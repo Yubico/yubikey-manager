@@ -1,0 +1,10 @@
+*.pyc
+*.egg-info
+*.egg/
+build/
+dist/
+.ropeproject/
+ChangeLog
+MANIFEST
+ykman/gui/qt_resources.py
+man/*.1
