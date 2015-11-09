@@ -25,14 +25,46 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-
-from ..device import open_device
-
-
-def main():
-    dev = open_device()
-    print 'Device: %s' % dev
+__all__ = ['CAPABILITY', 'Mode']
 
 
-if __name__ == '__main__':
-    main()
+class CAPABILITY(object):
+    OTP = 0x01
+    U2F = 0x02
+    CCID = 0x04
+    OPGP = 0x08
+    PIV = 0x10
+    OATH = 0x20
+
+
+class Mode(object):
+    _modes = [  # OTP, U2F, CCID
+        (True, False, False),  # 0x00 - OTP
+        (False, False, True),  # 0x01 - CCID
+        (True, False, True),  # 0x02 - OTP+CCID
+        (False, True, False),  # 0x03 - U2F
+        (True, True, False),  # 0x04 - OTP+U2F
+        (False, True, True),  # 0x05 - U2F+CCID
+        (True, True, True)  # 0x06 - OTP+U2F+CCID
+    ]
+
+    def __init__(self, otp=False, u2f=False, ccid=False):
+        self.otp = bool(otp)
+        self.u2f = bool(u2f)
+        self.ccid = bool(ccid)
+        try:
+            self.code = self._modes.index((self.otp, self.u2f, self.ccid))
+        except ValueError:
+            raise ValueError('Invalid mode!')
+
+    def __str__(self):
+        return '+'.join(filter(None, [
+            self.otp and 'OTP',
+            self.u2f and 'U2F',
+            self.ccid and 'CCID'
+        ]))
+
+    @classmethod
+    def from_code(cls, code):
+        code = code & 0b00000111
+        return cls(*cls._modes[code])

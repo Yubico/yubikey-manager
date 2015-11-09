@@ -26,13 +26,30 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from ..device import open_device
+class AbstractDriver(object):
+    """Abstract driver class for communicating with a YubiKey"""
 
+    transport = None
+    _version = (0, 0, 0)
+    serial = None
+    _mode = None
 
-def main():
-    dev = open_device()
-    print 'Device: %s' % dev
+    @property
+    def version(self):
+        return self._version
 
+    @property
+    def mode(self):
+        return self._mode
 
-if __name__ == '__main__':
-    main()
+    @mode.setter
+    def mode(self, value):
+        raise NotImplementedError()
+
+    def read_capabilities(self):
+        raise NotImplementedError()
+
+    def __str__(self):
+        return 'Driver: {}, v: {}, m: {}'.format(
+            self.transport, self.version, self.mode)
+
