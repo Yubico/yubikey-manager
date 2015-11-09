@@ -30,6 +30,8 @@ from smartcard import System
 from .driver import AbstractDriver
 from .util import Mode, CAPABILITY
 
+SW_OK = 0x9000
+
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
 
@@ -70,14 +72,14 @@ class CCIDDriver(AbstractDriver):
 
     def _read_version(self):
         s, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
-        if sw == 0x9000:
+        if sw == SW_OK:
             self._version = tuple(map(ord, s[:3]))
 
     def read_capabilities(self):
         if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
             return '\x03\x01\x01\x3f'
         _, sw = self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
-        if sw != 0x9000:
+        if sw != SW_OK:
             return ''
         capa, sw = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
         return capa
@@ -86,7 +88,7 @@ class CCIDDriver(AbstractDriver):
         capa = CAPABILITY.CCID
         for aid, code in KNOWN_APPLETS.items():
             _, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
-            if sw == 0x9000:
+            if sw == SW_OK:
                 capa |= code
         return capa
 
@@ -97,7 +99,7 @@ class CCIDDriver(AbstractDriver):
 
     def set_mode(self, mode_code):
         _, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
-        if sw == 0x9000:
+        if sw == SW_OK:
             data = chr(mode_code)
             _, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, data)
 

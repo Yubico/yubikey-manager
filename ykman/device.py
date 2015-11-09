@@ -76,6 +76,7 @@ class YubiKey(object):
 
         if not self.enabled:  # Assume everything supported is enabled.
             self.enabled = self.capabilities
+            # TODO: Remove transports based on mode.
 
     def _parse_capabilities(self, data):
         if not data:
@@ -97,6 +98,10 @@ class YubiKey(object):
         return self._driver.version
 
     @property
+    def serial(self):
+        return self._driver.serial
+
+    @property
     def mode(self):
         return self._driver.mode
 
@@ -108,13 +113,15 @@ class YubiKey(object):
         self._driver._mode = mode
 
     def __str__(self):
-        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3}] CAP: {4:x}'.format(
-            self.device_name,
-            self.version,
-            self.mode,
-            self._driver.transport,
-            self.capabilities
-        )
+        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3}] serial: {4} CAP: {5:x}' \
+            .format(
+                self.device_name,
+                self.version,
+                self.mode,
+                self._driver.transport,
+                self.serial,
+                self.capabilities
+            )
 
 
 def open_device(otp=True, u2f=True, ccid=True):
