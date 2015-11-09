@@ -27,7 +27,7 @@
 from ctypes import (Structure, POINTER, c_int, c_uint, c_uint8, c_uint16,
                     c_char_p, c_size_t)
 
-from neoman.yubicommon.ctypes.libloader import load_library
+from ..yubicommon.ctypes.libloader import load_library
 
 
 _lib = load_library('u2f-host', '0')

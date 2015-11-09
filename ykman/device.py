@@ -26,21 +26,14 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .util import CAPABILITY
+from .util import CAPABILITY, parse_tlv_list
 from .driver_ccid import open_device as open_ccid
+from .driver_u2f import open_device as open_u2f
 
 
 YK4_CAPA_TAG = 0x01
 YK4_SERIAL_TAG = 0x02
 YK4_ENABLED_TAG = 0x03
-
-
-def parse_tlv_list(data):
-    parsed = {}
-    while data:
-        t, l, data = ord(data[0]), ord(data[1]), data[2:]
-        parsed[t], data = data[:l], data[l:]
-    return parsed
 
 
 class YubiKey(object):
@@ -52,9 +45,14 @@ class YubiKey(object):
     enabled = 0
 
     def __init__(self, driver):
+        if not driver:
+            raise ValueError('No driver given!')
         self._driver = driver
 
-        if self.version >= (4, 1, 0):
+        if driver.transport == 'U2F' and driver.sky:
+            self.device_name = 'Security Key by Yubico'
+            self.capabilities = CAPABILITY.U2F
+        elif self.version >= (4, 1, 0):
             self.device_name = 'YubiKey 4'
             self._parse_capabilities(driver.read_capabilities())
             if self.capabilities == 0x07:  # YK Edge has no use for CCID.
@@ -65,7 +63,13 @@ class YubiKey(object):
             self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
         elif self.version >= (3, 0, 0):
             self.device_name = 'YubiKey NEO'
-            self.capabilities = CAPABILITY.CCID | driver.probe_applet_support()
+            if driver.transport == 'CCID':
+                self.capabilities = driver.probe_capabilities_support()
+            elif self.mode.u2f or self.version >= (3, 3, 0):
+                self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F \
+                    | CAPABILITY.CCID
+            else:
+                self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID
         else:
             self.capabilities = CAPABILITY.OTP
 
@@ -105,4 +109,7 @@ class YubiKey(object):
 
 
 def open_device():
-    return YubiKey(open_ccid())
+    dev = None #open_ccid()
+    if not dev:
+        dev = open_u2f()
+    return YubiKey(dev)

@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-__all__ = ['CAPABILITY', 'Mode']
+__all__ = ['CAPABILITY', 'Mode', 'parse_tlv_list']
 
 
 class CAPABILITY(object):
@@ -68,3 +68,11 @@ class Mode(object):
     def from_code(cls, code):
         code = code & 0b00000111
         return cls(*cls._modes[code])
+
+
+def parse_tlv_list(data):
+    parsed = {}
+    while data:
+        t, l, data = ord(data[0]), ord(data[1]), data[2:]
+        parsed[t], data = data[:l], data[l:]
+    return parsed

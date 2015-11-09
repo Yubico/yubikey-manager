@@ -30,6 +30,9 @@ from smartcard import System
 from .driver import AbstractDriver
 from .util import Mode, CAPABILITY
 
+INS_SELECT = 0xa4
+INS_YK4_CAPABILITIES = 0x1d
+
 OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
 MGR_AID = '\xa0\x00\x00\x05\x27\x47\x11\x17'
 
@@ -63,23 +66,23 @@ class CCIDDriver(AbstractDriver):
         self._read_version()  # Overwrite with exact version, if possible.
 
     def _read_version(self):
-        s, sw = self.send_apdu(0, 0xa4, 4, 0, OTP_AID)
+        s, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
         if sw == 0x9000:
             self._version = tuple(map(ord, s[:3]))
 
     def read_capabilities(self):
-        if self.version == (4, 2, 4):  # 4.2.4 doesn't report capa correctly.
+        if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
             return '\x03\x01\x01\x3f'
-        _, sw = self.send_apdu(0, 0xa4, 4, 0, MGR_AID)
+        _, sw = self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
         if sw != 0x9000:
             return ''
-        capa, sw = self.send_apdu(0, 0x1d, 0, 0)
+        capa, sw = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
         return capa
 
-    def probe_applet_support(self):
-        capa = 0
+    def probe_capabilities_support(self):
+        capa = CAPABILITY.CCID
         for aid, code in KNOWN_APPLETS.items():
-            _, sw = self.send_apdu(0, 0xa4, 4, 0, aid)
+            _, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
             if sw == 0x9000:
                 capa |= code
         return capa
