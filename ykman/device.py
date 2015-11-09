@@ -29,6 +29,7 @@
 from .util import CAPABILITY, parse_tlv_list
 from .driver_ccid import open_device as open_ccid
 from .driver_u2f import open_device as open_u2f
+from .driver_otp import open_device as open_otp
 
 
 YK4_CAPA_TAG = 0x01
@@ -100,16 +101,19 @@ class YubiKey(object):
         return self._driver.mode
 
     def __str__(self):
-        return '{0} {1[0]}.{1[1]}.{1[2]} {2} {3:x}'.format(
+        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3}] CAP: {4:x}'.format(
             self.device_name,
             self.version,
             self.mode,
+            self._driver.transport,
             self.capabilities
         )
 
 
 def open_device():
-    dev = None #open_ccid()
+    dev = None  # open_ccid()
+    if not dev:
+        dev = open_otp()
     if not dev:
         dev = open_u2f()
     return YubiKey(dev)

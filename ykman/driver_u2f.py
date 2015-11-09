@@ -39,7 +39,7 @@ INS_YK4_CAPABILITIES = 0x1d
 OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
 
 
-if u2fh_global_init(1 if 'NEOMAN_DEBUG' in os.environ else 0) != 0:
+if u2fh_global_init(1 if 'DEBUG' in os.environ else 0) != 0:
     raise Exception("Unable to initialize libu2f-host")
 
 
