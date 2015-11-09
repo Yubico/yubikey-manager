@@ -96,6 +96,10 @@ class U2FDriver(AbstractDriver):
             raise Exception('u2fh_sendrecv error: {}'.format(status))
         return resp.raw[0:buf_size.value]
 
+    def set_mode(self, mode_code):
+        data = chr(mode_code) + '\x0f\x00\x00'
+        self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
+
     def __del__(self):
         u2fh_devs_done(self._devs)
 

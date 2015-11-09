@@ -42,8 +42,7 @@ class AbstractDriver(object):
     def mode(self):
         return self._mode
 
-    @mode.setter
-    def mode(self, value):
+    def set_mode(self, mode_code):
         raise NotImplementedError()
 
     def read_capabilities(self):
@@ -52,4 +51,3 @@ class AbstractDriver(object):
     def __str__(self):
         return 'Driver: {}, v: {}, m: {}'.format(
             self.transport, self.version, self.mode)
-

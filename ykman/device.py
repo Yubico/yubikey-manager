@@ -100,6 +100,13 @@ class YubiKey(object):
     def mode(self):
         return self._driver.mode
 
+    @mode.setter
+    def mode(self, mode):
+        # TODO: Check if mode is supported.
+        # TODO: Set TOUCH_EJECT bit if needed.
+        self._driver.set_mode(mode.code)
+        self._driver._mode = mode
+
     def __str__(self):
         return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3}] CAP: {4:x}'.format(
             self.device_name,
@@ -110,10 +117,13 @@ class YubiKey(object):
         )
 
 
-def open_device():
-    dev = None  # open_ccid()
-    if not dev:
+def open_device(otp=True, u2f=True, ccid=True):
+    dev = None
+    if ccid:
+        dev = open_ccid()
+    if otp and not dev:
         dev = open_otp()
-    if not dev:
+    if u2f and not dev:
         dev = open_u2f()
+
     return YubiKey(dev)

@@ -27,6 +27,7 @@
 
 
 from ..device import open_device
+from ..util import Mode
 
 
 def main():

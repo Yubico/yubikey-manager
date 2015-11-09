@@ -33,6 +33,9 @@ from .util import Mode, CAPABILITY
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
 
+INS_YK2_REQ = 0x01
+SLOT_DEVICE_CONFIG = 0x11
+
 OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
 MGR_AID = '\xa0\x00\x00\x05\x27\x47\x11\x17'
 
@@ -91,6 +94,12 @@ class CCIDDriver(AbstractDriver):
         header = [cl, ins, p1, p2, len(data)]
         resp, sw1, sw2 = self._conn.transmit(header + map(ord, data))
         return ''.join(map(chr, resp)), sw1 << 8 | sw2
+
+    def set_mode(self, mode_code):
+        _, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
+        if sw == 0x9000:
+            data = chr(mode_code)
+            _, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, data)
 
     def __del__(self):
         self._conn.disconnect()
