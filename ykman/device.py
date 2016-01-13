@@ -44,6 +44,7 @@ class YubiKey(object):
     device_name = 'YubiKey'
     capabilities = 0
     enabled = 0
+    _serial = None
 
     def __init__(self, driver):
         if not driver:
@@ -87,7 +88,7 @@ class YubiKey(object):
         if YK4_CAPA_TAG in data:
             self.capabilities = int(data[YK4_CAPA_TAG].encode('hex'), 16)
         if YK4_SERIAL_TAG in data:
-            self.serial = int(data[YK4_SERIAL_TAG].encode('hex'), 16)
+            self._serial = int(data[YK4_SERIAL_TAG].encode('hex'), 16)
         if YK4_ENABLED_TAG in data:
             self.enabled = int(data[YK4_ENABLED_TAG].encode('hex'), 16)
         else:
@@ -99,7 +100,7 @@ class YubiKey(object):
 
     @property
     def serial(self):
-        return self._driver.serial
+        return self._serial or self._driver.serial
 
     @property
     def mode(self):
@@ -108,8 +109,12 @@ class YubiKey(object):
     @mode.setter
     def mode(self, mode):
         # TODO: Check if mode is supported.
+        flags = 0
         # TODO: Set TOUCH_EJECT bit if needed.
-        self._driver.set_mode(mode.code)
+        # NEO < 3.3.1 (?) should always set 82 instead of 2.
+        if self.version <= (3, 3, 1) and mode.code == 2:
+            flags = 0x80
+        self._driver.set_mode(flags & mode.code)
         self._driver._mode = mode
 
     def __str__(self):
@@ -133,4 +138,4 @@ def open_device(otp=True, u2f=True, ccid=True):
     if u2f and not dev:
         dev = open_u2f()
 
-    return YubiKey(dev)
+    return YubiKey(dev) if dev is not None else None

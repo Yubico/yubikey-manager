@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Yubico AB
+# Copyright (c) 2016 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -25,41 +25,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import signal
-import sys
-from PySide import QtCore, QtGui
+"""
+Strings for YubiKey Manager
 
-from ykman import __version__
-from ykman.yubicommon import qt
-from . import messages as m
+Note: String names must not start with underscore (_).
+"""
 
-
-class YkManApplication(qt.Application):
-
-    def __init__(self):
-        super(YkManApplication, self).__init__(m, __version__)
-
-        QtCore.QCoreApplication.setOrganizationName(m.organization)
-        QtCore.QCoreApplication.setOrganizationDomain(m.domain)
-        QtCore.QCoreApplication.setApplicationName(m.app_name)
-
-        self.ensure_singleton()
-
-        self._init_window()
-
-    def _init_window(self):
-        self.window.setWindowTitle(m.win_title_1 % self.version)
-        self.window.setWindowIcon(QtGui.QIcon(':/yubioath.png'))
-
-        self.window.show()
-        self.window.raise_()
-
-
-def main():
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    app = YkManApplication()
-    sys.exit(app.exec_())
-
-
-if __name__ == '__main__':
-    main()
+organization = "Yubico"
+domain = "yubico.com"
+app_name = "YubiKey Manager"
+win_title_1 = "YubiKey Manager (%s)"
