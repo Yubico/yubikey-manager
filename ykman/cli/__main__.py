@@ -25,14 +25,57 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-
+import argparse
+import sys
+from ykman import __version__
 from ..device import open_device
-from ..util import Mode
+from .mode import ModeCommand
+from .info import InfoCommand
+
+
+class CliRunner(object):
+
+    def __init__(self):
+        self._cmds = {}
+        self._parser = self._init_parser()
+
+    def _init_parser(self):
+        parser = argparse.ArgumentParser(
+            description="Interface with a YubiKey via the command line.",
+            add_help=True
+        )
+        parser.add_argument('-v', '--version', action='version',
+                            version='%(prog)s version ' + __version__)
+
+        subparser = parser.add_subparsers(dest='command', help='subcommands')
+        self._add_command(subparser, InfoCommand)
+        self._add_command(subparser, ModeCommand)
+
+        return parser
+
+    def _add_command(self, subparser, Cmd):
+        self._cmds[Cmd.name] = Cmd(subparser.add_parser(Cmd.name,
+                                                        help=Cmd.help))
+
+    def _subcmd_names(self):
+        for a in self._parser._subparsers._actions:
+            if isinstance(a, argparse._SubParsersAction):
+                for name in a._name_parser_map.keys():
+                    yield name
+
+    def run(self):
+        subcmds = list(self._subcmd_names()) + \
+            ['-h', '--help', '-v', '--version']
+        if not bool(set(sys.argv[1:]) & set(subcmds)):
+            sys.argv.insert(1, subcmds[0])
+        args = self._parser.parse_args()
+        dev = open_device()
+        self._cmds[args.command].run(args, dev)
 
 
 def main():
-    dev = open_device()
-    print 'Device: %s' % dev
+    runner = CliRunner()
+    runner.run()
 
 
 if __name__ == '__main__':
