@@ -57,6 +57,12 @@ class Mode(object):
         except ValueError:
             raise ValueError('Invalid mode!')
 
+    def __eq__(self, other):
+        return other is not None and self.code == other.code
+
+    def __ne__(self, other):
+        return other is None or self.code != other.code
+
     def __str__(self):
         return '+'.join(filter(None, [
             self.otp and 'OTP',
