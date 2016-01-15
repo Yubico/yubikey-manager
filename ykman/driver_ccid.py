@@ -104,7 +104,10 @@ class CCIDDriver(AbstractDriver):
             _, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, data)
 
     def __del__(self):
-        self._conn.disconnect()
+        try:
+            self._conn.disconnect()
+        except:
+            pass  # Ignore
 
 
 def open_device():
