@@ -26,6 +26,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import re
+import sys
+import argparse
+
 from ..util import Mode
 
 
@@ -45,21 +48,62 @@ def _parse_mode_string(mode):
     raise ValueError('Invalid mode string: %s' % mode)
 
 
+class ModeAction(argparse.Action):
+
+    def __call__(self, parser, args, values, option_string=None):
+        if values is not None:
+            try:  # Numeric mode:
+                mode = Mode.from_code(int(values))
+            except ValueError:  # Text mode
+                mode = _parse_mode_string(values)
+            setattr(args, self.dest, mode)
+
+
+class TouchEjectAction(argparse.Action):
+
+    def __call__(self, parser, args, values, option_string=None):
+        print "mode", args.mode == Mode(ccid=True)
+        if args.mode != Mode(ccid=True):
+            parser.error('--touch-eject can only be used when setting CCID-only'
+                         ' mode')
+        if values is None:
+            setattr(args, self.dest, 0)
+
+
 class ModeCommand(object):
     name = 'mode'
-    help = 'Get and set the mode of the YubiKey'
+    help = 'get and set the mode of the YubiKey'
 
     def __init__(self, parser):
-        parser.add_argument('mode', nargs='?', help='new mode to set')
+        parser.add_argument('mode', action=ModeAction, nargs='?',
+                            help='new mode to set')
+        parser.add_argument('-f', '--force', action='store_true',
+                            help='don\'t prompt for confirmation')
+        parser.add_argument('--touch-eject', nargs='?', action=TouchEjectAction,
+                            type=int, help='''when set, the button on the
+                            YubiKey will eject/insert the card (CCID mode only)
+                            ''')
 
     def run(self, args, dev):
         if args.mode is not None:
-            try:  # Numeric mode:
-                mode = Mode.from_code(int(args.mode))
-            except ValueError:  # Text mode
-                mode = _parse_mode_string(args.mode)
-            print "setting mode %s" % mode
+            if args.mode == dev.mode:
+                print 'Mode is already %s, nothing to do...' % args.mode
+            else:
+                if args.force:
+                    print 'Setting mode: %s...' % args.mode
+                else:
+                    print 'Set mode of YubiKey to %s? (y/n) [n]' % args.mode
+                    read = sys.stdin.readline().strip()
+                    if read.lower() not in ['y', 'yes']:
+                        print 'Aborted.'
+                        return 1
+                if args.touch_eject is not None:
+                    # TODO: Set touch eject
+                    print '--touch-eject not yet implemented!'
+                dev.mode = args.mode
+                print 'Mode set! You must remove and re-insert your YubiKey ' +\
+                    'for this change to take effect.'
         elif dev is None:
-            print "no YubiKey detected!"
+            print 'no YubiKey detected!'
         else:
-            print "mode is:", dev.mode
+            print 'mode is:', dev.mode

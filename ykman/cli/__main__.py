@@ -41,7 +41,7 @@ class CliRunner(object):
 
     def _init_parser(self):
         parser = argparse.ArgumentParser(
-            description="Interface with a YubiKey via the command line.",
+            description="Interface with a YubiKey via the command line",
             add_help=True
         )
         parser.add_argument('-v', '--version', action='version',
@@ -70,12 +70,15 @@ class CliRunner(object):
             sys.argv.insert(1, subcmds[0])
         args = self._parser.parse_args()
         dev = open_device()
-        self._cmds[args.command].run(args, dev)
+        status = self._cmds[args.command].run(args, dev)
+        if status is None:
+            status = 0
+        return status
 
 
 def main():
     runner = CliRunner()
-    runner.run()
+    sys.exit(runner.run())
 
 
 if __name__ == '__main__':

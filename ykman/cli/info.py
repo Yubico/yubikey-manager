@@ -31,7 +31,7 @@ from ykman import __version__
 
 class InfoCommand(object):
     name = 'info'
-    help = 'Display information about the attached YubiKey'
+    help = 'display information about the attached YubiKey'
 
     def __init__(self, parser):
         pass
