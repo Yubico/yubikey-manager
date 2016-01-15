@@ -114,7 +114,7 @@ class YubiKey(object):
         # NEO < 3.3.1 (?) should always set 82 instead of 2.
         if self.version <= (3, 3, 1) and mode.code == 2:
             flags = 0x80
-        self._driver.set_mode(flags & mode.code)
+        self._driver.set_mode(flags | mode.code)
         self._driver._mode = mode
 
     def __str__(self):
