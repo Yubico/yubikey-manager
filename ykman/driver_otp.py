@@ -93,9 +93,11 @@ class OTPDriver(AbstractDriver):
         if yk_get_capabilities(self._dev, 0, 0, resp, byref(buf_size)):
             return resp.raw[:buf_size.value]
 
-    def set_mode(self, mode_code):
+    def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykp_alloc_device_config()
         ykp_set_device_mode(config, mode_code)
+        ykp_set_device_chalresp_timeout(config, cr_timeout)
+        ykp_set_device_autoeject_time(config, autoeject_time)
         try:
             if not yk_write_device_config(self._dev, config):
                 raise Exception('Unable to set mode!')

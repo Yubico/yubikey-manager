@@ -31,6 +31,7 @@ from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
 from .util import Mode, CAPABILITY, parse_tlv_list
 import os
+import struct
 
 
 INS_SELECT = 0xa4
@@ -96,8 +97,8 @@ class U2FDriver(AbstractDriver):
             raise Exception('u2fh_sendrecv error: {}'.format(status))
         return resp.raw[0:buf_size.value]
 
-    def set_mode(self, mode_code):
-        data = chr(mode_code) + '\x0f\x00\x00'
+    def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
+        data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
         self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
 
     def __del__(self):

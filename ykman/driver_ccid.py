@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import struct
 from smartcard import System
 from .driver import AbstractDriver
 from .util import Mode, CAPABILITY
@@ -97,10 +98,10 @@ class CCIDDriver(AbstractDriver):
         resp, sw1, sw2 = self._conn.transmit(header + map(ord, data))
         return ''.join(map(chr, resp)), sw1 << 8 | sw2
 
-    def set_mode(self, mode_code):
+    def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         _, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
         if sw == SW_OK:
-            data = chr(mode_code)
+            data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
             _, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, data)
 
     def __del__(self):

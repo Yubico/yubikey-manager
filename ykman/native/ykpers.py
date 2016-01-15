@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
-                    c_char_p)
+                    c_char_p, c_ushort)
 from ..yubicommon.ctypes.libloader import load_library
 
 _lib = load_library('ykpers-1', '1')
@@ -82,6 +82,12 @@ ykp_free_device_config = define('ykp_free_device_config',
                                 [POINTER(YK_DEVICE_CONFIG)], c_int)
 ykp_set_device_mode = define('ykp_set_device_mode', [POINTER(YK_DEVICE_CONFIG),
                                                      c_ubyte], c_int)
+ykp_set_device_chalresp_timeout = define('ykp_set_device_chalresp_timeout',
+                                         [POINTER(YK_DEVICE_CONFIG),
+                                          c_ubyte], c_int)
+ykp_set_device_autoeject_time = define('ykp_set_device_autoeject_time',
+                                       [POINTER(YK_DEVICE_CONFIG),
+                                        c_ushort], c_int)
 
 yk_get_key_vid_pid = define('yk_get_key_vid_pid', [POINTER(YK_KEY),
                                                    POINTER(c_int),

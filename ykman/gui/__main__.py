@@ -32,6 +32,7 @@ from PySide import QtCore, QtGui
 from ykman import __version__
 from ykman.yubicommon import qt
 from . import messages as m
+from .controller import Controller
 
 
 class YkManApplication(qt.Application):
@@ -45,11 +46,26 @@ class YkManApplication(qt.Application):
 
         self.ensure_singleton()
 
+        self._controller = Controller(self)
+        self.startTimer(1000)
+
         self._init_window()
+
+    def timerEvent(self, event):
+        if QtGui.QApplication.activeWindow():
+            self._controller.refresh()
 
     def _init_window(self):
         self.window.setWindowTitle(m.win_title_1 % self.version)
-        self.window.setWindowIcon(QtGui.QIcon(':/yubioath.png'))
+        self.window.setWindowIcon(QtGui.QIcon(':/ykman.png'))
+
+        label = QtGui.QLabel()
+        def setSerial(serial):
+            label.setText('Serial: %d' % serial)
+        setSerial(self._controller.serial)
+        self._controller.serialChanged.connect(setSerial)
+        self._controller.hasDeviceChanged.connect(label.setVisible)
+        self.window.setCentralWidget(label)
 
         self.window.show()
         self.window.raise_()

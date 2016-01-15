@@ -24,3 +24,11 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+
+"""
+Contains all classes related to the YubiKey Manager GUI
+"""
+
+# Initialize resources (images, etc).
+from . import qt_resources
+assert qt_resources  # Silence warnings about unused import

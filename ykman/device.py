@@ -108,13 +108,22 @@ class YubiKey(object):
 
     @mode.setter
     def mode(self, mode):
+        self.set_mode(mode)
+
+    def set_mode(self, mode, cr_timeout=0, autoeject_time=None):
         # TODO: Check if mode is supported.
         flags = 0
-        # TODO: Set TOUCH_EJECT bit if needed.
+
+        # If autoeject_time is set, then set the touch eject flag.
+        if autoeject_time is not None:
+            flags |= 0x80
+        else:
+            autoeject_time = 0
+
         # NEO < 3.3.1 (?) should always set 82 instead of 2.
         if self.version <= (3, 3, 1) and mode.code == 2:
             flags = 0x80
-        self._driver.set_mode(flags | mode.code)
+        self._driver.set_mode(flags | mode.code, cr_timeout, autoeject_time)
         self._driver._mode = mode
 
     def __str__(self):

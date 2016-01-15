@@ -52,7 +52,7 @@ class ModeAction(argparse.Action):
 
     def __call__(self, parser, args, values, option_string=None):
         if values is not None:
-            try:  # Numeric mode:
+            try:  # Numeric mode
                 mode = Mode.from_code(int(values))
             except ValueError:  # Text mode
                 mode = _parse_mode_string(values)
@@ -62,12 +62,13 @@ class ModeAction(argparse.Action):
 class TouchEjectAction(argparse.Action):
 
     def __call__(self, parser, args, values, option_string=None):
-        print "mode", args.mode == Mode(ccid=True)
         if args.mode != Mode(ccid=True):
             parser.error('--touch-eject can only be used when setting CCID-only'
                          ' mode')
-        if values is None:
-            setattr(args, self.dest, 0)
+
+        if values is None:  # Arg set without argument.
+            values = 0
+        setattr(args, self.dest, values)
 
 
 class ModeCommand(object):
@@ -82,27 +83,33 @@ class ModeCommand(object):
         parser.add_argument('--touch-eject', nargs='?', action=TouchEjectAction,
                             type=int, help='''when set, the button on the
                             YubiKey will eject/insert the card (CCID mode only)
+
+                            Optionally give a timeout in seconds to auto-eject
+                            the card after a period of inactivity.
+                            ''')
+        parser.add_argument('--challenge-response-timeout', type=int,
+                            default=15, help='''set the timeout for
+                            challenge-response in seconds
                             ''')
 
     def run(self, args, dev):
         if args.mode is not None:
-            if args.mode == dev.mode:
-                print 'Mode is already %s, nothing to do...' % args.mode
-            else:
-                if args.force:
-                    print 'Setting mode: %s...' % args.mode
+            if not args.force:
+                if args.mode == dev.mode:
+                    print 'Mode is already %s, nothing to do...' % args.mode
+                    return 0
                 else:
                     print 'Set mode of YubiKey to %s? (y/n) [n]' % args.mode
                     read = sys.stdin.readline().strip()
                     if read.lower() not in ['y', 'yes']:
                         print 'Aborted.'
                         return 1
-                if args.touch_eject is not None:
-                    # TODO: Set touch eject
-                    print '--touch-eject not yet implemented!'
-                dev.mode = args.mode
-                print 'Mode set! You must remove and re-insert your YubiKey ' +\
-                    'for this change to take effect.'
+
+            dev.set_mode(args.mode,
+                            args.challenge_response_timeout,
+                            args.touch_eject)
+            print 'Mode set! You must remove and re-insert your YubiKey ' +\
+                'for this change to take effect.'
         elif dev is None:
             print 'no YubiKey detected!'
         else:
