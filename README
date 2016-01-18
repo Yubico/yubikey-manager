@@ -29,3 +29,10 @@ To update, just pull the repository.
 To uninstall, run:
 
   $ sudo pip uninstall yubikey-manager
+
+==== Command line autocompletion
+Some form of basic command line argument completion exists, through
+python-argcomplete. To use, simply install and activate argcomplete:
+
+  $ sudo apt-get install python-argcomplete
+  $ sudo activate-global-python-argcomplete
