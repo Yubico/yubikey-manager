@@ -45,6 +45,9 @@ setup(
     },
     install_requires=['pyscard', 'pycrypto'],
     yc_requires=['ctypes', 'qt'],
+    extras_require={
+        'argcomplete': ['argcomplete']
+    },
     cmdclass={
         'executable': executable,
         'qt_resources': qt_resources('ykman.gui')

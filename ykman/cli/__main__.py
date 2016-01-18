@@ -1,3 +1,5 @@
+# PYTHON_ARGCOMPLETE_OK
+
 # Copyright (c) 2015 Yubico AB
 # All rights reserved.
 #
@@ -68,6 +70,13 @@ class CliRunner(object):
             ['-h', '--help', '-v', '--version']
         if not bool(set(sys.argv[1:]) & set(subcmds)):
             sys.argv.insert(1, subcmds[0])
+
+        try:  # If argcomplete is available, use it.
+            import argcomplete
+            argcomplete.autocomplete(self._parser)
+        except ImportError:
+            pass
+
         args = self._parser.parse_args()
         dev = open_device()
         status = self._cmds[args.command].run(args, dev)
