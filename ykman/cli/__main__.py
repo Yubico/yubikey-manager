@@ -31,6 +31,7 @@ import argparse
 import sys
 from ykman import __version__
 from ..device import open_device
+from .gui import GuiCommand
 from .mode import ModeCommand
 from .info import InfoCommand
 
@@ -51,6 +52,7 @@ class CliRunner(object):
 
         subparser = parser.add_subparsers(dest='command', help='subcommands')
         self._add_command(subparser, InfoCommand)
+        self._add_command(subparser, GuiCommand)
         self._add_command(subparser, ModeCommand)
 
         return parser

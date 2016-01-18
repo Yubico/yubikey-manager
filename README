@@ -1,0 +1,31 @@
+== YubiKey Manager
+Graphical application and command line tool for configuring a YubiKey.
+
+=== Graphical desktop tool (ykman-gui)
+An easy-to-use desktop application with functionality to perform the most
+commonly used functions.
+
+=== Command line tool (ykman)
+A powerful command line interface to configuring or reprogramming a YubiKey,
+which can be used to script bulk operations, or access expert features of the
+YubiKey.
+
+=== Installation instructions
+THESE INSTRUCTIONS WILL BE DIFFERENT FOR OFFICIAL RELEASES!
+
+For Debian based systems:
+
+  # Install required dependencies
+  $ sudo apt-get install python-pip python-pyscard python-pyside libykpers-1-1 libu2f-host0
+
+  # Install YubiKey Manager (from root of repository):
+  $ sudo pip install -e .
+
+  # Run the app
+  $ ykman --help
+
+To update, just pull the repository.
+
+To uninstall, run:
+
+  $ sudo pip uninstall yubikey-manager

@@ -40,13 +40,15 @@ setup(
     description='Tool for managing your YubiKey configuration.',
     license='BSD 2 clause',
     entry_points={
-        'gui_scripts': ['ykman=ykman.gui.__main__:main'],
-        'console_scripts': ['ykman-cli=ykman.cli.__main__:main']
+        'console_scripts': ['ykman=ykman.cli.__main__:main'],
+        'gui_scripts': ['ykman-gui=ykman.gui.__main__:main']
     },
     install_requires=['pyscard', 'pycrypto'],
     yc_requires=['ctypes', 'qt'],
+    yc_requires_exclude=['PySide'],
     extras_require={
-        'argcomplete': ['argcomplete']
+        'ykman': ['argcomplete'],
+        'ykman-gui': ['PySide']
     },
     cmdclass={
         'executable': executable,
