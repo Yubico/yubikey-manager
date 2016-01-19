@@ -16,10 +16,17 @@ THESE INSTRUCTIONS WILL BE DIFFERENT FOR OFFICIAL RELEASES!
 For Debian based systems:
 
   # Install required dependencies
-  $ sudo apt-get install python-pip python-pyscard python-pyside libykpers-1-1 libu2f-host0
+  $ sudo apt-get install python-pip python-crypto python-pyscard \
+    python-pyside pyside-tools libykpers-1-1 libu2f-host0
+
+  # Setup the repository
+  $ git clone git@gitlab.yubico.com:Yubico/yubikey-manager.git
+  $ cd yubikey-manager
+  $ git submodule update --init
+  $ python setup.py qt_resources
 
   # Install YubiKey Manager (from root of repository):
-  $ sudo pip install -e .
+  $ sudo pip install -e . --no-deps
 
   # Run the app
   $ ykman --help
