@@ -75,6 +75,7 @@ ykds_free = define('ykds_free', [POINTER(YK_STATUS)], None)
 ykds_version_major = define('ykds_version_major', [POINTER(YK_STATUS)], c_int)
 ykds_version_minor = define('ykds_version_minor', [POINTER(YK_STATUS)], c_int)
 ykds_version_build = define('ykds_version_build', [POINTER(YK_STATUS)], c_int)
+ykds_touch_level = define('ykds_touch_level', [POINTER(YK_STATUS)], c_int)
 
 ykp_alloc_device_config = define('ykp_alloc_device_config', [],
                                  POINTER(YK_DEVICE_CONFIG))

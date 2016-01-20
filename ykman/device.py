@@ -112,6 +112,10 @@ class YubiKey(object):
         return self._serial or self._driver.serial
 
     @property
+    def driver(self):
+        return self._driver
+
+    @property
     def transport(self):
         return self._driver.transport
 

@@ -36,6 +36,9 @@ import os
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
 
+CONFIG1_VALID = 0x01
+CONFIG2_VALID = 0x02
+
 
 if not yk_init():
     raise Exception("Unable to initialize libykpers")
@@ -52,20 +55,24 @@ class OTPDriver(AbstractDriver):
 
     def __init__(self, dev):
         self._dev = dev
-        self._version = self._read_version()
+        self._version = (0, 0, 0)
+        self._slot1_valid = False
+        self._slot2_valid = True
+        self._read_status()
         self._mode = self._read_mode()
 
-    def _read_version(self):
+    def _read_status(self):
         status = ykds_alloc()
         try:
             if yk_get_status(self._dev, status):
-                return (
+                self._version = (
                     ykds_version_major(status),
                     ykds_version_minor(status),
                     ykds_version_build(status)
                 )
-            else:
-                return (0, 0, 0)
+                touch_level = ykds_touch_level(status)
+                self._slot1_valid = touch_level & CONFIG1_VALID != 0
+                self._slot2_valid = touch_level & CONFIG2_VALID != 0
         finally:
             ykds_free(status)
 

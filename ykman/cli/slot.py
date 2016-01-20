@@ -46,4 +46,7 @@ class SlotCommand(object):
             print '%s Use the mode command to enable OTP.' % e.message
             return 1
 
-        print dev
+        print dev.device_name
+        print 'Mode:', dev.mode
+        print "Slot 1:", dev.driver._slot1_valid and 'programmed' or 'empty'
+        print "Slot 2:", dev.driver._slot2_valid and 'programmed' or 'empty'
