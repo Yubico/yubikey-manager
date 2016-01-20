@@ -75,7 +75,8 @@ class YubiKey(object):
             self.device_name = 'YubiKey NEO'
             if driver.transport == TRANSPORT.CCID:
                 self.capabilities = driver.probe_capabilities_support()
-            elif self.mode.u2f or self.version >= (3, 3, 0):
+            elif self.mode.has_transport(TRANSPORT.U2F) \
+                or self.version >= (3, 3, 0):
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F \
                     | CAPABILITY.CCID
             else:
@@ -84,8 +85,8 @@ class YubiKey(object):
             self.capabilities = CAPABILITY.OTP
 
         if not self.enabled:  # Assume everything supported is enabled.
-            self.enabled = self.capabilities
-            # TODO: Remove transports based on mode.
+            self.enabled = self.capabilities & ~sum(TRANSPORT)  # not transports
+            self.enabled |= self.mode.transports  # ...unless they are enabled.
 
     def _parse_capabilities(self, data):
         if not data:
@@ -120,10 +121,14 @@ class YubiKey(object):
 
     @mode.setter
     def mode(self, mode):
+        if not self.has_mode(mode):
+            raise ValueError('Mode not supported: %s' % mode)
         self.set_mode(mode)
 
+    def has_mode(self, mode):
+        return self.capabilities & mode.transports == mode.transports
+
     def set_mode(self, mode, cr_timeout=0, autoeject_time=None):
-        # TODO: Check if mode is supported.
         flags = 0
 
         # If autoeject_time is set, then set the touch eject flag.
@@ -154,7 +159,7 @@ class YubiKey(object):
         return dev
 
     def __str__(self):
-        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3!s}] serial: {4} CAP: {5:x}' \
+        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}] serial: {4} CAP: {5:x}' \
             .format(
                 self.device_name,
                 self.version,

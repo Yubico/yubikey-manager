@@ -98,6 +98,10 @@ class ModeCommand(object):
                 if args.mode == dev.mode:
                     print 'Mode is already %s, nothing to do...' % args.mode
                     return 0
+                elif not dev.has_mode(args.mode):
+                    print 'Mode %s is not supported on this device!' % args.mode
+                    print 'Use --force to attempt to set it anyway.'
+                    return 1
                 else:
                     print 'Set mode of YubiKey to %s? (y/n) [n]' % args.mode
                     read = sys.stdin.readline().strip()
@@ -113,4 +117,7 @@ class ModeCommand(object):
         elif dev is None:
             print 'no YubiKey detected!'
         else:
-            print 'mode is:', dev.mode
+            print 'Current mode is:', dev.mode
+            supported = ', '.join(t.name for t in TRANSPORT \
+                                  if dev.capabilities & t)
+            print 'Supported transports are:', supported

@@ -63,6 +63,10 @@ class Mode(object):
         except ValueError:
             raise ValueError('Invalid mode!')
 
+    @property
+    def transports(self):
+        return self._transports
+
     def has_transport(self, transport):
         return self._transports & transport != 0
 
