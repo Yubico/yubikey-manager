@@ -30,10 +30,11 @@
 import argparse
 import sys
 from ykman import __version__
-from ..device import open_device
+from ..device import open_device, FailedOpeningDeviceException
 from .gui import GuiCommand
-from .mode import ModeCommand
 from .info import InfoCommand
+from .mode import ModeCommand
+from .slot import SlotCommand
 
 
 class CliRunner(object):
@@ -54,6 +55,7 @@ class CliRunner(object):
         self._add_command(subparser, InfoCommand)
         self._add_command(subparser, GuiCommand)
         self._add_command(subparser, ModeCommand)
+        self._add_command(subparser, SlotCommand)
 
         return parser
 
@@ -80,7 +82,13 @@ class CliRunner(object):
             pass
 
         args = self._parser.parse_args()
-        dev = open_device()
+        try:
+            dev = open_device()
+        except FailedOpeningDeviceException:
+            print 'Failed connecting to the YubiKey. ' +\
+                'Is it in use by another process?'
+            dev = open_device()
+            return 2
         status = self._cmds[args.command].run(args, dev)
         if status is None:
             status = 0
