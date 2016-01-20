@@ -16,8 +16,8 @@ THESE INSTRUCTIONS WILL BE DIFFERENT FOR OFFICIAL RELEASES!
 For Debian based systems:
 
   # Install required dependencies
-  $ sudo apt-get install python-pip python-crypto python-pyscard \
-    python-pyside pyside-tools libykpers-1-1 libu2f-host0
+  $ sudo apt-get install python-pip python-pyscard python-pyside pyside-tools \
+    libykpers-1-1 libu2f-host0
 
   # Setup the repository
   $ git clone git@gitlab.yubico.com:Yubico/yubikey-manager.git
@@ -38,7 +38,7 @@ To uninstall, run:
   $ sudo pip uninstall yubikey-manager
 
 ==== Command line autocompletion
-Some form of basic command line argument completion exists, through
+Some form of basic command line argument completion exists through
 python-argcomplete. To use, simply install and activate argcomplete:
 
   $ sudo apt-get install python-argcomplete
