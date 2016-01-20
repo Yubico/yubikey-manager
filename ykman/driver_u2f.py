@@ -29,7 +29,7 @@
 from .native.u2fh import *
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
-from .util import Mode, CAPABILITY, parse_tlv_list
+from .util import Mode, CAPABILITY, TRANSPORT, parse_tlv_list
 import os
 import struct
 
@@ -59,17 +59,14 @@ class U2FDriver(AbstractDriver):
     libu2f-host based U2F driver
     Version number reported by this driver are minimums determined by heuristics
     """
-    transport = 'U2F'
+    transport = TRANSPORT.U2F
     sky = False
 
     def __init__(self, devs, index, name=''):
         self._devs = devs
         self._index = index
-        self._mode = Mode(
-            otp='OTP' in name,
-            u2f=True,
-            ccid='CCID' in name
-        )
+        self._mode = Mode(TRANSPORT.U2F \
+                          | sum(t for t in TRANSPORT if t.name in name))
         if ' NEO ' in name:  # At least 3.0.0
             self._version = (3, 0, 0)
         elif ' 4 ' in name:  # At least 4.0.0

@@ -29,7 +29,7 @@
 import struct
 from smartcard import System
 from .driver import AbstractDriver
-from .util import Mode, CAPABILITY
+from .util import Mode, CAPABILITY, TRANSPORT
 
 SW_OK = 0x9000
 
@@ -56,15 +56,11 @@ class CCIDDriver(AbstractDriver):
     """
     Pyscard based CCID driver
     """
-    transport = 'CCID'
+    transport = TRANSPORT.CCID
 
     def __init__(self, connection, name=''):
         self._conn = connection
-        self._mode = Mode(
-            otp='OTP' in name,
-            u2f='U2F' in name,
-            ccid='CCID' in name
-        )
+        self._mode = Mode(sum(t for t in TRANSPORT if t.name in name))
         if ' NEO ' in name:  # At least 3.0.0
             self._version = (3, 0, 0)
         elif ' 4 ' in name:  # At least 4.1.0 if CCID is available.

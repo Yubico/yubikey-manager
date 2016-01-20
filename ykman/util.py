@@ -25,10 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-__all__ = ['CAPABILITY', 'Mode', 'parse_tlv_list']
+from enum import IntEnum
+
+__all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list']
 
 
-class CAPABILITY(object):
+class CAPABILITY(IntEnum):
     OTP = 0x01
     U2F = 0x02
     CCID = 0x04
@@ -37,25 +39,32 @@ class CAPABILITY(object):
     OATH = 0x20
 
 
+class TRANSPORT(IntEnum):
+    OTP = CAPABILITY.OTP
+    U2F = CAPABILITY.U2F
+    CCID = CAPABILITY.CCID
+
+
 class Mode(object):
-    _modes = [  # OTP, U2F, CCID
-        (True, False, False),  # 0x00 - OTP
-        (False, False, True),  # 0x01 - CCID
-        (True, False, True),  # 0x02 - OTP+CCID
-        (False, True, False),  # 0x03 - U2F
-        (True, True, False),  # 0x04 - OTP+U2F
-        (False, True, True),  # 0x05 - U2F+CCID
-        (True, True, True)  # 0x06 - OTP+U2F+CCID
+    _modes = [
+        TRANSPORT.OTP,  # 0x00
+        TRANSPORT.CCID,  # 0x01
+        TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
+        TRANSPORT.U2F,  # 0x03
+        TRANSPORT.OTP | TRANSPORT.U2F,  # 0x04
+        TRANSPORT.U2F | TRANSPORT.CCID,  # 0x05
+        TRANSPORT.OTP | TRANSPORT.U2F | TRANSPORT.CCID  # 0x06
     ]
 
-    def __init__(self, otp=False, u2f=False, ccid=False):
-        self.otp = bool(otp)
-        self.u2f = bool(u2f)
-        self.ccid = bool(ccid)
+    def __init__(self, transports):
         try:
-            self.code = self._modes.index((self.otp, self.u2f, self.ccid))
+            self.code = self._modes.index(transports)
+            self._transports = transports
         except ValueError:
             raise ValueError('Invalid mode!')
+
+    def has_transport(self, transport):
+        return self._transports & transport != 0
 
     def __eq__(self, other):
         return other is not None and self.code == other.code
@@ -64,16 +73,12 @@ class Mode(object):
         return other is None or self.code != other.code
 
     def __str__(self):
-        return '+'.join(filter(None, [
-            self.otp and 'OTP',
-            self.u2f and 'U2F',
-            self.ccid and 'CCID'
-        ]))
+        return '+'.join((t.name for t in TRANSPORT if t & self._transports))
 
     @classmethod
     def from_code(cls, code):
         code = code & 0b00000111
-        return cls(*cls._modes[code])
+        return cls(cls._modes[code])
 
 
 def parse_tlv_list(data):

@@ -29,7 +29,7 @@
 from .native.ykpers import *
 from ctypes import POINTER, byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
-from .util import Mode, CAPABILITY
+from .util import Mode, CAPABILITY, TRANSPORT
 import os
 
 
@@ -48,7 +48,7 @@ class OTPDriver(AbstractDriver):
     """
     libykpers based OTP driver
     """
-    transport = 'OTP'
+    transport = TRANSPORT.OTP
 
     def __init__(self, dev):
         self._dev = dev
@@ -71,7 +71,7 @@ class OTPDriver(AbstractDriver):
 
     def _read_mode(self):
         if self.version < (3, 0, 0):
-            return Mode(otp=True)
+            return Mode(TRANSPORT.OTP)
 
         vid = c_int()
         pid = c_int()
@@ -83,15 +83,16 @@ class OTPDriver(AbstractDriver):
             elif mode == 2:
                 mode = 1
             return Mode.from_code(mode)
-        return Mode(otp=mode & CAPABILITY.OTP,
-                    u2f=mode & CAPABILITY.U2F,
-                    ccid=mode & CAPABILITY.CCID)
+        return Mode(mode)
 
     def read_capabilities(self):
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
-        if yk_get_capabilities(self._dev, 0, 0, resp, byref(buf_size)):
+        res = yk_get_capabilities(self._dev, 0, 0, resp, byref(buf_size))
+        if res:
             return resp.raw[:buf_size.value]
+        else:
+            print "error", res
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykp_alloc_device_config()

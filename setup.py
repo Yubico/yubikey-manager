@@ -24,9 +24,16 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+
+import sys
 from ykman.yubicommon.setup.exe import executable
 from ykman.yubicommon.setup.qt import qt_resources
 from ykman.yubicommon.setup import setup
+
+
+install_requires = ['pyscard']
+if sys.version_info < (3, 4):
+    install_requires.append("enum34")
 
 
 setup(
@@ -43,7 +50,7 @@ setup(
         'console_scripts': ['ykman=ykman.cli.__main__:main'],
         'gui_scripts': ['ykman-gui=ykman.gui.__main__:main']
     },
-    install_requires=['pyscard', 'pycrypto'],
+    install_requires=install_requires,
     yc_requires=['ctypes', 'qt'],
     yc_requires_exclude=['PySide'],
     extras_require={

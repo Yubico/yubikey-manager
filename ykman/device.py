@@ -26,7 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .util import CAPABILITY, parse_tlv_list
+from .util import CAPABILITY, TRANSPORT, parse_tlv_list
+from .driver import AbstractDriver
 from .driver_ccid import open_device as open_ccid
 from .driver_u2f import open_device as open_u2f
 from .driver_otp import open_device as open_otp
@@ -35,6 +36,13 @@ from .driver_otp import open_device as open_otp
 YK4_CAPA_TAG = 0x01
 YK4_SERIAL_TAG = 0x02
 YK4_ENABLED_TAG = 0x03
+
+
+class FailedOpeningDeviceException(Exception):
+    pass
+
+
+_NULL_DRIVER = AbstractDriver()
 
 
 class YubiKey(object):
@@ -51,7 +59,7 @@ class YubiKey(object):
             raise ValueError('No driver given!')
         self._driver = driver
 
-        if driver.transport == 'U2F' and driver.sky:
+        if driver.transport == TRANSPORT.U2F and driver.sky:
             self.device_name = 'Security Key by Yubico'
             self.capabilities = CAPABILITY.U2F
         elif self.version >= (4, 1, 0):
@@ -65,7 +73,7 @@ class YubiKey(object):
             self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
         elif self.version >= (3, 0, 0):
             self.device_name = 'YubiKey NEO'
-            if driver.transport == 'CCID':
+            if driver.transport == TRANSPORT.CCID:
                 self.capabilities = driver.probe_capabilities_support()
             elif self.mode.u2f or self.version >= (3, 3, 0):
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F \
@@ -103,6 +111,10 @@ class YubiKey(object):
         return self._serial or self._driver.serial
 
     @property
+    def transport(self):
+        return self._driver.transport
+
+    @property
     def mode(self):
         return self._driver.mode
 
@@ -126,25 +138,43 @@ class YubiKey(object):
         self._driver.set_mode(flags | mode.code, cr_timeout, autoeject_time)
         self._driver._mode = mode
 
+    def use_transport(self, transport):
+        if self.transport == transport:
+            return self
+        if not self.mode.has_transport(transport):
+            raise ValueError('%s transport not enabled!' % transport)
+        my_mode = self.mode
+
+        del self._driver
+        self._driver = _NULL_DRIVER
+
+        dev = open_device(transport)
+        assert dev.serial == self.serial
+        assert dev.mode == my_mode
+        return dev
+
     def __str__(self):
-        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3}] serial: {4} CAP: {5:x}' \
+        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3!s}] serial: {4} CAP: {5:x}' \
             .format(
                 self.device_name,
                 self.version,
                 self.mode,
-                self._driver.transport,
+                self.transport,
                 self.serial,
                 self.capabilities
             )
 
 
-def open_device(otp=True, u2f=True, ccid=True):
+def open_device(transports=sum(TRANSPORT)):
     dev = None
-    if ccid:
-        dev = open_ccid()
-    if otp and not dev:
-        dev = open_otp()
-    if u2f and not dev:
-        dev = open_u2f()
+    try:
+        if TRANSPORT.CCID & transports:
+            dev = open_ccid()
+        if TRANSPORT.OTP & transports and not dev:
+            dev = open_otp()
+        if TRANSPORT.U2F & transports and not dev:
+            dev = open_u2f()
+    except Exception as e:
+        raise FailedOpeningDeviceException(e)
 
     return YubiKey(dev) if dev is not None else None

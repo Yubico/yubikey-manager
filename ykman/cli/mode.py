@@ -29,22 +29,22 @@ import re
 import sys
 import argparse
 
-from ..util import Mode
+from ..util import Mode, TRANSPORT
 
 
 def _parse_mode_string(mode):
     found = set()
-    parts = set(filter(None, re.split(r'[+ ,]+', mode.lower())))
+    parts = set(filter(None, re.split(r'[+ ,]+', mode.upper())))
     if len(parts) <= 3:
         for p in parts:
-            for available in ['otp', 'u2f', 'ccid']:
-                if available.startswith(p):
+            for available in TRANSPORT:
+                if available.name.startswith(p):
                     found.add(available)
                     break
             else:
                 raise ValueError('Invalid mode string: %s' % mode)
     if len(found) > 0:
-        return Mode('otp' in found, 'u2f' in found, 'ccid' in found)
+        return Mode(sum(found))
     raise ValueError('Invalid mode string: %s' % mode)
 
 
