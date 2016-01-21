@@ -87,7 +87,6 @@ class CliRunner(object):
         except FailedOpeningDeviceException:
             print 'Failed connecting to the YubiKey. ' +\
                 'Is it in use by another process?'
-            dev = open_device()
             return 2
         status = self._cmds[args.command].run(args, dev)
         if status is None:
