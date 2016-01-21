@@ -47,6 +47,5 @@ class SlotCommand(object):
             return 1
 
         print dev.device_name
-        print 'Mode:', dev.mode
         print "Slot 1:", dev.driver._slot1_valid and 'programmed' or 'empty'
         print "Slot 2:", dev.driver._slot2_valid and 'programmed' or 'empty'

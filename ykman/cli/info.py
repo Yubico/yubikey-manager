@@ -27,6 +27,9 @@
 
 import sys
 from ykman import __version__
+from ..util import CAPABILITY, TRANSPORT
+from ..driver_otp import libversion as ykpers_version
+from ..driver_u2f import libversion as u2fhost_version
 
 
 class InfoCommand(object):
@@ -37,6 +40,24 @@ class InfoCommand(object):
         pass
 
     def run(self, args, dev):
-        print '%s (YubiKey Manager CLI) %s' % (sys.argv[0], __version__)
+        print '{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__)
+        print 'Libraries: libykpers {}, libu2f-host {}'.format(
+            ykpers_version, u2fhost_version)
         print
-        print 'Attached device: %s' % dev  # TODO: Print better description
+
+        print 'Device name:', dev.device_name
+        print 'Serial number:', dev.serial or 'Not set or unreadable'
+        print 'Enabled transport(s):', dev.mode
+        print
+
+        print 'Device capabilities:'
+        for c in CAPABILITY:
+            if c & dev.capabilities:
+                if c & dev.enabled:
+                    status = 'Enabled'
+                else:
+                    status = 'Disabled'
+            else:
+                status = 'Not available'
+
+            print '    {0.name}:\t{1}'.format(c, status)
