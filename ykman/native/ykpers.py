@@ -53,6 +53,17 @@ YK_NAV = type('YK_NAV', (Structure,), {})
 YK_FRAME = type('YK_FRAME', (Structure,), {})
 YK_NDEF = type('YK_NDEF', (Structure,), {})
 YK_DEVICE_CONFIG = type('YK_DEVICE_CONFIG', (Structure,), {})
+YKP_CONFIG = type('YKP_CONFIG', (Structure,), {})
+
+
+_yk_errno_location = define('_yk_errno_location', [], POINTER(c_int))
+
+
+def yk_get_errno():
+    return _yk_errno_location().contents.value
+
+
+yk_strerror = define('yk_strerror', [c_int], c_char_p)
 
 ykpers_check_version = define('ykpers_check_version', [c_char_p], c_char_p)
 
@@ -66,9 +77,10 @@ yk_get_status = define('yk_get_status', [
     POINTER(YK_KEY), POINTER(YK_STATUS)], c_int)
 yk_get_serial = define('yk_get_serial', [
     POINTER(YK_KEY), c_uint8, c_uint, POINTER(c_uint)], c_int)
-yk_write_device_config = define('yk_write_device_config',
-                                [POINTER(YK_KEY), POINTER(YK_DEVICE_CONFIG)],
-                                c_int)
+yk_write_command = define('yk_write_config', [
+    POINTER(YK_KEY), POINTER(YK_CONFIG), c_uint8, c_char_p], bool)
+yk_write_device_config = define('yk_write_device_config', [
+    POINTER(YK_KEY), POINTER(YK_DEVICE_CONFIG)], c_int)
 
 ykds_alloc = define('ykds_alloc', [], POINTER(YK_STATUS))
 ykds_free = define('ykds_free', [POINTER(YK_STATUS)], None)
@@ -76,6 +88,13 @@ ykds_version_major = define('ykds_version_major', [POINTER(YK_STATUS)], c_int)
 ykds_version_minor = define('ykds_version_minor', [POINTER(YK_STATUS)], c_int)
 ykds_version_build = define('ykds_version_build', [POINTER(YK_STATUS)], c_int)
 ykds_touch_level = define('ykds_touch_level', [POINTER(YK_STATUS)], c_int)
+
+ykp_alloc = define('ykp_alloc', [], POINTER(YKP_CONFIG))
+ykp_free_config = define('ykp_free_config', [POINTER(YKP_CONFIG)], bool)
+ykp_configure_version = define('ykp_configure_version',
+                               [POINTER(YKP_CONFIG), POINTER(YK_STATUS)], None)
+ykp_core_config = define('ykp_core_config', [POINTER(YKP_CONFIG)],
+                         POINTER(YK_CONFIG))
 
 ykp_alloc_device_config = define('ykp_alloc_device_config', [],
                                  POINTER(YK_DEVICE_CONFIG))

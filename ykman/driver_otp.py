@@ -36,6 +36,8 @@ import os
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
 
+SLOT_CONFIG = 0x01
+SLOT_CONFIG2 = 0x03
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
@@ -111,6 +113,14 @@ class OTPDriver(AbstractDriver):
                 raise Exception('Unable to set mode!')
         finally:
             ykp_free_device_config(config)
+
+    def _write_command(self, cfg, slot, acc_code=None):
+        if not yk_write_command(self._dev, cfg, slot, acc_code):
+            errno = yk_get_errno()
+            raise Exception('error %d: %s' % (errno, yk_strerror(errno)))
+
+    def zap_slot(self, slot):
+        return self._write_command(None, slot, None)
 
     def __del__(self):
         yk_close_key(self._dev)

@@ -25,6 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import sys
 from ykman.yubicommon.cli import CliCommand, Argument
 from ..util import TRANSPORT
 
@@ -70,8 +71,13 @@ class SlotCommand(CliCommand):
 
     def _delete_action(self, dev):
         if not self.force:
-            print 'TODO: Ask for confirmation'
+            print 'Delete slot %d of YubiKey? (y/n) [n]' % self.slot
+            read = sys.stdin.readline().strip()
+            if read.lower() not in ['y', 'yes']:
+                print 'Aborted.'
+                return 1
         print 'Deleting slot:', self.slot
+        print dev.driver.zap_slot(self.slot)
 
     def _static_action(self, dev):
         print "Set static password in slot %d: %s" % (
