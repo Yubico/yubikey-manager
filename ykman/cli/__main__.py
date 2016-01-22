@@ -37,10 +37,12 @@ from .mode import ModeCommand
 from .slot import SlotCommand
 
 
+CMDS = (InfoCommand, GuiCommand, ModeCommand, SlotCommand)
+
+
 class CliRunner(object):
 
     def __init__(self):
-        self._cmds = {}
         self._parser = self._init_parser()
 
     def _init_parser(self):
@@ -51,17 +53,15 @@ class CliRunner(object):
         parser.add_argument('-v', '--version', action='version',
                             version='%(prog)s version ' + __version__)
 
-        subparser = parser.add_subparsers(dest='command', help='subcommands')
-        self._add_command(subparser, InfoCommand)
-        self._add_command(subparser, GuiCommand)
-        self._add_command(subparser, ModeCommand)
-        self._add_command(subparser, SlotCommand)
+        subparser = parser.add_subparsers(help='subcommands')
+        for subcommand in CMDS:
+            self._add_command(subparser, subcommand)
 
         return parser
 
     def _add_command(self, subparser, Cmd):
-        self._cmds[Cmd.name] = Cmd(subparser.add_parser(Cmd.name,
-                                                        help=Cmd.help))
+        cmd_parser = subparser.add_parser(Cmd.name, help=Cmd.help)
+        cmd_parser.set_defaults(command=Cmd(cmd_parser))
 
     def _subcmd_names(self):
         for a in self._parser._subparsers._actions:
@@ -88,7 +88,7 @@ class CliRunner(object):
             print 'Failed connecting to the YubiKey. ' +\
                 'Is it in use by another process?'
             return 2
-        status = self._cmds[args.command].run(args, dev)
+        status = args.command.run(args, dev)
         if status is None:
             status = 0
         return status

@@ -31,13 +31,46 @@ import argparse
 
 from ..util import TRANSPORT
 
+class SlotAction(argparse._SubParsersAction):
+
+    def __call__(self, parser, args, values, option_string=None):
+        print "Action called", args, values, option_string
+
+        super(SlotAction, self).__call__(parser, args, values, option_string)
+
 
 class SlotCommand(object):
     name = 'slot'
     help = 'configure aspects of the YubiKeys OTP mode slots'
 
     def __init__(self, parser):
-        pass
+        parser.add_argument('slot', type=int, nargs='?', choices=[1, 2],
+                            help='which slot to act on')
+        parser.add_argument('-f', '--force', action='store_true',
+                            help='don\'t prompt for confirmation')
+
+        #parser.add_argument('action', nargs='?', choices=['delete', 'swap'],
+        #                    help='slot action')
+
+        subparsers = parser.add_subparsers(help='slot action', action=SlotAction)
+        info_parser = subparsers.add_parser(
+            'info', help='show info about the slots')
+        info_parser.set_defaults(action=self._info_action)
+        delete_parser = subparsers.add_parser(
+            'delete', help='deletes configuration in a slot')
+        delete_parser.set_defaults(action=self._delete_action)
+        swap_parser = subparsers.add_parser(
+            'swap', help='swaps configurations between slots')
+        swap_parser.set_defaults(action=None)
+        static_parser = subparsers.add_parser(
+            'static', help='programs a static password')
+        static_parser.set_defaults(action=None)
+        static_parser.add_argument('password', help='the password to set')
+
+    def _delete_action(self, args, dev):
+        if not args.force:
+            print 'TODO: Ask for confirmation'
+        print 'Deleting slot:', args.slot
 
     def run(self, args, dev):
         try:
@@ -46,6 +79,12 @@ class SlotCommand(object):
             print '%s Use the mode command to enable OTP.' % e.message
             return 1
 
+        print args
+        #action = getattr(self, '_%s_action' % args.action, self._info_action)
+
+        #return action(args, dev)
+
+    def _info_action(self, args, dev):
         print dev.device_name
         print "Slot 1:", dev.driver._slot1_valid and 'programmed' or 'empty'
         print "Slot 2:", dev.driver._slot2_valid and 'programmed' or 'empty'
