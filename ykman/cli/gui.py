@@ -25,15 +25,20 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from ykman.yubicommon.cli import CliCommand
 
-class GuiCommand(object):
+
+class GuiCommand(CliCommand):
     """
     Launches the YubiKey Manager graphical interface.
+
+    Usage:
+    ykman gui
     """
+
     name = 'gui'
 
-    def __call__(self, dev):
-        del dev
+    def __call__(self):
         try:
             from ykman.gui import __main__ as gui_main
             gui_main.main()

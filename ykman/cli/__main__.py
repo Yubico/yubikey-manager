@@ -76,13 +76,16 @@ class MainCommand(CliCommand):
 
     def __call__(self):
         subcmd = self.cmd(argv=[self.cmd.name] + self.sub_argv)
-        try:
-            dev = open_device()
-        except FailedOpeningDeviceException:
-            print 'Failed connecting to the YubiKey. ' +\
-                'Is it in use by another process?'
-            return 2
-        status = subcmd(dev)
+        if subcmd.name == GuiCommand.name:  # Don't open the device
+            status = subcmd()
+        else:
+            try:
+                dev = open_device()
+            except FailedOpeningDeviceException:
+                print 'Failed connecting to the YubiKey. ' +\
+                    'Is it in use by another process?'
+                return 2
+            status = subcmd(dev)
         return status if status is not None else 0
 
 
