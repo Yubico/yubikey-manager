@@ -25,66 +25,54 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import re
-import sys
-import argparse
-
+from ykman.yubicommon.cli import CliCommand, Argument
 from ..util import TRANSPORT
 
-class SlotAction(argparse._SubParsersAction):
 
-    def __call__(self, parser, args, values, option_string=None):
-        print "Action called", args, values, option_string
+class SlotCommand(CliCommand):
+    """
+    Manage YubiKey OTP slots.
 
-        super(SlotAction, self).__call__(parser, args, values, option_string)
+    Usage:
+    ykman slot
+    ykman slot swap [-f]
+    ykman slot (1 | 2) delete [-f]
+    ykman slot (1 | 2) static <password> [-f]
 
+    Options:
+        -h, --help      show this help message
+        -f, --force     don't ask for confirmation for actions
+    """
 
-class SlotCommand(object):
     name = 'slot'
-    help = 'configure aspects of the YubiKeys OTP mode slots'
 
-    def __init__(self, parser):
-        parser.add_argument('slot', type=int, nargs='?', choices=[1, 2],
-                            help='which slot to act on')
-        parser.add_argument('-f', '--force', action='store_true',
-                            help='don\'t prompt for confirmation')
+    slot = Argument(('1', '2'), int)
+    action = Argument(('static', 'swap', 'delete'), default='info')
+    force = Argument('--force', bool)
+    static_password = Argument('<password>')
 
-        #parser.add_argument('action', nargs='?', choices=['delete', 'swap'],
-        #                    help='slot action')
-
-        subparsers = parser.add_subparsers(help='slot action', action=SlotAction)
-        info_parser = subparsers.add_parser(
-            'info', help='show info about the slots')
-        info_parser.set_defaults(action=self._info_action)
-        delete_parser = subparsers.add_parser(
-            'delete', help='deletes configuration in a slot')
-        delete_parser.set_defaults(action=self._delete_action)
-        swap_parser = subparsers.add_parser(
-            'swap', help='swaps configurations between slots')
-        swap_parser.set_defaults(action=None)
-        static_parser = subparsers.add_parser(
-            'static', help='programs a static password')
-        static_parser.set_defaults(action=None)
-        static_parser.add_argument('password', help='the password to set')
-
-    def _delete_action(self, args, dev):
-        if not args.force:
-            print 'TODO: Ask for confirmation'
-        print 'Deleting slot:', args.slot
-
-    def run(self, args, dev):
+    def __call__(self, dev):
         try:
             dev = dev.use_transport(TRANSPORT.OTP)
         except ValueError as e:
             print '%s Use the mode command to enable OTP.' % e.message
             return 1
 
-        print args
-        #action = getattr(self, '_%s_action' % args.action, self._info_action)
+        return getattr(self, '_{}_action'.format(self.action))(dev)
 
-        #return action(args, dev)
-
-    def _info_action(self, args, dev):
+    def _info_action(self, dev):
         print dev.device_name
         print "Slot 1:", dev.driver._slot1_valid and 'programmed' or 'empty'
         print "Slot 2:", dev.driver._slot2_valid and 'programmed' or 'empty'
+
+    def _swap_action(self, dev):
+        print "Swap slots"
+
+    def _delete_action(self, dev):
+        if not self.force:
+            print 'TODO: Ask for confirmation'
+        print 'Deleting slot:', self.slot
+
+    def _static_action(self, dev):
+        print "Set static password in slot %d: %s" % (
+            self.slot, self.static_password)

@@ -51,10 +51,10 @@ setup(
         'gui_scripts': ['ykman-gui=ykman.gui.__main__:main']
     },
     install_requires=install_requires,
-    yc_requires=['ctypes', 'qt'],
-    yc_requires_exclude=['PySide'],
+    yc_requires=['ctypes', 'qt', 'cli'],
+    yc_requires_exclude=['PySide', 'docopt'],
     extras_require={
-        'ykman': ['argcomplete'],
+        'ykman-cli': ['docopt'],
         'ykman-gui': ['PySide']
     },
     cmdclass={

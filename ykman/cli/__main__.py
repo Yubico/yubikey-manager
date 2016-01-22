@@ -27,9 +27,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import argparse
 import sys
 from ykman import __version__
+from ykman.yubicommon.cli import CliCommand, Argument
 from ..device import open_device, FailedOpeningDeviceException
 from .gui import GuiCommand
 from .info import InfoCommand
@@ -40,63 +40,55 @@ from .slot import SlotCommand
 CMDS = (InfoCommand, GuiCommand, ModeCommand, SlotCommand)
 
 
-class CliRunner(object):
+def _get_subcommand(cmd_name):
+    for Cmd in CMDS:
+        if Cmd.name == cmd_name:
+            return Cmd
+    raise ValueError('Unknown command: {}'.format(cmd_name))
 
-    def __init__(self):
-        self._parser = self._init_parser()
 
-    def _init_parser(self):
-        parser = argparse.ArgumentParser(
-            description="Interface with a YubiKey via the command line",
-            add_help=True
-        )
-        parser.add_argument('-v', '--version', action='version',
-                            version='%(prog)s version ' + __version__)
+class MainCommand(CliCommand):
+    """
+    Interface with a YubiKey via the command line
 
-        subparser = parser.add_subparsers(help='subcommands')
-        for subcommand in CMDS:
-            self._add_command(subparser, subcommand)
+    Usage:
+        ykman [options] [<command> [<args>...]]
 
-        return parser
+    Commands:
+        info    displays information about the connected YubiKey
+        gui     launches the graphical interface
+        mode    show or set the current transport mode
+        slot    show or modify YubiKey OTP slots
 
-    def _add_command(self, subparser, Cmd):
-        cmd_parser = subparser.add_parser(Cmd.name, help=Cmd.help)
-        cmd_parser.set_defaults(command=Cmd(cmd_parser))
+    Use 'ykman <command> -h' for additional help with a command.
 
-    def _subcmd_names(self):
-        for a in self._parser._subparsers._actions:
-            if isinstance(a, argparse._SubParsersAction):
-                for name in a._name_parser_map.keys():
-                    yield name
+    Options:
+        -h, --help      show this help message
+        -v, --version   show the program's version number
+    """
 
-    def run(self):
-        subcmds = list(self._subcmd_names()) + \
-            ['-h', '--help', '-v', '--version']
-        if not bool(set(sys.argv[1:]) & set(subcmds)):
-            sys.argv.insert(1, subcmds[0])
+    cmd = Argument('<command>', _get_subcommand, default=InfoCommand)
+    sub_argv = Argument('<args>')
 
-        try:  # If argcomplete is available, use it.
-            import argcomplete
-            argcomplete.autocomplete(self._parser)
-        except ImportError:
-            pass
+    def __init__(self, *args, **kwargs):
+        kwargs['options_first'] = True
+        super(MainCommand, self).__init__(*args, **kwargs)
 
-        args = self._parser.parse_args()
+    def __call__(self):
+        subcmd = self.cmd(argv=[self.cmd.name] + self.sub_argv)
         try:
             dev = open_device()
         except FailedOpeningDeviceException:
             print 'Failed connecting to the YubiKey. ' +\
                 'Is it in use by another process?'
             return 2
-        status = args.command.run(args, dev)
-        if status is None:
-            status = 0
-        return status
+        status = subcmd(dev)
+        return status if status is not None else 0
 
 
 def main():
-    runner = CliRunner()
-    sys.exit(runner.run())
+    cmd = MainCommand(version='%(prog)s version ' + __version__)
+    sys.exit(cmd())
 
 
 if __name__ == '__main__':

@@ -27,12 +27,20 @@
 
 import re
 import sys
-import argparse
 
+from ykman.yubicommon.cli import CliCommand, Argument
 from ..util import Mode, TRANSPORT
 
 
 def _parse_mode_string(mode):
+    try:
+        mode_int = int(mode)
+        return Mode.from_code(mode_int)
+    except IndexError:
+        raise ValueError('Invalid mode: %d' % mode_int)
+    except ValueError:
+        pass  # Not a numeric mode, parse string
+
     found = set()
     parts = set(filter(None, re.split(r'[+ ,]+', mode.upper())))
     if len(parts) <= 3:
@@ -48,70 +56,65 @@ def _parse_mode_string(mode):
     raise ValueError('Invalid mode string: %s' % mode)
 
 
-class ModeAction(argparse.Action):
+class ModeCommand(CliCommand):
+    """
+    Manage YubiKey transport mode.
 
-    def __call__(self, parser, args, values, option_string=None):
-        if values is not None:
-            try:  # Numeric mode
-                mode = Mode.from_code(int(values))
-            except ValueError:  # Text mode
-                mode = _parse_mode_string(values)
-            setattr(args, self.dest, mode)
+    Usage:
+    ykman mode
+    ykman mode <mode> [-f] [--touch-eject [TIMEOUT]]
+                      [--challenge-response-timeout TIMEOUT]
 
+    Options:
+        -h, --help      show this help message
+        -f, --force     don't ask for confirmation for actions
+                        when set, the button on the YubiKey will eject/insert
+                        the card (CCID mode only) Optionally give a timeout in
+                        seconds to auto-eject the card after a period of
+                        inactivity.
+        --touch-eject  [TIMEOUT]
+                        CCID mode only. When set, the button on the YubiKey will
+                        eject/insert the card. Optionally provide a TIMEOUT value
+                        to cause the card to automatically eject after a period of
+                        inactivity.
+        --challenge-response-timeout TIMEOUT
+                        set the timeout for challenge-response in seconds
+    """
 
-class TouchEjectAction(argparse.Action):
-
-    def __call__(self, parser, args, values, option_string=None):
-        if args.mode != Mode(ccid=True):
-            parser.error('--touch-eject can only be used when setting CCID-only'
-                         ' mode')
-
-        if values is None:  # Arg set without argument.
-            values = 0
-        setattr(args, self.dest, values)
-
-
-class ModeCommand(object):
     name = 'mode'
-    help = 'get and set the mode of the YubiKey'
 
-    def __init__(self, parser):
-        parser.add_argument('mode', action=ModeAction, nargs='?',
-                            help='new mode to set')
-        parser.add_argument('-f', '--force', action='store_true',
-                            help='don\'t prompt for confirmation')
-        parser.add_argument('--touch-eject', nargs='?', action=TouchEjectAction,
-                            type=int, help='''when set, the button on the
-                            YubiKey will eject/insert the card (CCID mode only)
+    force = Argument('--force', bool)
+    mode = Argument('<mode>', _parse_mode_string)
+    touch_eject = Argument('--touch-eject', bool)
+    autoeject_timeout = Argument('TIMEOUT', int)
+    cr_timeout = Argument('--challenge-response-timeout', int, 0)
 
-                            Optionally give a timeout in seconds to auto-eject
-                            the card after a period of inactivity.
-                            ''')
-        parser.add_argument('--challenge-response-timeout', type=int,
-                            default=15, help='''set the timeout for
-                            challenge-response in seconds
-                            ''')
+    def __call__(self, dev):
+        if self.mode is not None:
+            autoeject = self.autoeject_timeout if self.touch_eject else None
+            if self.mode.transports != TRANSPORT.CCID:
+                autoeject = None
+                if self.touch_eject:
+                    print '--touch-eject can only be used when setting', \
+                        'CCID-only mode'
+                    return 1
 
-    def run(self, args, dev):
-        if args.mode is not None:
-            if not args.force:
-                if args.mode == dev.mode:
-                    print 'Mode is already %s, nothing to do...' % args.mode
+            if not self.force:
+                if self.mode == dev.mode:
+                    print 'Mode is already %s, nothing to do...' % self.mode
                     return 0
-                elif not dev.has_mode(args.mode):
-                    print 'Mode %s is not supported on this device!' % args.mode
+                elif not dev.has_mode(self.mode):
+                    print 'Mode %s is not supported on this device!' % self.mode
                     print 'Use --force to attempt to set it anyway.'
                     return 1
                 else:
-                    print 'Set mode of YubiKey to %s? (y/n) [n]' % args.mode
+                    print 'Set mode of YubiKey to %s? (y/n) [n]' % self.mode
                     read = sys.stdin.readline().strip()
                     if read.lower() not in ['y', 'yes']:
                         print 'Aborted.'
                         return 1
 
-            dev.set_mode(args.mode,
-                            args.challenge_response_timeout,
-                            args.touch_eject)
+            dev.set_mode(self.mode, self.cr_timeout, autoeject)
             print 'Mode set! You must remove and re-insert your YubiKey ' +\
                 'for this change to take effect.'
         elif dev is None:

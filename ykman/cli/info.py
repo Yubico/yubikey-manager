@@ -27,19 +27,23 @@
 
 import sys
 from ykman import __version__
-from ..util import CAPABILITY, TRANSPORT
+from ykman.yubicommon.cli import CliCommand
+from ..util import CAPABILITY
 from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
 
 
-class InfoCommand(object):
+class InfoCommand(CliCommand):
+    """
+    Displays information about the attached YubiKey.
+
+    Usage:
+        ykman info
+    """
+
     name = 'info'
-    help = 'display information about the attached YubiKey'
 
-    def __init__(self, parser):
-        pass
-
-    def run(self, args, dev):
+    def __call__(self, dev):
         print '{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__)
         print 'Libraries: libykpers {}, libu2f-host {}'.format(
             ykpers_version, u2fhost_version)

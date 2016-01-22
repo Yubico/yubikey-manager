@@ -27,16 +27,16 @@
 
 
 class GuiCommand(object):
+    """
+    Launches the YubiKey Manager graphical interface.
+    """
     name = 'gui'
-    help = 'launches the graphical interface'
 
-    def __init__(self, parser):
-        self._error = parser.error
-
-    def run(self, args, dev):
+    def __call__(self, dev):
         del dev
         try:
             from ykman.gui import __main__ as gui_main
             gui_main.main()
         except ImportError:
-            self._error('gui requires PySide to run')
+            print 'gui requires PySide to run'
+            return 1
