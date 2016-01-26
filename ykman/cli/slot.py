@@ -25,8 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import sys
 from ykman.yubicommon.cli import CliCommand, Argument
+from .util import confirm
 from ..util import TRANSPORT
 
 
@@ -38,11 +38,12 @@ class SlotCommand(CliCommand):
     ykman slot
     ykman slot swap [-f]
     ykman slot (1 | 2) delete [-f]
-    ykman slot (1 | 2) static <password> [-f]
+    ykman slot (1 | 2) static <password> [-f] [--no-enter]
 
     Options:
         -h, --help      show this help message
         -f, --force     don't ask for confirmation for actions
+        --no-enter      don't trigger the Enter key after the password
     """
 
     name = 'slot'
@@ -51,6 +52,7 @@ class SlotCommand(CliCommand):
     slot = Argument(('1', '2'), int)
     action = Argument(('static', 'swap', 'delete'), default='info')
     force = Argument('--force', bool)
+    no_enter = Argument('--no-enter', bool)
     static_password = Argument('<password>')
 
     def __call__(self, dev):
@@ -62,18 +64,25 @@ class SlotCommand(CliCommand):
         print "Slot 2:", dev.driver._slot2_valid and 'programmed' or 'empty'
 
     def _swap_action(self, dev):
-        print "Swap slots"
+        if not self.force and not confirm('Swap slots of YubiKey?'):
+            return 1
+        print 'Swapping slots...'
+        dev.driver.swap_slots()
+        print 'Success!'
 
     def _delete_action(self, dev):
-        if not self.force:
-            print 'Delete slot %d of YubiKey? (y/n) [n]' % self.slot
-            read = sys.stdin.readline().strip()
-            if read.lower() not in ['y', 'yes']:
-                print 'Aborted.'
-                return 1
-        print 'Deleting slot:', self.slot
-        print dev.driver.zap_slot(self.slot)
+        if not self.force and \
+                not confirm('Delete slot %d of YubiKey?' % self.slot):
+            return 1
+        print 'Deleting slot: %d...' % self.slot
+        dev.driver.zap_slot(self.slot)
+        print 'Success!'
 
     def _static_action(self, dev):
-        print "Set static password in slot %d: %s" % (
-            self.slot, self.static_password)
+        if not self.force and \
+                not confirm('Program a static password in slot %d?' % self.slot):
+            return 1
+        print "Setting static password in slot %d..." % self.slot
+        dev.driver.program_static(self.slot, self.static_password,
+                                  not self.no_enter)
+        print 'Success!'

@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
-                    c_char_p, c_ushort)
+                    c_char_p, c_ushort, c_size_t)
 from ..yubicommon.ctypes.libloader import load_library
 
 _lib = load_library('ykpers-1', '1')
@@ -67,20 +67,29 @@ yk_strerror = define('yk_strerror', [c_int], c_char_p)
 
 ykpers_check_version = define('ykpers_check_version', [c_char_p], c_char_p)
 
-yk_init = define('yk_init', [], c_int)
-yk_release = define('yk_release', [], c_int)
+yk_init = define('yk_init', [], bool)
+yk_release = define('yk_release', [], bool)
 
 yk_open_first_key = define('yk_open_first_key', [], POINTER(YK_KEY))
-yk_close_key = define('yk_close_key', [POINTER(YK_KEY)], c_int)
+yk_close_key = define('yk_close_key', [POINTER(YK_KEY)], bool)
 
 yk_get_status = define('yk_get_status', [
-    POINTER(YK_KEY), POINTER(YK_STATUS)], c_int)
+    POINTER(YK_KEY), POINTER(YK_STATUS)], bool)
 yk_get_serial = define('yk_get_serial', [
-    POINTER(YK_KEY), c_uint8, c_uint, POINTER(c_uint)], c_int)
-yk_write_command = define('yk_write_config', [
+    POINTER(YK_KEY), c_uint8, c_uint, POINTER(c_uint)], bool)
+yk_write_command = define('yk_write_command', [
     POINTER(YK_KEY), POINTER(YK_CONFIG), c_uint8, c_char_p], bool)
 yk_write_device_config = define('yk_write_device_config', [
-    POINTER(YK_KEY), POINTER(YK_DEVICE_CONFIG)], c_int)
+    POINTER(YK_KEY), POINTER(YK_DEVICE_CONFIG)], bool)
+
+yk_get_key_vid_pid = define('yk_get_key_vid_pid', [POINTER(YK_KEY),
+                                                   POINTER(c_int),
+                                                   POINTER(c_int)], bool)
+
+yk_get_capabilities = define('yk_get_capabilities', [POINTER(YK_KEY),
+                                                     c_uint8,
+                                                     c_uint,
+                                                     c_char_p], bool)
 
 ykds_alloc = define('ykds_alloc', [], POINTER(YK_STATUS))
 ykds_free = define('ykds_free', [POINTER(YK_STATUS)], None)
@@ -93,29 +102,46 @@ ykp_alloc = define('ykp_alloc', [], POINTER(YKP_CONFIG))
 ykp_free_config = define('ykp_free_config', [POINTER(YKP_CONFIG)], bool)
 ykp_configure_version = define('ykp_configure_version',
                                [POINTER(YKP_CONFIG), POINTER(YK_STATUS)], None)
+ykp_configure_command = define('ykp_configure_command',
+                               [POINTER(YKP_CONFIG), c_uint8], bool)
 ykp_core_config = define('ykp_core_config', [POINTER(YKP_CONFIG)],
                          POINTER(YK_CONFIG))
 
 ykp_alloc_device_config = define('ykp_alloc_device_config', [],
                                  POINTER(YK_DEVICE_CONFIG))
 ykp_free_device_config = define('ykp_free_device_config',
-                                [POINTER(YK_DEVICE_CONFIG)], c_int)
+                                [POINTER(YK_DEVICE_CONFIG)], bool)
 ykp_set_device_mode = define('ykp_set_device_mode', [POINTER(YK_DEVICE_CONFIG),
-                                                     c_ubyte], c_int)
+                                                     c_ubyte], bool)
 ykp_set_device_chalresp_timeout = define('ykp_set_device_chalresp_timeout',
                                          [POINTER(YK_DEVICE_CONFIG),
-                                          c_ubyte], c_int)
+                                          c_ubyte], bool)
 ykp_set_device_autoeject_time = define('ykp_set_device_autoeject_time',
                                        [POINTER(YK_DEVICE_CONFIG),
-                                        c_ushort], c_int)
+                                        c_ushort], bool)
+ykp_set_fixed = define('ykp_set_fixed',
+                       [POINTER(YKP_CONFIG), c_char_p, c_size_t], bool)
+ykp_set_uid = define('ykp_set_uid',
+                     [POINTER(YKP_CONFIG), c_char_p, c_size_t], bool)
+ykp_AES_key_from_raw = define('ykp_AES_key_from_raw',
+                              [POINTER(YKP_CONFIG), c_char_p], bool)
 
-yk_get_key_vid_pid = define('yk_get_key_vid_pid', [POINTER(YK_KEY),
-                                                   POINTER(c_int),
-                                                   POINTER(c_int)], c_int)
 
-yk_get_capabilities = define('yk_get_capabilities', [POINTER(YK_KEY),
-                                                     c_uint8,
-                                                     c_uint,
-                                                     c_char_p], c_int)
+def _ykp_set(cfg, name, value=True):
+    cmd = define(name, [POINTER(YKP_CONFIG), c_uint8], bool)
+    return cmd(cfg, value)
+
+
+def ykp_set_tktflag(cfg, name, value=True):
+    return _ykp_set(cfg, 'ykp_set_tktflag_' + name, value)
+
+
+def ykp_set_cfgflag(cfg, name, value=True):
+    return _ykp_set(cfg, 'ykp_set_cfgflag_' + name, value)
+
+
+def ykp_set_extflag(cfg, name, value=True):
+    return _ykp_set(cfg, 'ykp_set_extflag_' + name, value)
+
 
 __all__ = [x for x in globals().keys() if x.lower().startswith('yk')]

@@ -102,7 +102,11 @@ class MainCommand(CliCommand):
                       'another process?')
                 return 2
 
-        status = subcmd(dev)
+        try:
+            status = subcmd(dev)
+        except ValueError as e:
+            print('Error:', e)
+            status = 1
         return status if status is not None else 0
 
 
