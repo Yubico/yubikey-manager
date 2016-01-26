@@ -46,6 +46,7 @@ class SlotCommand(CliCommand):
     """
 
     name = 'slot'
+    transports = TRANSPORT.OTP
 
     slot = Argument(('1', '2'), int)
     action = Argument(('static', 'swap', 'delete'), default='info')
@@ -53,12 +54,6 @@ class SlotCommand(CliCommand):
     static_password = Argument('<password>')
 
     def __call__(self, dev):
-        try:
-            dev = dev.use_transport(TRANSPORT.OTP)
-        except ValueError as e:
-            print '%s Use the mode command to enable OTP.' % e.message
-            return 1
-
         return getattr(self, '_{}_action'.format(self.action))(dev)
 
     def _info_action(self, dev):

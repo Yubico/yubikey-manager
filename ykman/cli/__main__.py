@@ -27,9 +27,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import sys
 from ykman import __version__
 from ykman.yubicommon.cli import CliCommand, Argument
+from ..util import TRANSPORT
 from ..device import open_device, FailedOpeningDeviceException
 from .gui import GuiCommand
 from .info import InfoCommand
@@ -76,16 +79,30 @@ class MainCommand(CliCommand):
 
     def __call__(self):
         subcmd = self.cmd(argv=[self.cmd.name] + self.sub_argv)
-        if subcmd.name == GuiCommand.name:  # Don't open the device
-            status = subcmd()
-        else:
+        dev = None
+        transports = getattr(subcmd, 'transports', sum(TRANSPORT))
+        if transports:
             try:
-                dev = open_device()
+                dev = open_device(transports)
+                if not dev:
+                    dev = open_device()
+                    if not dev:
+                        print('No YubiKey detected.')
+                        return 2
+                    else:
+                        req = ', '.join((t.name for t in TRANSPORT
+                                         if t & transports))
+                        print("Command '{}' requires one of the following "
+                              "transports to be enabled: '{}'".format(
+                                  subcmd.name, req))
+                        print("Use 'ykman mode' to set the enabled transports.")
+                        return 2
             except FailedOpeningDeviceException:
-                print 'Failed connecting to the YubiKey. ' +\
-                    'Is it in use by another process?'
+                print('Failed connecting to the YubiKey. Is it in use by '
+                      'another process?')
                 return 2
-            status = subcmd(dev)
+
+        status = subcmd(dev)
         return status if status is not None else 0
 
 

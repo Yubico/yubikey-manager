@@ -37,8 +37,9 @@ class GuiCommand(CliCommand):
     """
 
     name = 'gui'
+    transports = 0
 
-    def __call__(self):
+    def __call__(self, dev=None):
         try:
             from ykman.gui import __main__ as gui_main
             gui_main.main()
