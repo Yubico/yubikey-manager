@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 from ykman.yubicommon.cli import CliCommand, Argument
 from .util import confirm
 from ..util import TRANSPORT
@@ -59,30 +61,31 @@ class SlotCommand(CliCommand):
         return getattr(self, '_{}_action'.format(self.action))(dev)
 
     def _info_action(self, dev):
-        print dev.device_name
-        print "Slot 1:", dev.driver._slot1_valid and 'programmed' or 'empty'
-        print "Slot 2:", dev.driver._slot2_valid and 'programmed' or 'empty'
+        print(dev.device_name)
+        print('Slot 1:', dev.driver._slot1_valid and 'programmed' or 'empty')
+        print('Slot 2:', dev.driver._slot2_valid and 'programmed' or 'empty')
 
     def _swap_action(self, dev):
         if not self.force and not confirm('Swap slots of YubiKey?'):
             return 1
-        print 'Swapping slots...'
+        print('Swapping slots...')
         dev.driver.swap_slots()
-        print 'Success!'
+        print('Success!')
 
     def _delete_action(self, dev):
         if not self.force and \
-                not confirm('Delete slot %d of YubiKey?' % self.slot):
+                not confirm('Delete slot {} of YubiKey?'.format(self.slot)):
             return 1
-        print 'Deleting slot: %d...' % self.slot
+        print('Deleting slot: {}...'.format(self.slot))
         dev.driver.zap_slot(self.slot)
-        print 'Success!'
+        print('Success!')
 
     def _static_action(self, dev):
         if not self.force and \
-                not confirm('Program a static password in slot %d?' % self.slot):
+                not confirm('Program a static password in slot {}?' \
+                        .format(self.slot)):
             return 1
-        print "Setting static password in slot %d..." % self.slot
+        print("Setting static password in slot {}...".format(self.slot))
         dev.driver.program_static(self.slot, self.static_password,
                                   not self.no_enter)
-        print 'Success!'
+        print('Success!')

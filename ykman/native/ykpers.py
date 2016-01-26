@@ -24,6 +24,9 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+
+from __future__ import print_function
+
 from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
                     c_char_p, c_ushort, c_size_t)
 from ..yubicommon.ctypes.libloader import load_library
@@ -37,10 +40,10 @@ def define(name, args, res):
         fn.argtypes = args
         fn.restype = res
     except AttributeError:
-        print "Undefined symbol: %s" % name
+        print('Undefined symbol: {}'.format(name))
 
         def error(*args, **kwargs):
-            raise Exception("Undefined symbol: %s" % name)
+            raise Exception('Undefined symbol: {}'.format(name))
         fn = error
     return fn
 

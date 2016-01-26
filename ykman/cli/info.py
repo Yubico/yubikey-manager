@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import sys
 from ykman import __version__
 from ykman.yubicommon.cli import CliCommand
@@ -44,17 +46,17 @@ class InfoCommand(CliCommand):
     name = 'info'
 
     def __call__(self, dev):
-        print '{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__)
-        print 'Libraries: libykpers {}, libu2f-host {}'.format(
-            ykpers_version, u2fhost_version)
-        print
+        print('{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__))
+        print('Libraries: libykpers {}, libu2f-host {}'.format(
+            ykpers_version, u2fhost_version))
+        print()
 
-        print 'Device name:', dev.device_name
-        print 'Serial number:', dev.serial or 'Not set or unreadable'
-        print 'Enabled transport(s):', dev.mode
-        print
+        print('Device name:', dev.device_name)
+        print('Serial number:', dev.serial or 'Not set or unreadable')
+        print('Enabled transport(s):', dev.mode)
+        print()
 
-        print 'Device capabilities:'
+        print('Device capabilities:')
         for c in CAPABILITY:
             if c & dev.capabilities:
                 if c & dev.enabled:
@@ -64,4 +66,4 @@ class InfoCommand(CliCommand):
             else:
                 status = 'Not available'
 
-            print '    {0.name}:\t{1}'.format(c, status)
+            print('    {0.name}:\t{1}'.format(c, status))

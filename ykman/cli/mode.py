@@ -25,10 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import re
-import sys
 
 from ykman.yubicommon.cli import CliCommand, Argument
+from .util import confirm
 from ..util import Mode, TRANSPORT
 
 
@@ -37,7 +39,7 @@ def _parse_mode_string(mode):
         mode_int = int(mode)
         return Mode.from_code(mode_int)
     except IndexError:
-        raise ValueError('Invalid mode: %d' % mode_int)
+        raise ValueError('Invalid mode: {}'.format(mode_int))
     except ValueError:
         pass  # Not a numeric mode, parse string
 
@@ -50,10 +52,10 @@ def _parse_mode_string(mode):
                     found.add(available)
                     break
             else:
-                raise ValueError('Invalid mode string: %s' % mode)
+                raise ValueError('Invalid mode string: {}'.format(mode))
     if len(found) > 0:
         return Mode(sum(found))
-    raise ValueError('Invalid mode string: %s' % mode)
+    raise ValueError('Invalid mode string: {}'.format(mode))
 
 
 class ModeCommand(CliCommand):
@@ -74,9 +76,9 @@ class ModeCommand(CliCommand):
                         inactivity.
         --touch-eject  [TIMEOUT]
                         CCID mode only. When set, the button on the YubiKey will
-                        eject/insert the card. Optionally provide a TIMEOUT value
-                        to cause the card to automatically eject after a period of
-                        inactivity.
+                        eject/insert the card. Optionally provide a TIMEOUT
+                        value to cause the card to automatically eject after a
+                        period of inactivity.
         --challenge-response-timeout TIMEOUT
                         set the timeout for challenge-response in seconds
     """
@@ -95,32 +97,29 @@ class ModeCommand(CliCommand):
             if self.mode.transports != TRANSPORT.CCID:
                 autoeject = None
                 if self.touch_eject:
-                    print '--touch-eject can only be used when setting', \
-                        'CCID-only mode'
+                    print('--touch-eject can only be used when setting'
+                          'CCID-only mode')
                     return 1
 
             if not self.force:
                 if self.mode == dev.mode:
-                    print 'Mode is already %s, nothing to do...' % self.mode
+                    print('Mode is already {}, nothing to do...'
+                          .format(self.mode))
                     return 0
                 elif not dev.has_mode(self.mode):
-                    print 'Mode %s is not supported on this device!' % self.mode
-                    print 'Use --force to attempt to set it anyway.'
+                    print('Mode {} is not supported on this device!'
+                          .format(self.mode))
+                    print('Use --force to attempt to set it anyway.')
                     return 1
-                else:
-                    print 'Set mode of YubiKey to %s? (y/n) [n]' % self.mode
-                    read = sys.stdin.readline().strip()
-                    if read.lower() not in ['y', 'yes']:
-                        print 'Aborted.'
-                        return 1
+                elif not confirm('Set mode of YubiKey to {}?'
+                                 .format(self.mode)):
+                    return 1
 
             dev.set_mode(self.mode, self.cr_timeout, autoeject)
-            print 'Mode set! You must remove and re-insert your YubiKey ' +\
-                'for this change to take effect.'
-        elif dev is None:
-            print 'no YubiKey detected!'
+            print('Mode set! You must remove and re-insert your YubiKey for'
+                  'this change to take effect.')
         else:
-            print 'Current mode is:', dev.mode
-            supported = ', '.join(t.name for t in TRANSPORT \
+            print('Current mode is:', dev.mode)
+            supported = ', '.join(t.name for t in TRANSPORT
                                   if dev.capabilities & t)
-            print 'Supported transports are:', supported
+            print('Supported transports are:', supported)

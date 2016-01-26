@@ -25,11 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
 
 from .native.u2fh import *
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
-from .util import Mode, CAPABILITY, TRANSPORT, parse_tlv_list
+from .util import Mode, TRANSPORT
 import os
 import struct
 
@@ -65,7 +66,7 @@ class U2FDriver(AbstractDriver):
     def __init__(self, devs, index, name=''):
         self._devs = devs
         self._index = index
-        self._mode = Mode(TRANSPORT.U2F \
+        self._mode = Mode(TRANSPORT.U2F
                           | sum(t for t in TRANSPORT if t.name in name))
         if ' NEO ' in name:  # At least 3.0.0
             self._version = (3, 0, 0)
@@ -90,7 +91,7 @@ class U2FDriver(AbstractDriver):
         status = u2fh_sendrecv(self._devs, self._index, cmd, data, len(data),
                                resp, byref(buf_size))
         if status != 0:
-            print "error", status
+            print('error', status)
             raise Exception('u2fh_sendrecv error: {}'.format(status))
         return resp.raw[0:buf_size.value]
 

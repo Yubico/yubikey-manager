@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 from ykman.yubicommon.cli import CliCommand
 
 
@@ -44,5 +46,5 @@ class GuiCommand(CliCommand):
             from ykman.gui import __main__ as gui_main
             gui_main.main()
         except ImportError:
-            print 'gui requires PySide to run'
+            print('GUI requires PySide to run')
             return 1

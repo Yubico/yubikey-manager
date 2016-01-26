@@ -25,15 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import sys
 
 __all__ = ['confirm']
 
 
 def confirm(msg):
-    print '{} (y/n) [n]'.format(msg)
+    print('{} (y/n) [n]'.format(msg))
     read = sys.stdin.readline().strip()
     if read.lower() not in ['y', 'yes']:
-        print 'Aborted.'
+        print('Aborted.')
         return False
     return True
