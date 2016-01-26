@@ -111,9 +111,7 @@ class ModeCommand(CliCommand):
                           .format(self.mode))
                     print('Use --force to attempt to set it anyway.')
                     return 1
-                elif not confirm('Set mode of YubiKey to {}?'
-                                 .format(self.mode)):
-                    return 1
+                confirm('Set mode of YubiKey to {}?'.format(self.mode))
 
             dev.set_mode(self.mode, self.cr_timeout, autoeject)
             print('Mode set! You must remove and re-insert your YubiKey for'

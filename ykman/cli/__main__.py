@@ -34,6 +34,7 @@ from ykman import __version__
 from ykman.yubicommon.cli import CliCommand, Argument
 from ..util import TRANSPORT
 from ..device import open_device, FailedOpeningDeviceException
+from .util import CliExit
 from .gui import GuiCommand
 from .info import InfoCommand
 from .mode import ModeCommand
@@ -104,6 +105,9 @@ class MainCommand(CliCommand):
 
         try:
             status = subcmd(dev)
+        except CliExit as e:
+            print(e.message)
+            status = e.status
         except ValueError as e:
             print('Error:', e)
             status = 1

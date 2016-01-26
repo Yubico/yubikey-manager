@@ -32,10 +32,17 @@ import sys
 __all__ = ['confirm']
 
 
+class CliExit(Exception):
+    """Exception which causes CLI to exit using the given status"""
+
+    def __init__(self, status, message):
+        self.status = status
+        self.message = message
+
+
 def confirm(msg):
     print('{} (y/n) [n]'.format(msg))
     read = sys.stdin.readline().strip()
     if read.lower() not in ['y', 'yes']:
-        print('Aborted.')
-        return False
+        raise CliExit(1, 'Action aborted.')
     return True

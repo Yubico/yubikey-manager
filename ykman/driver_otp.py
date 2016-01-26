@@ -32,6 +32,8 @@ from .driver import AbstractDriver
 from .util import Mode, TRANSPORT
 from .scanmap import us
 
+from hashlib import sha1
+
 
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
@@ -141,12 +143,17 @@ class OTPDriver(AbstractDriver):
 
     def _create_cfg(self, cmd):
         st = ykds_alloc()
+        cfg = ykp_alloc()
         try:
             check(yk_get_status(self._dev, st))
-            cfg = ykp_alloc()
             ykp_configure_version(cfg, st)
             ykp_configure_command(cfg, cmd)
+            check(ykp_set_extflag(cfg, 'SERIAL_API_VISIBLE'))
+            check(ykp_set_extflag(cfg, 'ALLOW_UPDATE'))
             return cfg
+        except YkpersError:
+            ykp_free_config(cfg)
+            raise
         finally:
             ykds_free(st)
 
@@ -166,8 +173,6 @@ class OTPDriver(AbstractDriver):
 
         try:
             check(ykp_set_cfgflag(cfg, 'SHORT_TICKET'))
-            check(ykp_set_extflag(cfg, 'SERIAL_API_VISIBLE'))
-            check(ykp_set_extflag(cfg, 'ALLOW_UPDATE'))
 
             if append_cr:
                 check(ykp_set_tktflag(cfg, 'APPEND_CR'))
@@ -183,6 +188,48 @@ class OTPDriver(AbstractDriver):
                 check(ykp_set_uid(cfg, pw_bytes[-22:-16], 6))
                 ykp_AES_key_from_raw(cfg, pw_bytes[-16:])
 
+            check(yk_write_command(self._dev, ykp_core_config(cfg), cmd, None))
+        finally:
+            ykp_free_config(cfg)
+
+    def program_chalresp(self, slot, key, touch=False):
+        if self.version < (2, 2, 0):
+            raise ValueError('challenge-response requires YubiKey 2.2.0 or '
+                             'later')
+        if len(key) > 20:
+            raise ValueError('key lengths >20 bytes not supported')
+        cmd = slot_to_cmd(slot)
+        cfg = self._create_cfg(cmd)
+
+        try:
+            check(ykp_set_tktflag(cfg, 'CHAL_RESP'))
+            check(ykp_set_cfgflag(cfg, 'CHAL_HMAC'))
+            check(ykp_set_cfgflag(cfg, 'HMAC_LT64'))
+            ykp_HMAC_key_from_raw(cfg, key)
+            check(yk_write_command(self._dev, ykp_core_config(cfg), cmd, None))
+        finally:
+            ykp_free_config(cfg)
+
+    def program_hotp(self, slot, key, imf=0, hotp8=False, append_cr=True):
+        if self.version < (2, 1, 0):
+            raise ValueError('HOTP requires YubiKey 2.1.0 or later')
+        if len(key) > 64:
+            key = sha1(key).digest()
+        if len(key) > 20:
+            raise ValueError('key lengths >20 bytes not supported')
+        if imf % 16 != 0:
+            raise ValueError('imf must be a multiple of 16')
+        cmd = slot_to_cmd(slot)
+        cfg = self._create_cfg(cmd)
+
+        try:
+            check(ykp_set_tktflag(cfg, 'OATH_HOTP'))
+            check(ykp_set_oath_imf(cfg, imf))
+            if hotp8:
+                check(ykp_set_cfgflag(cfg, 'OATH_HOTP8'))
+            if append_cr:
+                check(ykp_set_tktflag(cfg, 'APPEND_CR'))
+            ykp_HMAC_key_from_raw(cfg, key)
             check(yk_write_command(self._dev, ykp_core_config(cfg), cmd, None))
         finally:
             ykp_free_config(cfg)

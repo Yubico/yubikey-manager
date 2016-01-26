@@ -31,6 +31,33 @@ from ykman.yubicommon.cli import CliCommand, Argument
 from .util import confirm
 from ..util import TRANSPORT
 
+import os
+import re
+from base64 import b32decode
+
+
+def int_6_or_8(val):
+    int_val = int(val)
+    if int_val == 6:
+        return False
+    elif int_val == 8:
+        return True
+    else:
+        raise ValueError('must be 6 or 8')
+
+
+def parse_key(val):
+    val = val.upper()
+    if re.match(r'^([0-9A-F]{2})+$', val):  # hex
+        return val.decode('hex')
+    else:
+        # Key should be b32 encoded
+        val += '=' * (-len(val) % 8)  # Support unpadded
+        try:
+            return b32decode(val)
+        except TypeError as e:
+            raise ValueError(e.message)
+
 
 class SlotCommand(CliCommand):
     """
@@ -41,21 +68,33 @@ class SlotCommand(CliCommand):
     ykman slot swap [-f]
     ykman slot (1 | 2) delete [-f]
     ykman slot (1 | 2) static <password> [-f] [--no-enter]
+    ykman slot (1 | 2) chalresp [<key>] [-f] [--require-touch]
+    ykman slot (1 | 2) hotp <key> [-f] [--no-enter] [--digits N] [--imf IMF]
+
+    <key> should be given as a hex or base32 encoded string
 
     Options:
-        -h, --help      show this help message
-        -f, --force     don't ask for confirmation for actions
-        --no-enter      don't trigger the Enter key after the password
+        -h, --help       show this help message
+        -f, --force      don't ask for confirmation for actions
+        --no-enter       don't trigger the Enter key after the password
+        --require-touch  require physical button press to generate response
+        --digits N       number of digits to output for HOTP [default: 6]
+        --imf IMF        initial moving factor for HOTP [default: 0]
     """
 
     name = 'slot'
     transports = TRANSPORT.OTP
 
     slot = Argument(('1', '2'), int)
-    action = Argument(('static', 'swap', 'delete'), default='info')
+    action = Argument(('static', 'swap', 'delete', 'chalresp', 'hotp'),
+                      default='info')
     force = Argument('--force', bool)
     no_enter = Argument('--no-enter', bool)
+    require_touch = Argument('--require-touch', bool)
     static_password = Argument('<password>')
+    key = Argument('<key>', parse_key)
+    hotp8 = Argument('--digits', int_6_or_8)
+    imf = Argument('--imf', int)
 
     def __call__(self, dev):
         return getattr(self, '_{}_action'.format(self.action))(dev)
@@ -65,27 +104,48 @@ class SlotCommand(CliCommand):
         print('Slot 1:', dev.driver._slot1_valid and 'programmed' or 'empty')
         print('Slot 2:', dev.driver._slot2_valid and 'programmed' or 'empty')
 
+    def _confirm(self, message):
+        if not self.force:
+            confirm(message)
+
     def _swap_action(self, dev):
-        if not self.force and not confirm('Swap slots of YubiKey?'):
-            return 1
+        self.force or confirm('Swap slots of YubiKey?')
         print('Swapping slots...')
         dev.driver.swap_slots()
         print('Success!')
 
     def _delete_action(self, dev):
-        if not self.force and \
-                not confirm('Delete slot {} of YubiKey?'.format(self.slot)):
-            return 1
+        self.force or confirm('Delete slot {} of YubiKey?'.format(self.slot))
         print('Deleting slot: {}...'.format(self.slot))
         dev.driver.zap_slot(self.slot)
         print('Success!')
 
     def _static_action(self, dev):
-        if not self.force and \
-                not confirm('Program a static password in slot {}?' \
-                        .format(self.slot)):
-            return 1
-        print("Setting static password in slot {}...".format(self.slot))
+        self.force or confirm('Program a static password in slot {}?'
+                              .format(self.slot))
+        print('Setting static password in slot {}...'.format(self.slot))
         dev.driver.program_static(self.slot, self.static_password,
                                   not self.no_enter)
+        print('Success!')
+
+    def _chalresp_action(self, dev):
+        if not self.key:
+            print('Using a randomly generated key.')
+            self.key = os.urandom(20)
+
+        self.force or confirm(
+            'Program a challenge-response credential in slot {}?'
+            .format(self.slot))
+
+        print('Programming challenge-response in slot {}...'.format(self.slot))
+        dev.driver.program_chalresp(self.slot, self.key, self.require_touch)
+        print('Success!')
+
+    def _hotp_action(self, dev):
+        self.force or confirm('Program a HOTP credential in slot {}?'
+                              .format(self.slot))
+
+        print('Programming HOTP credential in slot {}...'.format(self.slot))
+        dev.driver.program_hotp(self.slot, self.key, self.imf, self.hotp8,
+                                not self.no_enter)
         print('Success!')

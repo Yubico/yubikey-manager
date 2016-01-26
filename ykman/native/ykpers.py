@@ -28,7 +28,7 @@
 from __future__ import print_function
 
 from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
-                    c_char_p, c_ushort, c_size_t)
+                    c_char_p, c_ushort, c_size_t, c_ulong)
 from ..yubicommon.ctypes.libloader import load_library
 
 _lib = load_library('ykpers-1', '1')
@@ -128,6 +128,10 @@ ykp_set_uid = define('ykp_set_uid',
                      [POINTER(YKP_CONFIG), c_char_p, c_size_t], bool)
 ykp_AES_key_from_raw = define('ykp_AES_key_from_raw',
                               [POINTER(YKP_CONFIG), c_char_p], bool)
+ykp_HMAC_key_from_raw = define('ykp_HMAC_key_from_raw',
+                               [POINTER(YKP_CONFIG), c_char_p], bool)
+ykp_set_oath_imf = define('ykp_set_oath_imf', [POINTER(YKP_CONFIG), c_ulong],
+                          bool)
 
 
 def _ykp_set(cfg, name, value=True):
