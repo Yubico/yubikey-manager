@@ -27,7 +27,7 @@
 
 
 from .native.ykpers import *
-from ctypes import byref, c_int, c_size_t, create_string_buffer
+from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
 from .util import Mode, TRANSPORT
 from .scanmap import us
@@ -89,10 +89,18 @@ class OTPDriver(AbstractDriver):
     def __init__(self, dev):
         self._dev = dev
         self._version = (0, 0, 0)
+        self._serial = self._read_serial()
         self._slot1_valid = False
         self._slot2_valid = True
         self._read_status()
         self._mode = self._read_mode()
+
+    def _read_serial(self):
+        serial = c_uint()
+        if yk_get_serial(self._dev, 0, 0, byref(serial)):
+            return serial.value
+        else:
+            return None
 
     def _read_status(self):
         status = ykds_alloc()

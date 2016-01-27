@@ -153,12 +153,14 @@ class YubiKey(object):
         if not self.mode.has_transport(transport):
             raise ValueError('%s transport not enabled!' % transport)
         my_mode = self.mode
+        my_serial = self.serial
 
         del self._driver
         self._driver = _NULL_DRIVER
 
         dev = open_device(transport)
-        assert dev.serial == self.serial
+        if dev.serial and my_serial:
+            assert dev.serial == my_serial
         assert dev.mode == my_mode
         return dev
 

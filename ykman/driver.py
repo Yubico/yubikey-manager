@@ -31,8 +31,12 @@ class AbstractDriver(object):
 
     transport = None
     _version = (0, 0, 0)
-    serial = None
+    _serial = None
     _mode = None
+
+    @property
+    def serial(self):
+        return self._serial
 
     @property
     def version(self):

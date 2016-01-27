@@ -37,6 +37,7 @@ INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
 
 INS_YK2_REQ = 0x01
+SLOT_DEVICE_SERIAL = 0x10
 SLOT_DEVICE_CONFIG = 0x11
 
 OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
@@ -71,6 +72,9 @@ class CCIDDriver(AbstractDriver):
         s, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
         if sw == SW_OK:
             self._version = tuple(map(ord, s[:3]))
+            serial, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
+            if sw == SW_OK:
+                self._serial = struct.unpack('>I', serial)[0]
 
     def read_capabilities(self):
         if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
