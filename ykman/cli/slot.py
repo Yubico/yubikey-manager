@@ -29,10 +29,11 @@ from __future__ import print_function
 
 from ykman.yubicommon.cli import CliCommand, Argument
 from .util import confirm
-from ..util import TRANSPORT
+from ..util import TRANSPORT, modhex_decode, modhex_encode
 
 import os
 import re
+import struct
 from base64 import b32decode
 
 
@@ -67,29 +68,37 @@ class SlotCommand(CliCommand):
     ykman slot
     ykman slot swap [-f]
     ykman slot (1 | 2) delete [-f]
+    ykman slot (1 | 2) otp <key> [--public-id FIXED] [--private-id UID]
+                                 [-f] [--no-enter]
     ykman slot (1 | 2) static <password> [-f] [--no-enter]
     ykman slot (1 | 2) chalresp [<key>] [-f] [--require-touch]
     ykman slot (1 | 2) hotp <key> [-f] [--no-enter] [--digits N] [--imf IMF]
 
     <key> should be given as a hex or base32 encoded string
+    <private-id> should be given as a 6 byte (12 character) hex value
 
     Options:
-        -h, --help       show this help message
-        -f, --force      don't ask for confirmation for actions
-        --no-enter       don't trigger the Enter key after the password
-        --require-touch  require physical button press to generate response
-        --digits N       number of digits to output for HOTP [default: 6]
-        --imf IMF        initial moving factor for HOTP [default: 0]
+        -h, --help         show this help message
+        -f, --force        don't ask for confirmation for actions
+        --no-enter         don't trigger the Enter key after the password
+        --public-id FIXED  fixed part of the OTP, defaults to the devices serial
+                           number in modhex
+        --private-id UID   optional private identifier of the OTP credential
+        --require-touch    require physical button press to generate response
+        --digits N         number of digits to output for HOTP [default: 6]
+        --imf IMF          initial moving factor for HOTP [default: 0]
     """
 
     name = 'slot'
     transports = TRANSPORT.OTP
 
     slot = Argument(('1', '2'), int)
-    action = Argument(('static', 'swap', 'delete', 'chalresp', 'hotp'),
+    action = Argument(('swap', 'delete', 'otp', 'static', 'chalresp', 'hotp'),
                       default='info')
     force = Argument('--force', bool)
     no_enter = Argument('--no-enter', bool)
+    private_id = Argument('--private-id', lambda x: x.decode('hex'), '\0' * 6)
+    public_id = Argument('--public-id', modhex_decode)
     require_touch = Argument('--require-touch', bool)
     static_password = Argument('<password>')
     key = Argument('<key>', parse_key)
@@ -118,6 +127,20 @@ class SlotCommand(CliCommand):
         self.force or confirm('Delete slot {} of YubiKey?'.format(self.slot))
         print('Deleting slot: {}...'.format(self.slot))
         dev.driver.zap_slot(self.slot)
+        print('Success!')
+
+    def _otp_action(self, dev):
+        if self.public_id is None:
+            if dev.serial is None:
+                raise ValueError('serial number not set, '
+                                 'public-id must be provided')
+            self.public_id = '\x77\x77' + struct.pack('>I', dev.serial)
+            print('Using serial as public ID: {}'
+                  .format(modhex_encode(self.public_id)))
+        self.force or confirm('Program an OTP credential in slot {}?'
+                              .format(self.slot))
+        dev.driver.program_otp(self.slot, self.key, self.public_id,
+                               self.private_id, not self.no_enter)
         print('Success!')
 
     def _static_action(self, dev):

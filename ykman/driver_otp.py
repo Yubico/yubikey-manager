@@ -165,6 +165,28 @@ class OTPDriver(AbstractDriver):
         finally:
             ykds_free(st)
 
+    def program_otp(self, slot, key, fixed, uid, append_cr=True):
+        if len(key) != 16:
+            raise ValueError('key must be 16 bytes')
+        if len(uid) != 6:
+            raise ValueError('private ID must be 6 bytes')
+        if len(fixed) > 16:
+            raise ValueError('public ID must be <= 16 bytes')
+        print('TODO:', key.encode('hex'), uid.encode('hex'), fixed.encode('hex'))
+
+        cmd = slot_to_cmd(slot)
+        cfg = self._create_cfg(cmd)
+
+        try:
+            check(ykp_set_fixed(cfg, fixed, len(fixed)))
+            check(ykp_set_uid(cfg, uid, 6))
+            ykp_AES_key_from_raw(cfg, key)
+            if append_cr:
+                check(ykp_set_tktflag(cfg, 'APPEND_CR'))
+            check(yk_write_command(self._dev, ykp_core_config(cfg), cmd, None))
+        finally:
+            ykp_free_config(cfg)
+
     def program_static(self, slot, password, append_cr=True):
         pw_len = len(password)
         if self.version < (2, 0, 0):
