@@ -73,7 +73,7 @@ class CCIDDriver(AbstractDriver):
         if sw == SW_OK:
             self._version = tuple(map(ord, s[:3]))
             serial, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
-            if sw == SW_OK:
+            if len(serial) == 4 and sw == SW_OK:
                 self._serial = struct.unpack('>I', serial)[0]
 
     def read_capabilities(self):
