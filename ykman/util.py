@@ -87,7 +87,7 @@ class Mode(object):
         return other is None or self.code != other.code
 
     def __str__(self):
-        return '+'.join((t.name for t in TRANSPORT.split(self._transports))
+        return '+'.join((t.name for t in TRANSPORT.split(self._transports)))
 
     @classmethod
     def from_code(cls, code):
