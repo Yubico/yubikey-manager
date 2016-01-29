@@ -77,8 +77,8 @@ class YubiKey(object):
             self.device_name = 'YubiKey NEO'
             if driver.transport == TRANSPORT.CCID:
                 self.capabilities = driver.probe_capabilities_support()
-            elif self.mode.has_transport(TRANSPORT.U2F) \
-                or self.version >= (3, 3, 0):
+            elif TRANSPORT.has(self.mode.transports, TRANSPORT.U2F) \
+                    or self.version >= (3, 3, 0):
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F \
                     | CAPABILITY.CCID
             else:
@@ -137,8 +137,9 @@ class YubiKey(object):
         return self._can_mode_switch
 
     def has_mode(self, mode):
-        self.mode == mode or (self.can_mode_switch and
-            self.capabilities & mode.transports == mode.transports)
+        return self.mode == mode or \
+            (self.can_mode_switch and
+             TRANSPORT.has(self.capabilities, mode.transports))
 
     def set_mode(self, mode, cr_timeout=0, autoeject_time=None):
         flags = 0
@@ -158,7 +159,7 @@ class YubiKey(object):
     def use_transport(self, transport):
         if self.transport == transport:
             return self
-        if not self.mode.has_transport(transport):
+        if not TRANSPORT.has(self.mode.transports, transport):
             raise ValueError('%s transport not enabled!' % transport)
         my_mode = self.mode
         my_serial = self.serial

@@ -119,5 +119,5 @@ class ModeCommand(CliCommand):
         else:
             print('Current mode is:', dev.mode)
             supported = ', '.join(t.name for t in TRANSPORT
-                                  if dev.capabilities & t)
+                                  .split(dev.capabilities))
             print('Supported transports are:', supported)

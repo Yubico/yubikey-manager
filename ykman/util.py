@@ -30,7 +30,17 @@ from enum import IntEnum
 __all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list']
 
 
-class CAPABILITY(IntEnum):
+class BitflagEnum(IntEnum):
+    @classmethod
+    def split(cls, flags):
+        return (c for c in cls if c & flags)
+
+    @classmethod
+    def has(cls, flags, check):
+        return flags & check == check
+
+
+class CAPABILITY(BitflagEnum):
     OTP = 0x01
     U2F = 0x02
     CCID = 0x04
@@ -39,7 +49,7 @@ class CAPABILITY(IntEnum):
     OATH = 0x20
 
 
-class TRANSPORT(IntEnum):
+class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
     U2F = CAPABILITY.U2F
     CCID = CAPABILITY.CCID
@@ -68,7 +78,7 @@ class Mode(object):
         return self._transports
 
     def has_transport(self, transport):
-        return self._transports & transport != 0
+        return TRANSPORT.has(self._transports, transport)
 
     def __eq__(self, other):
         return other is not None and self.code == other.code
@@ -77,7 +87,7 @@ class Mode(object):
         return other is None or self.code != other.code
 
     def __str__(self):
-        return '+'.join((t.name for t in TRANSPORT if t & self._transports))
+        return '+'.join((t.name for t in TRANSPORT.split(self._transports))
 
     @classmethod
     def from_code(cls, code):
