@@ -53,6 +53,7 @@ class YubiKey(object):
     capabilities = 0
     enabled = 0
     _serial = None
+    _can_mode_switch = True
 
     def __init__(self, driver):
         if not driver:
@@ -71,6 +72,7 @@ class YubiKey(object):
         elif self.version >= (4, 0, 0):  # YK Plus
             self.device_name = 'YubiKey Plus'
             self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
+            self._can_mode_switch = False
         elif self.version >= (3, 0, 0):
             self.device_name = 'YubiKey NEO'
             if driver.transport == TRANSPORT.CCID:
@@ -81,8 +83,9 @@ class YubiKey(object):
                     | CAPABILITY.CCID
             else:
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID
-        else:
+        else:  # Standard
             self.capabilities = CAPABILITY.OTP
+            self._can_mode_switch = False
 
         if not self.enabled:  # Assume everything supported is enabled.
             self.enabled = self.capabilities & ~sum(TRANSPORT)  # not transports
@@ -129,8 +132,13 @@ class YubiKey(object):
             raise ValueError('Mode not supported: %s' % mode)
         self.set_mode(mode)
 
+    @property
+    def can_mode_switch(self):
+        return self._can_mode_switch
+
     def has_mode(self, mode):
-        return self.capabilities & mode.transports == mode.transports
+        self.mode == mode or (self.can_mode_switch and
+            self.capabilities & mode.transports == mode.transports)
 
     def set_mode(self, mode, cr_timeout=0, autoeject_time=None):
         flags = 0

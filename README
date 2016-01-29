@@ -17,7 +17,7 @@ For Debian based systems:
 
   # Install required dependencies
   $ sudo apt-get install python-pip python-pyscard python-pyside pyside-tools \
-    python-docopt libykpers-1-1 libu2f-host0
+    python-enum34 python-docopt libykpers-1-1 libu2f-host0
 
   # Setup the repository
   $ git clone git@gitlab.yubico.com:Yubico/yubikey-manager.git

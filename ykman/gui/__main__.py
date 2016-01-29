@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import, print_function
+
 import signal
 import sys
 from PySide import QtCore, QtGui
@@ -33,6 +35,7 @@ from ykman import __version__
 from ykman.yubicommon import qt
 from . import messages as m
 from .controller import Controller
+from .view.info import InfoWidget
 
 
 class YkManApplication(qt.Application):
@@ -59,13 +62,7 @@ class YkManApplication(qt.Application):
         self.window.setWindowTitle(m.win_title_1 % self.version)
         self.window.setWindowIcon(QtGui.QIcon(':/ykman.png'))
 
-        label = QtGui.QLabel()
-        def setSerial(serial):
-            label.setText('Serial: %d' % serial)
-        setSerial(self._controller.serial)
-        self._controller.serialChanged.connect(setSerial)
-        self._controller.hasDeviceChanged.connect(label.setVisible)
-        self.window.setCentralWidget(label)
+        self.window.setCentralWidget(InfoWidget(self._controller, self.window))
 
         self.window.show()
         self.window.raise_()

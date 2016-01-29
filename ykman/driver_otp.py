@@ -268,6 +268,8 @@ class OTPDriver(AbstractDriver):
         check(yk_write_command(self._dev, None, slot_to_cmd(slot), None))
 
     def swap_slots(self):
+        if self.version < (2, 3, 0):
+            raise ValueError('swapping slots requires YubiKey 2.3.0 or later')
         cfg = self._create_cfg(SLOT_SWAP)
         try:
             ycfg = ykp_core_config(cfg)
