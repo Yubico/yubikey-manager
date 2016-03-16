@@ -110,8 +110,9 @@ class SlotCommand(CliCommand):
 
     def _info_action(self, dev):
         print(dev.device_name)
-        print('Slot 1:', dev.driver._slot1_valid and 'programmed' or 'empty')
-        print('Slot 2:', dev.driver._slot2_valid and 'programmed' or 'empty')
+        slot1, slot2 = dev.driver.slot_status
+        print('Slot 1:', slot1 and 'programmed' or 'empty')
+        print('Slot 2:', slot2 and 'programmed' or 'empty')
 
     def _confirm(self, message):
         if not self.force:

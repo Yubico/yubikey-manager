@@ -91,7 +91,7 @@ class OTPDriver(AbstractDriver):
         self._version = (0, 0, 0)
         self._serial = self._read_serial()
         self._slot1_valid = False
-        self._slot2_valid = True
+        self._slot2_valid = False
         self._read_status()
         self._mode = self._read_mode()
 
@@ -164,6 +164,10 @@ class OTPDriver(AbstractDriver):
             raise
         finally:
             ykds_free(st)
+
+    @property
+    def slot_status(self):
+        return (self._slot1_valid, self._slot2_valid)
 
     def program_otp(self, slot, key, fixed, uid, append_cr=True):
         if len(key) != 16:
