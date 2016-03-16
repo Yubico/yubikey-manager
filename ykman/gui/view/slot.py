@@ -35,10 +35,8 @@ from .. import messages as m
 
 class _SlotStatus(QtGui.QWidget):
 
-    def __init__(self, controller, parent=None):
+    def __init__(self, parent=None):
         super(_SlotStatus, self).__init__(parent)
-
-        self._controller = controller
 
         layout = QtGui.QGridLayout(self)
         layout.addWidget(QtGui.QLabel('<h2>YubiKey slot configuration</h2>'), 0, 0, 1, 4)
@@ -46,6 +44,7 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(QtGui.QLabel('Slot 1 (short press):'), 1, 0)
         self._slot1_lbs = (QtGui.QLabel('Reading state...'), QtGui.QLabel(), QtGui.QLabel())
         self._slot1_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
+        self._slot1_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
         layout.addWidget(self._slot1_lbs[0], 1, 1)
         layout.addWidget(self._slot1_lbs[1], 1, 2)
         layout.addWidget(self._slot1_lbs[2], 1, 3)
@@ -53,28 +52,36 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(QtGui.QLabel('Slot 2 (long press):'), 2, 0)
         self._slot2_lbs = (QtGui.QLabel('Reading state...'), QtGui.QLabel(), QtGui.QLabel())
         self._slot2_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
+        self._slot2_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
         layout.addWidget(self._slot2_lbs[0], 2, 1)
         layout.addWidget(self._slot2_lbs[1], 2, 2)
         layout.addWidget(self._slot2_lbs[2], 2, 3)
 
-        color = QtGui.QApplication.palette().color(QtGui.QPalette.Disabled,
-                                                   QtGui.QPalette.WindowText)
-        label = QtGui.QLabel('<a href="#" style="color: {};">swap configurations</a>'.format(color.name()))
-        label.setDisabled(True)
-        layout.addWidget(label, 3, 0)
+        self._swap_slots = QtGui.QLabel()
+        self._swap_slots.linkActivated.connect(lambda _: self.parent().swap())
+        layout.addWidget(self._swap_slots, 3, 0)
 
-        buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Cancel)
+        buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Close)
         buttons.rejected.connect(self.parent().back)
         layout.addWidget(buttons, 4, 0, 1, 4)
 
     def _slots_cb(self, slots):
         (stat1, stat2) = slots
         self._slot1_lbs[0].setText('Configured' if stat1 else 'Blank')
-        self._slot1_lbs[1].setText('<a href="0">{}</a>'.format('re-configure' if stat1 else 'configure'))
-        self._slot1_lbs[2].setText('<a href="0">erase</a>' if stat1 else '')
+        self._slot1_lbs[1].setText('<a href="1">{}</a>'.format('re-configure' if stat1 else 'configure'))
+        self._slot1_lbs[2].setText('<a href="1">erase</a>' if stat1 else '')
         self._slot2_lbs[0].setText('Configured' if stat2 else 'Blank')
-        self._slot2_lbs[1].setText('<a href="1">{}</a>'.format('re-configure' if stat2 else 'configure'))
-        self._slot2_lbs[2].setText('<a href="1">erase</a>' if stat2 else '')
+        self._slot2_lbs[1].setText('<a href="2">{}</a>'.format('re-configure' if stat2 else 'configure'))
+        self._slot2_lbs[2].setText('<a href="2">erase</a>' if stat2 else '')
+
+        if stat1 or stat2:
+            self._swap_slots.setText('<a href="#">swap configurations</a>')
+            self._swap_slots.setDisabled(False)
+        else:
+            color = QtGui.QApplication.palette() \
+                .color(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText)
+            self._swap_slots.setText('<a href="#" style="color: {};">swap configurations</a>'.format(color.name()))
+            self._swap_slots.setDisabled(True)
 
 
 class _WizardPage(QtGui.QWidget):
@@ -91,7 +98,7 @@ class _WizardPage(QtGui.QWidget):
         layout = QtGui.QFormLayout(self)
         layout.addRow(QtGui.QLabel('<h2>{}</h2>'.format(self.title_text)))
 
-        if slot is not None and parent._slot_status[slot]:
+        if slot is not None and parent._slot_status[slot - 1]:
             layout.addRow(QtGui.QLabel('<b>WARNING:</b> This will overwrite the existing configuration!'))
 
         if self.description is not None:
@@ -121,6 +128,38 @@ class _WizardPage(QtGui.QWidget):
         print('TODO: Next')
 
 
+class _DeleteSlotPage(_WizardPage):
+    description = 'Permanently deletes the contents of this slot.'
+    accept_text = 'Delete'
+
+    def __init__(self, slot, parent):
+        super(_DeleteSlotPage, self).__init__(slot, parent)
+
+    @property
+    def title_text(self):
+        return 'Erase YubiKey slot {}'.format(self._slot)
+
+    def _accept(self):
+        page = _WritingConfig(self.title_text, 'Erasing configuration...', self.parent())
+        self.parent().push(page)
+        self.parent()._controller.delete_slot(self._slot, lambda _: page.complete('Configuration erased!'))
+
+
+class _SwapSlotsPage(_WizardPage):
+    title_text = 'Swap YubiKey slots'
+    description = 'Swaps the credentials between slots 1 and 2.'
+    accept_text = 'Swap'
+
+    def __init__(self, parent):
+        super(_SwapSlotsPage, self).__init__(None, parent)
+
+    def _accept(self):
+        page = _WritingConfig(self.title_text, 'Writing configuration...', self.parent())
+        self.parent().push(page)
+        self.parent()._controller.swap_slots(
+            lambda _: page.complete('Configuration successfully written!'))
+
+
 class _ConfigureSlotType(_WizardPage):
     description = 'Select the type of functionality to program:'
 
@@ -146,7 +185,7 @@ class _ConfigureSlotType(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure YubiKey slot {}'.format(self._slot + 1)
+        return 'Configure YubiKey slot {}'.format(self._slot)
 
     def _accept(self):
         action = self._action.checkedButton()
@@ -165,7 +204,7 @@ class _ConfigureOTP(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure YubiKey OTP for slot {}'.format(self._slot + 1)
+        return 'Configure YubiKey OTP for slot {}'.format(self._slot)
 
     def _build_ui(self, layout):
         layout.addRow('Secret key:', QtGui.QLineEdit())
@@ -188,7 +227,7 @@ class _ConfigureStaticPassword(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure static password for slot {}'.format(self._slot + 1)
+        return 'Configure static password for slot {}'.format(self._slot)
 
     def _build_ui(self, layout):
         self._static_pw = QtGui.QLineEdit()
@@ -198,8 +237,9 @@ class _ConfigureStaticPassword(_WizardPage):
     def _accept(self):
         page = _WritingConfig(self.title_text, 'Writing configuration...', self.parent())
         self.parent().push(page)
-        print ('TODO: write static: "{}"'.format(self._static_pw.text()))
-        page.complete('Configuration successfully written!')
+        self.parent()._controller.program_static(
+            self._slot, self._static_pw.text(),
+            lambda _: page.complete('Configuration successfully written!'))
 
 
 class _WritingConfig(_WizardPage):
@@ -217,7 +257,7 @@ class _WritingConfig(_WizardPage):
         layout.addRow(self._message)
 
     def _accept(self):
-        self.parent().accept()
+        self.parent().reset()
 
     def complete(self, message):
         self._message.setText(message)
@@ -235,13 +275,17 @@ class SlotDialog(qt.Dialog):
         self.setWindowTitle('Configure YubiKey slots')
 
         QtGui.QStackedLayout(self)
-
-        self.push(_SlotStatus(controller, self))
-        self._controller.read_slots(self._slots_cb)
+        self.reset()
 
     def _slots_cb(self, res):
         self._slot_status = res
         self.layout().currentWidget()._slots_cb(res)
+
+    def reset(self):
+        self.push(_SlotStatus(self))
+        self._controller.read_slots(self._slots_cb)
+        while self.layout().currentIndex() > 0:
+            self.layout().removeWidget(self.layout().widget(0))
 
     def push(self, widget):
         self.layout().addWidget(widget)
@@ -254,3 +298,9 @@ class SlotDialog(qt.Dialog):
 
     def configure(self, slot):
         self.push(_ConfigureSlotType(slot, self))
+
+    def erase(self, slot):
+        self.push(_DeleteSlotPage(slot, self))
+
+    def swap(self):
+        self.push(_SwapSlotsPage(self))

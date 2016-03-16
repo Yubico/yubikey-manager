@@ -94,7 +94,7 @@ class Controller(QtCore.QObject):
         def _func():
             dev = self._grab_device(transports)
             return fn(dev)
-        self.worker.post_bg(_func, cb)
+        self.worker.post_bg(_func, cb, True)
 
     def refresh(self, can_skip=True):
         if can_skip and self._refreshing:
@@ -131,3 +131,13 @@ class Controller(QtCore.QObject):
 
     def read_slots(self, cb):
         self._use_device(lambda d: d.driver.slot_status, cb, TRANSPORT.OTP)
+
+    def delete_slot(self, slot, cb):
+        self._use_device(lambda d: d.driver.zap_slot(slot), cb, TRANSPORT.OTP)
+
+    def swap_slots(self, cb):
+        self._use_device(lambda d: d.driver.swap_slots(), cb, TRANSPORT.OTP)
+
+    def program_static(self, slot, password, cb):
+        self._use_device(lambda d: d.driver.program_static(slot, password), cb,
+                         TRANSPORT.OTP)
