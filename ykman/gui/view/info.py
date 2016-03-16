@@ -27,10 +27,11 @@
 
 from __future__ import absolute_import, print_function
 
-from PySide import QtCore, QtGui
+from PySide import QtGui
 
 from ...util import CAPABILITY, TRANSPORT
 from .mode import ModeDialog
+from .slot import SlotDialog
 
 
 class _HeaderPanel(QtGui.QWidget):
@@ -54,7 +55,6 @@ class _HeaderPanel(QtGui.QWidget):
         self._set_serial(controller.serial)
 
     def _set_has_device(self, has_device):
-        print("has device:", has_device)
         if not has_device:
             self._set_serial(None)
             self._set_device_name('No YubiKey detected')
@@ -72,6 +72,7 @@ class _FeatureSection(object):
 
     def __init__(self, controller, grid_layout):
         self._controller = controller
+        self._parent = grid_layout.parent()
         self._widgets = {}
 
         row_i = grid_layout.rowCount() + 1
@@ -98,7 +99,13 @@ class _FeatureSection(object):
         self._update()
 
     def _configure(self, link):
-        print('TODO:', link)
+        feature = int(link)
+        if feature == CAPABILITY.OTP:
+            dialog = SlotDialog(self._controller, self._parent)
+        else:
+            print('TODO:', link)
+            return
+        dialog.exec_()
 
     def _update(self, value=None):
         for c, widgets in self._widgets.items():
