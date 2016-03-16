@@ -49,14 +49,10 @@ class YkManApplication(qt.Application):
 
         self.ensure_singleton()
 
-        self._controller = Controller(self)
-        self.startTimer(1000)
+        self._controller = Controller(self.worker, self)
+        self._controller.refresh()
 
         self._init_window()
-
-    def timerEvent(self, event):
-        if QtGui.QApplication.activeWindow():
-            self._controller.refresh()
 
     def _init_window(self):
         self.window.setWindowTitle(m.win_title_1 % self.version)

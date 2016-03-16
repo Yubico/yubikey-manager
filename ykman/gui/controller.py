@@ -41,8 +41,12 @@ class Controller(QtCore.QObject):
     enabledChanged = QtCore.Signal(int)
     canModeSwitchChanged = QtCore.Signal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, worker, parent=None):
         super(Controller, self).__init__(parent)
+
+        self.worker = worker
+
+        self._refreshing = False
 
         self._data = SignalMap()
         self._data.add_property('has_device', False, self.hasDeviceChanged)
@@ -53,8 +57,6 @@ class Controller(QtCore.QObject):
         self._data.add_property('enabled', 0, self.enabledChanged)
         self._data.add_property('can_mode_switch', False,
                                 self.canModeSwitchChanged)
-
-        self.refresh()
 
     @property
     def has_device(self):
@@ -88,27 +90,44 @@ class Controller(QtCore.QObject):
         # TODO: Make sure same device.
         return dev
 
-    def set_mode(self, mode):
-        dev = self._grab_device()
-        dev.mode = mode
+    def _use_device(self, fn, cb=None, transports=sum(TRANSPORT)):
+        def _func():
+            dev = self._grab_device(transports)
+            return fn(dev)
+        self.worker.post_bg(_func, cb)
 
-    def refresh(self):
-        had_device = self.has_device
-        try:
-            dev = open_device()
-            if dev:
-                self._data['has_device'] = True
-                self._data['device_name'] = dev.device_name
-                self._data['serial'] = dev.serial
-                self._data['capabilities'] = dev.capabilities
-                self._data['enabled'] = dev.enabled
-                self._data['can_mode_switch'] = dev.can_mode_switch
-            else:
+    def refresh(self, can_skip=True):
+        if can_skip and self._refreshing:
+            return
+
+        def _func():
+            had_device = self.has_device
+            try:
+                dev = open_device()
+                if dev:
+                    self._data['has_device'] = True
+                    self._data['device_name'] = dev.device_name
+                    self._data['serial'] = dev.serial
+                    self._data['capabilities'] = dev.capabilities
+                    self._data['enabled'] = dev.enabled
+                    self._data['can_mode_switch'] = dev.can_mode_switch
+                else:
+                    self._data.clear(False)
+            except Exception as e:
+                print("Couldn't open device: {:s}".format(e))
                 self._data.clear(False)
-        except Exception as e:
-            print("Couldn't open device: {:s}".format(e))
-            self._data.clear(False)
 
-        # If device was removed, we want to emit a signal for that alone.
-        if had_device and not self.has_device:
-            self.hasDeviceChanged.emit(False)
+            # If device was removed, we want to emit a signal for that alone.
+            if had_device and not self.has_device:
+                self.hasDeviceChanged.emit(False)
+            self._refreshing = False
+        self._refreshing = True
+        self.worker.post_bg(_func)
+
+    def set_mode(self, mode, cb=None):
+        def _func(dev):
+            dev.mode = mode
+        self._use_device(_func, cb)
+
+    def read_slots(self, cb):
+        self._use_device(lambda d: d.driver.slot_status, cb, TRANSPORT.OTP)

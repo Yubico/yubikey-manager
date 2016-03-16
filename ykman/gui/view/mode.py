@@ -35,6 +35,29 @@ from .. import messages as m
 from ...util import Mode, TRANSPORT
 
 
+class _RemoveDialog(QtGui.QMessageBox):
+
+    def __init__(self, controller, parent=None):
+        super(_RemoveDialog, self).__init__(parent)
+
+        self._controller = controller
+
+        self.setWindowTitle('Change mode')
+        self.setIcon(QtGui.QMessageBox.Information)
+        self.setText('remove device')
+        self.setStandardButtons(QtGui.QMessageBox.NoButton)
+
+        qt.connect_once(controller.hasDeviceChanged, self._close)
+        self._timer = self.startTimer(1000)
+
+    def _close(self, has_device):
+        self.killTimer(self._timer)
+        self.accept()
+
+    def timerEvent(self, event):
+        self._controller.refresh()
+
+
 class ModeDialog(qt.Dialog):
 
     def __init__(self, controller, parent=None):
@@ -77,13 +100,7 @@ class ModeDialog(qt.Dialog):
         self.close()
         self._controller.set_mode(self.mode)
 
-        remove_dialog = QtGui.QMessageBox(self)
-        remove_dialog.setWindowTitle('Change mode')
-        remove_dialog.setIcon(QtGui.QMessageBox.Information)
-        remove_dialog.setText('remove device')
-        remove_dialog.setStandardButtons(QtGui.QMessageBox.NoButton)
-        qt.connect_once(self._controller.hasDeviceChanged,
-                        lambda has_device: remove_dialog.accept())
+        remove_dialog = _RemoveDialog(self._controller, self)
         remove_dialog.exec_()
 
     @property

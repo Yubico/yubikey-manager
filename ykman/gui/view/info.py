@@ -169,6 +169,12 @@ class InfoWidget(QtGui.QWidget):
         self._controller = controller
         self._build_ui()
 
+        self.startTimer(1000)
+
+    def timerEvent(self, event):
+        if QtGui.QApplication.activeWindow() == self.parent():
+            self._controller.refresh()
+
     def _build_ui(self):
         layout = QtGui.QGridLayout(self)
 
