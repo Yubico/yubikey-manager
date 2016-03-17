@@ -43,8 +43,10 @@ class GuiCommand(CliCommand):
 
     def __call__(self, dev=None):
         try:
-            from ykman.gui import __main__ as gui_main
-            gui_main.main()
+            import PySide
+            assert PySide
         except ImportError:
             print('GUI requires PySide to run')
             return 1
+        from ykman.gui import __main__ as gui_main
+        gui_main.main()
