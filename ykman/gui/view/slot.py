@@ -28,9 +28,11 @@
 from __future__ import absolute_import, print_function
 
 from PySide import QtGui, QtCore
+from binascii import a2b_hex
 
 from ykman.yubicommon import qt
 from .. import messages as m
+from ...util import modhex_decode
 
 
 class _SlotStatus(QtGui.QWidget):
@@ -117,6 +119,10 @@ class _WizardPage(QtGui.QWidget):
         buttons.rejected.connect(parent.back)
         layout.addRow(buttons)
 
+    @property
+    def slot(self):
+        return self._slot
+
     def setPrevEnabled(self, state):
         self._reject_btn.setEnabled(state)
 
@@ -129,6 +135,11 @@ class _WizardPage(QtGui.QWidget):
     def _accept(self):
         print('TODO: Next')
 
+    def begin_work(self, message):
+        page = _WritingConfig(self.title_text, message, self.parent())
+        self.parent().push(page)
+        return page
+
 
 class _DeleteSlotPage(_WizardPage):
     description = 'Permanently deletes the contents of this slot.'
@@ -139,12 +150,11 @@ class _DeleteSlotPage(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Erase YubiKey slot {}'.format(self._slot)
+        return 'Erase YubiKey slot {}'.format(self.slot)
 
     def _accept(self):
-        page = _WritingConfig(self.title_text, 'Erasing configuration...', self.parent())
-        self.parent().push(page)
-        self.parent()._controller.delete_slot(self._slot, lambda _: page.complete('Configuration erased!'))
+        page = self.begin_work('Erasing configuration...')
+        self.parent()._controller.delete_slot(self.slot, lambda _: page.complete('Configuration erased!'))
 
 
 class _SwapSlotsPage(_WizardPage):
@@ -156,8 +166,7 @@ class _SwapSlotsPage(_WizardPage):
         super(_SwapSlotsPage, self).__init__(None, parent)
 
     def _accept(self):
-        page = _WritingConfig(self.title_text, 'Writing configuration...', self.parent())
-        self.parent().push(page)
+        page = self.begin_work('Writing configuration...')
         self.parent()._controller.swap_slots(
             lambda _: page.complete('Configuration successfully written!'))
 
@@ -187,14 +196,16 @@ class _ConfigureSlotType(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure YubiKey slot {}'.format(self._slot)
+        return 'Configure YubiKey slot {}'.format(self.slot)
 
     def _accept(self):
         action = self._action.checkedButton()
         if action == self._action_otp:
-            self.parent().push(_ConfigureOTP(self._slot, self.parent()))
+            self.parent().push(_ConfigureOTP(self.slot, self.parent()))
         elif action == self._action_pw:
-            self.parent().push(_ConfigureStaticPassword(self._slot, self.parent()))
+            self.parent().push(_ConfigureStaticPassword(self.slot, self.parent()))
+        elif action == self._action_hotp:
+            self.parent().push(_ConfigureHotp(self.slot, self.parent()))
 
 
 class _ConfigureOTP(_WizardPage):
@@ -205,19 +216,35 @@ class _ConfigureOTP(_WizardPage):
         super(_ConfigureOTP, self).__init__(slot, parent)
 
     @property
+    def key(self):
+        return a2b_hex(self._key_lbl.text())
+
+    @property
+    def fixed(self):
+        return modhex_decode(self._fixed_lbl.text())
+
+    @property
+    def uid(self):
+        return a2b_hex(self._uid_lbl.text())
+
+    @property
     def title_text(self):
-        return 'Configure YubiKey OTP for slot {}'.format(self._slot)
+        return 'Configure YubiKey OTP for slot {}'.format(self.slot)
 
     def _build_ui(self, layout):
-        layout.addRow('Secret key:', QtGui.QLineEdit())
-        layout.addRow('Public identity:', QtGui.QLineEdit())
-        layout.addRow('Private identity:', QtGui.QLineEdit())
+        self._key_lbl = QtGui.QLineEdit()
+        self._fixed_lbl = QtGui.QLineEdit()
+        self._uid_lbl = QtGui.QLineEdit()
+
+        layout.addRow('Secret key (hex):', self._key_lbl)
+        layout.addRow('Public identity (modhex):', self._fixed_lbl)
+        layout.addRow('Private identity (hex):', self._uid_lbl)
 
     def _accept(self):
-        page = _WritingConfig(self.title_text, 'Writing configuration...', self.parent())
-        self.parent().push(page)
-        print ('TODO: write config')
-        page.complete('Configuration successfully written!')
+        page = self.begin_work('Writing configuration...')
+        self.parent()._controller.program_otp(
+            self.slot, self.key, self.fixed, self.uid,
+            lambda _: page.complete('Configuration successfully written!'))
 
 
 class _ConfigureStaticPassword(_WizardPage):
@@ -230,7 +257,7 @@ class _ConfigureStaticPassword(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure static password for slot {}'.format(self._slot)
+        return 'Configure static password for slot {}'.format(self.slot)
 
     def _build_ui(self, layout):
         self._static_pw = QtGui.QLineEdit()
@@ -238,10 +265,36 @@ class _ConfigureStaticPassword(_WizardPage):
         layout.addRow('Password:', self._static_pw)
 
     def _accept(self):
-        page = _WritingConfig(self.title_text, 'Writing configuration...', self.parent())
-        self.parent().push(page)
+        page = self.begin_work('Writing configuration...')
         self.parent()._controller.program_static(
-            self._slot, self._static_pw.text(),
+            self.slot, self._static_pw.text(),
+            lambda _: page.complete('Configuration successfully written!'))
+
+
+class _ConfigureHotp(_WizardPage):
+    description = 'When triggered, the YubiKey will output a HOTP code.'
+    accept_text = 'Write configuration'
+
+    def __init__(self, slot, parent):
+        super(_ConfigureHotp, self).__init__(slot, parent)
+        self.setNextEnabled(False)
+
+    @property
+    def title_text(self):
+        return 'Configure HOTP credential for slot {}'.format(self.slot)
+
+    def _build_ui(self, layout):
+        self._key = QtGui.QLineEdit()
+        self._key.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
+        layout.addRow('Secret key:', self._key)
+        self._n_digits = QtGui.QComboBox()
+        self._n_digits.addItems(['6', '8'])
+        layout.addRow('Number of digits:', self._n_digits)
+
+    def _accept(self):
+        page = self.begin_work('Writing configuration...')
+        self.parent()._controller.program_hotp(
+            self.slot, self._key.text(), int(self._n_digits.currentText()),
             lambda _: page.complete('Configuration successfully written!'))
 
 

@@ -138,6 +138,16 @@ class Controller(QtCore.QObject):
     def swap_slots(self, cb):
         self._use_device(lambda d: d.driver.swap_slots(), cb, TRANSPORT.OTP)
 
+    def program_otp(self, slot, key, fixed, uid, cb):
+        self._use_device(lambda d: d.driver.program_otp(slot, key, fixed, uid),
+                         cb, TRANSPORT.OTP)
+
     def program_static(self, slot, password, cb):
         self._use_device(lambda d: d.driver.program_static(slot, password), cb,
                          TRANSPORT.OTP)
+
+    def program_hotp(self, slot, key, digits, cb):
+        imf = 0
+        hotp8 = (digits == 8)
+        self._use_device(lambda d: d.driver.program_hotp(slot, key, imf, hotp8),
+                         cb, TRANSPORT.OTP)
