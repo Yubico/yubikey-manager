@@ -238,6 +238,8 @@ class OTPDriver(AbstractDriver):
             check(ykp_set_tktflag(cfg, 'CHAL_RESP'))
             check(ykp_set_cfgflag(cfg, 'CHAL_HMAC'))
             check(ykp_set_cfgflag(cfg, 'HMAC_LT64'))
+            if touch:
+                check(ykp_set_cfgflag(cfg, 'CHAL_BTN_TRIG'))
             ykp_HMAC_key_from_raw(cfg, key)
             check(yk_write_command(self._dev, ykp_core_config(cfg), cmd, None))
         finally:
