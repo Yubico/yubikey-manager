@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import, print_function
 
-from PySide import QtGui
+from PySide import QtGui, QtCore
 
 from ykman.yubicommon import qt
 from .. import messages as m
@@ -42,7 +42,7 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(QtGui.QLabel('<h2>YubiKey slot configuration</h2>'), 0, 0, 1, 4)
 
         layout.addWidget(QtGui.QLabel('Slot 1 (short press):'), 1, 0)
-        self._slot1_lbs = (QtGui.QLabel('Reading state...'), QtGui.QLabel(), QtGui.QLabel())
+        self._slot1_lbs = (QtGui.QLabel(), QtGui.QLabel(), QtGui.QLabel())
         self._slot1_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
         self._slot1_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
         layout.addWidget(self._slot1_lbs[0], 1, 1)
@@ -50,20 +50,22 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(self._slot1_lbs[2], 1, 3)
 
         layout.addWidget(QtGui.QLabel('Slot 2 (long press):'), 2, 0)
-        self._slot2_lbs = (QtGui.QLabel('Reading state...'), QtGui.QLabel(), QtGui.QLabel())
+        self._slot2_lbs = (QtGui.QLabel(), QtGui.QLabel(), QtGui.QLabel())
         self._slot2_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
         self._slot2_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
         layout.addWidget(self._slot2_lbs[0], 2, 1)
         layout.addWidget(self._slot2_lbs[1], 2, 2)
         layout.addWidget(self._slot2_lbs[2], 2, 3)
 
-        self._swap_slots = QtGui.QLabel()
+        self._swap_slots = QtGui.QLabel('Reading state...')
         self._swap_slots.linkActivated.connect(lambda _: self.parent().swap())
         layout.addWidget(self._swap_slots, 3, 0)
 
         buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Close)
         buttons.rejected.connect(self.parent().back)
         layout.addWidget(buttons, 4, 0, 1, 4)
+
+        parent.slot_status.connect(self._slots_cb)
 
     def _slots_cb(self, slots):
         (stat1, stat2) = slots
@@ -196,7 +198,7 @@ class _ConfigureSlotType(_WizardPage):
 
 
 class _ConfigureOTP(_WizardPage):
-    description = 'When triggered, the the YubiKey to output a one time password.'
+    description = 'When triggered, the YubiKey will output a one time password.'
     accept_text = 'Write configuration'
 
     def __init__(self, slot, parent):
@@ -219,6 +221,7 @@ class _ConfigureOTP(_WizardPage):
 
 
 class _ConfigureStaticPassword(_WizardPage):
+    description = 'When triggered, the YubiKey will output a fixed password.'
     accept_text = 'Write configuration'
 
     def __init__(self, slot, parent):
@@ -232,7 +235,7 @@ class _ConfigureStaticPassword(_WizardPage):
     def _build_ui(self, layout):
         self._static_pw = QtGui.QLineEdit()
         self._static_pw.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
-        layout.addRow('Static password:', self._static_pw)
+        layout.addRow('Password:', self._static_pw)
 
     def _accept(self):
         page = _WritingConfig(self.title_text, 'Writing configuration...', self.parent())
@@ -265,6 +268,7 @@ class _WritingConfig(_WizardPage):
 
 
 class SlotDialog(qt.Dialog):
+    slot_status = QtCore.Signal(tuple)
 
     def __init__(self, controller, parent=None):
         super(SlotDialog, self).__init__(parent)
@@ -275,25 +279,40 @@ class SlotDialog(qt.Dialog):
         self.setWindowTitle('Configure YubiKey slots')
 
         QtGui.QStackedLayout(self)
-        self.reset()
+        spacer = QtGui.QWidget()
+        spacer.setFixedWidth(400)
+        self.layout().addWidget(spacer)
+
+        self.reset(True)
 
     def _slots_cb(self, res):
         self._slot_status = res
-        self.layout().currentWidget()._slots_cb(res)
+        self.slot_status.emit(res)
 
-    def reset(self):
-        self.push(_SlotStatus(self))
+    def reset(self, initial=False):
+        self._widget_stack = []
+        if not initial:
+            self.layout().removeWidget(self.layout().currentWidget())
+        self.layout().insertWidget(0, _SlotStatus(self))
+        self.layout().setCurrentIndex(0)
         self._controller.read_slots(self._slots_cb)
-        while self.layout().currentIndex() > 0:
-            self.layout().removeWidget(self.layout().widget(0))
 
     def push(self, widget):
-        self.layout().addWidget(widget)
-        self.layout().setCurrentWidget(widget)
+        current = self.layout().currentWidget()
+        if current:
+            self._widget_stack.append(current)
+            self.layout().removeWidget(current)
+        self.layout().insertWidget(0, widget)
+        self.layout().setCurrentIndex(0)
+        self.adjustSize()
 
     def back(self):
-        self.layout().removeWidget(self.layout().currentWidget())
-        if self.layout().currentIndex() == -1:
+        if self._widget_stack:
+            self.layout().removeWidget(self.layout().currentWidget())
+            self.layout().insertWidget(0, self._widget_stack.pop())
+            self.layout().setCurrentIndex(0)
+            self.adjustSize()
+        else:
             self.reject()
 
     def configure(self, slot):
