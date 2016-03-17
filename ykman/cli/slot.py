@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from __future__ import absolute_import, print_function
 
 from ykman.yubicommon.cli import CliCommand, Argument
 from .util import confirm
@@ -34,7 +34,7 @@ from ..util import TRANSPORT, modhex_decode, modhex_encode
 import os
 import re
 import struct
-from base64 import b32decode
+from base64 import b32decode, b16decode
 
 
 def int_6_or_8(val):
@@ -50,14 +50,14 @@ def int_6_or_8(val):
 def parse_key(val):
     val = val.upper()
     if re.match(r'^([0-9A-F]{2})+$', val):  # hex
-        return val.decode('hex')
+        return b16decode(val)
     else:
         # Key should be b32 encoded
         val += '=' * (-len(val) % 8)  # Support unpadded
         try:
             return b32decode(val)
         except TypeError as e:
-            raise ValueError(e.message)
+            raise ValueError('{}'.format(e))
 
 
 class SlotCommand(CliCommand):

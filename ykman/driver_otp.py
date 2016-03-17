@@ -176,7 +176,6 @@ class OTPDriver(AbstractDriver):
             raise ValueError('private ID must be 6 bytes')
         if len(fixed) > 16:
             raise ValueError('public ID must be <= 16 bytes')
-        print('TODO:', key.encode('hex'), uid.encode('hex'), fixed.encode('hex'))
 
         cmd = slot_to_cmd(slot)
         cfg = self._create_cfg(cmd)
