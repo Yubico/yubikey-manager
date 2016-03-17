@@ -29,6 +29,7 @@ from __future__ import absolute_import, print_function
 
 from PySide import QtGui, QtCore
 from binascii import a2b_hex
+from base64 import b32decode
 
 from ykman.yubicommon import qt
 from .. import messages as m
@@ -206,6 +207,8 @@ class _ConfigureSlotType(_WizardPage):
             self.parent().push(_ConfigureStaticPassword(self.slot, self.parent()))
         elif action == self._action_hotp:
             self.parent().push(_ConfigureHotp(self.slot, self.parent()))
+        elif action == self._action_cr:
+            self.parent().push(_ConfigureChalResp(self.slot, self.parent()))
 
 
 class _ConfigureOTP(_WizardPage):
@@ -214,6 +217,10 @@ class _ConfigureOTP(_WizardPage):
 
     def __init__(self, slot, parent):
         super(_ConfigureOTP, self).__init__(slot, parent)
+
+    @property
+    def title_text(self):
+        return 'Configure YubiKey OTP for slot {}'.format(self.slot)
 
     @property
     def key(self):
@@ -226,10 +233,6 @@ class _ConfigureOTP(_WizardPage):
     @property
     def uid(self):
         return a2b_hex(self._uid_lbl.text())
-
-    @property
-    def title_text(self):
-        return 'Configure YubiKey OTP for slot {}'.format(self.slot)
 
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
@@ -259,15 +262,20 @@ class _ConfigureStaticPassword(_WizardPage):
     def title_text(self):
         return 'Configure static password for slot {}'.format(self.slot)
 
+    @property
+    def static_pw(self):
+        return self._static_pw_lbl.text()
+
     def _build_ui(self, layout):
-        self._static_pw = QtGui.QLineEdit()
-        self._static_pw.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
-        layout.addRow('Password:', self._static_pw)
+        self._static_pw_lbl = QtGui.QLineEdit()
+        self._static_pw_lbl.textChanged.connect(
+            lambda t: self.setNextEnabled(bool(t)))
+        layout.addRow('Password:', self._static_pw_lbl)
 
     def _accept(self):
         page = self.begin_work('Writing configuration...')
         self.parent()._controller.program_static(
-            self.slot, self._static_pw.text(),
+            self.slot, self.static_pw,
             lambda _: page.complete('Configuration successfully written!'))
 
 
@@ -283,18 +291,60 @@ class _ConfigureHotp(_WizardPage):
     def title_text(self):
         return 'Configure HOTP credential for slot {}'.format(self.slot)
 
+    @property
+    def key(self):
+        return b32decode(self._key_lbl.text().upper())
+
+    @property
+    def n_digits(self):
+        return int(self._n_digits_box.currentText())
+
     def _build_ui(self, layout):
-        self._key = QtGui.QLineEdit()
-        self._key.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
-        layout.addRow('Secret key:', self._key)
-        self._n_digits = QtGui.QComboBox()
-        self._n_digits.addItems(['6', '8'])
-        layout.addRow('Number of digits:', self._n_digits)
+        self._key_lbl = QtGui.QLineEdit()
+        self._key_lbl.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
+        layout.addRow('Secret key:', self._key_lbl)
+        self._n_digits_box = QtGui.QComboBox()
+        self._n_digits_box.addItems(['6', '8'])
+        layout.addRow('Number of digits:', self._n_digits_box)
 
     def _accept(self):
         page = self.begin_work('Writing configuration...')
         self.parent()._controller.program_hotp(
-            self.slot, self._key.text(), int(self._n_digits.currentText()),
+            self.slot, self.key, self.n_digits,
+            lambda _: page.complete('Configuration successfully written!'))
+
+
+class _ConfigureChalResp(_WizardPage):
+    description = 'When queried, the YubiKey will respond to a challenge.'
+    accept_text = 'Write configuration'
+
+    def __init__(self, slot, parent):
+        super(_ConfigureChalResp, self).__init__(slot, parent)
+        self.setNextEnabled(False)
+
+    @property
+    def title_text(self):
+        return 'Configure HMAC-SHA1 credential for slot {}'.format(self.slot)
+
+    @property
+    def key(self):
+        return a2b_hex(self._key_lbl.text())
+
+    @property
+    def touch(self):
+        return self._touch_box.isChecked()
+
+    def _build_ui(self, layout):
+        self._key_lbl = QtGui.QLineEdit()
+        self._key_lbl.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
+        self._touch_box = QtGui.QCheckBox('Require touch')
+        layout.addRow('Secret key:', self._key_lbl)
+        layout.addRow(self._touch_box)
+
+    def _accept(self):
+        page = self.begin_work('Writing configuration...')
+        self.parent()._controller.program_chalresp(
+            self.slot, self.key, self.touch,
             lambda _: page.complete('Configuration successfully written!'))
 
 

@@ -151,3 +151,7 @@ class Controller(QtCore.QObject):
         hotp8 = (digits == 8)
         self._use_device(lambda d: d.driver.program_hotp(slot, key, imf, hotp8),
                          cb, TRANSPORT.OTP)
+
+    def program_chalresp(self, slot, key, touch, cb):
+        self._use_device(lambda d: d.driver.program_chalresp(slot, key, touch),
+                         cb, TRANSPORT.OTP)
