@@ -93,6 +93,8 @@ class Controller(QtCore.QObject):
     def _use_device(self, fn, cb=None, transports=sum(TRANSPORT)):
         def _func():
             dev = self._grab_device(transports)
+            if dev is None:
+                raise ValueError('Unable to access device!')
             return fn(dev)
         self.worker.post_bg(_func, cb, True)
 

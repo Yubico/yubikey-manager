@@ -35,6 +35,75 @@ from ykman.yubicommon import qt
 from .. import messages as m
 from ...util import modhex_decode
 
+import re
+
+
+class B32Validator(QtGui.QValidator):
+
+    def __init__(self, parent=None):
+        super(B32Validator, self).__init__(parent)
+        self.partial = re.compile(r'^[ a-z2-7]+$', re.IGNORECASE)
+
+    def fixup(self, value):
+        try:
+            unpadded = value.upper().rstrip('=').replace(' ', '')
+            return b32decode(unpadded + '=' * (-len(unpadded) % 8))
+        except:
+            return None
+
+    def validate(self, value, pos):
+        try:
+            if self.fixup(value) is not None:
+                return QtGui.QValidator.Acceptable
+        except:
+            pass
+        if self.partial.match(value):
+            return QtGui.QValidator.Intermediate
+        return QtGui.QValidator.Invalid
+
+
+class HexValidator(QtGui.QValidator):
+    partial_pattern = r'^[ a-f0-9]*$'
+
+    def __init__(self, min_bytes=0, max_bytes=None, parent=None):
+        super(HexValidator, self).__init__(parent)
+        self.partial = re.compile(self.partial_pattern, re.IGNORECASE)
+        self._min = min_bytes
+        self._max = max_bytes if max_bytes is not None else float('inf')
+
+    def fixup(self, value):
+        try:
+            return a2b_hex(value.replace(' ', ''))
+        except:
+            return None
+
+    def validate(self, value, pos):
+        try:
+            fixed = self.fixup(value)
+            if fixed is not None and self._min <= len(fixed) <= self._max:
+                return QtGui.QValidator.Acceptable
+        except:
+            pass
+
+        if self.partial.match(value) and \
+                (len(value.replace(' ', '')) + 1) / 2 <= self._max:
+            return QtGui.QValidator.Intermediate
+
+        return QtGui.QValidator.Invalid
+
+
+class ModhexValidator(HexValidator):
+    partial_pattern = r'^[cbdefghijklnrtuv]+$'
+
+    def __init__(self, min_bytes=0, max_bytes=None, parent=None):
+        super(ModhexValidator, self).__init__(min_bytes, max_bytes, parent)
+
+    def fixup(self, value):
+        try:
+            return modhex_decode(value.replace(' ', ''))
+        except:
+            return None
+
 
 class _SlotStatus(QtGui.QWidget):
 
@@ -155,7 +224,7 @@ class _DeleteSlotPage(_WizardPage):
 
     def _accept(self):
         page = self.begin_work('Erasing configuration...')
-        self.parent()._controller.delete_slot(self.slot, lambda _: page.complete('Configuration erased!'))
+        self.parent()._controller.delete_slot(self.slot, page.cb('Configuration erased!'))
 
 
 class _SwapSlotsPage(_WizardPage):
@@ -169,7 +238,7 @@ class _SwapSlotsPage(_WizardPage):
     def _accept(self):
         page = self.begin_work('Writing configuration...')
         self.parent()._controller.swap_slots(
-            lambda _: page.complete('Configuration successfully written!'))
+            page.cb('Configuration successfully written!'))
 
 
 class _ConfigureSlotType(_WizardPage):
@@ -178,6 +247,9 @@ class _ConfigureSlotType(_WizardPage):
     def __init__(self, slot, parent):
         super(_ConfigureSlotType, self).__init__(slot, parent)
         self.setNextEnabled(False)
+
+        # Do this after the window is drawn to avoid expanding the dialog.
+        QtCore.QTimer.singleShot(0, lambda: self._action_desc.setText('The YubiKey supports a variety of protocols for the slot-based credentials.'))
 
     def _build_ui(self, layout):
         self._action = QtGui.QButtonGroup(self)
@@ -189,15 +261,37 @@ class _ConfigureSlotType(_WizardPage):
         self._action.addButton(self._action_cr)
         self._action.addButton(self._action_pw)
         self._action.addButton(self._action_hotp)
-        layout.addWidget(self._action_otp)
-        layout.addWidget(self._action_cr)
-        layout.addWidget(self._action_pw)
-        layout.addWidget(self._action_hotp)
-        self._action.buttonClicked.connect(lambda x: self.setNextEnabled(True))
+        self._action.buttonClicked.connect(self._select_action)
+
+        grid = QtGui.QGridLayout()
+        layout.addRow(grid)
+
+        grid.addWidget(self._action_otp, 0, 0)
+        grid.addWidget(self._action_cr, 1, 0)
+        grid.addWidget(self._action_pw, 2, 0)
+        grid.addWidget(self._action_hotp, 3, 0)
+
+        self._action_desc = QtGui.QLabel()
+        self._action_desc.setWordWrap(True)
+        self._action_desc.setSizePolicy(QtGui.QSizePolicy.Expanding,
+                                        QtGui.QSizePolicy.Minimum)
+        grid.addWidget(self._action_desc, 0, 1, 4, 1)
 
     @property
     def title_text(self):
         return 'Configure YubiKey slot {}'.format(self.slot)
+
+    def _select_action(self, action):
+        self.setNextEnabled(True)
+        action = self._action.checkedButton()
+        if action == self._action_otp:
+            self._action_desc.setText('Programs a one-time-password credential using the YubiKey OTP protocol.')
+        elif action == self._action_pw:
+            self._action_desc.setText('Stores a fixed password, which will be output each time you touch the button.')
+        elif action == self._action_hotp:
+            self._action_desc.setText('Stores a numeric one-time-password using the OATH-HOTP standard.')
+        elif action == self._action_cr:
+            self._action_desc.setText('Programs an HMAC-SHA1 credential, which can be used for local authentication or encryption.')
 
     def _accept(self):
         action = self._action.checkedButton()
@@ -217,6 +311,7 @@ class _ConfigureOTP(_WizardPage):
 
     def __init__(self, slot, parent):
         super(_ConfigureOTP, self).__init__(slot, parent)
+        self.setNextEnabled(False)
 
     @property
     def title_text(self):
@@ -224,30 +319,51 @@ class _ConfigureOTP(_WizardPage):
 
     @property
     def key(self):
-        return a2b_hex(self._key_lbl.text())
+        return self._key_lbl.validator().fixup(self._key_lbl.text())
 
     @property
     def fixed(self):
-        return modhex_decode(self._fixed_lbl.text())
+        return self._fixed_lbl.validator().fixup(self._fixed_lbl.text())
 
     @property
     def uid(self):
-        return a2b_hex(self._uid_lbl.text())
+        return self._uid_lbl.validator().fixup(self._uid_lbl.text())
 
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
+        self._key_lbl.setValidator(HexValidator(16, 16))
+        self._key_lbl.textChanged.connect(self._on_change)
         self._fixed_lbl = QtGui.QLineEdit()
+        self._fixed_lbl.setValidator(ModhexValidator(0, 16))
+        self._fixed_lbl.textChanged.connect(self._on_change)
         self._uid_lbl = QtGui.QLineEdit()
+        self._uid_lbl.setValidator(HexValidator(6, 6))
+        self._uid_lbl.textChanged.connect(self._on_change)
 
-        layout.addRow('Secret key (hex):', self._key_lbl)
-        layout.addRow('Public identity (modhex):', self._fixed_lbl)
-        layout.addRow('Private identity (hex):', self._uid_lbl)
+        self._key_lbl.setPlaceholderText('16 byte AES key, in hex')
+        self._fixed_lbl.setPlaceholderText('0-16 byte static prefix, in modhex')
+        self._uid_lbl.setPlaceholderText('6 byte internal identity, in hex')
+        layout.addRow('Secret key:', self._key_lbl)
+        layout.addRow('Public ID:', self._fixed_lbl)
+        layout.addRow('Private ID:', self._uid_lbl)
+
+        #self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
+
+    def _on_change(self, changed):
+        self.setNextEnabled(all(f.hasAcceptableInput() for f in [
+            self._key_lbl,
+            self._fixed_lbl,
+            self._uid_lbl
+        ]))
 
     def _accept(self):
         page = self.begin_work('Writing configuration...')
-        self.parent()._controller.program_otp(
-            self.slot, self.key, self.fixed, self.uid,
-            lambda _: page.complete('Configuration successfully written!'))
+        try:
+            self.parent()._controller.program_otp(
+                self.slot, self.key, self.fixed, self.uid,
+                page.cb('Configuration successfully written!'))
+        except Exception as e:
+            page.fail(e)
 
 
 class _ConfigureStaticPassword(_WizardPage):
@@ -268,15 +384,21 @@ class _ConfigureStaticPassword(_WizardPage):
 
     def _build_ui(self, layout):
         self._static_pw_lbl = QtGui.QLineEdit()
+        self._static_pw_lbl.setPlaceholderText('Password, up to 32 characters')
         self._static_pw_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(bool(t)))
         layout.addRow('Password:', self._static_pw_lbl)
+        layout_note = QtGui.QLabel('NOTE: Different keyboard layouts may render different passwords, especially for non-alphanumeric characters. To avoid this, choose a password consisting of modhex characters.')
+        layout_note.setWordWrap(True)
+        layout.addRow(layout_note)
+
+        # self._static_pw_lbl.setFocus(QtCore.Qt.OtherFocusReason)
 
     def _accept(self):
         page = self.begin_work('Writing configuration...')
         self.parent()._controller.program_static(
             self.slot, self.static_pw,
-            lambda _: page.complete('Configuration successfully written!'))
+            page.cb('Configuration successfully written!'))
 
 
 class _ConfigureHotp(_WizardPage):
@@ -293,7 +415,7 @@ class _ConfigureHotp(_WizardPage):
 
     @property
     def key(self):
-        return b32decode(self._key_lbl.text().upper())
+        return self._key_lbl.validator().fixup(self._key_lbl.text())
 
     @property
     def n_digits(self):
@@ -301,17 +423,25 @@ class _ConfigureHotp(_WizardPage):
 
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
-        self._key_lbl.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
-        layout.addRow('Secret key:', self._key_lbl)
+        self._key_lbl.setPlaceholderText('OATH secret, in base32')
+        self._key_lbl.setValidator(B32Validator())
+        self._key_lbl.textChanged.connect(
+            lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
+        layout.addRow('Secret key (base32):', self._key_lbl)
         self._n_digits_box = QtGui.QComboBox()
         self._n_digits_box.addItems(['6', '8'])
         layout.addRow('Number of digits:', self._n_digits_box)
 
+        #self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
+
     def _accept(self):
         page = self.begin_work('Writing configuration...')
-        self.parent()._controller.program_hotp(
-            self.slot, self.key, self.n_digits,
-            lambda _: page.complete('Configuration successfully written!'))
+        try:
+            self.parent()._controller.program_hotp(
+                self.slot, self.key, self.n_digits,
+                page.cb('Configuration successfully written!'))
+        except Exception as e:
+            page.fail(e)
 
 
 class _ConfigureChalResp(_WizardPage):
@@ -328,7 +458,7 @@ class _ConfigureChalResp(_WizardPage):
 
     @property
     def key(self):
-        return a2b_hex(self._key_lbl.text())
+        return self._key_lbl.validator().fixup(self._key_lbl.text())
 
     @property
     def touch(self):
@@ -336,16 +466,21 @@ class _ConfigureChalResp(_WizardPage):
 
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
-        self._key_lbl.textChanged.connect(lambda t: self.setNextEnabled(bool(t)))
+        self._key_lbl.setValidator(HexValidator(1, 20))
+        self._key_lbl.setPlaceholderText('1-20 byte HMAC-SHA1 key, in hex')
+        self._key_lbl.textChanged.connect(
+            lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
         self._touch_box = QtGui.QCheckBox('Require touch')
         layout.addRow('Secret key:', self._key_lbl)
         layout.addRow(self._touch_box)
+
+        # self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
 
     def _accept(self):
         page = self.begin_work('Writing configuration...')
         self.parent()._controller.program_chalresp(
             self.slot, self.key, self.touch,
-            lambda _: page.complete('Configuration successfully written!'))
+            page.cb('Configuration successfully written!'))
 
 
 class _WritingConfig(_WizardPage):
@@ -369,6 +504,18 @@ class _WritingConfig(_WizardPage):
         self._message.setText(message)
         self.setNextEnabled(True)
 
+    def fail(self, error):
+        self._message.setText('Error: {}'.format(error))
+        self.setPrevEnabled(True)
+
+    def cb(self, message):
+        def _func(result):
+            if isinstance(result, Exception):
+                self.fail(result)
+            else:
+                self.complete(message)
+        return _func
+
 
 class SlotDialog(qt.Dialog):
     slot_status = QtCore.Signal(tuple)
@@ -383,7 +530,7 @@ class SlotDialog(qt.Dialog):
 
         QtGui.QStackedLayout(self)
         spacer = QtGui.QWidget()
-        spacer.setFixedWidth(400)
+        spacer.setFixedWidth(460)
         self.layout().addWidget(spacer)
 
         self.reset(True)
