@@ -103,8 +103,6 @@ class YubiKey(object):
             self._serial = int(data[YK4_SERIAL_TAG].encode('hex'), 16)
         if YK4_ENABLED_TAG in data:
             self.enabled = int(data[YK4_ENABLED_TAG].encode('hex'), 16)
-        else:
-            self.enabled = self.capabilities
 
     @property
     def version(self):

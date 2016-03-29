@@ -40,6 +40,8 @@ INS_YK2_REQ = 0x01
 SLOT_DEVICE_SERIAL = 0x10
 SLOT_DEVICE_CONFIG = 0x11
 
+INS_NEO_TEST = 0x16
+
 OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
 MGR_AID = '\xa0\x00\x00\x05\x27\x47\x11\x17'
 
@@ -99,10 +101,16 @@ class CCIDDriver(AbstractDriver):
         return ''.join(map(chr, resp)), sw1 << 8 | sw2
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
-        _, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
-        if sw == SW_OK:
-            data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-            _, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, data)
+        for aid, ins in [(OTP_AID, INS_YK2_REQ), (MGR_AID, INS_NEO_TEST)]:
+            _, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
+            if sw == SW_OK:
+                data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
+                _, sw = self.send_apdu(0, ins, SLOT_DEVICE_CONFIG, 0, data)
+                if sw == SW_OK:
+                    return
+                else:
+                    raise Exception('Setting mode failed!')
+        raise Exception('Selecting applet failed!')
 
     def __del__(self):
         try:
