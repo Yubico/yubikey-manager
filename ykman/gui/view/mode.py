@@ -64,16 +64,20 @@ class ModeDialog(qt.Dialog):
         super(ModeDialog, self).__init__(parent)
 
         self._controller = controller
-        self._state = controller.enabled & sum(TRANSPORT)
+        self._state = 0
 
         layout = QtGui.QVBoxLayout(self)
-        layout.addWidget(QtGui.QLabel('Change mode'))
+        layout.addWidget(QtGui.QLabel('<h2>Configure enabled USB protocols</h2>'))
+        layout.addWidget(QtGui.QLabel('Set the enabled USB protocols for your YubiKey.'))
+        desc_lbl = QtGui.QLabel('Once changed, you will need to unplug and re-insert your YubiKey for the setting to take effect.')
+        desc_lbl.setWordWrap(True)
+        layout.addWidget(desc_lbl)
 
         boxes = QtGui.QHBoxLayout()
         self._boxes = []
         for t in TRANSPORT.split(controller.capabilities):
             cb = QtGui.QCheckBox(t.name)
-            cb.setChecked(self._state & t)
+            cb.setChecked(controller.enabled & t)
             cb.stateChanged.connect(partial(self._state_changed, t))
             boxes.addWidget(cb)
             self._boxes.append(cb)
@@ -87,7 +91,7 @@ class ModeDialog(qt.Dialog):
         self._ok = buttons.button(QtGui.QDialogButtonBox.Ok)
         layout.addWidget(buttons)
 
-        self.setWindowTitle('Configure enabled USB protocols')
+        self.setWindowTitle('Configure YubiKey transports')
 
     def _state_changed(self, transport, state):
         if state:
@@ -97,11 +101,15 @@ class ModeDialog(qt.Dialog):
         self._ok.setEnabled(bool(self._state))
 
     def _set_mode(self):
-        self.close()
-        self._controller.set_mode(self.mode)
+        def _cb(result):
+            if isinstance(result, Exception):
+                print('Error:', result)
+            else:
+                self.close()
+                remove_dialog = _RemoveDialog(self._controller, self)
+                remove_dialog.exec_()
 
-        remove_dialog = _RemoveDialog(self._controller, self)
-        remove_dialog.exec_()
+        self._controller.set_mode(self.mode, _cb)
 
     @property
     def mode(self):
