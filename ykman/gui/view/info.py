@@ -34,12 +34,20 @@ from .mode import ModeDialog
 from .slot import SlotDialog
 
 
-class _HeaderPanel(QtGui.QWidget):
-    def __init__(self, controller, parent=None):
-        super(_HeaderPanel, self).__init__(parent)
+def format_readable_list(items):
+    if not items:
+        return ''
+    elif len(items) == 1:
+        return items[0]
+    else:
+        return '{} and {}'.format(', '.join(items[:-1]), items[-1])
 
-        layout = QtGui.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 11)
+
+class _HeaderPanel(QtGui.QGroupBox):
+    def __init__(self, controller, parent=None):
+        super(_HeaderPanel, self).__init__('Device', parent)
+
+        layout = QtGui.QHBoxLayout(self)
         self._device_name = QtGui.QLabel()
         layout.addWidget(self._device_name)
         self._serial = QtGui.QLabel()
@@ -60,25 +68,24 @@ class _HeaderPanel(QtGui.QWidget):
             self._set_device_name('No YubiKey detected')
 
     def _set_device_name(self, name):
-        self._device_name.setText('<h2>{}</h2>'.format(name))
+        self._device_name.setText(name)
 
     def _set_serial(self, serial):
         self._serial.setText('Serial: {}'.format(serial) if serial else '')
 
 
-class _FeatureSection(object):
+class _FeatureSection(QtGui.QGroupBox):
     names = dict((c, c.name + ':') for c in CAPABILITY)
     configurable = CAPABILITY.OTP | CAPABILITY.OPGP
 
-    def __init__(self, controller, grid_layout):
+    def __init__(self, controller, parent=None):
+        super(_FeatureSection, self).__init__('Features', parent)
         self._controller = controller
-        self._parent = grid_layout.parent()
         self._widgets = {}
 
-        row_i = grid_layout.rowCount() + 1
+        grid_layout = QtGui.QGridLayout(self)
 
-        grid_layout.addWidget(QtGui.QLabel('<b>Features</b>'), row_i, 0, 1, 3)
-        row_i += 1
+        row_i = 0
 
         for c in CAPABILITY:
             label = QtGui.QLabel(self.names[c])
@@ -101,7 +108,7 @@ class _FeatureSection(object):
     def _configure(self, link):
         feature = int(link)
         if feature == CAPABILITY.OTP:
-            dialog = SlotDialog(self._controller, self._parent)
+            dialog = SlotDialog(self._controller, self.parent())
         else:
             print('TODO:', link)
             return
@@ -124,22 +131,20 @@ class _FeatureSection(object):
                     widgets[2].setVisible(False)
 
 
-class _ModeSection(object):
+class _ModeSection(QtGui.QGroupBox):
     names = dict((t, t.name + ':') for t in TRANSPORT)
 
-    def __init__(self, controller, grid_layout):
+    def __init__(self, controller, parent=None):
+        super(_ModeSection, self).__init__('USB Protocols', parent)
         self._controller = controller
-        self._parent = grid_layout.parent()
 
-        row_i = grid_layout.rowCount() + 1
+        grid_layout = QtGui.QGridLayout(self)
 
-        grid_layout.addWidget(QtGui.QLabel('<b>USB Protocols</b>'), row_i, 0, 1,
-                              3)
-        row_i += 1
+        row_i = 0
 
         grid_layout.addWidget(QtGui.QLabel('Supported:'), row_i, 0)
         self._supported_label = QtGui.QLabel()
-        grid_layout.addWidget(self._supported_label, row_i, 1)
+        grid_layout.addWidget(self._supported_label, row_i, 1, 1, 2)
         row_i += 1
 
         grid_layout.addWidget(QtGui.QLabel('Enabled:'), row_i, 0)
@@ -156,15 +161,15 @@ class _ModeSection(object):
         self._update()
 
     def _configure(self, url):
-        dialog = ModeDialog(self._controller, self._parent)
+        dialog = ModeDialog(self._controller, self.parent())
         dialog.exec_()
 
     def _update(self, value=None):
         supported = [t.name for t in
                      TRANSPORT.split(self._controller.capabilities)]
         enabled = [t.name for t in TRANSPORT.split(self._controller.enabled)]
-        self._supported_label.setText(', '.join(supported))
-        self._enabled_label.setText(', '.join(enabled))
+        self._supported_label.setText(format_readable_list(supported))
+        self._enabled_label.setText(format_readable_list(enabled))
         self._configure_label.setVisible(self._controller.can_mode_switch)
 
 
@@ -183,10 +188,17 @@ class InfoWidget(QtGui.QWidget):
             self._controller.refresh()
 
     def _build_ui(self):
-        layout = QtGui.QGridLayout(self)
+        layout = QtGui.QVBoxLayout(self)
+
+        spacer = QtGui.QWidget()
+        spacer.setFixedWidth(280)
+        layout.addWidget(spacer)
 
         self._header = _HeaderPanel(self._controller, self)
-        layout.addWidget(self._header, 0, 0, 1, 3)
+        layout.addWidget(self._header)
 
-        self._features = _FeatureSection(self._controller, layout)
-        self._mode = _ModeSection(self._controller, layout)
+        self._features = _FeatureSection(self._controller, self)
+        layout.addWidget(self._features)
+
+        self._mode = _ModeSection(self._controller, self)
+        layout.addWidget(self._mode)
