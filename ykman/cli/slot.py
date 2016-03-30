@@ -34,7 +34,8 @@ from ..util import TRANSPORT, modhex_decode, modhex_encode
 import os
 import re
 import struct
-from base64 import b32decode, b16decode
+from base64 import b32decode
+from binascii import a2b_hex
 
 
 def int_6_or_8(val):
@@ -50,7 +51,7 @@ def int_6_or_8(val):
 def parse_key(val):
     val = val.upper()
     if re.match(r'^([0-9A-F]{2})+$', val):  # hex
-        return b16decode(val)
+        return a2b_hex(val)
     else:
         # Key should be b32 encoded
         val += '=' * (-len(val) % 8)  # Support unpadded
@@ -97,7 +98,7 @@ class SlotCommand(CliCommand):
                       default='info')
     force = Argument('--force', bool)
     no_enter = Argument('--no-enter', bool)
-    private_id = Argument('--private-id', lambda x: x.decode('hex'), '\0' * 6)
+    private_id = Argument('--private-id', a2b_hex, b'\0' * 6)
     public_id = Argument('--public-id', modhex_decode)
     require_touch = Argument('--require-touch', bool)
     static_password = Argument('<password>')
@@ -135,7 +136,7 @@ class SlotCommand(CliCommand):
             if dev.serial is None:
                 raise ValueError('serial number not set, '
                                  'public-id must be provided')
-            self.public_id = '\x77\x77' + struct.pack('>I', dev.serial)
+            self.public_id = b'\x77\x77' + struct.pack(b'>I', dev.serial)
             print('Using serial as public ID: {}'
                   .format(modhex_encode(self.public_id)))
         self.force or confirm('Program an OTP credential in slot {}?'

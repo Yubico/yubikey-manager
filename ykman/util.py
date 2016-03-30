@@ -26,6 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from enum import IntEnum
+from binascii import b2a_hex, a2b_hex
+from .yubicommon.compat import byte2int, text_type
 
 __all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list']
 
@@ -98,20 +100,22 @@ class Mode(object):
 def parse_tlv_list(data):
     parsed = {}
     while data:
-        t, l, data = ord(data[0]), ord(data[1]), data[2:]
+        t, l, data = byte2int(data[0]), byte2int(data[1]), data[2:]
         parsed[t], data = data[:l], data[l:]
     return parsed
 
 
-_HEX = '0123456789abcdef'
-_MODHEX = 'cbdefghijklnrtuv'
-_MODHEX_TO_HEX = dict(zip(_MODHEX, _HEX))
-_HEX_TO_MODHEX = dict(zip(_HEX, _MODHEX))
+_HEX = b'0123456789abcdef'
+_MODHEX = b'cbdefghijklnrtuv'
+_MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
+_HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i:i+1]) for i in range(16))
 
 
 def modhex_decode(value):
-    return ''.join(_MODHEX_TO_HEX[c] for c in value).decode('hex')
+    if isinstance(value, text_type):
+        value = value.encode('ascii')
+    return a2b_hex(b''.join(_MODHEX_TO_HEX[c] for c in value))
 
 
 def modhex_encode(value):
-    return ''.join(_HEX_TO_MODHEX[c] for c in value.encode('hex'))
+    return b''.join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode('ascii')

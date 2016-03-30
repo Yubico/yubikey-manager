@@ -31,6 +31,7 @@ from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
 from .util import Mode, TRANSPORT
 from .scanmap import us
+from .yubicommon.compat import byte2int, int2byte, text_type
 
 from hashlib import sha1
 
@@ -77,7 +78,9 @@ def slot_to_cmd(slot):
 
 
 def get_scan_codes(ascii):
-    return ''.join(chr(us.scancodes[ord(c)]) for c in ascii)
+    if isinstance(ascii, text_type):
+        ascii = ascii.encode('ascii')
+    return b''.join(int2byte(us.scancodes[byte2int(c)]) for c in ascii)
 
 
 class OTPDriver(AbstractDriver):

@@ -116,7 +116,7 @@ class Controller(QtCore.QObject):
                 else:
                     self._data.clear(False)
             except Exception as e:
-                print("Couldn't open device: {:s}".format(e))
+                print("Couldn't open device: {!s}".format(e))
                 self._data.clear(False)
 
             # If device was removed, we want to emit a signal for that alone.

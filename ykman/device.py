@@ -31,6 +31,8 @@ from .driver import AbstractDriver
 from .driver_ccid import open_device as open_ccid
 from .driver_u2f import open_device as open_u2f
 from .driver_otp import open_device as open_otp
+from .yubicommon.compat import byte2int
+from binascii import b2a_hex
 
 
 YK4_CAPA_TAG = 0x01
@@ -94,15 +96,15 @@ class YubiKey(object):
     def _parse_capabilities(self, data):
         if not data:
             return
-        c_len, data = ord(data[0]), data[1:]
+        c_len, data = byte2int(data[0]), data[1:]
         data = data[:c_len]
         data = parse_tlv_list(data)
         if YK4_CAPA_TAG in data:
-            self.capabilities = int(data[YK4_CAPA_TAG].encode('hex'), 16)
+            self.capabilities = int(b2a_hex(data[YK4_CAPA_TAG]), 16)
         if YK4_SERIAL_TAG in data:
-            self._serial = int(data[YK4_SERIAL_TAG].encode('hex'), 16)
+            self._serial = int(b2a_hex(data[YK4_SERIAL_TAG]), 16)
         if YK4_ENABLED_TAG in data:
-            self.enabled = int(data[YK4_ENABLED_TAG].encode('hex'), 16)
+            self.enabled = int(b2a_hex(data[YK4_ENABLED_TAG]), 16)
 
     @property
     def version(self):

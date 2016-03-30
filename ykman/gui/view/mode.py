@@ -79,6 +79,7 @@ class ModeDialog(qt.Dialog):
             cb = QtGui.QCheckBox(t.name)
             cb.setChecked(controller.enabled & t)
             cb.stateChanged.connect(partial(self._state_changed, t))
+            self._state |= controller.enabled & t
             boxes.addWidget(cb)
             self._boxes.append(cb)
 
