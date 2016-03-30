@@ -252,6 +252,7 @@ class OTPDriver(AbstractDriver):
             key = sha1(key).digest()
         if len(key) > 20:
             raise ValueError('key lengths >20 bytes not supported')
+        key += b'\0' * (20 - len(key))
         if imf % 16 != 0:
             raise ValueError('imf must be a multiple of 16')
         cmd = slot_to_cmd(slot)
