@@ -38,14 +38,14 @@ import struct
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
 
-OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
+OTP_AID = b'\xa0\x00\x00\x05\x27\x20\x01'
 
 
 if u2fh_global_init(1 if 'DEBUG' in os.environ else 0) != 0:
     raise Exception("Unable to initialize libu2f-host")
 
 
-libversion = u2fh_check_version(None)
+libversion = u2fh_check_version(None).decode('ascii')
 
 
 U2F_VENDOR_FIRST = 0x40
@@ -80,7 +80,7 @@ class U2FDriver(AbstractDriver):
 
     def read_capabilities(self):
         try:
-            return self.sendrecv(U2FHID_YK4_CAPABILITIES, '\x00')
+            return self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
         except:
             return None
 
@@ -91,7 +91,6 @@ class U2FDriver(AbstractDriver):
         status = u2fh_sendrecv(self._devs, self._index, cmd, data, len(data),
                                resp, byref(buf_size))
         if status != 0:
-            print('error', status)
             raise Exception('u2fh_sendrecv error: {}'.format(status))
         return resp.raw[0:buf_size.value]
 

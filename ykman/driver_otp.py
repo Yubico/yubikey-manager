@@ -65,7 +65,7 @@ def check(status):
 check(yk_init())
 
 
-libversion = ykpers_check_version(None)
+libversion = ykpers_check_version(None).decode('ascii')
 
 
 def slot_to_cmd(slot):
