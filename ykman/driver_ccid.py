@@ -30,6 +30,7 @@ import struct
 from smartcard import System
 from .driver import AbstractDriver
 from .util import Mode, CAPABILITY, TRANSPORT
+from .yubicommon.compat import byte2int, int2byte
 
 SW_OK = 0x9000
 
@@ -42,16 +43,16 @@ SLOT_DEVICE_CONFIG = 0x11
 
 INS_NEO_TEST = 0x16
 
-OTP_AID = '\xa0\x00\x00\x05\x27\x20\x01'
-MGR_AID = '\xa0\x00\x00\x05\x27\x47\x11\x17'
+OTP_AID = b'\xa0\x00\x00\x05\x27\x20\x01'
+MGR_AID = b'\xa0\x00\x00\x05\x27\x47\x11\x17'
 
 KNOWN_APPLETS = {
     OTP_AID: CAPABILITY.OTP,
-    '\xa0\x00\x00\x06\x47\x2f\x00\x01': CAPABILITY.U2F,  # Official
-    '\xa0\x00\x00\x05\x27\x10\x02': CAPABILITY.U2F,  # Yubico - No longer used
-    '\xa0\x00\x00\x03\x08': CAPABILITY.PIV,
-    '\xd2\x76\x00\x01\x24\x01': CAPABILITY.OPGP,
-    '\xa0\x00\x00\x05\x27\x21\x01': CAPABILITY.OATH
+    b'\xa0\x00\x00\x06\x47\x2f\x00\x01': CAPABILITY.U2F,  # Official
+    b'\xa0\x00\x00\x05\x27\x10\x02': CAPABILITY.U2F,  # Yubico - No longer used
+    b'\xa0\x00\x00\x03\x08': CAPABILITY.PIV,
+    b'\xd2\x76\x00\x01\x24\x01': CAPABILITY.OPGP,
+    b'\xa0\x00\x00\x05\x27\x21\x01': CAPABILITY.OATH
 }
 
 
@@ -73,17 +74,17 @@ class CCIDDriver(AbstractDriver):
     def _read_version(self):
         s, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
         if sw == SW_OK:
-            self._version = tuple(map(ord, s[:3]))
+            self._version = tuple(byte2int(c) for c in s[:3])
             serial, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
             if len(serial) == 4 and sw == SW_OK:
                 self._serial = struct.unpack('>I', serial)[0]
 
     def read_capabilities(self):
         if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
-            return '\x03\x01\x01\x3f'
+            return b'\x03\x01\x01\x3f'
         _, sw = self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
         if sw != SW_OK:
-            return ''
+            return b''
         capa, sw = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
         return capa
 
@@ -95,10 +96,11 @@ class CCIDDriver(AbstractDriver):
                 capa |= code
         return capa
 
-    def send_apdu(self, cl, ins, p1, p2, data=''):
+    def send_apdu(self, cl, ins, p1, p2, data=b''):
         header = [cl, ins, p1, p2, len(data)]
-        resp, sw1, sw2 = self._conn.transmit(header + map(ord, data))
-        return ''.join(map(chr, resp)), sw1 << 8 | sw2
+        body = [byte2int(c) for c in data]
+        resp, sw1, sw2 = self._conn.transmit(header + body)
+        return b''.join([int2byte(c) for c in resp]), sw1 << 8 | sw2
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         for aid, ins in [(OTP_AID, INS_YK2_REQ), (MGR_AID, INS_NEO_TEST)]:
