@@ -66,8 +66,8 @@ class U2FDriver(AbstractDriver):
     def __init__(self, devs, index, name=''):
         self._devs = devs
         self._index = index
-        self._mode = Mode(TRANSPORT.U2F
-                          | sum(t for t in TRANSPORT if t.name in name))
+        self._mode = Mode(
+            TRANSPORT.U2F | sum(t for t in TRANSPORT if t.name in name))
         if ' NEO ' in name:  # At least 3.0.0
             self._version = (3, 0, 0)
         elif ' 4 ' in name:  # At least 4.0.0
@@ -115,7 +115,7 @@ def open_device():
             buf_size = c_size_t(1024)
             if u2fh_get_device_description(
                     devs, index, resp, byref(buf_size)) == 0:
-                name = resp.value
+                name = resp.value.decode('utf8')
                 if name.startswith('Yubikey') \
                         or name.startswith('Security Key by Yubico'):
                     return U2FDriver(devs, index, name)

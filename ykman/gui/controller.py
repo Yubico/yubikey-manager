@@ -29,7 +29,7 @@ from __future__ import absolute_import, print_function
 
 from PySide import QtCore
 from .util import SignalMap
-from ..device import open_device
+from ..device import open_device, FailedOpeningDeviceException
 from ..util import TRANSPORT
 
 
@@ -115,7 +115,8 @@ class Controller(QtCore.QObject):
                     self._data['can_mode_switch'] = dev.can_mode_switch
                 else:
                     self._data.clear(False)
-            except Exception as e:
+            except FailedOpeningDeviceException as e:
+                # TODO: Indicate in the UI that the device may be busy.
                 print("Couldn't open device: {!s}".format(e))
                 self._data.clear(False)
 
