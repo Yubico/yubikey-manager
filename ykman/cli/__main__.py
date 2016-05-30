@@ -29,7 +29,6 @@
 
 from __future__ import print_function
 
-import sys
 from ykman import __version__
 from ykman.yubicommon.cli import CliCommand, Argument
 from ..util import TRANSPORT
@@ -39,9 +38,13 @@ from .gui import GuiCommand
 from .info import InfoCommand
 from .mode import ModeCommand
 from .slot import SlotCommand
+from .opgp import OpgpCommand
+import sys
+import time
+import subprocess
 
 
-CMDS = (InfoCommand, GuiCommand, ModeCommand, SlotCommand)
+CMDS = (InfoCommand, GuiCommand, ModeCommand, SlotCommand, OpgpCommand)
 
 
 def _get_subcommand(cmd_name):
@@ -49,6 +52,33 @@ def _get_subcommand(cmd_name):
         if Cmd.name == cmd_name:
             return Cmd
     raise ValueError('Unknown command: {}'.format(cmd_name))
+
+
+def kill_scdaemon():
+    try:
+        # Works for Windows.
+        from win32com.client import GetObject
+        from win32api import OpenProcess, CloseHandle, TerminateProcess
+        WMI = GetObject('winmgmts:')
+        ps = WMI.InstancesOf('Win32_Process')
+        for p in ps:
+            if p.Properties_('Name').Value == 'scdaemon.exe':
+                pid = p.Properties_('ProcessID').Value
+                print("Stopping scdaemon...")
+                handle = OpenProcess(1, False, pid)
+                TerminateProcess(handle, -1)
+                CloseHandle(handle)
+                time.sleep(0.1)
+    except ImportError:
+        # Works for Linux and OS X.
+        pids = subprocess.check_output(
+            "ps ax | grep scdaemon | grep -v grep | awk '{ print $1 }'",
+            shell=True).strip()
+        if pids:
+            for pid in pids.split():
+                print("Stopping scdaemon...")
+                subprocess.call(['kill', '-9', pid])
+            time.sleep(0.1)
 
 
 class MainCommand(CliCommand):
@@ -59,10 +89,11 @@ class MainCommand(CliCommand):
         ykman [options] [<command> [<args>...]]
 
     Commands:
-        info    displays information about the connected YubiKey
-        gui     launches the graphical interface
-        mode    show or set the current transport mode
-        slot    show or modify YubiKey OTP slots
+        info     displays information about the connected YubiKey
+        gui      launches the graphical interface
+        mode     show or set the current transport mode
+        slot     show or modify YubiKey OTP slots
+        openpgp  configure OpenPGP settings for the YubiKey
 
     Use 'ykman <command> -h' for additional help with a command.
 
@@ -83,21 +114,28 @@ class MainCommand(CliCommand):
         dev = None
         transports = getattr(subcmd, 'transports', sum(TRANSPORT))
         if transports:
+            if TRANSPORT.CCID & transports:
+                kill_scdaemon()
             try:
                 dev = open_device(transports)
                 if not dev:
                     dev = open_device()
                     if not dev:
                         print('No YubiKey detected.')
-                        return 2
                     else:
                         req = ', '.join((t.name for t in TRANSPORT
                                          if t & transports))
-                        print("Command '{}' requires one of the following "
-                              "transports to be enabled: '{}'".format(
-                                  subcmd.name, req))
-                        print("Use 'ykman mode' to set the enabled transports.")
-                        return 2
+                        if transports & dev.mode.transports != 0:
+                            print("Device wasn't accessible over one of the "
+                                  "required transports: {}".format(req))
+                            print("Perhaps the device is already in use?")
+                        else:
+                            print("Command '{}' requires one of the following "
+                                  "transports to be enabled: '{}'".format(
+                                    subcmd.name, req))
+                            print("Use 'ykman mode' to set the enabled "
+                                  "transports.")
+                    return 2
             except FailedOpeningDeviceException:
                 print('Failed connecting to the YubiKey. Is it in use by '
                       'another process?')

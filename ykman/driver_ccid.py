@@ -45,13 +45,14 @@ INS_NEO_TEST = 0x16
 
 OTP_AID = b'\xa0\x00\x00\x05\x27\x20\x01'
 MGR_AID = b'\xa0\x00\x00\x05\x27\x47\x11\x17'
+OPGP_AID = b'\xd2\x76\x00\x01\x24\x01'
 
 KNOWN_APPLETS = {
     OTP_AID: CAPABILITY.OTP,
     b'\xa0\x00\x00\x06\x47\x2f\x00\x01': CAPABILITY.U2F,  # Official
     b'\xa0\x00\x00\x05\x27\x10\x02': CAPABILITY.U2F,  # Yubico - No longer used
     b'\xa0\x00\x00\x03\x08': CAPABILITY.PIV,
-    b'\xd2\x76\x00\x01\x24\x01': CAPABILITY.OPGP,
+    OPGP_AID: CAPABILITY.OPGP,
     b'\xa0\x00\x00\x05\x27\x21\x01': CAPABILITY.OATH
 }
 
