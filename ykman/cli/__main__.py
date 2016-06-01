@@ -27,31 +27,22 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from __future__ import absolute_import
 
 from ykman import __version__
-from ykman.yubicommon.cli import CliCommand, Argument
 from ..util import TRANSPORT
 from ..device import open_device, FailedOpeningDeviceException
-from .util import CliExit
-from .gui import GuiCommand
-from .info import InfoCommand
-from .mode import ModeCommand
-from .slot import SlotCommand
-from .opgp import OpgpCommand
-import sys
+from .gui import gui
+from .info import info
+from .mode import mode
+from .slot import slot
+from .opgp import openpgp
 import time
 import subprocess
+import click
 
 
-CMDS = (InfoCommand, GuiCommand, ModeCommand, SlotCommand, OpgpCommand)
-
-
-def _get_subcommand(cmd_name):
-    for Cmd in CMDS:
-        if Cmd.name == cmd_name:
-            return Cmd
-    raise ValueError('Unknown command: {}'.format(cmd_name))
+COMMANDS = (info, mode, slot, openpgp, gui)
 
 
 def kill_scdaemon():
@@ -64,7 +55,7 @@ def kill_scdaemon():
         for p in ps:
             if p.Properties_('Name').Value == 'scdaemon.exe':
                 pid = p.Properties_('ProcessID').Value
-                print("Stopping scdaemon...")
+                click.echo("Stopping scdaemon...")
                 handle = OpenProcess(1, False, pid)
                 TerminateProcess(handle, -1)
                 CloseHandle(handle)
@@ -76,85 +67,70 @@ def kill_scdaemon():
             shell=True).strip()
         if pids:
             for pid in pids.split():
-                print("Stopping scdaemon...")
+                click.echo("Stopping scdaemon...")
                 subprocess.call(['kill', '-9', pid])
             time.sleep(0.1)
 
 
-class MainCommand(CliCommand):
+CLICK_CONTEXT_SETTINGS = dict(
+    help_option_names=['-h', '--help']
+)
+
+
+def print_version(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo('ykman version: {}'.format(__version__))
+    ctx.exit()
+
+
+@click.group(context_settings=CLICK_CONTEXT_SETTINGS)
+@click.option('-v', '--version', is_flag=True, callback=print_version,
+              expose_value=False, is_eager=True)
+@click.pass_context
+def cli(ctx):
     """
-    Interface with a YubiKey via the command line
-
-    Usage:
-        ykman [options] [<command> [<args>...]]
-
-    Commands:
-        info     displays information about the connected YubiKey
-        gui      launches the graphical interface
-        mode     show or set the current transport mode
-        slot     show or modify YubiKey OTP slots
-        openpgp  configure OpenPGP settings for the YubiKey
-
-    Use 'ykman <command> -h' for additional help with a command.
-
-    Options:
-        -h, --help      show this help message
-        -v, --version   show the program's version number
+    Interface with a YubiKey via the command line.
     """
-
-    cmd = Argument('<command>', _get_subcommand, default=InfoCommand)
-    sub_argv = Argument('<args>')
-
-    def __init__(self, *args, **kwargs):
-        kwargs['options_first'] = True
-        super(MainCommand, self).__init__(*args, **kwargs)
-
-    def __call__(self):
-        subcmd = self.cmd(argv=[self.cmd.name] + self.sub_argv)
-        dev = None
-        transports = getattr(subcmd, 'transports', sum(TRANSPORT))
-        if transports:
-            if TRANSPORT.CCID & transports:
-                kill_scdaemon()
-            try:
-                dev = open_device(transports)
-                if not dev:
-                    dev = open_device()
-                    if not dev:
-                        print('No YubiKey detected.')
-                    else:
-                        req = ', '.join((t.name for t in TRANSPORT
-                                         if t & transports))
-                        if transports & dev.mode.transports != 0:
-                            print("Device wasn't accessible over one of the "
-                                  "required transports: {}".format(req))
-                            print("Perhaps the device is already in use?")
-                        else:
-                            print("Command '{}' requires one of the following "
-                                  "transports to be enabled: '{}'".format(
-                                    subcmd.name, req))
-                            print("Use 'ykman mode' to set the enabled "
-                                  "transports.")
-                    return 2
-            except FailedOpeningDeviceException:
-                print('Failed connecting to the YubiKey. Is it in use by '
-                      'another process?')
-                return 2
-
+    dev = None
+    subcmd = next(filter(lambda c: c.name == ctx.invoked_subcommand, COMMANDS))
+    transports = getattr(subcmd, 'transports', sum(TRANSPORT))
+    if transports:
+        if TRANSPORT.CCID & transports:
+            kill_scdaemon()
         try:
-            status = subcmd(dev)
-        except CliExit as e:
-            print(e.message)
-            status = e.status
-        except ValueError as e:
-            print('Error:', e)
-            status = 1
-        return status if status is not None else 0
+            dev = open_device(transports)
+            if not dev:
+                dev = open_device()
+                if not dev:
+                    ctx.fail('No YubiKey detected!')
+
+                req = ', '.join((t.name for t in TRANSPORT
+                                 if t & transports))
+                if transports & dev.mode.transports != 0:
+                    click.echo("Device wasn't accessible over one of "
+                               "the required transports: {}"
+                               .format(req))
+                    click.echo("Perhaps the device is already in use?")
+                else:
+                    click.echo("Command '{}' requires one of the following "
+                               "transports to be enabled: '{}'".format(
+                                   subcmd.name, req))
+                    click.echo("Use 'ykman mode' to set the enabled "
+                               "transports.")
+                ctx.exit(2)
+        except FailedOpeningDeviceException:
+            ctx.fail('Failed connecting to the YubiKey. Is it in use by '
+                     'another process?')
+    ctx.obj['dev'] = dev
+
+
+for cmd in COMMANDS:
+    cli.add_command(cmd)
 
 
 def main():
-    cmd = MainCommand(version='%(prog)s version ' + __version__)
-    sys.exit(cmd())
+    cli(obj={})
 
 
 if __name__ == '__main__':

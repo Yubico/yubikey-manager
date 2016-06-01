@@ -25,30 +25,21 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import
 
-from ykman.yubicommon.cli import CliCommand, Argument
-from .util import confirm
 from ..util import TRANSPORT, modhex_decode, modhex_encode
-
+from .util import click_force_option
+from base64 import b32decode
+from binascii import a2b_hex
 import os
 import re
 import struct
-from base64 import b32decode
-from binascii import a2b_hex
+import click
 
 
-def int_6_or_8(val):
-    int_val = int(val)
-    if int_val == 6:
-        return False
-    elif int_val == 8:
-        return True
-    else:
-        raise ValueError('must be 6 or 8')
-
-
-def parse_key(val):
+def parse_key(ctx, param, val):
+    if val is None:
+        return None
     val = val.upper()
     if re.match(r'^([0-9A-F]{2})+$', val):  # hex
         return a2b_hex(val)
@@ -61,116 +52,160 @@ def parse_key(val):
             raise ValueError('{}'.format(e))
 
 
-class SlotCommand(CliCommand):
+def parse_public_id(ctx, param, value):
+    if value is None:
+        dev = ctx.obj['dev']
+        if dev.serial is None:
+            ctx.fail('serial number not set, public-id must be provided')
+        value = b'\x77\x77' + struct.pack(b'>I', dev.serial)
+        click.echo('Using serial as public ID: {}'.format(modhex_encode(value)))
+    else:
+        value = modhex_decode(value)
+    return value
+
+
+click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
+                                     callback=lambda c, p, v: int(v))
+
+
+@click.group()
+def slot():
     """
     Manage YubiKey OTP slots.
-
-    Usage:
-    ykman slot
-    ykman slot swap [-f]
-    ykman slot (1 | 2) delete [-f]
-    ykman slot (1 | 2) otp <key> [--public-id FIXED] [--private-id UID]
-                                 [-f] [--no-enter]
-    ykman slot (1 | 2) static <password> [-f] [--no-enter]
-    ykman slot (1 | 2) chalresp [<key>] [-f] [--require-touch]
-    ykman slot (1 | 2) hotp <key> [-f] [--no-enter] [--digits N] [--imf IMF]
-
-    <key> should be given as a hex or base32 encoded string
-    <private-id> should be given as a 6 byte (12 character) hex value
-
-    Options:
-        -h, --help         show this help message
-        -f, --force        don't ask for confirmation for actions
-        --no-enter         don't trigger the Enter key after the password
-        --public-id FIXED  fixed part of the OTP, defaults to the devices serial
-                           number in modhex
-        --private-id UID   optional private identifier of the OTP credential
-        --require-touch    require physical button press to generate response
-        --digits N         number of digits to output for HOTP [default: 6]
-        --imf IMF          initial moving factor for HOTP [default: 0]
     """
+slot.transports = TRANSPORT.OTP
 
-    name = 'slot'
-    transports = TRANSPORT.OTP
 
-    slot = Argument(('1', '2'), int)
-    action = Argument(('swap', 'delete', 'otp', 'static', 'chalresp', 'hotp'),
-                      default='info')
-    force = Argument('--force', bool)
-    no_enter = Argument('--no-enter', bool)
-    private_id = Argument('--private-id', a2b_hex, b'\0' * 6)
-    public_id = Argument('--public-id', modhex_decode)
-    require_touch = Argument('--require-touch', bool)
-    static_password = Argument('<password>')
-    key = Argument('<key>', parse_key)
-    hotp8 = Argument('--digits', int_6_or_8)
-    imf = Argument('--imf', int)
+@slot.command()
+@click.pass_context
+def info(ctx):
+    """
+    Display status of OTP slots.
+    """
+    dev = ctx.obj['dev']
+    click.echo(dev.device_name)
+    slot1, slot2 = dev.driver.slot_status
+    click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
+    click.echo('Slot 2: {}'.format(slot2 and 'programmed' or 'empty'))
 
-    def __call__(self, dev):
-        return getattr(self, '_{}_action'.format(self.action))(dev)
 
-    def _info_action(self, dev):
-        print(dev.device_name)
-        slot1, slot2 = dev.driver.slot_status
-        print('Slot 1:', slot1 and 'programmed' or 'empty')
-        print('Slot 2:', slot2 and 'programmed' or 'empty')
+@slot.command()
+@click.confirmation_option('-f', '--force', prompt='Swap the two slots of the '
+                           'YubiKey?')
+@click.pass_context
+def swap(ctx):
+    """
+    Swaps the two slot configurations with each other.
+    """
+    dev = ctx.obj['dev']
+    click.echo('Swapping slots...')
+    dev.driver.swap_slots()
 
-    def _confirm(self, message):
-        if not self.force:
-            confirm(message)
 
-    def _swap_action(self, dev):
-        self.force or confirm('Swap slots of YubiKey?')
-        print('Swapping slots...')
-        dev.driver.swap_slots()
-        print('Success!')
+@slot.command()
+@click_slot_argument
+@click_force_option
+@click.pass_context
+def delete(ctx, slot, force):
+    """
+    Deletes the configuration of a slot.
+    """
+    dev = ctx.obj['dev']
+    force or click.confirm('Really delete slot {} or the YubiKey?'.format(slot),
+                           abort=True)
+    click.echo('Deleting slot: {}...'.format(slot))
+    dev.driver.zap_slot(slot)
 
-    def _delete_action(self, dev):
-        self.force or confirm('Delete slot {} of YubiKey?'.format(self.slot))
-        print('Deleting slot: {}...'.format(self.slot))
-        dev.driver.zap_slot(self.slot)
-        print('Success!')
 
-    def _otp_action(self, dev):
-        if self.public_id is None:
-            if dev.serial is None:
-                raise ValueError('serial number not set, '
-                                 'public-id must be provided')
-            self.public_id = b'\x77\x77' + struct.pack(b'>I', dev.serial)
-            print('Using serial as public ID: {}'
-                  .format(modhex_encode(self.public_id)))
-        self.force or confirm('Program an OTP credential in slot {}?'
-                              .format(self.slot))
-        dev.driver.program_otp(self.slot, self.key, self.public_id,
-                               self.private_id, not self.no_enter)
-        print('Success!')
+@slot.command()
+@click_slot_argument
+@click.argument('key', callback=parse_key)
+@click.option('--public-id', required=False, callback=parse_public_id,
+              help='Static part of the OTP, defaults to the devices serial '
+              'number converted to modhex.', metavar='MODHEX')
+@click.option('--private-id', required=False, default=b'\0'*6,
+              callback=lambda c, p, v: a2b_hex(v), help='6 byte private '
+              'identifier of the credential.', metavar='HEX')
+@click.option('--no-enter', is_flag=True, help="Don't send an Enter "
+              'keystroke after outputting an OTP.')
+@click_force_option
+@click.pass_context
+def otp(ctx, slot, key, public_id, private_id, no_enter, force):
+    """
+    Program a YubiKey OTP credential.
 
-    def _static_action(self, dev):
-        self.force or confirm('Program a static password in slot {}?'
-                              .format(self.slot))
-        print('Setting static password in slot {}...'.format(self.slot))
-        dev.driver.program_static(self.slot, self.static_password,
-                                  not self.no_enter)
-        print('Success!')
+    KEY is a 16 byte AES key given as a hex encoded string.
+    """
+    dev = ctx.obj['dev']
+    force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
+                           abort=True)
+    dev.driver.program_otp(slot, key, public_id, private_id, not no_enter)
 
-    def _chalresp_action(self, dev):
-        if not self.key:
-            print('Using a randomly generated key.')
-            self.key = os.urandom(20)
 
-        self.force or confirm(
-            'Program a challenge-response credential in slot {}?'
-            .format(self.slot))
+@slot.command()
+@click_slot_argument
+@click.argument('password')
+@click.option('--no-enter', is_flag=True, help="Don't send an Enter "
+              'keystroke after outputting the password.')
+@click_force_option
+@click.pass_context
+def static(ctx, slot, password, no_enter, force):
+    """
+    Program a static password.
+    """
+    dev = ctx.obj['dev']
+    force or click.confirm('Program a static password in slot {}?'.format(slot),
+                           abort=True)
+    click.echo('Setting static password in slot {}...'.format(slot))
+    dev.driver.program_static(slot, password, not no_enter)
 
-        print('Programming challenge-response in slot {}...'.format(self.slot))
-        dev.driver.program_chalresp(self.slot, self.key, self.require_touch)
-        print('Success!')
 
-    def _hotp_action(self, dev):
-        self.force or confirm('Program a HOTP credential in slot {}?'
-                              .format(self.slot))
+@slot.command()
+@click_slot_argument
+@click.argument('key', callback=parse_key, required=False)
+@click.option('--require-touch', is_flag=True, help='Require physical button '
+              'press to generate response.')
+@click_force_option
+@click.pass_context
+def chalresp(ctx, slot, key, require_touch, force):
+    """
+    Program an HMAC-SHA1 challenge-response credential.
 
-        print('Programming HOTP credential in slot {}...'.format(self.slot))
-        dev.driver.program_hotp(self.slot, self.key, self.imf, self.hotp8,
-                                not self.no_enter)
-        print('Success!')
+    KEY is given as a hex encoded string.
+    If KEY is not given, a randomly generated key will be used.
+    """
+    dev = ctx.obj['dev']
+    if not key:
+        click.echo('Using a randomly generated key.')
+        key = os.urandom(20)
+
+    force or click.confirm('Program a challenge-response credential in slot {}?'
+                           .format(slot), abort=True)
+
+    click.echo('Programming challenge-response in slot {}...'.format(slot))
+    dev.driver.program_chalresp(slot, key, require_touch)
+
+
+@slot.command()
+@click_slot_argument
+@click.argument('key', callback=parse_key)
+@click.option('--digits', type=click.Choice(['6', '8']), default='6',
+              callback=lambda c, p, v: int(v),
+              help='Number of digits to output for HOTP codes.')
+@click.option('--imf', type=int, default=0,
+              help='Initial moving factor for credential.')
+@click.option('--no-enter', is_flag=True, help="Don't send an Enter "
+              'keystroke after outputting an OTP.')
+@click_force_option
+@click.pass_context
+def hotp(ctx, slot, key, digits, imf, no_enter, force):
+    """
+    Program an HMAC-SHA1 OATH-HOTP credential.
+
+    KEY is given as a hex or base32 encoded string.
+    """
+    dev = ctx.obj['dev']
+    force or click.confirm('Program a HOTP credential in slot {}?'.format(slot),
+                           abort=True)
+    click.echo('Programming HOTP credential in slot {}...'.format(slot))
+    dev.driver.program_hotp(slot, key, imf, digits == 8, not no_enter)

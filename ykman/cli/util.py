@@ -25,24 +25,10 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+import click
 
-import sys
-
-__all__ = ['confirm']
+__all__ = ['click_force_option']
 
 
-class CliExit(Exception):
-    """Exception which causes CLI to exit using the given status"""
-
-    def __init__(self, status, message):
-        self.status = status
-        self.message = message
-
-
-def confirm(msg):
-    print('{} (y/n) [n]'.format(msg))
-    read = sys.stdin.readline().strip()
-    if read.lower() not in ['y', 'yes']:
-        raise CliExit(1, 'Action aborted.')
-    return True
+click_force_option = click.option('-f', '--force', is_flag=True,
+                                  help='Confirm the action without prompting.')

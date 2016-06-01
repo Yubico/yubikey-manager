@@ -26,27 +26,20 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from __future__ import print_function
+import click
 
-from ykman.yubicommon.cli import CliCommand
 
-
-class GuiCommand(CliCommand):
+@click.command()
+def gui():
     """
     Launches the YubiKey Manager graphical interface.
-
-    Usage:
-    ykman gui
     """
-
-    name = 'gui'
-    transports = 0
-
-    def __call__(self, dev=None):
-        try:
-            import PySide
-            assert PySide
-        except ImportError:
-            print('GUI requires PySide to run')
-            return 1
-        from ykman.gui import __main__ as gui_main
-        gui_main.main()
+    try:
+        import PySide
+        assert PySide
+    except ImportError:
+        print('GUI requires PySide to run')
+        return 1
+    from ykman.gui import __main__ as gui_main
+    gui_main.main()
+gui.transports = 0

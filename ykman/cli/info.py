@@ -25,45 +25,42 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from __future__ import absolute_import
 
-import sys
 from ykman import __version__
-from ykman.yubicommon.cli import CliCommand
 from ..util import CAPABILITY
 from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
+import sys
+import click
 
 
-class InfoCommand(CliCommand):
+@click.command()
+@click.pass_context
+def info(ctx):
     """
     Displays information about the attached YubiKey.
-
-    Usage:
-        ykman info
     """
+    click.echo('{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__))
+    click.echo('Libraries: libykpers {}, libu2f-host {}'.format(
+        ykpers_version, u2fhost_version))
+    click.echo()
 
-    name = 'info'
+    dev = ctx.obj['dev']
+    click.echo('Device name: {}'.format(dev.device_name))
+    click.echo('Serial number: {}'.format(
+        dev.serial or 'Not set or unreadable'))
+    click.echo('Enabled transport(s): {}'.format(dev.mode))
+    click.echo()
 
-    def __call__(self, dev):
-        print('{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__))
-        print('Libraries: libykpers {}, libu2f-host {}'.format(
-            ykpers_version, u2fhost_version))
-        print()
-
-        print('Device name:', dev.device_name)
-        print('Serial number:', dev.serial or 'Not set or unreadable')
-        print('Enabled transport(s):', dev.mode)
-        print()
-
-        print('Device capabilities:')
-        for c in CAPABILITY:
-            if c & dev.capabilities:
-                if c & dev.enabled:
-                    status = 'Enabled'
-                else:
-                    status = 'Disabled'
+    click.echo('Device capabilities:')
+    for c in CAPABILITY:
+        if c & dev.capabilities:
+            if c & dev.enabled:
+                status = 'Enabled'
             else:
-                status = 'Not available'
+                status = 'Disabled'
+        else:
+            status = 'Not available'
 
-            print('    {0.name}:\t{1}'.format(c, status))
+        click.echo('    {0.name}:\t{1}'.format(c, status))

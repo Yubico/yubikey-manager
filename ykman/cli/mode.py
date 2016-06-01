@@ -25,16 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from __future__ import absolute_import
 
-import re
-
-from ykman.yubicommon.cli import CliCommand, Argument
-from .util import confirm
+from .util import click_force_option
 from ..util import Mode, TRANSPORT
+import re
+import click
 
 
-def _parse_mode_string(mode):
+def _parse_mode_string(ctx, param, mode):
+    if mode is None:
+        return None
     try:
         mode_int = int(mode)
         return Mode.from_code(mode_int)
@@ -58,66 +59,55 @@ def _parse_mode_string(mode):
     raise ValueError('Invalid mode string: {}'.format(mode))
 
 
-class ModeCommand(CliCommand):
+@click.command()
+@click.argument('mode', required=False, callback=_parse_mode_string)
+@click.option('--touch-eject', is_flag=True, help='When set, the button '
+              'toggles the state of the smartcard between ejected and inserted '
+              '(CCID mode only).')
+@click.option('--autoeject-timeout', required=False, type=int, default=0,
+              help='When set, the smartcard will automatically eject after the '
+              'given number of seconds. Implies --touch-eject (CCID mode only).'
+              )
+@click.option('--chalresp-timeout', required=False, type=int, default=0,
+              help='Sets the timeout when waiting for touch for challenge '
+              'response, in seconds.')
+@click_force_option
+@click.pass_context
+def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
-    Manage YubiKey transport mode.
+    Get the current transport mode of the YubiKey, or set it to MODE.
 
-    Usage:
-    ykman mode
-    ykman mode <mode> [-f] [--touch-eject [TIMEOUT]]
-                      [--challenge-response-timeout TIMEOUT]
-
-    Options:
-        -h, --help      show this help message
-        -f, --force     don't ask for confirmation for actions
-                        when set, the button on the YubiKey will eject/insert
-                        the card (CCID mode only) Optionally give a timeout in
-                        seconds to auto-eject the card after a period of
-                        inactivity.
-        --touch-eject  [TIMEOUT]
-                        CCID mode only. When set, the button on the YubiKey will
-                        eject/insert the card. Optionally provide a TIMEOUT
-                        value to cause the card to automatically eject after a
-                        period of inactivity.
-        --challenge-response-timeout TIMEOUT
-                        set the timeout for challenge-response in seconds
+    MODE can be a string, such as "OTP+U2F+CCID", or a shortened form: "o+u+c".
+    It can also be a mode number.
     """
+    dev = ctx.obj['dev']
+    if autoeject_timeout:
+        touch_eject = True
+    autoeject = autoeject_timeout if touch_eject else None
 
-    name = 'mode'
+    if mode is not None:
+        if mode.transports != TRANSPORT.CCID:
+            autoeject = None
+            if touch_eject:
+                ctx.fail('--touch-eject can only be used when setting'
+                         'CCID-only mode')
 
-    force = Argument('--force', bool)
-    mode = Argument('<mode>', _parse_mode_string)
-    touch_eject = Argument('--touch-eject', bool)
-    autoeject_timeout = Argument('TIMEOUT', int)
-    cr_timeout = Argument('--challenge-response-timeout', int, 0)
+        if not force:
+            if mode == dev.mode:
+                click.echo('Mode is already {}, nothing to do...'.format(mode))
+                ctx.exit()
+            elif not dev.has_mode(mode):
+                click.echo('Mode {} is not supported on this device!'
+                           .format(mode))
+                ctx.fail('Use --force to attempt to set it anyway.')
+            force or click.confirm('Set mode of YubiKey to {}?'.format(mode),
+                                   abort=True)
 
-    def __call__(self, dev):
-        if self.mode is not None:
-            autoeject = self.autoeject_timeout if self.touch_eject else None
-            if self.mode.transports != TRANSPORT.CCID:
-                autoeject = None
-                if self.touch_eject:
-                    print('--touch-eject can only be used when setting'
-                          'CCID-only mode')
-                    return 1
-
-            if not self.force:
-                if self.mode == dev.mode:
-                    print('Mode is already {}, nothing to do...'
-                          .format(self.mode))
-                    return 0
-                elif not dev.has_mode(self.mode):
-                    print('Mode {} is not supported on this device!'
-                          .format(self.mode))
-                    print('Use --force to attempt to set it anyway.')
-                    return 1
-                confirm('Set mode of YubiKey to {}?'.format(self.mode))
-
-            dev.set_mode(self.mode, self.cr_timeout, autoeject)
-            print('Mode set! You must remove and re-insert your YubiKey for '
-                  'this change to take effect.')
-        else:
-            print('Current mode is:', dev.mode)
-            supported = ', '.join(t.name for t in TRANSPORT
-                                  .split(dev.capabilities))
-            print('Supported transports are:', supported)
+        dev.set_mode(mode, chalresp_timeout, autoeject)
+        click.echo('Mode set! You must remove and re-insert your YubiKey for '
+                   'this change to take effect.')
+    else:
+        click.echo('Current mode is:', dev.mode)
+        supported = ', '.join(t.name for t in TRANSPORT
+                              .split(dev.capabilities))
+        click.echo('Supported transports are:', supported)

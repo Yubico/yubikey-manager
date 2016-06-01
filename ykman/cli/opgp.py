@@ -25,26 +25,32 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import
 
-from ykman.yubicommon.cli import CliCommand, Argument
-from .util import confirm
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
-import getpass
+from .util import click_force_option
+import click
 
 
-KEY_NAMES = {
-    'sig': KEY_SLOT.SIGN,
-    'enc': KEY_SLOT.ENCRYPT,
-    'aut': KEY_SLOT.AUTHENTICATE
-}
+KEY_NAMES = dict(
+    sig=KEY_SLOT.SIGN,
+    enc=KEY_SLOT.ENCRYPT,
+    aut=KEY_SLOT.AUTHENTICATE
+)
 
-MODE_NAMES = {
-    'off': TOUCH_MODE.OFF,
-    'on': TOUCH_MODE.ON,
-    'fixed': TOUCH_MODE.ON_FIXED
-}
+MODE_NAMES = dict(
+    off=TOUCH_MODE.OFF,
+    on=TOUCH_MODE.ON,
+    fixed=TOUCH_MODE.ON_FIXED
+)
+
+
+def one_of(data):
+    def inner(ctx, param, key):
+        if key is not None:
+            return data[key]
+    return inner
 
 
 def get_or_fail(data):
@@ -66,90 +72,115 @@ def int_in_range(minval, maxval):
     return inner
 
 
-class OpgpCommand(CliCommand):
+@click.group()
+@click.pass_context
+def openpgp(ctx):
     """
     Manage YubiKey OpenPGP functions.
-
-    Usage:
-    ykman openpgp
-    ykman openpgp reset [-f]
-    ykman openpgp touch <key> [<policy>] [-f] [--admin-pin PIN]
-    ykman openpgp set-pin-retries <pin_retries> <reset_code_retries>
-                                  <admin_pin_retries> [--admin-pin PIN]
-
-    <key> must be one of "sig", "enc", or "aut", and corresponds to one of the
-    three available keys stored.
-    <policy> must be one of "on", "off", or "fixed". Once "fixed" has been set
-    on a key, it cannot be unset without performing a complete factory reset.
-    <pin_retries>, <reset_code_retries> and <admin_pin_retries> should be given
-    as three numerical values, in the range 1-255.
-
-    Options:
-        -h, --help         show this help message
-        -f, --force        don't ask for confirmation for actions
-        --admin-pin PIN    admin PIN to use. If omitted, you will be prompted
     """
 
-    name = 'openpgp'
-    transports = TRANSPORT.CCID
+    controller = OpgpController(ctx.obj['dev'].driver)
+    ctx.obj['controller'] = controller
 
-    action = Argument(('reset', 'touch', 'set-pin-retries'),
-                      lambda x: x.replace('-', '_'), default='info')
-    key = Argument('<key>', get_or_fail(KEY_NAMES))
-    policy = Argument('<policy>', get_or_fail(MODE_NAMES))
-    force = Argument('--force', bool)
-    pin = Argument('--admin-pin')
-    pw1_tries = Argument('<pin_retries>', int_in_range(1, 99))
-    pw2_tries = Argument('<reset_code_retries>', int_in_range(1, 99))
-    pw3_tries = Argument('<admin_pin_retries>', int_in_range(1, 99))
 
-    def __call__(self, dev):
-        controller = OpgpController(dev.driver)
-        return getattr(self, '_{}_action'.format(self.action))(controller)
+@openpgp.command()
+@click.pass_context
+def info(ctx):
+    """
+    Display version information about the OpenPGP functionality on the YubiKey.
+    """
+    controller = ctx.obj['controller']
+    click.echo('OpenPGP version: %d.%d.%d' % controller.version)
 
-    def _confirm(self, message):
-        if not self.force:
-            confirm(message)
 
-    def _info_action(self, controller):
-        print('OpenPGP version: %d.%d.%d' % controller.version)
+@openpgp.command()
+@click.confirmation_option('-f', '--force', prompt='WARNING! This will delete '
+                           'all stored OpenPGP keys and data and restore '
+                           'factory settings?')
+@click.pass_context
+def reset(ctx):
+    """
+    Resets OpenPGP functionality of the YubiKey, clearing all data.
 
-    def _reset_action(self, controller):
-        self._confirm('WARNING! This will delete all stored OpenPGP keys and '
-                      'data and restore factory settings?')
-        print('Resetting OpenPGP data...')
-        controller.reset()
-        print('Success! All data has been cleared and default PINs are set.')
-        print('PIN:       123456')
-        print('Admin PIN: 12345678')
+    This action will wipe all OpenPGP data, and set all PINs to their default
+    values.
+    """
+    click.echo('Resetting OpenPGP data...')
+    ctx.obj['controller'].reset()
+    echo_default_pins()
 
-    def _touch_action(self, controller):
-        old_policy = controller.get_touch(self.key)
-        print('Current touch policy of {.name} key is {.name}.'.format(
-            self.key, old_policy))
-        if self.policy is None:
-            return
 
-        if old_policy == TOUCH_MODE.ON_FIXED:
-            print('A FIXED policy cannot be changed!')
-            return 1
+def echo_default_pins():
+    click.echo('Success! All data has been cleared and default PINs are set.')
+    click.echo('PIN:         123456')
+    click.echo('Reset code:  NOT SET')
+    click.echo('Admin PIN:   12345678')
 
-        self._confirm('Set touch policy of {.name} key to {.name}?'.format(
-            self.key, self.policy))
-        if self.pin is None:
-            self.pin = getpass.getpass('Enter Admin PIN: ')
-        controller.set_touch(self.key, self.policy, self.pin.encode('utf8'))
-        print('Touch policy successfully set.')
 
-    def _set_pin_retries_action(self, controller):
-        if controller.version <= (1, 0, 7) or \
-                (4, 0, 0) <= controller.version < (4, 3, 0):
-            raise ValueError('Changing the number of PIN retries is not '
-                             'supported on this YubiKey.')
-        self._confirm('Set PIN retry counters to: {} {} {}?'.format(
-            self.pw1_tries, self.pw2_tries, self.pw3_tries))
-        if self.pin is None:
-            self.pin = getpass.getpass('Enter Admin PIN: ')
-        controller.set_pin_retries(self.pw1_tries, self.pw2_tries,
-                                   self.pw3_tries, self.pin.encode('utf8'))
-        print('PIN retries successfully set.')
+@openpgp.command()
+@click.argument('key', type=click.Choice(sorted(KEY_NAMES)),
+                callback=lambda c, p, k: KEY_NAMES.get(k))
+@click.argument('policy', type=click.Choice(sorted(MODE_NAMES)),
+                callback=lambda c, p, k: MODE_NAMES.get(k), required=False)
+@click.option('--admin-pin', required=False, help='Admin PIN for OpenPGP.')
+@click_force_option
+@click.pass_context
+def touch(ctx, key, policy, admin_pin, force):
+    """
+    Get or set the touch policy for one of the OpenPGP keys.
+
+    \b
+    KEY     Key slot to get/set (sig, enc or aut).
+    POLICY  Touch policy to set (on, of or fixed).
+    """
+    controller = ctx.obj['controller']
+    if controller.version <= (4, 2, 0):
+        ctx.fail('Setting a touch policy is not supported on this YubiKey.')
+    old_policy = controller.get_touch(key)
+    click.echo('Current touch policy of {.name} key is {.name}.'.format(
+        key, old_policy))
+    if policy is None:
+        return
+
+    if old_policy == TOUCH_MODE.ON_FIXED:
+        ctx.fail('A FIXED policy cannot be changed!')
+
+    force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
+        key, policy), abort=True)
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True)
+    controller.set_touch(key, policy, admin_pin.encode('utf8'))
+    click.echo('Touch policy successfully set.')
+
+
+@openpgp.command('set-pin-retries')
+@click.argument('pw-attempts', nargs=3, type=click.IntRange(1, 99))
+@click.password_option('--admin-pin', prompt='Enter admin PIN',
+                       confirmation_prompt=False)
+@click_force_option
+@click.pass_context
+def set_pin_retries(ctx, pw_attempts, admin_pin, force):
+    """
+    Sets the number of attempts available before locking for each PIN.
+
+    PW_ATTEMPTS should be three integer values corresponding to the number of
+    attempts for the PIN, Reset Code, and Admin PIN, respectively.
+    """
+    controller = ctx.obj['controller']
+    if controller.version <= (1, 0, 7) or \
+            (4, 0, 0) <= controller.version < (4, 3, 0):
+        ctx.fail('Changing the number of PIN retries is not supported on this '
+                 'YubiKey.')
+    resets_pins = controller.version < (4, 0, 0)
+    if resets_pins:
+        click.echo('WARNING: Setting PIN retries will reset the values for all '
+                   '3 PINs!')
+    force or click.confirm('Set PIN retry counters to: {} {} {}?'.format(
+        *pw_attempts), abort=True)
+    controller.set_pin_retries(*(pw_attempts + (admin_pin.encode('utf8'),)))
+    click.echo('PIN retries successfully set.')
+    if resets_pins:
+        echo_default_pins()
+
+
+openpgp.transports = TRANSPORT.CCID
