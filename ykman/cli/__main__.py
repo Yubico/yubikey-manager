@@ -93,7 +93,7 @@ def cli(ctx):
     Interface with a YubiKey via the command line.
     """
     dev = None
-    subcmd = next(filter(lambda c: c.name == ctx.invoked_subcommand, COMMANDS))
+    subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     transports = getattr(subcmd, 'transports', sum(TRANSPORT))
     if transports:
         if TRANSPORT.CCID & transports:

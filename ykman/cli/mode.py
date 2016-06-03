@@ -107,7 +107,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
         click.echo('Mode set! You must remove and re-insert your YubiKey for '
                    'this change to take effect.')
     else:
-        click.echo('Current mode is:', dev.mode)
+        click.echo('Current mode is: {}'.format(dev.mode))
         supported = ', '.join(t.name for t in TRANSPORT
                               .split(dev.capabilities))
-        click.echo('Supported transports are:', supported)
+        click.echo('Supported transports are: {}'.format(supported))
