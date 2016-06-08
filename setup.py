@@ -54,8 +54,8 @@ setup(
     yc_requires=['ctypes', 'qt'],
     yc_requires_exclude=['PySide'],
     extras_require={
-        'ykman-cli': ['click'],
-        'ykman-gui': ['PySide']
+        'cli': ['click'],
+        'gui': ['PySide']
     },
     cmdclass={
         'executable': executable,
