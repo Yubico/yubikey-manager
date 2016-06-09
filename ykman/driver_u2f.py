@@ -27,7 +27,7 @@
 
 from __future__ import print_function
 
-from .native.u2fh import *
+from .native.u2fh import u2fh, u2fh_devs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver
 from .util import Mode, TRANSPORT
@@ -41,11 +41,11 @@ INS_YK4_CAPABILITIES = 0x1d
 OTP_AID = b'\xa0\x00\x00\x05\x27\x20\x01'
 
 
-if u2fh_global_init(1 if 'DEBUG' in os.environ else 0) != 0:
+if u2fh.u2fh_global_init(1 if 'DEBUG' in os.environ else 0) != 0:
     raise Exception("Unable to initialize libu2f-host")
 
 
-libversion = u2fh_check_version(None).decode('ascii')
+libversion = u2fh.u2fh_check_version(None).decode('ascii')
 
 
 U2F_VENDOR_FIRST = 0x40
@@ -88,8 +88,8 @@ class U2FDriver(AbstractDriver):
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
 
-        status = u2fh_sendrecv(self._devs, self._index, cmd, data, len(data),
-                               resp, byref(buf_size))
+        status = u2fh.u2fh_sendrecv(self._devs, self._index, cmd, data,
+                                    len(data), resp, byref(buf_size))
         if status != 0:
             raise Exception('u2fh_sendrecv error: {}'.format(status))
         return resp.raw[0:buf_size.value]
@@ -99,21 +99,21 @@ class U2FDriver(AbstractDriver):
         self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
 
     def __del__(self):
-        u2fh_devs_done(self._devs)
+        u2fh.u2fh_devs_done(self._devs)
 
 
 def open_device():
     devs = POINTER(u2fh_devs)()
-    status = u2fh_devs_init(byref(devs))
+    status = u2fh.u2fh_devs_init(byref(devs))
     if status != 0:
         raise Exception('u2fh_devs_init error: {}'.format(status))
     max_index = c_uint()
-    status = u2fh_devs_discover(devs, byref(max_index))
+    status = u2fh.u2fh_devs_discover(devs, byref(max_index))
     if status == 0:
         resp = create_string_buffer(1024)
         for index in range(max_index.value + 1):
             buf_size = c_size_t(1024)
-            if u2fh_get_device_description(
+            if u2fh.u2fh_get_device_description(
                     devs, index, resp, byref(buf_size)) == 0:
                 name = resp.value.decode('utf8')
                 if name.startswith('Yubikey') \

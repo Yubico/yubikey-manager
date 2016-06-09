@@ -27,36 +27,32 @@
 from ctypes import (Structure, POINTER, c_int, c_uint, c_uint8, c_uint16,
                     c_char_p, c_size_t)
 
-from ..yubicommon.ctypes.libloader import use_library
+from ..yubicommon.ctypes import CLibrary
 
 
-u2fh = use_library('u2f-host', '0')
+__all__ = ['u2fh', 'u2fh_devs']
 
 
 u2fh_rc = c_int
 u2fh_initflags = c_uint
-
-
-u2fh_check_version = u2fh('u2fh_check_version', [c_char_p], c_char_p)
-
 u2fh_devs = type('u2fh_devs', (Structure,), {})
 
-u2fh_global_init = u2fh('u2fh_global_init', [u2fh_initflags], u2fh_rc)
-u2fh_global_done = u2fh('u2fh_global_done', [])
 
-u2fh_devs_init = u2fh('u2fh_devs_init', [POINTER(POINTER(u2fh_devs))],
-                      u2fh_rc)
-u2fh_devs_discover = u2fh('u2fh_devs_discover', [POINTER(u2fh_devs),
-                                                 POINTER(c_uint)], u2fh_rc)
-u2fh_devs_done = u2fh('u2fh_devs_done', [POINTER(u2fh_devs)])
+class U2fh(CLibrary):
+    u2fh_check_version = [c_char_p], c_char_p
 
-u2fh_is_alive = u2fh('u2fh_is_alive', [POINTER(u2fh_devs), c_uint], c_int)
-u2fh_sendrecv = u2fh('u2fh_sendrecv', [POINTER(u2fh_devs), c_uint, c_uint8,
-                                       c_char_p, c_uint16, c_char_p,
-                                       POINTER(c_size_t)], u2fh_rc)
-u2fh_get_device_description = u2fh('u2fh_get_device_description',
-                                   [POINTER(u2fh_devs), c_int, c_char_p,
-                                    POINTER(c_size_t)], u2fh_rc)
+    u2fh_global_init = [u2fh_initflags], u2fh_rc
+    u2fh_global_done = [], None
+
+    u2fh_devs_init = [POINTER(POINTER(u2fh_devs))], u2fh_rc
+    u2fh_devs_discover = [POINTER(u2fh_devs), POINTER(c_uint)], u2fh_rc
+    u2fh_devs_done = [POINTER(u2fh_devs)], None
+
+    u2fh_is_alive = [POINTER(u2fh_devs), c_uint], c_int
+    u2fh_sendrecv = [POINTER(u2fh_devs), c_uint, c_uint8, c_char_p, c_uint16,
+                     c_char_p, POINTER(c_size_t)], u2fh_rc
+    u2fh_get_device_description = [POINTER(u2fh_devs), c_int, c_char_p,
+                                   POINTER(c_size_t)], u2fh_rc
 
 
-__all__ = [x for x in globals().keys() if x.lower().startswith('u2fh')]
+u2fh = U2fh('u2f-host', '0')
