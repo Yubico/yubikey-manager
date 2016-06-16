@@ -34,6 +34,9 @@ from .mode import ModeDialog
 from .slot import SlotDialog
 
 
+NON_FEATURE_CAPABILITIES = ['CCID', 'NFC']
+
+
 def format_readable_list(items):
     if not items:
         return ''
@@ -75,6 +78,7 @@ class _HeaderPanel(QtGui.QGroupBox):
 
 
 class _FeatureSection(QtGui.QGroupBox):
+
     names = dict((c, c.name + ':') for c in CAPABILITY)
     configurable = CAPABILITY.OTP | CAPABILITY.OPGP
 
@@ -87,7 +91,7 @@ class _FeatureSection(QtGui.QGroupBox):
 
         row_i = 0
 
-        for c in CAPABILITY:
+        for c in (c for c in CAPABILITY if c.name not in NON_FEATURE_CAPABILITIES):
             label = QtGui.QLabel(self.names[c])
             status = QtGui.QLabel('N/A')
             widgets = [label, status]
