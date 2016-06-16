@@ -57,7 +57,7 @@ def parse_public_id(ctx, param, value):
         dev = ctx.obj['dev']
         if dev.serial is None:
             ctx.fail('serial number not set, public-id must be provided')
-        value = b'\x77\x77' + struct.pack(b'>I', dev.serial)
+        value = b'\xff\x00' + struct.pack(b'>I', dev.serial)
         click.echo('Using serial as public ID: {}'.format(modhex_encode(value)))
     else:
         value = modhex_decode(value)
@@ -123,7 +123,7 @@ def delete(ctx, slot, force):
 @click.option('--public-id', required=False, callback=parse_public_id,
               help='Static part of the OTP, defaults to the devices serial '
               'number converted to modhex.', metavar='MODHEX')
-@click.option('--private-id', required=False, default=b'\0'*6,
+@click.option('--private-id', required=False, default='00'*6,
               callback=lambda c, p, v: a2b_hex(v), help='6 byte private '
               'identifier of the credential.', metavar='HEX')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
