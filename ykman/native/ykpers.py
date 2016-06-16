@@ -95,7 +95,7 @@ class Ykpers(CLibrary):
         return self._yk_errno_location().contents.value
 
     def _ykp_set(self, cfg, name, value=True):
-        cmd = self._define(name, [POINTER(YKP_CONFIG), c_uint8], bool)
+        cmd = self._lib(name, [POINTER(YKP_CONFIG), c_uint8], bool)
         return cmd(cfg, value)
 
     def ykp_set_tktflag(self, cfg, name, value=True):
