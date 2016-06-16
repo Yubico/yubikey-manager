@@ -139,7 +139,7 @@ class _ModeSection(QtGui.QGroupBox):
     names = dict((t, t.name + ':') for t in TRANSPORT)
 
     def __init__(self, controller, parent=None):
-        super(_ModeSection, self).__init__('USB Protocols', parent)
+        super(_ModeSection, self).__init__('Transport protocols', parent)
         self._controller = controller
 
         grid_layout = QtGui.QGridLayout(self)

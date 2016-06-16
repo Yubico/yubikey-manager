@@ -67,8 +67,8 @@ class ModeDialog(qt.Dialog):
         self._state = 0
 
         layout = QtGui.QVBoxLayout(self)
-        layout.addWidget(QtGui.QLabel('<h2>Configure enabled USB protocols</h2>'))
-        layout.addWidget(QtGui.QLabel('Set the enabled USB protocols for your YubiKey.'))
+        layout.addWidget(QtGui.QLabel('<h2>Configure enabled transport protocols</h2>'))
+        layout.addWidget(QtGui.QLabel('Set the enabled transport protocols for your YubiKey.'))
         desc_lbl = QtGui.QLabel('Once changed, you will need to unplug and re-insert your YubiKey for the setting to take effect.')
         desc_lbl.setWordWrap(True)
         layout.addWidget(desc_lbl)
