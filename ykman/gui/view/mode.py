@@ -79,6 +79,7 @@ class ModeDialog(qt.Dialog):
             cb = QtGui.QCheckBox(t.name)
             cb.setChecked(controller.enabled & t)
             cb.stateChanged.connect(partial(self._state_changed, t))
+            cb.setEnabled(TRANSPORT.has(TRANSPORT.usb_transports(), t))
             self._state |= controller.enabled & t
             boxes.addWidget(cb)
             self._boxes.append(cb)
@@ -114,4 +115,4 @@ class ModeDialog(qt.Dialog):
 
     @property
     def mode(self):
-        return Mode(self._state)
+        return Mode(self._state & TRANSPORT.usb_transports())
