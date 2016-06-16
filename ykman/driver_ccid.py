@@ -125,6 +125,7 @@ class CCIDDriver(AbstractDriver):
 
 
 def kill_scdaemon():
+    killed = False
     try:
         # Works for Windows.
         from win32com.client import GetObject
@@ -134,11 +135,10 @@ def kill_scdaemon():
         for p in ps:
             if p.Properties_('Name').Value == 'scdaemon.exe':
                 pid = p.Properties_('ProcessID').Value
-                print("Stopping scdaemon...")
                 handle = OpenProcess(1, False, pid)
                 TerminateProcess(handle, -1)
                 CloseHandle(handle)
-                time.sleep(0.1)
+                killed = True
     except ImportError:
         # Works for Linux and OS X.
         pids = subprocess.check_output(
@@ -146,9 +146,13 @@ def kill_scdaemon():
             shell=True).strip()
         if pids:
             for pid in pids.split():
-                print("Stopping scdaemon...")
                 subprocess.call(['kill', '-9', pid])
-            time.sleep(0.1)
+            killed = True
+
+    if killed:
+        print("scdaemon stopped...")
+        time.sleep(0.1)
+    return killed
 
 
 def open_device():
@@ -158,8 +162,7 @@ def open_device():
                 conn = reader.createConnection()
                 conn.connect()
             except Exceptions.CardConnectionException as e:
-                if 'Sharing violation' in str(e):
-                    kill_scdaemon()
+                if 'Sharing violation' in str(e) and kill_scdaemon():
                     return open_device()
                 raise
             return CCIDDriver(conn, reader.name)
