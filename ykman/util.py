@@ -37,8 +37,8 @@ class BitflagEnum(IntEnum):
     def split(cls, flags):
         return (c for c in cls if c & flags)
 
-    @classmethod
-    def has(cls, flags, check):
+    @staticmethod
+    def has(flags, check):
         return flags & check == check
 
 
@@ -57,6 +57,10 @@ class TRANSPORT(BitflagEnum):
     U2F = CAPABILITY.U2F
     CCID = CAPABILITY.CCID
     NFC = CAPABILITY.NFC
+
+    @staticmethod
+    def usb_transports():
+        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F
 
 
 class Mode(object):

@@ -92,8 +92,9 @@ class YubiKey(object):
             self.capabilities = CAPABILITY.OTP
             self._can_mode_switch = False
 
-        if not self.enabled:  # Assume everything supported is enabled.
-            self.enabled = self.capabilities & ~sum(TRANSPORT)  # not transports
+        if not self.enabled:
+            # Assume everything supported is enabled, except USB transports
+            self.enabled = self.capabilities & ~TRANSPORT.usb_transports()
             self.enabled |= self.mode.transports  # ...unless they are enabled.
 
     def _parse_capabilities(self, data):
