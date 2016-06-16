@@ -37,39 +37,10 @@ from .info import info
 from .mode import mode
 from .slot import slot
 from .opgp import openpgp
-import time
-import subprocess
 import click
 
 
 COMMANDS = (info, mode, slot, openpgp, gui)
-
-
-def kill_scdaemon():
-    try:
-        # Works for Windows.
-        from win32com.client import GetObject
-        from win32api import OpenProcess, CloseHandle, TerminateProcess
-        WMI = GetObject('winmgmts:')
-        ps = WMI.InstancesOf('Win32_Process')
-        for p in ps:
-            if p.Properties_('Name').Value == 'scdaemon.exe':
-                pid = p.Properties_('ProcessID').Value
-                click.echo("Stopping scdaemon...")
-                handle = OpenProcess(1, False, pid)
-                TerminateProcess(handle, -1)
-                CloseHandle(handle)
-                time.sleep(0.1)
-    except ImportError:
-        # Works for Linux and OS X.
-        pids = subprocess.check_output(
-            "ps ax | grep scdaemon | grep -v grep | awk '{ print $1 }'",
-            shell=True).strip()
-        if pids:
-            for pid in pids.split():
-                click.echo("Stopping scdaemon...")
-                subprocess.call(['kill', '-9', pid])
-            time.sleep(0.1)
 
 
 CLICK_CONTEXT_SETTINGS = dict(
@@ -96,8 +67,6 @@ def cli(ctx):
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     transports = getattr(subcmd, 'transports', sum(TRANSPORT))
     if transports:
-        if TRANSPORT.CCID & transports:
-            kill_scdaemon()
         try:
             dev = open_device(transports)
             if not dev:

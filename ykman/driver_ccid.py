@@ -27,7 +27,9 @@
 
 
 import struct
-from smartcard import System
+import subprocess
+import time
+from smartcard import System, Exceptions
 from .driver import AbstractDriver
 from .util import Mode, CAPABILITY, TRANSPORT
 from .yubicommon.compat import byte2int, int2byte
@@ -122,9 +124,42 @@ class CCIDDriver(AbstractDriver):
             pass  # Ignore
 
 
+def kill_scdaemon():
+    try:
+        # Works for Windows.
+        from win32com.client import GetObject
+        from win32api import OpenProcess, CloseHandle, TerminateProcess
+        WMI = GetObject('winmgmts:')
+        ps = WMI.InstancesOf('Win32_Process')
+        for p in ps:
+            if p.Properties_('Name').Value == 'scdaemon.exe':
+                pid = p.Properties_('ProcessID').Value
+                print("Stopping scdaemon...")
+                handle = OpenProcess(1, False, pid)
+                TerminateProcess(handle, -1)
+                CloseHandle(handle)
+                time.sleep(0.1)
+    except ImportError:
+        # Works for Linux and OS X.
+        pids = subprocess.check_output(
+            "ps ax | grep scdaemon | grep -v grep | awk '{ print $1 }'",
+            shell=True).strip()
+        if pids:
+            for pid in pids.split():
+                print("Stopping scdaemon...")
+                subprocess.call(['kill', '-9', pid])
+            time.sleep(0.1)
+
+
 def open_device():
     for reader in System.readers():
         if reader.name.lower().startswith('yubico yubikey'):
-            conn = reader.createConnection()
-            conn.connect()
+            try:
+                conn = reader.createConnection()
+                conn.connect()
+            except Exceptions.CardConnectionException as e:
+                if 'Sharing violation' in str(e):
+                    kill_scdaemon()
+                    return open_device()
+                raise
             return CCIDDriver(conn, reader.name)
