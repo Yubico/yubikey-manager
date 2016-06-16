@@ -68,8 +68,10 @@ class YubiKey(object):
         elif self.version >= (4, 1, 0):
             self.device_name = 'YubiKey 4'
             self._parse_capabilities(driver.read_capabilities())
-            if self.capabilities == 0x07:  # YK Edge has no use for CCID.
+            if self.capabilities == \
+                    (CAPABILITY.OTP | CAPABILITY.CCID | CAPABILITY.U2F):
                 self.device_name = 'YubiKey Edge'
+                # YK Edge has no use for CCID.
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
         elif self.version >= (4, 0, 0):  # YK Plus
             self.device_name = 'YubiKey Plus'
@@ -85,6 +87,7 @@ class YubiKey(object):
                     | CAPABILITY.CCID
             else:
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID
+            self.capabilities |= CAPABILITY.NFC  # All NEOs have NFC.
         else:  # Standard
             self.capabilities = CAPABILITY.OTP
             self._can_mode_switch = False

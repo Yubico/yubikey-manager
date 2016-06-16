@@ -49,12 +49,14 @@ class CAPABILITY(BitflagEnum):
     OPGP = 0x08
     PIV = 0x10
     OATH = 0x20
+    NFC = 0x40
 
 
 class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
     U2F = CAPABILITY.U2F
     CCID = CAPABILITY.CCID
+    NFC = CAPABILITY.NFC
 
 
 class Mode(object):
