@@ -37,6 +37,7 @@ class Controller(QtCore.QObject):
     hasDeviceChanged = QtCore.Signal(bool)
     deviceNameChanged = QtCore.Signal(str)
     serialChanged = QtCore.Signal(int)
+    versionChanged = QtCore.Signal(object)
     capabilitiesChanged = QtCore.Signal(int)
     enabledChanged = QtCore.Signal(int)
     canModeSwitchChanged = QtCore.Signal(bool)
@@ -53,6 +54,7 @@ class Controller(QtCore.QObject):
         self._data.add_property('device_name', 'No YubiKey detected',
                                 self.deviceNameChanged)
         self._data.add_property('serial', 0, self.serialChanged)
+        self._data.add_property('version', None, self.versionChanged)
         self._data.add_property('capabilities', 0, self.capabilitiesChanged)
         self._data.add_property('enabled', 0, self.enabledChanged)
         self._data.add_property('can_mode_switch', False,
@@ -69,6 +71,10 @@ class Controller(QtCore.QObject):
     @property
     def serial(self):
         return self._data['serial']
+
+    @property
+    def version(self):
+        return self._data['version']
 
     @property
     def capabilities(self):
@@ -110,6 +116,7 @@ class Controller(QtCore.QObject):
                     self._data['has_device'] = True
                     self._data['device_name'] = dev.device_name
                     self._data['serial'] = dev.serial
+                    self._data['version'] = dev.version
                     self._data['capabilities'] = dev.capabilities
                     self._data['enabled'] = dev.enabled
                     self._data['can_mode_switch'] = dev.can_mode_switch

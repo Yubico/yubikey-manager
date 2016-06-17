@@ -51,10 +51,15 @@ class _HeaderPanel(QtGui.QGroupBox):
         super(_HeaderPanel, self).__init__('Device', parent)
 
         layout = QtGui.QHBoxLayout(self)
+
         self._device_name = QtGui.QLabel()
         layout.addWidget(self._device_name)
+
         self._serial = QtGui.QLabel()
         layout.addWidget(self._serial)
+
+        controller.versionChanged.connect(self._set_version)
+        self._set_version(controller.version)
 
         controller.hasDeviceChanged.connect(self._set_has_device)
         self._set_has_device(controller.has_device)
@@ -65,10 +70,12 @@ class _HeaderPanel(QtGui.QGroupBox):
         controller.serialChanged.connect(self._set_serial)
         self._set_serial(controller.serial)
 
+
     def _set_has_device(self, has_device):
         if not has_device:
             self._set_serial(None)
             self._set_device_name('No YubiKey detected')
+            self._set_version(None)
 
     def _set_device_name(self, name):
         self._device_name.setText(name)
@@ -76,6 +83,12 @@ class _HeaderPanel(QtGui.QGroupBox):
     def _set_serial(self, serial):
         self._serial.setText('Serial: {}'.format(serial) if serial else '')
 
+    def _set_version(self, version):
+        if version:
+            name = self._device_name.text()
+            f_version = '({0[0]}.{0[1]})'.format(version) if 'NEO' in name \
+                    else '({0[0]}.{0[1]}.{0[2]})'.format(version)
+            self._device_name.setText(name + ' ' + f_version)
 
 class _FeatureSection(QtGui.QGroupBox):
 
