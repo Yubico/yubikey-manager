@@ -31,6 +31,7 @@ from ..util import TRANSPORT, modhex_decode, modhex_encode
 from .util import click_force_option
 from base64 import b32decode
 from binascii import a2b_hex
+from ..driver_otp import WriteError
 import os
 import re
 import struct
@@ -99,8 +100,10 @@ def swap(ctx):
     """
     dev = ctx.obj['dev']
     click.echo('Swapping slots...')
-    dev.driver.swap_slots()
-
+    try:
+        dev.driver.swap_slots()
+    except WriteError:
+        _failed_to_write_msg()
 
 @slot.command()
 @click_slot_argument
@@ -114,8 +117,10 @@ def delete(ctx, slot, force):
     force or click.confirm('Really delete slot {} or the YubiKey?'.format(slot),
                            abort=True)
     click.echo('Deleting slot: {}...'.format(slot))
-    dev.driver.zap_slot(slot)
-
+    try:
+        dev.driver.zap_slot(slot)
+    except WriteError:
+        _failed_to_write_msg()
 
 @slot.command()
 @click_slot_argument
@@ -139,8 +144,10 @@ def otp(ctx, slot, key, public_id, private_id, no_enter, force):
     dev = ctx.obj['dev']
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True)
-    dev.driver.program_otp(slot, key, public_id, private_id, not no_enter)
-
+    try:
+        dev.driver.program_otp(slot, key, public_id, private_id, not no_enter)
+    except WriteError:
+        _failed_to_write_msg()
 
 @slot.command()
 @click_slot_argument
@@ -157,7 +164,10 @@ def static(ctx, slot, password, no_enter, force):
     force or click.confirm('Program a static password in slot {}?'.format(slot),
                            abort=True)
     click.echo('Setting static password in slot {}...'.format(slot))
-    dev.driver.program_static(slot, password, not no_enter)
+    try:
+        dev.driver.program_static(slot, password, not no_enter)
+    except WriteError:
+        _failed_to_write_msg()
 
 
 @slot.command()
@@ -183,8 +193,10 @@ def chalresp(ctx, slot, key, require_touch, force):
                            .format(slot), abort=True)
 
     click.echo('Programming challenge-response in slot {}...'.format(slot))
-    dev.driver.program_chalresp(slot, key, require_touch)
-
+    try:
+        dev.driver.program_chalresp(slot, key, require_touch)
+    except WriteError:
+        _failed_to_write_msg()
 
 @slot.command()
 @click_slot_argument
@@ -208,4 +220,12 @@ def hotp(ctx, slot, key, digits, imf, no_enter, force):
     force or click.confirm('Program a HOTP credential in slot {}?'.format(slot),
                            abort=True)
     click.echo('Programming HOTP credential in slot {}...'.format(slot))
-    dev.driver.program_hotp(slot, key, imf, digits == 8, not no_enter)
+    try:
+        dev.driver.program_hotp(slot, key, imf, digits == 8, not no_enter)
+    except WriteError:
+        _failed_to_write_msg()
+
+
+def _failed_to_write_msg():
+    click.echo('Failed to write to the device. Make sure the device does not have restricted access.')
+
