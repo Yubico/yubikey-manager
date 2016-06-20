@@ -40,7 +40,7 @@ def _parse_mode_string(ctx, param, mode):
         mode_int = int(mode)
         return Mode.from_code(mode_int)
     except IndexError:
-        raise ValueError('Invalid mode: {}'.format(mode_int))
+        ctx.fail('Invalid mode: {}'.format(mode_int))
     except ValueError:
         pass  # Not a numeric mode, parse string
 
@@ -53,10 +53,10 @@ def _parse_mode_string(ctx, param, mode):
                     found.add(available)
                     break
             else:
-                raise ValueError('Invalid mode string: {}'.format(mode))
+                ctx.fail('Invalid mode string: {}'.format(mode))
     if len(found) > 0:
         return Mode(sum(found))
-    raise ValueError('Invalid mode string: {}'.format(mode))
+    ctx.fail('Invalid mode string: {}'.format(mode))
 
 
 @click.command()
