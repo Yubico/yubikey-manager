@@ -93,7 +93,7 @@ class _HeaderPanel(QtGui.QGroupBox):
 class _FeatureSection(QtGui.QGroupBox):
 
     names = dict((c, c.name + ':') for c in CAPABILITY)
-    configurable = CAPABILITY.OTP | CAPABILITY.OPGP
+    configurable = CAPABILITY.OTP
 
     def __init__(self, controller, parent=None):
         super(_FeatureSection, self).__init__('Features', parent)
