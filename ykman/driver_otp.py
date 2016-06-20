@@ -61,7 +61,7 @@ class YkpersError(Exception):
 
 class WriteError(YkpersError):
 
-    """Write error from ykpers, may indicate 
+    """Write error from ykpers, may indicate
     that the device has restricted access."""
 
     def __init__(self):
@@ -105,7 +105,7 @@ class OTPDriver(AbstractDriver):
 
     def __init__(self, dev):
         self._dev = dev
-        self._accesscode = None
+        self._access_code = None
         self._version = (0, 0, 0)
         self._serial = self._read_serial()
         self._slot1_valid = False
@@ -114,12 +114,12 @@ class OTPDriver(AbstractDriver):
         self._mode = self._read_mode()
 
     @property
-    def accesscode(self):
-        return self._accesscode
+    def access_code(self):
+        return self._access_code
 
-    @accesscode.setter
-    def accesscode(self, value):
-        self._accesscode = value
+    @access_code.setter
+    def access_code(self, value):
+        self._access_code = value
 
     def _read_serial(self):
         serial = c_uint()
@@ -185,9 +185,9 @@ class OTPDriver(AbstractDriver):
             ykpers.ykp_configure_command(cfg, cmd)
             check(ykpers.ykp_set_extflag(cfg, 'SERIAL_API_VISIBLE'))
             check(ykpers.ykp_set_extflag(cfg, 'ALLOW_UPDATE'))
-            if self.accesscode is not None:
+            if self.access_code is not None:
                 check(ykpers.ykp_set_access_code(
-                    cfg, self.accesscode, len(self.accesscode)))
+                    cfg, self.access_code, len(self.access_code)))
             return cfg
         except YkpersError:
             ykpers.ykp_free_config(cfg)
@@ -218,7 +218,7 @@ class OTPDriver(AbstractDriver):
                 check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
             check(ykpers.yk_write_command(self._dev,
                                           ykpers.ykp_core_config(cfg),
-                                          cmd, self.accesscode))
+                                          cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
 
@@ -254,7 +254,7 @@ class OTPDriver(AbstractDriver):
                 ykpers.ykp_AES_key_from_raw(cfg, pw_bytes[-16:])
 
             check(ykpers.yk_write_command(
-                self._dev, ykpers.ykp_core_config(cfg), cmd, self.accesscode))
+                self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
 
@@ -275,7 +275,7 @@ class OTPDriver(AbstractDriver):
                 check(ykpers.ykp_set_cfgflag(cfg, 'CHAL_BTN_TRIG'))
             ykpers.ykp_HMAC_key_from_raw(cfg, key)
             check(ykpers.yk_write_command(
-                self._dev, ykpers.ykp_core_config(cfg), cmd, self.accesscode))
+                self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
 
@@ -301,13 +301,13 @@ class OTPDriver(AbstractDriver):
                 check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
             ykpers.ykp_HMAC_key_from_raw(cfg, key)
             check(ykpers.yk_write_command(
-                self._dev, ykpers.ykp_core_config(cfg), cmd, self.accesscode))
+                self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
 
     def zap_slot(self, slot):
         check(ykpers.yk_write_command(self._dev, None, slot_to_cmd(slot),
-                                      self.accesscode))
+                                      self.access_code))
 
     def swap_slots(self):
         if self.version < (2, 3, 0):
@@ -319,7 +319,7 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def set_accesscode(self, slot, old_code=None, new_code=None, update=True):
+    def set_access_code(self, slot, new_code=None, update=True):
         if update and self.version < (2, 3, 0):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
@@ -327,10 +327,12 @@ class OTPDriver(AbstractDriver):
         cmd = slot_to_cmd(slot, update)
         cfg = self._create_cfg(cmd)
         try:
-            if new_code is not None:
-                check(ykpers.ykp_set_access_code(cfg, new_code, len(new_code)))
+            if new_code is None:
+                new_code = b'\0' * 6
+            check(ykpers.ykp_set_access_code(cfg, new_code, len(new_code)))
             ycfg = ykpers.ykp_core_config(cfg)
-            check(ykpers.yk_write_command(self._dev, ycfg, cmd, old_code))
+            check(ykpers.yk_write_command(self._dev, ycfg, cmd,
+                                          self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
 

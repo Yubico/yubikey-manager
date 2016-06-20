@@ -91,7 +91,7 @@ def slot(ctx, access_code):
     """
     Manage YubiKey OTP slots.
     """
-    ctx.obj['dev'].driver.accesscode = access_code
+    ctx.obj['dev'].driver.access_code = access_code
 slot.transports = TRANSPORT.OTP
 
 
