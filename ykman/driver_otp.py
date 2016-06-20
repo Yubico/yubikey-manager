@@ -28,7 +28,7 @@
 
 from .native.ykpers import ykpers
 from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
-from .driver import AbstractDriver
+from .driver import AbstractDriver, ModeSwitchError
 from .util import Mode, TRANSPORT
 from .scanmap import us
 from .yubicommon.compat import byte2int, int2byte, text_type
@@ -161,7 +161,7 @@ class OTPDriver(AbstractDriver):
         ykpers.ykp_set_device_autoeject_time(config, autoeject_time)
         try:
             check(ykpers.yk_write_device_config(self._dev, config))
-        except YkPersError:
+        except YkpersError:
             raise ModeSwitchError()
         finally:
             ykpers.ykp_free_device_config(config)

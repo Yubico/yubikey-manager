@@ -40,14 +40,6 @@ INS_YK4_CAPABILITIES = 0x1d
 
 OTP_AID = b'\xa0\x00\x00\x05\x27\x20\x01'
 
-
-if u2fh.u2fh_global_init(1 if 'DEBUG' in os.environ else 0) != 0:
-    raise Exception("Unable to initialize libu2f-host")
-
-
-libversion = u2fh.u2fh_check_version(None).decode('ascii')
-
-
 U2F_VENDOR_FIRST = 0x40
 TYPE_INIT = 0x80
 U2FHID_PING = TYPE_INIT | 0x01
@@ -64,6 +56,15 @@ class U2FHostError(Exception):
     def __str__(self):
         return 'u2fh error {}, {}'.format(self.errno, self.message)
 
+
+def check(status):
+    if status is not 0:
+        raise U2FHostError(status)
+
+
+check(u2fh.u2fh_global_init(0))
+
+libversion = u2fh.u2fh_check_version(None).decode('ascii')
 
 class U2FDriver(AbstractDriver):
     """
@@ -97,11 +98,8 @@ class U2FDriver(AbstractDriver):
     def sendrecv(self, cmd, data):
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
-
-        status = u2fh.u2fh_sendrecv(self._devs, self._index, cmd, data,
-                                    len(data), resp, byref(buf_size))
-        if status != 0:
-            raise U2FHostError(status)
+        check(u2fh.u2fh_sendrecv(self._devs, self._index, cmd, data,
+                                    len(data), resp, byref(buf_size)))
         return resp.raw[0:buf_size.value]
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
@@ -116,18 +114,15 @@ class U2FDriver(AbstractDriver):
 
 def open_device():
     devs = POINTER(u2fh_devs)()
-    status = u2fh.u2fh_devs_init(byref(devs))
-    if status != 0:
-        raise Exception('u2fh_devs_init error: {}'.format(status))
+    check(u2fh.u2fh_devs_init(byref(devs)))
     max_index = c_uint()
-    status = u2fh.u2fh_devs_discover(devs, byref(max_index))
-    if status == 0:
-        resp = create_string_buffer(1024)
-        for index in range(max_index.value + 1):
-            buf_size = c_size_t(1024)
-            if u2fh.u2fh_get_device_description(
-                    devs, index, resp, byref(buf_size)) == 0:
-                name = resp.value.decode('utf8')
-                if name.startswith('Yubikey') \
-                        or name.startswith('Security Key by Yubico'):
-                    return U2FDriver(devs, index, name)
+    u2fh.u2fh_devs_discover(devs, byref(max_index))
+    resp = create_string_buffer(1024)
+    for index in range(max_index.value + 1):
+        buf_size = c_size_t(1024)
+        if u2fh.u2fh_get_device_description(
+                devs, index, resp, byref(buf_size)) == 0:
+            name = resp.value.decode('utf8')
+            if name.startswith('Yubikey') \
+                    or name.startswith('Security Key by Yubico'):
+                return U2FDriver(devs, index, name)
