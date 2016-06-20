@@ -39,6 +39,9 @@ u2fh_devs = type('u2fh_devs', (Structure,), {})
 
 
 class U2fh(CLibrary):
+    u2fh_strerror = [u2fh_rc], c_char_p
+    u2fh_strerror_name = [u2fh_rc], c_char_p
+
     u2fh_check_version = [c_char_p], c_char_p
 
     u2fh_global_init = [u2fh_initflags], u2fh_rc
