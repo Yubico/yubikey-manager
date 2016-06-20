@@ -30,6 +30,7 @@ from __future__ import absolute_import, print_function
 from PySide import QtGui
 
 from ...util import CAPABILITY, TRANSPORT
+from .. import messages as m
 from .mode import ModeDialog
 from .slot import SlotDialog
 
@@ -48,7 +49,7 @@ def format_readable_list(items):
 
 class _HeaderPanel(QtGui.QGroupBox):
     def __init__(self, controller, parent=None):
-        super(_HeaderPanel, self).__init__('Device', parent)
+        super(_HeaderPanel, self).__init__(m.device, parent)
 
         layout = QtGui.QHBoxLayout(self)
 
@@ -73,14 +74,14 @@ class _HeaderPanel(QtGui.QGroupBox):
     def _set_has_device(self, has_device):
         if not has_device:
             self._set_serial(None)
-            self._set_device_name('No YubiKey detected')
+            self._set_device_name(m.no_key)
             self._set_version(None)
 
     def _set_device_name(self, name):
         self._device_name.setText(name)
 
     def _set_serial(self, serial):
-        self._serial.setText('Serial: {}'.format(serial) if serial else '')
+        self._serial.setText((m.serial_1 % serial) if serial else '')
 
     def _set_version(self, version):
         if version:
@@ -96,7 +97,7 @@ class _FeatureSection(QtGui.QGroupBox):
     configurable = CAPABILITY.OTP
 
     def __init__(self, controller, parent=None):
-        super(_FeatureSection, self).__init__('Features', parent)
+        super(_FeatureSection, self).__init__(m.features, parent)
         self._controller = controller
         self._widgets = {}
 
@@ -135,15 +136,15 @@ class _FeatureSection(QtGui.QGroupBox):
         for c, widgets in self._widgets.items():
             if c & self._controller.capabilities:
                 if c & self._controller.enabled:
-                    widgets[1].setText('Enabled')
+                    widgets[1].setText(m.enabled)
                     if c & self.configurable:
                         widgets[2].setVisible(True)
                 else:
-                    widgets[1].setText('Disabled')
+                    widgets[1].setText(m.disabled)
                     if c & self.configurable:
                         widgets[2].setVisible(False)
             else:
-                widgets[1].setText('Not available')
+                widgets[1].setText(m.not_available)
                 if c & self.configurable:
                     widgets[2].setVisible(False)
 
@@ -152,19 +153,19 @@ class _ModeSection(QtGui.QGroupBox):
     names = dict((t, t.name + ':') for t in TRANSPORT)
 
     def __init__(self, controller, parent=None):
-        super(_ModeSection, self).__init__('Transport protocols', parent)
+        super(_ModeSection, self).__init__(m.connections, parent)
         self._controller = controller
 
         grid_layout = QtGui.QGridLayout(self)
 
         row_i = 0
 
-        grid_layout.addWidget(QtGui.QLabel('Supported:'), row_i, 0)
+        grid_layout.addWidget(QtGui.QLabel('%s:' % m.supported), row_i, 0)
         self._supported_label = QtGui.QLabel()
         grid_layout.addWidget(self._supported_label, row_i, 1, 1, 2)
         row_i += 1
 
-        grid_layout.addWidget(QtGui.QLabel('Enabled:'), row_i, 0)
+        grid_layout.addWidget(QtGui.QLabel('%s:' % m.enabled), row_i, 0)
         self._enabled_label = QtGui.QLabel()
         grid_layout.addWidget(self._enabled_label, row_i, 1)
         self._configure_label = QtGui.QLabel('<a href="#">configure</a>')

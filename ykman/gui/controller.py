@@ -29,6 +29,7 @@ from __future__ import absolute_import, print_function
 
 from PySide import QtCore
 from .util import SignalMap
+from . import messages as m
 from ..device import open_device, FailedOpeningDeviceException
 from ..util import TRANSPORT
 
@@ -51,8 +52,7 @@ class Controller(QtCore.QObject):
 
         self._data = SignalMap()
         self._data.add_property('has_device', False, self.hasDeviceChanged)
-        self._data.add_property('device_name', 'No YubiKey detected',
-                                self.deviceNameChanged)
+        self._data.add_property('device_name', m.no_key, self.deviceNameChanged)
         self._data.add_property('serial', 0, self.serialChanged)
         self._data.add_property('version', None, self.versionChanged)
         self._data.add_property('capabilities', 0, self.capabilitiesChanged)
