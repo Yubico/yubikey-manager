@@ -59,21 +59,9 @@ class YkpersError(Exception):
         return 'ykpers error {}, {}'.format(self.errno, self.message)
 
 
-class WriteError(YkpersError):
-
-    """Write error from ykpers, may indicate
-    that the device has restricted access."""
-
-    def __init__(self):
-        super(WriteError, self).__init__(3)
-
-
 def check(status):
     if not status:
-        if ykpers.yk_get_errno() is 3:
-            raise WriteError()
-        else:
-            raise YkpersError(ykpers.yk_get_errno())
+        raise YkpersError(ykpers.yk_get_errno())
 
 
 check(ykpers.yk_init())
@@ -173,6 +161,8 @@ class OTPDriver(AbstractDriver):
         ykpers.ykp_set_device_autoeject_time(config, autoeject_time)
         try:
             check(ykpers.yk_write_device_config(self._dev, config))
+        except YkPersError:
+            raise ModeSwitchError()
         finally:
             ykpers.ykp_free_device_config(config)
 
