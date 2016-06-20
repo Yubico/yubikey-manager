@@ -27,8 +27,22 @@
 
 import click
 
-__all__ = ['click_force_option']
+__all__ = ['click_force_option', 'click_callback']
 
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
+
+
+def click_callback(invoke_on_missing=False):
+    def wrap(f):
+        def inner(ctx, param, val):
+            if not invoke_on_missing and not param.required and val is None:
+                return None
+            try:
+                return f(ctx, param, val)
+            except Exception as e:
+                ctx.fail('Invalid value for "{}": {}'.format(
+                    param.name, str(e)))
+        return inner
+    return wrap

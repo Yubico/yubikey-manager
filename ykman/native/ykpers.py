@@ -87,6 +87,7 @@ class Ykpers(CLibrary):
     ykp_set_device_autoeject_time = [POINTER(YK_DEVICE_CONFIG), c_ushort], bool
     ykp_set_fixed = [POINTER(YKP_CONFIG), c_char_p, c_size_t], bool
     ykp_set_uid = [POINTER(YKP_CONFIG), c_char_p, c_size_t], bool
+    ykp_set_access_code = [POINTER(YKP_CONFIG), c_char_p, c_size_t], bool
     ykp_AES_key_from_raw = [POINTER(YKP_CONFIG), c_char_p], bool
     ykp_HMAC_key_from_raw = [POINTER(YKP_CONFIG), c_char_p], bool
     ykp_set_oath_imf = [POINTER(YKP_CONFIG), c_ulong], bool
