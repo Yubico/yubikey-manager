@@ -34,7 +34,7 @@ from .mode import ModeDialog
 from .slot import SlotDialog
 
 
-NON_FEATURE_CAPABILITIES = ['CCID', 'NFC']
+NON_FEATURE_CAPABILITIES = [CAPABILITY.CCID, CAPABILITY.NFC]
 
 
 def format_readable_list(items):
@@ -70,7 +70,6 @@ class _HeaderPanel(QtGui.QGroupBox):
         controller.serialChanged.connect(self._set_serial)
         self._set_serial(controller.serial)
 
-
     def _set_has_device(self, has_device):
         if not has_device:
             self._set_serial(None)
@@ -85,10 +84,11 @@ class _HeaderPanel(QtGui.QGroupBox):
 
     def _set_version(self, version):
         if version:
+            f_version = '({0[0]}.{0[1]})'.format(version) if version[0] == 3 \
+                else '({0[0]}.{0[1]}.{0[2]})'.format(version)
             name = self._device_name.text()
-            f_version = '({0[0]}.{0[1]})'.format(version) if 'NEO' in name \
-                    else '({0[0]}.{0[1]}.{0[2]})'.format(version)
             self._device_name.setText(name + ' ' + f_version)
+
 
 class _FeatureSection(QtGui.QGroupBox):
 
@@ -104,7 +104,7 @@ class _FeatureSection(QtGui.QGroupBox):
 
         row_i = 0
 
-        for c in (c for c in CAPABILITY if c.name not in NON_FEATURE_CAPABILITIES):
+        for c in (c for c in CAPABILITY if c not in NON_FEATURE_CAPABILITIES):
             label = QtGui.QLabel(self.names[c])
             status = QtGui.QLabel('N/A')
             widgets = [label, status]
