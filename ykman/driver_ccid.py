@@ -30,10 +30,9 @@ import struct
 import subprocess
 import time
 from smartcard import System, Exceptions
-from .driver import AbstractDriver
+from .driver import AbstractDriver, ModeSwitchError
 from .util import Mode, CAPABILITY, TRANSPORT
 from .yubicommon.compat import byte2int, int2byte
-
 SW_OK = 0x9000
 
 INS_SELECT = 0xa4
@@ -107,15 +106,16 @@ class CCIDDriver(AbstractDriver):
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         for aid, ins in [(OTP_AID, INS_YK2_REQ), (MGR_AID, INS_NEO_TEST)]:
-            _, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
+            resp, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
             if sw == SW_OK:
+                pgm_seq_old = byte2int(resp[3])
                 data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-                _, sw = self.send_apdu(0, ins, SLOT_DEVICE_CONFIG, 0, data)
+                resp, sw = self.send_apdu(0, ins, SLOT_DEVICE_CONFIG, 0, data)
                 if sw == SW_OK:
-                    return
-                else:
-                    raise Exception('Setting mode failed!')
-        raise Exception('Selecting applet failed!')
+                    pgm_seq_new = byte2int(resp[3])
+                    if _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
+                        return
+        raise ModeSwitchError()
 
     def __del__(self):
         try:
@@ -123,6 +123,10 @@ class CCIDDriver(AbstractDriver):
         except:
             pass  # Ignore
 
+
+def _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
+    return pgm_seq_new > pgm_seq_old and \
+        (pgm_seq_old is not 0 and pgm_seq_new is not 0)
 
 def kill_scdaemon():
     killed = False

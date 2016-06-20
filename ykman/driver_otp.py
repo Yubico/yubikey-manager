@@ -56,7 +56,7 @@ class YkpersError(Exception):
         self.message = ykpers.yk_strerror(errno)
 
     def __str__(self):
-        return 'ykpers error {}: {}'.format(self.errno, self.message)
+        return 'ykpers error {}, {}'.format(self.errno, self.message)
 
 
 class WriteError(YkpersError):

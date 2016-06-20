@@ -29,6 +29,7 @@ from __future__ import absolute_import
 
 from .util import click_force_option
 from ..util import Mode, TRANSPORT
+from ..driver import ModeSwitchError
 import re
 import click
 
@@ -103,9 +104,14 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             force or click.confirm('Set mode of YubiKey to {}?'.format(mode),
                                    abort=True)
 
-        dev.set_mode(mode, chalresp_timeout, autoeject)
-        click.echo('Mode set! You must remove and re-insert your YubiKey for '
+        try:
+            dev.set_mode(mode, chalresp_timeout, autoeject)
+            click.echo('Mode set! You must remove and re-insert your YubiKey for '
                    'this change to take effect.')
+        except ModeSwitchError:
+            click.echo('Failed to switch mode on the device. '
+                    'Make sure the device does not have restricted access.')
+
     else:
         click.echo('Current mode is: {}'.format(dev.mode))
         supported = ', '.join(t.name for t in TRANSPORT

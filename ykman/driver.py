@@ -26,6 +26,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+class ModeSwitchError(Exception):
+
+    def __init__(self):
+        super(ModeSwitchError, self).__init__('Failed to switch mode.')
+
+
 class AbstractDriver(object):
     """Abstract driver class for communicating with a YubiKey"""
 

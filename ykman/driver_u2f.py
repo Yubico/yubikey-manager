@@ -29,7 +29,7 @@ from __future__ import print_function
 
 from .native.u2fh import u2fh, u2fh_devs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
-from .driver import AbstractDriver
+from .driver import AbstractDriver, ModeSwitchError
 from .util import Mode, TRANSPORT
 import os
 import struct
@@ -53,6 +53,16 @@ TYPE_INIT = 0x80
 U2FHID_PING = TYPE_INIT | 0x01
 U2FHID_YUBIKEY_DEVICE_CONFIG = TYPE_INIT | U2F_VENDOR_FIRST
 U2FHID_YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
+
+class U2FHostError(Exception):
+    """Thrown if u2f-host call fails."""
+
+    def __init__(self, errno):
+        self.errno = errno
+        self.message = '{}: {}'.format(u2fh.u2fh_strerror_name(errno), u2fh.u2fh_strerror(errno))
+
+    def __str__(self):
+        return 'u2fh error {}, {}'.format(self.errno, self.message)
 
 
 class U2FDriver(AbstractDriver):
@@ -91,13 +101,15 @@ class U2FDriver(AbstractDriver):
         status = u2fh.u2fh_sendrecv(self._devs, self._index, cmd, data,
                                     len(data), resp, byref(buf_size))
         if status != 0:
-            raise Exception('u2fh_sendrecv error: {}'.format(status))
+            raise U2FHostError(status)
         return resp.raw[0:buf_size.value]
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-        self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
-
+        try:
+            self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
+        except U2FHostError:
+            raise ModeSwitchError()
     def __del__(self):
         u2fh.u2fh_devs_done(self._devs)
 
