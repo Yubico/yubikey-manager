@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .driver_ccid import OPGP_AID, SW_OK
+from .driver_ccid import OPGP_AID, SW_OK, CCIDError
 from ykman.yubicommon.compat import byte2int, int2byte
 from enum import IntEnum
 from binascii import b2a_hex
@@ -71,69 +71,53 @@ class OpgpController(object):
     def version(self):
         return self._version
 
-    def send_apdu(self, cl, ins, p1, p2, data=b''):
-        return self._driver.send_apdu(cl, ins, p1, p2, data)
+    def send_apdu(self, cl, ins, p1, p2, data=b'', check=True):
+        return self._driver.send_apdu(cl, ins, p1, p2, data, check)
 
     def _read_version(self):
-        bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0)[0])
+        bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
         return tuple(int(bcd_hex[i:i+2]) for i in range(0, 6, 2))
 
     def select(self):
-        _, sw = self.send_apdu(0, INS.SELECT, 0x04, 0, OPGP_AID)
-        if sw != SW_OK:
-            raise Exception('Failure selecting applet!')
+        self.send_apdu(0, INS.SELECT, 0x04, 0, OPGP_AID)
 
     def _get_pin_tries(self):
-        data, sw = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
-        if sw != SW_OK:
-            raise Exception('Failue reading PIN retries!')
+        data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
         return tuple(byte2int(x) for x in data[4:7])
 
     def _block_pins(self):
         pw1_tries, _, pw3_tries = self._get_pin_tries()
 
         for _ in range(pw1_tries):
-            _, sw = self.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN)
+            self.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN, check=False)
         for _ in range(pw3_tries):
-            _, sw = self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN)
+            self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN, check=False)
 
     def reset(self):
         self._block_pins()
-        _, sw = self.send_apdu(0, INS.TERMINATE, 0, 0)
-        if sw != SW_OK:
-            raise Exception('Failure resetting OpenPGP!')
-        _, sw = self.send_apdu(0, INS.ACTIVATE, 0, 0)
-        if sw != SW_OK:
-            raise Exception('Failed initializing OpenPGP!')
+        self.send_apdu(0, INS.TERMINATE, 0, 0)
+        self.send_apdu(0, INS.ACTIVATE, 0, 0)
 
     def get_touch(self, key_slot):
-        data, sw = self.send_apdu(0, INS.GET_DATA, 0, key_slot)
-        if sw == SW_OK:
-            return TOUCH_MODE(byte2int(data[0]))
-        else:
-            raise Exception('Failure reading touch mode for key {.name}'
-                            .format(key_slot))
-        return data
+        data = self.send_apdu(0, INS.GET_DATA, 0, key_slot)
+        return TOUCH_MODE(byte2int(data[0]))
 
     def _verify(self, pw, pin):
-        _, sw = self.send_apdu(0, INS.VERIFY, 0, pw, pin)
-        if sw != SW_OK:
+        try:
+            self.send_apdu(0, INS.VERIFY, 0, pw, pin)
+        except CCIDError:
             pw_remaining = self._get_pin_tries()[pw-PW1]
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))
 
     def set_touch(self, key_slot, mode, pin):
         self._verify(PW3, pin)
-        _, sw = self.send_apdu(0, INS.PUT_DATA, 0, key_slot,
+        self.send_apdu(0, INS.PUT_DATA, 0, key_slot,
                                int2byte(mode) + b'\x20')
-        if sw != SW_OK:
-            raise Exception('Failure setting touch policy!')
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, pin):
         self._verify(PW3, pin)
-        _, sw = self.send_apdu(0, INS.SET_PIN_RETRIES, 0, 0,
-                               int2byte(pw1_tries) +
-                               int2byte(pw2_tries) +
-                               int2byte(pw3_tries))
-        if sw != SW_OK:
-            raise Exception('Failure setting PIN retries!')
+        self.send_apdu(0, INS.SET_PIN_RETRIES, 0, 0,
+                           int2byte(pw1_tries) +
+                           int2byte(pw2_tries) +
+                           int2byte(pw3_tries))

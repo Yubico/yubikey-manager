@@ -109,12 +109,12 @@ class CCIDDriver(AbstractDriver):
                 pass
         return capa
 
-    def send_apdu(self, cl, ins, p1, p2, data=b''):
+    def send_apdu(self, cl, ins, p1, p2, data=b'', check=True):
         header = [cl, ins, p1, p2, len(data)]
         body = [byte2int(c) for c in data]
         resp, sw1, sw2 = self._conn.transmit(header + body)
         sw = sw1 << 8 | sw2
-        if sw != SW_OK:
+        if check and sw != SW_OK:
             raise CCIDError(sw)
         return b''.join([int2byte(c) for c in resp])
 
