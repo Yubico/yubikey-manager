@@ -361,7 +361,7 @@ class _ConfigureOTP(_WizardPage):
             self.parent()._controller.program_otp(
                 self.slot, self.key, self.fixed, self.uid,
                 page.cb('Configuration successfully written!'))
-        except Exception as e:
+        except YkpersError as e:
             page.fail(e)
 
 
@@ -439,7 +439,7 @@ class _ConfigureHotp(_WizardPage):
             self.parent()._controller.program_hotp(
                 self.slot, self.key, self.n_digits,
                 page.cb('Configuration successfully written!'))
-        except Exception as e:
+        except YkpersError as e:
             page.fail(e)
 
 
