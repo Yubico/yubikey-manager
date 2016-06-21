@@ -34,7 +34,7 @@ from base64 import b32decode
 from ykman.yubicommon import qt
 from .. import messages as m
 from ...util import modhex_decode
-
+from ...driver_otp import YkpersError
 import re
 
 
@@ -239,7 +239,6 @@ class _SwapSlotsPage(_WizardPage):
         page = self.begin_work('Writing configuration...')
         self.parent()._controller.swap_slots(
             page.cb('Configuration successfully written!'))
-
 
 class _ConfigureSlotType(_WizardPage):
     description = 'Select the type of functionality to program:'
@@ -505,12 +504,12 @@ class _WritingConfig(_WizardPage):
         self.setNextEnabled(True)
 
     def fail(self, error):
-        self._message.setText('Error: {}'.format(error))
+        self._message.setText('Failed to write to the device.\nMake sure the device does not have restricted access.')
         self.setPrevEnabled(True)
 
     def cb(self, message):
         def _func(result):
-            if isinstance(result, Exception):
+            if isinstance(result, YkpersError):
                 self.fail(result)
             else:
                 self.complete(message)
