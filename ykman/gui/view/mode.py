@@ -44,7 +44,7 @@ class _RemoveDialog(QtGui.QMessageBox):
 
         self.setWindowTitle('Change mode')
         self.setIcon(QtGui.QMessageBox.Information)
-        self.setText('remove device')
+        self.setText('Please remove and re-insert the device.')
         self.setStandardButtons(QtGui.QMessageBox.NoButton)
 
         qt.connect_once(controller.hasDeviceChanged, self._close)
@@ -67,9 +67,9 @@ class ModeDialog(qt.Dialog):
         self._state = 0
 
         layout = QtGui.QVBoxLayout(self)
-        layout.addWidget(QtGui.QLabel('<h2>Configure enabled transport protocols</h2>'))
-        layout.addWidget(QtGui.QLabel('Set the enabled transport protocols for your YubiKey.'))
-        desc_lbl = QtGui.QLabel('Once changed, you will need to unplug and re-insert your YubiKey for the setting to take effect.')
+        layout.addWidget(QtGui.QLabel('<h2>Configure enabled connection protocols</h2>'))
+        layout.addWidget(QtGui.QLabel('Set the enabled connection protocols for your YubiKey.'))
+        desc_lbl = QtGui.QLabel('Once changed, you will need to unplug and re-insert your YubiKey for the settings to take effect.')
         desc_lbl.setWordWrap(True)
         layout.addWidget(desc_lbl)
 
@@ -93,7 +93,7 @@ class ModeDialog(qt.Dialog):
         self._ok = buttons.button(QtGui.QDialogButtonBox.Ok)
         layout.addWidget(buttons)
 
-        self.setWindowTitle('Configure YubiKey transports')
+        self.setWindowTitle('Configure connections')
 
     def _state_changed(self, transport, state):
         if state:
