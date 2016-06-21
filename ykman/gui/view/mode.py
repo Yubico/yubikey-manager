@@ -78,9 +78,11 @@ class ModeDialog(qt.Dialog):
         for t in TRANSPORT.split(controller.capabilities):
             cb = QtGui.QCheckBox(t.name)
             cb.setChecked(controller.enabled & t)
-            cb.stateChanged.connect(partial(self._state_changed, t))
-            cb.setEnabled(TRANSPORT.has(TRANSPORT.usb_transports(), t))
-            self._state |= controller.enabled & t
+            if TRANSPORT.has(TRANSPORT.usb_transports(), t):
+                cb.stateChanged.connect(partial(self._state_changed, t))
+                self._state |= controller.enabled & t
+            else:
+                cb.setEnabled(False)
             boxes.addWidget(cb)
             self._boxes.append(cb)
 
