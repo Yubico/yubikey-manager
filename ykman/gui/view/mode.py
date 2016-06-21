@@ -33,7 +33,7 @@ from functools import partial
 from ykman.yubicommon import qt
 from .. import messages as m
 from ...util import Mode, TRANSPORT
-
+from ...driver import ModeSwitchError
 
 class _RemoveDialog(QtGui.QMessageBox):
 
@@ -104,7 +104,10 @@ class ModeDialog(qt.Dialog):
 
     def _set_mode(self):
         def _cb(result):
-            if isinstance(result, Exception):
+            if isinstance(result, ModeSwitchError):
+                QtGui.QMessageBox.critical(self, 'Failed to configure connections',
+                        'There was a problem configuring the connections on the device.\n\n'
+                        'Make sure you do not have restricted access.')
                 print('Error:', result)
             else:
                 self.close()
