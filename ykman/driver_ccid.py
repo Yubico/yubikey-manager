@@ -57,6 +57,15 @@ KNOWN_APPLETS = {
     b'\xa0\x00\x00\x05\x27\x21\x01': CAPABILITY.OATH
 }
 
+class CCIDError(Exception):
+    """Thrown when smart card communication fails."""
+
+    def __init__(self, errno):
+        self.errno = errno
+
+    def __str__(self):
+        return 'CCID error: {}'.format(self.errno)
+
 
 class CCIDDriver(AbstractDriver):
     """
@@ -74,47 +83,53 @@ class CCIDDriver(AbstractDriver):
         self._read_version()  # Overwrite with exact version, if possible.
 
     def _read_version(self):
-        s, sw = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
-        if sw == SW_OK:
-            self._version = tuple(byte2int(c) for c in s[:3])
-            serial, sw = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
-            if len(serial) == 4 and sw == SW_OK:
-                self._serial = struct.unpack('>I', serial)[0]
+        resp = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
+        self._version = tuple(byte2int(c) for c in resp[:3])
+        serial = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
+        if len(serial) == 4:
+            self._serial = struct.unpack('>I', serial)[0]
 
     def read_capabilities(self):
         if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
             return b'\x03\x01\x01\x3f'
-        _, sw = self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
-        if sw != SW_OK:
+        try:
+            self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
+            capa = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
+            return capa
+        except CCIDError:
             return b''
-        capa, sw = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
-        return capa
 
     def probe_capabilities_support(self):
         capa = CAPABILITY.CCID
         for aid, code in KNOWN_APPLETS.items():
-            _, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
-            if sw == SW_OK:
+            try:
+                self.send_apdu(0, INS_SELECT, 4, 0, aid)
                 capa |= code
+            except CCIDError:
+                pass
         return capa
 
     def send_apdu(self, cl, ins, p1, p2, data=b''):
         header = [cl, ins, p1, p2, len(data)]
         body = [byte2int(c) for c in data]
         resp, sw1, sw2 = self._conn.transmit(header + body)
-        return b''.join([int2byte(c) for c in resp]), sw1 << 8 | sw2
+        sw = sw1 << 8 | sw2
+        if sw != SW_OK:
+            raise CCIDError(sw)
+        return b''.join([int2byte(c) for c in resp])
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         for aid, ins in [(OTP_AID, INS_YK2_REQ), (MGR_AID, INS_NEO_TEST)]:
-            resp, sw = self.send_apdu(0, INS_SELECT, 4, 0, aid)
-            if sw == SW_OK:
+            try:
+                resp = self.send_apdu(0, INS_SELECT, 4, 0, aid)
                 pgm_seq_old = byte2int(resp[3])
                 data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-                resp, sw = self.send_apdu(0, ins, SLOT_DEVICE_CONFIG, 0, data)
-                if sw == SW_OK:
-                    pgm_seq_new = byte2int(resp[3])
-                    if _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
-                        return
+                resp = self.send_apdu(0, ins, SLOT_DEVICE_CONFIG, 0, data)
+                pgm_seq_new = byte2int(resp[3])
+                if _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
+                    return
+            except CCIDError:
+                pass
         raise ModeSwitchError()
 
     def __del__(self):
