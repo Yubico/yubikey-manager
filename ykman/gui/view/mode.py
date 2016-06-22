@@ -42,9 +42,9 @@ class _RemoveDialog(QtGui.QMessageBox):
 
         self._controller = controller
 
-        self.setWindowTitle('Change mode')
+        self.setWindowTitle(m.configure_connections)
         self.setIcon(QtGui.QMessageBox.Information)
-        self.setText('Please remove and re-insert the device.')
+        self.setText(m.remove_device)
         self.setStandardButtons(QtGui.QMessageBox.NoButton)
 
         qt.connect_once(controller.hasDeviceChanged, self._close)
@@ -67,9 +67,9 @@ class ModeDialog(qt.Dialog):
         self._state = 0
 
         layout = QtGui.QVBoxLayout(self)
-        layout.addWidget(QtGui.QLabel('<h2>Configure enabled connection protocols</h2>'))
-        layout.addWidget(QtGui.QLabel('Set the enabled connection protocols for your YubiKey.'))
-        desc_lbl = QtGui.QLabel('Once changed, you will need to unplug and re-insert your YubiKey for the settings to take effect.')
+        layout.addWidget(QtGui.QLabel('<h2>' + m.configure_protocols + '</h2>'))
+        layout.addWidget(QtGui.QLabel(m.configure_protocols_desc))
+        desc_lbl = QtGui.QLabel(m.configure_protocols_reinsert)
         desc_lbl.setWordWrap(True)
         layout.addWidget(desc_lbl)
 
@@ -95,7 +95,7 @@ class ModeDialog(qt.Dialog):
         self._ok = buttons.button(QtGui.QDialogButtonBox.Ok)
         layout.addWidget(buttons)
 
-        self.setWindowTitle('Configure connections')
+        self.setWindowTitle(m.configure_connections)
 
     def _state_changed(self, transport, state):
         if state:
@@ -107,10 +107,8 @@ class ModeDialog(qt.Dialog):
     def _set_mode(self):
         def _cb(result):
             if isinstance(result, ModeSwitchError):
-                QtGui.QMessageBox.critical(self, 'Failed to configure connections',
-                        'There was a problem configuring the connections on the device.\n\n'
-                        'Make sure you do not have restricted access.')
-                print('Error:', result)
+                QtGui.QMessageBox.critical(self, m.failed_configure_connections, 
+                        m.failed_configure_connections_desc)
             else:
                 self.close()
                 remove_dialog = _RemoveDialog(self._controller, self)
