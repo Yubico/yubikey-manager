@@ -50,10 +50,9 @@ def info(ctx):
     click.echo('Device name: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))
-    f_version = '{0[0]}.{0[1]}'.format(dev.version) if 'NEO' in dev.device_name \
-            else '{0[0]}.{0[1]}.{0[2]}'.format(dev.version)
+    f_version = '.'.join(str(x) for x in dev.version)
     click.echo('Firmware version: {}'.format(f_version))
-    click.echo('Enabled transport(s): {}'.format(dev.mode))
+    click.echo('Enabled connection(s): {}'.format(dev.mode))
     click.echo()
 
     click.echo('Device capabilities:')

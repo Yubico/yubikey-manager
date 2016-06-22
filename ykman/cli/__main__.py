@@ -30,7 +30,7 @@
 from __future__ import absolute_import
 
 from ykman import __version__
-from ..util import TRANSPORT
+from ..util import TRANSPORT, list_yubikeys
 from ..device import open_device, FailedOpeningDeviceException
 from .gui import gui
 from .info import info
@@ -38,6 +38,7 @@ from .mode import mode
 from .slot import slot
 from .opgp import openpgp
 import click
+import sys
 
 
 COMMANDS = (info, mode, slot, openpgp, gui)
@@ -55,6 +56,13 @@ def print_version(ctx, param, value):
     ctx.exit()
 
 
+def is_help(ctx):
+    for arg in ctx.help_option_names:
+        if arg in sys.argv:
+            return True
+    return False
+
+
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option('-v', '--version', is_flag=True, callback=print_version,
               expose_value=False, is_eager=True)
@@ -63,35 +71,30 @@ def cli(ctx):
     """
     Interface with a YubiKey via the command line.
     """
-    dev = None
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
-    transports = getattr(subcmd, 'transports', sum(TRANSPORT))
-    if transports:
-        try:
-            dev = open_device(transports)
-            if not dev:
-                dev = open_device()
-                if not dev:
-                    ctx.fail('No YubiKey detected!')
-
-                req = ', '.join((t.name for t in TRANSPORT
-                                 if t & transports))
-                if transports & dev.mode.transports != 0:
-                    click.echo("Device wasn't accessible over one of "
-                               "the required transports: {}"
-                               .format(req))
-                    click.echo("Perhaps the device is already in use?")
-                else:
-                    click.echo("Command '{}' requires one of the following "
-                               "transports to be enabled: '{}'".format(
-                                   subcmd.name, req))
-                    click.echo("Use 'ykman mode' to set the enabled "
-                               "transports.")
-                ctx.exit(2)
-        except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to the YubiKey. Is it in use by '
-                     'another process?')
-    ctx.obj['dev'] = dev
+    transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
+    if transports and not is_help(ctx):
+        yubikeys = list_yubikeys()
+        n_keys = len(yubikeys)
+        if n_keys == 0:
+            ctx.fail('No YubiKey detected!')
+        if n_keys > 1:
+            ctx.fail('Multiple YubiKeys detected. Only a single YubiKey at a '
+                     'time is supported.')
+        dev_transports = yubikeys[0]
+        if dev_transports & transports:
+            try:
+                ctx.obj['dev'] = open_device(transports)
+                if not ctx.obj['dev']:  # Key should be there, busy?
+                    raise FailedOpeningDeviceException()
+            except FailedOpeningDeviceException:
+                ctx.fail('Failed connecting to the YubiKey. Is it in use by '
+                         'another process?')
+        else:
+            req = ', '.join((t.name for t in TRANSPORT if t & transports))
+            click.echo("Command '{}' requires one of the following transports "
+                       "to be enabled: '{}'.".format(subcmd.name, req))
+            ctx.fail("Use 'ykman mode' to set the enabled connections.")
 
 
 for cmd in COMMANDS:

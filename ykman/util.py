@@ -28,8 +28,11 @@
 from enum import IntEnum
 from binascii import b2a_hex, a2b_hex
 from .yubicommon.compat import byte2int, text_type
+import usb.core
 
-__all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list']
+
+__all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list',
+           'read_version_usb', 'list_yubikeys']
 
 
 class BitflagEnum(IntEnum):
@@ -125,3 +128,48 @@ def modhex_decode(value):
 
 def modhex_encode(value):
     return b''.join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode('ascii')
+
+
+_YUBIKEY_PIDS = {
+    # YubiKey Standard
+    0x0010: TRANSPORT.OTP,
+
+    # YubiKey NEO
+    0x0110: TRANSPORT.OTP,
+    0x0111: TRANSPORT.OTP | TRANSPORT.CCID,
+    0x0112: TRANSPORT.CCID,
+    0x0113: TRANSPORT.U2F,
+    0x0114: TRANSPORT.OTP | TRANSPORT.U2F,
+    0x0115: TRANSPORT.U2F | TRANSPORT.CCID,
+    0x0116: TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F,
+
+    # Security Key by Yubico
+    0x0120: TRANSPORT.U2F,
+
+    # YubiKey 4
+    0x0401: TRANSPORT.OTP,
+    0x0402: TRANSPORT.U2F,
+    0x0403: TRANSPORT.OTP | TRANSPORT.U2F,
+    0x0404: TRANSPORT.CCID,
+    0x0405: TRANSPORT.OTP | TRANSPORT.U2F,
+    0x0406: TRANSPORT.U2F | TRANSPORT.CCID,
+    0x0407: TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F,
+
+    # YubiKey Plus
+    0x0410: TRANSPORT.OTP | TRANSPORT.U2F,
+}
+
+
+def _yubikeys():
+    for dev in usb.core.find(True, idVendor=0x1050):
+        if dev.idProduct in _YUBIKEY_PIDS:
+            yield dev
+
+
+def list_yubikeys():
+    return [_YUBIKEY_PIDS[dev.idProduct] for dev in _yubikeys()]
+
+
+def read_version_usb():
+    v_int = next(_yubikeys()).bcdDevice
+    return ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)

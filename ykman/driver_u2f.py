@@ -30,8 +30,7 @@ from __future__ import print_function
 from .native.u2fh import u2fh, u2fh_devs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import Mode, TRANSPORT
-import os
+from .util import Mode, TRANSPORT, read_version_usb
 import struct
 
 
@@ -46,12 +45,14 @@ U2FHID_PING = TYPE_INIT | 0x01
 U2FHID_YUBIKEY_DEVICE_CONFIG = TYPE_INIT | U2F_VENDOR_FIRST
 U2FHID_YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
 
+
 class U2FHostError(Exception):
     """Thrown if u2f-host call fails."""
 
     def __init__(self, errno):
         self.errno = errno
-        self.message = '{}: {}'.format(u2fh.u2fh_strerror_name(errno), u2fh.u2fh_strerror(errno))
+        self.message = '{}: {}'.format(u2fh.u2fh_strerror_name(errno),
+                                       u2fh.u2fh_strerror(errno))
 
     def __str__(self):
         return 'u2fh error {}, {}'.format(self.errno, self.message)
@@ -66,6 +67,7 @@ check(u2fh.u2fh_global_init(0))
 
 libversion = u2fh.u2fh_check_version(None).decode('ascii')
 
+
 class U2FDriver(AbstractDriver):
     """
     libu2f-host based U2F driver
@@ -79,15 +81,9 @@ class U2FDriver(AbstractDriver):
         self._index = index
         self._mode = Mode(
             TRANSPORT.U2F | sum(t for t in TRANSPORT if t.name in name))
-        if ' NEO ' in name:  # At least 3.0.0
-            self._version = (3, 0, 0)
-        elif ' 4 ' in name:  # At least 4.0.0
-            if self.read_capabilities():
-                self._version = (4, 1, 0)  # Capabilities means >= 4.1.0
-            else:
-                self._version = (4, 0, 0)
-        elif 'Security Key' in name:
+        if 'Security Key' in name:
             self.sky = True
+        self._version = read_version_usb()
 
     def read_capabilities(self):
         try:
@@ -99,7 +95,7 @@ class U2FDriver(AbstractDriver):
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
         check(u2fh.u2fh_sendrecv(self._devs, self._index, cmd, data,
-                                    len(data), resp, byref(buf_size)))
+                                 len(data), resp, byref(buf_size)))
         return resp.raw[0:buf_size.value]
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
@@ -108,6 +104,7 @@ class U2FDriver(AbstractDriver):
             self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
         except U2FHostError:
             raise ModeSwitchError()
+
     def __del__(self):
         u2fh.u2fh_devs_done(self._devs)
 

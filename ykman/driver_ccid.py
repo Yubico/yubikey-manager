@@ -31,7 +31,7 @@ import subprocess
 import time
 from smartcard import System, Exceptions
 from .driver import AbstractDriver, ModeSwitchError
-from .util import Mode, CAPABILITY, TRANSPORT
+from .util import Mode, CAPABILITY, TRANSPORT, read_version_usb
 from .yubicommon.compat import byte2int, int2byte
 SW_OK = 0x9000
 
@@ -57,6 +57,7 @@ KNOWN_APPLETS = {
     b'\xa0\x00\x00\x05\x27\x21\x01': CAPABILITY.OATH
 }
 
+
 class CCIDError(Exception):
     """Thrown when smart card communication fails."""
 
@@ -76,15 +77,11 @@ class CCIDDriver(AbstractDriver):
     def __init__(self, connection, name=''):
         self._conn = connection
         self._mode = Mode(sum(t for t in TRANSPORT if t.name in name))
-        if ' NEO ' in name:  # At least 3.0.0
-            self._version = (3, 0, 0)
-        elif ' 4 ' in name:  # At least 4.1.0 if CCID is available.
-            self._version = (4, 1, 0)
-        self._read_version()  # Overwrite with exact version, if possible.
+        self._version = read_version_usb()
+        self._read_serial()
 
-    def _read_version(self):
-        resp = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
-        self._version = tuple(byte2int(c) for c in resp[:3])
+    def _read_serial(self):
+        self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
         serial = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
         if len(serial) == 4:
             self._serial = struct.unpack('>I', serial)[0]
