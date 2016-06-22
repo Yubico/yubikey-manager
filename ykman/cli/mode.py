@@ -66,12 +66,14 @@ def _parse_mode_string(ctx, param, mode):
               'toggles the state of the smartcard between ejected and inserted '
               '(CCID mode only).')
 @click.option('--autoeject-timeout', required=False, type=int, default=0,
+              metavar='SECONDS',
               help='When set, the smartcard will automatically eject after the '
-              'given number of seconds. Implies --touch-eject (CCID mode only).'
+              'given time. Implies --touch-eject (CCID mode only).'
               )
 @click.option('--chalresp-timeout', required=False, type=int, default=0,
+              metavar='SECONDS',
               help='Sets the timeout when waiting for touch for challenge '
-              'response, in seconds.')
+              'response.')
 @click_force_option
 @click.pass_context
 def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):

@@ -123,7 +123,8 @@ def echo_default_pins():
                 callback=lambda c, p, k: KEY_NAMES.get(k))
 @click.argument('policy', type=click.Choice(sorted(MODE_NAMES)),
                 callback=lambda c, p, k: MODE_NAMES.get(k), required=False)
-@click.option('--admin-pin', required=False, help='Admin PIN for OpenPGP.')
+@click.option('--admin-pin', required=False, metavar='PIN',
+              help='Admin PIN for OpenPGP.')
 @click_force_option
 @click.pass_context
 def touch(ctx, key, policy, admin_pin, force):
@@ -156,7 +157,7 @@ def touch(ctx, key, policy, admin_pin, force):
 
 @openpgp.command('set-pin-retries')
 @click.argument('pw-attempts', nargs=3, type=click.IntRange(1, 99))
-@click.password_option('--admin-pin', prompt='Enter admin PIN',
+@click.password_option('--admin-pin', metavar='PIN', prompt='Enter admin PIN',
                        confirmation_prompt=False)
 @click_force_option
 @click.pass_context
