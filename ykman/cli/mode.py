@@ -76,7 +76,7 @@ def _parse_mode_string(ctx, param, mode):
 @click.pass_context
 def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
-    Get the current transport mode of the YubiKey, or set it to MODE.
+    Get the current connection mode of the YubiKey, or set it to MODE.
 
     MODE can be a string, such as "OTP+U2F+CCID", or a shortened form: "o+u+c".
     It can also be a mode number.
@@ -106,14 +106,14 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
         try:
             dev.set_mode(mode, chalresp_timeout, autoeject)
-            click.echo('Mode set! You must remove and re-insert your YubiKey for '
-                   'this change to take effect.')
+            click.echo('Mode set! You must remove and re-insert your YubiKey '
+                       'for this change to take effect.')
         except ModeSwitchError:
             click.echo('Failed to switch mode on the device. '
-                    'Make sure the device does not have restricted access.')
+                       'Make sure the device does not have restricted access.')
 
     else:
-        click.echo('Current mode is: {}'.format(dev.mode))
+        click.echo('Current connection mode is: {}'.format(dev.mode))
         supported = ', '.join(t.name for t in TRANSPORT
                               .split(dev.capabilities))
-        click.echo('Supported transports are: {}'.format(supported))
+        click.echo('Supported connections are: {}'.format(supported))
