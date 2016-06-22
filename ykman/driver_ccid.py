@@ -78,7 +78,10 @@ class CCIDDriver(AbstractDriver):
         self._conn = connection
         self._mode = Mode(sum(t for t in TRANSPORT if t.name in name))
         self._version = read_version_usb()
-        self._read_serial()
+        try:
+            self._read_serial()
+        except CCIDError:
+            pass  # Can't read serial
 
     def _read_serial(self):
         self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
@@ -116,18 +119,26 @@ class CCIDDriver(AbstractDriver):
         return b''.join([int2byte(c) for c in resp])
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
-        for aid, ins in [(OTP_AID, INS_YK2_REQ), (MGR_AID, INS_NEO_TEST)]:
+        mode_data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
+        try:
             try:
-                resp = self.send_apdu(0, INS_SELECT, 4, 0, aid)
-                pgm_seq_old = byte2int(resp[3])
-                data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-                resp = self.send_apdu(0, ins, SLOT_DEVICE_CONFIG, 0, data)
-                pgm_seq_new = byte2int(resp[3])
-                if _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
-                    return
+                self._set_mode_otp(mode_data)
             except CCIDError:
-                pass
-        raise ModeSwitchError()
+                self._set_mode_mgr(mode_data)
+        except CCIDError:
+            raise ModeSwitchError()
+
+    def _set_mode_otp(self, mode_data):
+        resp = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
+        pgm_seq_old = byte2int(resp[3])
+        resp = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, mode_data)
+        pgm_seq_new = byte2int(resp[3])
+        if not _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
+            raise ModeSwitchError()
+
+    def _set_mode_mgr(self, mode_data):
+        self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
+        self.send_apdu(0, INS_NEO_TEST, SLOT_DEVICE_CONFIG, 0, mode_data)
 
     def __del__(self):
         try:
@@ -137,8 +148,8 @@ class CCIDDriver(AbstractDriver):
 
 
 def _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
-    return pgm_seq_new > pgm_seq_old and \
-        (pgm_seq_old is not 0 and pgm_seq_new is not 0)
+    return pgm_seq_new == pgm_seq_old == 0 or pgm_seq_new > pgm_seq_old
+
 
 def kill_scdaemon():
     killed = False
