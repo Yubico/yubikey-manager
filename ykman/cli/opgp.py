@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
-from .util import click_force_option
+from .util import click_force_option, click_skip_on_help
 import click
 
 
@@ -74,6 +74,7 @@ def int_in_range(minval, maxval):
 
 @click.group()
 @click.pass_context
+@click_skip_on_help
 def openpgp(ctx):
     """
     Manage YubiKey OpenPGP functions.

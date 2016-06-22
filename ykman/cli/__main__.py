@@ -32,13 +32,13 @@ from __future__ import absolute_import
 from ykman import __version__
 from ..util import TRANSPORT, list_yubikeys
 from ..device import open_device, FailedOpeningDeviceException
+from .util import click_skip_on_help
 from .gui import gui
 from .info import info
 from .mode import mode
 from .slot import slot
 from .opgp import openpgp
 import click
-import sys
 
 
 COMMANDS = (info, mode, slot, openpgp, gui)
@@ -56,24 +56,18 @@ def print_version(ctx, param, value):
     ctx.exit()
 
 
-def is_help(ctx):
-    for arg in ctx.help_option_names:
-        if arg in sys.argv:
-            return True
-    return False
-
-
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option('-v', '--version', is_flag=True, callback=print_version,
               expose_value=False, is_eager=True)
 @click.pass_context
+@click_skip_on_help
 def cli(ctx):
     """
     Interface with a YubiKey via the command line.
     """
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
-    if transports and not is_help(ctx):
+    if transports:
         yubikeys = list_yubikeys()
         n_keys = len(yubikeys)
         if n_keys == 0:

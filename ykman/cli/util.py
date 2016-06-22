@@ -24,10 +24,11 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-
+import functools
 import click
+import sys
 
-__all__ = ['click_force_option', 'click_callback']
+__all__ = ['click_force_option', 'click_callback', 'click_skip_on_help']
 
 
 click_force_option = click.option('-f', '--force', is_flag=True,
@@ -36,6 +37,7 @@ click_force_option = click.option('-f', '--force', is_flag=True,
 
 def click_callback(invoke_on_missing=False):
     def wrap(f):
+        @functools.wraps(f)
         def inner(ctx, param, val):
             if not invoke_on_missing and not param.required and val is None:
                 return None
@@ -46,3 +48,14 @@ def click_callback(invoke_on_missing=False):
                     param.name, str(e)))
         return inner
     return wrap
+
+
+def click_skip_on_help(f):
+    @functools.wraps(f)
+    def inner(*args, **kwargs):
+        ctx = click.get_current_context()
+        for arg in ctx.help_option_names:
+            if arg in sys.argv:
+                return
+        f(*args, **kwargs)
+    return inner

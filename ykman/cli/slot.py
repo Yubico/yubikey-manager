@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import click_force_option, click_callback
+from .util import click_force_option, click_callback, click_skip_on_help
 from ..util import TRANSPORT, modhex_decode, modhex_encode
 from base64 import b32decode
 from binascii import a2b_hex
@@ -83,6 +83,7 @@ def _failed_to_write_msg():
 
 @click.group()
 @click.pass_context
+@click_skip_on_help
 @click.option('--access-code', required=False, callback=parse_hex(6),
               help='If your YubiKey is write-protected using an access code, '
               'you will need to specify it here for any operation that writes '
