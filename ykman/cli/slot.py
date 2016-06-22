@@ -30,7 +30,7 @@ from __future__ import absolute_import
 from .util import click_force_option, click_callback, click_skip_on_help
 from ..util import TRANSPORT, modhex_decode, modhex_encode
 from base64 import b32decode
-from binascii import a2b_hex
+from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
 import os
 import re
@@ -145,24 +145,35 @@ def delete(ctx, slot, force):
 
 @slot.command()
 @click_slot_argument
-@click.argument('key', callback=parse_hex(16))
-@click.option('--public-id', required=False, callback=parse_public_id,
+@click.option('-P', '--public-id', required=False, callback=parse_public_id,
               help='Static part of the OTP, defaults to the devices serial '
               'number converted to modhex.', metavar='MODHEX')
-@click.option('--private-id', required=False, default='00'*6,
+@click.option('-p', '--private-id', required=False, metavar='HEX',
               callback=parse_hex(6), help='6 byte private identifier of the '
-              'credential.', metavar='HEX')
+              'credential.')
+@click.option('-k', '--key', required=False, metavar='HEX',
+              callback=parse_hex(16), help='16 byte secret key, in hex.')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting an OTP.')
 @click_force_option
 @click.pass_context
-def otp(ctx, slot, key, public_id, private_id, no_enter, force):
+def otp(ctx, slot, public_id, private_id, key, no_enter, force):
     """
     Program a YubiKey OTP credential.
 
-    KEY is a 16 byte AES key given as a hex encoded string.
+    If --public-id is not given, the devices serial number will be used.
+    If --private-id is not given, a randomly generated one will be used.
+    If --key is not given, a randomly generated key will be used.
     """
     dev = ctx.obj['dev']
+    if not private_id:
+        private_id = os.urandom(6)
+        click.echo('Using a randomly generated private ID: {}'.format(
+            b2a_hex(private_id).decode('ascii')))
+    if not key:
+        key = os.urandom(16)
+        click.echo('Using a randomly generated secret key: {}'.format(
+            b2a_hex(key).decode('ascii')))
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True)
     try:
@@ -194,7 +205,8 @@ def static(ctx, slot, password, no_enter, force):
 
 @slot.command()
 @click_slot_argument
-@click.argument('key', callback=parse_key, required=False)
+@click.option('-k', '--key', metavar='HEX', callback=parse_key, required=False,
+              help='HMAC-SHA1 secret key.')
 @click.option('--require-touch', is_flag=True, help='Require physical button '
               'press to generate response.')
 @click_force_option
@@ -203,8 +215,7 @@ def chalresp(ctx, slot, key, require_touch, force):
     """
     Program an HMAC-SHA1 challenge-response credential.
 
-    KEY is given as a hex encoded string.
-    If KEY is not given, a randomly generated key will be used.
+    If --key is not given, a randomly generated key will be used.
     """
     dev = ctx.obj['dev']
     if not key:
