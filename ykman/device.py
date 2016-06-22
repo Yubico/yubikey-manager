@@ -65,6 +65,7 @@ class YubiKey(object):
         if driver.transport == TRANSPORT.U2F and driver.sky:
             self.device_name = 'Security Key by Yubico'
             self.capabilities = CAPABILITY.U2F
+            self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
             self.device_name = 'YubiKey 4'
             self._parse_capabilities(driver.read_capabilities())
