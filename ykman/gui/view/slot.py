@@ -111,9 +111,9 @@ class _SlotStatus(QtGui.QWidget):
         super(_SlotStatus, self).__init__(parent)
 
         layout = QtGui.QGridLayout(self)
-        layout.addWidget(QtGui.QLabel('<h2>YubiKey slot configuration</h2>'), 0, 0, 1, 4)
+        layout.addWidget(QtGui.QLabel('<h2>' + m.slot_configuration + '</h2>'), 0, 0, 1, 4)
 
-        layout.addWidget(QtGui.QLabel('Slot 1 (short press):'), 1, 0)
+        layout.addWidget(QtGui.QLabel(m.slot_1), 1, 0)
         self._slot1_lbs = (QtGui.QLabel(), QtGui.QLabel(), QtGui.QLabel())
         self._slot1_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
         self._slot1_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
@@ -121,7 +121,7 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(self._slot1_lbs[1], 1, 2)
         layout.addWidget(self._slot1_lbs[2], 1, 3)
 
-        layout.addWidget(QtGui.QLabel('Slot 2 (long press):'), 2, 0)
+        layout.addWidget(QtGui.QLabel(m.slot_2), 2, 0)
         self._slot2_lbs = (QtGui.QLabel(), QtGui.QLabel(), QtGui.QLabel())
         self._slot2_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
         self._slot2_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
@@ -129,7 +129,7 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(self._slot2_lbs[1], 2, 2)
         layout.addWidget(self._slot2_lbs[2], 2, 3)
 
-        self._swap_slots = QtGui.QLabel('Reading state...')
+        self._swap_slots = QtGui.QLabel(m.reading_state)
         self._swap_slots.linkActivated.connect(lambda _: self.parent().swap())
         layout.addWidget(self._swap_slots, 3, 0)
 
@@ -159,10 +159,10 @@ class _SlotStatus(QtGui.QWidget):
 
 
 class _WizardPage(QtGui.QWidget):
-    title_text = 'YubiKey Slot configuration'
+    title_text = m.slot_configuration
     description = None
-    reject_text = 'Previous'
-    accept_text = 'Next'
+    reject_text = m.previous
+    accept_text = m.next_
 
     def __init__(self, slot, parent):
         super(_WizardPage, self).__init__(parent)
@@ -173,7 +173,7 @@ class _WizardPage(QtGui.QWidget):
         layout.addRow(QtGui.QLabel('<h2>{}</h2>'.format(self.title_text)))
 
         if slot is not None and parent._slot_status[slot - 1]:
-            layout.addRow(QtGui.QLabel('<b>WARNING:</b> This will overwrite the existing configuration!'))
+            layout.addRow(QtGui.QLabel('<b>' + m.warning + ':</b>' + m.overwrite_existing))
 
         if self.description is not None:
             layout.addRow(QtGui.QLabel(self.description))
@@ -212,50 +212,49 @@ class _WizardPage(QtGui.QWidget):
 
 
 class _DeleteSlotPage(_WizardPage):
-    description = 'Permanently deletes the contents of this slot.'
-    accept_text = 'Delete'
+    description = m.deletes_content
+    accept_text = m.delete
 
     def __init__(self, slot, parent):
         super(_DeleteSlotPage, self).__init__(slot, parent)
 
     @property
     def title_text(self):
-        return 'Erase YubiKey slot {}'.format(self.slot)
+        return m.erase_yubikey_slot.format(self.slot)
 
     def _accept(self):
-        page = self.begin_work('Erasing configuration...')
-        self.parent()._controller.delete_slot(self.slot, page.cb('Configuration erased!'))
+        page = self.begin_work(m.erase_configuration)
+        self.parent()._controller.delete_slot(self.slot, page.cb(m.configuration_erased))
 
 
 class _SwapSlotsPage(_WizardPage):
-    title_text = 'Swap YubiKey slots'
-    description = 'Swaps the credentials between slots 1 and 2.'
-    accept_text = 'Swap'
+    title_text = m.swap_slots
+    description = m.swap_slots_desc
+    accept_text = m.swap 
 
     def __init__(self, parent):
         super(_SwapSlotsPage, self).__init__(None, parent)
 
     def _accept(self):
-        page = self.begin_work('Writing configuration...')
-        self.parent()._controller.swap_slots(
-            page.cb('Configuration successfully written!'))
+        page = self.begin_work(m.writing_configuration)
+        self.parent()._controller.swap_slots(page.cb(m.successfully_written))
 
 class _ConfigureSlotType(_WizardPage):
-    description = 'Select the type of functionality to program:'
+    description = m.select_functionality
 
     def __init__(self, slot, parent):
         super(_ConfigureSlotType, self).__init__(slot, parent)
         self.setNextEnabled(False)
 
         # Do this after the window is drawn to avoid expanding the dialog.
-        QtCore.QTimer.singleShot(0, lambda: self._action_desc.setText('The YubiKey supports a variety of protocols for the slot-based credentials.'))
+        QtCore.QTimer.singleShot(0, lambda: self._action_desc.setText(m.supports_variety_of_protocols))
 
     def _build_ui(self, layout):
         self._action = QtGui.QButtonGroup(self)
-        self._action_otp = QtGui.QRadioButton('YubiKey OTP')
-        self._action_cr = QtGui.QRadioButton('Challenge-response')
-        self._action_pw = QtGui.QRadioButton('Static password')
-        self._action_hotp = QtGui.QRadioButton('OATH-HOTP')
+        self._action_otp = QtGui.QRadioButton(m.yubikey_otp)
+        self._action_cr = QtGui.QRadioButton(m.challenge_response)
+        self._action_pw = QtGui.QRadioButton(m.static_password)
+        self._action_hotp = QtGui.QRadioButton(m.oath_hotp)
         self._action.addButton(self._action_otp)
         self._action.addButton(self._action_cr)
         self._action.addButton(self._action_pw)
@@ -278,19 +277,19 @@ class _ConfigureSlotType(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure YubiKey slot {}'.format(self.slot)
+        return m.configure_yubikey_slot.format(self.slot)
 
     def _select_action(self, action):
         self.setNextEnabled(True)
         action = self._action.checkedButton()
         if action == self._action_otp:
-            self._action_desc.setText('Programs a one-time-password credential using the YubiKey OTP protocol.')
+            self._action_desc.setText(m.program_otp_desc)
         elif action == self._action_pw:
-            self._action_desc.setText('Stores a fixed password, which will be output each time you touch the button.')
+            self._action_desc.setText(m.program_static_password_desc)
         elif action == self._action_hotp:
-            self._action_desc.setText('Stores a numeric one-time-password using the OATH-HOTP standard.')
+            self._action_desc.setText(m.program_oath_hotp_desc)
         elif action == self._action_cr:
-            self._action_desc.setText('Programs an HMAC-SHA1 credential, which can be used for local authentication or encryption.')
+            self._action_desc.setText(m.program_challenge_resp_desc)
 
     def _accept(self):
         action = self._action.checkedButton()
@@ -305,8 +304,8 @@ class _ConfigureSlotType(_WizardPage):
 
 
 class _ConfigureOTP(_WizardPage):
-    description = 'When triggered, the YubiKey will output a one time password.'
-    accept_text = 'Write configuration'
+    description = m.otp_desc
+    accept_text = m.write_configuration
 
     def __init__(self, slot, parent):
         super(_ConfigureOTP, self).__init__(slot, parent)
@@ -314,7 +313,7 @@ class _ConfigureOTP(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure YubiKey OTP for slot {}'.format(self.slot)
+        return m.configure_yubikey_otp_slot.format(self.slot)
 
     @property
     def key(self):
@@ -339,14 +338,12 @@ class _ConfigureOTP(_WizardPage):
         self._uid_lbl.setValidator(HexValidator(6, 6))
         self._uid_lbl.textChanged.connect(self._on_change)
 
-        self._key_lbl.setPlaceholderText('16 byte AES key, in hex')
-        self._fixed_lbl.setPlaceholderText('0-16 byte static prefix, in modhex')
-        self._uid_lbl.setPlaceholderText('6 byte internal identity, in hex')
-        layout.addRow('Secret key:', self._key_lbl)
-        layout.addRow('Public ID:', self._fixed_lbl)
-        layout.addRow('Private ID:', self._uid_lbl)
-
-        #self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
+        self._key_lbl.setPlaceholderText(m.byte_hex_16)
+        self._fixed_lbl.setPlaceholderText(m.modhex_prefix)
+        self._uid_lbl.setPlaceholderText(m.byte_id_6)
+        layout.addRow(m.secret_key, self._key_lbl)
+        layout.addRow(m.public_id, self._fixed_lbl)
+        layout.addRow(m.private_id, self._uid_lbl)
 
     def _on_change(self, changed):
         self.setNextEnabled(all(f.hasAcceptableInput() for f in [
@@ -356,18 +353,18 @@ class _ConfigureOTP(_WizardPage):
         ]))
 
     def _accept(self):
-        page = self.begin_work('Writing configuration...')
+        page = self.begin_work(m.writing_configuration)
         try:
             self.parent()._controller.program_otp(
                 self.slot, self.key, self.fixed, self.uid,
-                page.cb('Configuration successfully written!'))
+                page.cb(m.successfully_written))
         except YkpersError as e:
             page.fail(e)
 
 
 class _ConfigureStaticPassword(_WizardPage):
-    description = 'When triggered, the YubiKey will output a fixed password.'
-    accept_text = 'Write configuration'
+    description = m.static_password_desc
+    accept_text = m.write_configuration
 
     def __init__(self, slot, parent):
         super(_ConfigureStaticPassword, self).__init__(slot, parent)
@@ -375,7 +372,7 @@ class _ConfigureStaticPassword(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure static password for slot {}'.format(self.slot)
+        return m.configure_static_password.format(self.slot)
 
     @property
     def static_pw(self):
@@ -383,26 +380,24 @@ class _ConfigureStaticPassword(_WizardPage):
 
     def _build_ui(self, layout):
         self._static_pw_lbl = QtGui.QLineEdit()
-        self._static_pw_lbl.setPlaceholderText('Password, up to 32 characters')
+        self._static_pw_lbl.setPlaceholderText(m.password_32_char)
         self._static_pw_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(bool(t)))
-        layout.addRow('Password:', self._static_pw_lbl)
-        layout_note = QtGui.QLabel('NOTE: Different keyboard layouts may render different passwords, especially for non-alphanumeric characters. To avoid this, choose a password consisting of modhex characters.')
+        layout.addRow(m.password, self._static_pw_lbl)
+        layout_note = QtGui.QLabel(m.keyboard_layout_note)
         layout_note.setWordWrap(True)
         layout.addRow(layout_note)
 
-        # self._static_pw_lbl.setFocus(QtCore.Qt.OtherFocusReason)
-
     def _accept(self):
-        page = self.begin_work('Writing configuration...')
+        page = self.begin_work(m.writing_configuration)
         self.parent()._controller.program_static(
             self.slot, self.static_pw,
-            page.cb('Configuration successfully written!'))
+            page.cb(m.successfully_written))
 
 
 class _ConfigureHotp(_WizardPage):
-    description = 'When triggered, the YubiKey will output a HOTP code.'
-    accept_text = 'Write configuration'
+    description = m.oath_hotp_desc
+    accept_text = m.write_configuration
 
     def __init__(self, slot, parent):
         super(_ConfigureHotp, self).__init__(slot, parent)
@@ -410,7 +405,7 @@ class _ConfigureHotp(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure HOTP credential for slot {}'.format(self.slot)
+        return m.configure_hotp.format(self.slot)
 
     @property
     def key(self):
@@ -422,30 +417,30 @@ class _ConfigureHotp(_WizardPage):
 
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
-        self._key_lbl.setPlaceholderText('OATH secret, in base32')
+        self._key_lbl.setPlaceholderText(m.oath_secret)
         self._key_lbl.setValidator(B32Validator())
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
-        layout.addRow('Secret key (base32):', self._key_lbl)
+        layout.addRow(m.secret_key_base32, self._key_lbl)
         self._n_digits_box = QtGui.QComboBox()
         self._n_digits_box.addItems(['6', '8'])
-        layout.addRow('Number of digits:', self._n_digits_box)
+        layout.addRow(m.number_of_digits, self._n_digits_box)
 
         #self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
 
     def _accept(self):
-        page = self.begin_work('Writing configuration...')
+        page = self.begin_work(m.write_configuration)
         try:
             self.parent()._controller.program_hotp(
                 self.slot, self.key, self.n_digits,
-                page.cb('Configuration successfully written!'))
+                page.cb(m.successfully_written))
         except YkpersError as e:
             page.fail(e)
 
 
 class _ConfigureChalResp(_WizardPage):
-    description = 'When queried, the YubiKey will respond to a challenge.'
-    accept_text = 'Write configuration'
+    description = m.challenge_response_desc
+    accept_text = m.write_configuration
 
     def __init__(self, slot, parent):
         super(_ConfigureChalResp, self).__init__(slot, parent)
@@ -453,7 +448,7 @@ class _ConfigureChalResp(_WizardPage):
 
     @property
     def title_text(self):
-        return 'Configure HMAC-SHA1 credential for slot {}'.format(self.slot)
+        return m.configure_challenge_resp.format(self.slot)
 
     @property
     def key(self):
@@ -466,24 +461,22 @@ class _ConfigureChalResp(_WizardPage):
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(1, 20))
-        self._key_lbl.setPlaceholderText('1-20 byte HMAC-SHA1 key, in hex')
+        self._key_lbl.setPlaceholderText(m.hmac_sha1_key_hex)
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
-        self._touch_box = QtGui.QCheckBox('Require touch')
-        layout.addRow('Secret key:', self._key_lbl)
+        self._touch_box = QtGui.QCheckBox(m.require_touch)
+        layout.addRow(m.secret_key, self._key_lbl)
         layout.addRow(self._touch_box)
 
-        # self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
-
     def _accept(self):
-        page = self.begin_work('Writing configuration...')
+        page = self.begin_work(m.write_configuration)
         self.parent()._controller.program_chalresp(
             self.slot, self.key, self.touch,
-            page.cb('Configuration successfully written!'))
+            page.cb(m.successfully_written))
 
 
 class _WritingConfig(_WizardPage):
-    accept_text = 'Finish'
+    accept_text = m.finish
 
     def __init__(self, title, message, parent):
         self.title_text = title
@@ -504,7 +497,7 @@ class _WritingConfig(_WizardPage):
         self.setNextEnabled(True)
 
     def fail(self, error):
-        self._message.setText('Failed to write to the device.\nMake sure the device does not have restricted access.')
+        self._message.setText(m.failed_to_write)
         self.setPrevEnabled(True)
 
     def cb(self, message):
@@ -525,7 +518,7 @@ class SlotDialog(qt.Dialog):
         self._controller = controller
         self._slot_status = (False, False)
 
-        self.setWindowTitle('Configure YubiKey slots')
+        self.setWindowTitle(m.configure_yubikey_slots)
 
         QtGui.QStackedLayout(self)
         spacer = QtGui.QWidget()

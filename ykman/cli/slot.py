@@ -84,8 +84,7 @@ def _failed_to_write_msg():
 @click.group()
 @click.pass_context
 @click_skip_on_help
-@click.option('--access-code', required=False, metavar='HEX',
-              callback=parse_hex(6),
+@click.option('--access-code', required=False, metavar="HEX", callback=parse_hex(6),
               help='If your YubiKey is write-protected using an access code, '
               'you will need to specify it here for any operation that writes '
               'to the device.')
