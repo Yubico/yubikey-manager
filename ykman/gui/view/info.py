@@ -85,10 +85,8 @@ class _HeaderPanel(QtGui.QGroupBox):
 
     def _set_version(self, version):
         if version:
-            f_version = '({0[0]}.{0[1]})'.format(version) if version[0] == 3 \
-                else '({0[0]}.{0[1]}.{0[2]})'.format(version)
             name = self._device_name.text()
-            self._device_name.setText(name + ' ' + f_version)
+            self._device_name.setText(name + ' ({0[0]}.{0[1]}.{0[2]})'.format(version))
 
 
 class _FeatureSection(QtGui.QGroupBox):
