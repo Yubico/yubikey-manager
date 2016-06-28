@@ -161,9 +161,13 @@ _YUBIKEY_PIDS = {
 
 
 def _yubikeys():
+    found = []  # Composite devices are listed multiple times on Windows...
     for dev in usb.core.find(True, idVendor=0x1050):
         if dev.idProduct in _YUBIKEY_PIDS:
-            yield dev
+            addr = (dev.bus, dev.address)
+            if addr not in found:
+                found.append(addr)
+                yield dev
 
 
 def list_yubikeys():
