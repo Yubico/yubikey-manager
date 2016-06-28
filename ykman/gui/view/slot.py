@@ -28,15 +28,15 @@
 from __future__ import absolute_import, print_function
 
 from PySide import QtGui, QtCore
-from binascii import a2b_hex
+from binascii import a2b_hex, b2a_hex
 from base64 import b32decode
-
 from ykman.yubicommon import qt
 from .. import messages as m
-from ...util import modhex_decode
+from ...util import modhex_decode, modhex_encode
 from ...driver_otp import YkpersError
 import re
-
+import os
+import struct
 
 class B32Validator(QtGui.QValidator):
 
@@ -173,7 +173,7 @@ class _WizardPage(QtGui.QWidget):
         layout.addRow(QtGui.QLabel('<h2>{}</h2>'.format(self.title_text)))
 
         if slot is not None and parent._slot_status[slot - 1]:
-            layout.addRow(QtGui.QLabel('<b>' + m.warning + ':</b>' + m.overwrite_existing))
+            layout.addRow(QtGui.QLabel('<b>' + m.warning + ':</b> ' + m.overwrite_existing))
 
         if self.description is not None:
             layout.addRow(QtGui.QLabel(self.description))
@@ -328,22 +328,41 @@ class _ConfigureOTP(_WizardPage):
         return self._uid_lbl.validator().fixup(self._uid_lbl.text())
 
     def _build_ui(self, layout):
-        self._key_lbl = QtGui.QLineEdit()
-        self._key_lbl.setValidator(HexValidator(16, 16))
-        self._key_lbl.textChanged.connect(self._on_change)
+
         self._fixed_lbl = QtGui.QLineEdit()
         self._fixed_lbl.setValidator(ModhexValidator(0, 16))
+        self._fixed_lbl.setMaximumWidth(100)
         self._fixed_lbl.textChanged.connect(self._on_change)
+        self._fixed_cb = QtGui.QCheckBox(m.use_serial, None)
+        self._fixed_cb.toggled.connect(self._use_serial)
+        fixed_layout = QtGui.QHBoxLayout()
+        fixed_layout.addWidget(self._fixed_lbl)
+        fixed_layout.addWidget(self._fixed_cb)
+        layout.addRow(m.public_id, fixed_layout)
+
         self._uid_lbl = QtGui.QLineEdit()
         self._uid_lbl.setValidator(HexValidator(6, 6))
+        self._uid_lbl.setMaximumWidth(100)
         self._uid_lbl.textChanged.connect(self._on_change)
+        self._uid_btn = QtGui.QPushButton(m.generate, None)
+        self._uid_btn.clicked.connect(self._gen_uid)
+        uid_layout = QtGui.QHBoxLayout()
+        uid_layout.addWidget(self._uid_lbl)
+        uid_layout.addWidget(self._uid_btn)
+        layout.addRow(m.private_id, uid_layout)
 
-        self._key_lbl.setPlaceholderText(m.byte_hex_16)
-        self._fixed_lbl.setPlaceholderText(m.modhex_prefix)
-        self._uid_lbl.setPlaceholderText(m.byte_id_6)
-        layout.addRow(m.secret_key, self._key_lbl)
-        layout.addRow(m.public_id, self._fixed_lbl)
-        layout.addRow(m.private_id, self._uid_lbl)
+        self._key_lbl = QtGui.QLineEdit()
+        self._key_lbl.setValidator(HexValidator(16, 16))
+        self._key_lbl.setMinimumWidth(240)
+        self._key_lbl.textChanged.connect(self._on_change)
+        self._key_btn = QtGui.QPushButton(m.generate, None)
+        self._key_btn.clicked.connect(self._gen_key)
+        key_layout = QtGui.QHBoxLayout()
+        key_layout.addWidget(self._key_lbl)
+        key_layout.addWidget(self._key_btn)
+        layout.addRow(m.secret_key, key_layout)
+
+        layout.setVerticalSpacing(2)
 
     def _on_change(self, changed):
         self.setNextEnabled(all(f.hasAcceptableInput() for f in [
@@ -360,6 +379,19 @@ class _ConfigureOTP(_WizardPage):
                 page.cb(m.successfully_written))
         except YkpersError as e:
             page.fail(e)
+
+    def _gen_key(self):
+        self._key_lbl.setText(b2a_hex(os.urandom(16)).decode('ascii'))
+
+    def _gen_uid(self):
+        self._uid_lbl.setText(b2a_hex(os.urandom(6)).decode('ascii'))
+
+    def _use_serial(self, checked):
+        if checked:
+            serial = self.parent()._controller.serial
+            serial = b'\xff\x00' + struct.pack(b'>I', serial)
+            self._fixed_lbl.setText(modhex_encode(serial))
+        self._fixed_lbl.setDisabled(checked)
 
 
 class _ConfigureStaticPassword(_WizardPage):
