@@ -114,49 +114,42 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(QtGui.QLabel('<h2>' + m.slot_configuration + '</h2>'), 0, 0, 1, 4)
 
         layout.addWidget(QtGui.QLabel(m.slot_1), 1, 0)
-        self._slot1_lbs = (QtGui.QLabel(), QtGui.QLabel(), QtGui.QLabel())
-        self._slot1_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
-        self._slot1_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
+        self._slot1_lbs = (QtGui.QLabel(), QtGui.QPushButton(m.configure), QtGui.QPushButton(m.erase))
+        self._slot1_lbs[1].clicked.connect(lambda: self.parent().configure(1))
+        self._slot1_lbs[2].setVisible(False)
+        self._slot1_lbs[2].clicked.connect(lambda: self.parent().erase(1))
         layout.addWidget(self._slot1_lbs[0], 1, 1)
         layout.addWidget(self._slot1_lbs[1], 1, 2)
         layout.addWidget(self._slot1_lbs[2], 1, 3)
 
         layout.addWidget(QtGui.QLabel(m.slot_2), 2, 0)
-        self._slot2_lbs = (QtGui.QLabel(), QtGui.QLabel(), QtGui.QLabel())
-        self._slot2_lbs[1].linkActivated.connect(lambda x: self.parent().configure(int(x)))
-        self._slot2_lbs[2].linkActivated.connect(lambda x: self.parent().erase(int(x)))
+        self._slot2_lbs = (QtGui.QLabel(), QtGui.QPushButton(m.configure), QtGui.QPushButton(m.erase))
+        self._slot2_lbs[1].clicked.connect(lambda: self.parent().configure(2))
+        self._slot2_lbs[2].setVisible(False)
+        self._slot2_lbs[2].clicked.connect(lambda: self.parent().erase(2))
         layout.addWidget(self._slot2_lbs[0], 2, 1)
         layout.addWidget(self._slot2_lbs[1], 2, 2)
         layout.addWidget(self._slot2_lbs[2], 2, 3)
 
-        self._swap_slots = QtGui.QLabel(m.reading_state)
-        self._swap_slots.linkActivated.connect(lambda _: self.parent().swap())
+        self._swap_slots = QtGui.QPushButton(m.swap)
+        self._swap_slots.setVisible(False)
+        self._swap_slots.clicked.connect(lambda: self.parent().swap())
         layout.addWidget(self._swap_slots, 3, 0)
 
-        buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Close)
-        buttons.rejected.connect(self.parent().back)
-        layout.addWidget(buttons, 4, 0, 1, 4)
+        close = QtGui.QPushButton(m.close)
+        close.setDefault(True)
+        close.clicked.connect(self.parent().back)
+        layout.addWidget(close, 4, 3, 1, 1)
 
         parent.slot_status.connect(self._slots_cb)
 
     def _slots_cb(self, slots):
         (stat1, stat2) = slots
-        self._slot1_lbs[0].setText('Configured' if stat1 else 'Blank')
-        self._slot1_lbs[1].setText('<a href="1">{}</a>'.format('re-configure' if stat1 else 'configure'))
-        self._slot1_lbs[2].setText('<a href="1">erase</a>' if stat1 else '')
-        self._slot2_lbs[0].setText('Configured' if stat2 else 'Blank')
-        self._slot2_lbs[1].setText('<a href="2">{}</a>'.format('re-configure' if stat2 else 'configure'))
-        self._slot2_lbs[2].setText('<a href="2">erase</a>' if stat2 else '')
-
-        if stat1 or stat2:
-            self._swap_slots.setText('<a href="#">swap configurations</a>')
-            self._swap_slots.setDisabled(False)
-        else:
-            color = QtGui.QApplication.palette() \
-                .color(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText)
-            self._swap_slots.setText('<a href="#" style="color: {};">swap configurations</a>'.format(color.name()))
-            self._swap_slots.setDisabled(True)
-
+        self._slot1_lbs[0].setText(m.configured if stat1 else m.blank)
+        self._slot2_lbs[0].setText(m.configured if stat2 else m.blank)
+        self._swap_slots.setVisible(stat1 or stat2)
+        self._slot1_lbs[2].setVisible(stat1)
+        self._slot2_lbs[2].setVisible(stat2)
 
 class _WizardPage(QtGui.QWidget):
     title_text = m.slot_configuration
@@ -556,7 +549,6 @@ class SlotDialog(qt.Dialog):
         spacer = QtGui.QWidget()
         spacer.setFixedWidth(460)
         self.layout().addWidget(spacer)
-        self.setFixedSize(self.sizeHint())
         self.reset(True)
 
     def _slots_cb(self, res):
