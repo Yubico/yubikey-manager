@@ -108,9 +108,10 @@ class _FeatureSection(QtGui.QGroupBox):
             status = QtGui.QLabel('N/A')
             widgets = [label, status]
             if c & self.configurable:
-                configure = QtGui.QLabel('<a href="{}">configure</a>'.format(c))
-                configure.linkActivated.connect(self._configure)
-                widgets.append(configure)
+                conf_btn = QtGui.QPushButton(m.configure, None)
+                conf_btn.c = c
+                conf_btn.clicked.connect(self._configure)
+                widgets.append(conf_btn)
             for col_i in range(len(widgets)):
                 grid_layout.addWidget(widgets[col_i], row_i, col_i)
             self._widgets[c] = widgets
@@ -121,14 +122,10 @@ class _FeatureSection(QtGui.QGroupBox):
         controller.hasDeviceChanged.connect(self._update)
         self._update()
 
-    def _configure(self, link):
-        feature = int(link)
-        if feature == CAPABILITY.OTP:
+    def _configure(self):
+        if self.sender().c == CAPABILITY.OTP:
             dialog = SlotDialog(self._controller, self.parent())
-        else:
-            print('TODO:', link)
-            return
-        dialog.exec_()
+            dialog.exec_()
 
     def _update(self, value=None):
         for c, widgets in self._widgets.items():
@@ -166,9 +163,9 @@ class _ModeSection(QtGui.QGroupBox):
         grid_layout.addWidget(QtGui.QLabel('%s:' % m.enabled), row_i, 0)
         self._enabled_label = QtGui.QLabel()
         grid_layout.addWidget(self._enabled_label, row_i, 1)
-        self._configure_label = QtGui.QLabel('<a href="#">configure</a>')
-        self._configure_label.linkActivated.connect(self._configure)
-        grid_layout.addWidget(self._configure_label, row_i, 2)
+        self._conf_btn = QtGui.QPushButton(m.configure, None)
+        self._conf_btn.clicked.connect(self._configure)
+        grid_layout.addWidget(self._conf_btn, row_i, 2)
 
         controller.capabilitiesChanged.connect(self._update)
         controller.enabledChanged.connect(self._update)
@@ -176,7 +173,7 @@ class _ModeSection(QtGui.QGroupBox):
         controller.canModeSwitchChanged.connect(self._update)
         self._update()
 
-    def _configure(self, url):
+    def _configure(self):
         dialog = ModeDialog(self._controller, self.parent())
         dialog.exec_()
 
@@ -186,7 +183,7 @@ class _ModeSection(QtGui.QGroupBox):
         enabled = [t.name for t in TRANSPORT.split(self._controller.enabled)]
         self._supported_label.setText(format_readable_list(supported))
         self._enabled_label.setText(format_readable_list(enabled))
-        self._configure_label.setVisible(self._controller.can_mode_switch)
+        self._conf_btn.setVisible(self._controller.can_mode_switch)
 
 
 class InfoWidget(QtGui.QWidget):

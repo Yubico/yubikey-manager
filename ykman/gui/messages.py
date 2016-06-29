@@ -106,3 +106,4 @@ failed_to_write = "Failed to write to the device.\nMake sure the device does not
 configure_yubikey_slots = "Configure YubiKey slots"
 use_serial = "Use serial number"
 generate = "Generate"
+configure = "Configure"
