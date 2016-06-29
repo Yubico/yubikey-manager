@@ -451,10 +451,8 @@ class _ConfigureHotp(_WizardPage):
         self._n_digits_box.addItems(['6', '8'])
         layout.addRow(m.number_of_digits, self._n_digits_box)
 
-        #self._key_lbl.setFocus(QtCore.Qt.OtherFocusReason)
-
     def _accept(self):
-        page = self.begin_work(m.write_configuration)
+        page = self.begin_work(m.writing_configuration)
         try:
             self.parent()._controller.program_hotp(
                 self.slot, self.key, self.n_digits,
@@ -486,19 +484,26 @@ class _ConfigureChalResp(_WizardPage):
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(1, 20))
-        self._key_lbl.setPlaceholderText(m.hmac_sha1_key_hex)
+        self._key_lbl.setMinimumWidth(300)
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
         self._touch_box = QtGui.QCheckBox(m.require_touch)
-        layout.addRow(m.secret_key, self._key_lbl)
+        self._key_btn = QtGui.QPushButton(m.generate)
+        self._key_btn.clicked.connect(self._gen_key)
+        key_layout = QtGui.QHBoxLayout()
+        key_layout.addWidget(self._key_lbl)
+        key_layout.addWidget(self._key_btn)
+        layout.addRow(m.secret_key, key_layout)
         layout.addRow(self._touch_box)
 
     def _accept(self):
-        page = self.begin_work(m.write_configuration)
+        page = self.begin_work(m.writing_configuration)
         self.parent()._controller.program_chalresp(
             self.slot, self.key, self.touch,
             page.cb(m.successfully_written))
 
+    def _gen_key(self):
+        self._key_lbl.setText(b2a_hex(os.urandom(20)).decode('ascii'))
 
 class _WritingConfig(_WizardPage):
     accept_text = m.finish
