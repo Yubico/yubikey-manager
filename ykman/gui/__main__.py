@@ -60,6 +60,7 @@ class YkManApplication(qt.Application):
 
         self.window.setCentralWidget(InfoWidget(self._controller, self.window))
 
+        self.window.setFixedSize(self.window.sizeHint())
         self.window.show()
         self.window.raise_()
 

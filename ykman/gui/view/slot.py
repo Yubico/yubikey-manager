@@ -556,7 +556,7 @@ class SlotDialog(qt.Dialog):
         spacer = QtGui.QWidget()
         spacer.setFixedWidth(460)
         self.layout().addWidget(spacer)
-
+        self.setFixedSize(self.sizeHint())
         self.reset(True)
 
     def _slots_cb(self, res):

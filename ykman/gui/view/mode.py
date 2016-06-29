@@ -96,6 +96,7 @@ class ModeDialog(qt.Dialog):
         layout.addWidget(buttons)
 
         self.setWindowTitle(m.configure_connections)
+        self.setFixedSize(self.sizeHint())
 
     def _state_changed(self, transport, state):
         if state:
