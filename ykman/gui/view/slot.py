@@ -450,8 +450,8 @@ class _ConfigureHotp(_WizardPage):
 
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
-        self._key_lbl.setPlaceholderText(m.oath_secret)
         self._key_lbl.setValidator(B32Validator())
+        self._key_lbl.setMinimumWidth(240)
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
         layout.addRow(m.secret_key_base32, self._key_lbl)
