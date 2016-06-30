@@ -36,7 +36,7 @@ from ykman.yubicommon import qt
 from . import messages as m
 from .controller import Controller
 from .view.info import InfoWidget
-
+from ..util import list_yubikeys
 
 class YkManApplication(qt.Application):
 
@@ -51,7 +51,7 @@ class YkManApplication(qt.Application):
 
         self._controller = Controller(self.worker, self)
         self._controller.refresh()
-        self._controller.hasDeviceChanged.connect(self._update)
+        self._controller.numberOfKeysChanged.connect(self._update)
 
         self._init_window()
         self._update()
@@ -61,22 +61,31 @@ class YkManApplication(qt.Application):
         self.window.setWindowIcon(QtGui.QIcon(':/ykman.png'))
 
         self._info = InfoWidget(self._controller, self.window)
+
         self._no_key = QtGui.QLabel(m.no_key)
         self._no_key.setAlignment(QtCore.Qt.AlignCenter)
+
+        self._multiple_keys = QtGui.QLabel(m.multiple_keys)
+        self._multiple_keys.setAlignment(QtCore.Qt.AlignCenter)
 
         self._widget_stack = QtGui.QStackedWidget()
         self._widget_stack.addWidget(self._info)
         self._widget_stack.addWidget(self._no_key)
+        self._widget_stack.addWidget(self._multiple_keys)
+
         self.window.setCentralWidget(self._widget_stack)
 
         self.window.show()
         self.window.raise_()
 
     def _update(self):
-        if self._controller.has_device:
-            self._widget_stack.setCurrentWidget(self._info)
-        else:
+        n_keys = self._controller.number_of_keys
+        if n_keys == 0:
             self._widget_stack.setCurrentWidget(self._no_key)
+        elif n_keys == 1:
+            self._widget_stack.setCurrentWidget(self._info)
+        elif n_keys > 1:
+            self._widget_stack.setCurrentWidget(self._multiple_keys)
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)

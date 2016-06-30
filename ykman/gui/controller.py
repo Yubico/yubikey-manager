@@ -31,7 +31,7 @@ from PySide import QtCore
 from .util import SignalMap
 from . import messages as m
 from ..device import open_device, FailedOpeningDeviceException
-from ..util import TRANSPORT
+from ..util import TRANSPORT, list_yubikeys
 
 
 class Controller(QtCore.QObject):
@@ -42,6 +42,7 @@ class Controller(QtCore.QObject):
     capabilitiesChanged = QtCore.Signal(int)
     enabledChanged = QtCore.Signal(int)
     canModeSwitchChanged = QtCore.Signal(bool)
+    numberOfKeysChanged = QtCore.Signal(bool)
 
     def __init__(self, worker, parent=None):
         super(Controller, self).__init__(parent)
@@ -57,8 +58,8 @@ class Controller(QtCore.QObject):
         self._data.add_property('version', None, self.versionChanged)
         self._data.add_property('capabilities', 0, self.capabilitiesChanged)
         self._data.add_property('enabled', 0, self.enabledChanged)
-        self._data.add_property('can_mode_switch', False,
-                                self.canModeSwitchChanged)
+        self._data.add_property('can_mode_switch', False, self.canModeSwitchChanged)
+        self._data.add_property('number_of_keys', 0, self.numberOfKeysChanged)
 
     @property
     def has_device(self):
@@ -88,6 +89,10 @@ class Controller(QtCore.QObject):
     def can_mode_switch(self):
         return self._data['can_mode_switch']
 
+    @property
+    def number_of_keys(self):
+        return self._data['number_of_keys']
+
     def _grab_device(self, transports=sum(TRANSPORT)):
         if not self.has_device:
             raise ValueError('No device present')
@@ -110,6 +115,12 @@ class Controller(QtCore.QObject):
 
         def _func():
             had_device = self.has_device
+
+            n_keys = len(list_yubikeys())
+            if n_keys != self.number_of_keys:
+                self.numberOfKeysChanged.emit(True)
+            self._data['number_of_keys'] = n_keys
+
             try:
                 dev = open_device()
                 if dev:
