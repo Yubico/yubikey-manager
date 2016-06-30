@@ -36,7 +36,7 @@ domain = "yubico.com"
 app_name = "YubiKey Manager"
 win_title_1 = "YubiKey Manager (%s)"
 
-no_key = "No YubiKey detected."
+no_key = "Insert a YubiKey..."
 device = "Device"
 serial_1 = "Serial: %s"
 features = "Features"

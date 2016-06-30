@@ -51,18 +51,32 @@ class YkManApplication(qt.Application):
 
         self._controller = Controller(self.worker, self)
         self._controller.refresh()
+        self._controller.hasDeviceChanged.connect(self._update)
 
         self._init_window()
+        self._update()
 
     def _init_window(self):
         self.window.setWindowTitle(m.win_title_1 % self.version)
         self.window.setWindowIcon(QtGui.QIcon(':/ykman.png'))
 
-        self.window.setCentralWidget(InfoWidget(self._controller, self.window))
+        self._info = InfoWidget(self._controller, self.window)
+        self._no_key = QtGui.QLabel(m.no_key)
+        self._no_key.setAlignment(QtCore.Qt.AlignCenter)
+
+        self._widget_stack = QtGui.QStackedWidget()
+        self._widget_stack.addWidget(self._info)
+        self._widget_stack.addWidget(self._no_key)
+        self.window.setCentralWidget(self._widget_stack)
 
         self.window.show()
         self.window.raise_()
 
+    def _update(self):
+        if self._controller.has_device:
+            self._widget_stack.setCurrentWidget(self._info)
+        else:
+            self._widget_stack.setCurrentWidget(self._no_key)
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)

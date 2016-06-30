@@ -62,20 +62,11 @@ class _HeaderPanel(QtGui.QGroupBox):
         controller.versionChanged.connect(self._set_version)
         self._set_version(controller.version)
 
-        controller.hasDeviceChanged.connect(self._set_has_device)
-        self._set_has_device(controller.has_device)
-
         controller.deviceNameChanged.connect(self._set_device_name)
         self._set_device_name(controller.device_name)
 
         controller.serialChanged.connect(self._set_serial)
         self._set_serial(controller.serial)
-
-    def _set_has_device(self, has_device):
-        if not has_device:
-            self._set_serial(None)
-            self._set_device_name(m.no_key)
-            self._set_version(None)
 
     def _set_device_name(self, name):
         self._device_name.setText(name)
@@ -197,7 +188,7 @@ class InfoWidget(QtGui.QWidget):
         self.startTimer(1000)
 
     def timerEvent(self, event):
-        if QtGui.QApplication.activeWindow() == self.parent():
+        if QtGui.QApplication.activeWindow():
             self._controller.refresh()
 
     def _build_ui(self):
