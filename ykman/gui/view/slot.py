@@ -169,7 +169,9 @@ class _WizardPage(QtGui.QWidget):
             layout.addRow(QtGui.QLabel('<b>' + m.warning + ':</b> ' + m.overwrite_existing))
 
         if self.description is not None:
-            layout.addRow(QtGui.QLabel(self.description))
+            description = QtGui.QLabel(self.description)
+            description.setWordWrap(True)
+            layout.addRow(description)
 
         self._build_ui(layout)
 
@@ -405,13 +407,17 @@ class _ConfigureStaticPassword(_WizardPage):
 
     def _build_ui(self, layout):
         self._static_pw_lbl = QtGui.QLineEdit()
-        self._static_pw_lbl.setPlaceholderText(m.password_32_char)
+        self._static_pw_lbl.setMinimumWidth(240)
+        self._static_pw_lbl.setMaxLength(32)
+        self._static_pw_lbl.setValidator(ModhexValidator())
         self._static_pw_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(bool(t)))
-        layout.addRow(m.password, self._static_pw_lbl)
-        layout_note = QtGui.QLabel(m.keyboard_layout_note)
-        layout_note.setWordWrap(True)
-        layout.addRow(layout_note)
+        self._static_pw_btn = QtGui.QPushButton(m.generate)
+        self._static_pw_btn.clicked.connect(self._gen_static_pw)
+        static_pw_layout = QtGui.QHBoxLayout()
+        static_pw_layout.addWidget(self._static_pw_lbl)
+        static_pw_layout.addWidget(self._static_pw_btn)
+        layout.addRow(m.password, static_pw_layout)
 
     def _accept(self):
         page = self.begin_work(m.writing_configuration)
@@ -419,6 +425,8 @@ class _ConfigureStaticPassword(_WizardPage):
             self.slot, self.static_pw,
             page.cb(m.successfully_written))
 
+    def _gen_static_pw(self):
+        self._static_pw_lbl.setText(modhex_encode(os.urandom(32)))
 
 class _ConfigureHotp(_WizardPage):
     description = m.oath_hotp_desc
