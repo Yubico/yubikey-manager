@@ -25,84 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import
 
 from PySide import QtGui, QtCore
-from binascii import a2b_hex, b2a_hex
-from base64 import b32decode
+from binascii import  b2a_hex
 from ykman.yubicommon import qt
+from ..validators import B32Validator, HexValidator, ModhexValidator
 from .. import messages as m
-from ...util import modhex_decode, modhex_encode
+from ...util import modhex_encode
 from ...driver_otp import YkpersError
-import re
 import os
 import struct
-
-class B32Validator(QtGui.QValidator):
-
-    def __init__(self, parent=None):
-        super(B32Validator, self).__init__(parent)
-        self.partial = re.compile(r'^[ a-z2-7]+$', re.IGNORECASE)
-
-    def fixup(self, value):
-        try:
-            unpadded = value.upper().rstrip('=').replace(' ', '')
-            return b32decode(unpadded + '=' * (-len(unpadded) % 8))
-        except:
-            return None
-
-    def validate(self, value, pos):
-        try:
-            if self.fixup(value) is not None:
-                return QtGui.QValidator.Acceptable
-        except:
-            pass
-        if self.partial.match(value):
-            return QtGui.QValidator.Intermediate
-        return QtGui.QValidator.Invalid
-
-
-class HexValidator(QtGui.QValidator):
-    partial_pattern = r'^[ a-f0-9]*$'
-
-    def __init__(self, min_bytes=0, max_bytes=None, parent=None):
-        super(HexValidator, self).__init__(parent)
-        self.partial = re.compile(self.partial_pattern, re.IGNORECASE)
-        self._min = min_bytes
-        self._max = max_bytes if max_bytes is not None else float('inf')
-
-    def fixup(self, value):
-        try:
-            return a2b_hex(value.replace(' ', ''))
-        except:
-            return None
-
-    def validate(self, value, pos):
-        try:
-            fixed = self.fixup(value)
-            if fixed is not None and self._min <= len(fixed) <= self._max:
-                return QtGui.QValidator.Acceptable
-        except:
-            pass
-
-        if self.partial.match(value) and \
-                (len(value.replace(' ', '')) + 1) / 2 <= self._max:
-            return QtGui.QValidator.Intermediate
-
-        return QtGui.QValidator.Invalid
-
-
-class ModhexValidator(HexValidator):
-    partial_pattern = r'^[cbdefghijklnrtuv]+$'
-
-    def __init__(self, min_bytes=0, max_bytes=None, parent=None):
-        super(ModhexValidator, self).__init__(min_bytes, max_bytes, parent)
-
-    def fixup(self, value):
-        try:
-            return modhex_decode(value.replace(' ', ''))
-        except:
-            return None
 
 
 class _SlotStatus(QtGui.QWidget):
@@ -151,6 +84,7 @@ class _SlotStatus(QtGui.QWidget):
         self._slot1_lbs[2].setVisible(stat1)
         self._slot2_lbs[2].setVisible(stat2)
 
+
 class _WizardPage(QtGui.QWidget):
     title_text = m.slot_configuration
     description = None
@@ -198,7 +132,7 @@ class _WizardPage(QtGui.QWidget):
         pass
 
     def _accept(self):
-        print('TODO: Next')
+        pass
 
     def begin_work(self, message):
         page = _WritingConfig(self.title_text, message, self.parent())
