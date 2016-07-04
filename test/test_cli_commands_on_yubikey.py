@@ -1,7 +1,12 @@
 import unittest
 import time
+import sys
+import click
 from subprocess import check_output
 from ykman.util import list_yubikeys, BitflagEnum, TRANSPORT
+
+if not click.confirm("Run integration tests? This will erase data on the YubiKey, make sure it is a key used for development."):
+    sys.exit()
 
 def _one_yubikey():
     return len(list_yubikeys()) == 1
