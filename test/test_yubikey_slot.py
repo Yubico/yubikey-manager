@@ -1,23 +1,32 @@
 import unittest
+import time
 from subprocess import check_output
-from ykman.util import list_yubikeys 
+from ykman.util import list_yubikeys, BitflagEnum, TRANSPORT
 
-def verify_one_key():
-    if len(list_yubikeys()) != 1:
-        print("\nTo run the tests, a single YubiKey must be connected.")
-        raise Exception
+def _one_yubikey():
+    return len(list_yubikeys()) == 1
 
+def _has_mode(mode):
+    yubikeys = list_yubikeys()
+    if len(yubikeys) is not 1:
+        return False
+    return BitflagEnum.has(list_yubikeys()[0], mode)
+
+
+@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
 class TestYkmanInfo(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(self):
-        verify_one_key()
-
     def test_ykman_info(self):
+        time.sleep(3)
         info = check_output(['ykman', 'info']).decode('ascii')
         self.assertIn('Device name:', info) 
         self.assertIn('Serial number:', info)
-        self.assertIn('Firmware version:', info) 
+        self.assertIn('Firmware version:', info)
+
+
+@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
+class TestSlotStatus(unittest.TestCase):
 
     def test_ykman_slot_info(self):
         info = check_output(['ykman', 'slot', 'info']).decode('ascii')
@@ -31,11 +40,9 @@ class TestYkmanInfo(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
+@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
 class TestSlotProgramming(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(self):
-        verify_one_key()
 
     def tearDown(self):
         self._check_slot_2_programmed()
@@ -65,8 +72,21 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Deleting slot: 2...', output)
         status = check_output(['ykman', 'slot', 'info']).decode('ascii')
         self.assertIn('Slot 2: empty', status)
-    
+
     def _check_slot_2_programmed(self):
         status = check_output(['ykman', 'slot', 'info']).decode('ascii')
         self.assertIn('Slot 2: programmed', status)
+
+
+@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _has_mode(TRANSPORT.CCID), "CCID needs to be enabled for this test.")
+class TestOpenPGP(unittest.TestCase):
+
+    def test_openpgp_info(self):
+        output = check_output(['ykman', 'openpgp', 'info']).decode('ascii')
+        self.assertIn('OpenPGP version:', output)
+
+    def test_openpgp_reset(self):
+        output = check_output(['ykman', 'openpgp', 'reset', '-f']).decode('ascii')
+        self.assertIn('Success! All data has been cleared and default PINs are set.', output)
 
