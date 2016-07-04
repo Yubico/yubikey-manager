@@ -11,7 +11,6 @@ which can be used to script bulk operations, or access expert features of the
 YubiKey.
 
 === Installation instructions
-THESE INSTRUCTIONS WILL BE DIFFERENT FOR OFFICIAL RELEASES!
 
 For Debian based systems:
 
@@ -20,7 +19,7 @@ For Debian based systems:
     python-enum34 python-docopt libykpers-1-1 libu2f-host0
 
   # Setup the repository
-  $ git clone git@gitlab.yubico.com:Yubico/yubikey-manager.git
+  $ git clone git clone --recursive https://github.com/Yubico/yubikey-manager.git
   $ cd yubikey-manager
   $ git submodule update --init
   $ python setup.py qt_resources
