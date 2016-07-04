@@ -51,7 +51,9 @@ class YkManApplication(qt.Application):
 
         self._controller = Controller(self.worker, self)
         self._controller.refresh()
+
         self._controller.numberOfKeysChanged.connect(self._update)
+        self._controller.hasDeviceChanged.connect(self._update)
 
         self._init_window()
         self._update()
@@ -65,12 +67,16 @@ class YkManApplication(qt.Application):
         self._no_key = QtGui.QLabel(m.no_key)
         self._no_key.setAlignment(QtCore.Qt.AlignCenter)
 
+        self._busy_key = QtGui.QLabel(m.busy_key)
+        self._busy_key.setAlignment(QtCore.Qt.AlignCenter)
+
         self._multiple_keys = QtGui.QLabel(m.multiple_keys)
         self._multiple_keys.setAlignment(QtCore.Qt.AlignCenter)
 
         self._widget_stack = QtGui.QStackedWidget()
         self._widget_stack.addWidget(self._info)
         self._widget_stack.addWidget(self._no_key)
+        self._widget_stack.addWidget(self._busy_key)
         self._widget_stack.addWidget(self._multiple_keys)
 
         self.window.setCentralWidget(self._widget_stack)
@@ -80,10 +86,13 @@ class YkManApplication(qt.Application):
 
     def _update(self):
         n_keys = self._controller.number_of_keys
+        has_device = self._controller.has_device
         if n_keys == 0:
             self._widget_stack.setCurrentWidget(self._no_key)
-        elif n_keys == 1:
+        elif n_keys == 1 and has_device:
             self._widget_stack.setCurrentWidget(self._info)
+        elif n_keys == 1 and not has_device:
+            self._widget_stack.setCurrentWidget(self._busy_key)
         elif n_keys > 1:
             self._widget_stack.setCurrentWidget(self._multiple_keys)
 

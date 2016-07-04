@@ -115,33 +115,28 @@ class Controller(QtCore.QObject):
 
         def _func():
             had_device = self.has_device
-
             n_keys = len(list_yubikeys())
             if n_keys != self.number_of_keys:
                 self.numberOfKeysChanged.emit(True)
             self._data['number_of_keys'] = n_keys
-
-            try:
-                dev = open_device()
-                if dev:
-                    self._data['has_device'] = True
-                    self._data['device_name'] = dev.device_name
-                    self._data['serial'] = dev.serial
-                    self._data['version'] = dev.version
-                    self._data['capabilities'] = dev.capabilities
-                    self._data['enabled'] = dev.enabled
-                    self._data['can_mode_switch'] = dev.can_mode_switch
-                else:
-                    self._data.clear(False)
-            except FailedOpeningDeviceException as e:
-                # TODO: Indicate in the UI that the device may be busy.
-                print("Couldn't open device: {!s}".format(e))
-                self._data.clear(False)
-
-            # If device was removed, we want to emit a signal for that alone.
-            if had_device and not self.has_device:
-                self.hasDeviceChanged.emit(False)
+            if n_keys == 1:
+                try:
+                    dev = open_device()
+                    if dev:
+                        self._data['has_device'] = True
+                        self._data['device_name'] = dev.device_name
+                        self._data['serial'] = dev.serial
+                        self._data['version'] = dev.version
+                        self._data['capabilities'] = dev.capabilities
+                        self._data['enabled'] = dev.enabled
+                        self._data['can_mode_switch'] = dev.can_mode_switch
+                    else:
+                        self.hasDeviceChanged.emit(False)
+                except FailedOpeningDeviceException as e:
+                        print("Couldn't open device: {!s}".format(e))
+                        self.hasDeviceChanged.emit(False)
             self._refreshing = False
+
         self._refreshing = True
         self.worker.post_bg(_func)
 
