@@ -96,10 +96,7 @@ class Controller(QtCore.QObject):
     def _grab_device(self, transports=sum(TRANSPORT)):
         if not self.has_device:
             raise ValueError('No device present')
-
-        dev = open_device(transports)
-        # TODO: Make sure same device.
-        return dev
+        return open_device(transports)
 
     def _use_device(self, fn, cb=None, transports=sum(TRANSPORT)):
         def _func():
