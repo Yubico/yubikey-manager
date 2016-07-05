@@ -29,10 +29,12 @@
 import struct
 import subprocess
 import time
-from smartcard import System, Exceptions
+from smartcard import System
+from smartcard.Exceptions import CardConnectionException
 from .driver import AbstractDriver, ModeSwitchError
 from .util import Mode, CAPABILITY, TRANSPORT, read_version_usb
 from .yubicommon.compat import byte2int, int2byte
+
 SW_OK = 0x9000
 
 INS_SELECT = 0xa4
@@ -112,7 +114,10 @@ class CCIDDriver(AbstractDriver):
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=True):
         header = [cl, ins, p1, p2, len(data)]
         body = [byte2int(c) for c in data]
-        resp, sw1, sw2 = self._conn.transmit(header + body)
+        try:
+            resp, sw1, sw2 = self._conn.transmit(header + body)
+        except CardConnectionException as e:
+            raise CCIDError(e)
         sw = sw1 << 8 | sw2
         if check and sw != SW_OK:
             raise CCIDError(sw)
@@ -188,7 +193,7 @@ def open_device():
             try:
                 conn = reader.createConnection()
                 conn.connect()
-            except Exceptions.CardConnectionException as e:
+            except CardConnectionException as e:
                 if 'Sharing violation' in str(e) and kill_scdaemon():
                     return open_device()
                 raise

@@ -48,6 +48,7 @@ class _RemoveDialog(QtGui.QMessageBox):
         self.setStandardButtons(QtGui.QMessageBox.NoButton)
 
         qt.connect_once(controller.hasDeviceChanged, self._close)
+        qt.connect_once(controller.numberOfKeysChanged, self._close)
         self._timer = self.startTimer(1000)
 
     def _close(self, has_device):
