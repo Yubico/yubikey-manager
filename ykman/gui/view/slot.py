@@ -111,11 +111,11 @@ class _WizardPage(QtGui.QWidget):
 
         buttons = QtGui.QDialogButtonBox()
         self._accept_btn = QtGui.QPushButton(self.accept_text)
+        self._accept_btn.clicked.connect(self._accept)
         self._reject_btn = QtGui.QPushButton(self.reject_text)
-        buttons.addButton(self._reject_btn, QtGui.QDialogButtonBox.RejectRole)
-        buttons.addButton(self._accept_btn, QtGui.QDialogButtonBox.AcceptRole)
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(parent.back)
+        self._reject_btn.clicked.connect(parent.back)
+        buttons.addButton(self._reject_btn, QtGui.QDialogButtonBox.ActionRole)
+        buttons.addButton(self._accept_btn, QtGui.QDialogButtonBox.ActionRole)
         layout.addRow(buttons)
 
     @property
