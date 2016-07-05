@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from PySide import QtGui, QtCore
-from binascii import  b2a_hex
+from binascii import b2a_hex
 from ykman.yubicommon import qt
 from ..validators import B32Validator, HexValidator, ModhexValidator
 from .. import messages as m
@@ -44,10 +44,12 @@ class _SlotStatus(QtGui.QWidget):
         super(_SlotStatus, self).__init__(parent)
 
         layout = QtGui.QGridLayout(self)
-        layout.addWidget(QtGui.QLabel('<h2>' + m.slot_configuration + '</h2>'), 0, 0, 1, 4)
+        layout.addWidget(QtGui.QLabel('<h2>' + m.slot_configuration + '</h2>'),
+                         0, 0, 1, 4)
 
         layout.addWidget(QtGui.QLabel(m.slot_1), 1, 0)
-        self._slot1_lbs = (QtGui.QLabel(), QtGui.QPushButton(m.configure), QtGui.QPushButton(m.erase))
+        self._slot1_lbs = (QtGui.QLabel(), QtGui.QPushButton(m.configure),
+                           QtGui.QPushButton(m.erase))
         self._slot1_lbs[1].clicked.connect(lambda: self.parent().configure(1))
         self._slot1_lbs[2].setVisible(False)
         self._slot1_lbs[2].clicked.connect(lambda: self.parent().erase(1))
@@ -56,7 +58,8 @@ class _SlotStatus(QtGui.QWidget):
         layout.addWidget(self._slot1_lbs[2], 1, 3)
 
         layout.addWidget(QtGui.QLabel(m.slot_2), 2, 0)
-        self._slot2_lbs = (QtGui.QLabel(), QtGui.QPushButton(m.configure), QtGui.QPushButton(m.erase))
+        self._slot2_lbs = (QtGui.QLabel(), QtGui.QPushButton(m.configure),
+                           QtGui.QPushButton(m.erase))
         self._slot2_lbs[1].clicked.connect(lambda: self.parent().configure(2))
         self._slot2_lbs[2].setVisible(False)
         self._slot2_lbs[2].clicked.connect(lambda: self.parent().erase(2))
@@ -100,7 +103,8 @@ class _WizardPage(QtGui.QWidget):
         layout.addRow(QtGui.QLabel('<h2>{}</h2>'.format(self.title_text)))
 
         if slot is not None and parent._slot_status[slot - 1]:
-            layout.addRow(QtGui.QLabel('<b>' + m.warning + ':</b> ' + m.overwrite_existing))
+            layout.addRow(QtGui.QLabel('<b>{}:</b> {}'.format(
+                m.warning, m.overwrite_existing)))
 
         if self.description is not None:
             description = QtGui.QLabel(self.description)
@@ -153,13 +157,14 @@ class _DeleteSlotPage(_WizardPage):
 
     def _accept(self):
         page = self.begin_work(m.erase_configuration)
-        self.parent()._controller.delete_slot(self.slot, page.cb(m.configuration_erased))
+        self.parent()._controller.delete_slot(self.slot,
+                                              page.cb(m.configuration_erased))
 
 
 class _SwapSlotsPage(_WizardPage):
     title_text = m.swap_slots
     description = m.swap_slots_desc
-    accept_text = m.swap 
+    accept_text = m.swap
 
     def __init__(self, parent):
         super(_SwapSlotsPage, self).__init__(None, parent)
@@ -167,6 +172,7 @@ class _SwapSlotsPage(_WizardPage):
     def _accept(self):
         page = self.begin_work(m.writing_configuration)
         self.parent()._controller.swap_slots(page.cb(m.successfully_written))
+
 
 class _ConfigureSlotType(_WizardPage):
     description = m.select_functionality
@@ -176,7 +182,8 @@ class _ConfigureSlotType(_WizardPage):
         self.setNextEnabled(False)
 
         # Do this after the window is drawn to avoid expanding the dialog.
-        QtCore.QTimer.singleShot(0, lambda: self._action_desc.setText(m.supports_variety_of_protocols))
+        QtCore.QTimer.singleShot(0, lambda: self._action_desc.setText(
+            m.supports_variety_of_protocols))
 
     def _build_ui(self, layout):
         self._action = QtGui.QButtonGroup(self)
@@ -225,7 +232,8 @@ class _ConfigureSlotType(_WizardPage):
         if action == self._action_otp:
             self.parent().push(_ConfigureOTP(self.slot, self.parent()))
         elif action == self._action_pw:
-            self.parent().push(_ConfigureStaticPassword(self.slot, self.parent()))
+            self.parent().push(_ConfigureStaticPassword(self.slot,
+                                                        self.parent()))
         elif action == self._action_hotp:
             self.parent().push(_ConfigureHotp(self.slot, self.parent()))
         elif action == self._action_cr:
@@ -362,6 +370,7 @@ class _ConfigureStaticPassword(_WizardPage):
     def _gen_static_pw(self):
         self._static_pw_lbl.setText(modhex_encode(os.urandom(32)))
 
+
 class _ConfigureHotp(_WizardPage):
     description = m.oath_hotp_desc
     accept_text = m.write_configuration
@@ -446,6 +455,7 @@ class _ConfigureChalResp(_WizardPage):
 
     def _gen_key(self):
         self._key_lbl.setText(b2a_hex(os.urandom(20)).decode('ascii'))
+
 
 class _WritingConfig(_WizardPage):
     accept_text = m.finish
