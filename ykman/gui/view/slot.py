@@ -38,6 +38,12 @@ import os
 import struct
 
 
+def _monospace():
+    font = QtGui.QFont("Monospace")
+    font.setStyleHint(QtGui.QFont.TypeWriter)
+    return font
+
+
 class _SlotStatus(QtGui.QWidget):
 
     def __init__(self, parent=None):
@@ -268,7 +274,8 @@ class _ConfigureOTP(_WizardPage):
 
         self._fixed_lbl = QtGui.QLineEdit()
         self._fixed_lbl.setValidator(ModhexValidator(0, 16))
-        self._fixed_lbl.setMaximumWidth(100)
+        self._fixed_lbl.setMaximumWidth(110)
+        self._fixed_lbl.setFont(_monospace())
         self._fixed_lbl.textChanged.connect(self._on_change)
         self._fixed_cb = QtGui.QCheckBox(m.use_serial)
         self._fixed_cb.toggled.connect(self._use_serial)
@@ -279,7 +286,8 @@ class _ConfigureOTP(_WizardPage):
 
         self._uid_lbl = QtGui.QLineEdit()
         self._uid_lbl.setValidator(HexValidator(6, 6))
-        self._uid_lbl.setMaximumWidth(100)
+        self._uid_lbl.setMaximumWidth(110)
+        self._uid_lbl.setFont(_monospace())
         self._uid_lbl.textChanged.connect(self._on_change)
         self._uid_btn = QtGui.QPushButton(m.generate, None)
         self._uid_btn.clicked.connect(self._gen_uid)
@@ -291,7 +299,8 @@ class _ConfigureOTP(_WizardPage):
 
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(16, 16))
-        self._key_lbl.setMinimumWidth(240)
+        self._key_lbl.setMinimumWidth(260)
+        self._key_lbl.setFont(_monospace())
         self._key_lbl.textChanged.connect(self._on_change)
         self._key_btn = QtGui.QPushButton(m.generate)
         self._key_btn.clicked.connect(self._gen_key)
@@ -348,9 +357,10 @@ class _ConfigureStaticPassword(_WizardPage):
 
     def _build_ui(self, layout):
         self._static_pw_lbl = QtGui.QLineEdit()
-        self._static_pw_lbl.setMinimumWidth(240)
+        self._static_pw_lbl.setMinimumWidth(260)
         self._static_pw_lbl.setMaxLength(32)
         self._static_pw_lbl.setValidator(ModhexValidator())
+        self._static_pw_lbl.setFont(_monospace())
         self._static_pw_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(bool(t)))
         self._static_pw_btn = QtGui.QPushButton(m.generate)
@@ -394,6 +404,7 @@ class _ConfigureHotp(_WizardPage):
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(B32Validator())
         self._key_lbl.setMinimumWidth(240)
+        self._key_lbl.setFont(_monospace())
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
         layout.addRow(m.secret_key_base32, self._key_lbl)
@@ -434,7 +445,8 @@ class _ConfigureChalResp(_WizardPage):
     def _build_ui(self, layout):
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(1, 20))
-        self._key_lbl.setMinimumWidth(300)
+        self._key_lbl.setMinimumWidth(320)
+        self._key_lbl.setFont(_monospace())
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
         self._touch_box = QtGui.QCheckBox(m.require_touch)
