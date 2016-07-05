@@ -270,7 +270,7 @@ class _ConfigureOTP(_WizardPage):
         self._fixed_lbl.setValidator(ModhexValidator(0, 16))
         self._fixed_lbl.setMaximumWidth(100)
         self._fixed_lbl.textChanged.connect(self._on_change)
-        self._fixed_cb = QtGui.QCheckBox(m.use_serial, None)
+        self._fixed_cb = QtGui.QCheckBox(m.use_serial)
         self._fixed_cb.toggled.connect(self._use_serial)
         fixed_layout = QtGui.QHBoxLayout()
         fixed_layout.addWidget(self._fixed_lbl)
@@ -286,20 +286,19 @@ class _ConfigureOTP(_WizardPage):
         uid_layout = QtGui.QHBoxLayout()
         uid_layout.addWidget(self._uid_lbl)
         uid_layout.addWidget(self._uid_btn)
+        uid_layout.addStretch(1)
         layout.addRow(m.private_id, uid_layout)
 
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(16, 16))
         self._key_lbl.setMinimumWidth(240)
         self._key_lbl.textChanged.connect(self._on_change)
-        self._key_btn = QtGui.QPushButton(m.generate, None)
+        self._key_btn = QtGui.QPushButton(m.generate)
         self._key_btn.clicked.connect(self._gen_key)
         key_layout = QtGui.QHBoxLayout()
         key_layout.addWidget(self._key_lbl)
         key_layout.addWidget(self._key_btn)
         layout.addRow(m.secret_key, key_layout)
-
-        layout.setVerticalSpacing(2)
 
     def _on_change(self, changed):
         self.setNextEnabled(all(f.hasAcceptableInput() for f in [
