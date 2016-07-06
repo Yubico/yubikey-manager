@@ -174,7 +174,7 @@ class _DeleteSlotPage(_WizardPage):
 class _SwapSlotsPage(_WizardPage):
     title_text = m.swap_slots
     description = m.swap_slots_desc
-    accept_text = m.swap
+    accept_text = m.write_configuration
 
     def __init__(self, parent):
         super(_SwapSlotsPage, self).__init__(None, parent)
