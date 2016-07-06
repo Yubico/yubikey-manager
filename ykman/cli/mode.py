@@ -78,6 +78,8 @@ def _parse_mode_string(ctx, param, mode):
 @click.pass_context
 def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
+    Manage connection modes.
+
     Get the current connection mode of the YubiKey, or set it to MODE.
 
     MODE can be a string, such as "OTP+U2F+CCID", or a shortened form: "o+u+c".

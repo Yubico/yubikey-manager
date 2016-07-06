@@ -39,7 +39,10 @@ import click
 @click.pass_context
 def info(ctx):
     """
-    Displays information about the attached YubiKey.
+    Show general information.
+
+    Displays information about the attached YubiKey such as serial number,
+    firmware version, capabilities, etc.
     """
     click.echo('{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__))
     click.echo('Libraries: libykpers {}, libu2f-host {}'.format(

@@ -91,6 +91,9 @@ def _failed_to_write_msg():
 def slot(ctx, access_code):
     """
     Manage YubiKey OTP slots.
+
+    The YubiKey provides two keyboard-based slots which can each be configured
+    with a credential. Several credential types are supported.
     """
     ctx.obj['dev'].driver.access_code = access_code
 slot.transports = TRANSPORT.OTP
@@ -115,7 +118,7 @@ def info(ctx):
 @click.pass_context
 def swap(ctx):
     """
-    Swaps the two slot configurations with each other.
+    Swaps the two slot configurations.
     """
     dev = ctx.obj['dev']
     click.echo('Swapping slots...')
@@ -213,7 +216,7 @@ def static(ctx, slot, password, no_enter, force):
 @click.pass_context
 def chalresp(ctx, slot, key, require_touch, force):
     """
-    Program an HMAC-SHA1 challenge-response credential.
+    Program a challenge-response credential.
 
     If --key is not given, a randomly generated key will be used.
     """

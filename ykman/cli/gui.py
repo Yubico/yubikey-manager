@@ -32,7 +32,7 @@ import click
 @click.command()
 def gui():
     """
-    Launches the YubiKey Manager graphical interface.
+    Launch the graphical interface.
     """
     try:
         import PySide

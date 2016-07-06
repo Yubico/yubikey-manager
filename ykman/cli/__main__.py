@@ -45,7 +45,8 @@ COMMANDS = (info, mode, slot, openpgp, gui)
 
 
 CLICK_CONTEXT_SETTINGS = dict(
-    help_option_names=['-h', '--help']
+    help_option_names=['-h', '--help'],
+    max_content_width=999
 )
 
 
