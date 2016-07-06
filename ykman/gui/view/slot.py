@@ -279,11 +279,9 @@ class _ConfigureOTP(_WizardPage):
         self._fixed_lbl.textChanged.connect(self._on_change)
         self._fixed_cb = QtGui.QCheckBox(m.use_serial)
         self._fixed_cb.toggled.connect(self._use_serial)
-        fixed_layout = QtGui.QHBoxLayout()
-        fixed_layout.addWidget(self._fixed_lbl)
-        fixed_layout.addWidget(self._fixed_cb)
         grid.addWidget(QtGui.QLabel(m.public_id), 0, 0)
-        grid.addLayout(fixed_layout, 0, 1)
+        grid.addWidget(self._fixed_lbl, 0, 1)
+        grid.addWidget(self._fixed_cb, 0, 2, 1, 3)
 
         self._uid_lbl = QtGui.QLineEdit()
         self._uid_lbl.setValidator(HexValidator(6, 6))
@@ -292,12 +290,9 @@ class _ConfigureOTP(_WizardPage):
         self._uid_lbl.textChanged.connect(self._on_change)
         self._uid_btn = QtGui.QPushButton(m.generate, None)
         self._uid_btn.clicked.connect(self._gen_uid)
-        uid_layout = QtGui.QHBoxLayout()
-        uid_layout.addWidget(self._uid_lbl)
-        uid_layout.addWidget(self._uid_btn)
-        uid_layout.addStretch(1)
         grid.addWidget(QtGui.QLabel(m.private_id), 1, 0)
-        grid.addLayout(uid_layout, 1, 1)
+        grid.addWidget(self._uid_lbl, 1, 1)
+        grid.addWidget(self._uid_btn, 1, 2)
 
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(16, 16))
@@ -306,11 +301,9 @@ class _ConfigureOTP(_WizardPage):
         self._key_lbl.textChanged.connect(self._on_change)
         self._key_btn = QtGui.QPushButton(m.generate)
         self._key_btn.clicked.connect(self._gen_key)
-        key_layout = QtGui.QHBoxLayout()
-        key_layout.addWidget(self._key_lbl)
-        key_layout.addWidget(self._key_btn)
         grid.addWidget(QtGui.QLabel(m.secret_key), 2, 0)
-        grid.addLayout(key_layout, 2, 1)
+        grid.addWidget(self._key_lbl, 2, 1, 1, 3)
+        grid.addWidget(self._key_btn, 2, 4)
 
     def _on_change(self, changed):
         self.setNextEnabled(all(f.hasAcceptableInput() for f in [
