@@ -479,8 +479,8 @@ class _WritingConfig(_WizardPage):
         self.setPrevEnabled(False)
         self.setNextEnabled(False)
 
-    def _build_ui(self, layout):
-        layout.addRow(self._message)
+    def _build_ui(self, grid):
+        grid.addWidget(self._message)
 
     def _accept(self):
         self.parent().reset()
