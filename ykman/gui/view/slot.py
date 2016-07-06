@@ -105,28 +105,32 @@ class _WizardPage(QtGui.QWidget):
 
         self._slot = slot
 
-        layout = QtGui.QFormLayout(self)
-        layout.addRow(QtGui.QLabel('<h2>{}</h2>'.format(self.title_text)))
+        layout = QtGui.QVBoxLayout(self)
+        layout.addWidget(QtGui.QLabel('<h2>{}</h2>'.format(self.title_text)))
 
         if slot is not None and parent._slot_status[slot - 1]:
-            layout.addRow(QtGui.QLabel('<b>{}:</b> {}'.format(
+            layout.addWidget(QtGui.QLabel('<b>{}:</b> {}'.format(
                 m.warning, m.overwrite_existing)))
 
         if self.description is not None:
             description = QtGui.QLabel(self.description)
             description.setWordWrap(True)
-            layout.addRow(description)
+            layout.addWidget(description)
 
-        self._build_ui(layout)
+        grid = QtGui.QGridLayout()
+        self._build_ui(grid)
+        layout.addLayout(grid)
 
-        buttons = QtGui.QDialogButtonBox()
+        layout.addStretch(1)
+        buttons = QtGui.QHBoxLayout()
         self._accept_btn = QtGui.QPushButton(self.accept_text)
         self._accept_btn.clicked.connect(self._accept)
         self._reject_btn = QtGui.QPushButton(self.reject_text)
         self._reject_btn.clicked.connect(parent.back)
-        buttons.addButton(self._reject_btn, QtGui.QDialogButtonBox.ActionRole)
-        buttons.addButton(self._accept_btn, QtGui.QDialogButtonBox.ActionRole)
-        layout.addRow(buttons)
+        buttons.addStretch(1)
+        buttons.addWidget(self._reject_btn)
+        buttons.addWidget(self._accept_btn)
+        layout.addLayout(buttons)
 
     @property
     def slot(self):
@@ -191,7 +195,7 @@ class _ConfigureSlotType(_WizardPage):
         QtCore.QTimer.singleShot(0, lambda: self._action_desc.setText(
             m.supports_variety_of_protocols))
 
-    def _build_ui(self, layout):
+    def _build_ui(self, grid):
         self._action = QtGui.QButtonGroup(self)
         self._action_otp = QtGui.QRadioButton(m.yubikey_otp)
         self._action_cr = QtGui.QRadioButton(m.challenge_response)
@@ -202,9 +206,6 @@ class _ConfigureSlotType(_WizardPage):
         self._action.addButton(self._action_pw)
         self._action.addButton(self._action_hotp)
         self._action.buttonClicked.connect(self._select_action)
-
-        grid = QtGui.QGridLayout()
-        layout.addRow(grid)
 
         grid.addWidget(self._action_otp, 0, 0)
         grid.addWidget(self._action_cr, 1, 0)
@@ -270,8 +271,7 @@ class _ConfigureOTP(_WizardPage):
     def uid(self):
         return self._uid_lbl.validator().fixup(self._uid_lbl.text())
 
-    def _build_ui(self, layout):
-
+    def _build_ui(self, grid):
         self._fixed_lbl = QtGui.QLineEdit()
         self._fixed_lbl.setValidator(ModhexValidator(0, 16))
         self._fixed_lbl.setMaximumWidth(110)
@@ -282,7 +282,8 @@ class _ConfigureOTP(_WizardPage):
         fixed_layout = QtGui.QHBoxLayout()
         fixed_layout.addWidget(self._fixed_lbl)
         fixed_layout.addWidget(self._fixed_cb)
-        layout.addRow(m.public_id, fixed_layout)
+        grid.addWidget(QtGui.QLabel(m.public_id), 0, 0)
+        grid.addLayout(fixed_layout, 0, 1)
 
         self._uid_lbl = QtGui.QLineEdit()
         self._uid_lbl.setValidator(HexValidator(6, 6))
@@ -295,7 +296,8 @@ class _ConfigureOTP(_WizardPage):
         uid_layout.addWidget(self._uid_lbl)
         uid_layout.addWidget(self._uid_btn)
         uid_layout.addStretch(1)
-        layout.addRow(m.private_id, uid_layout)
+        grid.addWidget(QtGui.QLabel(m.private_id), 1, 0)
+        grid.addLayout(uid_layout, 1, 1)
 
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(16, 16))
@@ -307,7 +309,8 @@ class _ConfigureOTP(_WizardPage):
         key_layout = QtGui.QHBoxLayout()
         key_layout.addWidget(self._key_lbl)
         key_layout.addWidget(self._key_btn)
-        layout.addRow(m.secret_key, key_layout)
+        grid.addWidget(QtGui.QLabel(m.secret_key), 2, 0)
+        grid.addLayout(key_layout, 2, 1)
 
     def _on_change(self, changed):
         self.setNextEnabled(all(f.hasAcceptableInput() for f in [
@@ -355,7 +358,7 @@ class _ConfigureStaticPassword(_WizardPage):
     def static_pw(self):
         return self._static_pw_lbl.text()
 
-    def _build_ui(self, layout):
+    def _build_ui(self, grid):
         self._static_pw_lbl = QtGui.QLineEdit()
         self._static_pw_lbl.setMinimumWidth(260)
         self._static_pw_lbl.setMaxLength(32)
@@ -368,7 +371,9 @@ class _ConfigureStaticPassword(_WizardPage):
         static_pw_layout = QtGui.QHBoxLayout()
         static_pw_layout.addWidget(self._static_pw_lbl)
         static_pw_layout.addWidget(self._static_pw_btn)
-        layout.addRow(m.password, static_pw_layout)
+        grid.addWidget(QtGui.QLabel(m.password), 0, 0)
+        grid.addWidget(self._static_pw_lbl, 0, 1)
+        grid.addWidget(self._static_pw_btn, 0, 2)
 
     def _accept(self):
         page = self.begin_work(m.writing_configuration)
@@ -400,17 +405,20 @@ class _ConfigureHotp(_WizardPage):
     def n_digits(self):
         return int(self._n_digits_box.currentText())
 
-    def _build_ui(self, layout):
+    def _build_ui(self, grid):
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(B32Validator())
         self._key_lbl.setMinimumWidth(240)
         self._key_lbl.setFont(_monospace())
         self._key_lbl.textChanged.connect(
             lambda t: self.setNextEnabled(self._key_lbl.hasAcceptableInput()))
-        layout.addRow(m.secret_key_base32, self._key_lbl)
+        grid.addWidget(QtGui.QLabel(m.secret_key_base32), 0, 0)
+        grid.addWidget(self._key_lbl, 0, 1, 1, 2)
         self._n_digits_box = QtGui.QComboBox()
         self._n_digits_box.addItems(['6', '8'])
-        layout.addRow(m.number_of_digits, self._n_digits_box)
+        grid.addWidget(QtGui.QLabel(m.number_of_digits), 1, 0)
+        grid.addWidget(self._n_digits_box, 1, 1)
+        grid.setColumnStretch(2, 1)
 
     def _accept(self):
         page = self.begin_work(m.writing_configuration)
@@ -442,7 +450,7 @@ class _ConfigureChalResp(_WizardPage):
     def touch(self):
         return self._touch_box.isChecked()
 
-    def _build_ui(self, layout):
+    def _build_ui(self, grid):
         self._key_lbl = QtGui.QLineEdit()
         self._key_lbl.setValidator(HexValidator(1, 20))
         self._key_lbl.setMinimumWidth(320)
@@ -452,11 +460,10 @@ class _ConfigureChalResp(_WizardPage):
         self._touch_box = QtGui.QCheckBox(m.require_touch)
         self._key_btn = QtGui.QPushButton(m.generate)
         self._key_btn.clicked.connect(self._gen_key)
-        key_layout = QtGui.QHBoxLayout()
-        key_layout.addWidget(self._key_lbl)
-        key_layout.addWidget(self._key_btn)
-        layout.addRow(m.secret_key, key_layout)
-        layout.addRow(self._touch_box)
+        grid.addWidget(QtGui.QLabel(m.secret_key), 0, 0)
+        grid.addWidget(self._key_lbl, 0, 1)
+        grid.addWidget(self._key_btn, 0, 2)
+        grid.addWidget(self._touch_box, 1, 0, 1, 3)
 
     def _accept(self):
         page = self.begin_work(m.writing_configuration)
