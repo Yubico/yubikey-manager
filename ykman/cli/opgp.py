@@ -88,7 +88,7 @@ def openpgp(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display version information about the OpenPGP functionality on the YubiKey.
+    Display status of OpenPGP functionality.
     """
     controller = ctx.obj['controller']
     click.echo('OpenPGP version: %d.%d.%d' % controller.version)
@@ -101,7 +101,7 @@ def info(ctx):
 @click.pass_context
 def reset(ctx):
     """
-    Resets OpenPGP functionality of the YubiKey, clearing all data.
+    Resets OpenPGP functionality.
 
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
@@ -129,11 +129,11 @@ def echo_default_pins():
 @click.pass_context
 def touch(ctx, key, policy, admin_pin, force):
     """
-    Get or set the touch policy for one of the OpenPGP keys.
+    Manage touch policy for OpenPGP keys.
 
     \b
     KEY     Key slot to get/set (sig, enc or aut).
-    POLICY  Touch policy to set (on, of or fixed).
+    POLICY  Touch policy to set (on, off or fixed).
     """
     controller = ctx.obj['controller']
     if controller.version <= (4, 2, 0):
@@ -163,6 +163,8 @@ def touch(ctx, key, policy, admin_pin, force):
 @click.pass_context
 def set_pin_retries(ctx, pw_attempts, admin_pin, force):
     """
+    Manage pin-retries.
+
     Sets the number of attempts available before locking for each PIN.
 
     PW_ATTEMPTS should be three integer values corresponding to the number of
