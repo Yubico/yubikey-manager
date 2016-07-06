@@ -76,7 +76,7 @@ class _SlotStatus(QtGui.QWidget):
         self._swap_slots = QtGui.QPushButton(m.swap)
         self._swap_slots.setVisible(False)
         self._swap_slots.clicked.connect(lambda: self.parent().swap())
-        layout.addWidget(self._swap_slots, 3, 0)
+        layout.addWidget(self._swap_slots, 3, 0, 1, 2)
 
         close = QtGui.QPushButton(m.close)
         close.setDefault(True)
