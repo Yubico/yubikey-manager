@@ -76,15 +76,16 @@ click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
                                      callback=lambda c, p, v: int(v))
 
 
-def _failed_to_write_msg():
-    click.echo('Failed to write to the device. Make sure the device does not '
-               'have restricted access.')
+def _failed_to_write_msg(ctx):
+    ctx.fail('Failed to write to the device. Make sure the device does not '
+             'have restricted access.')
 
 
 @click.group()
 @click.pass_context
 @click_skip_on_help
-@click.option('--access-code', required=False, metavar="HEX", callback=parse_hex(6),
+@click.option('--access-code', required=False, metavar="HEX",
+              callback=parse_hex(6),
               help='If your YubiKey is write-protected using an access code, '
               'you will need to specify it here for any operation that writes '
               'to the device.')
@@ -125,7 +126,7 @@ def swap(ctx):
     try:
         dev.driver.swap_slots()
     except YkpersError:
-        _failed_to_write_msg()
+        _failed_to_write_msg(ctx)
 
 
 @slot.command()
@@ -143,7 +144,7 @@ def delete(ctx, slot, force):
     try:
         dev.driver.zap_slot(slot)
     except YkpersError:
-        _failed_to_write_msg()
+        _failed_to_write_msg(ctx)
 
 
 @slot.command()
@@ -182,7 +183,7 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
     try:
         dev.driver.program_otp(slot, key, public_id, private_id, not no_enter)
     except YkpersError:
-        _failed_to_write_msg()
+        _failed_to_write_msg(ctx)
 
 
 @slot.command()
@@ -203,7 +204,7 @@ def static(ctx, slot, password, no_enter, force):
     try:
         dev.driver.program_static(slot, password, not no_enter)
     except YkpersError:
-        _failed_to_write_msg()
+        _failed_to_write_msg(ctx)
 
 
 @slot.command()
@@ -232,7 +233,7 @@ def chalresp(ctx, slot, key, require_touch, force):
     try:
         dev.driver.program_chalresp(slot, key, require_touch)
     except YkpersError:
-        _failed_to_write_msg()
+        _failed_to_write_msg(ctx)
 
 
 @slot.command()
@@ -260,4 +261,4 @@ def hotp(ctx, slot, key, digits, imf, no_enter, force):
     try:
         dev.driver.program_hotp(slot, key, imf, digits == 8, not no_enter)
     except YkpersError:
-        _failed_to_write_msg()
+        _failed_to_write_msg(ctx)
