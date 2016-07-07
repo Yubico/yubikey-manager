@@ -28,10 +28,8 @@
 from enum import IntEnum
 from binascii import b2a_hex, a2b_hex
 from .yubicommon.compat import byte2int, text_type
-import ctypes.util
+from .native.pyusb import get_usb_backend
 import usb.core
-import os
-import sys
 
 
 __all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list',
@@ -163,33 +161,9 @@ _YUBIKEY_PIDS = {
 }
 
 
-def find_library(libname):
-    if os.path.isfile(libname):
-        return libname
-    elif sys.platform == 'win32' and os.path.isfile(libname + '.dll'):
-        return libname + '.dll'
-    return ctypes.util.find_library(libname)
-
-
-def load_usb_backend():
-    import usb.backend.libusb1 as libusb1
-    import usb.backend.libusb0 as libusb0
-    import usb.backend.openusb as openusb
-
-    for m in (libusb1, openusb, libusb0):
-        backend = m.get_backend(find_library=find_library)
-        if backend is not None:
-            return backend
-
-
-_usb_backend = None
-
-
 def _yubikeys():
-    global _usb_backend
-    _usb_backend = _usb_backend or load_usb_backend()
     found = []  # Composite devices are listed multiple times on Windows...
-    for dev in usb.core.find(True, idVendor=0x1050, backend=_usb_backend):
+    for dev in usb.core.find(True, idVendor=0x1050, backend=get_usb_backend()):
         if dev.idProduct in _YUBIKEY_PIDS:
             addr = (dev.bus, dev.address)
             if addr not in found:
