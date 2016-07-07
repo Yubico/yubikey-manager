@@ -8,3 +8,7 @@ ChangeLog
 MANIFEST
 ykman/gui/qt_resources.py
 man/*.1
+ykman-gui-script.py
+ykman-gui.pkg
+ykman-script.py
+ykman.pkg
