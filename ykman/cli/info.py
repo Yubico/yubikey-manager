@@ -29,8 +29,6 @@ from __future__ import absolute_import
 
 from ykman import __version__
 from ..util import CAPABILITY
-from ..driver_otp import libversion as ykpers_version
-from ..driver_u2f import libversion as u2fhost_version
 import sys
 import click
 
@@ -44,12 +42,8 @@ def info(ctx):
     Displays information about the attached YubiKey such as serial number,
     firmware version, capabilities, etc.
     """
-    click.echo('{} (YubiKey Manager CLI) {}'.format(sys.argv[0], __version__))
-    click.echo('Libraries: libykpers {}, libu2f-host {}'.format(
-        ykpers_version, u2fhost_version))
-    click.echo()
-
     dev = ctx.obj['dev']
+    click.echo()
     click.echo('Device name: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))

@@ -31,6 +31,8 @@ from __future__ import absolute_import
 
 from ykman import __version__
 from ..util import TRANSPORT, list_yubikeys
+from ..driver_otp import libversion as ykpers_version
+from ..driver_u2f import libversion as u2fhost_version
 from ..device import open_device, FailedOpeningDeviceException
 from .util import click_skip_on_help
 from .gui import gui
@@ -53,7 +55,8 @@ CLICK_CONTEXT_SETTINGS = dict(
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo('ykman version: {}'.format(__version__))
+    click.echo('YubiKey Manager (ykman) version: {}'.format(__version__))
+    click.echo('Libraries: libykpers {}, libu2f-host {}'.format(ykpers_version, u2fhost_version))
     ctx.exit()
 
 
