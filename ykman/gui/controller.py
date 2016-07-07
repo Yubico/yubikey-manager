@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from __future__ import absolute_import, print_function
-
+from usb.core import NoBackendError
 from PySide import QtCore
 from .util import SignalMap
 from . import messages as m
@@ -112,7 +112,14 @@ class Controller(QtCore.QObject):
 
         def _func():
             had_device = self.has_device
-            n_keys = len(list_yubikeys())
+
+            try:
+                yubikeys = list_yubikeys()
+                n_keys = len(list_yubikeys())
+            except NoBackendError:
+                n_keys = 0
+                print("No PyUSB backend detected!")
+
             if n_keys != self.number_of_keys:
                 self.numberOfKeysChanged.emit(True)
             self._data['number_of_keys'] = n_keys
