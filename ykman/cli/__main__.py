@@ -41,6 +41,7 @@ from .info import info
 from .mode import mode
 from .slot import slot
 from .opgp import openpgp
+import usb.core
 import click
 
 
@@ -57,8 +58,12 @@ def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
     click.echo('YubiKey Manager (ykman) version: {}'.format(__version__))
+    libs = ['libykpers ' + ykpers_version, 'libu2f-host ' + u2fhost_version]
     usb_lib = get_usb_backend_version()
-    click.echo('Libraries: libykpers {}, libu2f-host {}, {}'.format(ykpers_version, u2fhost_version, usb_lib))
+    libs.append(usb_lib or '<pyusb backend missing>')
+    click.echo('Libraries:')
+    for lib in libs:
+        click.echo('    {}'.format(lib))
     ctx.exit()
 
 
@@ -74,7 +79,10 @@ def cli(ctx):
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
-        yubikeys = list_yubikeys()
+        try:
+            yubikeys = list_yubikeys()
+        except usb.core.NoBackendError:
+            click.fail('No PyUSB backend detected!')
         n_keys = len(yubikeys)
         if n_keys == 0:
             ctx.fail('No YubiKey detected!')

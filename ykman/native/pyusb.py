@@ -72,7 +72,9 @@ class LibUsb1Version(ctypes.Structure):
 
 def get_usb_backend_version():
     backend = get_usb_backend()
-    if isinstance(backend, libusb1._LibUSB):
+    if backend is None:
+        return None
+    elif isinstance(backend, libusb1._LibUSB):
         lib = backend.lib
         lib.libusb_get_version.restype = ctypes.POINTER(LibUsb1Version)
         version = lib.libusb_get_version().contents
