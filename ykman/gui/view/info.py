@@ -51,6 +51,8 @@ class _HeaderPanel(QtGui.QGroupBox):
     def __init__(self, controller, parent=None):
         super(_HeaderPanel, self).__init__(m.device, parent)
 
+        self._controller = controller
+
         layout = QtGui.QHBoxLayout(self)
 
         self._device_name = QtGui.QLabel()
@@ -75,10 +77,11 @@ class _HeaderPanel(QtGui.QGroupBox):
         self._serial.setText((m.serial_1 % serial) if serial else '')
 
     def _set_version(self, version):
+        name = self._controller.device_name
         if version:
-            name = self._device_name.text()
             self._device_name.setText(name + ' ({0[0]}.{0[1]}.{0[2]})'.format(version))
-
+        else:
+            self._device_name.setText(name)
 
 class _FeatureSection(QtGui.QGroupBox):
 
