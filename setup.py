@@ -61,6 +61,8 @@ setup(
         'executable': executable,
         'qt_resources': qt_resources('ykman.gui')
     },
+    test_suite='test',
+    tests_require=install_requires + ['click'],
     classifiers=[
         'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
