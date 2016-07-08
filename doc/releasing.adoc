@@ -1,0 +1,17 @@
+== Source release to pypi
+
+    python setup.py release --skip-tests --pypi
+
+== Releasing on macOS
+
+    python setup.py executable
+    resources/fix_libusb_dep_app_bundle.sh dist/YubiKey\ Manager.app/
+    codesign -s 'Developer ID Application' dist/YubiKey\ Manager.app/ --deep
+    sudo pkgbuild --install-location /Applications --component dist/YubiKey\ Manager.app/ dist/installer.pkg
+    productsign -s 'Developer ID Installer' dist/installer.pkg dist/yubikey-manager-VERSION-mac.pkg
+    gpg --detach-sign dist/yubikey-manager-VERSION-mac.pkg
+
+== Releasing on Windows
+
+    python setup.py executable
+    gpg --detach-sign dist/yubikey-manager-VERSION-win.exe
