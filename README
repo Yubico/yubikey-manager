@@ -41,7 +41,7 @@ Linux (Debian based):
     $ sudo -H pip install yubikey-manager
 
 === Bash completion
-Bash completion for the command line tool is available, but not enabled by
-default. To enable it, run:
+Experimental Bash completion for the command line tool is available, but not
+enabled by default. To enable it, run this command once:
 
-    $ sudo sh -c '_YKMAN_COMPLETE=source ykman > /etc/bash_completion.d/ykman'
+    $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
