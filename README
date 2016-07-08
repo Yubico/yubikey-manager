@@ -45,33 +45,3 @@ Bash completion for the command line tool is available, but not enabled by
 default. To enable it, run:
 
     $ sudo sh -c '_YKMAN_COMPLETE=source ykman > /etc/bash_completion.d/ykman'
-
-=== Setup development environment
-
-Install development dependencies:
-
-    $ sudo apt-get install python-pip pcscd python-pyscard python-pyside \
-    libykpers-1-1 libu2f-host0 python-click pyside-tools
-
-Setup the repository:
-
-    $ git clone git clone --recursive https://github.com/Yubico/yubikey-manager.git
-    $ cd yubikey-manager
-    $ python setup.py qt_resources
-
-Install YubiKey Manager (from root of repository):
-
-    $ sudo -H pip install -e .
-
-Run the app:
-
-    $ ykman --help
-
-To update once installed, just make sure the repo is up to date:
-
-    $ git pull
-    $ git submodule update
-
-To uninstall, run:
-
-    $ sudo -H pip uninstall yubikey-manager
