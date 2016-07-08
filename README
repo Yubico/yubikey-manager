@@ -10,6 +10,22 @@ A powerful command line interface to configuring or reprogramming a YubiKey,
 which can be used to script bulk operations, or access expert features of the
 YubiKey.
 
+    Usage: ykman [OPTIONS] COMMAND [ARGS]...
+
+    Interface with a YubiKey via the command line.
+
+    Options:
+        -v, --version
+        -h, --help     Show this message and exit.
+
+    Commands:
+        gui      Launch the graphical interface.
+        info     Show general information.
+        mode     Manage connection modes.
+        openpgp  Manage YubiKey OpenPGP functions.
+        slot     Manage YubiKey OTP slots.
+
+
 === Installation instructions
 
 For Debian based systems:
