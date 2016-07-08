@@ -10,27 +10,29 @@ A powerful command line interface to configuring or reprogramming a YubiKey,
 which can be used to script bulk operations, or access expert features of the
 YubiKey.
 
+....
     Usage: ykman [OPTIONS] COMMAND [ARGS]...
-+
+
     Interface with a YubiKey via the command line.
-+   
+
     Options:
         -v, --version
         -h, --help     Show this message and exit.
-+   
+
     Commands:
         gui      Launch the graphical interface.
         info     Show general information.
         mode     Manage connection modes.
         openpgp  Manage YubiKey OpenPGP functions.
         slot     Manage YubiKey OTP slots.
-
+....
 
 === Installation
 Windows & macOS:
 Use installers available for download https://developers.yubico.com/yubikey-manager/Releases/[here].
 
 Linux (Debian based):
+
     $ sudo apt-get install python-pip pcscd python-pyscard python-pyside \ 
     libykpers-1-1 libu2f-host0 python-click
 
@@ -40,23 +42,29 @@ Linux (Debian based):
 === Setup development environment
 
 Install development dependencies:
+
     $ sudo apt-get install python-pip pcscd python-pyscard python-pyside \
     libykpers-1-1 libu2f-host0 python-click pyside-tools
 
 Setup the repository:
+
     $ git clone git clone --recursive https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
     $ python setup.py qt_resources
 
 Install YubiKey Manager (from root of repository):
+
     $ sudo -H pip install -e .
 
 Run the app:
+
     $ ykman --help
 
 To update once installed, just make sure the repo is up to date:
+
     $ git pull
     $ git submodule update
 
 To uninstall, run:
+
     $ sudo -H pip uninstall yubikey-manager
