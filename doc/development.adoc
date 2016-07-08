@@ -1,4 +1,4 @@
-=== Setup development environment
+== Setting up a development environment and working with sources
 
 Install development dependencies:
 
