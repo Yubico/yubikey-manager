@@ -5,7 +5,7 @@ Graphical application and command line tool for configuring a YubiKey.
 An easy-to-use desktop application with functionality to perform the most
 commonly used functions.
 
-image::resources/screenshot.png[]
+image::screenshot.png[]
 
 === Command line tool (ykman)
 A powerful command line interface to configuring or reprogramming a YubiKey,
