@@ -36,12 +36,6 @@ from ..util import TRANSPORT, list_yubikeys
 
 class Controller(QtCore.QObject):
     hasDeviceChanged = QtCore.Signal(bool)
-    deviceNameChanged = QtCore.Signal(str)
-    serialChanged = QtCore.Signal(int)
-    versionChanged = QtCore.Signal(object)
-    capabilitiesChanged = QtCore.Signal(int)
-    enabledChanged = QtCore.Signal(int)
-    canModeSwitchChanged = QtCore.Signal(bool)
     numberOfKeysChanged = QtCore.Signal(bool)
 
     def __init__(self, worker, parent=None):
@@ -53,12 +47,12 @@ class Controller(QtCore.QObject):
 
         self._data = SignalMap()
         self._data.add_property('has_device', False, self.hasDeviceChanged)
-        self._data.add_property('device_name', m.no_key, self.deviceNameChanged)
-        self._data.add_property('serial', 0, self.serialChanged)
-        self._data.add_property('version', None, self.versionChanged)
-        self._data.add_property('capabilities', 0, self.capabilitiesChanged)
-        self._data.add_property('enabled', 0, self.enabledChanged)
-        self._data.add_property('can_mode_switch', False, self.canModeSwitchChanged)
+        self._data.add_property('device_name', m.no_key, self.hasDeviceChanged)
+        self._data.add_property('serial', 0, self.hasDeviceChanged)
+        self._data.add_property('version', (0,0,0), self.hasDeviceChanged)
+        self._data.add_property('capabilities', 0, self.hasDeviceChanged)
+        self._data.add_property('enabled', 0, self.hasDeviceChanged)
+        self._data.add_property('can_mode_switch', False, self.hasDeviceChanged)
         self._data.add_property('number_of_keys', 0, self.numberOfKeysChanged)
 
     @property

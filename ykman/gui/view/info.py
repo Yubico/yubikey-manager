@@ -61,27 +61,17 @@ class _HeaderPanel(QtGui.QGroupBox):
         self._serial = QtGui.QLabel()
         layout.addWidget(self._serial)
 
-        controller.versionChanged.connect(self._set_version)
-        self._set_version(controller.version)
+        controller.hasDeviceChanged.connect(self._update)
+        self._update()
 
-        controller.deviceNameChanged.connect(self._set_device_name)
-        self._set_device_name(controller.device_name)
-
-        controller.serialChanged.connect(self._set_serial)
-        self._set_serial(controller.serial)
-
-    def _set_device_name(self, name):
-        self._device_name.setText(name)
-
-    def _set_serial(self, serial):
+    def _update(self, value=None):
+        self._device_name.setText(self._controller.device_name)
+        serial = self._controller.serial
         self._serial.setText((m.serial_1 % serial) if serial else '')
-
-    def _set_version(self, version):
+        version = self._controller.version
         name = self._controller.device_name
-        if version:
-            self._device_name.setText(name + ' ({0[0]}.{0[1]}.{0[2]})'.format(version))
-        else:
-            self._device_name.setText(name)
+        self._device_name.setText(name + ' ({0[0]}.{0[1]}.{0[2]})'.format(version))
+
 
 class _FeatureSection(QtGui.QGroupBox):
 
@@ -111,8 +101,6 @@ class _FeatureSection(QtGui.QGroupBox):
             self._widgets[c] = widgets
             row_i += 1
 
-        controller.capabilitiesChanged.connect(self._update)
-        controller.enabledChanged.connect(self._update)
         controller.hasDeviceChanged.connect(self._update)
         self._update()
 
@@ -161,10 +149,7 @@ class _ModeSection(QtGui.QGroupBox):
         self._conf_btn.clicked.connect(self._configure)
         grid_layout.addWidget(self._conf_btn, row_i, 2)
 
-        controller.capabilitiesChanged.connect(self._update)
-        controller.enabledChanged.connect(self._update)
         controller.hasDeviceChanged.connect(self._update)
-        controller.canModeSwitchChanged.connect(self._update)
         self._update()
 
     def _configure(self):
