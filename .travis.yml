@@ -16,7 +16,10 @@ addons:
     packages:
       - libusb-1.0-0-dev
       - swig
-      - libpcscdlite-dev
+      - pcscd
+      - python-pyscard
+      - python-pyside
+      - pyside-tools
       - libykpers-1-1
       - libu2f-host0
       - python-click
