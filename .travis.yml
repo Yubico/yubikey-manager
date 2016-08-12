@@ -11,6 +11,12 @@ cache:
   directories:
     - $HOME/.cache/pip
 
+addons:
+  apt:
+    packages:
+      - libusb-1.0-0-dev
+      - swig
+
 install:
   - pip install --disable-pip-version-check --upgrade pip
   - pip install flake8
