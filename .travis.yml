@@ -1,5 +1,5 @@
 language: python
-sudo: false
+sudo: required
 
 python:
   - "2.6"
@@ -16,6 +16,7 @@ addons:
     packages:
       - libusb-1.0-0-dev
       - swig
+      - libpcslite-dev
       - pcscd
       - python-pyscard
       - python-pyside
