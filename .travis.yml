@@ -11,14 +11,11 @@ cache:
   directories:
     - $HOME/.cache/pip
 
-addons:
-  apt:
-    packages:
-      - swig
-      - libpcsclite-dev
-      - libykpers-1-dev
-      - libu2f-host-dev
-
+before_install:
+  - sudo add-apt-repository -y ppa:yubico/stable
+  - sudo apt-get update
+  - sudo apt-get install -y swig libpcsclite-dev libykpers-1-dev libu2f-host
+ 
 install:
   - pip install --disable-pip-version-check --upgrade pip
   - pip install flake8
@@ -28,6 +25,4 @@ before_script:
   - flake8
 
 script:
-  - sudo add-apt-repository -y ppa:yubico/stable
-  - sudo apt-get update
-  - python setup.py test
+ - python setup.py test
