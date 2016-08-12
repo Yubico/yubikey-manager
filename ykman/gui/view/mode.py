@@ -35,6 +35,7 @@ from .. import messages as m
 from ...util import Mode, TRANSPORT
 from ...driver import ModeSwitchError
 
+
 class _RemoveDialog(QtGui.QMessageBox):
 
     def __init__(self, controller, parent=None):
@@ -55,7 +56,7 @@ class _RemoveDialog(QtGui.QMessageBox):
         self.killTimer(self._timer)
         self.accept()
 
-    def timerEvent(self, event):
+    def timerEvent(self, event):  # noqa: N802
         self._controller.refresh()
 
 
@@ -108,8 +109,10 @@ class ModeDialog(qt.Dialog):
     def _set_mode(self):
         def _cb(result):
             if isinstance(result, ModeSwitchError):
-                QtGui.QMessageBox.critical(self, m.failed_configure_connections, 
-                        m.failed_configure_connections_desc)
+                QtGui.QMessageBox.critical(
+                    self,
+                    m.failed_configure_connections,
+                    m.failed_configure_connections_desc)
             else:
                 self.close()
                 remove_dialog = _RemoveDialog(self._controller, self)

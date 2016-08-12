@@ -70,7 +70,8 @@ class _HeaderPanel(QtGui.QGroupBox):
         self._serial.setText((m.serial_1 % serial) if serial else '')
         version = self._controller.version
         name = self._controller.device_name
-        self._device_name.setText(name + ' ({0[0]}.{0[1]}.{0[2]})'.format(version))
+        self._device_name.setText(
+            name + ' ({0[0]}.{0[1]}.{0[2]})'.format(version))
 
 
 class _FeatureSection(QtGui.QGroupBox):
@@ -175,7 +176,7 @@ class InfoWidget(QtGui.QWidget):
 
         self.startTimer(1000)
 
-    def timerEvent(self, event):
+    def timerEvent(self, event):  # noqa: N802
         if QtGui.QApplication.activeWindow():
             self._controller.refresh()
 

@@ -36,7 +36,7 @@ from ykman.yubicommon import qt
 from . import messages as m
 from .controller import Controller
 from .view.info import InfoWidget
-from ..util import list_yubikeys
+
 
 class YkManApplication(qt.Application):
 
@@ -95,6 +95,7 @@ class YkManApplication(qt.Application):
             self._widget_stack.setCurrentWidget(self._busy_key)
         elif n_keys > 1:
             self._widget_stack.setCurrentWidget(self._multiple_keys)
+
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)

@@ -27,9 +27,7 @@
 
 from __future__ import absolute_import
 
-from ykman import __version__
 from ..util import CAPABILITY
-import sys
 import click
 
 

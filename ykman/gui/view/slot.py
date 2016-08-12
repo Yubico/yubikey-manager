@@ -136,10 +136,10 @@ class _WizardPage(QtGui.QWidget):
     def slot(self):
         return self._slot
 
-    def setPrevEnabled(self, state):
+    def setPrevEnabled(self, state):  # noqa: N802
         self._reject_btn.setEnabled(state)
 
-    def setNextEnabled(self, state):
+    def setNextEnabled(self, state):  # noqa: N802
         self._accept_btn.setEnabled(state)
 
     def _build_ui(self, layout):

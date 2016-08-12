@@ -79,12 +79,16 @@ class TestSlotProgramming(unittest.TestCase):
         self._check_slot_2_programmed()
 
     def test_ykman_program_hotp_slot_2(self):
-        output = ykman_cli('slot', 'hotp', '2', '27KIZZE3SD7GE2FVJJBAXEI3I6RRTPGM', '-f')
+        output = ykman_cli(
+            'slot', 'hotp', '2',
+            '27KIZZE3SD7GE2FVJJBAXEI3I6RRTPGM', '-f')
         self.assertIn('Programming HOTP credential in slot 2...', output)
         self._check_slot_2_programmed()
 
     def test_ykman_program_static_slot_2(self):
-        output = ykman_cli('slot', 'static', '2', 'higngdukgerjktbbikrhirngtlkkttkb', '-f')
+        output = ykman_cli(
+            'slot', 'static', '2',
+            'higngdukgerjktbbikrhirngtlkkttkb', '-f')
         self.assertIn('Setting static password in slot 2...', output)
         self._check_slot_2_programmed()
 
@@ -100,7 +104,9 @@ class TestSlotProgramming(unittest.TestCase):
 
 
 @unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
-@unittest.skipIf(not _has_mode(TRANSPORT.CCID), "CCID needs to be enabled for this test.")
+@unittest.skipIf(
+    not _has_mode(TRANSPORT.CCID),
+    "CCID needs to be enabled for this test.")
 class TestOpenPGP(unittest.TestCase):
 
     def test_openpgp_info(self):
@@ -109,4 +115,6 @@ class TestOpenPGP(unittest.TestCase):
 
     def test_openpgp_reset(self):
         output = ykman_cli('openpgp', 'reset', '-f')
-        self.assertIn('Success! All data has been cleared and default PINs are set.', output)
+        self.assertIn(
+            'Success! All data has been cleared and default PINs are set.',
+            output)

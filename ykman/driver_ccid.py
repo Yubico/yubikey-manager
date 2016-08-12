@@ -162,8 +162,8 @@ def kill_scdaemon():
         # Works for Windows.
         from win32com.client import GetObject
         from win32api import OpenProcess, CloseHandle, TerminateProcess
-        WMI = GetObject('winmgmts:')
-        ps = WMI.InstancesOf('Win32_Process')
+        wmi = GetObject('winmgmts:')
+        ps = wmi.InstancesOf('Win32_Process')
         for p in ps:
             if p.Properties_('Name').Value == 'scdaemon.exe':
                 pid = p.Properties_('ProcessID').Value

@@ -26,25 +26,25 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .driver_ccid import OPGP_AID, SW_OK, CCIDError
+from .driver_ccid import OPGP_AID, CCIDError
 from ykman.yubicommon.compat import byte2int, int2byte
 from enum import IntEnum
 from binascii import b2a_hex
 
 
-class KEY_SLOT(IntEnum):
+class KEY_SLOT(IntEnum):  # noqa: N801
     SIGN = 0xd6
     ENCRYPT = 0xd7
     AUTHENTICATE = 0xd8
 
 
-class TOUCH_MODE(IntEnum):
+class TOUCH_MODE(IntEnum):  # noqa: N801
     OFF = 0x00
     ON = 0x01
     ON_FIXED = 0x02
 
 
-class INS(IntEnum):
+class INS(IntEnum):  # noqa: N801
     SELECT = 0xa4
     GET_DATA = 0xca
     GET_VERSION = 0xf1
@@ -112,12 +112,13 @@ class OpgpController(object):
 
     def set_touch(self, key_slot, mode, pin):
         self._verify(PW3, pin)
-        self.send_apdu(0, INS.PUT_DATA, 0, key_slot,
-                               int2byte(mode) + b'\x20')
+        self.send_apdu(
+            0, INS.PUT_DATA, 0, key_slot, int2byte(mode) + b'\x20')
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, pin):
         self._verify(PW3, pin)
-        self.send_apdu(0, INS.SET_PIN_RETRIES, 0, 0,
-                           int2byte(pw1_tries) +
-                           int2byte(pw2_tries) +
-                           int2byte(pw3_tries))
+        self.send_apdu(
+            0, INS.SET_PIN_RETRIES, 0, 0,
+            int2byte(pw1_tries) +
+            int2byte(pw2_tries) +
+            int2byte(pw3_tries))

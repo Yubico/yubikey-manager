@@ -49,7 +49,7 @@ class Controller(QtCore.QObject):
         self._data.add_property('has_device', False, self.hasDeviceChanged)
         self._data.add_property('device_name', m.no_key, self.hasDeviceChanged)
         self._data.add_property('serial', 0, self.hasDeviceChanged)
-        self._data.add_property('version', (0,0,0), self.hasDeviceChanged)
+        self._data.add_property('version', (0, 0, 0), self.hasDeviceChanged)
         self._data.add_property('capabilities', 0, self.hasDeviceChanged)
         self._data.add_property('enabled', 0, self.hasDeviceChanged)
         self._data.add_property('can_mode_switch', False, self.hasDeviceChanged)
@@ -105,10 +105,7 @@ class Controller(QtCore.QObject):
             return
 
         def _func():
-            had_device = self.has_device
-
             try:
-                yubikeys = list_yubikeys()
                 n_keys = len(list_yubikeys())
             except NoBackendError:
                 n_keys = 0

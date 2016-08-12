@@ -32,7 +32,6 @@ from binascii import a2b_hex
 from base64 import b32decode
 from ..util import modhex_decode
 import re
-import struct
 
 
 class B32Validator(QtGui.QValidator):

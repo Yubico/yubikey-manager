@@ -179,7 +179,8 @@ class YubiKey(object):
         return dev
 
     def __str__(self):
-        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}] serial: {4} CAP: {5:x}' \
+        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}]' \
+            'serial: {4} CAP: {5:x}' \
             .format(
                 self.device_name,
                 self.version,
