@@ -1,11 +1,13 @@
 import unittest
-import time
-import click
-import traceback
-from ykman.util import list_yubikeys, BitflagEnum, TRANSPORT
-from click.testing import CliRunner
-from ykman.cli.__main__ import cli
-
+try:
+    import time
+    import click
+    import traceback
+    from ykman.util import list_yubikeys, BitflagEnum, TRANSPORT
+    from click.testing import CliRunner
+    from ykman.cli.__main__ import cli
+except Exception:
+    raise unittest.SkipTest("Imports failed, skipping.")
 
 click.confirm("Run integration tests? This will erase data on the YubiKey, "
               "make sure it is a key used for development.", abort=True)

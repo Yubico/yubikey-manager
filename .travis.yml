@@ -24,3 +24,4 @@ install:
 
 script:
   - flake8
+  - python setup.py test
