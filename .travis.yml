@@ -15,7 +15,7 @@ addons:
   apt:
     packages:
       - swig
-      - libpcslite-dev
+      - libpcsclite-dev
 
 install:
   - pip install --disable-pip-version-check --upgrade pip
