@@ -22,8 +22,5 @@ install:
   - pip install flake8
   - pip install -e .
 
-before_script:
-  - flake8
-
 script:
- - python setup.py test
+  - flake8
