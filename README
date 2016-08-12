@@ -1,4 +1,5 @@
 == YubiKey Manager
+[![Build Status](https://travis-ci.org/Yubico/yubikey-manager.svg?branch=master)](https://travis-ci.org/Yubico/yubikey-manager)
 Graphical application and command line tool for configuring a YubiKey.
 
 NOTE: This project is in BETA. Any part of the application may change before
