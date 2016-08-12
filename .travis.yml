@@ -16,6 +16,7 @@ addons:
     packages:
       - swig
       - libpcsclite-dev
+      - libykpers-1-dev
 
 install:
   - pip install --disable-pip-version-check --upgrade pip
