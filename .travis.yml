@@ -16,6 +16,10 @@ addons:
     packages:
       - libusb-1.0-0-dev
       - swig
+      - libpcscdlite-dev
+      - libykpers-1-1
+      - libu2f-host0
+      - python-click
 
 install:
   - pip install --disable-pip-version-check --upgrade pip
