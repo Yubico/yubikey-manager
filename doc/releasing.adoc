@@ -2,6 +2,10 @@
 
     python setup.py release --skip-tests --pypi
 
+== Sign source release for GitHub
+
+   gpg --detach-sign dist/yubikey-manager-VERSION.tar.gz
+
 == Releasing on macOS
 
     python setup.py executable
