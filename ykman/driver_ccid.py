@@ -32,7 +32,7 @@ import time
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
 from .driver import AbstractDriver, ModeSwitchError
-from .util import Mode, CAPABILITY, TRANSPORT
+from .util import CAPABILITY, TRANSPORT
 from .yubicommon.compat import byte2int, int2byte
 
 SW_OK = 0x9000
@@ -78,7 +78,6 @@ class CCIDDriver(AbstractDriver):
 
     def __init__(self, connection, name=''):
         self._conn = connection
-        self._mode = Mode(sum(t for t in TRANSPORT if t.name in name))
         try:
             self._read_serial()
         except CCIDError:

@@ -124,7 +124,7 @@ class YubiKey(object):
 
     @property
     def mode(self):
-        return self._driver.mode
+        return self._descriptor.mode
 
     @mode.setter
     def mode(self, mode):
@@ -154,7 +154,6 @@ class YubiKey(object):
         if self.version <= (3, 3, 1) and mode.code == 2:
             flags = 0x80
         self._driver.set_mode(flags | mode.code, cr_timeout, autoeject_time)
-        self._driver._mode = mode
 
     def use_transport(self, transport):
         if self.transport == transport:

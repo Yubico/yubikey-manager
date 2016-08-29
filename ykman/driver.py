@@ -37,15 +37,10 @@ class AbstractDriver(object):
 
     transport = None
     _serial = None
-    _mode = None
 
     @property
     def serial(self):
         return self._serial
-
-    @property
-    def mode(self):
-        return self._mode
 
     def set_mode(self, mode_code):
         raise NotImplementedError()

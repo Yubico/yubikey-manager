@@ -27,9 +27,9 @@
 
 
 from .native.ykpers import ykpers
-from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
+from ctypes import byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import Mode, TRANSPORT
+from .util import TRANSPORT
 from .scanmap import us
 from .yubicommon.compat import byte2int, int2byte, text_type
 
@@ -94,12 +94,10 @@ class OTPDriver(AbstractDriver):
     def __init__(self, dev):
         self._dev = dev
         self._access_code = None
-        self._version = (0, 0, 0)
         self._serial = self._read_serial()
         self._slot1_valid = False
         self._slot2_valid = False
         self._read_status()
-        self._mode = self._read_mode()
 
     @property
     def access_code(self):
@@ -120,32 +118,11 @@ class OTPDriver(AbstractDriver):
         status = ykpers.ykds_alloc()
         try:
             if ykpers.yk_get_status(self._dev, status):
-                self._version = (
-                    ykpers.ykds_version_major(status),
-                    ykpers.ykds_version_minor(status),
-                    ykpers.ykds_version_build(status)
-                )
                 touch_level = ykpers.ykds_touch_level(status)
                 self._slot1_valid = touch_level & CONFIG1_VALID != 0
                 self._slot2_valid = touch_level & CONFIG2_VALID != 0
         finally:
             ykpers.ykds_free(status)
-
-    def _read_mode(self):
-        if self._version < (3, 0, 0):
-            return Mode(TRANSPORT.OTP)
-
-        vid = c_int()
-        pid = c_int()
-        ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid))
-        mode = 0x07 & pid.value
-        if self._version < (4, 0, 0):  # YubiKey NEO PIDs
-            if mode == 1:  # mode 1 has PID 0112 and mode 2 has PID 0111
-                mode = 2
-            elif mode == 2:
-                mode = 1
-            return Mode.from_code(mode)
-        return Mode(mode)
 
     def read_capabilities(self):
         buf_size = c_size_t(1024)

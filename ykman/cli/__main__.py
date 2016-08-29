@@ -90,7 +90,7 @@ def cli(ctx):
             ctx.fail('Multiple YubiKeys detected. Only a single YubiKey at a '
                      'time is supported.')
         descriptor = descriptors[0]
-        if descriptor.mode & transports:
+        if descriptor.mode.transports & transports:
             try:
                 ctx.obj['dev'] = descriptor.open_device(transports)
                 if not ctx.obj['dev']:  # Key should be there, busy?
