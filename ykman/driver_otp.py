@@ -97,6 +97,7 @@ class OTPDriver(AbstractDriver):
         self._serial = self._read_serial()
         self._slot1_valid = False
         self._slot2_valid = False
+        self._status = (0, 0, 0)
         self._read_status()
 
     @property
@@ -118,6 +119,11 @@ class OTPDriver(AbstractDriver):
         status = ykpers.ykds_alloc()
         try:
             if ykpers.yk_get_status(self._dev, status):
+                self._version = (
+                    ykpers.ykds_version_major(status),
+                    ykpers.ykds_version_minor(status),
+                    ykpers.ykds_version_build(status)
+                )
                 touch_level = ykpers.ykds_touch_level(status)
                 self._slot1_valid = touch_level & CONFIG1_VALID != 0
                 self._slot2_valid = touch_level & CONFIG2_VALID != 0
@@ -191,9 +197,9 @@ class OTPDriver(AbstractDriver):
 
     def program_static(self, slot, password, append_cr=True):
         pw_len = len(password)
-        if self.version < (2, 0, 0):
+        if self._version < (2, 0, 0):
             raise ValueError('static password requires YubiKey 2.0.0 or later')
-        elif self.version < (2, 2, 0) and pw_len > 16:
+        elif self._version < (2, 2, 0) and pw_len > 16:
             raise ValueError('password too long, this device supports a '
                              'maximum of %d characters' % 16)
         elif pw_len > 38:
@@ -226,7 +232,7 @@ class OTPDriver(AbstractDriver):
             ykpers.ykp_free_config(cfg)
 
     def program_chalresp(self, slot, key, touch=False):
-        if self.version < (2, 2, 0):
+        if self._version < (2, 2, 0):
             raise ValueError('challenge-response requires YubiKey 2.2.0 or '
                              'later')
         if len(key) > 20:
@@ -247,7 +253,7 @@ class OTPDriver(AbstractDriver):
             ykpers.ykp_free_config(cfg)
 
     def program_hotp(self, slot, key, imf=0, hotp8=False, append_cr=True):
-        if self.version < (2, 1, 0):
+        if self._version < (2, 1, 0):
             raise ValueError('HOTP requires YubiKey 2.1.0 or later')
         if len(key) > 64:
             key = sha1(key).digest()
@@ -277,7 +283,7 @@ class OTPDriver(AbstractDriver):
                                       self.access_code))
 
     def swap_slots(self):
-        if self.version < (2, 3, 0):
+        if self._version < (2, 3, 0):
             raise ValueError('swapping slots requires YubiKey 2.3.0 or later')
         cfg = self._create_cfg(SLOT_SWAP)
         try:
@@ -287,7 +293,7 @@ class OTPDriver(AbstractDriver):
             ykpers.ykp_free_config(cfg)
 
     def set_access_code(self, slot, new_code=None, update=True):
-        if update and self.version < (2, 3, 0):
+        if update and self._version < (2, 3, 0):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
             raise ValueError('Cannot set new access code unless updating slot')
