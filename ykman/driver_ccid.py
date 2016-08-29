@@ -90,8 +90,6 @@ class CCIDDriver(AbstractDriver):
             self._serial = struct.unpack('>I', serial)[0]
 
     def read_capabilities(self):
-        if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
-            return b'\x03\x01\x01\x3f'
         try:
             self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
             capa = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)

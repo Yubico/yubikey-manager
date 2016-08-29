@@ -65,7 +65,11 @@ class YubiKey(object):
             self.capabilities = CAPABILITY.U2F
             self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
-            self._parse_capabilities(driver.read_capabilities())
+            if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
+                capabilities = b'\x03\x01\x01\x3f'
+            else:
+                capabilities = driver.read_capabilities()
+            self._parse_capabilities(capabilities)
             if self.capabilities == \
                     (CAPABILITY.OTP | CAPABILITY.CCID | CAPABILITY.U2F):
                 self.device_name = 'YubiKey Edge'
