@@ -30,11 +30,11 @@
 from __future__ import absolute_import
 
 from ykman import __version__
-from ..util import TRANSPORT, list_yubikeys
+from ..util import TRANSPORT
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
-from ..device import open_device, FailedOpeningDeviceException
+from ..descriptor import get_descriptors, FailedOpeningDeviceException
 from .util import click_skip_on_help
 from .gui import gui
 from .info import info
@@ -80,19 +80,19 @@ def cli(ctx):
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
         try:
-            yubikeys = list_yubikeys()
+            descriptors = list(get_descriptors())
         except usb.core.NoBackendError:
             click.fail('No PyUSB backend detected!')
-        n_keys = len(yubikeys)
+        n_keys = len(descriptors)
         if n_keys == 0:
             ctx.fail('No YubiKey detected!')
         if n_keys > 1:
             ctx.fail('Multiple YubiKeys detected. Only a single YubiKey at a '
                      'time is supported.')
-        dev_transports = yubikeys[0]
-        if dev_transports & transports:
+        descriptor = descriptors[0]
+        if descriptor.mode & transports:
             try:
-                ctx.obj['dev'] = open_device(transports)
+                ctx.obj['dev'] = descriptor.open_device(transports)
                 if not ctx.obj['dev']:  # Key should be there, busy?
                     raise FailedOpeningDeviceException()
             except FailedOpeningDeviceException:

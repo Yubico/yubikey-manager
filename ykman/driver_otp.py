@@ -132,14 +132,14 @@ class OTPDriver(AbstractDriver):
             ykpers.ykds_free(status)
 
     def _read_mode(self):
-        if self.version < (3, 0, 0):
+        if self._version < (3, 0, 0):
             return Mode(TRANSPORT.OTP)
 
         vid = c_int()
         pid = c_int()
         ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid))
         mode = 0x07 & pid.value
-        if self.version < (4, 0, 0):  # YubiKey NEO PIDs
+        if self._version < (4, 0, 0):  # YubiKey NEO PIDs
             if mode == 1:  # mode 1 has PID 0112 and mode 2 has PID 0111
                 mode = 2
             elif mode == 2:

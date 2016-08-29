@@ -30,7 +30,7 @@ from __future__ import print_function
 from .native.u2fh import u2fh, u2fh_devs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import Mode, TRANSPORT, read_version_usb
+from .util import Mode, TRANSPORT
 import struct
 
 
@@ -83,7 +83,6 @@ class U2FDriver(AbstractDriver):
             TRANSPORT.U2F | sum(t for t in TRANSPORT if t.name in name))
         if 'Security Key' in name:
             self.sky = True
-        self._version = read_version_usb()
 
     def read_capabilities(self):
         try:

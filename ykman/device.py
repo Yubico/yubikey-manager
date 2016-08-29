@@ -28,9 +28,6 @@
 
 from .util import CAPABILITY, TRANSPORT, parse_tlv_list
 from .driver import AbstractDriver
-from .driver_ccid import open_device as open_ccid
-from .driver_u2f import open_device as open_u2f
-from .driver_otp import open_device as open_otp
 from .yubicommon.compat import byte2int
 from binascii import b2a_hex
 
@@ -57,17 +54,17 @@ class YubiKey(object):
     _serial = None
     _can_mode_switch = True
 
-    def __init__(self, driver):
+    def __init__(self, descriptor, driver):
         if not driver:
             raise ValueError('No driver given!')
+        self._descriptor = descriptor
         self._driver = driver
+        self.device_name = descriptor.device_name
 
         if driver.transport == TRANSPORT.U2F and driver.sky:
-            self.device_name = 'Security Key by Yubico'
             self.capabilities = CAPABILITY.U2F
             self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
-            self.device_name = 'YubiKey 4'
             self._parse_capabilities(driver.read_capabilities())
             if self.capabilities == \
                     (CAPABILITY.OTP | CAPABILITY.CCID | CAPABILITY.U2F):
@@ -75,11 +72,9 @@ class YubiKey(object):
                 # YK Edge has no use for CCID.
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
         elif self.version >= (4, 0, 0):  # YK Plus
-            self.device_name = 'YubiKey Plus'
             self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
             self._can_mode_switch = False
         elif self.version >= (3, 0, 0):
-            self.device_name = 'YubiKey NEO'
             if driver.transport == TRANSPORT.CCID:
                 self.capabilities = driver.probe_capabilities_support()
             elif TRANSPORT.has(self.mode.transports, TRANSPORT.U2F) \
@@ -113,7 +108,7 @@ class YubiKey(object):
 
     @property
     def version(self):
-        return self._driver.version
+        return self._descriptor.version
 
     @property
     def serial(self):
@@ -172,7 +167,7 @@ class YubiKey(object):
         del self._driver
         self._driver = _NULL_DRIVER
 
-        dev = open_device(transport)
+        dev = self._descriptor.open_device(transport)
         if dev.serial and my_serial:
             assert dev.serial == my_serial
         assert dev.mode == my_mode
@@ -189,18 +184,3 @@ class YubiKey(object):
                 self.serial,
                 self.capabilities
             )
-
-
-def open_device(transports=sum(TRANSPORT)):
-    dev = None
-    try:
-        if TRANSPORT.CCID & transports:
-            dev = open_ccid()
-        if TRANSPORT.OTP & transports and not dev:
-            dev = open_otp()
-        if TRANSPORT.U2F & transports and not dev:
-            dev = open_u2f()
-    except Exception as e:
-        raise FailedOpeningDeviceException(e)
-
-    return YubiKey(dev) if dev is not None else None

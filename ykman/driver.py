@@ -36,17 +36,12 @@ class AbstractDriver(object):
     """Abstract driver class for communicating with a YubiKey"""
 
     transport = None
-    _version = (0, 0, 0)
     _serial = None
     _mode = None
 
     @property
     def serial(self):
         return self._serial
-
-    @property
-    def version(self):
-        return self._version
 
     @property
     def mode(self):
@@ -59,5 +54,4 @@ class AbstractDriver(object):
         raise NotImplementedError()
 
     def __str__(self):
-        return 'Driver: {}, v: {}, m: {}'.format(
-            self.transport, self.version, self.mode)
+        return 'Driver: {}, m: {}'.format(self.transport, self.mode)
