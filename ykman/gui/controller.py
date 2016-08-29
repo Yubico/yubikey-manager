@@ -30,8 +30,8 @@ from usb.core import NoBackendError
 from PySide import QtCore
 from .util import SignalMap
 from . import messages as m
-from ..device import open_device, FailedOpeningDeviceException
-from ..util import TRANSPORT, list_yubikeys
+from ..descriptor import get_descriptors, FailedOpeningDeviceException
+from ..util import TRANSPORT
 
 
 class Controller(QtCore.QObject):
@@ -44,6 +44,7 @@ class Controller(QtCore.QObject):
         self.worker = worker
 
         self._refreshing = False
+        self._descriptor = None
 
         self._data = SignalMap()
         self._data.add_property('has_device', False, self.hasDeviceChanged)
@@ -90,7 +91,7 @@ class Controller(QtCore.QObject):
     def _grab_device(self, transports=sum(TRANSPORT)):
         if not self.has_device:
             raise ValueError('No device present')
-        return open_device(transports)
+        return self._descriptor.open_device(transports)
 
     def _use_device(self, fn, cb=None, transports=sum(TRANSPORT)):
         def _func():
@@ -105,8 +106,9 @@ class Controller(QtCore.QObject):
             return
 
         def _func():
+            descriptors = list(get_descriptors())
             try:
-                n_keys = len(list_yubikeys())
+                n_keys = len(descriptors)
             except NoBackendError:
                 n_keys = 0
                 print("No PyUSB backend detected!")
@@ -115,8 +117,9 @@ class Controller(QtCore.QObject):
                 self.numberOfKeysChanged.emit(True)
             self._data['number_of_keys'] = n_keys
             if n_keys == 1:
+                self._descriptor = descriptors[0]
                 try:
-                    dev = open_device()
+                    dev = self._descriptor.open_device()
                     if dev:
                         self._data['has_device'] = True
                         self._data['device_name'] = dev.device_name
@@ -130,6 +133,8 @@ class Controller(QtCore.QObject):
                 except FailedOpeningDeviceException as e:
                         print("Couldn't open device: {!s}".format(e))
                         self.hasDeviceChanged.emit(False)
+            else:
+                self._descriptor = None
             self._refreshing = False
 
         self._refreshing = True
