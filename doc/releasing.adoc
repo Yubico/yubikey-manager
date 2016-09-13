@@ -13,6 +13,16 @@
     codesign --deep --force --verify --verbose --sign 'Developer ID Application' dist/YubiKey\ Manager.app/
     sudo pkgbuild --sign 'Developer ID Installer' --install-location /Applications --component dist/YubiKey\ Manager.app/ dist/installer.pkg
     gpg --detach-sign dist/yubikey-manager-VERSION-mac.pkg
+    
+=== Fixing retina support
+Add this (before signing) to `Ìnfo.plist`:
+    
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <string>True</string>
+
+Source: https://blog.qt.io/blog/2013/04/25/retina-display-support-for-mac-os-ios-and-x11/
 
 == Releasing on Windows
 
