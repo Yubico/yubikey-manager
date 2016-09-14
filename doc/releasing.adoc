@@ -11,7 +11,7 @@
     python setup.py executable
     resources/fix_libusb_dep_app_bundle.sh dist/YubiKey\ Manager.app/
     codesign --deep --force --verify --verbose --sign 'Developer ID Application' dist/YubiKey\ Manager.app/
-    sudo pkgbuild --sign 'Developer ID Installer' --install-location /Applications --component dist/YubiKey\ Manager.app/ dist/installer.pkg
+    sudo pkgbuild --sign 'Developer ID Installer' --install-location /Applications --component dist/YubiKey\ Manager.app/ dist/yubikey-manager-VERSION-mac.pkg
     gpg --detach-sign dist/yubikey-manager-VERSION-mac.pkg
     
 === Fixing retina support
