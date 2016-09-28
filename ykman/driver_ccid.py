@@ -31,6 +31,8 @@ import subprocess
 import time
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
+from smartcard.pcsc.PCSCExceptions import ListReadersException
+from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError
 from .util import CAPABILITY, TRANSPORT
 from .yubicommon.compat import byte2int, int2byte
@@ -183,8 +185,19 @@ def kill_scdaemon():
     return killed
 
 
+def _list_readers():
+    try:
+        return System.readers()
+    except ListReadersException:
+        # If the PCSC system has restarted the context might be stale, try
+        # forcing a new context (This happens on Windows if the last reader is
+        # removed):
+        PCSCContext.instance = None
+        return System.readers()
+
+
 def open_device():
-    for reader in System.readers():
+    for reader in _list_readers():
         if reader.name.lower().startswith('yubico yubikey'):
             try:
                 conn = reader.createConnection()
