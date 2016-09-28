@@ -79,23 +79,27 @@ class YubiKey(object):
             self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
             self._can_mode_switch = False
         elif self.version >= (3, 0, 0):
+            # NEO
             if driver.transport == TRANSPORT.CCID:
                 self.capabilities = driver.probe_capabilities_support()
-            elif TRANSPORT.has(self.mode.transports, TRANSPORT.U2F) \
-                    or self.version >= (3, 3, 0):
-                self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F \
-                    | CAPABILITY.CCID
             else:
-                self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID
+                # Assume base capabilities for NEO
+                self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID | \
+                    CAPABILITY.OPGP | CAPABILITY.PIV | CAPABILITY.OATH
+            if TRANSPORT.has(self.mode.transports, TRANSPORT.U2F) \
+                    or self.version >= (3, 3, 0):
+                    self.capabilities |= CAPABILITY.U2F
             self.capabilities |= CAPABILITY.NFC  # All NEOs have NFC.
         else:  # Standard
             self.capabilities = CAPABILITY.OTP
             self._can_mode_switch = False
-
         if not self.enabled:
             # Assume everything supported is enabled, except USB transports
             self.enabled = self.capabilities & ~TRANSPORT.usb_transports()
             self.enabled |= self.mode.transports  # ...unless they are enabled.
+        # If no CCID, disable dependent capabilities
+        if not CAPABILITY.has(self.enabled, CAPABILITY.CCID):
+            self.enabled = self.enabled & ~CAPABILITY.dependent_on_ccid()
 
     def _parse_capabilities(self, data):
         if not data:

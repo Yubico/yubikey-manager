@@ -52,6 +52,10 @@ class CAPABILITY(BitflagEnum):
     OATH = 0x20
     NFC = 0x40
 
+    @staticmethod
+    def dependent_on_ccid():
+        return CAPABILITY.OPGP | CAPABILITY.OATH | CAPABILITY.PIV
+
 
 class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
