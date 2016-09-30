@@ -309,6 +309,17 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_config(cfg)
 
+    def update_settings(self, slot, enter=True):
+        cmd = slot_to_cmd(slot, update=True)
+        cfg = self._create_cfg(cmd)
+        if enter:
+            check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
+        try:
+            check(ykpers.yk_write_command(
+                self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
+        finally:
+            ykpers.ykp_free_config(cfg)
+
     def __del__(self):
         ykpers.yk_close_key(self._dev)
 

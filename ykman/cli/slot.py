@@ -138,6 +138,8 @@ def delete(ctx, slot, force):
     Deletes the configuration of a slot.
     """
     dev = ctx.obj['dev']
+    if not force and not dev.driver.slot_status[slot - 1]:
+        ctx.fail('Not possible to delete an empty slot.')
     force or click.confirm('Really delete slot {} or the YubiKey?'.format(slot),
                            abort=True)
     click.echo('Deleting slot: {}...'.format(slot))
@@ -260,5 +262,32 @@ def hotp(ctx, slot, key, digits, imf, no_enter, force):
     click.echo('Programming HOTP credential in slot {}...'.format(slot))
     try:
         dev.driver.program_hotp(slot, key, imf, digits == 8, not no_enter)
+    except YkpersError:
+        _failed_to_write_msg(ctx)
+
+
+@slot.command()
+@click_slot_argument
+@click_force_option
+@click.pass_context
+@click.option(
+    '--enter/--no-enter',
+    default=True,
+    help="Should send 'Enter' keystroke after slot output.")
+def update(ctx, slot, enter, force):
+    """
+    Update settings for a slot.
+
+    Change the settings for a slot without changing the stored secret.
+    All settings not specified will be written with default values.
+    """
+    dev = ctx.obj['dev']
+    if not dev.driver.slot_status[slot - 1]:
+        ctx.fail("Not possible to update settings on an empty slot.")
+    force or click.confirm(
+        'Update the settings for slot {}?'.format(slot), abort=True)
+    click.echo('Updating settings for slot {}...'.format(slot))
+    try:
+        dev.driver.update_settings(slot, enter)
     except YkpersError:
         _failed_to_write_msg(ctx)
