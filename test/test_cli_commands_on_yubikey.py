@@ -4,7 +4,7 @@ import time
 import click
 import traceback
 try:
-    from ykman.util import BitflagEnum, TRANSPORT
+    from ykman.util import TRANSPORT
     from ykman.descriptor import get_descriptors
     from click.testing import CliRunner
     from ykman.cli.__main__ import cli
@@ -97,7 +97,7 @@ class TestSlotProgramming(unittest.TestCase):
         ykman_cli('slot', 'otp', '2', '-f')
         output = ykman_cli('slot', 'update', '2', '-f', '--no-enter')
         self.assertIn('Updating settings for slot', output)
-   
+
     def test_delete_slot_2(self):
         ykman_cli('slot', 'otp', '2', '-f')
         output = ykman_cli('slot', 'delete', '2', '-f')
