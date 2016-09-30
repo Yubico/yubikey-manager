@@ -4,7 +4,8 @@ import time
 import click
 import traceback
 try:
-    from ykman.util import list_yubikeys, BitflagEnum, TRANSPORT
+    from ykman.util import BitflagEnum, TRANSPORT
+    from ykman.descriptor import get_descriptors
     from click.testing import CliRunner
     from ykman.cli.__main__ import cli
     click.confirm(
@@ -25,14 +26,14 @@ def ykman_cli(*argv):
 
 
 def _one_yubikey():
-    return len(list_yubikeys()) == 1
+    return len(list(get_descriptors())) == 1
 
 
 def _has_mode(mode):
-    yubikeys = list_yubikeys()
+    yubikeys = list(get_descriptors())
     if len(yubikeys) is not 1:
         return False
-    return BitflagEnum.has(list_yubikeys()[0], mode)
+    return yubikeys[0].mode.has_transport(mode)
 
 
 @unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
