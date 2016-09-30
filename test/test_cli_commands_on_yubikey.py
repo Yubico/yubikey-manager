@@ -67,9 +67,6 @@ class TestSlotStatus(unittest.TestCase):
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
 class TestSlotProgramming(unittest.TestCase):
 
-    def tearDown(self):
-        self._delete_slot_2()
-
     def test_ykman_program_otp_slot_2(self):
         output = ykman_cli('slot', 'otp', '2', '-f')
         self.assertIn('Using serial as public ID:', output)
@@ -96,9 +93,15 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Setting static password in slot 2...', output)
         self._check_slot_2_programmed()
 
-    def _delete_slot_2(self):
+    def test_update_settings_enter_slot_2(self):
+        ykman_cli('slot', 'otp', '2', '-f')
+        output = ykman_cli('slot', 'update', '2', '-f', '--no-enter')
+        self.assertIn('Updating settings for slot', output)
+   
+    def test_delete_slot_2(self):
+        ykman_cli('slot', 'otp', '2', '-f')
         output = ykman_cli('slot', 'delete', '2', '-f')
-        self.assertIn('Deleting slot: 2...', output)
+        self.assertIn('Deleting slot', output)
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: empty', status)
 
