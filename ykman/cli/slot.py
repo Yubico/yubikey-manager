@@ -272,11 +272,11 @@ def hotp(ctx, slot, key, digits, imf, no_enter, force):
 @click.pass_context
 @click.option(
     '--enter/--no-enter',
-    default=True,
+    # default=True,
     help="Should send 'Enter' keystroke after slot output.")
-def update(ctx, slot, enter, force):
+def settings(ctx, slot, enter, force):
     """
-    Update settings for a slot.
+    Update the settings for a slot.
 
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
@@ -285,7 +285,7 @@ def update(ctx, slot, enter, force):
     if not dev.driver.slot_status[slot - 1]:
         ctx.fail("Not possible to update settings on an empty slot.")
     force or click.confirm(
-        'Update the settings for slot {}?'.format(slot), abort=True)
+        'Update the settings for slot {}? All existing settings will be overwritten.'.format(slot), abort=True)
     click.echo('Updating settings for slot {}...'.format(slot))
     try:
         dev.driver.update_settings(slot, enter)

@@ -95,7 +95,7 @@ class TestSlotProgramming(unittest.TestCase):
 
     def test_update_settings_enter_slot_2(self):
         ykman_cli('slot', 'otp', '2', '-f')
-        output = ykman_cli('slot', 'update', '2', '-f', '--no-enter')
+        output = ykman_cli('slot', 'settings', '2', '-f', '--no-enter')
         self.assertIn('Updating settings for slot', output)
 
     def test_delete_slot_2(self):
