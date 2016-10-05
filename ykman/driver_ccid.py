@@ -203,7 +203,7 @@ def open_device():
                 conn = reader.createConnection()
                 conn.connect()
             except CardConnectionException as e:
-                if 'Sharing violation' in str(e) and kill_scdaemon():
+                if kill_scdaemon():
                     return open_device()
                 raise
             return CCIDDriver(conn, reader.name)
