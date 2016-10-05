@@ -202,7 +202,7 @@ def open_device():
             try:
                 conn = reader.createConnection()
                 conn.connect()
-            except CardConnectionException as e:
+            except CardConnectionException:
                 if kill_scdaemon():
                     return open_device()
                 raise
