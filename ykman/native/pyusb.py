@@ -36,10 +36,15 @@ import usb.backend.openusb as openusb
 
 
 def _find_library(libname):
-    if os.path.isfile(libname):
-        return libname
-    elif sys.platform == 'win32' and os.path.isfile(libname + '.dll'):
-        return libname + '.dll'
+    libpath = os.path.join(os.path.dirname(sys.executable), libname)
+    if sys.platform == 'win32':
+        libpath += '.dll'
+    if os.path.isfile(libpath):
+        return libpath
+    if sys.platform == 'darwin':
+        libpath = os.path.join(os.path.dirname(sys.executable), "../Frameworks", libname)
+        if os.path.isfile(libpath):
+            return libpath
     return ctypes.util.find_library(libname)
 
 
