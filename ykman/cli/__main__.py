@@ -82,7 +82,7 @@ def cli(ctx):
         try:
             descriptors = list(get_descriptors())
         except usb.core.NoBackendError:
-            click.fail('No PyUSB backend detected!')
+            ctx.fail('No PyUSB backend detected!')
         n_keys = len(descriptors)
         if n_keys == 0:
             ctx.fail('No YubiKey detected!')
