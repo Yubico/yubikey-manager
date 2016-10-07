@@ -49,7 +49,8 @@ def _find_library(libname):
         return libpath + '.dll'
     # For .app bundles
     if sys.platform == 'darwin':
-        libpath = os.path.join(os.path.dirname(sys.executable), "../Frameworks", libname)
+        libpath = os.path.join(
+            os.path.dirname(sys.executable), "../Frameworks", libname)
         if os.path.isfile(libpath):
             return libpath
     return ctypes.util.find_library(libname)
