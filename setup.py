@@ -34,7 +34,7 @@ from ykman.yubicommon.setup import setup
 install_requires = ['pyscard', 'pyusb']
 if sys.version_info < (3, 4):
     install_requires.append("enum34")
-if "win" in sys.platform:
+if sys.platform == "win32":
     install_requires.append("pypiwin32")
 
 setup(
