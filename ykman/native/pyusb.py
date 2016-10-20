@@ -35,7 +35,7 @@ import usb.backend.libusb0 as libusb0
 import usb.backend.openusb as openusb
 
 
-def _find_library(libname):
+def _find_library_local(libname):
     # Look in working directory
     if os.path.isfile(libname):
         return libname
@@ -54,14 +54,19 @@ def _find_library(libname):
                 sys.executable), "../Frameworks", libname + '.dylib')
         if os.path.isfile(libpath):
             return libpath
-    return ctypes.util.find_library(libname)
 
 
 def _load_usb_backend():
+    # First try to find backend locally, if not found try the systems.
     for m in (libusb1, openusb, libusb0):
-        backend = m.get_backend(find_library=_find_library)
+        backend = m.get_backend(find_library=_find_library_local)
         if backend is not None:
             return backend
+        else:
+            for m in (libusb1, openusb, libusb0):
+                backend = m.get_backend()
+                if backend is not None:
+                    return backend
 
 
 _usb_backend = None
