@@ -1,5 +1,3 @@
-# PYTHON_ARGCOMPLETE_OK
-
 # Copyright (c) 2015 Yubico AB
 # All rights reserved.
 #
@@ -36,7 +34,6 @@ from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
 from ..descriptor import get_descriptors, FailedOpeningDeviceException
 from .util import click_skip_on_help
-from .gui import gui
 from .info import info
 from .mode import mode
 from .slot import slot
@@ -45,7 +42,7 @@ import usb.core
 import click
 
 
-COMMANDS = (info, mode, slot, openpgp, gui)
+COMMANDS = (info, mode, slot, openpgp)
 
 
 CLICK_CONTEXT_SETTINGS = dict(
