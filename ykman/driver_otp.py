@@ -204,7 +204,7 @@ class OTPDriver(AbstractDriver):
                              'maximum of %d characters' % 16)
         elif pw_len > 38:
             raise ValueError('password too long, this device supports a '
-                             'maximum of %d characters' % 32)
+                             'maximum of %d characters' % 38)
 
         cmd = slot_to_cmd(slot)
         cfg = self._create_cfg(cmd)
