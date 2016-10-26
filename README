@@ -1,53 +1,9 @@
 == YubiKey Manager
 image:https://travis-ci.org/Yubico/yubikey-manager.svg?branch=master["Build Status", link="https://travis-ci.org/Yubico/yubikey-manager"]
 
-Graphical application and command line tool for configuring a YubiKey.
+Python library and command line tool for configuring a YubiKey. If your looking for the graphical application, it's https://github.com/Yubico/yubikey-manager-qt[here].
 
 NOTE: This project is in BETA. Any part of the application may change before
 the next release, and some functionality and documentation is missing at this
 point.
 
-=== Graphical desktop tool (ykman-gui)
-An easy-to-use desktop application with functionality to perform the most
-commonly used functions.
-
-image::screenshot.png[]
-
-=== Command line tool (ykman)
-A powerful command line interface to configuring or reprogramming a YubiKey,
-which can be used to script bulk operations, or access expert features of the
-YubiKey.
-
-....
-Usage: ykman [OPTIONS] COMMAND [ARGS]...
-
-Interface with a YubiKey via the command line.
-
-Options:
-    -v, --version
-    -h, --help     Show this message and exit.
-
-Commands:
-    gui      Launch the graphical interface.
-    info     Show general information.
-    mode     Manage connection modes.
-    openpgp  Manage YubiKey OpenPGP functions.
-    slot     Manage YubiKey OTP slots.
-....
-
-=== Installation
-Windows & macOS:
-Use installers available for download https://developers.yubico.com/yubikey-manager/Releases/[here].
-
-Linux (Debian based):
-
-    $ sudo apt-get install python-pip pcscd python-pyscard python-pyside \ 
-    libykpers-1-1 libu2f-host0 python-click
-
-    $ sudo -H pip install yubikey-manager
-
-=== Bash completion
-Experimental Bash completion for the command line tool is available, but not
-enabled by default. To enable it, run this command once:
-
-    $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
