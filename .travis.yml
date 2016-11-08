@@ -24,4 +24,3 @@ install:
 
 script:
   - pre-commit run --all-files
-  - python setup.py test
