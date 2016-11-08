@@ -63,7 +63,7 @@ def check(status):
         raise U2FHostError(status)
 
 
-check(u2fh.u2fh_global_init(0))
+_u2fh_init_res = u2fh.u2fh_global_init(0)
 
 libversion = u2fh.u2fh_check_version(None).decode('ascii')
 
@@ -77,6 +77,8 @@ class U2FDriver(AbstractDriver):
     sky = False
 
     def __init__(self, devs, index, name=''):
+        check(_u2fh_init_res)
+
         self._devs = devs
         self._index = index
         if 'Security Key' in name:

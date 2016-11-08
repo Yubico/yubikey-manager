@@ -64,7 +64,7 @@ def check(status):
         raise YkpersError(ykpers.yk_get_errno())
 
 
-check(ykpers.yk_init())
+_yk_init_res = ykpers.yk_init()
 
 
 libversion = ykpers.ykpers_check_version(None).decode('ascii')
@@ -92,6 +92,8 @@ class OTPDriver(AbstractDriver):
     transport = TRANSPORT.OTP
 
     def __init__(self, dev):
+        check(_yk_init_res)
+
         self._dev = dev
         self._access_code = None
         self._serial = self._read_serial()
