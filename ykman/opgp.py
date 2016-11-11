@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .driver_ccid import OPGP_AID, CCIDError
+from .driver_ccid import OPGP_AID, APDUError, SW_OK
 from ykman.yubicommon.compat import byte2int, int2byte
 from enum import IntEnum
 from binascii import b2a_hex
@@ -71,7 +71,7 @@ class OpgpController(object):
     def version(self):
         return self._version
 
-    def send_apdu(self, cl, ins, p1, p2, data=b'', check=True):
+    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
         return self._driver.send_apdu(cl, ins, p1, p2, data, check)
 
     def _read_version(self):
@@ -89,9 +89,9 @@ class OpgpController(object):
         pw1_tries, _, pw3_tries = self._get_pin_tries()
 
         for _ in range(pw1_tries):
-            self.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN, check=False)
+            self.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN, check=None)
         for _ in range(pw3_tries):
-            self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN, check=False)
+            self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN, check=None)
 
     def reset(self):
         self._block_pins()
@@ -105,7 +105,7 @@ class OpgpController(object):
     def _verify(self, pw, pin):
         try:
             self.send_apdu(0, INS.VERIFY, 0, pw, pin)
-        except CCIDError:
+        except APDUError:
             pw_remaining = self._get_pin_tries()[pw-PW1]
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))

@@ -65,11 +65,16 @@ KNOWN_APPLETS = {
 class CCIDError(Exception):
     """Thrown when smart card communication fails."""
 
-    def __init__(self, errno):
-        self.errno = errno
+
+class APDUError(CCIDError):
+    """Thrown when an APDU response has the wrong SW code"""
+
+    def __init__(self, data, sw):
+        self.data = data
+        self.sw = sw
 
     def __str__(self):
-        return 'CCID error: {}'.format(self.errno)
+        return 'APDU error: SW=0x{:04x}'.format(self.sw)
 
 
 class CCIDDriver(AbstractDriver):
@@ -82,7 +87,7 @@ class CCIDDriver(AbstractDriver):
         self._conn = connection
         try:
             self._read_serial()
-        except CCIDError:
+        except APDUError:
             pass  # Can't read serial
 
     def _read_serial(self):
@@ -96,7 +101,7 @@ class CCIDDriver(AbstractDriver):
             self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
             capa = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
             return capa
-        except CCIDError:
+        except APDUError:
             return b''
 
     def probe_capabilities_support(self):
@@ -105,11 +110,11 @@ class CCIDDriver(AbstractDriver):
             try:
                 self.send_apdu(0, INS_SELECT, 4, 0, aid)
                 capa |= code
-            except CCIDError:
+            except APDUError:
                 pass
         return capa
 
-    def send_apdu(self, cl, ins, p1, p2, data=b'', check=True):
+    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
         header = [cl, ins, p1, p2, len(data)]
         body = [byte2int(c) for c in data]
         try:
@@ -117,16 +122,20 @@ class CCIDDriver(AbstractDriver):
         except CardConnectionException as e:
             raise CCIDError(e)
         sw = sw1 << 8 | sw2
-        if check and sw != SW_OK:
-            raise CCIDError(sw)
-        return b''.join([int2byte(c) for c in resp])
+        resp = b''.join([int2byte(c) for c in resp])
+        if check is None:
+            return resp, sw
+        elif check == sw:
+            return resp
+        else:
+            raise APDUError(resp, sw)
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         mode_data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
         try:
             try:
                 self._set_mode_otp(mode_data)
-            except CCIDError:
+            except APDUError:
                 self._set_mode_mgr(mode_data)
         except CCIDError:
             raise ModeSwitchError()
