@@ -35,9 +35,9 @@ from .native.pyusb import get_usb_backend
 import usb.core
 
 
-YKS = 'YubiKey'
+YKS = 'YubiKey Standard'
 NEO = 'YubiKey NEO'
-SKY = 'Security Key by Yubico'
+SKY = 'FIDO U2F Security Key by Yubico'
 YKP = 'YubiKey Plus'
 YK4 = 'YubiKey 4'
 
@@ -55,7 +55,7 @@ _YUBIKEY_PIDS = {
     0x0115: (NEO, TRANSPORT.U2F | TRANSPORT.CCID),
     0x0116: (NEO, TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F),
 
-    # Security Key by Yubico
+    # FIDO U2F Security Key by Yubico
     0x0120: (SKY, TRANSPORT.U2F),
 
     # YubiKey 4
