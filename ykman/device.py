@@ -89,7 +89,6 @@ class YubiKey(object):
             if TRANSPORT.has(self.mode.transports, TRANSPORT.U2F) \
                     or self.version >= (3, 3, 0):
                     self.capabilities |= CAPABILITY.U2F
-            self.capabilities |= CAPABILITY.NFC  # All NEOs have NFC.
         else:  # Standard
             self.capabilities = CAPABILITY.OTP
             self._can_mode_switch = False

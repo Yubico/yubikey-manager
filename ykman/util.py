@@ -61,7 +61,6 @@ class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
     U2F = CAPABILITY.U2F
     CCID = CAPABILITY.CCID
-    NFC = CAPABILITY.NFC
 
     @staticmethod
     def usb_transports():
