@@ -97,7 +97,7 @@ def slot(ctx, access_code):
     with a credential. Several credential types are supported.
     """
     ctx.obj['dev'].driver.access_code = access_code
-slot.transports = TRANSPORT.OTP
+    slot.transports = TRANSPORT.OTP
 
 
 @slot.command()
