@@ -1,4 +1,4 @@
-== YubiKey Manager (Command line tool and library)
+== YubiKey Manager CLI
 image:https://travis-ci.org/Yubico/yubikey-manager.svg?branch=master["Build Status", link="https://travis-ci.org/Yubico/yubikey-manager"]
 
 Python library and command line tool for configuring a YubiKey. If your looking for the full graphical application, which also includes the command line tool, it's https://github.com/Yubico/yubikey-manager-qt[here].
@@ -33,3 +33,10 @@ $ sudo apt-get install python-pip pcscd python-pyscard python-pyside \
 
 $ sudo -H pip install yubikey-manager
 ....
+
+=== Bash completion
+
+Experimental Bash completion for the command line tool is available, but not 
+enabled by default. To enable it, run this command once:
+
+    $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
