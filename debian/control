@@ -1,0 +1,20 @@
+Source: yubikey-manager
+Maintainer: Debian Authentication Maintainers <pkg-auth-maintainers@lists.alioth.debian.org>
+Uploaders: Dag Heyman <dag@yubico.com>,
+           Dain Nilsson <dain@yubico.com>
+Section: utils
+Priority: optional
+Standards-Version: 3.9.5
+Build-Depends: debhelper (>= 9), python, python-setuptools
+Homepage: https://developers.yubico.com/yubikey-manager/
+
+Package: yubikey-manager
+Architecture: all
+Depends: ${python:Depends}, 
+         ${misc:Depends},
+         python-click,
+         libykpers-1-1,
+         libu2f-host
+Description: Python library and command line tool for configuring a YubiKey
+    YubiKey Manager (ykman) is a python library and commands line tool for
+    configuring a YubiKey.
