@@ -13,6 +13,7 @@ Architecture: all
 Depends: ${python:Depends}, 
          ${misc:Depends},
          python-click,
+         python-setuptools,
          libykpers-1-1,
          libu2f-host0
 Description: Python library and command line tool for configuring a YubiKey
