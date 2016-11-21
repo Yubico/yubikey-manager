@@ -5,26 +5,3 @@
 == Sign source release for GitHub
 
    gpg --detach-sign dist/yubikey-manager-VERSION.tar.gz
-
-== Releasing on macOS
-
-    python setup.py executable
-    resources/fix_libusb_dep_app_bundle.sh dist/YubiKey\ Manager.app/
-    codesign --deep --force --verify --verbose --sign 'Developer ID Application' dist/YubiKey\ Manager.app/
-    sudo pkgbuild --sign 'Developer ID Installer' --install-location /Applications --component dist/YubiKey\ Manager.app/ dist/yubikey-manager-VERSION-mac.pkg
-    gpg --detach-sign dist/yubikey-manager-VERSION-mac.pkg
-    
-=== Fixing retina support
-Add this (before signing) to `Ìnfo.plist`:
-    
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>NSHighResolutionCapable</key>
-    <string>True</string>
-
-Source: https://blog.qt.io/blog/2013/04/25/retina-display-support-for-mac-os-ios-and-x11/
-
-== Releasing on Windows
-
-    python setup.py executable
-    gpg --detach-sign dist/yubikey-manager-VERSION-win.exe
