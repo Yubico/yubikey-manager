@@ -13,14 +13,30 @@ cache:
     - $HOME/.cache/pip
 
 before_install:
-  - sudo add-apt-repository -y ppa:yubico/stable
   - sudo apt-get update
-  - sudo apt-get install -y swig libpcsclite-dev libykpers-1-dev libu2f-host-dev
- 
-install:
   - pip install --disable-pip-version-check --upgrade pip
+
+install:
+  - sudo apt-get install devscripts python-setuptools debhelper
   - pip install pre-commit
-  - pip install -e .
 
 script:
   - pre-commit run --all-files
+  - pip install -e .
+
+after_success:
+  - debuild -us -uc
+  - mkdir deploy
+  - mv ../*.deb deploy/yubikey-manager-$TRAVIS_BRANCH-HEAD.deb
+
+deploy:
+  provider: s3
+  access_key_id: "$AWS_KEY_ID"
+  secret_access_key: "$AWS_SECRET_KEY"
+  bucket: "$AWS_BUCKET"
+  skip_cleanup: true
+  acl: public-read
+  region: eu-west-1
+  local-dir: "deploy/"
+  on:
+    all_branches: true
