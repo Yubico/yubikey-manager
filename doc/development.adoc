@@ -1,19 +1,17 @@
-== Setting up a development environment and working with sources
+== Setting up a development environment on Ubuntu 16.04 (Xenial)
 
 Install development dependencies:
 
-    $ sudo apt-get install python-pip pcscd python-pyscard python-pyside \
-    libykpers-1-1 libu2f-host0 python-click pyside-tools
+    $ sudo apt-get install python-pip python-pyscard libykpers-1-1 libu2f-host0 
 
 Setup the repository:
 
-    $ git clone git clone --recursive https://github.com/Yubico/yubikey-manager.git
+    $ git clone --recursive https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
-    $ python setup.py qt_resources
 
-Install YubiKey Manager (from root of repository):
+Install in editable mode with pip (from root of repository):
 
-    $ sudo -H pip install -e .
+    $ sudo pip install -e .
 
 Run the app:
 
@@ -26,4 +24,4 @@ To update once installed, just make sure the repo is up to date:
 
 To uninstall, run:
 
-    $ sudo -H pip uninstall yubikey-manager
+    $ sudo pip uninstall yubikey-manager
