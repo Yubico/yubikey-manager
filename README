@@ -24,16 +24,6 @@ Commands:
   slot     Manage YubiKey OTP slots.
 ....
 
-=== Installation
-
-Linux (Debian based):
-....
-$ sudo apt-get install python-pip pcscd python-pyscard python-pyside \ 
-    libykpers-1-1 libu2f-host0 python-click
-
-$ sudo -H pip install yubikey-manager
-....
-
 === Bash completion
 
 Experimental Bash completion for the command line tool is available, but not 
