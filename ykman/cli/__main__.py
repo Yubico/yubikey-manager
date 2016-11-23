@@ -71,7 +71,7 @@ def print_version(ctx, param, value):
 @click_skip_on_help
 def cli(ctx):
     """
-    Interface with a YubiKey via the command line.
+    Configure your YubiKey via the command line.
     """
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())

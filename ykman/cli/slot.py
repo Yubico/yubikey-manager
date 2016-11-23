@@ -91,7 +91,7 @@ def _failed_to_write_msg(ctx):
               'to the device.')
 def slot(ctx, access_code):
     """
-    Manage YubiKey OTP slots.
+    Manage YubiKey Slots.
 
     The YubiKey provides two keyboard-based slots which can each be configured
     with a credential. Several credential types are supported.
@@ -104,7 +104,7 @@ def slot(ctx, access_code):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OTP slots.
+    Display status of YubiKey Slots.
     """
     dev = ctx.obj['dev']
     click.echo(dev.device_name)
@@ -165,7 +165,7 @@ def delete(ctx, slot, force):
 @click.pass_context
 def otp(ctx, slot, public_id, private_id, key, no_enter, force):
     """
-    Program a YubiKey OTP credential.
+    Program a Yubico OTP credential.
 
     If --public-id is not given, the devices serial number will be used.
     If --private-id is not given, a randomly generated one will be used.
