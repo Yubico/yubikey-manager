@@ -1,2 +1,6 @@
+* Version 0.2.0 (released 2016-11-23)
+ * Removed all GUI code. This project is now only for the python library and CLI tool. The GUI will be re-released seperatly in a different project.
+ * Addded command to update settings for YubiKey Slots.
+
 * Version 0.1.0 (released 2016-07-07)
- * Initial release for beta testing
+ * Initial release for beta testing.
