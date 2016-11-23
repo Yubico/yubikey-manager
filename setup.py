@@ -26,7 +26,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
-from ykman.yubicommon.setup.exe import executable
 from ykman.yubicommon.setup import setup
 
 
@@ -51,9 +50,6 @@ setup(
     },
     install_requires=install_requires,
     yc_requires=['ctypes'],
-    cmdclass={
-        'executable': executable,
-    },
     test_suite='test',
     tests_require=install_requires,
     classifiers=[
