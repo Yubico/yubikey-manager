@@ -38,5 +38,6 @@ deploy:
   acl: public-read
   region: eu-west-1
   local-dir: "deploy/"
+  upload-dir: "yubikey-manager"
   on:
     all_branches: true
