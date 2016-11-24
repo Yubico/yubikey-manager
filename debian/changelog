@@ -1,5 +1,5 @@
-yubikey-manager (0.0.1) UNRELEASED; urgency=medium
+yubikey-manager (0.2.0) UNRELEASED; urgency=medium
 
-  * Initial release for Travis CI.
+  * Build for ppa
 
  -- Dag Heyman <dag@yubico.com>  Fri, 18 Nov 2016 14:14:54 +0100
