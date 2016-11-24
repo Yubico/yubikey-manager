@@ -11,7 +11,7 @@ point.
 ....
 Usage: ykman [OPTIONS] COMMAND [ARGS]...
 
-  Interface with a YubiKey via the command line.
+  Configure your YubiKey via the command line.
 
 Options:
   -v, --version
@@ -21,8 +21,16 @@ Commands:
   info     Show general information.
   mode     Manage connection modes.
   openpgp  Manage YubiKey OpenPGP functions.
-  slot     Manage YubiKey OTP slots.
+  slot     Manage YubiKey Slots.
 ....
+
+=== Installation
+
+==== Ubuntu
+
+    $ sudo apt-add-repository ppa:yubico/stable
+    $ sudo apt update
+    $ sudo apt install yubikey-manager
 
 === Bash completion
 
