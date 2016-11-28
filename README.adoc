@@ -32,6 +32,10 @@ Commands:
     $ sudo apt update
     $ sudo apt install yubikey-manager
 
+==== Pip
+
+    $ pip install yubikey-manager
+
 === Bash completion
 
 Experimental Bash completion for the command line tool is available, but not 
