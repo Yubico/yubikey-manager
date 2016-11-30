@@ -29,9 +29,9 @@ from __future__ import absolute_import
 
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
+from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_force_option, click_skip_on_help
 import click
-
 
 KEY_NAMES = dict(
     sig=KEY_SLOT.SIGN,
@@ -79,9 +79,13 @@ def openpgp(ctx):
     """
     Manage YubiKey OpenPGP functions.
     """
-
-    controller = OpgpController(ctx.obj['dev'].driver)
-    ctx.obj['controller'] = controller
+    try:
+        controller = OpgpController(ctx.obj['dev'].driver)
+        ctx.obj['controller'] = controller
+    except APDUError as e:
+        if e.sw == SW_APPLICATION_NOT_FOUND:
+            ctx.fail("The applet can't be found on the device.")
+        raise
 
 
 @openpgp.command()
