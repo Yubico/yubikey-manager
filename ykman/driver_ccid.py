@@ -38,6 +38,7 @@ from .util import CAPABILITY, TRANSPORT
 from .yubicommon.compat import byte2int, int2byte
 
 SW_OK = 0x9000
+SW_APPLICATION_NOT_FOUND = 0x6a82
 
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
