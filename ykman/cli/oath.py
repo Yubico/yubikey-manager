@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 import click
 from .util import click_skip_on_help
+from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
 from ..oath import OathController
 
@@ -39,8 +40,13 @@ def oath(ctx):
     """
     Manage YubiKey OATH credentials.
     """
-    controller = OathController(ctx.obj['dev'].driver)
-    ctx.obj['controller'] = controller
+    try:
+        controller = OathController(ctx.obj['dev'].driver)
+        ctx.obj['controller'] = controller
+    except APDUError as e:
+        if e.sw == SW_APPLICATION_NOT_FOUND:
+            ctx.fail("The applet can't be found on the device.")
+        raise
 
 
 @oath.command()
