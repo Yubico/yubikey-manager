@@ -97,7 +97,6 @@ def slot(ctx, access_code):
     with a credential. Several credential types are supported.
     """
     ctx.obj['dev'].driver.access_code = access_code
-    slot.transports = TRANSPORT.OTP
 
 
 @slot.command()
@@ -292,3 +291,5 @@ def settings(ctx, slot, enter, force):
         dev.driver.update_settings(slot, enter)
     except YkpersError:
         _failed_to_write_msg(ctx)
+
+slot.transports = TRANSPORT.OTP
