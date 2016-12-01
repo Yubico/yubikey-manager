@@ -191,7 +191,6 @@ def kill_scdaemon():
             killed = True
 
     if killed:
-        print("scdaemon stopped...")
         time.sleep(0.1)
     return killed
 
