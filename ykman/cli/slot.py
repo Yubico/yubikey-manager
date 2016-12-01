@@ -292,4 +292,5 @@ def settings(ctx, slot, enter, force):
     except YkpersError:
         _failed_to_write_msg(ctx)
 
+
 slot.transports = TRANSPORT.OTP
