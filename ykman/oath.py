@@ -32,7 +32,8 @@ from .driver_ccid import OATH_AID, SW_OK
 
 
 class INS(IntEnum):
-    SELECT = 0xa4
+    SELECT = 0xa4,
+    RESET = 0x04
 
 
 class OathController(object):
@@ -55,3 +56,6 @@ class OathController(object):
 
     def select(self):
         self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
+
+    def reset(self):
+        self.send_apdu(0, INS.RESET, 0xde, 0xad)

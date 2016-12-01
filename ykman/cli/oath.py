@@ -63,6 +63,9 @@ def info(ctx):
 
 @oath.command()
 @click.pass_context
+@click.confirmation_option(
+    '-f', '--force', prompt='WARNING! This will delete '
+    'all stored OATH credentials and restore factory settings?')
 def reset(ctx):
     """
     Reset all OATH credentials.
@@ -70,5 +73,7 @@ def reset(ctx):
     This action will wipe all OATH data.
     """
 
+    click.echo('Resetting OATH data...')
+    ctx.obj['controller'].reset()
 
 oath.transports = TRANSPORT.CCID
