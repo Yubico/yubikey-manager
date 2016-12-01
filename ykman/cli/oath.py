@@ -76,4 +76,5 @@ def reset(ctx):
     click.echo('Resetting OATH data...')
     ctx.obj['controller'].reset()
 
+
 oath.transports = TRANSPORT.CCID
