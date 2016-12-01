@@ -125,3 +125,14 @@ class TestOpenPGP(unittest.TestCase):
         self.assertIn(
             'Success! All data has been cleared and default PINs are set.',
             output)
+
+
+@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(
+    not _has_mode(TRANSPORT.CCID),
+    "CCID needs to be enabled for this test.")
+class TestOATH(unittest.TestCase):
+
+    def test_oath_info(self):
+        output = ykman_cli('oath', 'info')
+        self.assertIn('OATH version:', output)
