@@ -30,28 +30,36 @@ import hashlib
 from enum import IntEnum
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import OATH_AID, SW_OK
+from .util import tlv
 from base64 import b32decode
 
 
 ALG_SHA1 = 0x01
 
-TAG_NAME = 0x71
-TAG_KEY = 0x73
+
+class TAG(IntEnum):
+    NAME = 0x71
+    KEY = 0x73
+    PROPERTY = 0x78
 
 
 class ALG(IntEnum):
-    SHA1 = 0x01,
+    SHA1 = 0x01
     SHA256 = 0x02
 
 
-class TYPE(IntEnum):
-    HOTP = 0x10,
+class OATH_TYPE(IntEnum):
+    HOTP = 0x10
     TOTP = 0x20
 
 
+class PROPERTIES(IntEnum):
+    REQUIRE_TOUCH = 0x02
+
+
 class INS(IntEnum):
-    SELECT = 0xa4,
-    PUT = 0x01,
+    SELECT = 0xa4
+    PUT = 0x01
     RESET = 0x04
 
 
@@ -79,13 +87,23 @@ class OathController(object):
     def reset(self):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
 
-    def put(self, key, name, oath_type=TYPE.TOTP, digits=6,
+    def put(self, key, name, oath_type=OATH_TYPE.TOTP, digits=6,
             algo=ALG.SHA1, require_touch=False):
+
+        properties = 0
+        if require_touch:
+            properties |= PROPERTIES.REQUIRE_TOUCH
+
         unpadded = key.upper()
         key = b32decode(unpadded + '=' * (-len(unpadded) % 8))
         key = hmac_shorten_key(key, algo)
         key = int2byte(oath_type | ALG.SHA1) + int2byte(digits) + key
-        data = der_pack(TAG_NAME, name.encode('utf8'), TAG_KEY, key)
+
+        data = tlv(TAG.NAME, name.encode('utf8')) + tlv(TAG.KEY, key)
+
+        if properties:
+            data += int2byte(TAG.PROPERTY) + int2byte(properties)
+
         self.send_apdu(0, INS.PUT, 0, 0, data)
 
 
@@ -99,9 +117,3 @@ def hmac_shorten_key(key, algo):
     if len(key) > h.block_size:
         key = h.update(key).digest()
     return key
-
-
-def der_pack(*values):
-    return b''.join(
-        [int2byte(t) + int2byte(len(v)) + v for t, v in zip(
-            values[0::2], values[1::2])])

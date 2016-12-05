@@ -30,7 +30,7 @@ import click
 from .util import click_skip_on_help
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
-from ..oath import OathController
+from ..oath import OathController, OATH_TYPE
 
 
 @click.group()
@@ -78,16 +78,37 @@ def reset(ctx):
 
 
 @oath.command()
-@click.pass_context
 @click.argument('key')  # TODO: Callback for key validation
 @click.argument('name')
-def add(ctx, key, name):
+@click.option(
+    '-o', '--oath-type', type=click.Choice(['totp', 'hotp']), default='totp',
+    help='Specify whether this is a time or counter-based OATH credential.')
+@click.option(
+    '-d', '--digits', type=click.Choice(['6', '8']), default='6',
+    help='Number of digits in generated code.')
+@click.option(
+    '-t', '--touch', is_flag=True,
+    help='Require touch on YubiKey to generate code.')
+@click.pass_context
+def add(ctx, key, name, oath_type, digits, touch):
     """
     Add a new OATH credential.
 
     This will add a new OATH credential to the device.
     """
-    ctx.obj['controller'].put(key, name)
+
+    if oath_type == 'hotp':
+        oath_type = OATH_TYPE.HOTP
+    else:
+        oath_type = OATH_TYPE.TOTP
+
+    #  TODO: check if name already exists, prompt for confirmation.
+
+    #  TODO: verify that firmware supports touch
+
+    ctx.obj['controller'].put(
+        key, name, oath_type=oath_type, digits=int(digits),
+        require_touch=touch)
 
 
 oath.transports = TRANSPORT.CCID
