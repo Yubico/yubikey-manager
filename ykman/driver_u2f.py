@@ -63,7 +63,7 @@ def check(status):
         raise U2FHostError(status)
 
 
-_u2fh_init_res = u2fh.u2fh_global_init(0)
+_u2fh_init_res = u2fh.u2fh_global_init(0)  # TODO: Allow debug output
 
 libversion = u2fh.u2fh_check_version(None).decode('ascii')
 
