@@ -27,7 +27,7 @@
 
 from enum import IntEnum
 from binascii import b2a_hex, a2b_hex
-from .yubicommon.compat import byte2int, text_type
+from .yubicommon.compat import int2byte, byte2int, text_type
 
 
 __all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list']
@@ -105,6 +105,18 @@ class Mode(object):
     def from_code(cls, code):
         code = code & 0b00000111
         return cls(cls._modes[code])
+
+
+def tlv(tag, value=b''):
+    data = int2byte(tag)
+    length = len(value)
+    if length < 0x80:
+        data += int2byte(length)
+    elif length < 0xff:
+        data += b'\x81' + int2byte(length)
+    else:
+        data += b'\x82' + int2byte(length >> 8) + int2byte(length & 0xff)
+    return data + value
 
 
 def parse_tlv_list(data):
