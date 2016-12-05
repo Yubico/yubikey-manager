@@ -77,4 +77,17 @@ def reset(ctx):
     ctx.obj['controller'].reset()
 
 
+@oath.command()
+@click.pass_context
+@click.argument('key')  # TODO: Callback for key validation
+@click.argument('name')
+def add(ctx, key, name):
+    """
+    Add a new OATH credential.
+
+    This will add a new OATH credential to the device.
+    """
+    ctx.obj['controller'].put(key, name)
+
+
 oath.transports = TRANSPORT.CCID
