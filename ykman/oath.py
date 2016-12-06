@@ -33,7 +33,7 @@ from .driver_ccid import OATH_AID, SW_OK
 from .util import tlv
 
 
-ALG_SHA1 = 0x01
+ALGORITHM_SHA1 = 0x01
 
 
 class TAG(IntEnum):
@@ -42,7 +42,7 @@ class TAG(IntEnum):
     PROPERTY = 0x78
 
 
-class ALG(IntEnum):
+class ALGORITHM(IntEnum):
     SHA1 = 0x01
     SHA256 = 0x02
 
@@ -87,14 +87,14 @@ class OathController(object):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
 
     def put(self, key, name, oath_type=OATH_TYPE.TOTP, digits=6,
-            algo=ALG.SHA1, require_touch=False):
+            algo=ALGORITHM.SHA1, require_touch=False):
 
         properties = 0
         if require_touch:
             properties |= PROPERTIES.REQUIRE_TOUCH
 
         key = hmac_shorten_key(key, algo)
-        key = int2byte(oath_type | ALG.SHA1) + int2byte(digits) + key
+        key = int2byte(oath_type | algo) + int2byte(digits) + key
 
         data = tlv(TAG.NAME, name.encode('utf8')) + tlv(TAG.KEY, key)
 
@@ -105,9 +105,9 @@ class OathController(object):
 
 
 def hmac_shorten_key(key, algo):
-    if algo == ALG.SHA1:
+    if algo == ALGORITHM.SHA1:
         h = hashlib.sha1()
-    elif algo == ALG.SHA256:
+    elif algo == ALGORITHM.SHA256:
         h = hashlib.sha256()
     else:
         raise ValueError('Unsupported algorithm!')

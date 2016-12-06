@@ -30,7 +30,7 @@ import click
 from .util import click_skip_on_help, parse_key
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
-from ..oath import OathController, OATH_TYPE
+from ..oath import OathController, OATH_TYPE, ALGORITHM
 
 
 @click.group()
@@ -87,10 +87,13 @@ def reset(ctx):
     '-d', '--digits', type=click.Choice(['6', '8']), default='6',
     help='Number of digits in generated code.')
 @click.option(
+    '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256']),
+    default='SHA1', help='Algorithm to use for code generation.')
+@click.option(
     '-t', '--touch', is_flag=True,
     help='Require touch on YubiKey to generate code.')
 @click.pass_context
-def add(ctx, key, name, oath_type, digits, touch):
+def add(ctx, key, name, oath_type, digits, algorithm, touch):
     """
     Add a new OATH credential.
 
@@ -104,6 +107,11 @@ def add(ctx, key, name, oath_type, digits, touch):
     else:
         oath_type = OATH_TYPE.TOTP
 
+    if algorithm == 'SHA256':
+        algo = ALGORITHM.SHA256
+    else:
+        algo = ALGORITHM.SHA1
+
     if touch and controller.version < (4, 2, 6):
         ctx.fail("Touch-required credentials not supported on this key.")
 
@@ -111,7 +119,7 @@ def add(ctx, key, name, oath_type, digits, touch):
 
     controller.put(
         key, name, oath_type=oath_type, digits=int(digits),
-        require_touch=touch)
+        require_touch=touch, algo=algo)
 
 
 oath.transports = TRANSPORT.CCID
