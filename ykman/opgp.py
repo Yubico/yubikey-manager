@@ -94,13 +94,12 @@ class OpgpController(object):
             self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN, check=None)
 
     def reset(self):
+        if self.version < (1, 0, 6):
+            raise ValueError('Resetting OpenPGP data requires version 1.0.6 or '
+                             'later.')
         self._block_pins()
         self.send_apdu(0, INS.TERMINATE, 0, 0)
         self.send_apdu(0, INS.ACTIVATE, 0, 0)
-
-    def get_touch(self, key_slot):
-        data = self.send_apdu(0, INS.GET_DATA, 0, key_slot)
-        return TOUCH_MODE(byte2int(data[0]))
 
     def _verify(self, pw, pin):
         try:
@@ -110,12 +109,26 @@ class OpgpController(object):
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))
 
+    def get_touch(self, key_slot):
+        if self.version < (4, 2, 0):
+            raise ValueError('Touch policy is available on YubiKey 4 or later.')
+        data = self.send_apdu(0, INS.GET_DATA, 0, key_slot)
+        return TOUCH_MODE(byte2int(data[0]))
+
     def set_touch(self, key_slot, mode, pin):
+        if self.version < (4, 2, 0):
+            raise ValueError('Touch policy is available on YubiKey 4 or later.')
         self._verify(PW3, pin)
         self.send_apdu(
             0, INS.PUT_DATA, 0, key_slot, int2byte(mode) + b'\x20')
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, pin):
+        if self.version < (1, 0, 7):  # For YubiKey NEO
+            raise ValueError('Setting PIN retry counters requires version '
+                             '1.0.7 or later.')
+        if (4, 0, 0) <= self.version < (4, 3, 1):  # For YubiKey 4
+            raise ValueError('Setting PIN retry counters requires version '
+                             '4.3.1 or later.')
         self._verify(PW3, pin)
         self.send_apdu(
             0, INS.SET_PIN_RETRIES, 0, 0,

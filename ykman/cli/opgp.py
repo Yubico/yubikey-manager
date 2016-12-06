@@ -140,8 +140,6 @@ def touch(ctx, key, policy, admin_pin, force):
     POLICY  Touch policy to set (on, off or fixed).
     """
     controller = ctx.obj['controller']
-    if controller.version <= (4, 2, 0):
-        ctx.fail('Setting a touch policy is not supported on this YubiKey.')
     old_policy = controller.get_touch(key)
     click.echo('Current touch policy of {.name} key is {.name}.'.format(
         key, old_policy))
@@ -175,10 +173,6 @@ def set_pin_retries(ctx, pw_attempts, admin_pin, force):
     attempts for the PIN, Reset Code, and Admin PIN, respectively.
     """
     controller = ctx.obj['controller']
-    if controller.version <= (1, 0, 7) or \
-            (4, 0, 0) <= controller.version < (4, 3, 0):
-        ctx.fail('Changing the number of PIN retries is not supported on this '
-                 'YubiKey.')
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
         click.echo('WARNING: Setting PIN retries will reset the values for all '
