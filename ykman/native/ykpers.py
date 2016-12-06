@@ -32,9 +32,6 @@ from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
 from ..yubicommon.ctypes import CLibrary
 
 
-__all__ = ['ykpers']
-
-
 YK_KEY = type('YK_KEY', (Structure,), {})
 YK_STATUS = type('YK_STATUS', (Structure,), {})
 YK_TICKET = type('YK_TICKET', (Structure,), {})

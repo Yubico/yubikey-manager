@@ -30,9 +30,6 @@ from ctypes import (Structure, POINTER, c_int, c_uint, c_uint8, c_uint16,
 from ..yubicommon.ctypes import CLibrary
 
 
-__all__ = ['u2fh', 'u2fh_devs']
-
-
 u2fh_rc = c_int
 u2fh_initflags = c_uint
 u2fh_devs = type('u2fh_devs', (Structure,), {})
