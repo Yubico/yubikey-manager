@@ -86,8 +86,18 @@ class OathController(object):
     def reset(self):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
 
-    def put(self, key, name, oath_type=OATH_TYPE.TOTP, digits=6,
-            algo=ALGORITHM.SHA1, require_touch=False):
+    def put(self, key, name, oath_type='totp', digits=6,
+            algo='SHA1', require_touch=False):
+
+        if oath_type == 'hotp':
+            oath_type = OATH_TYPE.HOTP
+        else:
+            oath_type = OATH_TYPE.TOTP
+
+        if algo == 'SHA256':
+            algo = ALGORITHM.SHA256
+        else:
+            algo = ALGORITHM.SHA1
 
         properties = 0
         if require_touch:

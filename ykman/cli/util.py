@@ -31,8 +31,6 @@ import re
 from base64 import b32decode
 from binascii import a2b_hex
 
-__all__ = ['click_force_option', 'click_callback', 'click_skip_on_help']
-
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
@@ -71,5 +69,9 @@ def parse_key(ctx, param, val):
         return a2b_hex(val)
     else:
         # Key should be b32 encoded
-        val += '=' * (-len(val) % 8)  # Support unpadded
-        return b32decode(val)
+        return parse_b32_key(val)
+
+
+def parse_b32_key(key):
+    key += '=' * (-len(key) % 8)  # Support unpadded
+    return b32decode(key)

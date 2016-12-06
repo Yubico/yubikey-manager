@@ -27,10 +27,15 @@
 
 from __future__ import absolute_import
 import click
-from .util import click_skip_on_help, parse_key
+from .util import click_skip_on_help, parse_key, parse_b32_key
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
-from ..oath import OathController, OATH_TYPE, ALGORITHM
+from ..oath import OathController
+try:
+    from urlparse import urlparse, parse_qs
+    from urllib import unquote
+except ImportError:
+    from urllib.parse import unquote, urlparse, parse_qs
 
 
 @click.group()
@@ -102,16 +107,6 @@ def add(ctx, key, name, oath_type, digits, algorithm, touch):
 
     controller = ctx.obj['controller']
 
-    if oath_type == 'hotp':
-        oath_type = OATH_TYPE.HOTP
-    else:
-        oath_type = OATH_TYPE.TOTP
-
-    if algorithm == 'SHA256':
-        algo = ALGORITHM.SHA256
-    else:
-        algo = ALGORITHM.SHA1
-
     if touch and controller.version < (4, 2, 6):
         ctx.fail("Touch-required credentials not supported on this key.")
 
@@ -119,7 +114,42 @@ def add(ctx, key, name, oath_type, digits, algorithm, touch):
 
     controller.put(
         key, name, oath_type=oath_type, digits=int(digits),
-        require_touch=touch, algo=algo)
+        require_touch=touch, algo=algorithm)
+
+
+@oath.command()
+@click.argument('uri')
+@click.pass_context
+def uri(ctx, uri):
+    """
+    Add a new OATH credential from URI.
+
+    Use a URI to add a new OATH credential to the device.
+    """
+
+    params = parse_uri(uri)
+    name = params['name']
+    key = params['secret']
+    key = parse_b32_key(key)
+    oath_type = params['type']
+    digits = params['digits']
+    algo = params['algorithm']
+
+    controller = ctx.obj['controller']
+
+    controller.put(
+        key, name, oath_type=oath_type, digits=int(digits), algo=algo)
+
+
+def parse_uri(uri):
+    uri = uri.strip()
+    parsed = urlparse(uri)
+    params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
+    params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
+    params['type'] = parsed.hostname
+    if 'issuer' in params and not params['name'].startswith(params['issuer']):
+        params['name'] = params['issuer'] + ':' + params['name']
+    return params
 
 
 oath.transports = TRANSPORT.CCID
