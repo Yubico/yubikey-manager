@@ -30,9 +30,6 @@ from binascii import b2a_hex, a2b_hex
 from .yubicommon.compat import int2byte, byte2int, text_type
 
 
-__all__ = ['CAPABILITY', 'TRANSPORT', 'Mode', 'parse_tlv_list']
-
-
 class BitflagEnum(IntEnum):
     @classmethod
     def split(cls, flags):

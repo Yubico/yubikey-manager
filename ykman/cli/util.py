@@ -28,8 +28,6 @@ import functools
 import click
 import sys
 
-__all__ = ['click_force_option', 'click_callback', 'click_skip_on_help']
-
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
