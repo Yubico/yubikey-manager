@@ -97,16 +97,19 @@ def add(ctx, key, name, oath_type, digits, touch):
     This will add a new OATH credential to the device.
     """
 
+    controller = ctx.obj['controller']
+
     if oath_type == 'hotp':
         oath_type = OATH_TYPE.HOTP
     else:
         oath_type = OATH_TYPE.TOTP
 
+    if touch and controller.version < (4, 2, 6):
+        ctx.fail("Touch-required credentials not supported on this key.")
+
     #  TODO: check if name already exists, prompt for confirmation.
 
-    #  TODO: verify that firmware supports touch
-
-    ctx.obj['controller'].put(
+    controller.put(
         key, name, oath_type=oath_type, digits=int(digits),
         require_touch=touch)
 
