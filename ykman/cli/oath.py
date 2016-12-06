@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 import click
-from .util import click_skip_on_help
+from .util import click_skip_on_help, parse_key
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
 from ..oath import OathController, OATH_TYPE
@@ -78,7 +78,7 @@ def reset(ctx):
 
 
 @oath.command()
-@click.argument('key')  # TODO: Callback for key validation
+@click.argument('key', callback=parse_key)
 @click.argument('name')
 @click.option(
     '-o', '--oath-type', type=click.Choice(['totp', 'hotp']), default='totp',

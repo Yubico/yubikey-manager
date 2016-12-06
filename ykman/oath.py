@@ -31,7 +31,6 @@ from enum import IntEnum
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import OATH_AID, SW_OK
 from .util import tlv
-from base64 import b32decode
 
 
 ALG_SHA1 = 0x01
@@ -94,8 +93,6 @@ class OathController(object):
         if require_touch:
             properties |= PROPERTIES.REQUIRE_TOUCH
 
-        unpadded = key.upper()
-        key = b32decode(unpadded + '=' * (-len(unpadded) % 8))
         key = hmac_shorten_key(key, algo)
         key = int2byte(oath_type | ALG.SHA1) + int2byte(digits) + key
 

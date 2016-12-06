@@ -27,26 +27,14 @@
 
 from __future__ import absolute_import
 
-from .util import click_force_option, click_callback, click_skip_on_help
+from .util import (
+    click_force_option, click_callback, parse_key, click_skip_on_help)
 from ..util import TRANSPORT, modhex_decode, modhex_encode
-from base64 import b32decode
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
 import os
-import re
 import struct
 import click
-
-
-@click_callback()
-def parse_key(ctx, param, val):
-    val = val.upper()
-    if re.match(r'^([0-9A-F]{2})+$', val):  # hex
-        return a2b_hex(val)
-    else:
-        # Key should be b32 encoded
-        val += '=' * (-len(val) % 8)  # Support unpadded
-        return b32decode(val)
 
 
 def parse_hex(length):

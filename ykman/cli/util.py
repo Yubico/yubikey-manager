@@ -27,6 +27,9 @@
 import functools
 import click
 import sys
+import re
+from base64 import b32decode
+from binascii import a2b_hex
 
 __all__ = ['click_force_option', 'click_callback', 'click_skip_on_help']
 
@@ -59,3 +62,14 @@ def click_skip_on_help(f):
                 return
         f(*args, **kwargs)
     return inner
+
+
+@click_callback()
+def parse_key(ctx, param, val):
+    val = val.upper()
+    if re.match(r'^([0-9A-F]{2})+$', val):  # hex
+        return a2b_hex(val)
+    else:
+        # Key should be b32 encoded
+        val += '=' * (-len(val) % 8)  # Support unpadded
+        return b32decode(val)
