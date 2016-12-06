@@ -37,6 +37,10 @@ try:
 except ImportError:
     from urllib.parse import unquote, urlparse, parse_qs
 
+click_touch_option = click.option(
+    '-t', '--touch', is_flag=True,
+    help='Require touch on YubiKey to generate code.')
+
 
 @click.group()
 @click.pass_context
@@ -94,9 +98,7 @@ def reset(ctx):
 @click.option(
     '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256']),
     default='SHA1', help='Algorithm to use for code generation.')
-@click.option(
-    '-t', '--touch', is_flag=True,
-    help='Require touch on YubiKey to generate code.')
+@click_touch_option
 @click.pass_context
 def add(ctx, key, name, oath_type, digits, algorithm, touch):
     """
@@ -119,8 +121,9 @@ def add(ctx, key, name, oath_type, digits, algorithm, touch):
 
 @oath.command()
 @click.argument('uri')
+@click_touch_option
 @click.pass_context
-def uri(ctx, uri):
+def uri(ctx, uri, touch):
     """
     Add a new OATH credential from URI.
 
@@ -138,7 +141,8 @@ def uri(ctx, uri):
     controller = ctx.obj['controller']
 
     controller.put(
-        key, name, oath_type=oath_type, digits=int(digits), algo=algo)
+        key, name, oath_type=oath_type, digits=int(digits),
+        algo=algo, require_touch=touch)
 
 
 def parse_uri(uri):
