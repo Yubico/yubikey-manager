@@ -41,6 +41,7 @@ from .opgp import openpgp
 from .oath import oath
 import usb.core
 import click
+import sys
 
 
 COMMANDS = (info, mode, slot, openpgp, oath)
@@ -108,8 +109,12 @@ for cmd in COMMANDS:
 
 
 def main():
-    cli(obj={})
+    try:
+        cli(obj={})
+    except ValueError as e:
+        print('Error:', e)
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
