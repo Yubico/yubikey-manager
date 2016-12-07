@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 import click
-from .util import click_skip_on_help, parse_key, parse_b32_key
+from .util import click_skip_on_help, click_callback, parse_key, parse_b32_key
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
 from ..oath import OathController
@@ -40,6 +40,26 @@ except ImportError:
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
     help='Require touch on YubiKey to generate code.')
+
+
+@click_callback()
+def parse_uri(ctx, param, val):
+    try:
+        uri = val.strip()
+        parsed = urlparse(uri)
+        assert parsed.scheme == 'otpauth'
+        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
+        params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
+        params['type'] = parsed.hostname
+        # Issuer can come both in a param and inside name param.
+        # We store both in the name field on the key.
+        if 'issuer' in params \
+                and not params['name'].startswith(params['issuer']):
+                    print("test")
+                    params['name'] = params['issuer'] + ':' + params['name']
+        return params
+    except Exception:
+        raise ValueError('URI seems to have the wrong format.')
 
 
 @click.group()
@@ -120,7 +140,7 @@ def add(ctx, key, name, oath_type, digits, algorithm, touch):
 
 
 @oath.command()
-@click.argument('uri')
+@click.argument('uri', callback=parse_uri)
 @click_touch_option
 @click.pass_context
 def uri(ctx, uri, touch):
@@ -130,7 +150,7 @@ def uri(ctx, uri, touch):
     Use a URI to add a new OATH credential to the device.
     """
 
-    params = parse_uri(uri)
+    params = uri
     name = params['name']
     key = params['secret']
     key = parse_b32_key(key)
@@ -143,17 +163,6 @@ def uri(ctx, uri, touch):
     controller.put(
         key, name, oath_type=oath_type, digits=int(digits),
         algo=algo, require_touch=touch)
-
-
-def parse_uri(uri):
-    uri = uri.strip()
-    parsed = urlparse(uri)
-    params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
-    params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
-    params['type'] = parsed.hostname
-    if 'issuer' in params and not params['name'].startswith(params['issuer']):
-        params['name'] = params['issuer'] + ':' + params['name']
-    return params
 
 
 oath.transports = TRANSPORT.CCID
