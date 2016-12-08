@@ -33,16 +33,14 @@ from .driver_ccid import OATH_AID, SW_OK
 from .util import tlv
 
 
-ALGORITHM_SHA1 = 0x01
-
-
 class TAG(IntEnum):
     NAME = 0x71
     KEY = 0x73
     PROPERTY = 0x78
+    NAME_LIST = 0x72
 
 
-class ALGORITHM(IntEnum):
+class ALGO(IntEnum):
     SHA1 = 0x01
     SHA256 = 0x02
 
@@ -60,6 +58,12 @@ class INS(IntEnum):
     SELECT = 0xa4
     PUT = 0x01
     RESET = 0x04
+    LIST = 0xa1
+
+
+class MASK(IntEnum):
+    TYPE = 0xf0
+    ALGO = 0x0f
 
 
 class OathController(object):
@@ -89,15 +93,8 @@ class OathController(object):
     def put(self, key, name, oath_type='totp', digits=6,
             algo='SHA1', require_touch=False):
 
-        if oath_type == 'hotp':
-            oath_type = OATH_TYPE.HOTP
-        else:
-            oath_type = OATH_TYPE.TOTP
-
-        if algo == 'SHA256':
-            algo = ALGORITHM.SHA256
-        else:
-            algo = ALGORITHM.SHA1
+        oath_type = OATH_TYPE[oath_type.upper()].value
+        algo = ALGO[algo].value
 
         properties = 0
         if require_touch:
@@ -113,11 +110,27 @@ class OathController(object):
 
         self.send_apdu(0, INS.PUT, 0, 0, data)
 
+    def list(self):
+
+        resp = self.send_apdu(0, INS.LIST, 0, 0)
+
+        while resp:
+            assert byte2int(resp[0]) == TAG.NAME_LIST
+            length = byte2int(resp[1]) - 1
+            oath_type = (MASK.TYPE & resp[2])
+            algo = (MASK.ALGO & resp[2])
+            name = resp[3:3 + length]
+            yield (
+                name.decode('utf-8'),
+                OATH_TYPE(oath_type).name,
+                ALGO(algo).name)
+            resp = resp[3 + length:]
+
 
 def hmac_shorten_key(key, algo):
-    if algo == ALGORITHM.SHA1:
+    if algo == ALGO.SHA1:
         h = hashlib.sha1()
-    elif algo == ALGORITHM.SHA256:
+    elif algo == ALGO.SHA256:
         h = hashlib.sha256()
     else:
         raise ValueError('Unsupported algorithm!')

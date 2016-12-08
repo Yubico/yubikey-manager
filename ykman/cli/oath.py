@@ -165,4 +165,18 @@ def uri(ctx, uri, touch):
         algo=algo, require_touch=touch)
 
 
+@oath.command()
+@click.pass_context
+def list(ctx):
+    """
+    List all OATH credentials.
+
+    List all OATH credentials stored on the device.
+    """
+    controller = ctx.obj['controller']
+
+    for cred in controller.list():
+        click.echo('{}'.format(cred[0]))
+
+
 oath.transports = TRANSPORT.CCID
