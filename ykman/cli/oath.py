@@ -131,31 +131,15 @@ def add(ctx, key, name, oath_type, digits, algorithm, touch, force):
 
     This will add a new OATH credential to the device.
     """
-
-    controller = ctx.obj['controller']
-
-    if touch and controller.version < (4, 2, 6):
-        ctx.fail("Touch-required credentials not supported on this key.")
-
-    if not force and any(cred[0] == name for cred in controller.list()):
-        click.confirm(
-            'A credential called {} already exists on the device.'
-            ' Do you want to overwrite it?'.format(name), abort=True)
-
-    try:
-        controller.put(
-            key, name, oath_type=oath_type, digits=int(digits),
-            require_touch=touch, algo=algorithm)
-    except APDUError as e:
-        if e.sw == OATH_ERROR.NO_SPACE:
-            ctx.fail('No space left on device.')
+    _add_cred(ctx, key, name, oath_type, digits, touch, algorithm, force)
 
 
 @oath.command()
 @click.argument('uri', callback=parse_uri)
 @click_touch_option
+@click_force_option
 @click.pass_context
-def uri(ctx, uri, touch):
+def uri(ctx, uri, touch, force):
     """
     Add a new OATH credential from URI.
 
@@ -170,11 +154,28 @@ def uri(ctx, uri, touch):
     digits = params['digits']
     algo = params['algorithm']
 
+    _add_cred(ctx, key, name, oath_type, digits, touch, algo, force)
+
+
+def _add_cred(ctx, key, name, oath_type, digits, touch, algo, force):
+
     controller = ctx.obj['controller']
 
-    controller.put(
-        key, name, oath_type=oath_type, digits=int(digits),
-        algo=algo, require_touch=touch)
+    if touch and controller.version < (4, 2, 6):
+        ctx.fail("Touch-required credentials not supported on this key.")
+
+    if not force and any(cred[0] == name for cred in controller.list()):
+        click.confirm(
+            'A credential called {} already exists on the device.'
+            ' Do you want to overwrite it?'.format(name), abort=True)
+
+    try:
+        controller.put(
+            key, name, oath_type=oath_type, digits=int(digits),
+            require_touch=touch, algo=algo)
+    except APDUError as e:
+        if e.sw == OATH_ERROR.NO_SPACE:
+            ctx.fail('No space left on device.')
 
 
 @oath.command()
