@@ -27,10 +27,12 @@
 
 from __future__ import absolute_import
 import click
-from .util import click_skip_on_help, click_callback, parse_key, parse_b32_key
-from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
+from .util import (
+    click_force_option, click_skip_on_help,
+    click_callback, parse_key, parse_b32_key)
+from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
-from ..oath import OathController
+from ..oath import OathController, OATH_ERROR
 try:
     from urlparse import urlparse, parse_qs
     from urllib import unquote
@@ -121,8 +123,9 @@ def reset(ctx):
     '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256']),
     default='SHA1', help='Algorithm to use for code generation.')
 @click_touch_option
+@click_force_option
 @click.pass_context
-def add(ctx, key, name, oath_type, digits, algorithm, touch):
+def add(ctx, key, name, oath_type, digits, algorithm, touch, force):
     """
     Add a new OATH credential.
 
@@ -134,11 +137,18 @@ def add(ctx, key, name, oath_type, digits, algorithm, touch):
     if touch and controller.version < (4, 2, 6):
         ctx.fail("Touch-required credentials not supported on this key.")
 
-    #  TODO: check if name already exists, prompt for confirmation.
+    if not force and any(cred[0] == name for cred in controller.list()):
+        click.confirm(
+            'A credential called {} already exists on the device.'
+            ' Do you want to overwrite it?'.format(name), abort=True)
 
-    controller.put(
-        key, name, oath_type=oath_type, digits=int(digits),
-        require_touch=touch, algo=algorithm)
+    try:
+        controller.put(
+            key, name, oath_type=oath_type, digits=int(digits),
+            require_touch=touch, algo=algorithm)
+    except APDUError as e:
+        if e.sw == OATH_ERROR.NO_SPACE:
+            ctx.fail('No space left on device.')
 
 
 @oath.command()

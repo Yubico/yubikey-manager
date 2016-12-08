@@ -66,6 +66,10 @@ class MASK(IntEnum):
     ALGO = 0x0f
 
 
+class OATH_ERROR(IntEnum):
+    NO_SPACE = 0x6a84
+
+
 class OathController(object):
 
     def __init__(self, driver):
