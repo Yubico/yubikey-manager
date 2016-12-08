@@ -104,6 +104,8 @@ def reset(ctx):
 
     click.echo('Resetting OATH data...')
     ctx.obj['controller'].reset()
+    click.echo(
+        'Success! All OATH credentials have been cleared from the device.')
 
 
 @oath.command()

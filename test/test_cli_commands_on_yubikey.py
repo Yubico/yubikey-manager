@@ -136,3 +136,12 @@ class TestOATH(unittest.TestCase):
     def test_oath_info(self):
         output = ykman_cli('oath', 'info')
         self.assertIn('OATH version:', output)
+
+    def test_oath_add_credential(self):
+        ykman_cli('oath', 'add', 'abba', 'credential-from-test')
+
+    def test_oath_reset(self):
+        output = ykman_cli('oath', 'reset', '-f')
+        self.assertIn(
+            'Success! All OATH credentials have been cleared from the device.',
+            output)
