@@ -29,7 +29,7 @@
 import hashlib
 from enum import IntEnum
 from ykman.yubicommon.compat import byte2int, int2byte
-from .driver_ccid import OATH_AID, SW_OK
+from .driver_ccid import APDUError, OATH_AID, SW_OK
 from .util import tlv
 
 
@@ -59,6 +59,7 @@ class INS(IntEnum):
     PUT = 0x01
     RESET = 0x04
     LIST = 0xa1
+    SEND_REMAINING = 0xa5
 
 
 class MASK(IntEnum):
@@ -66,8 +67,10 @@ class MASK(IntEnum):
     ALGO = 0x0f
 
 
-class OATH_ERROR(IntEnum):
+class SW(IntEnum):
     NO_SPACE = 0x6a84
+    COMMAND_ABORTED = 0x6f00
+    MORE_DATA = 0x61
 
 
 class OathController(object):
@@ -81,8 +84,17 @@ class OathController(object):
     def version(self):
         return self._version
 
-    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
-        return self._driver.send_apdu(cl, ins, p1, p2, data, check)
+    def send_apdu(self, cl, ins, p1, p2, data=b''):
+        resp, sw = self._driver.send_apdu(cl, ins, p1, p2, data, check=None)
+        while (sw >> 8) == SW.MORE_DATA:
+            more, sw = self._driver.send_apdu(
+                0, INS.SEND_REMAINING, 0, 0, '', check=None)
+            resp += more
+
+        if sw != SW_OK:
+            raise APDUError(resp, sw)
+
+        return resp
 
     def _read_version(self):
         data = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)

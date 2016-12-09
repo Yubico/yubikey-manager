@@ -32,7 +32,7 @@ from .util import (
     click_callback, parse_key, parse_b32_key)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
-from ..oath import OathController, OATH_ERROR
+from ..oath import OathController, SW
 try:
     from urlparse import urlparse, parse_qs
     from urllib import unquote
@@ -174,8 +174,13 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, force):
             key, name, oath_type=oath_type, digits=int(digits),
             require_touch=touch, algo=algo)
     except APDUError as e:
-        if e.sw == OATH_ERROR.NO_SPACE:
+        if e.sw == SW.NO_SPACE:
             ctx.fail('No space left on device.')
+        elif e.sw == SW.COMMAND_ABORTED:
+            ctx.fail(
+                'The command failed. Do you have enough space on the device?')
+        else:
+            raise
 
 
 @oath.command()
