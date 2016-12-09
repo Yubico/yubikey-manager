@@ -8,6 +8,10 @@ import traceback
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
         'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
 
+URI_TOTP_EXAMPLE = (
+        'otpauth://totp/ACME%20Co:john.doe@email.com?'
+        'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
+        '&algorithm=SHA1&digits=6&period=30')
 
 try:
     from ykman.util import TRANSPORT
@@ -144,10 +148,19 @@ class TestOATH(unittest.TestCase):
         self.assertIn('OATH version:', output)
 
     def test_oath_add_credential(self):
-        ykman_cli('oath', 'add', 'abba', 'credential-from-test')
+        ykman_cli('oath', 'add', 'abba', 'test-name')
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('test-name', creds)
 
     def test_oath_add_uri_hotp(self):
         ykman_cli('oath', 'uri', URI_HOTP_EXAMPLE)
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('Example:demo', creds)
+
+    def test_oath_add_uri_totp(self):
+        ykman_cli('oath', 'uri', URI_TOTP_EXAMPLE)
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('john.doe', creds)
 
     def test_oath_reset(self):
         output = ykman_cli('oath', 'reset', '-f')

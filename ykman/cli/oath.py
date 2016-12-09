@@ -57,7 +57,6 @@ def parse_uri(ctx, param, val):
         # We store both in the name field on the key.
         if 'issuer' in params \
                 and not params['name'].startswith(params['issuer']):
-                    print("test")
                     params['name'] = params['issuer'] + ':' + params['name']
         return params
     except Exception:
@@ -157,7 +156,7 @@ def uri(ctx, uri, touch, force):
     oath_type = params.get('type')
     digits = params.get('digits') or 6
     algo = params.get('algorithm') or 'SHA1'
-    counter = params.get('counter')
+    counter = params.get('counter') or 0
 
     _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force)
 
