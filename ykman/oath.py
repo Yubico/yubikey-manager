@@ -27,6 +27,7 @@
 
 
 import hashlib
+import struct
 from enum import IntEnum
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import APDUError, OATH_AID, SW_OK
@@ -38,6 +39,7 @@ class TAG(IntEnum):
     KEY = 0x73
     PROPERTY = 0x78
     NAME_LIST = 0x72
+    IMF = 0x7a
 
 
 class ALGO(IntEnum):
@@ -107,22 +109,26 @@ class OathController(object):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
 
     def put(self, key, name, oath_type='totp', digits=6,
-            algo='SHA1', require_touch=False):
+            algo='SHA1', counter=0, require_touch=False):
 
         oath_type = OATH_TYPE[oath_type.upper()].value
         algo = ALGO[algo].value
-
-        properties = 0
-        if require_touch:
-            properties |= PROPERTIES.REQUIRE_TOUCH
 
         key = hmac_shorten_key(key, algo)
         key = int2byte(oath_type | algo) + int2byte(digits) + key
 
         data = tlv(TAG.NAME, name.encode('utf8')) + tlv(TAG.KEY, key)
 
+        properties = 0
+
+        if require_touch:
+            properties |= PROPERTIES.REQUIRE_TOUCH
+
         if properties:
             data += int2byte(TAG.PROPERTY) + int2byte(properties)
+
+        if counter > 0:
+            data += tlv(TAG.IMF, struct.pack('>I', counter))
 
         self.send_apdu(0, INS.PUT, 0, 0, data)
 
@@ -133,8 +139,8 @@ class OathController(object):
         while resp:
             assert byte2int(resp[0]) == TAG.NAME_LIST
             length = byte2int(resp[1]) - 1
-            oath_type = (MASK.TYPE & resp[2])
-            algo = (MASK.ALGO & resp[2])
+            oath_type = (MASK.TYPE & byte2int(resp[2]))
+            algo = (MASK.ALGO & byte2int(resp[2]))
             name = resp[3:3 + length]
             yield (
                 name.decode('utf-8'),

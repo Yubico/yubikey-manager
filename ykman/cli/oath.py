@@ -122,16 +122,20 @@ def reset(ctx):
 @click.option(
     '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256']),
     default='SHA1', help='Algorithm to use for code generation.')
+@click.option(
+    '-c', '--counter', type=click.INT, default=0,
+    help='Initial counter value for HOTP credentials.')
 @click_touch_option
 @click_force_option
 @click.pass_context
-def add(ctx, key, name, oath_type, digits, algorithm, touch, force):
+def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
     """
     Add a new OATH credential.
 
     This will add a new OATH credential to the device.
     """
-    _add_cred(ctx, key, name, oath_type, digits, touch, algorithm, force)
+    _add_cred(
+        ctx, key, name, oath_type, digits, touch, algorithm, counter, force)
 
 
 @oath.command()
@@ -147,22 +151,26 @@ def uri(ctx, uri, touch, force):
     """
 
     params = uri
-    name = params['name']
-    key = params['secret']
+    name = params.get('name')
+    key = params.get('secret')
     key = parse_b32_key(key)
-    oath_type = params['type']
-    digits = params['digits']
-    algo = params['algorithm']
+    oath_type = params.get('type')
+    digits = params.get('digits') or 6
+    algo = params.get('algorithm') or 'SHA1'
+    counter = params.get('counter')
 
-    _add_cred(ctx, key, name, oath_type, digits, touch, algo, force)
+    _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force)
 
 
-def _add_cred(ctx, key, name, oath_type, digits, touch, algo, force):
+def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 
     controller = ctx.obj['controller']
 
     if touch and controller.version < (4, 2, 6):
         ctx.fail("Touch-required credentials not supported on this key.")
+
+    if counter and not oath_type == 'hotp':
+        ctx.fail('Counter only supported for HOTP credentials.')
 
     if not force and any(cred[0] == name for cred in controller.list()):
         click.confirm(
@@ -172,7 +180,7 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, force):
     try:
         controller.put(
             key, name, oath_type=oath_type, digits=int(digits),
-            require_touch=touch, algo=algo)
+            require_touch=touch, algo=algo, counter=int(counter))
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
             ctx.fail('No space left on device.')

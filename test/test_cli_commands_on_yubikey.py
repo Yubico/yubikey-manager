@@ -3,6 +3,12 @@ import unittest
 import time
 import click
 import traceback
+
+
+URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
+        'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
+
+
 try:
     from ykman.util import TRANSPORT
     from ykman.descriptor import get_descriptors
@@ -139,6 +145,9 @@ class TestOATH(unittest.TestCase):
 
     def test_oath_add_credential(self):
         ykman_cli('oath', 'add', 'abba', 'credential-from-test')
+
+    def test_oath_add_uri_hotp(self):
+        ykman_cli('oath', 'uri', URI_HOTP_EXAMPLE)
 
     def test_oath_reset(self):
         output = ykman_cli('oath', 'reset', '-f')
