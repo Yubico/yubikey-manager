@@ -165,8 +165,11 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 
     controller = ctx.obj['controller']
 
+    if len(name) > 64:
+        ctx.fail('Name can not be longer than 64 bytes.')
+
     if touch and controller.version < (4, 2, 6):
-        ctx.fail("Touch-required credentials not supported on this key.")
+        ctx.fail('Touch-required credentials not supported on this key.')
 
     if counter and not oath_type == 'hotp':
         ctx.fail('Counter only supported for HOTP credentials.')
