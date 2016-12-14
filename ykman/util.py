@@ -118,13 +118,26 @@ def tlv(tag, value=b''):
 
 def parse_tlv(data):
     res = []
+    offs = 2
     while data:
         t = byte2int(data[0])
-        l = byte2int(data[1])  # TODO: Support 2 byte length
-        v = data[2:2+l]
-        res.append(dict(tag=t, length=l, value=v))
-        data = data[2+l:]
+        l = byte2int(data[1])
+        if l > 0x80:
+            n_bytes = l - 0x80
+            l = b2len(data[offs:offs + n_bytes])
+            offs = offs + n_bytes
+        v = data[offs:offs+l]
+        res.append({'tag': t, 'length': l, 'value': v})
+        data = data[offs+l:]
     return res
+
+
+def b2len(bs):
+    l = 0
+    for b in bs:
+        l *= 256
+        l += byte2int(b)
+    return l
 
 
 _HEX = b'0123456789abcdef'
