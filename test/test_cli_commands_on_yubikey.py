@@ -162,6 +162,11 @@ class TestOATH(unittest.TestCase):
         creds = ykman_cli('oath', 'list')
         self.assertIn('john.doe', creds)
 
+    def test_oath_code(self):
+        ykman_cli('oath', 'add', 'abba', 'test-name2')
+        creds = ykman_cli('oath', 'code')
+        self.assertIn('test-name2', creds)
+
     def test_oath_reset(self):
         output = ykman_cli('oath', 'reset', '-f')
         self.assertIn(
