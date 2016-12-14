@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .util import CAPABILITY, TRANSPORT, parse_tlv_list
+from .util import CAPABILITY, TRANSPORT, parse_tlv
 from .driver import AbstractDriver
 from .yubicommon.compat import byte2int
 from binascii import b2a_hex
@@ -105,13 +105,15 @@ class YubiKey(object):
             return
         c_len, data = byte2int(data[0]), data[1:]
         data = data[:c_len]
-        data = parse_tlv_list(data)
-        if YK4_CAPA_TAG in data:
-            self.capabilities = int(b2a_hex(data[YK4_CAPA_TAG]), 16)
-        if YK4_SERIAL_TAG in data:
-            self._serial = int(b2a_hex(data[YK4_SERIAL_TAG]), 16)
-        if YK4_ENABLED_TAG in data:
-            self.enabled = int(b2a_hex(data[YK4_ENABLED_TAG]), 16)
+        for tlv in parse_tlv(data):
+            tag = tlv['tag']
+            value = tlv['value']
+            if YK4_CAPA_TAG == tag:
+                self.capabilities = int(b2a_hex(value), 16)
+            if YK4_SERIAL_TAG == tag:
+                self._serial = int(b2a_hex(value), 16)
+            if YK4_ENABLED_TAG == tag:
+                self.enabled = int(b2a_hex(value), 16)
 
     @property
     def version(self):

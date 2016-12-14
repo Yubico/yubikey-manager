@@ -127,14 +127,6 @@ def parse_tlv(data):
     return res
 
 
-def parse_tlv_list(data):
-    parsed = {}
-    while data:
-        t, l, data = byte2int(data[0]), byte2int(data[1]), data[2:]
-        parsed[t], data = data[:l], data[l:]
-    return parsed
-
-
 _HEX = b'0123456789abcdef'
 _MODHEX = b'cbdefghijklnrtuv'
 _MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
