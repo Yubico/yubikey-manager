@@ -203,7 +203,8 @@ def hmac_shorten_key(key, algo):
     else:
         raise ValueError('Unsupported algorithm!')
     if len(key) > h.block_size:
-        key = h.update(key).digest()
+        h.update(key)
+        key = h.digest()
     return key
 
 
