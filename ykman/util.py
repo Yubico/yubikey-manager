@@ -116,6 +116,17 @@ def tlv(tag, value=b''):
     return data + value
 
 
+def parse_tlv(data):
+    res = []
+    while data:
+        t = byte2int(data[0])
+        l = byte2int(data[1])  # TODO: Support 2 byte length
+        v = data[2:2+l]
+        res.append(dict(tag=t, length=l, value=v))
+        data = data[2+l:]
+    return res
+
+
 def parse_tlv_list(data):
     parsed = {}
     while data:

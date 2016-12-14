@@ -28,10 +28,11 @@
 
 import hashlib
 import struct
+import time
 from enum import IntEnum
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import APDUError, OATH_AID, SW_OK
-from .util import tlv
+from .util import tlv, parse_tlv
 
 
 class TAG(IntEnum):
@@ -40,6 +41,10 @@ class TAG(IntEnum):
     PROPERTY = 0x78
     NAME_LIST = 0x72
     IMF = 0x7a
+    CHALLENGE = 0x74
+    TRUNCATED_RESPONSE = 0x76
+    TOUCH = 0x7c
+    HOTP = 0x77
 
 
 class ALGO(IntEnum):
@@ -62,6 +67,7 @@ class INS(IntEnum):
     RESET = 0x04
     LIST = 0xa1
     SEND_REMAINING = 0xa5
+    CALCULATE_ALL = 0xa4
 
 
 class MASK(IntEnum):
@@ -73,6 +79,15 @@ class SW(IntEnum):
     NO_SPACE = 0x6a84
     COMMAND_ABORTED = 0x6f00
     MORE_DATA = 0x61
+
+
+class Credential(object):
+
+    def __init__(self, name, code=None, cred_type=None, touch=False):
+        self.name = name
+        self.code = code
+        self.cred_type = cred_type
+        self.touch = touch
 
 
 class OathController(object):
@@ -133,11 +148,8 @@ class OathController(object):
         self.send_apdu(0, INS.PUT, 0, 0, data)
 
     def list(self):
-
         resp = self.send_apdu(0, INS.LIST, 0, 0)
-
         while resp:
-            assert byte2int(resp[0]) == TAG.NAME_LIST
             length = byte2int(resp[1]) - 1
             oath_type = (MASK.TYPE & byte2int(resp[2]))
             algo = (MASK.ALGO & byte2int(resp[2]))
@@ -147,6 +159,40 @@ class OathController(object):
                 OATH_TYPE(oath_type).name,
                 ALGO(algo).name)
             resp = resp[3 + length:]
+
+    def calc_all(self):
+        data = tlv(TAG.CHALLENGE, time_challenge())
+        resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
+        return _parse_creds(resp)
+
+
+def _parse_creds(data):
+    tags = parse_tlv(data)
+    while tags:
+        name_tag = tags[0]
+        resp_tag = tags[1]
+        name = name_tag['value'].decode('utf-8')
+        resp_type = resp_tag['tag']
+        digits = resp_tag['value'][0]
+        cred = Credential(name)
+        if resp_type == TAG.TRUNCATED_RESPONSE:
+            code = parse_truncated(resp_tag['value'][1:])
+            cred.code = format_code(code, digits)
+            cred.cred_type = 'totp'
+        elif resp_type == TAG.HOTP:
+            cred.cred_type = 'hotp'
+        elif resp_type == TAG.TOUCH:
+            cred.touch = True
+        yield cred
+        tags = tags[2:]
+
+
+def format_code(code, digits=6):
+    return ('%%0%dd' % digits) % (code % 10 ** digits)
+
+
+def parse_truncated(resp):
+    return struct.unpack('>I', resp)[0] & 0x7fffffff
 
 
 def hmac_shorten_key(key, algo):
@@ -159,3 +205,7 @@ def hmac_shorten_key(key, algo):
     if len(key) > h.block_size:
         key = h.update(key).digest()
     return key
+
+
+def time_challenge(t=None):
+    return struct.pack('>q', int((t or time.time())/30))

@@ -207,4 +207,23 @@ def list(ctx):
         click.echo('{}'.format(cred[0]))
 
 
+@oath.command()
+@click.pass_context
+def code(ctx):
+    """
+    Generate codes
+
+    Generate codes from credentials stored on the device.
+    """
+
+    controller = ctx.obj['controller']
+    for cred in controller.calc_all():
+        if cred.cred_type == 'totp':
+            click.echo('{} {}'.format(cred.name, cred.code))
+        if cred.touch:
+            click.echo('{} {}'.format(cred.name, '[Touch Credential]'))
+        if cred.cred_type == 'hotp':
+            click.echo('{} {}'.format(cred.name, '[HOTP Credential]'))
+
+
 oath.transports = TRANSPORT.CCID
