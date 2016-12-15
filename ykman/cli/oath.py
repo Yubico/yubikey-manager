@@ -39,9 +39,15 @@ try:
 except ImportError:
     from urllib.parse import unquote, urlparse, parse_qs
 
+
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
     help='Require touch on YubiKey to generate code.')
+
+
+click_show_hidden_option = click.option(
+    '-H', '--show-hidden', is_flag=True,
+    help='Include hidden credentials')
 
 
 @click_callback()
@@ -177,7 +183,7 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
     if counter and not oath_type == 'hotp':
         ctx.fail('Counter only supported for HOTP credentials.')
 
-    if not force and any(cred[0] == name for cred in controller.list()):
+    if not force and any(cred.name == name for cred in controller.list()):
         click.confirm(
             'A credential called {} already exists on the device.'
             ' Do you want to overwrite it?'.format(name), abort=True)
@@ -197,8 +203,9 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 
 
 @oath.command()
+@click_show_hidden_option
 @click.pass_context
-def list(ctx):
+def list(ctx, show_hidden):
     """
     List all OATH credentials.
 
@@ -206,13 +213,17 @@ def list(ctx):
     """
     controller = ctx.obj['controller']
 
+    # TODO: Options to list type and algo ?
     for cred in controller.list():
-        click.echo('{}'.format(cred[0]))
+        if cred.hidden and not show_hidden:
+            continue
+        click.echo('{}'.format(cred.name))
 
 
 @oath.command()
+@click_show_hidden_option
 @click.pass_context
-def code(ctx):
+def code(ctx, show_hidden):
     """
     Generate codes
 
@@ -221,6 +232,10 @@ def code(ctx):
 
     controller = ctx.obj['controller']
     for cred in controller.calc_all():
+
+        if cred.hidden and not show_hidden:
+            continue
+
         if cred.cred_type == 'totp':
             click.echo('{} {}'.format(cred.name, cred.code))
         if cred.touch:

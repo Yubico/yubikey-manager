@@ -83,11 +83,13 @@ class SW(IntEnum):
 
 class Credential(object):
 
-    def __init__(self, name, code=None, cred_type=None, touch=False):
+    def __init__(self, name, code=None, cred_type=None, touch=False, algo=None):
         self.name = name
         self.code = code
         self.cred_type = cred_type
         self.touch = touch
+        self.algo = algo
+        self.hidden = name.startswith('_hidden:')
 
 
 class OathController(object):
@@ -152,12 +154,11 @@ class OathController(object):
         while resp:
             length = byte2int(resp[1]) - 1
             oath_type = (MASK.TYPE & byte2int(resp[2]))
+            oath_type = OATH_TYPE(oath_type).name
             algo = (MASK.ALGO & byte2int(resp[2]))
-            name = resp[3:3 + length]
-            yield (
-                name.decode('utf-8'),
-                OATH_TYPE(oath_type).name,
-                ALGO(algo).name)
+            name = resp[3:3 + length].decode('utf-8')
+            cred = Credential(name, cred_type=oath_type, algo=algo)
+            yield cred
             resp = resp[3 + length:]
 
     def calc_all(self):
