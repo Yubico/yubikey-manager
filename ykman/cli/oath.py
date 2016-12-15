@@ -104,15 +104,16 @@ def info(ctx):
     'all stored OATH credentials and restore factory settings?')
 def reset(ctx):
     """
-    Reset all OATH credentials.
+    Reset all OATH data.
 
-    This action will wipe all OATH data.
+    This action will wipe all credentials and reset factory settings for
+    the OATH functionality on the device.
     """
 
     click.echo('Resetting OATH data...')
     ctx.obj['controller'].reset()
     click.echo(
-        'Success! All OATH credentials have been cleared from the device.')
+        'Success! All credentials have been cleared from the device.')
 
 
 @oath.command()
@@ -135,9 +136,9 @@ def reset(ctx):
 @click.pass_context
 def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
     """
-    Add a new OATH credential.
+    Add a new credential.
 
-    This will add a new OATH credential to the device.
+    This will add a new credential to the device.
     """
     _add_cred(
         ctx, key, name, oath_type, digits, touch, algorithm, counter, force)
@@ -150,9 +151,9 @@ def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
 @click.pass_context
 def uri(ctx, uri, touch, force):
     """
-    Add a new OATH credential from URI.
+    Add a new credential from URI.
 
-    Use a URI to add a new OATH credential to the device.
+    Use a URI to add a new credential to the device.
     """
 
     params = uri
@@ -207,9 +208,9 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 @click.pass_context
 def list(ctx, show_hidden):
     """
-    List all OATH credentials.
+    List all credentials.
 
-    List all OATH credentials stored on the device.
+    List all credentials stored on the device.
     """
     controller = ctx.obj['controller']
 
