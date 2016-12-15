@@ -224,19 +224,29 @@ def list(ctx, show_hidden):
 @oath.command()
 @click_show_hidden_option
 @click.pass_context
-def code(ctx, show_hidden):
+@click.argument('query', required=False)
+def code(ctx, show_hidden, query):
     """
-    Generate codes
+    Generate codes.
 
     Generate codes from credentials stored on the device.
     """
 
     controller = ctx.obj['controller']
-    for cred in controller.calc_all():
+    creds = controller.calc_all()
 
-        if cred.hidden and not show_hidden:
-            continue
+    # Remove hidden creds
+    if not show_hidden:
+        creds = [c for c in creds if not c.hidden]
 
+    if query:
+        creds = [c for c in creds if query.lower() in c.name.lower()]
+        if len(creds) == 1:
+            #  TODO: controller.calculate(cred)
+            print('one match!')
+            ctx.exit()
+
+    for cred in creds:
         if cred.cred_type == 'totp':
             click.echo('{} {}'.format(cred.name, cred.code))
         if cred.touch:
