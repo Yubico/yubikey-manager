@@ -178,3 +178,8 @@ class TestOATH(unittest.TestCase):
         ykman_cli('oath', 'add', 'abba', 'Issuer')
         output = ykman_cli('oath', 'list')
         self.assertIn('Issuer:name', output)
+
+    def test_oath_remove(self):
+        ykman_cli('oath', 'add', 'abba', 'remove-me')
+        ykman_cli('oath', 'remove', 'remove-me')
+        self.assertNotIn('remove-me', ykman_cli('oath', 'list'))
