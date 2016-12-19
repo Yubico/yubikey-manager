@@ -248,17 +248,20 @@ def code(ctx, show_hidden, query):
             if query.lower() in c.name.lower():
                 hits.append(c)
         if len(hits) == 1:
-            cred = controller.calculate(hits[0])
-            click.echo(cred)
+            cred = hits[0]
+            if cred.touch:
+                click.echo("Touch your YubiKey...")
+            cred = controller.calculate(cred)
+            click.echo(cred.code)
             ctx.exit()
         creds = hits
 
     for cred in creds:
-        if cred.cred_type == 'totp':
+        if cred.oath_type == 'totp':
             click.echo('{} {}'.format(cred.name, cred.code))
         if cred.touch:
             click.echo('{} {}'.format(cred.name, '[Touch Credential]'))
-        if cred.cred_type == 'hotp':
+        if cred.oath_type == 'hotp':
             click.echo('{} {}'.format(cred.name, '[HOTP Credential]'))
 
 

@@ -84,10 +84,10 @@ class SW(IntEnum):
 
 class Credential(object):
 
-    def __init__(self, name, code=None, cred_type=None, touch=False, algo=None):
+    def __init__(self, name, code=None, oath_type='', touch=False, algo=None):
         self.name = name
         self.code = code
-        self.cred_type = cred_type
+        self.oath_type = oath_type
         self.touch = touch
         self.algo = algo
         self.hidden = name.startswith('_hidden:')
@@ -158,13 +158,13 @@ class OathController(object):
             oath_type = OATH_TYPE(oath_type).name
             algo = (MASK.ALGO & byte2int(resp[2]))
             name = resp[3:3 + length].decode('utf-8')
-            cred = Credential(name, cred_type=oath_type, algo=algo)
+            cred = Credential(name, oath_type=oath_type, algo=algo)
             yield cred
             resp = resp[3 + length:]
 
     def calculate(self, cred):
         challenge = time_challenge() \
-            if cred.cred_type.lower() == 'totp' else b''
+            if cred.oath_type == 'totp' else b''
         data = tlv(TAG.NAME, cred.name.encode('utf-8')) + tlv(
             TAG.CHALLENGE, challenge)
         resp = self.send_apdu(0, INS.CALCULATE, 0, 0x01, data)
@@ -172,8 +172,8 @@ class OathController(object):
         digits = resp[0]
         code = resp[1:]
         code = parse_truncated(code)
-        code = format_code(code, digits)
-        return code
+        cred.code = format_code(code, digits)
+        return cred
 
     def delete(self):
         pass
@@ -196,9 +196,9 @@ def _parse_creds(data):
         if resp_type == TAG.TRUNCATED_RESPONSE:
             code = parse_truncated(resp_tag['value'][1:])
             cred.code = format_code(code, digits)
-            cred.cred_type = 'totp'
+            cred.oath_type = 'totp'
         elif resp_type == TAG.HOTP:
-            cred.cred_type = 'hotp'
+            cred.oath_type = 'hotp'
         elif resp_type == TAG.TOUCH:
             cred.touch = True
         yield cred
