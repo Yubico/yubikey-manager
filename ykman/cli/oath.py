@@ -233,18 +233,25 @@ def code(ctx, show_hidden, query):
     """
 
     controller = ctx.obj['controller']
-    creds = controller.calc_all()
+    creds = controller.calculate_all()
 
     # Remove hidden creds
     if not show_hidden:
         creds = [c for c in creds if not c.hidden]
 
     if query:
-        creds = [c for c in creds if query.lower() in c.name.lower()]
-        if len(creds) == 1:
-            #  TODO: controller.calculate(cred)
-            print('one match!')
+        hits = []
+        for c in creds:
+            if c.name == query:
+                hits = [c]
+                break
+            if query.lower() in c.name.lower():
+                hits.append(c)
+        if len(hits) == 1:
+            cred = controller.calculate(hits[0])
+            click.echo(cred)
             ctx.exit()
+        creds = hits
 
     for cred in creds:
         if cred.cred_type == 'totp':

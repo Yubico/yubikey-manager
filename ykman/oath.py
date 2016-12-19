@@ -68,6 +68,7 @@ class INS(IntEnum):
     LIST = 0xa1
     SEND_REMAINING = 0xa5
     CALCULATE_ALL = 0xa4
+    CALCULATE = 0xa2
 
 
 class MASK(IntEnum):
@@ -161,7 +162,23 @@ class OathController(object):
             yield cred
             resp = resp[3 + length:]
 
-    def calc_all(self):
+    def calculate(self, cred):
+        challenge = time_challenge() \
+            if cred.cred_type.lower() == 'totp' else b''
+        data = tlv(TAG.NAME, cred.name.encode('utf-8')) + tlv(
+            TAG.CHALLENGE, challenge)
+        resp = self.send_apdu(0, INS.CALCULATE, 0, 0x01, data)
+        resp = parse_tlv(resp)[0]['value']
+        digits = resp[0]
+        code = resp[1:]
+        code = parse_truncated(code)
+        code = format_code(code, digits)
+        return code
+
+    def delete(self):
+        pass
+
+    def calculate_all(self):
         data = tlv(TAG.CHALLENGE, time_challenge())
         resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
         return _parse_creds(resp)
