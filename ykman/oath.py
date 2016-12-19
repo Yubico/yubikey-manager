@@ -69,6 +69,7 @@ class INS(IntEnum):
     SEND_REMAINING = 0xa5
     CALCULATE_ALL = 0xa4
     CALCULATE = 0xa2
+    DELETE = 0x02
 
 
 class MASK(IntEnum):
@@ -175,8 +176,9 @@ class OathController(object):
         cred.code = format_code(code, digits)
         return cred
 
-    def delete(self):
-        pass
+    def delete(self, cred):
+        data = tlv(TAG.NAME, cred.name.encode('utf-8'))
+        self.send_apdu(0, INS.DELETE, 0, 0, data)
 
     def calculate_all(self):
         data = tlv(TAG.CHALLENGE, time_challenge())

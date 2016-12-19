@@ -240,13 +240,7 @@ def code(ctx, show_hidden, query):
         creds = [c for c in creds if not c.hidden]
 
     if query:
-        hits = []
-        for c in creds:
-            if c.name == query:
-                hits = [c]
-                break
-            if query.lower() in c.name.lower():
-                hits.append(c)
+        hits = _search(creds, query)
         if len(hits) == 1:
             cred = hits[0]
             if cred.touch:
@@ -263,6 +257,35 @@ def code(ctx, show_hidden, query):
             click.echo('{} {}'.format(cred.name, '[Touch Credential]'))
         if cred.oath_type == 'hotp':
             click.echo('{} {}'.format(cred.name, '[HOTP Credential]'))
+
+
+@oath.command()
+@click.pass_context
+@click.argument('query', required=False)
+def remove(ctx, query):
+    """
+    Remove a credential.
+
+    Removes a credential from the device.
+    """
+
+    controller = ctx.obj['controller']
+    creds = controller.list()
+    hits = _search(creds, query)
+    if len(hits) == 1:
+        controller.delete(hits[0])
+    else:
+        click.echo("2 many matches")
+
+
+def _search(creds, query):
+    hits = []
+    for c in creds:
+        if c.name == query:
+            return [c]
+        if query.lower() in c.name.lower():
+            hits.append(c)
+    return hits
 
 
 oath.transports = TRANSPORT.CCID
