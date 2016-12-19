@@ -170,5 +170,11 @@ class TestOATH(unittest.TestCase):
     def test_oath_reset(self):
         output = ykman_cli('oath', 'reset', '-f')
         self.assertIn(
-            'Success! All OATH credentials have been cleared from the device.',
+            'Success! All credentials have been cleared from the device.',
             output)
+
+    def test_oath_overwrite(self):
+        ykman_cli('oath', 'add', 'abba', 'Issuer:name')
+        ykman_cli('oath', 'add', 'abba', 'Issuer')
+        output = ykman_cli('oath', 'list')
+        self.assertIn('Issuer:name', output)

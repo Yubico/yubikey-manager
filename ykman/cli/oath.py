@@ -189,6 +189,13 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
             'A credential called {} already exists on the device.'
             ' Do you want to overwrite it?'.format(name), abort=True)
 
+    #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
+    if ((4, 0, 0) < controller.version < (4, 3, 5) and
+            any(cred.name.startswith(name) for cred in controller.list())):
+        click.echo(
+            'Choose a name that is not a subset of an existing credential.')
+        ctx.exit()
+
     try:
         controller.put(
             key, name, oath_type=oath_type, digits=int(digits),
