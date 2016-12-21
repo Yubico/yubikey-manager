@@ -77,6 +77,7 @@ class INS(IntEnum):
     CALCULATE = 0xa2
     DELETE = 0x02
     SET_CODE = 0x03
+    VALIDATE = 0xa3
 
 
 class MASK(IntEnum):
@@ -125,8 +126,13 @@ class OathController(object):
 
     def select(self):
         resp = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
-        self._version = tuple(byte2int(x) for x in resp[2:5])
-        self._id = resp[7:7 + resp[6]]
+        tags = parse_tlv(resp)
+        self._version = tuple(byte2int(x) for x in tags[0]['value'])
+        self._id = tags[1]['value']
+        if len(tags) > 2:
+            self._challenge = tags[2]['value']
+        else:
+            self._challenge = None
 
     def reset(self):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
@@ -200,6 +206,17 @@ class OathController(object):
 
     def clear_password(self):
         self.send_apdu(0, INS.SET_CODE, 0, 0, tlv(TAG.KEY, b''))
+
+    def validate(self, password):
+        key = _derive_key(self._id, password)
+        response = hmac.new(key, self._challenge, hashlib.sha1).digest()
+        challenge = os.urandom(8)
+        verification = hmac.new(key, challenge, hashlib.sha1).digest()
+        data = tlv(TAG.RESPONSE, response) + tlv(TAG.CHALLENGE, challenge)
+        resp = self.send_apdu(0, INS.VALIDATE, 0, 0, data)
+        if parse_tlv(resp)[0]['value'] != verification:
+            raise ValueError(
+                'Response from validation does not match verification!')
 
 
 def _derive_key(salt, passphrase):

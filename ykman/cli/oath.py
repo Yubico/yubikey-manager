@@ -47,7 +47,7 @@ click_touch_option = click.option(
 
 click_show_hidden_option = click.option(
     '-H', '--show-hidden', is_flag=True,
-    help='Include hidden credentials')
+    help='Include hidden credentials.')
 
 
 @click_callback()
@@ -72,13 +72,15 @@ def parse_uri(ctx, param, val):
 @click.group()
 @click.pass_context
 @click_skip_on_help
-def oath(ctx):
+@click.option('-p', '--password', help='Provide a password to unlock device.')
+def oath(ctx, password):
     """
     Manage YubiKey OATH credentials.
     """
     try:
         controller = OathController(ctx.obj['dev'].driver)
         ctx.obj['controller'] = controller
+        ctx.obj['password'] = password
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The applet can't be found on the device.")
@@ -140,6 +142,7 @@ def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
 
     This will add a new credential to the device.
     """
+    ensure_validated(ctx)
     _add_cred(
         ctx, key, name, oath_type, digits, touch, algorithm, counter, force)
 
@@ -156,6 +159,7 @@ def uri(ctx, uri, touch, force):
     Use a URI to add a new credential to the device.
     """
 
+    ensure_validated(ctx)
     params = uri
     name = params.get('name')
     key = params.get('secret')
@@ -219,6 +223,7 @@ def list(ctx, show_hidden):
 
     List all credentials stored on the device.
     """
+    ensure_validated(ctx)
     controller = ctx.obj['controller']
 
     # TODO: Options to list type and algo ?
@@ -238,6 +243,8 @@ def code(ctx, show_hidden, query):
 
     Generate codes from credentials stored on the device.
     """
+
+    ensure_validated(ctx)
 
     controller = ctx.obj['controller']
     creds = controller.calculate_all()
@@ -276,6 +283,7 @@ def remove(ctx, query):
     Removes a credential from the device.
     """
 
+    ensure_validated(ctx)
     controller = ctx.obj['controller']
     creds = controller.list()
     hits = _search(creds, query)
@@ -287,6 +295,7 @@ def remove(ctx, query):
 
 def _clear_callback(ctx, param, clear):
     if clear:
+        ensure_validated(ctx)
         ctx.obj['controller'].clear_password()
         ctx.exit()
 
@@ -307,8 +316,24 @@ def password(ctx, new_password):
     to access and use the OATH functionality
     on the device.
     """
-
+    ensure_validated(ctx)
     ctx.obj['controller'].set_password(new_password)
+
+
+def ensure_validated(ctx):
+    controller = ctx.obj['controller']
+    pw_from_option = ctx.obj['password']
+    if controller._challenge:
+        try:
+            if pw_from_option:
+                controller.validate(pw_from_option)
+            else:
+                pw_from_prompt = click.prompt('Password', hide_input=True)
+                controller.validate(pw_from_prompt)
+            controller._challenge = None
+        except:
+            click.echo('Authentication failed.')
+            ctx.exit()
 
 
 def _search(creds, query):
