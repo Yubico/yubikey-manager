@@ -26,10 +26,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import os
 import hashlib
 import struct
 import time
+import hmac
 from enum import IntEnum
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import APDUError, OATH_AID, SW_OK
 from .util import tlv, parse_tlv
@@ -45,6 +50,7 @@ class TAG(IntEnum):
     TRUNCATED_RESPONSE = 0x76
     TOUCH = 0x7c
     HOTP = 0x77
+    RESPONSE = 0x75
 
 
 class ALGO(IntEnum):
@@ -70,6 +76,7 @@ class INS(IntEnum):
     CALCULATE_ALL = 0xa4
     CALCULATE = 0xa2
     DELETE = 0x02
+    SET_CODE = 0x03
 
 
 class MASK(IntEnum):
@@ -99,7 +106,6 @@ class OathController(object):
     def __init__(self, driver):
         self._driver = driver
         self.select()
-        self._version = self._read_version()
 
     @property
     def version(self):
@@ -117,12 +123,10 @@ class OathController(object):
 
         return resp
 
-    def _read_version(self):
-        data = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
-        return tuple(byte2int(x) for x in data[2:5])
-
     def select(self):
-        self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
+        resp = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
+        self._version = tuple(byte2int(x) for x in resp[2:5])
+        self._id = resp[7:7 + resp[6]]
 
     def reset(self):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
@@ -184,6 +188,23 @@ class OathController(object):
         data = tlv(TAG.CHALLENGE, time_challenge())
         resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
         return _parse_creds(resp)
+
+    def set_password(self, password):
+        key = _derive_key(self._id, password)
+        keydata = int2byte(OATH_TYPE.TOTP | ALGO.SHA1) + key
+        challenge = os.urandom(8)
+        response = hmac.new(key, challenge, hashlib.sha1).digest()
+        data = tlv(TAG.KEY, keydata) + tlv(TAG.CHALLENGE, challenge) + tlv(
+            TAG.RESPONSE, response)
+        self.send_apdu(0, INS.SET_CODE, 0, 0, data)
+
+    def clear_password(self):
+        self.send_apdu(0, INS.SET_CODE, 0, 0, tlv(TAG.KEY, b''))
+
+
+def _derive_key(salt, passphrase):
+    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
+    return kdf.derive(passphrase.encode('utf-8'))
 
 
 def _parse_creds(data):

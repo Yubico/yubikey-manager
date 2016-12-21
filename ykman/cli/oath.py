@@ -268,7 +268,7 @@ def code(ctx, show_hidden, query):
 
 @oath.command()
 @click.pass_context
-@click.argument('query', required=False)
+@click.argument('query')
 def remove(ctx, query):
     """
     Remove a credential.
@@ -282,7 +282,33 @@ def remove(ctx, query):
     if len(hits) == 1:
         controller.delete(hits[0])
     else:
-        click.echo("2 many matches")
+        click.echo("To many matches, please specify the query.")
+
+
+def _clear_callback(ctx, param, clear):
+    if clear:
+        ctx.obj['controller'].clear_password()
+        ctx.exit()
+
+
+@oath.command()
+@click.pass_context
+@click.option(
+    '-c', '--clear', is_flag=True, expose_value=False,
+    callback=_clear_callback, is_eager=True, help='Clear the current password.')
+@click.password_option(
+    '-n', '--new-password',
+    help='Set a password to protect the OATH functionality on the device.')
+def password(ctx, new_password):
+    """
+    Password protect the OATH functionality.
+
+    Allows you to set a password required
+    to access and use the OATH functionality
+    on the device.
+    """
+
+    ctx.obj['controller'].set_password(new_password)
 
 
 def _search(creds, query):
