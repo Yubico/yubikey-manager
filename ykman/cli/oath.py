@@ -280,13 +280,16 @@ def code(ctx, show_hidden, query):
             ctx.exit()
         creds = hits
 
+    longest = max(len(cred.name) for cred in creds)
+    format_str = '{:<%d}  {:>10}' % longest
+
     for cred in creds:
         if cred.oath_type == 'totp':
-            click.echo('{} {}'.format(cred.name, cred.code))
+            click.echo(format_str.format(cred.name, cred.code))
         if cred.touch:
-            click.echo('{} {}'.format(cred.name, '[Touch Credential]'))
+            click.echo(format_str.format(cred.name, '[Touch Credential]'))
         if cred.oath_type == 'hotp':
-            click.echo('{} {}'.format(cred.name, '[HOTP Credential]'))
+            click.echo(format_str.format(cred.name, '[HOTP Credential]'))
 
 
 @oath.command()
