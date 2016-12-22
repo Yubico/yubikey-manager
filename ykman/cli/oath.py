@@ -51,6 +51,14 @@ click_show_hidden_option = click.option(
 
 
 @click_callback()
+def _clear_callback(ctx, param, clear):
+    if clear:
+        ensure_validated(ctx)
+        ctx.obj['controller'].clear_password()
+        ctx.exit()
+
+
+@click_callback()
 def parse_uri(ctx, param, val):
     try:
         uri = val.strip()
@@ -65,8 +73,8 @@ def parse_uri(ctx, param, val):
                 and not params['name'].startswith(params['issuer']):
                     params['name'] = params['issuer'] + ':' + params['name']
         return params
-    except Exception:
-        raise ValueError('URI seems to have the wrong format.')
+    except:
+        raise click.BadParameter('URI seems to have the wrong format.')
 
 
 @click.group()
@@ -80,11 +88,13 @@ def oath(ctx, password):
     try:
         controller = OathController(ctx.obj['dev'].driver)
         ctx.obj['controller'] = controller
-        ctx.obj['password'] = password
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The applet can't be found on the device.")
         raise
+
+    if password and controller._challenge:
+        _validate(ctx, password)
 
 
 @oath.command()
@@ -142,7 +152,9 @@ def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
 
     This will add a new credential to the device.
     """
+
     ensure_validated(ctx)
+
     _add_cred(
         ctx, key, name, oath_type, digits, touch, algorithm, counter, force)
 
@@ -160,6 +172,7 @@ def uri(ctx, uri, touch, force):
     """
 
     ensure_validated(ctx)
+
     params = uri
     name = params.get('name')
     key = params.get('secret')
@@ -293,19 +306,12 @@ def remove(ctx, query):
         click.echo("To many matches, please specify the query.")
 
 
-def _clear_callback(ctx, param, clear):
-    if clear:
-        ensure_validated(ctx)
-        ctx.obj['controller'].clear_password()
-        ctx.exit()
-
-
 @oath.command()
 @click.pass_context
 @click.option(
     '-c', '--clear', is_flag=True, expose_value=False,
     callback=_clear_callback, is_eager=True, help='Clear the current password.')
-@click.password_option(
+@click.option(
     '-n', '--new-password',
     help='Set a password to protect the OATH functionality on the device.')
 def password(ctx, new_password):
@@ -317,23 +323,26 @@ def password(ctx, new_password):
     on the device.
     """
     ensure_validated(ctx)
+    if not new_password:
+        new_password = click.prompt(
+            'Enter your new password',
+            hide_input=True,
+            confirmation_prompt=True)
+
     ctx.obj['controller'].set_password(new_password)
 
 
 def ensure_validated(ctx):
-    controller = ctx.obj['controller']
-    pw_from_option = ctx.obj['password']
-    if controller._challenge:
-        try:
-            if pw_from_option:
-                controller.validate(pw_from_option)
-            else:
-                pw_from_prompt = click.prompt('Password', hide_input=True)
-                controller.validate(pw_from_prompt)
-            controller._challenge = None
-        except:
-            click.echo('Authentication failed.')
-            ctx.exit()
+    if ctx.obj['controller']._challenge:
+        password = click.prompt('Enter your current password', hide_input=True)
+        _validate(ctx, password)
+
+
+def _validate(ctx, password):
+    try:
+        ctx.obj['controller'].validate(password)
+    except:
+        ctx.fail('Authentication to the device failed. Wrong password?')
 
 
 def _search(creds, query):

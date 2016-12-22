@@ -217,6 +217,7 @@ class OathController(object):
         if parse_tlv(resp)[0]['value'] != verification:
             raise ValueError(
                 'Response from validation does not match verification!')
+        self._challenge = None
 
 
 def _derive_key(salt, passphrase):
