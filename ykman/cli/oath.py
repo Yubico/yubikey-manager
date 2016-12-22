@@ -233,7 +233,9 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 @oath.command()
 @click_show_hidden_option
 @click.pass_context
-def list(ctx, show_hidden):
+@click.option('-o', '--oath-type', is_flag=True)
+@click.option('-a', '--algorithm', is_flag=True)
+def list(ctx, show_hidden, oath_type, algorithm):
     """
     List all credentials.
 
@@ -242,11 +244,15 @@ def list(ctx, show_hidden):
     ensure_validated(ctx)
     controller = ctx.obj['controller']
 
-    # TODO: Options to list type and algo ?
     for cred in controller.list():
         if cred.hidden and not show_hidden:
             continue
-        click.echo('{}'.format(cred.name))
+        click.echo(cred.name, nl=False)
+        if oath_type:
+            click.echo(', {}'.format(cred.oath_type), nl=False)
+        if algorithm:
+            click.echo(', {}'.format(cred.algo), nl=False)
+        click.echo()
 
 
 @oath.command()
@@ -280,7 +286,7 @@ def code(ctx, show_hidden, query):
             ctx.exit()
         creds = hits
 
-    longest = max(len(cred.name) for cred in creds)
+    longest = max(len(cred.name) for cred in creds) if creds else 0
     format_str = '{:<%d}  {:>10}' % longest
 
     for cred in creds:

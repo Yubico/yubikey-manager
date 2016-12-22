@@ -168,6 +168,7 @@ class OathController(object):
             oath_type = (MASK.TYPE & byte2int(resp[2]))
             oath_type = OATH_TYPE(oath_type).name
             algo = (MASK.ALGO & byte2int(resp[2]))
+            algo = ALGO(algo).name
             name = resp[3:3 + length].decode('utf-8')
             cred = Credential(name, oath_type=oath_type, algo=algo)
             yield cred
