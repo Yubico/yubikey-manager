@@ -206,12 +206,15 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
             'A credential called {} already exists on the device.'
             ' Do you want to overwrite it?'.format(name), abort=True)
 
+    firmware_overwrite_issue = (4, 0, 0) < controller.version < (4, 3, 5)
+    cred_is_subset = any(
+        (cred.name.startswith(name) and cred.name != name)
+        for cred in controller.list())
+
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
-    if ((4, 0, 0) < controller.version < (4, 3, 5) and
-            any(cred.name.startswith(name) for cred in controller.list())):
-        click.echo(
+    if firmware_overwrite_issue and cred_is_subset:
+        ctx.fail(
             'Choose a name that is not a subset of an existing credential.')
-        ctx.exit()
 
     try:
         controller.put(
