@@ -127,9 +127,10 @@ def delete(ctx, slot, force):
     dev = ctx.obj['dev']
     if not force and not dev.driver.slot_status[slot - 1]:
         ctx.fail('Not possible to delete an empty slot.')
-    force or click.confirm('Really delete slot {} or the YubiKey?'.format(slot),
-                           abort=True)
-    click.echo('Deleting slot: {}...'.format(slot))
+    force or click.confirm(
+        'Do you really want to delete'
+        ' the configuration of slot {}?'.format(slot), abort=True)
+    click.echo('Deleting the configuration of slot {}...'.format(slot))
     try:
         dev.driver.zap_slot(slot)
     except YkpersError:
