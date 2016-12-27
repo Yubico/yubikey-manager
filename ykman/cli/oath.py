@@ -243,8 +243,9 @@ def list(ctx, show_hidden, oath_type, algorithm):
     """
     ensure_validated(ctx)
     controller = ctx.obj['controller']
-
-    for cred in controller.list():
+    creds = [c for c in controller.list()]
+    creds.sort()
+    for cred in creds:
         if cred.hidden and not show_hidden:
             continue
         click.echo(cred.name, nl=False)
@@ -288,6 +289,8 @@ def code(ctx, show_hidden, query):
 
     longest = max(len(cred.name) for cred in creds) if creds else 0
     format_str = '{:<%d}  {:>10}' % longest
+
+    creds.sort()
 
     for cred in creds:
         if cred.oath_type == 'totp':

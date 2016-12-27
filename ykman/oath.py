@@ -30,6 +30,7 @@ import os
 import hashlib
 import struct
 import hmac
+from functools import total_ordering
 from enum import IntEnum
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import APDUError, OATH_AID, SW_OK
@@ -89,6 +90,7 @@ class SW(IntEnum):
     MORE_DATA = 0x61
 
 
+@total_ordering
 class Credential(object):
 
     def __init__(self, name, code=None, oath_type='', touch=False, algo=None):
@@ -98,6 +100,9 @@ class Credential(object):
         self.touch = touch
         self.algo = algo
         self.hidden = name.startswith('_hidden:')
+
+    def __lt__(self, other):
+        return self.name.lower() < other.name.lower()
 
 
 class OathController(object):
