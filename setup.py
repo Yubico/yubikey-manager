@@ -29,7 +29,7 @@ import sys
 from ykman.yubicommon.setup import setup
 
 
-install_requires = ['pyscard', 'pyusb', 'click']
+install_requires = ['pyscard', 'pyusb', 'click', 'cryptography']
 if sys.version_info < (3, 4):
     install_requires.append("enum34")
 if sys.platform == "win32":
