@@ -282,7 +282,7 @@ def code(ctx, show_hidden, query):
             if cred.touch:
                 click.echo("Touch your YubiKey...")
             cred = controller.calculate(cred)
-            click.echo(cred.code)
+            click.echo('{} {}'.format(cred.name, cred.code))
             ctx.exit()
         creds = hits
 
