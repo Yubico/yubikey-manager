@@ -93,7 +93,7 @@ def oath(ctx, password):
             ctx.fail("The applet can't be found on the device.")
         raise
 
-    if password and controller._challenge:
+    if password and controller.locked:
         _validate(ctx, password)
 
 
@@ -345,7 +345,7 @@ def password(ctx, new_password):
 
 
 def ensure_validated(ctx):
-    if ctx.obj['controller']._challenge:
+    if ctx.obj['controller'].locked:
         password = click.prompt('Enter your current password', hide_input=True)
         _validate(ctx, password)
 

@@ -112,6 +112,10 @@ class OathController(object):
     def version(self):
         return self._version
 
+    @property
+    def locked(self):
+        return self._challenge
+
     def send_apdu(self, cl, ins, p1, p2, data=b''):
         resp, sw = self._driver.send_apdu(cl, ins, p1, p2, data, check=None)
         while (sw >> 8) == SW.MORE_DATA:
