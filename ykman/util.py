@@ -25,6 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import time
+import struct
+import hashlib
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 from enum import IntEnum
 from binascii import b2a_hex, a2b_hex
 from .yubicommon.compat import int2byte, byte2int, text_type
@@ -154,3 +160,33 @@ def modhex_decode(value):
 
 def modhex_encode(value):
     return b''.join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode('ascii')
+
+
+def derive_key(salt, passphrase):
+    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
+    return kdf.derive(passphrase.encode('utf-8'))
+
+
+def format_code(code, digits=6):
+    return ('%%0%dd' % digits) % (code % 10 ** digits)
+
+
+def parse_truncated(resp):
+    return struct.unpack('>I', resp)[0] & 0x7fffffff
+
+
+def hmac_shorten_key(key, algo):
+    if algo.upper() == 'SHA1':
+        h = hashlib.sha1()
+    elif algo.upper() == 'SHA256':
+        h = hashlib.sha256()
+    else:
+        raise ValueError('Unsupported algorithm!')
+    if len(key) > h.block_size:
+        h.update(key)
+        key = h.digest()
+    return key
+
+
+def time_challenge(t=None):
+    return struct.pack('>q', int((t or time.time())/30))

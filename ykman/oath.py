@@ -29,15 +29,13 @@
 import os
 import hashlib
 import struct
-import time
 import hmac
 from enum import IntEnum
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.backends import default_backend
 from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import APDUError, OATH_AID, SW_OK
-from .util import tlv, parse_tlv
+from .util import (
+    tlv, parse_tlv, time_challenge, derive_key,
+    format_code, parse_truncated, hmac_shorten_key)
 
 
 class TAG(IntEnum):
@@ -147,7 +145,7 @@ class OathController(object):
         oath_type = OATH_TYPE[oath_type.upper()].value
         algo = ALGO[algo].value
 
-        key = hmac_shorten_key(key, algo)
+        key = hmac_shorten_key(key, ALGO(algo).name)
         key = int2byte(oath_type | algo) + int2byte(digits) + key
 
         data = tlv(TAG.NAME, name.encode('utf8')) + tlv(TAG.KEY, key)
@@ -198,10 +196,27 @@ class OathController(object):
     def calculate_all(self):
         data = tlv(TAG.CHALLENGE, time_challenge())
         resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
-        return _parse_creds(resp)
+        tags = parse_tlv(resp)
+        while tags:
+            name_tag = tags[0]
+            resp_tag = tags[1]
+            name = name_tag['value'].decode('utf-8')
+            resp_type = resp_tag['tag']
+            digits = resp_tag['value'][0]
+            cred = Credential(name)
+            if resp_type == TAG.TRUNCATED_RESPONSE:
+                code = parse_truncated(resp_tag['value'][1:])
+                cred.code = format_code(code, digits)
+                cred.oath_type = 'totp'
+            elif resp_type == TAG.HOTP:
+                cred.oath_type = 'hotp'
+            elif resp_type == TAG.TOUCH:
+                cred.touch = True
+            yield cred
+            tags = tags[2:]
 
     def set_password(self, password):
-        key = _derive_key(self._id, password)
+        key = derive_key(self._id, password)
         keydata = int2byte(OATH_TYPE.TOTP | ALGO.SHA1) + key
         challenge = os.urandom(8)
         response = hmac.new(key, challenge, hashlib.sha1).digest()
@@ -213,7 +228,7 @@ class OathController(object):
         self.send_apdu(0, INS.SET_CODE, 0, 0, tlv(TAG.KEY, b''))
 
     def validate(self, password):
-        key = _derive_key(self._id, password)
+        key = derive_key(self._id, password)
         response = hmac.new(key, self._challenge, hashlib.sha1).digest()
         challenge = os.urandom(8)
         verification = hmac.new(key, challenge, hashlib.sha1).digest()
@@ -223,54 +238,3 @@ class OathController(object):
             raise ValueError(
                 'Response from validation does not match verification!')
         self._challenge = None
-
-
-def _derive_key(salt, passphrase):
-    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
-    return kdf.derive(passphrase.encode('utf-8'))
-
-
-def _parse_creds(data):
-    tags = parse_tlv(data)
-    while tags:
-        name_tag = tags[0]
-        resp_tag = tags[1]
-        name = name_tag['value'].decode('utf-8')
-        resp_type = resp_tag['tag']
-        digits = resp_tag['value'][0]
-        cred = Credential(name)
-        if resp_type == TAG.TRUNCATED_RESPONSE:
-            code = parse_truncated(resp_tag['value'][1:])
-            cred.code = format_code(code, digits)
-            cred.oath_type = 'totp'
-        elif resp_type == TAG.HOTP:
-            cred.oath_type = 'hotp'
-        elif resp_type == TAG.TOUCH:
-            cred.touch = True
-        yield cred
-        tags = tags[2:]
-
-
-def format_code(code, digits=6):
-    return ('%%0%dd' % digits) % (code % 10 ** digits)
-
-
-def parse_truncated(resp):
-    return struct.unpack('>I', resp)[0] & 0x7fffffff
-
-
-def hmac_shorten_key(key, algo):
-    if algo == ALGO.SHA1:
-        h = hashlib.sha1()
-    elif algo == ALGO.SHA256:
-        h = hashlib.sha256()
-    else:
-        raise ValueError('Unsupported algorithm!')
-    if len(key) > h.block_size:
-        h.update(key)
-        key = h.digest()
-    return key
-
-
-def time_challenge(t=None):
-    return struct.pack('>q', int((t or time.time())/30))
