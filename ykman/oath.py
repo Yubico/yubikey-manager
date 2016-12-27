@@ -42,15 +42,15 @@ from .util import tlv, parse_tlv
 
 class TAG(IntEnum):
     NAME = 0x71
-    KEY = 0x73
-    PROPERTY = 0x78
     NAME_LIST = 0x72
-    IMF = 0x7a
+    KEY = 0x73
     CHALLENGE = 0x74
-    TRUNCATED_RESPONSE = 0x76
-    TOUCH = 0x7c
-    HOTP = 0x77
     RESPONSE = 0x75
+    TRUNCATED_RESPONSE = 0x76
+    HOTP = 0x77
+    PROPERTY = 0x78
+    IMF = 0x7a
+    TOUCH = 0x7c
 
 
 class ALGO(IntEnum):
@@ -68,21 +68,21 @@ class PROPERTIES(IntEnum):
 
 
 class INS(IntEnum):
-    SELECT = 0xa4
     PUT = 0x01
-    RESET = 0x04
-    LIST = 0xa1
-    SEND_REMAINING = 0xa5
-    CALCULATE_ALL = 0xa4
-    CALCULATE = 0xa2
     DELETE = 0x02
     SET_CODE = 0x03
+    RESET = 0x04
+    LIST = 0xa1
+    CALCULATE = 0xa2
     VALIDATE = 0xa3
+    SELECT = 0xa4
+    CALCULATE_ALL = 0xa4
+    SEND_REMAINING = 0xa5
 
 
 class MASK(IntEnum):
-    TYPE = 0xf0
     ALGO = 0x0f
+    TYPE = 0xf0
 
 
 class SW(IntEnum):
