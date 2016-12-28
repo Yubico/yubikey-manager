@@ -100,6 +100,7 @@ class Credential(object):
         self.touch = touch
         self.algo = algo
         self.hidden = name.startswith('_hidden:')
+        self.steam = name.startswith('Steam:')
 
     def __lt__(self, other):
         return self.name.lower() < other.name.lower()
@@ -191,7 +192,7 @@ class OathController(object):
         digits = resp[0]
         code = resp[1:]
         code = parse_truncated(code)
-        cred.code = format_code(code, digits)
+        cred.code = format_code(code, digits, steam=cred.steam)
         return cred
 
     def delete(self, cred):
@@ -210,9 +211,12 @@ class OathController(object):
             digits = resp_tag['value'][0]
             cred = Credential(name)
             if resp_type == TAG.TRUNCATED_RESPONSE:
-                code = parse_truncated(resp_tag['value'][1:])
-                cred.code = format_code(code, digits)
                 cred.oath_type = 'totp'
+                if cred.steam:
+                    cred = self.calculate(cred)
+                else:
+                    code = parse_truncated(resp_tag['value'][1:])
+                    cred.code = format_code(code, digits)
             elif resp_type == TAG.HOTP:
                 cred.oath_type = 'hotp'
             elif resp_type == TAG.TOUCH:

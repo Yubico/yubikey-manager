@@ -182,6 +182,11 @@ def uri(ctx, uri, touch, force):
     algo = params.get('algorithm') or 'SHA1'
     counter = params.get('counter') or 0
 
+    # Steam is a special case where we allow the otpauth
+    # URI to contain a 'digits' value of '5'.
+    if digits == 5 and name.startswith('Steam:'):
+        digits = 6
+
     _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force)
 
 

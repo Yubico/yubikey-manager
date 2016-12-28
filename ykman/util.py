@@ -167,8 +167,16 @@ def derive_key(salt, passphrase):
     return kdf.derive(passphrase.encode('utf-8'))
 
 
-def format_code(code, digits=6):
-    return ('%%0%dd' % digits) % (code % 10 ** digits)
+def format_code(code, digits=6, steam=False):
+    STEAM_CHAR_TABLE = "23456789BCDFGHJKMNPQRTVWXY"
+    if steam:
+        chars = []
+        for i in range(5):
+            chars.append(STEAM_CHAR_TABLE[code % len(STEAM_CHAR_TABLE)])
+            code //= len(STEAM_CHAR_TABLE)
+        return ''.join(chars)
+    else:
+        return ('%%0%dd' % digits) % (code % 10 ** digits)
 
 
 def parse_truncated(resp):
