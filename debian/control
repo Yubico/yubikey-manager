@@ -15,7 +15,8 @@ Depends: ${python:Depends},
          python-click,
          python-setuptools,
          libykpers-1-1,
-         libu2f-host0
+         libu2f-host0,
+         pcscd
 Description: Python library and command line tool for configuring a YubiKey
  YubiKey Manager (ykman) is a python library and command line tool for
  configuring a YubiKey.
