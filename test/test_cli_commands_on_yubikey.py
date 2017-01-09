@@ -4,7 +4,6 @@ import unittest
 import time
 import traceback
 from ykman.util import TRANSPORT
-from ykman.descriptor import get_descriptors
 
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
@@ -15,14 +14,17 @@ URI_TOTP_EXAMPLE = (
         'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
         '&algorithm=SHA1&digits=6&period=30')
 
+_one_yubikey = False
 if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
     try:
         import click
         from click.testing import CliRunner
+        from ykman.descriptor import get_descriptors
         from ykman.cli.__main__ import cli
         click.confirm(
             "Run integration tests? This will erase data on the YubiKey,"
             " make sure it is a key used for development.", abort=True)
+        _one_yubikey = len(list(get_descriptors())) == 1
     except Exception:
         sys.exit()
     _skip = False
@@ -40,11 +42,9 @@ def ykman_cli(*argv):
     return result.output
 
 
-def _one_yubikey():
-    return len(list(get_descriptors())) == 1
-
-
 def _has_mode(mode):
+    if not _one_yubikey:
+        return False
     yubikeys = list(get_descriptors())
     if len(yubikeys) is not 1:
         return False
@@ -52,7 +52,7 @@ def _has_mode(mode):
 
 
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 class TestYkmanInfo(unittest.TestCase):
 
     def test_ykman_info(self):
@@ -64,7 +64,7 @@ class TestYkmanInfo(unittest.TestCase):
 
 
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
 class TestSlotStatus(unittest.TestCase):
 
@@ -81,7 +81,7 @@ class TestSlotStatus(unittest.TestCase):
 
 
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
 class TestSlotProgramming(unittest.TestCase):
 
@@ -129,7 +129,7 @@ class TestSlotProgramming(unittest.TestCase):
 
 
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
     "CCID needs to be enabled for this test.")
@@ -147,7 +147,7 @@ class TestOpenPGP(unittest.TestCase):
 
 
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey(), "A single YubiKey need to be connected.")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
     "CCID needs to be enabled for this test.")
