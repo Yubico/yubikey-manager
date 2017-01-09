@@ -88,6 +88,7 @@ class SW(IntEnum):
     NO_SPACE = 0x6a84
     COMMAND_ABORTED = 0x6f00
     MORE_DATA = 0x61
+    INVALID_INSTRUCTION = 0x6d00
 
 
 @total_ordering
@@ -119,6 +120,10 @@ class OathController(object):
     @property
     def locked(self):
         return self._challenge
+
+    @property
+    def _426device(self):
+        return (4, 2, 0) <= self.version <= (4, 2, 6)
 
     def send_apdu(self, cl, ins, p1, p2, data=b''):
         resp, sw = self._driver.send_apdu(cl, ins, p1, p2, data, check=None)
@@ -183,6 +188,15 @@ class OathController(object):
             resp = resp[3 + length:]
 
     def calculate(self, cred):
+
+        # The 4.2.0-4.2.6 firmwares have a known issue with credentials that
+        # require touch: If this action is performed within 2 seconds of a
+        # command resulting in a long response (over 54 bytes),
+        # the command will hang. A workaround is to send an invalid command
+        # (resulting in a short reply) prior to the "calculate" command.
+        if self._426device and cred.touch:
+            self._send_invalid_apdu()
+
         challenge = time_challenge() \
             if cred.oath_type == 'totp' else b''
         data = tlv(TAG.NAME, cred.name.encode('utf-8')) + tlv(
@@ -247,3 +261,6 @@ class OathController(object):
             raise ValueError(
                 'Response from validation does not match verification!')
         self._challenge = None
+
+    def _send_invalid_apdu(self):
+        self._driver.send_apdu(0, 0, 0, 0, '', check=SW.INVALID_INSTRUCTION)
