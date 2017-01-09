@@ -55,6 +55,7 @@ def _clear_callback(ctx, param, clear):
     if clear:
         ensure_validated(ctx)
         ctx.obj['controller'].clear_password()
+        click.echo('Password cleared.')
         ctx.exit()
 
 
@@ -133,7 +134,7 @@ def reset(ctx):
 @click.argument('name')
 @click.option(
     '-o', '--oath-type', type=click.Choice(['totp', 'hotp']), default='totp',
-    help='Specify whether this is a time or counter-based OATH credential.')
+    help='Time-based (TOTP) or counter-based (HOTP) credential.')
 @click.option(
     '-d', '--digits', type=click.Choice(['6', '8']), default='6',
     help='Number of digits in generated code.')
@@ -269,7 +270,9 @@ def code(ctx, show_hidden, query):
     """
     Generate codes.
 
-    Generate codes from credentials stored on the device.
+    Generate codes from credentials stored on the device. \
+Provide a query string to match one or more specific credentials. \
+Touch and HOTP credentials require a single match to be triggered.
     """
 
     ensure_validated(ctx)
@@ -313,7 +316,8 @@ def remove(ctx, query):
     """
     Remove a credential.
 
-    Removes a credential from the device.
+    Remove a credential from the device. \
+Provide a query string to match the credential to remove.
     """
 
     ensure_validated(ctx)
@@ -322,6 +326,7 @@ def remove(ctx, query):
     hits = _search(creds, query)
     if len(hits) == 1:
         controller.delete(hits[0])
+        click.echo('Removed {}.'.format(hits[0].name))
     else:
         click.echo("To many matches, please specify the query.")
 
@@ -333,12 +338,12 @@ def remove(ctx, query):
     callback=_clear_callback, is_eager=True, help='Clear the current password.')
 @click.option(
     '-n', '--new-password',
-    help='Set a password to protect the OATH functionality on the device.')
+    help='Provide a new password as an argument.')
 def password(ctx, new_password):
     """
     Password protect the OATH functionality.
 
-    Allows you to set a password required
+    Allows you to require and set a password
     to access and use the OATH functionality
     on the device.
     """
@@ -350,6 +355,7 @@ def password(ctx, new_password):
             confirmation_prompt=True)
 
     ctx.obj['controller'].set_password(new_password)
+    click.echo('New password have been set.')
 
 
 def ensure_validated(ctx):
