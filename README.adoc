@@ -20,6 +20,7 @@ Options:
 Commands:
   info     Show general information.
   mode     Manage connection modes.
+  oath     Manage YubiKey OATH credentials.
   openpgp  Manage YubiKey OpenPGP functions.
   slot     Manage YubiKey Slots.
 ....
