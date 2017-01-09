@@ -107,7 +107,7 @@ def info(ctx):
     controller = ctx.obj['controller']
     version = controller.version
     click.echo(
-        "OATH version: {}.{}.{}".format(version[0], version[1], version[2]))
+        'OATH version: {}.{}.{}'.format(version[0], version[1], version[2]))
 
 
 @oath.command()
@@ -289,7 +289,7 @@ Touch and HOTP credentials require a single match to be triggered.
         if len(hits) == 1:
             cred = hits[0]
             if cred.touch:
-                click.echo("Touch your YubiKey...")
+                click.echo('Touch your YubiKey...')
             cred = controller.calculate(cred)
             click.echo('{} {}'.format(cred.name, cred.code))
             ctx.exit()
@@ -328,7 +328,7 @@ Provide a query string to match the credential to remove.
         controller.delete(hits[0])
         click.echo('Removed {}.'.format(hits[0].name))
     else:
-        click.echo("To many matches, please specify the query.")
+        click.echo('To many matches, please specify the query.')
 
 
 @oath.command()
