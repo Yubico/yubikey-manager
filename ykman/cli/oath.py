@@ -238,8 +238,8 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 @oath.command()
 @click_show_hidden_option
 @click.pass_context
-@click.option('-o', '--oath-type', is_flag=True)
-@click.option('-a', '--algorithm', is_flag=True)
+@click.option('-o', '--oath-type', is_flag=True, help='Display the OATH type.')
+@click.option('-a', '--algorithm', is_flag=True, help='Display the algorithm.')
 def list(ctx, show_hidden, oath_type, algorithm):
     """
     List all credentials.
