@@ -17,7 +17,7 @@ before_install:
   - pip install --disable-pip-version-check --upgrade pip
 
 install:
-  - sudo apt-get install devscripts python-setuptools debhelper python-all python3-all python3-setuptools python-usb python3-usb python-pyscard python3-pyscard
+  - sudo apt-get install devscripts python-setuptools debhelper python-all python3-all python3-setuptools python-usb python-pyscard
   - pip install pre-commit
 
 script:
