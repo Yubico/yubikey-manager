@@ -1,6 +1,3 @@
 #!/usr/bin/make -f
-
-export PYBUILD_NAME = yubikey-manager
-
 %:
-	dh $@ --with python2,python3 --buildsystem=pybuild
+	dh $@ --with python2 --buildsystem=python_distutils

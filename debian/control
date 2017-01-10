@@ -4,24 +4,16 @@ Uploaders: Dag Heyman <dag@yubico.com>,
            Dain Nilsson <dain@yubico.com>
 Section: utils
 Priority: optional
-Standards-Version: 3.9.7
-Build-Depends: debhelper (>= 9),
-               python-all,
-               python3-all,
-               python-setuptools,
-               python3-setuptools,
-               python-usb,
-               python3-usb,
-               python-pyscard,
-               python3-pyscard
+Standards-Version: 3.9.5
+Build-Depends: debhelper (>= 9), python, python-setuptools
 Homepage: https://developers.yubico.com/yubikey-manager/
 
 Package: yubikey-manager
 Architecture: all
-Depends: ${python3:Depends},
+Depends: ${python:Depends}, 
          ${misc:Depends},
-         python3-click,
-         python3-setuptools,
+         python-click,
+         python-setuptools,
          libykpers-1-1,
          libu2f-host0,
          pcscd
