@@ -25,6 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import os
 import time
 import struct
 import hashlib
@@ -150,6 +151,7 @@ _HEX = b'0123456789abcdef'
 _MODHEX = b'cbdefghijklnrtuv'
 _MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
 _HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i:i+1]) for i in range(16))
+_PW_CHARS = _MODHEX + _MODHEX.upper()
 
 
 def modhex_decode(value):
@@ -160,6 +162,13 @@ def modhex_decode(value):
 
 def modhex_encode(value):
     return b''.join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode('ascii')
+
+
+def generate_static_pw(length):
+    data = os.urandom(length)
+    return b''.join(
+        int2byte(
+            byte2int(_PW_CHARS[byte2int(d) % len(_PW_CHARS)])) for d in data)
 
 
 def derive_key(salt, passphrase):

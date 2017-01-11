@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, parse_key, click_skip_on_help)
-from ..util import TRANSPORT, modhex_decode, modhex_encode
+from ..util import TRANSPORT, generate_static_pw, modhex_decode, modhex_encode
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
 import os
@@ -178,15 +178,40 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
 
 @slot.command()
 @click_slot_argument
-@click.argument('password')
+@click.argument('password', required=False)
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting the password.')
 @click_force_option
 @click.pass_context
 def static(ctx, slot, password, no_enter, force):
     """
-    Program a static password.
+    Program a static password. If no password is provided, \
+a random one may be generated.
     """
+
+    if not password:
+        if not force:
+            password = click.prompt(
+                'Enter a static password [blank to randomly generate]',
+                default='',
+                show_default=False)
+
+    if not password or password == '':
+        chars = 38
+        if not force:
+            while True:
+                chars = click.prompt(
+                    'Enter number of characters in generated password',
+                    type=int,
+                    default=38)
+                if chars > 38:
+                    click.echo(
+                        'Password too long (maximum length is 38 characters)')
+                else:
+                    break
+
+        password = generate_static_pw(chars)
+
     dev = ctx.obj['dev']
     force or click.confirm('Program a static password in slot {}?'.format(slot),
                            abort=True)
