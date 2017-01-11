@@ -29,7 +29,7 @@ from __future__ import absolute_import
 import click
 from .util import (
     click_force_option, click_skip_on_help,
-    click_callback, parse_key, parse_b32_key)
+    click_callback, click_parse_key, parse_key, parse_b32_key)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT
 from ..oath import OathController, SW
@@ -130,8 +130,8 @@ def reset(ctx):
 
 
 @oath.command()
-@click.argument('key', callback=parse_key)
 @click.argument('name')
+@click.argument('key', callback=click_parse_key, required=False)
 @click.option(
     '-o', '--oath-type', type=click.Choice(['TOTP', 'HOTP']), default='TOTP',
     help='Time-based (TOTP) or counter-based'
@@ -155,6 +155,16 @@ def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
 
     This will add a new credential to the device.
     """
+
+    if not key:
+        while True:
+            key = click.prompt('Enter a secret key (base32)')
+            try:
+                key = parse_key(key)
+                break
+            except Exception as e:
+                click.echo(e)
+                pass
 
     ensure_validated(ctx)
 

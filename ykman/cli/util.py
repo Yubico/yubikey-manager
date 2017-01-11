@@ -63,7 +63,11 @@ def click_skip_on_help(f):
 
 
 @click_callback()
-def parse_key(ctx, param, val):
+def click_parse_key(ctx, param, val):
+    return parse_key(val)
+
+
+def parse_key(val):
     val = val.upper()
     if re.match(r'^([0-9A-F]{2})+$', val):  # hex
         return a2b_hex(val)
