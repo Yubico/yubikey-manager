@@ -203,7 +203,7 @@ def uri(ctx, uri, touch, force):
     params = uri
     name = params.get('name')
     key = params.get('secret')
-    key = parse_b32_key(key)
+    key = parse_b32_key(key.upper())
     oath_type = params.get('type')
     digits = params.get('digits') or 6
     algo = params.get('algorithm') or 'SHA1'
