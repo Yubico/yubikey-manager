@@ -206,7 +206,7 @@ class OathController(object):
         digits = resp[0]
         code = resp[1:]
         code = parse_truncated(code)
-        cred.code = format_code(code, digits, steam=cred.steam)
+        cred.code = format_code(code, byte2int(digits), steam=cred.steam)
         return cred
 
     def delete(self, cred):
@@ -230,7 +230,7 @@ class OathController(object):
                     cred = self.calculate(cred)
                 else:
                     code = parse_truncated(resp_tag['value'][1:])
-                    cred.code = format_code(code, digits)
+                    cred.code = format_code(code, byte2int(digits))
             elif resp_type == TAG.HOTP:
                 cred.oath_type = 'hotp'
             elif resp_type == TAG.TOUCH:

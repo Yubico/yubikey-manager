@@ -158,7 +158,7 @@ class TestOATH(unittest.TestCase):
         self.assertIn('OATH version:', output)
 
     def test_oath_add_credential(self):
-        ykman_cli('oath', 'add', 'abba', 'test-name')
+        ykman_cli('oath', 'add', 'test-name', 'abba')
         creds = ykman_cli('oath', 'list')
         self.assertIn('test-name', creds)
 
@@ -173,7 +173,7 @@ class TestOATH(unittest.TestCase):
         self.assertIn('john.doe', creds)
 
     def test_oath_code(self):
-        ykman_cli('oath', 'add', 'abba', 'test-name2')
+        ykman_cli('oath', 'add', 'test-name2', 'abba')
         creds = ykman_cli('oath', 'code')
         self.assertIn('test-name2', creds)
 
@@ -184,12 +184,12 @@ class TestOATH(unittest.TestCase):
             output)
 
     def test_oath_overwrite(self):
-        ykman_cli('oath', 'add', 'abba', 'Issuer:name')
-        ykman_cli('oath', 'add', 'abba', 'Issuer')
+        ykman_cli('oath', 'add', 'Issuer:name', 'abba')
+        ykman_cli('oath', 'add', 'Issuer', 'abba')
         output = ykman_cli('oath', 'list')
         self.assertIn('Issuer:name', output)
 
     def test_oath_remove(self):
-        ykman_cli('oath', 'add', 'abba', 'remove-me')
+        ykman_cli('oath', 'add', 'remove-me', 'abba')
         ykman_cli('oath', 'remove', 'remove-me')
         self.assertNotIn('remove-me', ykman_cli('oath', 'list'))
