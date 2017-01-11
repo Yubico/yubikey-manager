@@ -60,7 +60,11 @@ def _clear_callback(ctx, param, clear):
 
 
 @click_callback()
-def parse_uri(ctx, param, val):
+def click_parse_uri(ctx, param, val):
+    return parse_uri(val)
+
+
+def parse_uri(val):
     try:
         uri = val.strip()
         parsed = urlparse(uri)
@@ -173,7 +177,7 @@ def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
 
 
 @oath.command()
-@click.argument('uri', callback=parse_uri)
+@click.argument('uri', callback=click_parse_uri, required=False)
 @click_touch_option
 @click_force_option
 @click.pass_context
@@ -183,6 +187,16 @@ def uri(ctx, uri, touch, force):
 
     Use a URI to add a new credential to the device.
     """
+
+    if not uri:
+        while True:
+            uri = click.prompt('Enter an OATH URI')
+            try:
+                uri = parse_uri(uri)
+                break
+            except Exception as e:
+                click.echo(e)
+                pass
 
     ensure_validated(ctx)
 
