@@ -26,8 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import six
 from .driver_ccid import OPGP_AID, APDUError, SW_OK
-from ykman.yubicommon.compat import byte2int, int2byte
 from enum import IntEnum
 from binascii import b2a_hex
 
@@ -58,6 +58,7 @@ class INS(IntEnum):  # noqa: N801
 PW1 = 0x81
 PW3 = 0x83
 INVALID_PIN = b'\0'*8
+TOUCH_METHOD_BUTTON = 0x20
 
 
 class OpgpController(object):
@@ -83,7 +84,7 @@ class OpgpController(object):
 
     def _get_pin_tries(self):
         data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
-        return tuple(byte2int(x) for x in data[4:7])
+        return tuple(six.iterbytes(data[4:7]))
 
     def _block_pins(self):
         pw1_tries, _, pw3_tries = self._get_pin_tries()
@@ -113,14 +114,14 @@ class OpgpController(object):
         if self.version < (4, 2, 0):
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
         data = self.send_apdu(0, INS.GET_DATA, 0, key_slot)
-        return TOUCH_MODE(byte2int(data[0]))
+        return TOUCH_MODE(six.indexbytes(data, 0))
 
     def set_touch(self, key_slot, mode, pin):
         if self.version < (4, 2, 0):
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
         self._verify(PW3, pin)
-        self.send_apdu(
-            0, INS.PUT_DATA, 0, key_slot, int2byte(mode) + b'\x20')
+        self.send_apdu(0, INS.PUT_DATA, 0, key_slot,
+                       bytes(bytearray([mode, TOUCH_METHOD_BUTTON])))
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, pin):
         if self.version < (1, 0, 7):  # For YubiKey NEO
@@ -130,8 +131,5 @@ class OpgpController(object):
             raise ValueError('Setting PIN retry counters requires version '
                              '4.3.1 or later.')
         self._verify(PW3, pin)
-        self.send_apdu(
-            0, INS.SET_PIN_RETRIES, 0, 0,
-            int2byte(pw1_tries) +
-            int2byte(pw2_tries) +
-            int2byte(pw3_tries))
+        self.send_apdu(0, INS.SET_PIN_RETRIES, 0, 0,
+                       bytes(bytearray([pw1_tries, pw2_tries, pw3_tries])))

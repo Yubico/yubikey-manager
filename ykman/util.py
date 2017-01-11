@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import six
 import time
 import struct
 import hashlib
@@ -34,7 +35,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from enum import IntEnum
 from binascii import b2a_hex, a2b_hex
-from .yubicommon.compat import int2byte, byte2int, text_type
 
 
 class BitflagEnum(IntEnum):
@@ -112,23 +112,23 @@ class Mode(object):
 
 
 def tlv(tag, value=b''):
-    data = int2byte(tag)
+    data = bytearray([tag])
     length = len(value)
     if length < 0x80:
-        data += int2byte(length)
+        data += bytearray([length])
     elif length < 0xff:
-        data += b'\x81' + int2byte(length)
+        data += bytearray([0x81, length])
     else:
-        data += b'\x82' + int2byte(length >> 8) + int2byte(length & 0xff)
-    return data + value
+        data += bytearray([0x82, length >> 8, length & 0xff])
+    return bytes(data) + value
 
 
 def parse_tlv(data):
     res = []
     offs = 2
     while data:
-        t = byte2int(data[0])
-        l = byte2int(data[1])
+        t = six.indexbytes(data, 0)
+        l = six.indexbytes(data, 1)
         if l > 0x80:
             n_bytes = l - 0x80
             l = b2len(data[offs:offs + n_bytes])
@@ -141,9 +141,9 @@ def parse_tlv(data):
 
 def b2len(bs):
     l = 0
-    for b in bs:
+    for b in six.iterbytes(bs):
         l *= 256
-        l += byte2int(b)
+        l += b
     return l
 
 
@@ -155,7 +155,7 @@ _PW_CHARS = _MODHEX + _MODHEX.upper()
 
 
 def modhex_decode(value):
-    if isinstance(value, text_type):
+    if isinstance(value, six.text_type):
         value = value.encode('ascii')
     return a2b_hex(b''.join(_MODHEX_TO_HEX[c] for c in value))
 
@@ -166,9 +166,8 @@ def modhex_encode(value):
 
 def generate_static_pw(length):
     data = os.urandom(length)
-    return b''.join(
-        int2byte(
-            byte2int(_PW_CHARS[byte2int(d) % len(_PW_CHARS)])) for d in data)
+    return bytes(bytearray(six.indexbytes(_PW_CHARS, d % len(_PW_CHARS))
+                           for d in six.iterbytes(data)))
 
 
 def derive_key(salt, passphrase):

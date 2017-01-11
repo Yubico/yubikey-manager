@@ -29,13 +29,13 @@
 import struct
 import subprocess
 import time
+import six
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError
 from .util import CAPABILITY, TRANSPORT
-from .yubicommon.compat import byte2int, int2byte
 
 SW_OK = 0x9000
 SW_APPLICATION_NOT_FOUND = 0x6a82
@@ -118,13 +118,13 @@ class CCIDDriver(AbstractDriver):
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
         header = [cl, ins, p1, p2, len(data)]
-        body = [byte2int(c) for c in data]
+        body = list(six.iterbytes(data))
         try:
             resp, sw1, sw2 = self._conn.transmit(header + body)
         except CardConnectionException as e:
             raise CCIDError(e)
         sw = sw1 << 8 | sw2
-        resp = b''.join([int2byte(c) for c in resp])
+        resp = bytes(bytearray(resp))
         if check is None:
             return resp, sw
         elif check == sw:
@@ -144,9 +144,9 @@ class CCIDDriver(AbstractDriver):
 
     def _set_mode_otp(self, mode_data):
         resp = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
-        pgm_seq_old = byte2int(resp[3])
+        pgm_seq_old = six.indexbytes(resp, 3)
         resp = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, mode_data)
-        pgm_seq_new = byte2int(resp[3])
+        pgm_seq_new = six.indexbytes(resp, 3)
         if not _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
             raise ModeSwitchError()
 

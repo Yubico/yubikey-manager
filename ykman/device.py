@@ -26,9 +26,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import six
 from .util import CAPABILITY, TRANSPORT, parse_tlv
 from .driver import AbstractDriver
-from .yubicommon.compat import byte2int
 from binascii import b2a_hex
 
 
@@ -103,7 +103,7 @@ class YubiKey(object):
     def _parse_capabilities(self, data):
         if not data:
             return
-        c_len, data = byte2int(data[0]), data[1:]
+        c_len, data = six.indexbytes(data, 0), data[1:]
         data = data[:c_len]
         for tlv in parse_tlv(data):
             tag = tlv['tag']

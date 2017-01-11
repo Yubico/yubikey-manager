@@ -30,9 +30,9 @@ import os
 import hashlib
 import struct
 import hmac
+import six
 from functools import total_ordering
 from enum import IntEnum
-from ykman.yubicommon.compat import byte2int, int2byte
 from .driver_ccid import APDUError, OATH_AID, SW_OK
 from .util import (
     tlv, parse_tlv, time_challenge, derive_key,
@@ -140,7 +140,7 @@ class OathController(object):
     def select(self):
         resp = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
         tags = parse_tlv(resp)
-        self._version = tuple(byte2int(x) for x in tags[0]['value'])
+        self._version = tuple(six.iterbytes(tags[0]['value']))
         self._id = tags[1]['value']
         if len(tags) > 2:
             self._challenge = tags[2]['value']
@@ -157,7 +157,7 @@ class OathController(object):
         algo = ALGO[algo].value
 
         key = hmac_shorten_key(key, ALGO(algo).name)
-        key = int2byte(oath_type | algo) + int2byte(digits) + key
+        key = bytearray([oath_type | algo, digits]) + key
 
         data = tlv(TAG.NAME, name.encode('utf8')) + tlv(TAG.KEY, key)
 
@@ -167,20 +167,20 @@ class OathController(object):
             properties |= PROPERTIES.REQUIRE_TOUCH
 
         if properties:
-            data += int2byte(TAG.PROPERTY) + int2byte(properties)
+            data += bytearray([TAG.PROPERTY, properties])
 
         if counter > 0:
             data += tlv(TAG.IMF, struct.pack('>I', counter))
 
-        self.send_apdu(0, INS.PUT, 0, 0, data)
+        self.send_apdu(0, INS.PUT, 0, 0, bytes(data))
 
     def list(self):
         resp = self.send_apdu(0, INS.LIST, 0, 0)
         while resp:
-            length = byte2int(resp[1]) - 1
-            oath_type = (MASK.TYPE & byte2int(resp[2]))
+            length = six.indexbytes(resp, 1) - 1
+            oath_type = MASK.TYPE & six.indexbytes(resp, 2)
             oath_type = OATH_TYPE(oath_type).name
-            algo = (MASK.ALGO & byte2int(resp[2]))
+            algo = MASK.ALGO & six.indexbytes(resp, 2)
             algo = ALGO(algo).name
             name = resp[3:3 + length].decode('utf-8')
             cred = Credential(name, oath_type=oath_type, algo=algo)
@@ -240,7 +240,7 @@ class OathController(object):
 
     def set_password(self, password):
         key = derive_key(self._id, password)
-        keydata = int2byte(OATH_TYPE.TOTP | ALGO.SHA1) + key
+        keydata = bytearray([OATH_TYPE.TOTP | ALGO.SHA1]) + key
         challenge = os.urandom(8)
         response = hmac.new(key, challenge, hashlib.sha1).digest()
         data = tlv(TAG.KEY, keydata) + tlv(TAG.CHALLENGE, challenge) + tlv(

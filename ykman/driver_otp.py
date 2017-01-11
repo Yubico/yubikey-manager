@@ -26,12 +26,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import six
 from .native.ykpers import ykpers
 from ctypes import byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
 from .util import TRANSPORT
 from .scanmap import us
-from .yubicommon.compat import byte2int, int2byte, text_type
 
 from hashlib import sha1
 
@@ -80,9 +80,9 @@ def slot_to_cmd(slot, update=False):
 
 
 def get_scan_codes(ascii):
-    if isinstance(ascii, text_type):
+    if isinstance(ascii, six.text_type):
         ascii = ascii.encode('ascii')
-    return b''.join(int2byte(us.scancodes[byte2int(c)]) for c in ascii)
+    bytes(bytearray(us.scancodes[c] for c in six.iterbytes(ascii)))
 
 
 class OTPDriver(AbstractDriver):
