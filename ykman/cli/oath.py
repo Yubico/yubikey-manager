@@ -133,14 +133,16 @@ def reset(ctx):
 @click.argument('key', callback=parse_key)
 @click.argument('name')
 @click.option(
-    '-o', '--oath-type', type=click.Choice(['totp', 'hotp']), default='totp',
-    help='Time-based (TOTP) or counter-based (HOTP) credential.')
+    '-o', '--oath-type', type=click.Choice(['TOTP', 'HOTP']), default='TOTP',
+    help='Time-based (TOTP) or counter-based'
+    ' (HOTP) credential (default is TOTP).')
 @click.option(
     '-d', '--digits', type=click.Choice(['6', '8']), default='6',
-    help='Number of digits in generated code.')
+    help='Number of digits in generated code (default is 6).')
 @click.option(
     '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256']),
-    default='SHA1', help='Algorithm to use for code generation.')
+    default='SHA1', help='Algorithm to use for '
+    'code generation (default is SHA1).')
 @click.option(
     '-c', '--counter', type=click.INT, default=0,
     help='Initial counter value for HOTP credentials.')
