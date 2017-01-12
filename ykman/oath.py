@@ -203,10 +203,10 @@ class OathController(object):
             TAG.CHALLENGE, challenge)
         resp = self.send_apdu(0, INS.CALCULATE, 0, 0x01, data)
         resp = parse_tlv(resp)[0]['value']
-        digits = resp[0]
+        digits = six.indexbytes(resp, 0)
         code = resp[1:]
         code = parse_truncated(code)
-        cred.code = format_code(code, byte2int(digits), steam=cred.steam)
+        cred.code = format_code(code, digits, steam=cred.steam)
         return cred
 
     def delete(self, cred):
@@ -222,7 +222,7 @@ class OathController(object):
             resp_tag = tags[1]
             name = name_tag['value'].decode('utf-8')
             resp_type = resp_tag['tag']
-            digits = resp_tag['value'][0]
+            digits = six.indexbytes(resp_tag['value'], 0)
             cred = Credential(name)
             if resp_type == TAG.TRUNCATED_RESPONSE:
                 cred.oath_type = 'totp'
@@ -230,7 +230,7 @@ class OathController(object):
                     cred = self.calculate(cred)
                 else:
                     code = parse_truncated(resp_tag['value'][1:])
-                    cred.code = format_code(code, byte2int(digits))
+                    cred.code = format_code(code, digits)
             elif resp_type == TAG.HOTP:
                 cred.oath_type = 'hotp'
             elif resp_type == TAG.TOUCH:
