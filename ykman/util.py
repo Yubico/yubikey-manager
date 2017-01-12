@@ -206,4 +206,6 @@ def hmac_shorten_key(key, algo):
 
 
 def time_challenge(t=None):
-    return struct.pack('>q', int((t or time.time())/30))
+    if t is None:
+        t = time.time()
+    return struct.pack('>q', int(t // 30))
