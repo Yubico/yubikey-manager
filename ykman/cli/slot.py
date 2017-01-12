@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from .util import (
-    click_force_option, click_callback, parse_key, click_skip_on_help)
+    click_force_option, click_callback, click_parse_key, click_skip_on_help)
 from ..util import TRANSPORT, generate_static_pw, modhex_decode, modhex_encode
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
@@ -224,8 +224,9 @@ a random one may be generated.
 
 @slot.command()
 @click_slot_argument
-@click.option('-k', '--key', metavar='HEX', callback=parse_key, required=False,
-              help='HMAC-SHA1 secret key.')
+@click.option(
+    '-k', '--key', metavar='HEX', callback=click_parse_key, required=False,
+    help='HMAC-SHA1 secret key.')
 @click.option('--require-touch', is_flag=True, help='Require physical button '
               'press to generate response.')
 @click_force_option
@@ -253,7 +254,7 @@ def chalresp(ctx, slot, key, require_touch, force):
 
 @slot.command()
 @click_slot_argument
-@click.argument('key', callback=parse_key)
+@click.argument('key', callback=click_parse_key)
 @click.option('--digits', type=click.Choice(['6', '8']), default='6',
               callback=lambda c, p, v: int(v),
               help='Number of digits to output for HOTP codes.')
