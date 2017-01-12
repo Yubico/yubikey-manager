@@ -119,7 +119,7 @@ class TestSlotProgramming(unittest.TestCase):
     def test_delete_slot_2(self):
         ykman_cli('slot', 'otp', '2', '-f')
         output = ykman_cli('slot', 'delete', '2', '-f')
-        self.assertIn('Deleting slot', output)
+        self.assertIn('Deleting the configuration', output)
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: empty', status)
 
