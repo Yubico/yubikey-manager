@@ -82,7 +82,7 @@ def slot_to_cmd(slot, update=False):
 def get_scan_codes(ascii):
     if isinstance(ascii, six.text_type):
         ascii = ascii.encode('ascii')
-    bytes(bytearray(us.scancodes[c] for c in six.iterbytes(ascii)))
+    return bytes(bytearray(us.scancodes[c] for c in six.iterbytes(ascii)))
 
 
 class OTPDriver(AbstractDriver):
