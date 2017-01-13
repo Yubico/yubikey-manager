@@ -47,19 +47,6 @@ def parse_hex(length):
     return inner
 
 
-@click_callback(invoke_on_missing=True)
-def parse_public_id(ctx, param, value):
-    if value is None:
-        dev = ctx.obj['dev']
-        if dev.serial is None:
-            ctx.fail('Serial number not set, public-id must be provided')
-        value = b'\xff\x00' + struct.pack(b'>I', dev.serial)
-        click.echo('Using serial as public ID: {}'.format(modhex_encode(value)))
-    else:
-        value = modhex_decode(value)
-    return value
-
-
 click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
                                      callback=lambda c, p, v: int(v))
 
@@ -139,7 +126,7 @@ def delete(ctx, slot, force):
 
 @slot.command()
 @click_slot_argument
-@click.option('-P', '--public-id', required=False, callback=parse_public_id,
+@click.option('-P', '--public-id', required=False,
               help='Static part of the OTP, defaults to the devices serial '
               'number converted to modhex.', metavar='MODHEX')
 @click.option('-p', '--private-id', required=False, metavar='HEX',
@@ -155,19 +142,50 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
     """
     Program a Yubico OTP credential.
 
-    If --public-id is not given, the devices serial number will be used.
-    If --private-id is not given, a randomly generated one will be used.
-    If --key is not given, a randomly generated key will be used.
     """
+
     dev = ctx.obj['dev']
+
+    if not public_id:
+        if not force:
+            public_id = click.prompt(
+                'Enter public ID [blank to use device serial]',
+                default='',
+                show_default=False)
+        if force or public_id == '':
+            if dev.serial is None:
+                ctx.fail('Serial number not set, public-id must be provided')
+            public_id = b'\xff\x00' + struct.pack(b'>I', dev.serial)
+            click.echo(
+                'Using device serial as public ID: {}'.format(
+                    modhex_encode(public_id)))
+
+    else:
+        public_id = modhex_decode(public_id)
+
     if not private_id:
-        private_id = os.urandom(6)
-        click.echo('Using a randomly generated private ID: {}'.format(
-            b2a_hex(private_id).decode('ascii')))
+        if not force:
+            private_id = click.prompt(
+                'Enter private ID [blank to randomly generate]',
+                default='',
+                show_default=False)
+        if force or private_id == '':
+            private_id = os.urandom(6)
+            click.echo(
+                'Using a randomly generated private ID: {}'.format(
+                    b2a_hex(private_id).decode('ascii')))
+
     if not key:
-        key = os.urandom(16)
-        click.echo('Using a randomly generated secret key: {}'.format(
-            b2a_hex(key).decode('ascii')))
+        if not force:
+            key = click.prompt(
+                'Enter secret key [blank to randomly generate]',
+                default='', show_default=False)
+        if force or key == '':
+            key = os.urandom(16)
+            click.echo(
+                'Using a randomly generated secret key: {}'.format(
+                    b2a_hex(key).decode('ascii')))
+
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True)
     try:
@@ -196,7 +214,7 @@ a random one may be generated.
                 default='',
                 show_default=False)
 
-    if not password or password == '':
+    if force or password == '':
         chars = 38
         if not force:
             while True:
