@@ -373,7 +373,7 @@ def password(ctx, new_password):
     to access and use the OATH functionality
     on the device.
     """
-    ensure_validated(ctx)
+    ensure_validated(ctx, prompt='Enter your current password')
     if not new_password:
         new_password = click.prompt(
             'Enter your new password',
@@ -384,9 +384,9 @@ def password(ctx, new_password):
     click.echo('New password set.')
 
 
-def ensure_validated(ctx):
+def ensure_validated(ctx, prompt='Enter your password'):
     if ctx.obj['controller'].locked:
-        password = click.prompt('Enter your current password', hide_input=True)
+        password = click.prompt(prompt, hide_input=True)
         _validate(ctx, password)
 
 
