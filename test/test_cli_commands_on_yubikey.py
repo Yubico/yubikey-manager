@@ -108,7 +108,7 @@ class TestSlotProgramming(unittest.TestCase):
         output = ykman_cli(
             'slot', 'static', '2',
             'higngdukgerjktbbikrhirngtlkkttkb', '-f')
-        self.assertIn('Setting static password in slot 2...', output)
+        self.assertIn('Static password set', output)
         self._check_slot_2_programmed()
 
     def test_update_settings_enter_slot_2(self):

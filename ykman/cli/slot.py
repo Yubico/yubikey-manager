@@ -211,13 +211,17 @@ a random one may be generated.
                     break
 
         password = generate_static_pw(chars)
+        force or click.echo(
+            'Generated password: {}'.format(password.decode('utf-8')))
+
+    force or click.confirm(
+            'Program static password in slot {}?'.format(slot), abort=True)
 
     dev = ctx.obj['dev']
-    force or click.confirm('Program a static password in slot {}?'.format(slot),
-                           abort=True)
-    click.echo('Setting static password in slot {}...'.format(slot))
+
     try:
         dev.driver.program_static(slot, password, not no_enter)
+        click.echo('Static password set for slot {}.'.format(slot))
     except YkpersError:
         _failed_to_write_msg(ctx)
 
