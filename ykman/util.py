@@ -111,31 +111,75 @@ class Mode(object):
         return cls(cls._modes[code])
 
 
-def tlv(tag, value=b''):
-    data = bytearray([tag])
-    length = len(value)
-    if length < 0x80:
-        data += bytearray([length])
-    elif length < 0xff:
-        data += bytearray([0x81, length])
-    else:
-        data += bytearray([0x82, length >> 8, length & 0xff])
-    return bytes(data) + value
+class Tlv(bytes):
 
+    @property
+    def tag(self):
+        return six.indexbytes(self, 0)
 
-def parse_tlv(data):
-    res = []
-    offs = 2
-    while data:
-        t = six.indexbytes(data, 0)
-        l = six.indexbytes(data, 1)
+    @property
+    def length(self):
+        l = six.indexbytes(self, 1)
+        offs = 2
         if l > 0x80:
             n_bytes = l - 0x80
-            l = b2len(data[offs:offs + n_bytes])
-            offs = offs + n_bytes
-        v = data[offs:offs+l]
-        res.append({'tag': t, 'length': l, 'value': v})
-        data = data[offs+l:]
+            l = b2len(self[offs:offs + n_bytes])
+        return l
+
+    @property
+    def value(self):
+        l = self.length
+        if l == 0:
+            return b''
+        return bytes(self[-l:])
+
+    def __repr__(self):
+        return u'{}(tag={:02x}, value={})'.format(
+            self.__class__.__name__,
+            self.tag,
+            b2a_hex(self.value).decode('ascii')
+        )
+
+    def __new__(cls, *args):
+        if len(args) == 1:
+            data = args[0]
+            if isinstance(data, int):  # Called with tag only, blank value
+                tag = data
+                value = b''
+            else:  # Called with binary TLV data
+                tag = six.indexbytes(data, 0)
+                l = six.indexbytes(data, 1)
+                offs = 2
+                if l > 0x80:
+                    n_bytes = l - 0x80
+                    l = b2len(data[offs:offs + n_bytes])
+                    offs = offs + n_bytes
+                value = data[offs:offs+l]
+        elif len(args) == 2:  # Called with tag and value.
+            (tag, value) = args
+        else:
+            raise TypeError('{}() takes at most 2 arguments ({} given)'.format(
+                cls, len(args)))
+
+        data = bytearray([tag])
+        length = len(value)
+        if length < 0x80:
+            data.append(length)
+        elif length < 0xff:
+            data.extend([0x81, length])
+        else:
+            data.extend([0x82, length >> 8, length & 0xff])
+        data += value
+
+        return super(Tlv, cls).__new__(cls, bytes(data))
+
+
+def parse_tlvs(data):
+    res = []
+    while data:
+        tlv = Tlv(data)
+        data = data[len(tlv):]
+        res.append(tlv)
     return res
 
 

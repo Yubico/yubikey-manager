@@ -2,7 +2,7 @@
 
 from ykman.util import (b2len, derive_key, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
-                        parse_tlv, parse_truncated, time_challenge, tlv)
+                        parse_tlvs, parse_truncated, time_challenge, Tlv)
 import unittest
 
 
@@ -75,19 +75,21 @@ class TestUtilityFunctions(unittest.TestCase):
                           b'\x0e\x8f\x22\x17\x9b\x58\xcd\x56')
         )
 
-    def test_parse_tlv(self):
-        data = parse_tlv(b'\xa0\x02\xd0\x0d\xa1\x00\xa2\x04\xfe\xed\xfa\xce')
-        self.assertEqual(0xa0, data[0]['tag'])
-        self.assertEqual(2, data[0]['length'])
-        self.assertEqual(b'\xd0\x0d', data[0]['value'])
+    def test_parse_tlvs(self):
+        tlvs = parse_tlvs(b'\x00\x02\xd0\x0d\xa1\x00\xff\x04\xfe\xed\xfa\xce')
+        self.assertEqual(3, len(tlvs))
 
-        self.assertEqual(0xa1, data[1]['tag'])
-        self.assertEqual(0, data[1]['length'])
-        self.assertEqual(b'', data[1]['value'])
+        self.assertEqual(0, tlvs[0].tag)
+        self.assertEqual(2, tlvs[0].length)
+        self.assertEqual(b'\xd0\x0d', tlvs[0].value)
 
-        self.assertEqual(0xa2, data[2]['tag'])
-        self.assertEqual(4, data[2]['length'])
-        self.assertEqual(b'\xfe\xed\xfa\xce', data[2]['value'])
+        self.assertEqual(0xa1, tlvs[1].tag)
+        self.assertEqual(0, tlvs[1].length)
+        self.assertEqual(b'', tlvs[1].value)
+
+        self.assertEqual(0xff, tlvs[2].tag)
+        self.assertEqual(4, tlvs[2].length)
+        self.assertEqual(b'\xfe\xed\xfa\xce', tlvs[2].value)
 
     def test_parse_truncated(self):
         self.assertEqual(0x01020304, parse_truncated(b'\1\2\3\4'))
@@ -102,6 +104,15 @@ class TestUtilityFunctions(unittest.TestCase):
                          time_challenge(1484223461.2644958))
 
     def test_tlv(self):
-        self.assertEqual(b'\0\5hello', tlv(0x00, b'hello'))
-        self.assertEqual(b'\xff\0', tlv(0xff, b''))
-        self.assertEqual(b'\x12\x82\x01\x90' + b'hi'*200, tlv(0x12, b'hi'*200))
+        self.assertEqual(Tlv(b'\xff\6foobar'), Tlv(0xff, b'foobar'))
+
+        tlv1 = Tlv(b'\0\5hello')
+        tlv2 = Tlv(0xff, b'')
+        tlv3 = Tlv(0x12, b'hi'*200)
+
+        self.assertEqual(b'\0\5hello', tlv1)
+        self.assertEqual(b'\xff\0', tlv2)
+        self.assertEqual(b'\x12\x82\x01\x90' + b'hi'*200, tlv3)
+
+        self.assertEqual(b'\0\5hello\xff\0\x12\x82\x01\x90' + b'hi'*200,
+                         tlv1 + tlv2 + tlv3)

@@ -35,7 +35,7 @@ from functools import total_ordering
 from enum import IntEnum
 from .driver_ccid import APDUError, OATH_AID, SW_OK
 from .util import (
-    tlv, parse_tlv, time_challenge, derive_key,
+    Tlv, parse_tlvs, time_challenge, derive_key,
     format_code, parse_truncated, hmac_shorten_key)
 
 
@@ -48,7 +48,9 @@ class TAG(IntEnum):
     TRUNCATED_RESPONSE = 0x76
     HOTP = 0x77
     PROPERTY = 0x78
+    VERSION = 0x79
     IMF = 0x7a
+    ALGORITHM = 0x7b
     TOUCH = 0x7c
 
 
@@ -139,13 +141,10 @@ class OathController(object):
 
     def select(self):
         resp = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
-        tags = parse_tlv(resp)
-        self._version = tuple(six.iterbytes(tags[0]['value']))
-        self._id = tags[1]['value']
-        if len(tags) > 2:
-            self._challenge = tags[2]['value']
-        else:
-            self._challenge = None
+        tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
+        self._version = tuple(six.iterbytes(tags[TAG.VERSION]))
+        self._id = tags[TAG.NAME]
+        self._challenge = tags.get(TAG.CHALLENGE)
 
     def reset(self):
         self.send_apdu(0, INS.RESET, 0xde, 0xad)
@@ -156,10 +155,11 @@ class OathController(object):
         oath_type = OATH_TYPE[oath_type.upper()].value
         algo = ALGO[algo].value
 
+        data = bytearray(Tlv(TAG.NAME, name.encode('utf8')))
+
         key = hmac_shorten_key(key, ALGO(algo).name)
         key = bytearray([oath_type | algo, digits]) + key
-
-        data = tlv(TAG.NAME, name.encode('utf8')) + tlv(TAG.KEY, key)
+        data += Tlv(TAG.KEY, key)
 
         properties = 0
 
@@ -167,10 +167,10 @@ class OathController(object):
             properties |= PROPERTIES.REQUIRE_TOUCH
 
         if properties:
-            data += bytearray([TAG.PROPERTY, properties])
+            data.extend([TAG.PROPERTY, properties])
 
         if counter > 0:
-            data += tlv(TAG.IMF, struct.pack('>I', counter))
+            data += Tlv(TAG.IMF, struct.pack('>I', counter))
 
         self.send_apdu(0, INS.PUT, 0, 0, bytes(data))
 
@@ -199,10 +199,10 @@ class OathController(object):
 
         challenge = time_challenge() \
             if cred.oath_type == 'totp' else b''
-        data = tlv(TAG.NAME, cred.name.encode('utf-8')) + tlv(
-            TAG.CHALLENGE, challenge)
+        data = Tlv(TAG.NAME, cred.name.encode('utf-8')) + \
+            Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(0, INS.CALCULATE, 0, 0x01, data)
-        resp = parse_tlv(resp)[0]['value']
+        resp = parse_tlvs(resp)[0].value
         digits = six.indexbytes(resp, 0)
         code = resp[1:]
         code = parse_truncated(code)
@@ -210,54 +210,51 @@ class OathController(object):
         return cred
 
     def delete(self, cred):
-        data = tlv(TAG.NAME, cred.name.encode('utf-8'))
+        data = Tlv(TAG.NAME, cred.name.encode('utf-8'))
         self.send_apdu(0, INS.DELETE, 0, 0, data)
 
     def calculate_all(self):
-        data = tlv(TAG.CHALLENGE, time_challenge())
+        data = Tlv(TAG.CHALLENGE, time_challenge())
         resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
-        tags = parse_tlv(resp)
-        while tags:
-            name_tag = tags[0]
-            resp_tag = tags[1]
-            name = name_tag['value'].decode('utf-8')
-            resp_type = resp_tag['tag']
-            digits = six.indexbytes(resp_tag['value'], 0)
+        tlvs = parse_tlvs(resp)
+        while tlvs:
+            name = tlvs.pop(0).value.decode('utf-8')
+            resp = tlvs.pop(0)
+            digits = six.indexbytes(resp.value, 0)
             cred = Credential(name)
-            if resp_type == TAG.TRUNCATED_RESPONSE:
+            if resp.tag == TAG.TRUNCATED_RESPONSE:
                 cred.oath_type = 'totp'
                 if cred.steam:
                     cred = self.calculate(cred)
                 else:
-                    code = parse_truncated(resp_tag['value'][1:])
+                    code = parse_truncated(resp.value[1:])
                     cred.code = format_code(code, digits)
-            elif resp_type == TAG.HOTP:
+            elif resp.tag == TAG.HOTP:
                 cred.oath_type = 'hotp'
-            elif resp_type == TAG.TOUCH:
+            elif resp.tag == TAG.TOUCH:
                 cred.touch = True
             yield cred
-            tags = tags[2:]
 
     def set_password(self, password):
         key = derive_key(self._id, password)
         keydata = bytearray([OATH_TYPE.TOTP | ALGO.SHA1]) + key
         challenge = os.urandom(8)
         response = hmac.new(key, challenge, hashlib.sha1).digest()
-        data = tlv(TAG.KEY, keydata) + tlv(TAG.CHALLENGE, challenge) + tlv(
+        data = Tlv(TAG.KEY, keydata) + Tlv(TAG.CHALLENGE, challenge) + Tlv(
             TAG.RESPONSE, response)
         self.send_apdu(0, INS.SET_CODE, 0, 0, data)
 
     def clear_password(self):
-        self.send_apdu(0, INS.SET_CODE, 0, 0, tlv(TAG.KEY, b''))
+        self.send_apdu(0, INS.SET_CODE, 0, 0, Tlv(TAG.KEY, b''))
 
     def validate(self, password):
         key = derive_key(self._id, password)
         response = hmac.new(key, self._challenge, hashlib.sha1).digest()
         challenge = os.urandom(8)
         verification = hmac.new(key, challenge, hashlib.sha1).digest()
-        data = tlv(TAG.RESPONSE, response) + tlv(TAG.CHALLENGE, challenge)
+        data = Tlv(TAG.RESPONSE, response) + Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(0, INS.VALIDATE, 0, 0, data)
-        if parse_tlv(resp)[0]['value'] != verification:
+        if parse_tlvs(resp)[0].value != verification:
             raise ValueError(
                 'Response from validation does not match verification!')
         self._challenge = None

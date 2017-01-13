@@ -27,7 +27,7 @@
 
 
 import six
-from .util import CAPABILITY, TRANSPORT, parse_tlv
+from .util import CAPABILITY, TRANSPORT, parse_tlvs
 from .driver import AbstractDriver
 from binascii import b2a_hex
 
@@ -105,15 +105,13 @@ class YubiKey(object):
             return
         c_len, data = six.indexbytes(data, 0), data[1:]
         data = data[:c_len]
-        for tlv in parse_tlv(data):
-            tag = tlv['tag']
-            value = tlv['value']
-            if YK4_CAPA_TAG == tag:
-                self.capabilities = int(b2a_hex(value), 16)
-            if YK4_SERIAL_TAG == tag:
-                self._serial = int(b2a_hex(value), 16)
-            if YK4_ENABLED_TAG == tag:
-                self.enabled = int(b2a_hex(value), 16)
+        for tlv in parse_tlvs(data):
+            if YK4_CAPA_TAG == tlv.tag:
+                self.capabilities = int(b2a_hex(tlv.value), 16)
+            elif YK4_SERIAL_TAG == tlv.tag:
+                self._serial = int(b2a_hex(tlv.value), 16)
+            elif YK4_ENABLED_TAG == tlv.tag:
+                self.enabled = int(b2a_hex(tlv.value), 16)
 
     @property
     def version(self):
