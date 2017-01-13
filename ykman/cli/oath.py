@@ -381,7 +381,7 @@ def password(ctx, new_password):
             confirmation_prompt=True)
 
     ctx.obj['controller'].set_password(new_password)
-    click.echo('New password have been set.')
+    click.echo('New password set.')
 
 
 def ensure_validated(ctx):
