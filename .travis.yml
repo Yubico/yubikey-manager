@@ -24,20 +24,22 @@ script:
   - pre-commit run --all-files
   - pip install -e .
 
-after_success:
-  - debuild -us -uc
-  - mkdir deploy
-  - mv ../*.deb deploy/yubikey-manager-$TRAVIS_BRANCH-HEAD.deb
-
-deploy:
-  provider: s3
-  access_key_id: "$AWS_KEY_ID"
-  secret_access_key: "$AWS_SECRET_KEY"
-  bucket: "$AWS_BUCKET"
-  skip_cleanup: true
-  acl: public-read
-  region: eu-west-1
-  local-dir: "deploy/"
-  upload-dir: "yubikey-manager"
-  on:
-    all_branches: true
+# TODO: Re-enable with a Xenial Docker Image
+#
+# after_success:
+#  - debuild -us -uc
+#  - mkdir deploy
+#  - mv ../*.deb deploy/yubikey-manager-$TRAVIS_BRANCH-HEAD.deb
+#
+# deploy:
+#  provider: s3
+#  access_key_id: "$AWS_KEY_ID"
+#  secret_access_key: "$AWS_SECRET_KEY"
+#  bucket: "$AWS_BUCKET"
+#  skip_cleanup: true
+#  acl: public-read
+#  region: eu-west-1
+#  local-dir: "deploy/"
+#  upload-dir: "yubikey-manager"
+#  on:
+#    all_branches: true
