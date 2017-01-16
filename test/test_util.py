@@ -41,7 +41,9 @@ class TestUtilityFunctions(unittest.TestCase):
     def test_generate_static_pw(self):
         for l in range(0, 38):
             self.assertRegex(generate_static_pw(l),
-                             b'^[cbdefghijklnrtuvCBDEFGHIJKLNRTUV]{%d}$' % l)
+                             b'^[cbdefghijklnrtuvCBDEFGHIJKLNRTUV]{' +
+                             '{:d}'.format(l).encode('ascii') +
+                             b'}$')
 
     def test_hmac_shorten_key(self):
         self.assertEqual(b'short', hmac_shorten_key(b'short', 'sha1'))
