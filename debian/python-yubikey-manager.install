@@ -1,0 +1,6 @@
+debian/tmp/usr/lib/python2*/*-packages/ykman/*.py
+debian/tmp/usr/lib/python2*/*-packages/ykman/scanmap/*.py
+debian/tmp/usr/lib/python2*/*-packages/ykman/native/*.py
+debian/tmp/usr/lib/python2*/*-packages/ykman/yubicommon/*.py
+debian/tmp/usr/lib/python2*/*-packages/ykman/yubicommon/*/*.py
+debian/tmp/usr/lib/python2*/*-packages/*.egg-info
