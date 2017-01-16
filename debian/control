@@ -17,6 +17,7 @@ Build-Depends: debhelper (>= 9),
                python-enum34,
                python-cryptography,
                python3-cryptography,
+               python-click,
                python3-click,
 Homepage: https://developers.yubico.com/yubikey-manager/
 
@@ -36,7 +37,7 @@ Description: Python library for configuring a YubiKey
 Package: python3-yubikey-manager
 Architecture: all
 Section: python
-XB-Python-Version: >= 3.2
+XB-Python-Version: >= 3.4
 Depends: ${python3:Depends},
          ${misc:Depends},
          python3-setuptools,
@@ -48,14 +49,11 @@ Description: Python 3 library for configuring a YubiKey
 
 Package: yubikey-manager
 Architecture: all
-XB-Python-Version: >= 3.2
+XB-Python-Version: >= 3.4
 Depends: ${python3:Depends}, 
          ${misc:Depends},
          python3-yubikey-manager,
          python3-click,
-         python3-setuptools,
-         libykpers-1-1,
-         libu2f-host0,
          pcscd
 Description: Python library and command line tool for configuring a YubiKey
  YubiKey Manager (ykman) is a python library and command line tool for
