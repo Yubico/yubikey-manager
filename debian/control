@@ -15,6 +15,7 @@ Build-Depends: debhelper (>= 9),
                python-pyscard,
                python3-pyscard,
                python-enum34,
+               python3-enum34,
                python-cryptography,
                python3-cryptography,
                python-click,
@@ -37,10 +38,11 @@ Description: Python library for configuring a YubiKey
 Package: python3-yubikey-manager
 Architecture: all
 Section: python
-XB-Python-Version: >= 3.4
+XB-Python-Version: >= 3.3
 Depends: ${python3:Depends},
          ${misc:Depends},
          python3-setuptools,
+         python3-enum34,
          libykpers-1-1,
          libu2f-host0
 Recommends: pcscd
@@ -49,9 +51,10 @@ Description: Python 3 library for configuring a YubiKey
 
 Package: yubikey-manager
 Architecture: all
-XB-Python-Version: >= 3.4
+XB-Python-Version: >= 3.3
 Depends: ${python3:Depends}, 
          ${misc:Depends},
+         python3-enum34,
          python3-yubikey-manager,
          python3-click,
          pcscd
