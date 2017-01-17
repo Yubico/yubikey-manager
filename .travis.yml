@@ -32,8 +32,8 @@ script:
 after_success:
   - docker run xenial -dt
   - mkdir deploy
-  - docker cp xenial:/*.deb deploy/
-  - mv deploy/*.deb deploy/yubikey-manager-$TRAVIS_BRANCH-HEAD.deb
+  - docker cp xenial:/yubikey-manager-debian-builds.tar.gz deploy/
+  - mv deploy/yubikey-manager-debian-builds.tar.gz deploy/yubikey-manager-debian-builds-$TRAVIS_BRANCH-HEAD.tar.gz
 
 deploy:
   provider: s3
