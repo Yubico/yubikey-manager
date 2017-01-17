@@ -2,6 +2,9 @@ language: python
 dist: trusty
 sudo: required
 
+services:
+  - docker
+
 python:
   - "2.7"
   - "3.4"
@@ -13,34 +16,34 @@ cache:
     - $HOME/.cache/pip
 
 before_install:
+  - docker build -t xenial docker/xenial
   - sudo apt-get update
   - pip install --disable-pip-version-check --upgrade pip
 
 install:
   - sudo apt-get install swig libpcsclite-dev
   - pip install pre-commit
+  - pip install -e .
 
 script:
   - pre-commit run --all-files
-  - pip install -e .
   - python setup.py test
 
-# TODO: Re-enable with a Xenial Docker Image
-#
-# after_success:
-#  - debuild -us -uc
-#  - mkdir deploy
-#  - mv ../*.deb deploy/yubikey-manager-$TRAVIS_BRANCH-HEAD.deb
-#
-# deploy:
-#  provider: s3
-#  access_key_id: "$AWS_KEY_ID"
-#  secret_access_key: "$AWS_SECRET_KEY"
-#  bucket: "$AWS_BUCKET"
-#  skip_cleanup: true
-#  acl: public-read
-#  region: eu-west-1
-#  local-dir: "deploy/"
-#  upload-dir: "yubikey-manager"
-#  on:
-#    all_branches: true
+after_success:
+  - docker run xenial -dt
+  - mkdir deploy
+  - docker cp xenial:/*.deb deploy/
+  - mv deploy/*.deb deploy/yubikey-manager-$TRAVIS_BRANCH-HEAD.deb
+
+deploy:
+  provider: s3
+  access_key_id: "$AWS_KEY_ID"
+  secret_access_key: "$AWS_SECRET_KEY"
+  bucket: "$AWS_BUCKET"
+  skip_cleanup: true
+  acl: public-read
+  region: eu-west-1
+  local-dir: "deploy/"
+  upload-dir: "yubikey-manager"
+  on:
+    all_branches: true
