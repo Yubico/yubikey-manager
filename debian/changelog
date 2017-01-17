@@ -1,4 +1,4 @@
-yubikey-manager (0.2.0) UNRELEASED; urgency=medium
+yubikey-manager (0.2.0~ppa1) xenial; urgency=low
 
   * Build for ppa
 
