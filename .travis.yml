@@ -30,9 +30,9 @@ script:
   - python setup.py test
 
 after_success:
-  - docker run xenial -dt
   - mkdir deploy
-  - docker cp xenial:/yubikey-manager-debian-builds.tar.gz deploy/
+  - id=$(docker create xenial)
+  - docker cp $id:/yubikey-manager-debian-builds.tar.gz deploy/
   - mv deploy/yubikey-manager-debian-builds.tar.gz deploy/yubikey-manager-debian-builds-$TRAVIS_BRANCH-HEAD.tar.gz
 
 deploy:
