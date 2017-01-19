@@ -104,6 +104,3 @@ class Ykpers(CLibrary):
 
     def ykp_set_extflag(self, cfg, name, value=True):
         return self._ykp_set(cfg, 'ykp_set_extflag_' + name, value)
-
-
-ykpers = Ykpers('ykpers-1', '1')

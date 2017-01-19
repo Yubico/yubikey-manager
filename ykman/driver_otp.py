@@ -27,10 +27,10 @@
 
 
 import six
-from .native.ykpers import ykpers
+from .native.ykpers import Ykpers
 from ctypes import byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT
+from .util import TRANSPORT, MissingLibrary
 from .scanmap import us
 
 from hashlib import sha1
@@ -48,6 +48,17 @@ CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
 
+try:
+    ykpers = Ykpers('Xykpers-1', '1')
+    if not ykpers.yk_init():
+        raise Exception('yk_init failed.')
+    libversion = ykpers.ykpers_check_version(None).decode('ascii')
+except:
+    ykpers = MissingLibrary(
+        'libykpers not found, slot functionality not available!')
+    libversion = None
+
+
 class YkpersError(Exception):
     """Thrown if a ykpers call fails."""
 
@@ -62,12 +73,6 @@ class YkpersError(Exception):
 def check(status):
     if not status:
         raise YkpersError(ykpers.yk_get_errno())
-
-
-_yk_init_res = ykpers.yk_init()
-
-
-libversion = ykpers.ykpers_check_version(None).decode('ascii')
 
 
 def slot_to_cmd(slot, update=False):
@@ -92,7 +97,6 @@ class OTPDriver(AbstractDriver):
     transport = TRANSPORT.OTP
 
     def __init__(self, dev):
-        check(_yk_init_res)
 
         self._dev = dev
         self._access_code = None

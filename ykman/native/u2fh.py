@@ -53,6 +53,3 @@ class U2fh(CLibrary):
                      c_char_p, POINTER(c_size_t)], u2fh_rc
     u2fh_get_device_description = [POINTER(u2fh_devs), c_int, c_char_p,
                                    POINTER(c_size_t)], u2fh_rc
-
-
-u2fh = U2fh('u2f-host', '0')

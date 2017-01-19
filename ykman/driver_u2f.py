@@ -27,10 +27,10 @@
 
 from __future__ import print_function
 
-from .native.u2fh import u2fh, u2fh_devs
+from .native.u2fh import U2fh, u2fh_devs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT
+from .util import TRANSPORT, MissingLibrary
 import struct
 
 
@@ -44,6 +44,19 @@ TYPE_INIT = 0x80
 U2FHID_PING = TYPE_INIT | 0x01
 U2FHID_YUBIKEY_DEVICE_CONFIG = TYPE_INIT | U2F_VENDOR_FIRST
 U2FHID_YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
+
+
+try:
+    u2fh = U2fh('Xu2f-host', '0')
+
+    # TODO: Allow debug output
+    if u2fh.u2fh_global_init(0) is not 0:
+        raise Exception('u2fh_global_init failed!')
+    libversion = u2fh.u2fh_check_version(None).decode('ascii')
+except:
+    u2fh = MissingLibrary(
+        'libu2f-host not found, U2F connectability not available!')
+    libversion = None
 
 
 class U2FHostError(Exception):
@@ -63,11 +76,6 @@ def check(status):
         raise U2FHostError(status)
 
 
-_u2fh_init_res = u2fh.u2fh_global_init(0)  # TODO: Allow debug output
-
-libversion = u2fh.u2fh_check_version(None).decode('ascii')
-
-
 class U2FDriver(AbstractDriver):
     """
     libu2f-host based U2F driver
@@ -77,8 +85,6 @@ class U2FDriver(AbstractDriver):
     sky = False
 
     def __init__(self, devs, index, name=''):
-        check(_u2fh_init_res)
-
         self._devs = devs
         self._index = index
         if 'Security Key' in name:

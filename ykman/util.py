@@ -174,6 +174,14 @@ class Tlv(bytes):
         return super(Tlv, cls).__new__(cls, bytes(data))
 
 
+class MissingLibrary(object):
+    def __init__(self, message):
+        self._message = message
+
+    def __getattr__(self, name):
+        raise ValueError(self._message)
+
+
 def parse_tlvs(data):
     res = []
     while data:
