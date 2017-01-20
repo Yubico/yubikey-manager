@@ -99,8 +99,7 @@ def cli(ctx):
                 if not ctx.obj['dev']:  # Key should be there, busy?
                     raise FailedOpeningDeviceException()
             except FailedOpeningDeviceException:
-                ctx.fail('Failed connecting to the YubiKey. Is it in use by '
-                         'another process?')
+                ctx.fail('Failed connecting to the YubiKey.')
         else:
             req = ', '.join((t.name for t in TRANSPORT if t & transports))
             click.echo("Command '{}' requires one of the following transports "
