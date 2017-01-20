@@ -47,7 +47,7 @@ U2FHID_YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
 
 
 try:
-    u2fh = U2fh('Xu2f-host', '0')
+    u2fh = U2fh('u2f-host', '0')
 
     # TODO: Allow debug output
     if u2fh.u2fh_global_init(0) is not 0:

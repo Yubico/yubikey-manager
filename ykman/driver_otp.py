@@ -49,7 +49,7 @@ CONFIG2_VALID = 0x02
 
 
 try:
-    ykpers = Ykpers('Xykpers-1', '1')
+    ykpers = Ykpers('ykpers-1', '1')
     if not ykpers.yk_init():
         raise Exception('yk_init failed.')
     libversion = ykpers.ykpers_check_version(None).decode('ascii')
