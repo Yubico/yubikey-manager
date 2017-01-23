@@ -2,9 +2,9 @@ import os
 import sys
 import unittest
 import time
-import traceback
+import click
 from ykman.util import TRANSPORT
-
+from test.util import ykman_cli
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
         'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
@@ -17,10 +17,7 @@ URI_TOTP_EXAMPLE = (
 _one_yubikey = False
 if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
     try:
-        import click
-        from click.testing import CliRunner
         from ykman.descriptor import get_descriptors
-        from ykman.cli.__main__ import cli
         click.confirm(
             "Run integration tests? This will erase data on the YubiKey,"
             " make sure it is a key used for development.", abort=True)
@@ -30,16 +27,6 @@ if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
     _skip = False
 else:
     _skip = True
-
-
-def ykman_cli(*argv):
-    runner = CliRunner()
-    result = runner.invoke(cli, list(argv), obj={})
-    if result.exit_code != 0:
-        click.echo(result.output)
-        traceback.print_tb(result.exc_info[2])
-        raise result.exception
-    return result.output
 
 
 def _has_mode(mode):
@@ -87,7 +74,7 @@ class TestSlotProgramming(unittest.TestCase):
 
     def test_ykman_program_otp_slot_2(self):
         output = ykman_cli('slot', 'otp', '2', '-f')
-        self.assertIn('Using serial as public ID:', output)
+        self.assertIn('Using device serial as public ID:', output)
         self.assertIn('Using a randomly generated private ID:', output)
         self.assertIn('Using a randomly generated secret key:', output)
         self._check_slot_2_programmed()
