@@ -33,9 +33,16 @@ Commands:
     $ sudo apt update
     $ sudo apt install yubikey-manager
 
+==== macOS
+
+    $ brew install python3 swig ykpers libu2f-host libusb
+    $ pip install yubikey-manager
+
 ==== Pip
 
     $ pip install yubikey-manager
+
+In order for the pip package to work [libu2f-host](https://developers.yubico.com/libu2f-host/), [ykpers](https://developers.yubico.com/yubikey-personalization/) and [libusb](http://libusb.info/) need to be installed on the system as well.
 
 === Bash completion
 
