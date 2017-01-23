@@ -1,3 +1,7 @@
+* Version 0.3.0 (released 2017-01-23)
+ ** OATH functionality added. The tool now exposes the OATH functionality found on the YubiKey 4 and NEO. To list the available commands, run ykman oath -h.
+ ** Added support for randomly generated static passwords.
+
 * Version 0.2.0 (released 2016-11-23)
  ** Removed all GUI code. This project is now only for the python library and CLI tool. The GUI will be re-released separately in a different project.
  ** Added command to update settings for YubiKey Slots.
