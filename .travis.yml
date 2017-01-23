@@ -19,7 +19,7 @@ before_install:
   - docker build -t xenial docker/xenial
   - sudo apt-add-repository -y ppa:yubico/stable
   - sudo apt-get update
-  - sudo apt-get install -qq libu2f-host libykpers-1-1 python-pyscard python-cryptography
+  - sudo apt-get install -qq libu2f-host0 libykpers-1-1 python-pyscard
   - pip install --disable-pip-version-check --upgrade pip
 
 install:
