@@ -42,7 +42,7 @@ Commands:
 
     $ pip install yubikey-manager
 
-In order for the pip package to work [libu2f-host](https://developers.yubico.com/libu2f-host/), [ykpers](https://developers.yubico.com/yubikey-personalization/) and [libusb](http://libusb.info/) need to be installed on the system as well.
+In order for the pip package to work https://developers.yubico.com/libu2f-host/[libu2f-host], https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
 
 === Bash completion
 
