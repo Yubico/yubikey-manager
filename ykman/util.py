@@ -27,7 +27,6 @@
 
 import os
 import six
-import time
 import struct
 import hashlib
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -256,7 +255,5 @@ def hmac_shorten_key(key, algo):
     return key
 
 
-def time_challenge(t=None):
-    if t is None:
-        t = time.time()
-    return struct.pack('>q', int(t // 30))
+def time_challenge(timestamp):
+    return struct.pack('>q', int(timestamp // 30))

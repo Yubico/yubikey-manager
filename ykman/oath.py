@@ -31,6 +31,7 @@ import hashlib
 import struct
 import hmac
 import six
+import time
 from functools import total_ordering
 from enum import IntEnum
 from .driver_ccid import APDUError, OATH_AID, SW_OK
@@ -96,7 +97,9 @@ class SW(IntEnum):
 @total_ordering
 class Credential(object):
 
-    def __init__(self, name, code=None, oath_type='', touch=False, algo=None):
+    def __init__(
+            self, name, code=None, oath_type='', touch=False, algo=None,
+            expiration=None):
         self.name = name
         self.code = code
         self.oath_type = oath_type
@@ -104,6 +107,7 @@ class Credential(object):
         self.algo = algo
         self.hidden = name.startswith('_hidden:')
         self.steam = name.startswith('Steam:')
+        self.expiration = expiration
 
     def __lt__(self, other):
         return self.name.lower() < other.name.lower()
@@ -187,7 +191,7 @@ class OathController(object):
             yield cred
             resp = resp[3 + length:]
 
-    def calculate(self, cred):
+    def calculate(self, cred, timestamp=None):
 
         # The 4.2.0-4.2.6 firmwares have a known issue with credentials that
         # require touch: If this action is performed within 2 seconds of a
@@ -197,7 +201,9 @@ class OathController(object):
         if self._426device and cred.touch:
             self._send_invalid_apdu()
 
-        challenge = time_challenge() \
+        if timestamp is None:
+            timestamp = int(time.time())
+        challenge = time_challenge(timestamp) \
             if cred.oath_type == 'totp' else b''
         data = Tlv(TAG.NAME, cred.name.encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
@@ -207,14 +213,17 @@ class OathController(object):
         code = resp[1:]
         code = parse_truncated(code)
         cred.code = format_code(code, digits, steam=cred.steam)
+        cred.expiration = ((timestamp + 30) // 30) * 30
         return cred
 
     def delete(self, cred):
         data = Tlv(TAG.NAME, cred.name.encode('utf-8'))
         self.send_apdu(0, INS.DELETE, 0, 0, data)
 
-    def calculate_all(self):
-        data = Tlv(TAG.CHALLENGE, time_challenge())
+    def calculate_all(self, timestamp=None):
+        if timestamp is None:
+            timestamp = int(time.time())
+        data = Tlv(TAG.CHALLENGE, time_challenge(timestamp))
         resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
         tlvs = parse_tlvs(resp)
         while tlvs:
@@ -225,10 +234,11 @@ class OathController(object):
             if resp.tag == TAG.TRUNCATED_RESPONSE:
                 cred.oath_type = 'totp'
                 if cred.steam:
-                    cred = self.calculate(cred)
+                    cred = self.calculate(cred, timestamp)
                 else:
                     code = parse_truncated(resp.value[1:])
                     cred.code = format_code(code, digits)
+                    cred.expiration = ((timestamp + 30) // 30) * 30
             elif resp.tag == TAG.HOTP:
                 cred.oath_type = 'hotp'
             elif resp.tag == TAG.TOUCH:
