@@ -112,6 +112,16 @@ class Credential(object):
     def __lt__(self, other):
         return self.name.lower() < other.name.lower()
 
+    def to_dict(self):
+        return dict(self.__dict__)
+
+    @staticmethod
+    def from_dict(data):
+        kwargs = dict(data)
+        del kwargs['steam']
+        del kwargs['hidden']
+        return Credential(**kwargs)
+
 
 class OathController(object):
 
