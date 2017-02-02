@@ -222,7 +222,8 @@ class OathController(object):
         code = resp[1:]
         code = parse_truncated(code)
         cred.code = format_code(code, digits, steam=cred.steam)
-        cred.expiration = ((timestamp + 30) // 30) * 30
+        if cred.oath_type == 'totp':
+            cred.expiration = ((timestamp + 30) // 30) * 30
         return cred
 
     def delete(self, cred):
