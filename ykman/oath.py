@@ -213,8 +213,7 @@ class OathController(object):
 
         if timestamp is None:
             timestamp = int(time.time())
-        challenge = time_challenge(timestamp) \
-            if cred.oath_type == 'totp' else b''
+        challenge = time_challenge(timestamp)
         data = Tlv(TAG.NAME, cred.name.encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(0, INS.CALCULATE, 0, 0x01, data)
