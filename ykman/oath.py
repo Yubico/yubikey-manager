@@ -135,7 +135,7 @@ class OathController(object):
 
     @property
     def locked(self):
-        return self._challenge
+        return self._challenge is not None
 
     @property
     def _426device(self):
