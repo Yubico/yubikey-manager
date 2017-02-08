@@ -31,7 +31,7 @@ from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_key, parse_key, parse_b32_key)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
-from ..util import TRANSPORT
+from ..util import TRANSPORT, derive_key
 from ..oath import OathController, SW
 try:
     from urlparse import urlparse, parse_qs
@@ -380,7 +380,9 @@ def password(ctx, new_password):
             hide_input=True,
             confirmation_prompt=True)
 
-    ctx.obj['controller'].set_password(new_password)
+    controller = ctx.obj['controller']
+    key = derive_key(controller.id, new_password)
+    controller.set_password(key)
     click.echo('New password set.')
 
 
@@ -392,7 +394,9 @@ def ensure_validated(ctx, prompt='Enter your password'):
 
 def _validate(ctx, password):
     try:
-        ctx.obj['controller'].validate(password)
+        controller = ctx.obj['controller']
+        key = derive_key(controller.id, password)
+        controller.validate(key)
     except:
         ctx.fail('Authentication to the device failed. Wrong password?')
 

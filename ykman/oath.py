@@ -36,7 +36,7 @@ from functools import total_ordering
 from enum import IntEnum
 from .driver_ccid import APDUError, OATH_AID, SW_OK
 from .util import (
-    Tlv, parse_tlvs, time_challenge, derive_key,
+    Tlv, parse_tlvs, time_challenge,
     format_code, parse_truncated, hmac_shorten_key)
 
 
@@ -132,6 +132,10 @@ class OathController(object):
     @property
     def version(self):
         return self._version
+
+    @property
+    def id(self):
+        return self._id
 
     @property
     def locked(self):
@@ -255,8 +259,7 @@ class OathController(object):
                 cred.touch = True
             yield cred
 
-    def set_password(self, password):
-        key = derive_key(self._id, password)
+    def set_password(self, key):
         keydata = bytearray([OATH_TYPE.TOTP | ALGO.SHA1]) + key
         challenge = os.urandom(8)
         response = hmac.new(key, challenge, hashlib.sha1).digest()
@@ -267,8 +270,7 @@ class OathController(object):
     def clear_password(self):
         self.send_apdu(0, INS.SET_CODE, 0, 0, Tlv(TAG.KEY, b''))
 
-    def validate(self, password):
-        key = derive_key(self._id, password)
+    def validate(self, key):
         response = hmac.new(key, self._challenge, hashlib.sha1).digest()
         challenge = os.urandom(8)
         verification = hmac.new(key, challenge, hashlib.sha1).digest()
