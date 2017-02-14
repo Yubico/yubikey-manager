@@ -43,3 +43,7 @@
 === macOS
 
     $ pip uninstall yubikey-manager
+
+== To run tests
+
+    $ python setup.py test
