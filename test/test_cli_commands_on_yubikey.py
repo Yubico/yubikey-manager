@@ -149,6 +149,13 @@ class TestOATH(unittest.TestCase):
         creds = ykman_cli('oath', 'list')
         self.assertIn('test-name', creds)
 
+    def test_oath_hidden_cred(self):
+        ykman_cli('oath', 'add', '_hidden:name', 'abba')
+        creds = ykman_cli('oath', 'code')
+        self.assertNotIn('_hidden:name', creds)
+        creds = ykman_cli('oath', 'code', '-H')
+        self.assertIn('_hidden:name', creds)
+
     def test_oath_add_uri_hotp(self):
         ykman_cli('oath', 'uri', URI_HOTP_EXAMPLE)
         creds = ykman_cli('oath', 'list')
