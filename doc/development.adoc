@@ -1,27 +1,45 @@
-== Setting up a development environment on Ubuntu 16.04 (Xenial)
+= Setting up a development environment
 
-Install development dependencies:
+== Install development dependencies:
+
+=== Ubuntu
 
     $ sudo apt-get install python-pip python-pyscard libykpers-1-1 libu2f-host0 
 
-Setup the repository:
+=== macOS
+
+    $ brew install python3 swig ykpers libu2f-host libusb
+
+== Setup the repository:
 
     $ git clone --recursive https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
 
-Install in editable mode with pip (from root of repository):
+== Install in editable mode with pip (from root of repository):
+
+=== Ubuntu
 
     $ sudo pip install -e .
 
-Run the app:
+=== macOS
+
+    $ pip install -e .
+
+== Run the app:
 
     $ ykman --help
 
-To update once installed, just make sure the repo is up to date:
+== To update once installed, just make sure the repo is up to date:
 
     $ git pull
     $ git submodule update
 
-To uninstall, run:
+== To uninstall, run:
+
+=== Ubuntu
 
     $ sudo pip uninstall yubikey-manager
+
+=== macOS
+
+    $ pip uninstall yubikey-manager
