@@ -304,7 +304,7 @@ Touch and HOTP credentials require a single match to be triggered.
     ensure_validated(ctx)
 
     controller = ctx.obj['controller']
-    creds = controller.calculate_all()
+    creds = [c for c in controller.calculate_all()]
 
     # Remove hidden creds
     if not show_hidden:
