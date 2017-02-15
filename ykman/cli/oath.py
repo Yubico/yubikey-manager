@@ -31,14 +31,8 @@ from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_key, parse_key, parse_b32_key)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
-from ..util import TRANSPORT, derive_key
+from ..util import TRANSPORT, derive_key, parse_uri
 from ..oath import OathController, SW
-try:
-    from urlparse import urlparse, parse_qs
-    from urllib import unquote
-except ImportError:
-    from urllib.parse import unquote, urlparse, parse_qs
-
 
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
@@ -61,24 +55,9 @@ def _clear_callback(ctx, param, clear):
 
 @click_callback()
 def click_parse_uri(ctx, param, val):
-    return parse_uri(val)
-
-
-def parse_uri(val):
     try:
-        uri = val.strip()
-        parsed = urlparse(uri)
-        assert parsed.scheme == 'otpauth'
-        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
-        params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
-        params['type'] = parsed.hostname
-        # Issuer can come both in a param and inside name param.
-        # We store both in the name field on the key.
-        if 'issuer' in params \
-                and not params['name'].startswith(params['issuer']):
-                    params['name'] = params['issuer'] + ':' + params['name']
-        return params
-    except:
+        return parse_uri(val)
+    except ValueError:
         raise click.BadParameter('URI seems to have the wrong format.')
 
 

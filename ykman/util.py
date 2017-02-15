@@ -34,6 +34,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from enum import IntEnum
 from binascii import b2a_hex, a2b_hex
+try:
+    from urlparse import urlparse, parse_qs
+    from urllib import unquote
+except ImportError:
+    from urllib.parse import unquote, urlparse, parse_qs
 
 
 class BitflagEnum(IntEnum):
@@ -257,3 +262,21 @@ def hmac_shorten_key(key, algo):
 
 def time_challenge(timestamp):
     return struct.pack('>q', int(timestamp // 30))
+
+
+def parse_uri(val):
+    try:
+        uri = val.strip()
+        parsed = urlparse(uri)
+        assert parsed.scheme == 'otpauth'
+        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
+        params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
+        params['type'] = parsed.hostname
+        # Issuer can come both in a param and inside name param.
+        # We store both in the name field on the key.
+        if 'issuer' in params \
+                and not params['name'].startswith(params['issuer']):
+                    params['name'] = params['issuer'] + ':' + params['name']
+        return params
+    except:
+        raise ValueError('URI seems to have the wrong format.')
