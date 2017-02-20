@@ -249,11 +249,12 @@ a random one may be generated.
 @click.option(
     '-k', '--key', metavar='HEX', callback=click_parse_key, required=False,
     help='HMAC-SHA1 secret key.')
-@click.option('--require-touch', is_flag=True, help='Require physical button '
-              'press to generate response.')
+@click.option(
+    '-t', '--touch', is_flag=True, help='Require touch'
+    ' on YubiKey to generate response.')
 @click_force_option
 @click.pass_context
-def chalresp(ctx, slot, key, require_touch, force):
+def chalresp(ctx, slot, key, touch, force):
     """
     Program a challenge-response credential.
 
@@ -269,7 +270,7 @@ def chalresp(ctx, slot, key, require_touch, force):
 
     click.echo('Programming challenge-response in slot {}...'.format(slot))
     try:
-        dev.driver.program_chalresp(slot, key, require_touch)
+        dev.driver.program_chalresp(slot, key, touch)
     except YkpersError:
         _failed_to_write_msg(ctx)
 
