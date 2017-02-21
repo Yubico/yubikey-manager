@@ -67,6 +67,12 @@ def click_parse_key(ctx, param, val):
     return parse_key(val)
 
 
+@click_callback()
+def click_parse_b32_key(ctx, param, val):
+    val = val.upper()
+    return parse_b32_key(val)
+
+
 def parse_key(val):
     val = val.upper()
     if re.match(r'^([0-9A-F]{2})+$', val):  # hex
