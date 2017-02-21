@@ -84,6 +84,10 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Using a randomly generated key.', output)
         self._check_slot_2_programmed()
 
+    def test_chal_resp_totp(self):
+        ykman_cli('slot', 'chalresp', '2', '-T', 'abba', '-f')
+        self._check_slot_2_programmed()
+
     def test_ykman_program_hotp_slot_2(self):
         output = ykman_cli(
             'slot', 'hotp', '2',

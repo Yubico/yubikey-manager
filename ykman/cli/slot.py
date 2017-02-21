@@ -28,13 +28,15 @@
 from __future__ import absolute_import
 
 from .util import (
-    click_force_option, click_callback, click_parse_key, click_skip_on_help)
+    click_force_option, click_callback, click_parse_key,
+    click_parse_b32_key, click_skip_on_help)
 from ..util import TRANSPORT, generate_static_pw, modhex_decode, modhex_encode
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
 import os
 import struct
 import click
+import hashlib
 
 
 def parse_hex(length):
@@ -252,15 +254,27 @@ a random one may be generated.
 @click.option(
     '-t', '--touch', is_flag=True, help='Require touch'
     ' on YubiKey to generate response.')
+@click.option(
+        '-T', '--totp', callback=click_parse_b32_key, required=False,
+        help='Use a base32 encoded key for TOTP credentials')
 @click_force_option
 @click.pass_context
-def chalresp(ctx, slot, key, touch, force):
+def chalresp(ctx, slot, key, totp, touch, force):
     """
     Program a challenge-response credential.
 
     If --key is not given, a randomly generated key will be used.
     """
     dev = ctx.obj['dev']
+
+    if totp:
+        key = totp
+        if len(key) > 64:  # Keys longer than 64 bytes are hashed, as per HMAC.
+            key = hashlib.sha1(key).digest()
+        if len(key) > 20:
+            ctx.fail('YubiKey Slots cannot handle TOTP keys over 20 bytes.')
+        key += b'\x00' * (20 - len(key))  # Keys must be padded to 20 bytes.
+
     if not key:
         click.echo('Using a randomly generated key.')
         key = os.urandom(20)
