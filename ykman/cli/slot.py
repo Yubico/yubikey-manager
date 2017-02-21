@@ -256,7 +256,7 @@ a random one may be generated.
     ' on YubiKey to generate response.')
 @click.option(
         '-T', '--totp', callback=click_parse_b32_key, required=False,
-        help='Use a base32 encoded key for TOTP credentials')
+        help='Use a base32 encoded key for TOTP credentials.')
 @click_force_option
 @click.pass_context
 def chalresp(ctx, slot, key, totp, touch, force):
