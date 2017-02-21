@@ -69,7 +69,6 @@ def click_parse_key(ctx, param, val):
 
 @click_callback()
 def click_parse_b32_key(ctx, param, val):
-    val = val.upper()
     return parse_b32_key(val)
 
 
@@ -83,5 +82,6 @@ def parse_key(val):
 
 
 def parse_b32_key(key):
+    key = key.upper()
     key += '=' * (-len(key) % 8)  # Support unpadded
     return b32decode(key)

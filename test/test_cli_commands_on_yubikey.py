@@ -81,7 +81,7 @@ class TestSlotProgramming(unittest.TestCase):
 
     def test_ykman_program_chalresp_slot_2(self):
         output = ykman_cli('slot', 'chalresp', '2', '-f')
-        self.assertIn('Using a randomly generated key.', output)
+        self.assertIn('Using a randomly generated key', output)
         self._check_slot_2_programmed()
 
     def test_chal_resp_totp(self):

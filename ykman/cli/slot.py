@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_key,
-    click_parse_b32_key, click_skip_on_help)
+    parse_key, parse_b32_key, click_skip_on_help)
 from ..util import TRANSPORT, generate_static_pw, modhex_decode, modhex_encode
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
@@ -248,14 +248,12 @@ a random one may be generated.
 
 @slot.command()
 @click_slot_argument
-@click.option(
-    '-k', '--key', metavar='HEX', callback=click_parse_key, required=False,
-    help='HMAC-SHA1 secret key.')
+@click.argument('key', required=False)
 @click.option(
     '-t', '--touch', is_flag=True, help='Require touch'
     ' on YubiKey to generate response.')
 @click.option(
-        '-T', '--totp', callback=click_parse_b32_key, required=False,
+        '-T', '--totp', is_flag=True, required=False,
         help='Use a base32 encoded key for TOTP credentials.')
 @click_force_option
 @click.pass_context
@@ -267,22 +265,40 @@ def chalresp(ctx, slot, key, totp, touch, force):
     """
     dev = ctx.obj['dev']
 
-    if totp:
-        key = totp
-        if len(key) > 64:  # Keys longer than 64 bytes are hashed, as per HMAC.
-            key = hashlib.sha1(key).digest()
-        if len(key) > 20:
-            ctx.fail('YubiKey Slots cannot handle TOTP keys over 20 bytes.')
-        key += b'\x00' * (20 - len(key))  # Keys must be padded to 20 bytes.
-
     if not key:
-        click.echo('Using a randomly generated key.')
-        key = os.urandom(20)
+        if totp:
+            while True:
+                key = click.prompt('Enter a secret key (base32)')
+                try:
+                    key = parse_b32_key(key)
+                    break
+                except Exception as e:
+                    click.echo(e)
+                    pass
+        else:
+            key = click.prompt(
+                'Enter a secret key [blank to randomly generate]',
+                default='', show_default=False)
+            if force or key == '':
+                key = os.urandom(20)
+                click.echo('Using a randomly generated key: {}'.format(
+                    b2a_hex(key).decode('ascii')))
+            else:
+                key = parse_key(key)
+    else:
+        if totp:
+            key = parse_b32_key(key)
+            if len(key) > 64:  # Keys longer than 64 bytes are hashed.
+                key = hashlib.sha1(key).digest()
+            if len(key) > 20:
+                ctx.fail('YubiKey Slots cannot handle TOTP keys over 20 bytes.')
+            key += b'\x00' * (20 - len(key))  # Keys must be padded to 20 bytes.
+        else:
+            key = parse_key(key)
 
-    force or click.confirm('Program a challenge-response credential in slot {}?'
-                           .format(slot), abort=True)
-
-    click.echo('Programming challenge-response in slot {}...'.format(slot))
+    cred_type = 'TOTP' if totp else 'challenge-response'
+    force or click.confirm('Program a {} credential in slot {}?'
+                           .format(cred_type, slot), abort=True)
     try:
         dev.driver.program_chalresp(slot, key, touch)
     except YkpersError:
