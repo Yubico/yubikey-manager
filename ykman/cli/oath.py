@@ -31,7 +31,7 @@ from threading import Timer
 from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_b32_key,
-    parse_b32_key)
+    parse_b32_key, prompt_for_touch)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT, derive_key, parse_uri
 from ..oath import OathController, SW
@@ -282,9 +282,6 @@ Provide a query string to match one or more specific credentials. \
 Touch and HOTP credentials require a single match to be triggered.
     """
 
-    def _prompt_for_touch():
-        click.echo("Touch your YubiKey...")
-
     ensure_validated(ctx)
 
     controller = ctx.obj['controller']
@@ -298,11 +295,11 @@ Touch and HOTP credentials require a single match to be triggered.
         if len(hits) == 1:
             cred = hits[0]
             if cred.touch:
-                _prompt_for_touch()
+                prompt_for_touch()
             if cred.oath_type == 'hotp':
                 # HOTP might require touch, we don't know.
                 # Assume yes after 500ms.
-                hotp_touch_timer = Timer(0.500, _prompt_for_touch)
+                hotp_touch_timer = Timer(0.500, prompt_for_touch)
                 hotp_touch_timer.start()
                 cred = controller.calculate(cred)
                 hotp_touch_timer.cancel()

@@ -85,3 +85,7 @@ def parse_b32_key(key):
     key = key.upper()
     key += '=' * (-len(key) % 8)  # Support unpadded
     return b32decode(key)
+
+
+def prompt_for_touch():
+    click.echo("Touch your YubiKey...")
