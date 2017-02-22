@@ -121,6 +121,26 @@ class TestSlotProgramming(unittest.TestCase):
 
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
 @unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
+@unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
+class TestSlotCalculate(unittest.TestCase):
+
+    def test_calculate_hex(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+        ykman_cli('slot', 'chalresp', '2', 'abba', '-f')
+        output = ykman_cli('slot', 'calculate', '2', 'abba')
+        self.assertIn('f8de2586056d89d8b961a072d1245a495d2155e1', output)
+
+    def test_calculate_totp(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+        ykman_cli('slot', 'chalresp', '2', 'abba', '-f')
+        output = ykman_cli('slot', 'calculate', '2', '-T')
+        self.assertEqual(6, len(output.strip()))
+        output = ykman_cli('slot', 'calculate', '2', '-T', '-d', '8')
+        self.assertEqual(8, len(output.strip()))
+
+
+@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
     "CCID needs to be enabled for this test.")
