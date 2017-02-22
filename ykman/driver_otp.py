@@ -27,14 +27,15 @@
 
 
 import six
+import time
 from .native.ykpers import Ykpers
-from ctypes import byref, c_uint, c_size_t, create_string_buffer
+from ctypes import sizeof, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
 from .util import TRANSPORT, MissingLibrary
 from .scanmap import us
-
+from ykman.util import time_challenge, parse_totp_hash, format_code
 from hashlib import sha1
-
+from binascii import a2b_hex, b2a_hex
 
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
@@ -47,6 +48,7 @@ SLOT_SWAP = 0x06
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
+SLOTS = [-1, 0x30, 0x38]
 
 try:
     ykpers = Ykpers('ykpers-1', '1')
@@ -257,6 +259,22 @@ class OTPDriver(AbstractDriver):
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
+
+    def calculate(
+            self, slot, challenge=None, totp=False,
+            digits=6, wait_for_touch=True):
+        if totp:
+            challenge = time_challenge(time.time())
+        else:
+            challenge = a2b_hex(challenge)
+        resp = create_string_buffer(64)
+        check(ykpers.yk_challenge_response(
+                self._dev, SLOTS[slot], wait_for_touch,
+                len(challenge), challenge, sizeof(resp), resp))
+        if totp:
+            return format_code(parse_totp_hash(resp.raw[:20]), digits)
+        else:
+            return b2a_hex(resp.raw[:20])
 
     def program_hotp(self, slot, key, imf=0, hotp8=False, append_cr=True):
         if self._version < (2, 1, 0):

@@ -243,6 +243,11 @@ def format_code(code, digits=6, steam=False):
         return ('%%0%dd' % digits) % (code % 10 ** digits)
 
 
+def parse_totp_hash(resp):
+    offs = six.indexbytes(resp, -1) & 0xf
+    return parse_truncated(resp[offs:offs+4])
+
+
 def parse_truncated(resp):
     return struct.unpack('>I', resp)[0] & 0x7fffffff
 

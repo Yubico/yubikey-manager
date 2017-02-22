@@ -29,7 +29,8 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_key,
-    parse_key, parse_b32_key, click_skip_on_help)
+    parse_key, parse_b32_key, click_skip_on_help,
+    prompt_for_touch)
 from ..util import TRANSPORT, generate_static_pw, modhex_decode, modhex_encode
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
@@ -303,6 +304,47 @@ def chalresp(ctx, slot, key, totp, touch, force):
         dev.driver.program_chalresp(slot, key, touch)
     except YkpersError:
         _failed_to_write_msg(ctx)
+
+
+@slot.command()
+@click_slot_argument
+@click.argument('challenge', required=False)
+@click.option(
+    '-T', '--totp', is_flag=True, help='Generate a TOTP code, '
+    'use the current time as challenge.')
+@click.option(
+    '-d', '--digits', type=click.Choice(['6', '8']), default='6',
+    help='Number of digits in generated TOTP code (default is 6).')
+@click.pass_context
+def calculate(ctx, slot, challenge, totp, digits):
+    """
+    Perform a challenge-response operation.
+
+    Send a challenge (in hex) to a YubiKey slot with a challenge-response
+credential, and read the response. Supports output as a OATH-TOTP code.
+    """
+    dev = ctx.obj['dev']
+    if not challenge and not totp:
+        ctx.fail('No challenge provided.')
+    try:
+        res = dev.driver.calculate(
+            slot, challenge, totp=totp,
+            digits=int(digits), wait_for_touch=False)
+    except YkpersError as e:
+        # Touch is set
+        if e.errno == 11:
+            prompt_for_touch()
+            try:
+                res = dev.driver.calculate(
+                    slot, challenge, totp=totp,
+                    digits=int(digits), wait_for_touch=True)
+            except YkpersError as e:
+                # Touch timed out
+                if e.errno == 4:
+                    ctx.fail('The YubiKey timed out.')
+        else:
+            ctx.fail('Failed to calculate challenge.')
+    click.echo(res)
 
 
 @slot.command()

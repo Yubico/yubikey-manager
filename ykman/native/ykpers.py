@@ -64,6 +64,10 @@ class Ykpers(CLibrary):
 
     yk_get_capabilities = [POINTER(YK_KEY), c_uint8, c_uint, c_char_p], bool
 
+    yk_challenge_response = [
+        POINTER(YK_KEY), c_uint8, c_int, c_uint, c_char_p,
+        c_uint, c_char_p], bool
+
     ykds_alloc = [], POINTER(YK_STATUS)
     ykds_free = [POINTER(YK_STATUS)], None
     ykds_version_major = [POINTER(YK_STATUS)], c_int
