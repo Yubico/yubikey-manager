@@ -25,3 +25,17 @@ To update once installed, just make sure the repo is up to date:
 To uninstall, run:
 
     $ sudo pip uninstall yubikey-manager
+
+=== Unit tests
+
+To run unit tests:
+
+    $ python setup.py test
+
+=== Integration tests
+
+WARNING: ONLY run these on a dedicated developer key, as it will permanently delete data on the device!
+
+To run integration tests:
+
+    $ INTEGRATION_TESTS=TRUE python setup.py test
