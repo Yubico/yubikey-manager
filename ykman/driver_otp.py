@@ -247,7 +247,7 @@ class OTPDriver(AbstractDriver):
             raise ValueError('key lengths >20 bytes not supported')
         cmd = slot_to_cmd(slot)
         cfg = self._create_cfg(cmd)
-
+        key = key.ljust(20, b'\0')  # Pad key to 20 bytes
         try:
             check(ykpers.ykp_set_tktflag(cfg, 'CHAL_RESP'))
             check(ykpers.ykp_set_cfgflag(cfg, 'CHAL_HMAC'))
