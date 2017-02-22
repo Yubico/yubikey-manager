@@ -326,6 +326,12 @@ credential, and read the response. Supports output as a OATH-TOTP code.
     dev = ctx.obj['dev']
     if not challenge and not totp:
         ctx.fail('No challenge provided.')
+
+    # Check that slot is not empty
+    slot1, slot2 = dev.driver.slot_status
+    if (slot == 1 and not slot1) or (slot == 2 and not slot2):
+        ctx.fail('Cannot perform challenge-response on an empty slot')
+
     try:
         res = dev.driver.calculate(
             slot, challenge, totp=totp,
