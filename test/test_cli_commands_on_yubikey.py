@@ -133,6 +133,10 @@ class TestSlotCalculate(unittest.TestCase):
     def test_calculate_totp(self):
         ykman_cli('slot', 'delete', '2', '-f')
         ykman_cli('slot', 'chalresp', '2', 'abba', '-f')
+        output = ykman_cli('slot', 'calculate', '2', '999', '-T')
+        self.assertEqual('533486', output.strip())
+        output = ykman_cli('slot', 'calculate', '2', '999', '-T', '-d', '8')
+        self.assertEqual('04533486', output.strip())
         output = ykman_cli('slot', 'calculate', '2', '-T')
         self.assertEqual(6, len(output.strip()))
         output = ykman_cli('slot', 'calculate', '2', '-T', '-d', '8')

@@ -264,7 +264,10 @@ class OTPDriver(AbstractDriver):
             self, slot, challenge=None, totp=False,
             digits=6, wait_for_touch=True):
         if totp:
-            challenge = time_challenge(time.time())
+            if challenge is None:
+                challenge = time_challenge(time.time())
+            else:
+                challenge = time_challenge(challenge)
         else:
             challenge = a2b_hex(challenge)
         resp = create_string_buffer(64)

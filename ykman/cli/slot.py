@@ -330,8 +330,14 @@ credential, and read the response. Supports output as a OATH-TOTP code.
     # Check that slot is not empty
     slot1, slot2 = dev.driver.slot_status
     if (slot == 1 and not slot1) or (slot == 2 and not slot2):
-        ctx.fail('Cannot perform challenge-response on an empty slot')
+        ctx.fail('Cannot perform challenge-response on an empty slot.')
 
+    # Timestamp challenge should be int
+    if challenge and totp:
+        try:
+            challenge = int(challenge)
+        except:
+            ctx.fail('Timestamp challenge for TOTP must be an integer.')
     try:
         res = dev.driver.calculate(
             slot, challenge, totp=totp,
