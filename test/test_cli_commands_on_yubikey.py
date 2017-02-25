@@ -177,6 +177,11 @@ class TestOATH(unittest.TestCase):
         creds = ykman_cli('oath', 'list')
         self.assertIn('test-name', creds)
 
+    def test_oath_add_credential_with_space(self):
+        ykman_cli('oath', 'add', 'test-name-space', 'ab ba')
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('test-name-space', creds)
+
     def test_oath_hidden_cred(self):
         ykman_cli('oath', 'add', '_hidden:name', 'abba')
         creds = ykman_cli('oath', 'code')
