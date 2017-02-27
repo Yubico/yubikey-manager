@@ -82,7 +82,7 @@ def parse_key(val):
 
 
 def parse_b32_key(key):
-    key = key.upper()
+    key = key.upper().replace(' ', '')
     key += '=' * (-len(key) % 8)  # Support unpadded
     return b32decode(key)
 
