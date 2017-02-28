@@ -29,9 +29,10 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_key,
-    parse_key, parse_b32_key, click_skip_on_help,
-    prompt_for_touch)
-from ..util import TRANSPORT, generate_static_pw, modhex_decode, modhex_encode
+    click_skip_on_help, prompt_for_touch)
+from ..util import (
+    TRANSPORT, generate_static_pw, modhex_decode,
+    modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
 import os

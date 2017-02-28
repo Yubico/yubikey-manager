@@ -27,10 +27,7 @@
 import functools
 import click
 import sys
-import re
-from base64 import b32decode
-from binascii import a2b_hex
-
+from ..util import parse_key, parse_b32_key
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
@@ -70,21 +67,6 @@ def click_parse_key(ctx, param, val):
 @click_callback()
 def click_parse_b32_key(ctx, param, val):
     return parse_b32_key(val)
-
-
-def parse_key(val):
-    val = val.upper()
-    if re.match(r'^([0-9A-F]{2})+$', val):  # hex
-        return a2b_hex(val)
-    else:
-        # Key should be b32 encoded
-        return parse_b32_key(val)
-
-
-def parse_b32_key(key):
-    key = key.upper().replace(' ', '')
-    key += '=' * (-len(key) % 8)  # Support unpadded
-    return b32decode(key)
 
 
 def prompt_for_touch():

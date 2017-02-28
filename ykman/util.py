@@ -29,10 +29,12 @@ import os
 import six
 import struct
 import hashlib
+import re
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from enum import IntEnum
+from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 try:
     from urlparse import urlparse, parse_qs
@@ -285,3 +287,18 @@ def parse_uri(val):
         return params
     except:
         raise ValueError('URI seems to have the wrong format.')
+
+
+def parse_key(val):
+    val = val.upper()
+    if re.match(r'^([0-9A-F]{2})+$', val):  # hex
+        return a2b_hex(val)
+    else:
+        # Key should be b32 encoded
+        return parse_b32_key(val)
+
+
+def parse_b32_key(key):
+    key = key.upper().replace(' ', '')
+    key += '=' * (-len(key) % 8)  # Support unpadded
+    return b32decode(key)

@@ -31,9 +31,9 @@ from threading import Timer
 from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_b32_key,
-    parse_b32_key, prompt_for_touch)
+    prompt_for_touch)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
-from ..util import TRANSPORT, derive_key, parse_uri
+from ..util import TRANSPORT, derive_key, parse_uri, parse_b32_key
 from ..oath import OathController, SW
 
 click_touch_option = click.option(
