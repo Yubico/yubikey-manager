@@ -1,3 +1,10 @@
+* Version 0.3.1 (unreleased)
+ ** Allow programming of TOTP credentials in YubiKey Slots using the chalresp command.
+ ** Add a calculate command (and library support) to perform a challenge-response operation. Can also be used to generate TOTP codes for credentials stored in a slot.
+ ** OATH: Remove whitespace in secret keys provided by the user.
+ ** OATH: Prompt the user to touch the YubiKey for HOTP touch credentials.
+ ** Bugfix: The flag for showing hidden credentials was not working correctly for the oath code command.
+
 * Version 0.3.0 (released 2017-01-23)
  ** OATH functionality added. The tool now exposes the OATH functionality found on the YubiKey 4 and NEO. To list the available commands, run ykman oath -h.
  ** Added support for randomly generated static passwords.
