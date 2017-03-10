@@ -262,7 +262,7 @@ def chalresp(ctx, slot, key, totp, touch, force):
     """
     Program a challenge-response credential.
 
-    If --key is not given, a randomly generated key will be used.
+    If key is not given, a randomly generated key will be used.
     """
     dev = ctx.obj['dev']
 
