@@ -243,7 +243,6 @@ a random one may be generated.
 
     try:
         dev.driver.program_static(slot, password, not no_enter)
-        click.echo('Static password set for slot {}.'.format(slot))
     except YkpersError:
         _failed_to_write_msg(ctx)
 
