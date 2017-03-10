@@ -89,10 +89,9 @@ class TestSlotProgramming(unittest.TestCase):
         self._check_slot_2_programmed()
 
     def test_ykman_program_hotp_slot_2(self):
-        output = ykman_cli(
+        ykman_cli(
             'slot', 'hotp', '2',
             '27KIZZE3SD7GE2FVJJBAXEI3I6RRTPGM', '-f')
-        self.assertIn('Programming HOTP credential in slot 2...', output)
         self._check_slot_2_programmed()
 
     def test_ykman_program_static_slot_2(self):

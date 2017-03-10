@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from .util import (
-    click_force_option, click_callback, click_parse_key,
+    click_force_option, click_callback, click_parse_b32_key,
     click_skip_on_help, prompt_for_touch)
 from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
@@ -361,28 +361,36 @@ credential, and read the response. Supports output as a OATH-TOTP code.
 
 @slot.command()
 @click_slot_argument
-@click.argument('key', callback=click_parse_key)
-@click.option('--digits', type=click.Choice(['6', '8']), default='6',
-              callback=lambda c, p, v: int(v),
-              help='Number of digits to output for HOTP codes.')
-@click.option('--imf', type=int, default=0,
-              help='Initial moving factor for credential.')
+@click.argument('key', callback=click_parse_b32_key, required=False)
+@click.option('-d', '--digits', type=click.Choice(['6', '8']), default='6',
+              help='Number of digits in generated code (default is 6).')
+@click.option('-c', '--counter', type=int, default=0,
+              help='Initial counter value.')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
-              'keystroke after outputting an OTP.')
+              'keystroke after outputting the code.')
 @click_force_option
 @click.pass_context
-def hotp(ctx, slot, key, digits, imf, no_enter, force):
+def hotp(ctx, slot, key, digits, counter, no_enter, force):
     """
     Program an HMAC-SHA1 OATH-HOTP credential.
 
-    KEY is given as a hex or base32 encoded string.
     """
     dev = ctx.obj['dev']
-    force or click.confirm('Program a HOTP credential in slot {}?'.format(slot),
-                           abort=True)
-    click.echo('Programming HOTP credential in slot {}...'.format(slot))
+    if not key:
+        while True:
+            key = click.prompt('Enter a secret key (base32)')
+            try:
+                key = parse_b32_key(key)
+                break
+            except Exception as e:
+                click.echo(e)
+                pass
+
+    force or click.confirm(
+        'Program a HOTP credential in slot {}?'.format(slot), abort=True)
     try:
-        dev.driver.program_hotp(slot, key, imf, digits == 8, not no_enter)
+        dev.driver.program_hotp(
+            slot, key, counter, int(digits) == 8, not no_enter)
     except YkpersError:
         _failed_to_write_msg(ctx)
 
