@@ -27,7 +27,7 @@
 import functools
 import click
 import sys
-from ..util import parse_key, parse_b32_key
+from ..util import parse_b32_key
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
@@ -57,11 +57,6 @@ def click_skip_on_help(f):
                 return
         f(*args, **kwargs)
     return inner
-
-
-@click_callback()
-def click_parse_key(ctx, param, val):
-    return parse_key(val)
 
 
 @click_callback()
