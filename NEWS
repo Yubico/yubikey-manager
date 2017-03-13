@@ -1,4 +1,4 @@
-* Version 0.3.1 (unreleased)
+* Version 0.3.1 (released 2017-03-13)
  ** Allow programming of TOTP credentials in YubiKey Slots using the chalresp command.
  ** Add a calculate command (and library support) to perform a challenge-response operation. Can also be used to generate TOTP codes for credentials stored in a slot.
  ** OATH: Remove whitespace in secret keys provided by the user.
