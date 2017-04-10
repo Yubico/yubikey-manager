@@ -36,7 +36,7 @@ Commands:
 ==== macOS
 
     $ brew install python3 swig ykpers libu2f-host libusb
-    $ pip install yubikey-manager
+    $ pip3 install yubikey-manager
 
 ==== Pip
 
