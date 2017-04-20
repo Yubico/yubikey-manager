@@ -64,10 +64,9 @@ def _failed_to_write_msg(ctx):
 @click.pass_context
 @click_skip_on_help
 @click.option('--access-code', required=False, metavar="HEX",
-              callback=parse_hex(6),
               help='If your YubiKey is write-protected using an access code, '
               'you will need to specify it here for any operation that writes '
-              'to the device.')
+              'to the device. Set to empty to use a prompt for input.')
 def slot(ctx, access_code):
     """
     Manage YubiKey Slots.
@@ -75,6 +74,13 @@ def slot(ctx, access_code):
     The YubiKey provides two keyboard-based slots which can each be configured
     with a credential. Several credential types are supported.
     """
+
+    if access_code is not None:
+        if access_code == '':
+            access_code = click.prompt("Enter access code", show_default=False)
+        access_code = a2b_hex(access_code)
+        if len(access_code) != 6:
+            raise ValueError('Must be exactly 6 bytes.')
     ctx.obj['dev'].driver.access_code = access_code
 
 
