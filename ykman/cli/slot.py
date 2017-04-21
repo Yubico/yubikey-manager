@@ -360,6 +360,8 @@ credential, and read the response. Supports output as a OATH-TOTP code.
                 # Touch timed out
                 if e.errno == 4:
                     ctx.fail('The YubiKey timed out.')
+                else:
+                    ctx.fail(e)
         else:
             ctx.fail('Failed to calculate challenge.')
     click.echo(res)
