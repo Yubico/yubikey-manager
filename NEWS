@@ -1,3 +1,7 @@
+* Version 0.3.2 (released 2017-04-24)
+ ** Allow access code input through an interactive prompt.
+ ** Bugfix: Some versions of YubiKey NEO occasionally failed calculating challenge-response credentials with touch.
+
 * Version 0.3.1 (released 2017-03-13)
  ** Allow programming of TOTP credentials in YubiKey Slots using the chalresp command.
  ** Add a calculate command (and library support) to perform a challenge-response operation. Can also be used to generate TOTP codes for credentials stored in a slot.
