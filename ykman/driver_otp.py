@@ -271,9 +271,20 @@ class OTPDriver(AbstractDriver):
         else:
             challenge = a2b_hex(challenge)
         resp = create_string_buffer(64)
-        check(ykpers.yk_challenge_response(
-                self._dev, SLOTS[slot], wait_for_touch,
-                len(challenge), challenge, sizeof(resp), resp))
+        # Some versions of the NEO firmware returns error 11 too often.
+        # Give the YubiKey 10 tries to do the calculation.
+        for idx in range(10):
+            try:
+                check(ykpers.yk_challenge_response(
+                        self._dev, SLOTS[slot], wait_for_touch,
+                        len(challenge), challenge, sizeof(resp), resp))
+            except YkpersError as e:
+                if idx < 10 and e.errno == 11 and wait_for_touch is True:
+                    # Error 11 when wait_for_touch is true is an unexpected
+                    # state, let's try again.
+                    continue
+                else:
+                    raise
         if totp:
             return format_code(parse_totp_hash(resp.raw[:20]), digits)
         else:
