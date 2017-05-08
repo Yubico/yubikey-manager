@@ -220,10 +220,14 @@ class OathController(object):
         challenge = time_challenge(timestamp)
         data = Tlv(TAG.NAME, cred.name.encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
-        resp = self.send_apdu(0, INS.CALCULATE, 0, 0x01, data)
+        resp = self.send_apdu(0, INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
+        # Manual dynamic truncation is required
+        # for Steam entries, so let's do it for all.
         digits = six.indexbytes(resp, 0)
-        code = resp[1:]
+        resp = resp[1:]
+        offset = resp[-1] & 0xF
+        code = resp[offset:offset + 4]
         code = parse_truncated(code)
         cred.code = format_code(code, digits, steam=cred.steam)
         if cred.oath_type != 'hotp':

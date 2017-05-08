@@ -208,6 +208,16 @@ class TestOATH(unittest.TestCase):
             'Success! All credentials have been cleared from the device.',
             output)
 
+    def test_oath_hotp_code(self):
+        ykman_cli('oath', 'add', '-o', 'HOTP', 'hotp-cred', 'abba')
+        cred = ykman_cli('oath', 'code', 'hotp-cred')
+        self.assertIn('659165', cred)
+
+    def test_oath_hotp_steam_code(self):
+        ykman_cli('oath', 'add', '-o', 'HOTP', 'Steam:steam-cred', 'abba')
+        cred = ykman_cli('oath', 'code', 'steam-cred')
+        self.assertIn('CGC3K', cred)
+
     def test_oath_remove(self):
         ykman_cli('oath', 'add', 'remove-me', 'abba')
         ykman_cli('oath', 'remove', 'remove-me')
