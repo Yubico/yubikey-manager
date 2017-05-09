@@ -33,7 +33,7 @@ import re
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
-from enum import IntEnum
+from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 try:
@@ -53,6 +53,16 @@ class BitflagEnum(IntEnum):
         return flags & check == check
 
 
+@unique
+class AID(bytes, Enum):
+    OTP = b'\xa0\x00\x00\x05\x27\x20\x01'
+    MGR = b'\xa0\x00\x00\x05\x27\x47\x11\x17'
+    OPGP = b'\xd2\x76\x00\x01\x24\x01'
+    OATH = b'\xa0\x00\x00\x05\x27\x21\x01'
+    PIV = b'\xa0\x00\x00\x03\x08'
+
+
+@unique
 class CAPABILITY(BitflagEnum):
     OTP = 0x01
     U2F = 0x02
@@ -67,6 +77,7 @@ class CAPABILITY(BitflagEnum):
         return CAPABILITY.OPGP | CAPABILITY.OATH | CAPABILITY.PIV
 
 
+@unique
 class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
     U2F = CAPABILITY.U2F

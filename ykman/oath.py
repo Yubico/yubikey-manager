@@ -33,13 +33,14 @@ import hmac
 import six
 import time
 from functools import total_ordering
-from enum import IntEnum
-from .driver_ccid import APDUError, OATH_AID, SW_OK
+from enum import IntEnum, unique
+from .driver_ccid import APDUError, SW_OK
 from .util import (
-    Tlv, parse_tlvs, time_challenge,
+    AID, Tlv, parse_tlvs, time_challenge,
     format_code, parse_truncated, hmac_shorten_key)
 
 
+@unique
 class TAG(IntEnum):
     NAME = 0x71
     NAME_LIST = 0x72
@@ -55,20 +56,24 @@ class TAG(IntEnum):
     TOUCH = 0x7c
 
 
+@unique
 class ALGO(IntEnum):
     SHA1 = 0x01
     SHA256 = 0x02
 
 
+@unique
 class OATH_TYPE(IntEnum):
     HOTP = 0x10
     TOTP = 0x20
 
 
+@unique
 class PROPERTIES(IntEnum):
     REQUIRE_TOUCH = 0x02
 
 
+@unique
 class INS(IntEnum):
     PUT = 0x01
     DELETE = 0x02
@@ -77,16 +82,17 @@ class INS(IntEnum):
     LIST = 0xa1
     CALCULATE = 0xa2
     VALIDATE = 0xa3
-    SELECT = 0xa4
     CALCULATE_ALL = 0xa4
     SEND_REMAINING = 0xa5
 
 
+@unique
 class MASK(IntEnum):
     ALGO = 0x0f
     TYPE = 0xf0
 
 
+@unique
 class SW(IntEnum):
     NO_SPACE = 0x6a84
     COMMAND_ABORTED = 0x6f00
@@ -126,8 +132,12 @@ class Credential(object):
 class OathController(object):
 
     def __init__(self, driver):
+        resp = driver.select(AID.OATH)
+        tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
+        self._version = tuple(six.iterbytes(tags[TAG.VERSION]))
+        self._id = tags[TAG.NAME]
+        self._challenge = tags.get(TAG.CHALLENGE)
         self._driver = driver
-        self.select()
 
     @property
     def version(self):
@@ -145,11 +155,11 @@ class OathController(object):
     def _426device(self):
         return (4, 2, 0) <= self.version <= (4, 2, 6)
 
-    def send_apdu(self, cl, ins, p1, p2, data=b''):
-        resp, sw = self._driver.send_apdu(cl, ins, p1, p2, data, check=None)
+    def send_apdu(self, ins, p1, p2, data=b''):
+        resp, sw = self._driver.send_apdu(0, ins, p1, p2, data, check=None)
         while (sw >> 8) == SW.MORE_DATA:
             more, sw = self._driver.send_apdu(
-                0, INS.SEND_REMAINING, 0, 0, '', check=None)
+                0, INS.SEND_REMAINING, 0, 0, b'', check=None)
             resp += more
 
         if sw != SW_OK:
@@ -157,15 +167,8 @@ class OathController(object):
 
         return resp
 
-    def select(self):
-        resp = self.send_apdu(0, INS.SELECT, 0x04, 0, OATH_AID)
-        tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
-        self._version = tuple(six.iterbytes(tags[TAG.VERSION]))
-        self._id = tags[TAG.NAME]
-        self._challenge = tags.get(TAG.CHALLENGE)
-
     def reset(self):
-        self.send_apdu(0, INS.RESET, 0xde, 0xad)
+        self.send_apdu(INS.RESET, 0xde, 0xad)
 
     def put(self, key, name, oath_type='totp', digits=6,
             algo='SHA1', counter=0, require_touch=False):
@@ -190,10 +193,10 @@ class OathController(object):
         if counter > 0:
             data += Tlv(TAG.IMF, struct.pack('>I', counter))
 
-        self.send_apdu(0, INS.PUT, 0, 0, bytes(data))
+        self.send_apdu(INS.PUT, 0, 0, bytes(data))
 
     def list(self):
-        resp = self.send_apdu(0, INS.LIST, 0, 0)
+        resp = self.send_apdu(INS.LIST, 0, 0)
         while resp:
             length = six.indexbytes(resp, 1) - 1
             oath_type = MASK.TYPE & six.indexbytes(resp, 2)
@@ -220,7 +223,7 @@ class OathController(object):
         challenge = time_challenge(timestamp)
         data = Tlv(TAG.NAME, cred.name.encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
-        resp = self.send_apdu(0, INS.CALCULATE, 0, 0, data)
+        resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
         # Manual dynamic truncation is required
         # for Steam entries, so let's do it for all.
@@ -236,13 +239,13 @@ class OathController(object):
 
     def delete(self, cred):
         data = Tlv(TAG.NAME, cred.name.encode('utf-8'))
-        self.send_apdu(0, INS.DELETE, 0, 0, data)
+        self.send_apdu(INS.DELETE, 0, 0, data)
 
     def calculate_all(self, timestamp=None):
         if timestamp is None:
             timestamp = int(time.time())
         data = Tlv(TAG.CHALLENGE, time_challenge(timestamp))
-        resp = self.send_apdu(0, INS.CALCULATE_ALL, 0, 0x01, data)
+        resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
         tlvs = parse_tlvs(resp)
         while tlvs:
             name = tlvs.pop(0).value.decode('utf-8')
@@ -269,17 +272,17 @@ class OathController(object):
         response = hmac.new(key, challenge, hashlib.sha1).digest()
         data = Tlv(TAG.KEY, keydata) + Tlv(TAG.CHALLENGE, challenge) + Tlv(
             TAG.RESPONSE, response)
-        self.send_apdu(0, INS.SET_CODE, 0, 0, data)
+        self.send_apdu(INS.SET_CODE, 0, 0, data)
 
     def clear_password(self):
-        self.send_apdu(0, INS.SET_CODE, 0, 0, Tlv(TAG.KEY, b''))
+        self.send_apdu(INS.SET_CODE, 0, 0, Tlv(TAG.KEY, b''))
 
     def validate(self, key):
         response = hmac.new(key, self._challenge, hashlib.sha1).digest()
         challenge = os.urandom(8)
         verification = hmac.new(key, challenge, hashlib.sha1).digest()
         data = Tlv(TAG.RESPONSE, response) + Tlv(TAG.CHALLENGE, challenge)
-        resp = self.send_apdu(0, INS.VALIDATE, 0, 0, data)
+        resp = self.send_apdu(INS.VALIDATE, 0, 0, data)
         if parse_tlvs(resp)[0].value != verification:
             raise ValueError(
                 'Response from validation does not match verification!')

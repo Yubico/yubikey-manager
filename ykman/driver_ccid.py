@@ -35,7 +35,7 @@ from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError
-from .util import CAPABILITY, TRANSPORT
+from .util import AID, CAPABILITY, TRANSPORT
 
 SW_OK = 0x9000
 SW_APPLICATION_NOT_FOUND = 0x6a82
@@ -49,18 +49,14 @@ SLOT_DEVICE_CONFIG = 0x11
 
 INS_NEO_TEST = 0x16
 
-OTP_AID = b'\xa0\x00\x00\x05\x27\x20\x01'
-MGR_AID = b'\xa0\x00\x00\x05\x27\x47\x11\x17'
-OPGP_AID = b'\xd2\x76\x00\x01\x24\x01'
-OATH_AID = b'\xa0\x00\x00\x05\x27\x21\x01\x01'
 
 KNOWN_APPLETS = {
-    OTP_AID: CAPABILITY.OTP,
+    AID.OTP: CAPABILITY.OTP,
     b'\xa0\x00\x00\x06\x47\x2f\x00\x01': CAPABILITY.U2F,  # Official
     b'\xa0\x00\x00\x05\x27\x10\x02': CAPABILITY.U2F,  # Yubico - No longer used
-    b'\xa0\x00\x00\x03\x08': CAPABILITY.PIV,
-    OPGP_AID: CAPABILITY.OPGP,
-    b'\xa0\x00\x00\x05\x27\x21\x01': CAPABILITY.OATH
+    AID.PIV: CAPABILITY.PIV,
+    AID.OPGP: CAPABILITY.OPGP,
+    AID.OATH: CAPABILITY.OATH
 }
 
 
@@ -93,14 +89,14 @@ class CCIDDriver(AbstractDriver):
             pass  # Can't read serial
 
     def _read_serial(self):
-        self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
+        self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
         serial = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
         if len(serial) == 4:
             self._serial = struct.unpack('>I', serial)[0]
 
     def read_capabilities(self):
         try:
-            self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
+            self.send_apdu(0, INS_SELECT, 4, 0, AID.MGR)
             capa = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
             return capa
         except APDUError:
@@ -121,6 +117,9 @@ class CCIDDriver(AbstractDriver):
         body = list(six.iterbytes(data))
         try:
             resp, sw1, sw2 = self._conn.transmit(header + body)
+            from binascii import b2a_hex
+            print('SEND:', b2a_hex(bytes(header + body)).decode('ascii'))
+            print('RECV:', b2a_hex(bytes(resp + [sw1, sw2])).decode('ascii'))
         except CardConnectionException as e:
             raise CCIDError(e)
         sw = sw1 << 8 | sw2
@@ -131,6 +130,9 @@ class CCIDDriver(AbstractDriver):
             return resp
         else:
             raise APDUError(resp, sw)
+
+    def select(self, aid):
+        return self.send_apdu(0, INS_SELECT, 0x04, 0, aid)
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         mode_data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
@@ -143,7 +145,7 @@ class CCIDDriver(AbstractDriver):
             raise ModeSwitchError()
 
     def _set_mode_otp(self, mode_data):
-        resp = self.send_apdu(0, INS_SELECT, 4, 0, OTP_AID)
+        resp = self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
         pgm_seq_old = six.indexbytes(resp, 3)
         resp = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, mode_data)
         pgm_seq_new = six.indexbytes(resp, 3)
@@ -151,7 +153,7 @@ class CCIDDriver(AbstractDriver):
             raise ModeSwitchError()
 
     def _set_mode_mgr(self, mode_data):
-        self.send_apdu(0, INS_SELECT, 4, 0, MGR_AID)
+        self.send_apdu(0, INS_SELECT, 4, 0, AID.MGR)
         self.send_apdu(0, INS_NEO_TEST, SLOT_DEVICE_CONFIG, 0, mode_data)
 
     def __del__(self):

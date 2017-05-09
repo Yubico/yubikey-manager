@@ -27,25 +27,28 @@
 
 
 import six
-from .driver_ccid import OPGP_AID, APDUError, SW_OK
-from enum import IntEnum
+from .util import AID
+from .driver_ccid import APDUError, SW_OK
+from enum import IntEnum, unique
 from binascii import b2a_hex
 
 
+@unique
 class KEY_SLOT(IntEnum):  # noqa: N801
     SIGN = 0xd6
     ENCRYPT = 0xd7
     AUTHENTICATE = 0xd8
 
 
+@unique
 class TOUCH_MODE(IntEnum):  # noqa: N801
     OFF = 0x00
     ON = 0x01
     ON_FIXED = 0x02
 
 
+@unique
 class INS(IntEnum):  # noqa: N801
-    SELECT = 0xa4
     GET_DATA = 0xca
     GET_VERSION = 0xf1
     SET_PIN_RETRIES = 0xf2
@@ -64,8 +67,8 @@ TOUCH_METHOD_BUTTON = 0x20
 class OpgpController(object):
 
     def __init__(self, driver):
+        driver.select(AID.OPGP)
         self._driver = driver
-        self.select()
         self._version = self._read_version()
 
     @property
@@ -78,9 +81,6 @@ class OpgpController(object):
     def _read_version(self):
         bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
         return tuple(int(bcd_hex[i:i+2]) for i in range(0, 6, 2))
-
-    def select(self):
-        self.send_apdu(0, INS.SELECT, 0x04, 0, OPGP_AID)
 
     def _get_pin_tries(self):
         data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
