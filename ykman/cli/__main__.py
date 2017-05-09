@@ -39,12 +39,13 @@ from .mode import mode
 from .slot import slot
 from .opgp import openpgp
 from .oath import oath
+from .piv import piv
 import usb.core
 import click
 import sys
 
 
-COMMANDS = (info, mode, slot, openpgp, oath)
+COMMANDS = (info, mode, slot, openpgp, oath, piv)
 
 
 CLICK_CONTEXT_SETTINGS = dict(
