@@ -26,10 +26,14 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-import six
 from enum import IntEnum, unique
 from .driver_ccid import APDUError, SW_OK
-from .util import AID
+from .util import AID, Tlv
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.constant_time import bytes_eq
+from cryptography.hazmat.backends import default_backend
+import six
+import os
 
 
 @unique
@@ -48,6 +52,24 @@ class INS(IntEnum):
     RESET = 0xfb
     SET_PIN_RETRIES = 0xfa
     ATTEST = 0xf9
+
+
+@unique
+class ALGO(IntEnum):
+    TDES = 0x03,
+    RSA1024 = 0x06,
+    RSA2048 = 0x07,
+    ECCP256 = 0x11,
+    ECCP384 = 0x14
+
+
+@unique
+class SLOT(IntEnum):
+    AUTHENTICATION = 0x9a,
+    CARDMGM = 0x9b,
+    SIGNATURE = 0x9c,
+    KEYMGM = 0x9d,
+    CARDAUTH = 0x9e
 
 
 @unique
@@ -110,3 +132,24 @@ class PivController(object):
     def unblock_pin(self, puk, new_pin):
         self.send_apdu(INS.RESET_RETRY, 0, 0x80,
                        _pack_pin(puk) + _pack_pin(new_pin))
+
+    def authenticate(self, key):
+        ct1 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARDMGM,
+                             Tlv(0x7c, Tlv(0x80)))[4:12]
+        backend = default_backend()
+        cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
+        decryptor = cipher.decryptor()
+        pt1 = decryptor.update(ct1) + decryptor.finalize()
+
+        ct2 = os.urandom(8)
+        pt2 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARDMGM,
+                             Tlv(0x7c, Tlv(0x80, pt1) + Tlv(0x81, ct2)))[4:12]
+
+        encryptor = cipher.encryptor()
+        pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
+        if not bytes_eq(pt2, pt2_cmp):
+            raise ValueError('Device challenge did not match!')
+
+    def set_mgm_key(self, new_key, touch=False):
+        self.send_apdu(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
+                       bytes([ALGO.TDES]) + Tlv(SLOT.CARDMGM, new_key))
