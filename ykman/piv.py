@@ -34,6 +34,7 @@ from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.hazmat.backends import default_backend
 import struct
 import six
@@ -70,10 +71,33 @@ class ALGO(IntEnum):
 @unique
 class SLOT(IntEnum):
     AUTHENTICATION = 0x9a
-    CARDMGM = 0x9b
+    CARD_MANAGEMENT = 0x9b
     SIGNATURE = 0x9c
-    KEYMGM = 0x9d
-    CARDAUTH = 0x9e
+    KEY_MANAGEMENT = 0x9d
+    CARD_AUTH = 0x9e
+
+    RETIRED1 = 0x82
+    RETIRED2 = 0x83
+    RETIRED3 = 0x84
+    RETIRED4 = 0x85
+    RETIRED5 = 0x86
+    RETIRED6 = 0x87
+    RETIRED7 = 0x88
+    RETIRED8 = 0x89
+    RETIRED9 = 0x8a
+    RETIRED10 = 0x8b
+    RETIRED11 = 0x8c
+    RETIRED12 = 0x8d
+    RETIRED13 = 0x8e
+    RETIRED14 = 0x8f
+    RETIRED15 = 0x90
+    RETIRED16 = 0x91
+    RETIRED17 = 0x92
+    RETIRED18 = 0x93
+    RETIRED19 = 0x94
+    RETIRED20 = 0x95
+
+    ATTESTATION = 0xf9
 
 
 @unique
@@ -91,7 +115,33 @@ class OBJ(IntEnum):
     DISCOVERY = 0x7e
     KEY_HISTORY = 0x5fc10c
     IRIS = 0x5fc121
+
+    RETIRED1 = 0x5fc10d
+    RETIRED2 = 0x5fc10e
+    RETIRED3 = 0x5fc10f
+    RETIRED4 = 0x5fc110
+    RETIRED5 = 0x5fc111
+    RETIRED6 = 0x5fc112
+    RETIRED7 = 0x5fc113
+    RETIRED8 = 0x5fc114
+    RETIRED9 = 0x5fc115
+    RETIRED10 = 0x5fc116
+    RETIRED11 = 0x5fc117
+    RETIRED12 = 0x5fc118
+    RETIRED13 = 0x5fc119
+    RETIRED14 = 0x5fc11a
+    RETIRED15 = 0x5fc11b
+    RETIRED16 = 0x5fc11c
+    RETIRED17 = 0x5fc11d
+    RETIRED18 = 0x5fc11e
+    RETIRED19 = 0x5fc11f
+    RETIRED20 = 0x5fc120
+
     ATTESTATION = 0x5fff01
+
+    @classmethod
+    def from_slot(cls, slot):
+        return getattr(cls, SLOT(slot).name)
 
 
 @unique
@@ -231,8 +281,11 @@ class PivController(object):
         self.send_apdu(INS.RESET_RETRY, 0, PIN,
                        _pack_pin(puk) + _pack_pin(new_pin))
 
+    def set_pin_retries(self, pin_retries, puk_retries):
+        self.send_apdu(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
+
     def authenticate(self, key):
-        ct1 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARDMGM,
+        ct1 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                              Tlv(TAG.DYN_AUTH, Tlv(DYN_AUTH.WITNESS)))[4:12]
         backend = default_backend()
         cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
@@ -240,7 +293,7 @@ class PivController(object):
         pt1 = decryptor.update(ct1) + decryptor.finalize()
 
         ct2 = os.urandom(8)
-        pt2 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARDMGM,
+        pt2 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                              Tlv(TAG.DYN_AUTH,
                                  Tlv(DYN_AUTH.WITNESS, pt1) +
                                  Tlv(DYN_AUTH.CHALLENGE, ct2)
@@ -253,7 +306,7 @@ class PivController(object):
 
     def set_mgm_key(self, new_key, touch=False):
         self.send_apdu(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
-                       bytes([ALGO.TDES]) + Tlv(SLOT.CARDMGM, new_key))
+                       bytes([ALGO.TDES]) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
 
     def reset(self):
         _, sw = self.send_apdu(INS.VERIFY, 0, PIN, check=None)
@@ -312,3 +365,25 @@ class PivController(object):
         if touch_policy:
             data += Tlv(TAG.TOUCH_POLICY, bytes([touch_policy]))
         self.send_apdu(INS.IMPORT_KEY, algorithm, slot, data)
+
+    def import_certificate(self, slot, certificate):
+        # TODO: compression?
+        cert_data = certificate.public_bytes(Encoding.DER)
+        data = Tlv(0x70, cert_data) + Tlv(0x71, b'\0') + Tlv(0xfe)
+        self.put_data(OBJ.from_slot(slot), data)
+
+    def sign_data(self, slot, algorithm, message):
+        if algorithm == ALGO.RSA1024:
+            l = 128
+        elif algorithm == ALGO.RSA2048:
+            l = 256
+        elif algorithm == ALGO.ECCP256:
+            l = 32
+        elif algorithm == ALGO.ECCP384:
+            l = 48
+        if len(message) > l:
+            raise ValueError('Message too long!')
+
+        data = Tlv(0x7c, Tlv(0x82) + Tlv(0x81, message))
+
+        self.send_apdu(INS.AUTHENTICATE, algorithm, slot, data)
