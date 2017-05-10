@@ -84,6 +84,30 @@ def info(ctx):
     """
     controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
+    # TODO: Add CHUID, CCC, slot info
+
+
+@piv.command()
+@click.pass_context
+@click.confirmation_option(
+    '-f', '--force', prompt='WARNING! This will delete '
+    'all stored PIV data and restore factory settings. Proceed?')
+def reset(ctx):
+    """
+    Reset all PIV data.
+
+    This action will wipe all credentials and reset factory settings for
+    the PIV functionality on the device.
+    """
+
+    click.echo('Resetting PIV data...')
+    ctx.obj['controller'].reset()
+    click.echo(
+        'Success! All credentials have been cleared from the device.')
+    click.echo('Your YubiKey now has the default PIN, PUK and Management Key:')
+    click.echo('\tPIN:\t123456')
+    click.echo('\tPUK:\t12345678')
+    click.echo('\tKey:\t010203040506070801020304050607080102030405060708')
 
 
 piv.transports = TRANSPORT.CCID
