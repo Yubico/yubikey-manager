@@ -246,7 +246,7 @@ class PivController(object):
     def version(self):
         return self._version
 
-    def send_apdu(self, ins, p1=0, p2=0, data=b'', check=SW_OK):
+    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW_OK):
         while len(data) > 0xff:
             self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
             data = data[0xff:]
@@ -265,40 +265,40 @@ class PivController(object):
         return resp
 
     def _read_version(self):
-        return tuple(six.iterbytes(self.send_apdu(INS.GET_VERSION)))
+        return tuple(six.iterbytes(self.send_cmd(INS.GET_VERSION)))
 
     def verify(self, pin):
-        self.send_apdu(INS.VERIFY, 0, PIN, _pack_pin(pin))
+        self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
 
     def change_pin(self, old_pin, new_pin):
-        self.send_apdu(INS.CHANGE_REFERENCE, 0, PIN,
-                       _pack_pin(old_pin) + _pack_pin(new_pin))
+        self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
+                      _pack_pin(old_pin) + _pack_pin(new_pin))
 
     def change_puk(self, old_puk, new_puk):
-        self.send_apdu(INS.CHANGE_REFERENCE, 0, PUK,
-                       _pack_pin(old_puk) + _pack_pin(new_puk))
+        self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
+                      _pack_pin(old_puk) + _pack_pin(new_puk))
 
     def unblock_pin(self, puk, new_pin):
-        self.send_apdu(INS.RESET_RETRY, 0, PIN,
-                       _pack_pin(puk) + _pack_pin(new_pin))
+        self.send_cmd(INS.RESET_RETRY, 0, PIN,
+                      _pack_pin(puk) + _pack_pin(new_pin))
 
     def set_pin_retries(self, pin_retries, puk_retries):
-        self.send_apdu(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
+        self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
 
     def authenticate(self, key):
-        ct1 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                             Tlv(TAG.DYN_AUTH, Tlv(DYN_AUTH.WITNESS)))[4:12]
+        ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
+                            Tlv(TAG.DYN_AUTH, Tlv(DYN_AUTH.WITNESS)))[4:12]
         backend = default_backend()
         cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
         decryptor = cipher.decryptor()
         pt1 = decryptor.update(ct1) + decryptor.finalize()
 
         ct2 = os.urandom(8)
-        pt2 = self.send_apdu(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                             Tlv(TAG.DYN_AUTH,
-                                 Tlv(DYN_AUTH.WITNESS, pt1) +
-                                 Tlv(DYN_AUTH.CHALLENGE, ct2)
-                                 ))[4:12]
+        pt2 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
+                            Tlv(TAG.DYN_AUTH,
+                                Tlv(DYN_AUTH.WITNESS, pt1) +
+                                Tlv(DYN_AUTH.CHALLENGE, ct2)
+                                ))[4:12]
 
         encryptor = cipher.encryptor()
         pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
@@ -306,35 +306,35 @@ class PivController(object):
             raise ValueError('Device challenge did not match!')
 
     def set_mgm_key(self, new_key, touch=False):
-        self.send_apdu(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
-                       bytes([ALGO.TDES]) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
+        self.send_cmd(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
+                      bytes([ALGO.TDES]) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
 
     def reset(self):
-        _, sw = self.send_apdu(INS.VERIFY, 0, PIN, check=None)
+        _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
         if sw >> 4 == 0x63c:
             tries = sw & 0xf
             print('Tries: %d' % tries)
             for _ in range(tries):
-                self.send_apdu(INS.VERIFY, 0, PIN, _pack_pin(''), check=None)
-        _, sw = self.send_apdu(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                               check=None)
+                self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(''), check=None)
+        _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
+                              check=None)
         if sw >> 4 == 0x63c:
             tries = sw & 0xf
             print('Tries: %d' % tries)
             for _ in range(tries):
-                self.send_apdu(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                               check=None)
-        self.send_apdu(INS.RESET)
+                self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
+                              check=None)
+        self.send_cmd(INS.RESET)
 
     def get_data(self, object_id):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
-        tlv = Tlv(self.send_apdu(INS.GET_DATA, 0x3f, 0xff, Tlv(0x5c, id_bytes)))
+        tlv = Tlv(self.send_cmd(INS.GET_DATA, 0x3f, 0xff, Tlv(0x5c, id_bytes)))
         return tlv.value
 
     def put_data(self, object_id, data):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
-        self.send_apdu(INS.PUT_DATA, 0x3f, 0xff, Tlv(0x5c, id_bytes) +
-                       Tlv(0x53, data))
+        self.send_cmd(INS.PUT_DATA, 0x3f, 0xff, Tlv(0x5c, id_bytes) +
+                      Tlv(0x53, data))
 
     def generate_key(self, slot, algorithm, pin_policy=PIN_POLICY.DEFAULT,
                      touch_policy=TOUCH_POLICY.DEFAULT):
@@ -343,7 +343,7 @@ class PivController(object):
             data += Tlv(TAG.PIN_POLICY, bytes([pin_policy]))
         if touch_policy:
             data += Tlv(TAG.TOUCH_POLICY, bytes([touch_policy]))
-        resp = self.send_apdu(INS.GENERATE_ASYMMETRIC, 0, slot, data)
+        resp = self.send_cmd(INS.GENERATE_ASYMMETRIC, 0, slot, data)
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
             data = parse_tlvs(Tlv(resp[1:]).value)
             return rsa.RSAPublicNumbers(
@@ -365,7 +365,7 @@ class PivController(object):
             data += Tlv(TAG.PIN_POLICY, bytes([pin_policy]))
         if touch_policy:
             data += Tlv(TAG.TOUCH_POLICY, bytes([touch_policy]))
-        self.send_apdu(INS.IMPORT_KEY, algorithm, slot, data)
+        self.send_cmd(INS.IMPORT_KEY, algorithm, slot, data)
         return algorithm
 
     def import_certificate(self, slot, certificate):
@@ -380,7 +380,7 @@ class PivController(object):
         return x509.load_der_x509_certificate(data[0].value, default_backend())
 
     def attest(self, slot):
-        return x509.load_der_x509_certificate(self.send_apdu(INS.ATTEST, slot),
+        return x509.load_der_x509_certificate(self.send_cmd(INS.ATTEST, slot),
                                               default_backend())
 
     def sign_data(self, slot, algorithm, message):
@@ -397,5 +397,5 @@ class PivController(object):
 
         data = Tlv(0x7c, Tlv(0x82) + Tlv(0x81, message))
 
-        resp = Tlv(self.send_apdu(INS.AUTHENTICATE, algorithm, slot, data))
+        resp = Tlv(self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data))
         return Tlv(resp.value).value
