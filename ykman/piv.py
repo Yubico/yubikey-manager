@@ -30,6 +30,7 @@ from __future__ import absolute_import
 from enum import IntEnum, unique
 from .driver_ccid import APDUError, SW_OK
 from .util import AID, Tlv, parse_tlvs
+from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
@@ -365,12 +366,22 @@ class PivController(object):
         if touch_policy:
             data += Tlv(TAG.TOUCH_POLICY, bytes([touch_policy]))
         self.send_apdu(INS.IMPORT_KEY, algorithm, slot, data)
+        return algorithm
 
     def import_certificate(self, slot, certificate):
-        # TODO: compression?
         cert_data = certificate.public_bytes(Encoding.DER)
         data = Tlv(0x70, cert_data) + Tlv(0x71, b'\0') + Tlv(0xfe)
         self.put_data(OBJ.from_slot(slot), data)
+
+    def read_certificate(self, slot):
+        data = parse_tlvs(self.get_data(OBJ.from_slot(slot)))
+        if data[1].value != b'\0':
+            raise ValueError('Compressed certificates are not supported!')
+        return x509.load_der_x509_certificate(data[0].value, default_backend())
+
+    def attest(self, slot):
+        return x509.load_der_x509_certificate(self.send_apdu(INS.ATTEST, slot),
+                                              default_backend())
 
     def sign_data(self, slot, algorithm, message):
         if algorithm == ALGO.RSA1024:
@@ -386,4 +397,5 @@ class PivController(object):
 
         data = Tlv(0x7c, Tlv(0x82) + Tlv(0x81, message))
 
-        self.send_apdu(INS.AUTHENTICATE, algorithm, slot, data)
+        resp = Tlv(self.send_apdu(INS.AUTHENTICATE, algorithm, slot, data))
+        return Tlv(resp.value).value
