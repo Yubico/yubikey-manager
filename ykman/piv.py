@@ -32,10 +32,11 @@ from .driver_ccid import APDUError, SW_OK
 from .util import AID, Tlv, parse_tlvs
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 import struct
 import six
@@ -67,6 +68,18 @@ class ALGO(IntEnum):
     RSA2048 = 0x07
     ECCP256 = 0x11
     ECCP384 = 0x14
+
+    @classmethod
+    def from_public_key(cls, key):
+        if isinstance(key, rsa.RSAPublicKey):
+            return getattr(cls, 'RSA%d' % key.key_size)
+        elif isinstance(key, ec.EllipticCurvePublicKey):
+            curve_name = key.curve.name
+            if curve_name == 'secp256r1':
+                return cls.ECCP256
+            elif curve_name == 'secp384r1':
+                return cls.ECCP384
+        raise ValueError('Unsupported key type!')
 
 
 @unique
@@ -148,19 +161,14 @@ class OBJ(IntEnum):
 @unique
 class TAG(IntEnum):
     DYN_AUTH = 0x7c
-    ALGOS_SUPPORTED = 0xac
     OBJ_ID = 0x5c
     OBJ_DATA = 0x53
+    CERTIFICATE = 0x70
+    CERT_INFO = 0x71
     ALGO = 0x80
     PIN_POLICY = 0xaa
     TOUCH_POLICY = 0xab
-
-
-@unique
-class DYN_AUTH(IntEnum):
-    WITNESS = 0x80
-    CHALLENGE = 0x81
-    RESPONSE = 0x82
+    LRC = 0xfe
 
 
 @unique
@@ -191,6 +199,10 @@ PIN = 0x80
 PUK = 0x81
 
 
+def _parse_tlv_dict(data):
+    return dict((tlv.tag, tlv.value) for tlv in parse_tlvs(data))
+
+
 def _pack_pin(pin):
     if isinstance(pin, six.text_type):
         pin = pin.encode('utf8')
@@ -202,7 +214,7 @@ def _pack_pin(pin):
 def _get_key_data(key):
     if isinstance(key, rsa.RSAPrivateKey):
         if key.public_key().public_numbers().e != 65537:
-            raise ValueError('Unsupported exponent!')
+            raise ValueError('Unsupported RSA exponent!')
 
         if key.key_size == 1024:
             algo = ALGO.RSA1024
@@ -233,6 +245,44 @@ def _get_key_data(key):
     else:
         raise ValueError('Unsupported key type!')
     return algo, data
+
+
+def _dummy_key(algorithm):
+    if algorithm == ALGO.RSA1024:
+        return rsa.generate_private_key(65537, 1024, default_backend())
+    if algorithm == ALGO.RSA2048:
+        return rsa.generate_private_key(65537, 2048, default_backend())
+    if algorithm == ALGO.ECCP256:
+        return ec.generate_private_key(ec.SECP256R1(), default_backend())
+    if algorithm == ALGO.ECCP384:
+        return ec.generate_private_key(ec.SECP384R1(), default_backend())
+    raise ValueError('Unsupported algorithm!')
+
+
+def _pkcs1_15_pad(algorithm, message):
+    h = hashes.Hash(hashes.SHA256(), default_backend())
+    h.update(message)
+    t = b'\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01\x05' + \
+        b'\x00\x04\x20' + h.finalize()
+    em_len = 128 if algorithm == ALGO.RSA1024 else 256
+    f_len = em_len - len(t) - 3
+    return b'\0\1' + b'\xff' * f_len + b'\0' + t
+
+
+_sign_len_conditions = {
+    ALGO.RSA1024: lambda l: l == 128,
+    ALGO.RSA2048: lambda l: l == 256,
+    ALGO.ECCP256: lambda l: l <= 32,
+    ALGO.ECCP384: lambda l: l <= 48
+}
+
+
+_decrypt_len_conditions = {
+    ALGO.RSA1024: lambda l: l == 128,
+    ALGO.RSA2048: lambda l: l == 256,
+    ALGO.ECCP256: lambda l: l == 65,
+    ALGO.ECCP384: lambda l: l == 97
+}
 
 
 class PivController(object):
@@ -287,7 +337,7 @@ class PivController(object):
 
     def authenticate(self, key):
         ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                            Tlv(TAG.DYN_AUTH, Tlv(DYN_AUTH.WITNESS)))[4:12]
+                            Tlv(TAG.DYN_AUTH, Tlv(0x80)))[4:12]
         backend = default_backend()
         cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
         decryptor = cipher.decryptor()
@@ -295,10 +345,8 @@ class PivController(object):
 
         ct2 = os.urandom(8)
         pt2 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                            Tlv(TAG.DYN_AUTH,
-                                Tlv(DYN_AUTH.WITNESS, pt1) +
-                                Tlv(DYN_AUTH.CHALLENGE, ct2)
-                                ))[4:12]
+                            Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
+                            )[4:12]
 
         encryptor = cipher.encryptor()
         pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
@@ -313,14 +361,12 @@ class PivController(object):
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
         if sw >> 4 == 0x63c:
             tries = sw & 0xf
-            print('Tries: %d' % tries)
             for _ in range(tries):
                 self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(''), check=None)
         _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
                               check=None)
         if sw >> 4 == 0x63c:
             tries = sw & 0xf
-            print('Tries: %d' % tries)
             for _ in range(tries):
                 self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
                               check=None)
@@ -328,27 +374,30 @@ class PivController(object):
 
     def get_data(self, object_id):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
-        tlv = Tlv(self.send_cmd(INS.GET_DATA, 0x3f, 0xff, Tlv(0x5c, id_bytes)))
+        tlv = Tlv(self.send_cmd(INS.GET_DATA, 0x3f, 0xff,
+                                Tlv(TAG.OBJ_ID, id_bytes)))
+        if tlv.tag != TAG.OBJ_DATA:
+            raise ValueError('Wrong tag in response data!')
         return tlv.value
 
     def put_data(self, object_id, data):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
-        self.send_cmd(INS.PUT_DATA, 0x3f, 0xff, Tlv(0x5c, id_bytes) +
-                      Tlv(0x53, data))
+        self.send_cmd(INS.PUT_DATA, 0x3f, 0xff, Tlv(TAG.OBJ_ID, id_bytes) +
+                      Tlv(TAG.OBJ_DATA, data))
 
     def generate_key(self, slot, algorithm, pin_policy=PIN_POLICY.DEFAULT,
                      touch_policy=TOUCH_POLICY.DEFAULT):
-        data = Tlv(TAG.ALGOS_SUPPORTED, Tlv(TAG.ALGO, bytes([algorithm])))
+        data = Tlv(0xac, Tlv(TAG.ALGO, bytes([algorithm])))
         if pin_policy:
             data += Tlv(TAG.PIN_POLICY, bytes([pin_policy]))
         if touch_policy:
             data += Tlv(TAG.TOUCH_POLICY, bytes([touch_policy]))
         resp = self.send_cmd(INS.GENERATE_ASYMMETRIC, 0, slot, data)
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
-            data = parse_tlvs(Tlv(resp[1:]).value)
+            data = _parse_tlv_dict(Tlv(resp[1:]).value)
             return rsa.RSAPublicNumbers(
-                int_from_bytes(data[1].value, 'big'),
-                int_from_bytes(data[0].value, 'big')
+                int_from_bytes(data[0x82], 'big'),
+                int_from_bytes(data[0x81], 'big')
             ).public_key(default_backend())
         else:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
@@ -370,32 +419,116 @@ class PivController(object):
 
     def import_certificate(self, slot, certificate):
         cert_data = certificate.public_bytes(Encoding.DER)
-        data = Tlv(0x70, cert_data) + Tlv(0x71, b'\0') + Tlv(0xfe)
-        self.put_data(OBJ.from_slot(slot), data)
+        self.put_data(OBJ.from_slot(slot), Tlv(TAG.CERTIFICATE, cert_data) +
+                      Tlv(TAG.CERT_INFO, b'\0') + Tlv(TAG.LRC))
 
     def read_certificate(self, slot):
-        data = parse_tlvs(self.get_data(OBJ.from_slot(slot)))
-        if data[1].value != b'\0':
+        data = _parse_tlv_dict(self.get_data(OBJ.from_slot(slot)))
+        if data[TAG.CERT_INFO] != b'\0':
             raise ValueError('Compressed certificates are not supported!')
-        return x509.load_der_x509_certificate(data[0].value, default_backend())
+        return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
+                                              default_backend())
 
     def attest(self, slot):
         return x509.load_der_x509_certificate(self.send_cmd(INS.ATTEST, slot),
                                               default_backend())
 
-    def sign_data(self, slot, algorithm, message):
-        if algorithm == ALGO.RSA1024:
-            l = 128
-        elif algorithm == ALGO.RSA2048:
-            l = 256
-        elif algorithm == ALGO.ECCP256:
-            l = 32
-        elif algorithm == ALGO.ECCP384:
-            l = 48
-        if len(message) > l:
-            raise ValueError('Message too long!')
+    def _raw_sign_decrypt(self, slot, algorithm, payload, condition):
+        if not condition(len(payload.value)):
+            raise ValueError('Input has invalid length!')
 
-        data = Tlv(0x7c, Tlv(0x82) + Tlv(0x81, message))
+        data = Tlv(TAG.DYN_AUTH, Tlv(0x82) + payload)
+        resp = self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data)
+        return Tlv(Tlv(resp).value).value
 
-        resp = Tlv(self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data))
-        return Tlv(resp.value).value
+    def sign_raw(self, slot, algorithm, message):
+        return self._raw_sign_decrypt(slot, algorithm, Tlv(0x81, message),
+                                      _sign_len_conditions[algorithm])
+
+    def decrypt_raw(self, slot, algorithm, message):
+        return self._raw_sign_decrypt(slot, algorithm, Tlv(0x85, message),
+                                      _decrypt_len_conditions[algorithm])
+
+    # Not sure if these should go in this class or somewhere else
+
+    def update_chuid(self):
+        self.put_data(
+            OBJ.CHUID,
+            Tlv(0x30, b'\xd4\xe7\x39\xda\x73\x9c\xed\x39\xce\x73\x9d\x83\x68'
+                b'\x58\x21\x08\x42\x10\x84\x21\x38\x42\x10\xc3\xf5') +
+            Tlv(0x34, os.urandom(16)) +
+            Tlv(0x35, b'\x32\x30\x33\x30\x30\x31\x30\x31') +
+            Tlv(0x3e) +
+            Tlv(TAG.LRC)
+        )
+
+    def update_ccc(self):
+        self.put_data(
+            OBJ.CAPABILITY,
+            Tlv(0xf0, b'\xa0\x00\x00\x01\x16\xff\x02' + os.urandom(14)) +
+            Tlv(0xf1, b'\x21') +
+            Tlv(0xf2, b'\x21') +
+            Tlv(0xf3) +
+            Tlv(0xf4, b'\x00') +
+            Tlv(0xf5, b'\x10') +
+            Tlv(0xf6) +
+            Tlv(0xf7) +
+            Tlv(0xfa) +
+            Tlv(0xfb) +
+            Tlv(0xfc) +
+            Tlv(0xfd) +
+            Tlv(TAG.LRC)
+        )
+
+    def sign_cert_builder(self, slot, algorithm, builder):
+        dummy_key = _dummy_key(algorithm)
+        cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
+        message = cert.tbs_certificate_bytes
+
+        if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
+            message = _pkcs1_15_pad(algorithm, message)
+        elif algorithm in (ALGO.ECCP256, ALGO.ECCP384):
+            h = hashes.Hash(hashes.SHA256(), default_backend())
+            h.update(message)
+            message = h.finalize()
+
+        sig = self.sign_raw(slot, algorithm, message)
+        seq = parse_tlvs(Tlv(cert.public_bytes(Encoding.DER)).value)
+        # Replace signature, add unused bits = 0
+        seq[2] = Tlv(seq[2].tag, b'\0' + sig)
+        # Re-assemble sequence
+        der = Tlv(0x30, b''.join(seq))
+
+        return x509.load_der_x509_certificate(der, default_backend())
+
+    def sign_csr_builder(self, slot, public_key, builder):
+        algorithm = ALGO.from_public_key(public_key)
+        dummy_key = _dummy_key(algorithm)
+        cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
+        message = cert.tbs_certrequest_bytes
+
+        if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
+            message = _pkcs1_15_pad(algorithm, message)
+            dummy_bytes = dummy_key.public_key().public_bytes(
+                Encoding.DER, PublicFormat.PKCS1)
+            pub_bytes = public_key.public_bytes(
+                Encoding.DER, PublicFormat.PKCS1)
+        elif algorithm in (ALGO.ECCP256, ALGO.ECCP384):
+            h = hashes.Hash(hashes.SHA256(), default_backend())
+            h.update(message)
+            message = h.finalize()
+            dummy_bytes = dummy_key.public_key().public_bytes(
+                Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+            pub_bytes = public_key.public_bytes(
+                Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+
+        sig = self.sign_raw(slot, algorithm, message)
+        seq = parse_tlvs(Tlv(cert.public_bytes(Encoding.DER)).value)
+        # Replace public key
+        seq[0] = seq[0].replace(dummy_bytes, pub_bytes)
+        # Replace signature, add unused bits = 0
+        seq[2] = Tlv(seq[2].tag, b'\0' + sig)
+        # Re-assemble sequence
+        der = Tlv(0x30, b''.join(seq))
+
+        return x509.load_der_x509_csr(der, default_backend())
