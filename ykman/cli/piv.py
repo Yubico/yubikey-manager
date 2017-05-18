@@ -65,7 +65,7 @@ def int_in_range(minval, maxval):
 @click_skip_on_help
 def piv(ctx):
     """
-    Manage YubiKey OpenPGP functions.
+    Manage YubiKey PIV functions.
     """
     try:
         controller = PivController(ctx.obj['dev'].driver)
@@ -80,7 +80,7 @@ def piv(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OpenPGP functionality.
+    Display status of PIV functionality.
     """
     controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
