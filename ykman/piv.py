@@ -37,7 +37,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+from collections import OrderedDict
 import struct
 import six
 import os
@@ -151,6 +153,7 @@ class OBJ(IntEnum):
     RETIRED19 = 0x5fc11f
     RETIRED20 = 0x5fc120
 
+    PIVMAN_DATA = 0x5fff00
     ATTESTATION = 0x5fff01
 
     @classmethod
@@ -285,16 +288,71 @@ _decrypt_len_conditions = {
 }
 
 
+def _derive_key(pin, salt):
+    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())
+    return kdf.derive(pin)
+
+
+class PivmanData(object):
+
+    def __init__(self, raw_data=Tlv(0x80)):
+        data = _parse_tlv_dict(Tlv(raw_data).value)
+        self._flags = struct.unpack('>B', data[0x80]) if 0x80 in data else None
+        self.salt = data.get(0x82)
+        self.pin_timestamp = struct.unpack('>I', data[0x83]) \
+            if 0x83 in data else None
+
+    def _get_flag(self, mask):
+        return bool((self._flags or 0) & mask)
+
+    def _set_flag(self, mask, value):
+        if value:
+            self._flags = (self._flags or 0) | mask
+        elif self._flags is not None:
+            self._flags &= ~mask
+
+    @property
+    def puk_blocked(self):
+        return self._get_flag(0x01)
+
+    @puk_blocked.setter
+    def puk_blocked(self, value):
+        self._set_flag(0x01, value)
+
+    def get_bytes(self):
+        data = b''
+        if self._flags is not None:
+            data += Tlv(0x81, struct.pack('>B', self._flags))
+        if self.salt is not None:
+            data += Tlv(0x82, self.salt)
+        if self.pin_timestamp is not None:
+            data += Tlv(0x83, struct.pack('>I', self.pin_timestamp))
+        return Tlv(0x80, data)
+
+
 class PivController(object):
 
     def __init__(self, driver):
         driver.select(AID.PIV)
+        self._authenticated = False
         self._driver = driver
         self._version = self._read_version()
+        try:
+            self._pivman_data = PivmanData(self.get_data(OBJ.PIVMAN_DATA))
+        except APDUError:
+            self._pivman_data = PivmanData()
 
     @property
     def version(self):
         return self._version
+
+    @property
+    def has_derived_key(self):
+        return self._pivman_data.salt is not None
+
+    @property
+    def puk_blocked(self):
+        return self._pivman_data.puk_blocked
 
     def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW_OK):
         while len(data) > 0xff:
@@ -319,10 +377,16 @@ class PivController(object):
 
     def verify(self, pin):
         self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
+        if self.has_derived_key and not self._authenticated:
+            self.authenticate(_derive_key(pin, self._pivman_data.salt))
 
     def change_pin(self, old_pin, new_pin):
         self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
                       _pack_pin(old_pin) + _pack_pin(new_pin))
+        if self.has_derived_key:
+            if not self._authenticated:
+                self.authenticate(_derive_key(old_pin, self._pivman_data.salt))
+            self.use_derived_key(new_pin)
 
     def change_puk(self, old_puk, new_puk):
         self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
@@ -334,6 +398,30 @@ class PivController(object):
 
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
+
+    def use_derived_key(self, pin):
+        self.verify(pin)
+        if not self.puk_blocked:
+            _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
+                                  check=None)
+            if sw >> 4 == 0x63c:
+                tries = sw & 0xf
+                for _ in range(tries):
+                    self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
+                                  check=None)
+            self._pivman_data.puk_blocked = True
+
+        new_salt = os.urandom(16)
+        new_key = _derive_key(pin, new_salt)
+        self.send_cmd(INS.SET_MGMKEY, 0xff, 0xff,
+                      bytes([ALGO.TDES]) +
+                      Tlv(SLOT.CARD_MANAGEMENT, new_key))
+        self._pivman_data.salt = new_salt
+        self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
+
+    def set_pin_timestamp(self, timestamp):
+        self._pivman_data.pin_timestamp = timestamp
+        self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
 
     def authenticate(self, key):
         ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
@@ -352,10 +440,18 @@ class PivController(object):
         pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
         if not bytes_eq(pt2, pt2_cmp):
             raise ValueError('Device challenge did not match!')
+        self._authenticated = True
 
     def set_mgm_key(self, new_key, touch=False):
         self.send_cmd(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
                       bytes([ALGO.TDES]) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
+        if self.has_derived_key:
+            self._pivman_data.salt = None
+            self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
+
+    def get_pin_tries(self):
+        _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
+        return sw & 0xf
 
     def reset(self):
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
@@ -450,6 +546,15 @@ class PivController(object):
                                       _decrypt_len_conditions[algorithm])
 
     # Not sure if these should go in this class or somewhere else
+
+    def list_certificates(self):
+        certs = OrderedDict()
+        for slot in set(SLOT) - {SLOT.CARD_MANAGEMENT, SLOT.ATTESTATION}:
+            try:
+                certs[slot] = self.read_certificate(slot)
+            except APDUError:
+                pass
+        return certs
 
     def update_chuid(self):
         self.put_data(

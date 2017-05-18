@@ -28,9 +28,12 @@
 from __future__ import absolute_import
 
 from ..util import TRANSPORT
-from ..piv import PivController
+from ..piv import PivController, ALGO, OBJ
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_skip_on_help
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from binascii import b2a_hex
 import click
 
 
@@ -65,7 +68,7 @@ def int_in_range(minval, maxval):
 @click_skip_on_help
 def piv(ctx):
     """
-    Manage YubiKey OpenPGP functions.
+    Manage YubiKey PIV functions.
     """
     try:
         controller = PivController(ctx.obj['dev'].driver)
@@ -80,11 +83,29 @@ def piv(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OpenPGP functionality.
+    Display status of PIV functionality.
     """
     controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
-    # TODO: Add CHUID, CCC, slot info
+    click.echo('PIN tries remaining: %d' % controller.get_pin_tries())
+    click.echo('CHUID:\t' + b2a_hex(controller.get_data(OBJ.CHUID))
+               .decode('ascii'))
+    click.echo('CCC:\t' + b2a_hex(controller.get_data(OBJ.CAPABILITY))
+               .decode('ascii'))
+    for (slot, cert) in controller.list_certificates().items():
+        click.echo('Slot %02x:' % slot)
+        click.echo('\tAlgorithm:\t%s' % ALGO.from_public_key(cert.public_key())
+                   .name)
+        cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+        cn = cn[0].value if len(cn) > 0 else 'None'
+        click.echo('\tSubject CN:\t%s' % cn)
+        cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+        cn = cn[0].value if len(cn) > 0 else 'None'
+        click.echo('\tIssuer CN:\t%s' % cn)
+        click.echo('\tFingerprint:\t%s' % b2a_hex(
+            cert.fingerprint(hashes.SHA256())).decode('ascii'))
+        click.echo('\tNot before:\t%s' % cert.not_valid_before)
+        click.echo('\tNot after:\t%s' % cert.not_valid_after)
 
 
 @piv.command()
