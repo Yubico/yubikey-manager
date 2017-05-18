@@ -46,4 +46,9 @@ WARNING: ONLY run these on a dedicated developer key, as it will permanently del
 
 To run integration tests:
 
-    $ INTEGRATION_TESTS=TRUE python setup.py test
+   $ INTEGRATION_TESTS=TRUE python setup.py test
+
+== Using vagrant for development
+
+A Vagrantfile with a development environment based on Ubuntu 16.04 is included in the repository.
+Modify the provision.sh script to set up a USB filter to capture the device with VirtualBox.
