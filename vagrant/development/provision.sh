@@ -20,11 +20,8 @@ pip install --upgrade pip
 # Install flake8 for linting
 pip install pre-commit flake8
 
-# Clone repository and submodules
-git clone --recursive https://github.com/Yubico/yubikey-manager.git
-
 # Install editable version of repository, install pre-commit hook
-cd yubikey-manager && pip install -e . && chown -R ubuntu . && pre-commit install
+cd /vagrant && pip install -e . && chown -R ubuntu . && pre-commit install
 
 # Add a very permissive udev rule to be able to access YubiKey Slots over ssh
 echo 'ATTRS{idVendor}=="1050", MODE="0777"' > /etc/udev/rules.d/99-yubico.rules
