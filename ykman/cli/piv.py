@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from ..util import TRANSPORT
-from ..piv import PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY
+from ..piv import PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_skip_on_help, click_callback
 from cryptography import x509
@@ -102,10 +102,21 @@ def info(ctx):
     controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
     click.echo('PIN tries remaining: %d' % controller.get_pin_tries())
-    click.echo('CHUID:\t' + b2a_hex(controller.get_data(OBJ.CHUID))
-               .decode('ascii'))
-    click.echo('CCC:\t' + b2a_hex(controller.get_data(OBJ.CAPABILITY))
-               .decode('ascii'))
+
+    try:
+        chuid = b2a_hex(controller.get_data(OBJ.CHUID)).decode()
+    except APDUError as e:
+        if e.sw == SW.NOT_FOUND:
+            chuid = 'No data available.'
+    click.echo('CHUID:\t' + chuid)
+
+    try:
+        ccc = b2a_hex(controller.get_data(OBJ.CAPABILITY)).decode()
+    except APDUError as e:
+        if e.sw == SW.NOT_FOUND:
+            ccc = 'No data available.'
+    click.echo('CCC: \t' + ccc)
+
     for (slot, cert) in controller.list_certificates().items():
         click.echo('Slot %02x:' % slot)
         click.echo('\tAlgorithm:\t%s' % ALGO.from_public_key(cert.public_key())
