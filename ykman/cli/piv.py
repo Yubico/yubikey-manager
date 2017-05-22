@@ -28,12 +28,12 @@
 from __future__ import absolute_import
 
 from ..util import TRANSPORT
-from ..piv import PivController, ALGO, OBJ
+from ..piv import PivController, ALGO, OBJ, SLOT
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
-from .util import click_skip_on_help
+from .util import click_skip_on_help, click_callback
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
-from binascii import b2a_hex
+from cryptography.hazmat.primitives import hashes, serialization
+from binascii import b2a_hex, a2b_hex
 import click
 
 
@@ -61,6 +61,20 @@ def int_in_range(minval, maxval):
         raise ValueError('Invalid value: {}. Must be in range {}-{}'.format(
             intval, minval, maxval))
     return inner
+
+
+@click_callback()
+def click_parse_piv_slot(ctx, param, val):
+    try:
+        return SLOT(int(val, 16))
+    except:
+        raise ValueError(val)
+
+
+click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
+click_management_key_option = click.option(
+    '-m', '--management-key',
+    help='A management key is required for administrative tasks.')
 
 
 @click.group()
@@ -128,7 +142,37 @@ def reset(ctx):
     click.echo('Your YubiKey now has the default PIN, PUK and Management Key:')
     click.echo('\tPIN:\t123456')
     click.echo('\tPUK:\t12345678')
-    click.echo('\tKey:\t010203040506070801020304050607080102030405060708')
+    click.echo(
+        '\tManagement Key:\t010203040506070801020304050607080102030405060708')
+
+
+@piv.command()
+@click.pass_context
+@click_slot_argument
+@click_management_key_option
+@click.option(
+    '-a', '--algorithm', help='Algorithm to use in key generation.',
+    type=click.Choice(
+        ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048')
+@click.option(
+    '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
+    default='PEM', help='Key serialization format.')
+def generate(ctx, slot, management_key, algorithm, key_format):
+    """
+    Generate a keypair in one of the slots.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = click.prompt(
+            'Enter a management key', default='', show_default=False)
+    controller.authenticate(a2b_hex(management_key))
+    public_key = controller.generate_key(slot, ALGO.from_string(algorithm))
+    key_encoding = serialization.Encoding.PEM \
+        if key_format == 'PEM' else serialization.Encoding.DER
+    public_key_serialised = public_key.public_bytes(
+            encoding=key_encoding,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo)
+    click.echo(public_key_serialised)
 
 
 piv.transports = TRANSPORT.CCID
