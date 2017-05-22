@@ -495,11 +495,11 @@ class PivController(object):
 
     def generate_key(self, slot, algorithm, pin_policy=PIN_POLICY.DEFAULT,
                      touch_policy=TOUCH_POLICY.DEFAULT):
-        data = Tlv(0xac, Tlv(TAG.ALGO, bytes([algorithm])))
-        if pin_policy:
-            data += Tlv(TAG.PIN_POLICY, bytes([pin_policy]))
-        if touch_policy:
-            data += Tlv(TAG.TOUCH_POLICY, bytes([touch_policy]))
+        data = Tlv(0xac, Tlv(TAG.ALGO, six.int2byte(algorithm)))
+        if pin_policy is not None:
+            data += Tlv(TAG.PIN_POLICY, six.int2byte(pin_policy))
+        if touch_policy is not None:
+            data += Tlv(TAG.TOUCH_POLICY, six.int2byte(touch_policy))
         resp = self.send_cmd(INS.GENERATE_ASYMMETRIC, 0, slot, data)
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
             data = _parse_tlv_dict(Tlv(resp[1:]).value)
