@@ -83,6 +83,18 @@ class ALGO(IntEnum):
                 return cls.ECCP384
         raise ValueError('Unsupported key type!')
 
+    @classmethod
+    def from_string(cls, algorithm):
+        if algorithm == 'RSA1024':
+            return cls.RSA1024
+        if algorithm == 'RSA2048':
+            return cls.RSA2048
+        if algorithm == 'ECCP256':
+            return cls.ECCP256
+        if algorithm == 'ECCP384':
+            return cls.ECCP384
+        raise ValueError('Unsupported algorithm!')
+
 
 @unique
 class SLOT(IntEnum):
