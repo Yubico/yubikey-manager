@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from ..util import TRANSPORT
-from ..piv import PivController, ALGO, OBJ, SLOT
+from ..piv import PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_skip_on_help, click_callback
 from cryptography import x509
@@ -157,7 +157,19 @@ def reset(ctx):
 @click.option(
     '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
     default='PEM', help='Key serialization format.')
-def generate(ctx, slot, management_key, algorithm, key_format):
+@click.option(
+    '-p', '--pin-policy',
+    type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
+    default='DEFFAULT',
+    help='PIN policy for slot where keypair is generated.')
+@click.option(
+    '-t', '--touch-policy',
+    type=click.Choice(['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
+    default='DEFAULT',
+    help='Touch policy for slot where keypair is generated.')
+def generate(
+    ctx, slot, management_key, algorithm, key_format, touch_policy,
+        pin_policy):
     """
     Generate a keypair in one of the slots.
     """
@@ -166,7 +178,11 @@ def generate(ctx, slot, management_key, algorithm, key_format):
         management_key = click.prompt(
             'Enter a management key', default='', show_default=False)
     controller.authenticate(a2b_hex(management_key))
-    public_key = controller.generate_key(slot, ALGO.from_string(algorithm))
+    public_key = controller.generate_key(
+        slot,
+        ALGO.from_string(algorithm),
+        PIN_POLICY.from_string(pin_policy),
+        TOUCH_POLICY.from_string(touch_policy))
     key_encoding = serialization.Encoding.PEM \
         if key_format == 'PEM' else serialization.Encoding.DER
     public_key_serialised = public_key.public_bytes(

@@ -193,6 +193,18 @@ class PIN_POLICY(IntEnum):
     ONCE = 0x2
     ALWAYS = 0x3
 
+    @classmethod
+    def from_string(cls, pin_policy):
+        if pin_policy == 'DEFAULT':
+            return cls.DEFAULT
+        if pin_policy == 'NEVER':
+            return cls.NEVER
+        if pin_policy == 'ONCE':
+            return cls.ONCE
+        if pin_policy == 'ALWAYS':
+            return cls.ALWAYS
+        raise ValueError('Unsupported pin policy!')
+
 
 @unique
 class TOUCH_POLICY(IntEnum):
@@ -200,6 +212,18 @@ class TOUCH_POLICY(IntEnum):
     NEVER = 0x1
     ALWAYS = 0x2
     CACHED = 0x3
+
+    @classmethod
+    def from_string(cls, touch_policy):
+        if touch_policy == 'DEFAULT':
+            return cls.DEFAULT
+        if touch_policy == 'NEVER':
+            return cls.NEVER
+        if touch_policy == 'ALWAYS':
+            return cls.ALWAYS
+        if touch_policy == 'CACHED':
+            return cls.CACHED
+        raise ValueError('Unsupported touch policy!')
 
 
 @unique
