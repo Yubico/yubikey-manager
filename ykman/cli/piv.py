@@ -77,6 +77,19 @@ click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
 click_management_key_option = click.option(
     '-m', '--management-key',
     help='A management key is required for administrative tasks.')
+click_key_format_option = click.option(
+    '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
+    default='PEM', help='Key serialization format.')
+click_pin_policy_option = click.option(
+    '-p', '--pin-policy',
+    type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
+    default='DEFAULT',
+    help='PIN policy for slot.')
+click_touch_policy_option = click.option(
+    '-t', '--touch-policy',
+    type=click.Choice(['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
+    default='DEFAULT',
+    help='Touch policy for slot.')
 
 
 @click.group()
@@ -167,22 +180,12 @@ def reset(ctx):
     '-a', '--algorithm', help='Algorithm to use in key generation.',
     type=click.Choice(
         ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048')
-@click.option(
-    '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
-    default='PEM', help='Key serialization format.')
-@click.option(
-    '-p', '--pin-policy',
-    type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
-    default='DEFFAULT',
-    help='PIN policy for slot where keypair is generated.')
-@click.option(
-    '-t', '--touch-policy',
-    type=click.Choice(['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
-    default='DEFAULT',
-    help='Touch policy for slot where keypair is generated.')
+@click_key_format_option
+@click_pin_policy_option
+@click_touch_policy_option
 def generate(
-    ctx, slot, management_key, algorithm, key_format, touch_policy,
-        pin_policy):
+    ctx, slot, management_key, algorithm, key_format, pin_policy,
+        touch_policy):
     """
     Generate a assymetric key pair.
     """
