@@ -187,8 +187,9 @@ def reset(ctx):
 @click_key_format_option
 @click_pin_policy_option
 @click_touch_policy_option
+@click.argument('output', type=click.File('wb'))
 def generate(
-    ctx, slot, management_key, algorithm, key_format, pin_policy,
+    ctx, slot, output, management_key, algorithm, key_format, pin_policy,
         touch_policy):
     """
     Generate a assymetric key pair.
@@ -205,10 +206,9 @@ def generate(
         TOUCH_POLICY.from_string(touch_policy))
     key_encoding = serialization.Encoding.PEM \
         if key_format == 'PEM' else serialization.Encoding.DER
-    public_key_serialised = public_key.public_bytes(
+    output.write(public_key.public_bytes(
             encoding=key_encoding,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo)
-    click.echo(public_key_serialised)
+            format=serialization.PublicFormat.SubjectPublicKeyInfo))
 
 
 @piv.command('import-certificate')
