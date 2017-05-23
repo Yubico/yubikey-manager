@@ -33,8 +33,10 @@ from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_skip_on_help, click_callback
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.backends import default_backend
 from binascii import b2a_hex, a2b_hex
 import click
+import six
 
 
 def one_of(data):
@@ -182,7 +184,7 @@ def generate(
     ctx, slot, management_key, algorithm, key_format, touch_policy,
         pin_policy):
     """
-    Generate a keypair in one of the slots.
+    Generate a assymetric key pair.
     """
     controller = ctx.obj['controller']
     if not management_key:
@@ -200,6 +202,32 @@ def generate(
             encoding=key_encoding,
             format=serialization.PublicFormat.SubjectPublicKeyInfo)
     click.echo(public_key_serialised)
+
+
+@piv.command('import-certificate')
+@click.pass_context
+@click_slot_argument
+@click_management_key_option
+@click.argument('input', type=click.File('r'))
+@click.option(
+    '-f', '--cert-format',
+    type=click.Choice(['PEM', 'DER']), default='PEM',
+    help='Certificate serialization format.')
+def import_certificate(ctx, slot, management_key, input, cert_format):
+    """
+    Import a X.509 certificate.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = click.prompt(
+            'Enter a management key', default='', show_default=False)
+    controller.authenticate(a2b_hex(management_key))
+    data = six.b(input.read())
+    if cert_format == 'PEM':
+        cert = x509.load_pem_x509_certificate(data, default_backend())
+    elif cert_format == 'DER':
+        cert = x509.load_der_x509_certificate(data, default_backend())
+    controller.import_certificate(slot, cert)
 
 
 piv.transports = TRANSPORT.CCID
