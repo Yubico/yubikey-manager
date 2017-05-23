@@ -233,4 +233,40 @@ def import_certificate(ctx, slot, management_key, input, cert_format):
     controller.import_certificate(slot, cert)
 
 
+@piv.command('import-key')
+@click.pass_context
+@click_slot_argument
+@click_management_key_option
+@click_key_format_option
+@click_pin_policy_option
+@click_touch_policy_option
+@click.argument('input', type=click.File('r'))
+def import_key(
+        ctx, slot, management_key, input, key_format, pin_policy, touch_policy):
+    """
+    Import a private key.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = click.prompt(
+            'Enter a management key', default='', show_default=False)
+    controller.authenticate(a2b_hex(management_key))
+    data = six.b(input.read())
+    password = None  # TODO: add support
+    if key_format == 'PEM':
+        private_key = serialization.load_pem_private_key(
+            data, password=password,
+            backend=default_backend())
+    elif key_format == 'DER':
+        private_key = serialization.load_der_private_key(
+            data, password=password,
+            backend=default_backend())
+
+    controller.import_key(
+            slot,
+            private_key,
+            pin_policy=PIN_POLICY.from_string(pin_policy),
+            touch_policy=TOUCH_POLICY.from_string(touch_policy))
+
+
 piv.transports = TRANSPORT.CCID
