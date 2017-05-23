@@ -270,4 +270,25 @@ def import_key(
             touch_policy=TOUCH_POLICY.from_string(touch_policy))
 
 
+@piv.command()
+@click.pass_context
+@click_slot_argument
+@click_cert_format_option
+@click.argument('output', type=click.File('wb'))
+def attest(ctx, slot, output, cert_format):
+    """
+    Generate a attestation certificate for a key.
+    """
+    controller = ctx.obj['controller']
+    try:
+        cert = controller.attest(slot)
+    except APDUError:
+        ctx.fail('Attestation failed. Is there a key in the selected slot?')
+    if cert_format == 'PEM':
+        encoding = serialization.Encoding.PEM
+    elif cert_format == 'DER':
+        encoding = serialization.Encoding.DER
+    output.write(cert.public_bytes(encoding=encoding))
+
+
 piv.transports = TRANSPORT.CCID
