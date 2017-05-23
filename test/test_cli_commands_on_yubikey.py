@@ -222,3 +222,19 @@ class TestOATH(unittest.TestCase):
         ykman_cli('oath', 'add', 'remove-me', 'abba')
         ykman_cli('oath', 'remove', 'remove-me')
         self.assertNotIn('remove-me', ykman_cli('oath', 'list'))
+
+
+@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
+@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
+@unittest.skipIf(
+    not _has_mode(TRANSPORT.CCID),
+    "CCID needs to be enabled for this test.")
+class TestPIV(unittest.TestCase):
+
+    def test_piv_info(self):
+        output = ykman_cli('piv', 'info')
+        self.assertIn('PIV version:', output)
+
+    def test_piv_reset(self):
+        output = ykman_cli('piv', 'reset', '-f')
+        self.assertIn('Success!', output)
