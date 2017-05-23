@@ -80,6 +80,10 @@ click_management_key_option = click.option(
 click_key_format_option = click.option(
     '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
     default='PEM', help='Key serialization format.')
+click_cert_format_option = click.option(
+    '-f', '--cert-format',
+    type=click.Choice(['PEM', 'DER']), default='PEM',
+    help='Certificate serialization format.')
 click_pin_policy_option = click.option(
     '-p', '--pin-policy',
     type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
@@ -212,10 +216,7 @@ def generate(
 @click_slot_argument
 @click_management_key_option
 @click.argument('input', type=click.File('r'))
-@click.option(
-    '-f', '--cert-format',
-    type=click.Choice(['PEM', 'DER']), default='PEM',
-    help='Certificate serialization format.')
+@click_cert_format_option
 def import_certificate(ctx, slot, management_key, input, cert_format):
     """
     Import a X.509 certificate.
