@@ -84,6 +84,8 @@ def click_parse_cert_format(ctx, param, val):
 
 
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
+click_input_argument = click.argument('input', type=click.File('r'))
+click_output_argument = click.argument('output', type=click.File('wb'))
 click_management_key_option = click.option(
     '-m', '--management-key',
     help='A management key is required for administrative tasks.')
@@ -197,7 +199,7 @@ def reset(ctx):
 @click_key_format_option
 @click_pin_policy_option
 @click_touch_policy_option
-@click.argument('output', type=click.File('wb'))
+@click_output_argument
 def generate(
     ctx, slot, output, management_key, algorithm, key_format, pin_policy,
         touch_policy):
@@ -225,7 +227,7 @@ def generate(
 @click.pass_context
 @click_slot_argument
 @click_management_key_option
-@click.argument('input', type=click.File('r'))
+@click_input_argument
 @click_cert_format_option
 def import_certificate(ctx, slot, management_key, input, cert_format):
     """
@@ -251,7 +253,7 @@ def import_certificate(ctx, slot, management_key, input, cert_format):
 @click_key_format_option
 @click_pin_policy_option
 @click_touch_policy_option
-@click.argument('input', type=click.File('r'))
+@click_input_argument
 def import_key(
         ctx, slot, management_key, input, key_format, pin_policy, touch_policy):
     """
@@ -284,7 +286,7 @@ def import_key(
 @click.pass_context
 @click_slot_argument
 @click_cert_format_option
-@click.argument('output', type=click.File('wb'))
+@click_output_argument
 def attest(ctx, slot, output, cert_format):
     """
     Generate a attestation certificate for a key.
@@ -301,7 +303,7 @@ def attest(ctx, slot, output, cert_format):
 @click.pass_context
 @click_slot_argument
 @click_cert_format_option
-@click.argument('output', type=click.File('wb'))
+@click_output_argument
 def export_certificate(ctx, slot, cert_format, output):
     """
     Export a X.509 certificate.
