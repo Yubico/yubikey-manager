@@ -197,7 +197,7 @@ def reset(ctx):
         '\tManagement Key:\t010203040506070801020304050607080102030405060708')
 
 
-@piv.command()
+@piv.command('generate-key')
 @click.pass_context
 @click_slot_argument
 @click_management_key_option
@@ -209,7 +209,7 @@ def reset(ctx):
 @click_pin_policy_option
 @click_touch_policy_option
 @click_output_argument
-def generate(
+def generate_key(
     ctx, slot, output, management_key, algorithm, key_format, pin_policy,
         touch_policy):
     """
