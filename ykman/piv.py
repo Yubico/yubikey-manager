@@ -557,8 +557,9 @@ class PivController(object):
 
     def read_certificate(self, slot):
         data = _parse_tlv_dict(self.get_data(OBJ.from_slot(slot)))
-        if data[TAG.CERT_INFO] != b'\0':
-            raise ValueError('Compressed certificates are not supported!')
+        if TAG.CERT_INFO in data:  # Not available in attestation slot
+            if data[TAG.CERT_INFO] != b'\0':
+                raise ValueError('Compressed certificates are not supported!')
         return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
                                               default_backend())
 
