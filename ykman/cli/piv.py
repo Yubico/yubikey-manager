@@ -73,6 +73,16 @@ def click_parse_piv_slot(ctx, param, val):
         raise ValueError(val)
 
 
+@click_callback()
+def click_parse_cert_format(ctx, param, val):
+    if val == 'PEM':
+        return serialization.Encoding.PEM
+    elif val == 'DER':
+        return serialization.Encoding.DER
+    else:
+        raise ValueError(val)
+
+
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
 click_management_key_option = click.option(
     '-m', '--management-key',
@@ -83,7 +93,7 @@ click_key_format_option = click.option(
 click_cert_format_option = click.option(
     '-f', '--cert-format',
     type=click.Choice(['PEM', 'DER']), default='PEM',
-    help='Certificate serialization format.')
+    help='Certificate format.', callback=click_parse_cert_format)
 click_pin_policy_option = click.option(
     '-p', '--pin-policy',
     type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
@@ -227,9 +237,9 @@ def import_certificate(ctx, slot, management_key, input, cert_format):
             'Enter a management key', default='', show_default=False)
     controller.authenticate(a2b_hex(management_key))
     data = six.b(input.read())
-    if cert_format == 'PEM':
+    if cert_format == serialization.Encoding.PEM:
         cert = x509.load_pem_x509_certificate(data, default_backend())
-    elif cert_format == 'DER':
+    elif cert_format == serialization.Encoding.DER:
         cert = x509.load_der_x509_certificate(data, default_backend())
     controller.import_certificate(slot, cert)
 
@@ -284,11 +294,7 @@ def attest(ctx, slot, output, cert_format):
         cert = controller.attest(slot)
     except APDUError:
         ctx.fail('Attestation failed.')
-    if cert_format == 'PEM':
-        encoding = serialization.Encoding.PEM
-    elif cert_format == 'DER':
-        encoding = serialization.Encoding.DER
-    output.write(cert.public_bytes(encoding=encoding))
+    output.write(cert.public_bytes(encoding=cert_format))
 
 
 @piv.command('export-certificate')
@@ -306,11 +312,7 @@ def export_certificate(ctx, slot, cert_format, output):
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail('No certificate found.')
-    if cert_format == 'PEM':
-        encoding = serialization.Encoding.PEM
-    elif cert_format == 'DER':
-        encoding = serialization.Encoding.DER
-    output.write(cert.public_bytes(encoding=encoding))
+    output.write(cert.public_bytes(encoding=cert_format))
 
 
 piv.transports = TRANSPORT.CCID
