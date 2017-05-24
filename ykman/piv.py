@@ -233,6 +233,7 @@ class SW(IntEnum):
     MORE_DATA = 0x61
     INVALID_INSTRUCTION = 0x6d00
     NOT_FOUND = 0x6a82
+    ACCESS_DENIED = 0x6982
 
 
 PIN = 0x80

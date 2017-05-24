@@ -83,12 +83,21 @@ def click_parse_cert_format(ctx, param, val):
         raise ValueError(val)
 
 
+@click_callback()
+def click_parse_management_key(ctx, param, val):
+    try:
+        return a2b_hex(val)
+    except:
+        return ValueError(val)
+
+
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
 click_input_argument = click.argument('input', type=click.File('r'))
 click_output_argument = click.argument('output', type=click.File('wb'))
 click_management_key_option = click.option(
     '-m', '--management-key',
-    help='A management key is required for administrative tasks.')
+    help='A management key is required for administrative tasks.',
+    callback=click_parse_management_key)
 click_key_format_option = click.option(
     '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
     default='PEM', help='Key serialization format.')
@@ -208,9 +217,8 @@ def generate(
     """
     controller = ctx.obj['controller']
     if not management_key:
-        management_key = click.prompt(
-            'Enter a management key', default='', show_default=False)
-    controller.authenticate(a2b_hex(management_key))
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
     public_key = controller.generate_key(
         slot,
         ALGO.from_string(algorithm),
@@ -235,9 +243,8 @@ def import_certificate(ctx, slot, management_key, input, cert_format):
     """
     controller = ctx.obj['controller']
     if not management_key:
-        management_key = click.prompt(
-            'Enter a management key', default='', show_default=False)
-    controller.authenticate(a2b_hex(management_key))
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
     data = six.b(input.read())
     if cert_format == serialization.Encoding.PEM:
         cert = x509.load_pem_x509_certificate(data, default_backend())
@@ -261,9 +268,8 @@ def import_key(
     """
     controller = ctx.obj['controller']
     if not management_key:
-        management_key = click.prompt(
-            'Enter a management key', default='', show_default=False)
-    controller.authenticate(a2b_hex(management_key))
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
     data = six.b(input.read())
     password = None  # TODO: add support
     if key_format == 'PEM':
@@ -315,6 +321,39 @@ def export_certificate(ctx, slot, cert_format, output):
         if e.sw == SW.NOT_FOUND:
             ctx.fail('No certificate found.')
     output.write(cert.public_bytes(encoding=cert_format))
+
+
+@piv.command()
+@click.pass_context
+@click_management_key_option
+def init(ctx, management_key):
+    """
+    Generate a CHUID and CCC on the device.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
+    controller.update_chuid()
+    controller.update_ccc()
+    click.echo('A CHUID and CCC generated.')
+
+
+def _prompt_management_key(ctx):
+    management_key = click.prompt(
+        'Enter a management key', default='', show_default=False)
+    try:
+        return a2b_hex(management_key)
+    except:
+        ctx.fail('Wrong format on management key.')
+
+
+def _authenticate(ctx, controller, management_key):
+    try:
+        controller.authenticate(management_key)
+    except APDUError as e:
+        if e.sw == SW.ACCESS_DENIED:
+            ctx.fail('Wrong management key.')
 
 
 piv.transports = TRANSPORT.CCID
