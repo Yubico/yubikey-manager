@@ -283,7 +283,29 @@ def attest(ctx, slot, output, cert_format):
     try:
         cert = controller.attest(slot)
     except APDUError:
-        ctx.fail('Attestation failed. Is there a key in the selected slot?')
+        ctx.fail('Attestation failed.')
+    if cert_format == 'PEM':
+        encoding = serialization.Encoding.PEM
+    elif cert_format == 'DER':
+        encoding = serialization.Encoding.DER
+    output.write(cert.public_bytes(encoding=encoding))
+
+
+@piv.command('export-certificate')
+@click.pass_context
+@click_slot_argument
+@click_cert_format_option
+@click.argument('output', type=click.File('wb'))
+def export_certificate(ctx, slot, cert_format, output):
+    """
+    Export a X.509 certificate.
+    """
+    controller = ctx.obj['controller']
+    try:
+        cert = controller.read_certificate(slot)
+    except APDUError as e:
+        if e.sw == SW.NOT_FOUND:
+            ctx.fail('No certificate found.')
     if cert_format == 'PEM':
         encoding = serialization.Encoding.PEM
     elif cert_format == 'DER':
