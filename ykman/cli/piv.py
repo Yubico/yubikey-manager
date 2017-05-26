@@ -98,6 +98,8 @@ click_management_key_option = click.option(
     '-m', '--management-key',
     help='A management key is required for administrative tasks.',
     callback=click_parse_management_key)
+click_pin_option = click.option(
+    '-P', '--pin', help='PIN code.')
 click_key_format_option = click.option(
     '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
     default='PEM', help='Key serialization format.')
@@ -339,21 +341,51 @@ def init(ctx, management_key):
     click.echo('A CHUID and CCC generated.')
 
 
+@piv.command('set-pin-retries')
+@click.pass_context
+@click.argument('pin-retries', type=click.INT, metavar='PIN-RETRIES')
+@click.argument('puk-retries', type=click.INT, metavar='PUK-RETRIES')
+@click_management_key_option
+@click_pin_option
+def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
+    """
+    Set the number of PIN and PUK retries.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
+    if not pin:
+        pin = _prompt_pin(ctx)
+    _verify_pin(ctx, controller, pin)
+    controller.set_pin_retries(pin_retries, puk_retries)
+
+
 def _prompt_management_key(ctx):
     management_key = click.prompt(
         'Enter a management key', default='', show_default=False)
     try:
         return a2b_hex(management_key)
     except:
-        ctx.fail('Wrong format on management key.')
+        ctx.fail('Management key has the wrong format.')
+
+
+def _prompt_pin(ctx):
+    return click.prompt('Enter PIN', default='', show_default=False)
+
+
+def _verify_pin(ctx, controller, pin):
+    try:
+        controller.verify(pin)
+    except APDUError:
+        ctx.fail('PIN verification failed.')
 
 
 def _authenticate(ctx, controller, management_key):
     try:
         controller.authenticate(management_key)
-    except APDUError as e:
-        if e.sw == SW.ACCESS_DENIED:
-            ctx.fail('Wrong management key.')
+    except APDUError:
+        ctx.fail('Authentication with management key failed.')
 
 
 piv.transports = TRANSPORT.CCID
