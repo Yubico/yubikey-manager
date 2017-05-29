@@ -143,7 +143,11 @@ def info(ctx):
     """
     controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
-    click.echo('PIN tries remaining: %d' % controller.get_pin_tries())
+
+    # Largest possible number of PIN tries to get back is 15
+    tries = controller.get_pin_tries()
+    tries = '15 or more.' if tries == 15 else tries
+    click.echo('PIN tries remaining: %s' % tries)
 
     try:
         chuid = b2a_hex(controller.get_data(OBJ.CHUID)).decode()

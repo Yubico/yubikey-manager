@@ -488,6 +488,9 @@ class PivController(object):
             self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
 
     def get_pin_tries(self):
+        """
+        Note: Will return 15 for >= 15 tries remaining.
+        """
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
         return sw & 0xf
 
