@@ -34,9 +34,13 @@ from .util import click_skip_on_help, click_callback
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
+from cryptography import utils
 from binascii import b2a_hex, a2b_hex
 import click
 import six
+import os
+import datetime
 
 
 def one_of(data):
@@ -365,6 +369,68 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
         pin = _prompt_pin(ctx)
     _verify_pin(ctx, controller, pin)
     controller.set_pin_retries(pin_retries, puk_retries)
+
+
+@piv.command('generate-certificate')
+@click.pass_context
+@click_slot_argument
+@click_management_key_option
+@click_pin_option
+@click_input_argument
+@click.option(
+    '-a', '--algorithm', help='Algorithm used for the key pair.',
+    type=click.Choice(
+        ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), required=True)
+@click.option(
+    '-s', '--subject', help='A subject name for the certificate', required=True)
+@click.option(
+    '-i', '--issuer', help='A issuer name for the certificate', required=True)
+@click.option(
+    '-d', '--valid-days',
+    help='Number of days until the certificate expires.',
+    type=click.INT, default=365)
+def generate_certificate(
+    ctx, slot, management_key, pin, input,
+        algorithm, subject, issuer, valid_days):
+    """
+    Generate a self-signed X.509 certificate.
+
+    A private key need to exist in the slot.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
+    if not pin:
+        pin = _prompt_pin(ctx)
+    _verify_pin(ctx, controller, pin)
+
+    data = six.b(input.read())
+    public_key = serialization.load_pem_public_key(
+        data, default_backend())
+
+    builder = x509.CertificateBuilder()
+    builder = builder.public_key(public_key)
+    builder = builder.subject_name(
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
+    builder = builder.issuer_name(
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer), ]))
+
+    # x509.random_serial_number added in cryptography 1.6
+    serial = utils.int_from_bytes(os.urandom(20), "big") >> 1
+    builder = builder.serial_number(serial)
+
+    now = datetime.datetime.now()
+    builder = builder.not_valid_before(now)
+    builder = builder.not_valid_after(now + datetime.timedelta(days=valid_days))
+
+    try:
+        cert = controller.sign_cert_builder(
+            slot, ALGO.from_string(algorithm), builder)
+    except APDUError:
+        ctx.fail('Certificate generation failed')
+
+    controller.import_certificate(slot, cert)
 
 
 def _prompt_management_key(ctx):
