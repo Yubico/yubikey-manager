@@ -347,8 +347,10 @@ def init(ctx, management_key):
 
 @piv.command('set-pin-retries')
 @click.pass_context
-@click.argument('pin-retries', type=click.INT, metavar='PIN-RETRIES')
-@click.argument('puk-retries', type=click.INT, metavar='PUK-RETRIES')
+@click.argument(
+    'pin-retries', type=click.IntRange(1, 255), metavar='PIN-RETRIES')
+@click.argument(
+    'puk-retries', type=click.IntRange(1, 255), metavar='PUK-RETRIES')
 @click_management_key_option
 @click_pin_option
 def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
