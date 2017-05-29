@@ -223,7 +223,7 @@ def generate_key(
     ctx, slot, output, management_key, algorithm, key_format, pin_policy,
         touch_policy):
     """
-    Generate a assymetric key pair.
+    Generate a asymmetric key pair.
     """
     controller = ctx.obj['controller']
     if not management_key:
