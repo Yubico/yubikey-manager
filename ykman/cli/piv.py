@@ -465,6 +465,21 @@ def generate_certificate_signing_request(
     output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
 
 
+@piv.command('delete-certificate')
+@click.pass_context
+@click_slot_argument
+@click_management_key_option
+def delete_certificate(ctx, slot, management_key):
+    """
+    Delete a certificate.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = _prompt_management_key(ctx)
+    _authenticate(ctx, controller, management_key)
+    controller.delete_certificate(slot)
+
+
 def _prompt_management_key(ctx):
     management_key = click.prompt(
         'Enter a management key', default='',

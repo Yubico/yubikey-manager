@@ -567,6 +567,9 @@ class PivController(object):
         return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
                                               default_backend())
 
+    def delete_certificate(self, slot):
+        self.put_data(OBJ.from_slot(slot), b'')
+
     def attest(self, slot):
         return x509.load_der_x509_certificate(self.send_cmd(INS.ATTEST, slot),
                                               default_backend())
