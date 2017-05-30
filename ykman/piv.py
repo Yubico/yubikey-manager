@@ -239,6 +239,11 @@ class SW(IntEnum):
 PIN = 0x80
 PUK = 0x81
 
+# 010203040506070801020304050607080102030405060708
+DEFAULT_MANAGEMENT_KEY = b'\x01\x02\x03\x04\x05\x06\x07\x08' \
+    + b'\x01\x02\x03\x04\x05\x06\x07\x08' \
+    + b'\x01\x02\x03\x04\x05\x06\x07\x08'
+
 
 def _parse_tlv_dict(data):
     return dict((tlv.tag, tlv.value) for tlv in parse_tlvs(data))

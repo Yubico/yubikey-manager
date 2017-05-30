@@ -28,7 +28,9 @@
 from __future__ import absolute_import
 
 from ..util import TRANSPORT
-from ..piv import PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY
+from ..piv import (
+    PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
+    DEFAULT_MANAGEMENT_KEY)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_skip_on_help, click_callback
 from cryptography import x509
@@ -482,8 +484,10 @@ def delete_certificate(ctx, slot, management_key):
 
 def _prompt_management_key(ctx):
     management_key = click.prompt(
-        'Enter a management key', default='',
+        'Enter a management key [blank to use default key]', default='',
         hide_input=True, show_default=False)
+    if management_key == '':
+        return DEFAULT_MANAGEMENT_KEY
     try:
         return a2b_hex(management_key)
     except:
