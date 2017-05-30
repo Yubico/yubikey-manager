@@ -435,7 +435,8 @@ def generate_certificate(
 
 def _prompt_management_key(ctx):
     management_key = click.prompt(
-        'Enter a management key', default='', show_default=False)
+        'Enter a management key', default='',
+        hide_input=True, show_default=False)
     try:
         return a2b_hex(management_key)
     except:
@@ -443,7 +444,8 @@ def _prompt_management_key(ctx):
 
 
 def _prompt_pin(ctx):
-    return click.prompt('Enter PIN', default='', show_default=False)
+    return click.prompt(
+        'Enter PIN', default='', hide_input=True, show_default=False)
 
 
 def _verify_pin(ctx, controller, pin):
