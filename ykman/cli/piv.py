@@ -429,6 +429,42 @@ def generate_certificate(
     controller.import_certificate(slot, cert)
 
 
+@piv.command('generate-csr')
+@click.pass_context
+@click_slot_argument
+@click_input_argument
+@click_output_argument
+@click_pin_option
+@click.option(
+    '-s', '--subject',
+    help='A subject name for the requested certificate.', required=True)
+def generate_certificate_signing_request(
+        ctx, slot, pin, input, output, subject):
+    """
+    Generate a Certificate Signing Request (CSR).
+
+    A private key need to exist in the slot.
+    """
+    controller = ctx.obj['controller']
+    if not pin:
+        pin = _prompt_pin(ctx)
+    _verify_pin(ctx, controller, pin)
+
+    data = six.b(input.read())
+    public_key = serialization.load_pem_public_key(
+        data, default_backend())
+
+    builder = x509.CertificateSigningRequestBuilder()
+    builder = builder.subject_name(
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
+
+    try:
+        csr = controller.sign_csr_builder(slot, public_key, builder)
+    except APDUError:
+        ctx.fail('Certificate Signing Request generation failed.')
+    output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
+
+
 def _prompt_management_key(ctx):
     management_key = click.prompt(
         'Enter a management key', default='',
