@@ -378,10 +378,6 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
 @click_pin_option
 @click_input_argument
 @click.option(
-    '-a', '--algorithm', help='Algorithm used for the key pair.',
-    type=click.Choice(
-        ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), required=True)
-@click.option(
     '-s', '--subject', help='A subject name for the certificate', required=True)
 @click.option(
     '-i', '--issuer', help='A issuer name for the certificate', required=True)
@@ -390,8 +386,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     help='Number of days until the certificate expires.',
     type=click.INT, default=365)
 def generate_certificate(
-    ctx, slot, management_key, pin, input,
-        algorithm, subject, issuer, valid_days):
+        ctx, slot, management_key, pin, input, subject, issuer, valid_days):
     """
     Generate a self-signed X.509 certificate.
 
@@ -409,6 +404,8 @@ def generate_certificate(
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
+    algorithm = ALGO.from_public_key(public_key)
+
     builder = x509.CertificateBuilder()
     builder = builder.public_key(public_key)
     builder = builder.subject_name(
@@ -425,10 +422,9 @@ def generate_certificate(
     builder = builder.not_valid_after(now + datetime.timedelta(days=valid_days))
 
     try:
-        cert = controller.sign_cert_builder(
-            slot, ALGO.from_string(algorithm), builder)
+        cert = controller.sign_cert_builder(slot, algorithm, builder)
     except APDUError:
-        ctx.fail('Certificate generation failed')
+        ctx.fail('Certificate generation failed.')
 
     controller.import_certificate(slot, cert)
 
