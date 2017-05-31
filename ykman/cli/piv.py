@@ -504,6 +504,28 @@ def change_pin(ctx, pin, new_pin):
     click.echo('New PIN set.')
 
 
+@piv.command('change-puk')
+@click.pass_context
+@click.option('-p', '--puk', help='Current PUK code.')
+@click.option('-n', '--new-puk', help='A new PUK code.')
+def change_puk(ctx, puk, new_puk):
+    """
+    Change the PUK code.
+    """
+    controller = ctx.obj['controller']
+    if not puk:
+        puk = _prompt_pin(ctx, prompt='Enter your current PUK')
+    if not new_puk:
+        new_puk = click.prompt(
+            'Enter your new PUK', default='', hide_input=True,
+            show_default=False, confirmation_prompt=True)
+    try:
+        controller.change_puk(puk, new_puk)
+    except APDUError:
+        ctx.fail('Changing the PUK failed.')
+    click.echo('New PUK set.')
+
+
 def _prompt_management_key(ctx):
     management_key = click.prompt(
         'Enter a management key [blank to use default key]', default='',

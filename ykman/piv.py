@@ -253,7 +253,7 @@ def _pack_pin(pin):
     if isinstance(pin, six.text_type):
         pin = pin.encode('utf8')
     if len(pin) > 8:
-        raise ValueError('PIN too large (max 8 bytes, was %d)' % len(pin))
+        raise ValueError('PIN/PUK too large (max 8 bytes, was %d)' % len(pin))
     return pin.ljust(8, b'\xff')
 
 
