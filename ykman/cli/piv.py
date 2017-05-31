@@ -102,7 +102,7 @@ click_input_argument = click.argument('input', type=click.File('r'))
 click_output_argument = click.argument('output', type=click.File('wb'))
 click_management_key_option = click.option(
     '-m', '--management-key',
-    help='A management key is required for administrative tasks.',
+    help='The management key.',
     callback=click_parse_management_key)
 click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
@@ -526,10 +526,42 @@ def change_puk(ctx, puk, new_puk):
     click.echo('New PUK set.')
 
 
-def _prompt_management_key(ctx):
+@piv.command('change-management-key')
+@click.pass_context
+@click_management_key_option
+@click.option(
+    '-t', '--touch', is_flag=True,
+    help='Require touch on YubiKey when prompted for management key.')
+@click.option('-n', '--new-management-key', help='A new management key.')
+def change_management_key(ctx, management_key, new_management_key, touch):
+    """
+    Change the management key.
+    """
+    controller = ctx.obj['controller']
+    if not management_key:
+        management_key = _prompt_management_key(
+            ctx, prompt='Enter your current management key'
+                        ' [blank to use the default key]')
+    _authenticate(ctx, controller, management_key)
+    if not new_management_key:
+        new_management_key = click.prompt(
+            'Enter your new management key',
+            default='', show_default=False,
+            hide_input=True, confirmation_prompt=True)
+    try:
+        new_management_key = a2b_hex(new_management_key)
+    except:
+        ctx.fail('New management key has the wrong format.')
+    try:
+        controller.set_mgm_key(new_management_key, touch=touch)
+    except APDUError:
+        ctx.fail('Changing the management key failed.')
+
+
+def _prompt_management_key(
+        ctx, prompt='Enter a management key [blank to use default key]'):
     management_key = click.prompt(
-        'Enter a management key [blank to use default key]', default='',
-        hide_input=True, show_default=False)
+        prompt, default='', hide_input=True, show_default=False)
     if management_key == '':
         return DEFAULT_MANAGEMENT_KEY
     try:
