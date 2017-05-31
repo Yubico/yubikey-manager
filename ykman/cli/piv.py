@@ -482,6 +482,28 @@ def delete_certificate(ctx, slot, management_key):
     controller.delete_certificate(slot)
 
 
+@piv.command('change-pin')
+@click.pass_context
+@click_pin_option
+@click.option('-n', '--new-pin', help='A new PIN.')
+def change_pin(ctx, pin, new_pin):
+    """
+    Change the PIN code.
+    """
+    controller = ctx.obj['controller']
+    if not pin:
+        pin = _prompt_pin(ctx, prompt='Enter your current PIN')
+    if not new_pin:
+        new_pin = click.prompt(
+            'Enter your new PIN', default='', hide_input=True,
+            show_default=False, confirmation_prompt=True)
+    try:
+        controller.change_pin(pin, new_pin)
+    except APDUError:
+        ctx.fail('Changing the PIN failed.')
+    click.echo('New PIN set.')
+
+
 def _prompt_management_key(ctx):
     management_key = click.prompt(
         'Enter a management key [blank to use default key]', default='',
@@ -494,9 +516,9 @@ def _prompt_management_key(ctx):
         ctx.fail('Management key has the wrong format.')
 
 
-def _prompt_pin(ctx):
+def _prompt_pin(ctx, prompt='Enter PIN'):
     return click.prompt(
-        'Enter PIN', default='', hide_input=True, show_default=False)
+        prompt, default='', hide_input=True, show_default=False)
 
 
 def _verify_pin(ctx, controller, pin):
