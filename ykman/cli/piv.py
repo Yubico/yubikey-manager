@@ -611,6 +611,24 @@ def change_management_key(ctx, management_key, pin, new_management_key, touch):
         ctx.fail('Changing the management key failed.')
 
 
+@piv.command('unblock-pin')
+@click.pass_context
+@click.option('-p', '--puk', required=False)
+@click.option('-n', '--new-pin', required=False, metavar='NEW-PIN')
+def unblock_pin(ctx, puk, new_pin):
+    """
+    Unblock the PIN.
+    """
+    controller = ctx.obj['controller']
+    if not puk:
+        puk = click.prompt(
+            'Enter PUK', default='', show_default=False, hide_input=True)
+    if not new_pin:
+        new_pin = click.prompt(
+            'Enter a new PIN', default='', show_default=False, hide_input=True)
+    controller.unblock_pin(puk, new_pin)
+
+
 def _prompt_management_key(
         ctx, prompt='Enter a management key [blank to use default key]'):
     management_key = click.prompt(
