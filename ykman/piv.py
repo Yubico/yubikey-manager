@@ -234,6 +234,7 @@ class SW(IntEnum):
     INVALID_INSTRUCTION = 0x6d00
     NOT_FOUND = 0x6a82
     ACCESS_DENIED = 0x6982
+    AUTHENTICATION_BLOCKED = 0x6983
 
 
 PIN = 0x80
@@ -494,10 +495,21 @@ class PivController(object):
 
     def get_pin_tries(self):
         """
-        Note: Will return 15 for >= 15 tries remaining.
+        Returns the number of PIN retries left,
+        0 PIN authentication blocked. Note that 15 is the highest
+        value that will be returned even if remaining tries is higher.
         """
-        _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
-        return sw & 0xf
+        try:
+            # Verify without PIN gives number of tries left.
+            _, sw = self.send_cmd(INS.VERIFY, 0, PIN)
+        except APDUError as e:
+            # PIN blocked, 0 tries left.
+            if e.sw == SW.AUTHENTICATION_BLOCKED:
+                return 0
+            # Verify failed, get number of tries left.
+            if 0x63c0 <= e.sw <= 0x63cf:
+                return e.sw & 0xf
+            raise
 
     def reset(self):
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
