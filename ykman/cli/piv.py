@@ -153,7 +153,10 @@ def info(ctx):
     tries = controller.get_pin_tries()
     tries = '15 or more.' if tries == 15 else tries
     click.echo('PIN tries remaining: %s' % tries)
-
+    if controller.puk_blocked:
+        click.echo('PUK blocked.')
+    if controller.has_derived_key:
+        click.echo('Management key is derived from PIN.')
     try:
         chuid = b2a_hex(controller.get_data(OBJ.CHUID)).decode()
     except APDUError as e:
