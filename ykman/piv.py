@@ -446,13 +446,7 @@ class PivController(object):
     def use_derived_key(self, pin):
         self.verify(pin)
         if not self.puk_blocked:
-            _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                                  check=None)
-            if sw >> 4 == 0x63c:
-                tries = sw & 0xf
-                for _ in range(tries):
-                    self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                                  check=None)
+            self._block_puk()
             self._pivman_data.puk_blocked = True
 
         new_salt = os.urandom(16)
@@ -506,24 +500,33 @@ class PivController(object):
             # PIN blocked, 0 tries left.
             if e.sw == SW.AUTHENTICATION_BLOCKED:
                 return 0
-            # Verify failed, get number of tries left.
             if 0x63c0 <= e.sw <= 0x63cf:
                 return e.sw & 0xf
             raise
 
+    def _get_puk_tries(self):
+        try:
+            # A failed unblock pin will return number of PUK tries left,
+            # but also uses one try.
+            _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2)
+        except APDUError as e:
+            if e.sw == SW.AUTHENTICATION_BLOCKED:
+                return 0
+            if 0x63c0 <= e.sw <= 0x63cf:
+                return e.sw & 0xf
+            raise
+
+    def _block_pin(self):
+        while self.get_pin_tries() > 0:
+            self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(''), check=None)
+
+    def _block_puk(self):
+        while self._get_puk_tries() > 0:
+            self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2, check=None)
+
     def reset(self):
-        _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
-        if sw >> 4 == 0x63c:
-            tries = sw & 0xf
-            for _ in range(tries):
-                self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(''), check=None)
-        _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                              check=None)
-        if sw >> 4 == 0x63c:
-            tries = sw & 0xf
-            for _ in range(tries):
-                self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                              check=None)
+        self._block_pin()
+        self._block_puk()
         self.send_cmd(INS.RESET)
 
     def get_data(self, object_id):
