@@ -40,7 +40,6 @@ from cryptography.x509.oid import NameOID
 from cryptography import utils
 from binascii import b2a_hex, a2b_hex
 import click
-import six
 import os
 import datetime
 
@@ -98,7 +97,7 @@ def click_parse_management_key(ctx, param, val):
 
 
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
-click_input_argument = click.argument('input', type=click.File('r'))
+click_input_argument = click.argument('input', type=click.File('rb'))
 click_output_argument = click.argument('output', type=click.File('wb'))
 click_management_key_option = click.option(
     '-m', '--management-key',
@@ -257,7 +256,7 @@ def import_certificate(ctx, slot, management_key, input, cert_format):
     if not management_key:
         management_key = _prompt_management_key(ctx)
     _authenticate(ctx, controller, management_key)
-    data = six.b(input.read())
+    data = input.read()
     if cert_format == serialization.Encoding.PEM:
         cert = x509.load_pem_x509_certificate(data, default_backend())
     elif cert_format == serialization.Encoding.DER:
@@ -282,7 +281,7 @@ def import_key(
     if not management_key:
         management_key = _prompt_management_key(ctx)
     _authenticate(ctx, controller, management_key)
-    data = six.b(input.read())
+    data = input.read()
     password = None  # TODO: add support
     if key_format == 'PEM':
         private_key = serialization.load_pem_private_key(
@@ -402,7 +401,7 @@ def generate_certificate(
         pin = _prompt_pin(ctx)
     _verify_pin(ctx, controller, pin)
 
-    data = six.b(input.read())
+    data = input.read()
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
@@ -452,7 +451,7 @@ def generate_certificate_signing_request(
         pin = _prompt_pin(ctx)
     _verify_pin(ctx, controller, pin)
 
-    data = six.b(input.read())
+    data = input.read()
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
