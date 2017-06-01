@@ -400,6 +400,9 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
         if not management_key:
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
 
     controller.set_pin_retries(pin_retries, puk_retries)
 
