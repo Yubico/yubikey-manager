@@ -212,6 +212,7 @@ def reset(ctx):
 @click.pass_context
 @click_slot_argument
 @click_management_key_option
+@click_pin_option
 @click.option(
     '-a', '--algorithm', help='Algorithm to use in key generation.',
     type=click.Choice(
@@ -221,15 +222,21 @@ def reset(ctx):
 @click_touch_policy_option
 @click_output_argument
 def generate_key(
-    ctx, slot, output, management_key, algorithm, key_format, pin_policy,
+    ctx, slot, output, management_key, pin, algorithm, key_format, pin_policy,
         touch_policy):
     """
     Generate a asymmetric key pair.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
+
     public_key = controller.generate_key(
         slot,
         ALGO.from_string(algorithm),
@@ -246,16 +253,23 @@ def generate_key(
 @click.pass_context
 @click_slot_argument
 @click_management_key_option
+@click_pin_option
 @click_input_argument
 @click_cert_format_option
-def import_certificate(ctx, slot, management_key, input, cert_format):
+def import_certificate(ctx, slot, management_key, pin, input, cert_format):
     """
     Import a X.509 certificate.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
+
     data = input.read()
     if cert_format == serialization.Encoding.PEM:
         cert = x509.load_pem_x509_certificate(data, default_backend())
@@ -267,20 +281,28 @@ def import_certificate(ctx, slot, management_key, input, cert_format):
 @piv.command('import-key')
 @click.pass_context
 @click_slot_argument
+@click_pin_option
 @click_management_key_option
 @click_key_format_option
 @click_pin_policy_option
 @click_touch_policy_option
 @click_input_argument
 def import_key(
-        ctx, slot, management_key, input, key_format, pin_policy, touch_policy):
+        ctx, slot, management_key, pin, input,
+        key_format, pin_policy, touch_policy):
     """
     Import a private key.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
+
     data = input.read()
     password = None  # TODO: add support
     if key_format == 'PEM':
@@ -336,15 +358,22 @@ def export_certificate(ctx, slot, cert_format, output):
 
 @piv.command()
 @click.pass_context
+@click_pin_option
 @click_management_key_option
-def init(ctx, management_key):
+def init(ctx, management_key, pin):
     """
     Generate a CHUID and CCC on the device.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
+
     controller.update_chuid()
     controller.update_ccc()
     click.echo('A CHUID and CCC generated.')
@@ -363,12 +392,15 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     Set the number of PIN and PUK retries.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
-    if not pin:
-        pin = _prompt_pin(ctx)
-    _verify_pin(ctx, controller, pin)
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
+
     controller.set_pin_retries(pin_retries, puk_retries)
 
 
@@ -394,12 +426,18 @@ def generate_certificate(
     A private key need to exist in the slot.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
-    if not pin:
-        pin = _prompt_pin(ctx)
-    _verify_pin(ctx, controller, pin)
+
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
+        if not pin:
+            pin = _prompt_pin(ctx)
+        _verify_pin(ctx, controller, pin)
 
     data = input.read()
     public_key = serialization.load_pem_public_key(
@@ -470,14 +508,20 @@ def generate_certificate_signing_request(
 @click.pass_context
 @click_slot_argument
 @click_management_key_option
-def delete_certificate(ctx, slot, management_key):
+@click_pin_option
+def delete_certificate(ctx, slot, management_key, pin):
     """
     Delete a certificate.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(ctx)
-    _authenticate(ctx, controller, management_key)
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
     controller.delete_certificate(slot)
 
 
@@ -528,20 +572,27 @@ def change_puk(ctx, puk, new_puk):
 @piv.command('change-management-key')
 @click.pass_context
 @click_management_key_option
+@click_pin_option
 @click.option(
     '-t', '--touch', is_flag=True,
     help='Require touch on YubiKey when prompted for management key.')
 @click.option('-n', '--new-management-key', help='A new management key.')
-def change_management_key(ctx, management_key, new_management_key, touch):
+def change_management_key(ctx, management_key, pin, new_management_key, touch):
     """
     Change the management key.
     """
     controller = ctx.obj['controller']
-    if not management_key:
-        management_key = _prompt_management_key(
-            ctx, prompt='Enter your current management key'
-                        ' [blank to use the default key]')
-    _authenticate(ctx, controller, management_key)
+
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(
+                ctx, prompt='Enter your current management key'
+                            ' [blank to use the default key]')
+        _authenticate(ctx, controller, management_key)
     if not new_management_key:
         new_management_key = click.prompt(
             'Enter your new management key',

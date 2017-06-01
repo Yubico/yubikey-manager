@@ -333,7 +333,7 @@ _decrypt_len_conditions = {
 
 def _derive_key(pin, salt):
     kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())
-    return kdf.derive(pin)
+    return kdf.derive(pin.encode('utf-8'))
 
 
 class PivmanData(object):
