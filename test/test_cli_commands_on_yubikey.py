@@ -14,6 +14,8 @@ URI_TOTP_EXAMPLE = (
         'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
         '&algorithm=SHA1&digits=6&period=30')
 
+DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
+
 _one_yubikey = False
 if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
     try:
@@ -238,3 +240,63 @@ class TestPIV(unittest.TestCase):
     def test_piv_reset(self):
         output = ykman_cli('piv', 'reset', '-f')
         self.assertIn('Success!', output)
+
+    def test_piv_generate_key_default(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
+    def test_piv_generate_key_rsa1024(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
+            DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
+    def test_piv_generate_key_eccp256(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
+            DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
+    def test_piv_generate_key_eccp384(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP384', '-m',
+            DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
+    def test_piv_generate_key_pin_policy_always(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '--pin-policy', 'ALWAYS', '-m',
+            DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
+    def test_piv_generate_key_touch_policy_always(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '--touch-policy', 'ALWAYS', '-m',
+            DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
+    def test_piv_attest_key(self):
+        ykman_cli(
+            'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
+        output = ykman_cli('piv', 'attest', '9a', '-')
+        self.assertIn('BEGIN CERTIFICATE', output)
+
+    def test_piv_generate_self_signed(self):
+        ykman_cli(
+            'piv', 'generate-key', '9a', '-m',
+            DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+        ykman_cli(
+            'piv', 'generate-certificate', '9a', '/tmp/test-pub-key.pem',
+            '-s', 'test-subject', '-i', 'test-issuer', '-P', '123456')
+        output = ykman_cli('piv', 'info')
+        self.assertIn('test-subject', output)
+
+    def test_piv_generate_csr(self):
+        ykman_cli(
+            'piv', 'generate-key', '9a', '-m',
+            DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+        output = ykman_cli(
+            'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
+            '-s', 'test-subject', '-P', '123456', '-')
+        self.assertIn('BEGIN CERTIFICATE REQUEST', output)
