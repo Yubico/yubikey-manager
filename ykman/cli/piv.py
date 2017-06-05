@@ -371,13 +371,13 @@ def export_certificate(ctx, slot, cert_format, output):
     output.write(cert.public_bytes(encoding=cert_format))
 
 
-@piv.command()
+@piv.command('set-chuid')
 @click.pass_context
 @click_pin_option
 @click_management_key_option
-def init(ctx, management_key, pin):
+def set_chuid(ctx, management_key, pin):
     """
-    Generate a CHUID and CCC on the device.
+    Generate and set a CHUID on the device.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -388,10 +388,27 @@ def init(ctx, management_key, pin):
         if not management_key:
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
-
     controller.update_chuid()
+
+
+@piv.command('set-ccc')
+@click.pass_context
+@click_pin_option
+@click_management_key_option
+def set_ccc(ctx, management_key, pin):
+    """
+    Generate and set a CCC on the device.
+    """
+    controller = ctx.obj['controller']
+    if controller.has_derived_key:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.verify(pin)
+    else:
+        if not management_key:
+            management_key = _prompt_management_key(ctx)
+        _authenticate(ctx, controller, management_key)
     controller.update_ccc()
-    click.echo('A CHUID and CCC generated.')
 
 
 @piv.command('set-pin-retries')
