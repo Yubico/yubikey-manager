@@ -289,9 +289,13 @@ def import_certificate(ctx, slot, management_key, pin, input, cert_format):
 @click_pin_policy_option
 @click_touch_policy_option
 @click_input_argument
+@click.option(
+    '-e', '--encrypted', help='Key is encrypted with a password.', is_flag=True)
+@click.option(
+    '-p', '--password', help='Password used to decrypt the private key.')
 def import_key(
         ctx, slot, management_key, pin, input,
-        key_format, pin_policy, touch_policy):
+        key_format, pin_policy, touch_policy, encrypted, password):
     """
     Import a private key.
     """
@@ -306,15 +310,24 @@ def import_key(
         _authenticate(ctx, controller, management_key)
 
     data = input.read()
-    password = None  # TODO: add support
+
     if key_format == 'PEM':
-        private_key = serialization.load_pem_private_key(
-            data, password=password,
-            backend=default_backend())
+        loader = serialization.load_pem_private_key
     elif key_format == 'DER':
-        private_key = serialization.load_der_private_key(
-            data, password=password,
-            backend=default_backend())
+        loader = serialization.load_der_private_key
+
+    if encrypted and password is None:
+        password = click.prompt(
+            'Enter password to decrypt key', default='', hide_input=True,
+            show_default=False)
+
+    if encrypted and password is not None:
+        password = password.encode()
+
+    try:
+        private_key = loader(data, password=password, backend=default_backend())
+    except TypeError as e:
+        raise ValueError(e)
 
     controller.import_key(
             slot,
