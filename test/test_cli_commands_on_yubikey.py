@@ -300,3 +300,7 @@ class TestPIV(unittest.TestCase):
             'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
             '-s', 'test-subject', '-P', '123456', '-')
         self.assertIn('BEGIN CERTIFICATE REQUEST', output)
+
+    def test_piv_export_attestation_certificate(self):
+        output = ykman_cli('piv', 'export-certificate', 'f9', '-')
+        self.assertIn('BEGIN CERTIFICATE', output)
