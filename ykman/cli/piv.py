@@ -113,13 +113,12 @@ click_cert_format_option = click.option(
     type=click.Choice(['PEM', 'DER']), default='PEM',
     help='Certificate format.', callback=click_parse_cert_format)
 click_pin_policy_option = click.option(
-    '-p', '--pin-policy',
-    type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
+    '--pin-policy', type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
     default='DEFAULT',
     help='PIN policy for slot.')
 click_touch_policy_option = click.option(
-    '-t', '--touch-policy',
-    type=click.Choice(['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
+    '--touch-policy', type=click.Choice(
+        ['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
     default='DEFAULT',
     help='Touch policy for slot.')
 
