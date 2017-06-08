@@ -39,6 +39,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from cryptography import utils
 from binascii import b2a_hex, a2b_hex
+from OpenSSL import crypto
 import click
 import os
 import datetime
@@ -285,9 +286,11 @@ def import_certificate(ctx, slot, management_key, pin, input, cert_format):
 @click_slot_argument
 @click_pin_option
 @click_management_key_option
-@click_key_format_option
 @click_pin_policy_option
 @click_touch_policy_option
+@click.option(
+    '-f', '--key-format', type=click.Choice(['PEM', 'DER', 'PKCS12']),
+    default='PEM', help='Key serialization format.')
 @click_input_argument
 @click.option(
     '-e', '--encrypted', help='Key is encrypted with a password.', is_flag=True)
@@ -311,10 +314,19 @@ def import_key(
 
     data = input.read()
 
-    if key_format == 'PEM':
+    if key_format in ['PEM', 'PKCS12']:
         loader = serialization.load_pem_private_key
     elif key_format == 'DER':
         loader = serialization.load_der_private_key
+
+    if key_format == 'PKCS12':
+        try:
+            p12 = crypto.load_pkcs12(data, password)
+        except crypto.Error:
+            ctx.fail('PKCS12 import failed.')
+        password = None  # Password used for p12 container, clear it.
+        #  Use crypto.PKey.to_cryptography_key when PyOpenSSL is >= 16.1
+        data = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
 
     if encrypted and password is None:
         password = click.prompt(
