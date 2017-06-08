@@ -612,9 +612,17 @@ def change_puk(ctx, puk, new_puk):
     '-t', '--touch', is_flag=True,
     help='Require touch on YubiKey when prompted for management key.')
 @click.option('-n', '--new-management-key', help='A new management key.')
-def change_management_key(ctx, management_key, pin, new_management_key, touch):
+@click.option(
+    '-d', '--derive-from-pin', is_flag=True,
+    help='Derive the management key from the current PIN code. \
+            Blocks the PUK code.')
+def change_management_key(
+        ctx, management_key, pin, new_management_key, touch, derive_from_pin):
     """
     Change the management key.
+
+    Management functionality is guarded by a 24 byte management key.
+    This key is required for administrative tasks, such as generating key pairs.
     """
     controller = ctx.obj['controller']
 
@@ -628,19 +636,25 @@ def change_management_key(ctx, management_key, pin, new_management_key, touch):
                 ctx, prompt='Enter your current management key'
                             ' [blank to use the default key]')
         _authenticate(ctx, controller, management_key)
-    if not new_management_key:
-        new_management_key = click.prompt(
-            'Enter your new management key',
-            default='', show_default=False,
-            hide_input=True, confirmation_prompt=True)
-    try:
-        new_management_key = a2b_hex(new_management_key)
-    except:
-        ctx.fail('New management key has the wrong format.')
-    try:
-        controller.set_mgm_key(new_management_key, touch=touch)
-    except APDUError:
-        ctx.fail('Changing the management key failed.')
+
+    if derive_from_pin:
+        if not pin:
+            pin = _prompt_pin(pin)
+        controller.use_derived_key(pin, touch=touch)
+    else:
+        if not new_management_key:
+            new_management_key = click.prompt(
+                'Enter your new management key',
+                default='', show_default=False,
+                hide_input=True, confirmation_prompt=True)
+        try:
+            new_management_key = a2b_hex(new_management_key)
+        except:
+            ctx.fail('New management key has the wrong format.')
+        try:
+            controller.set_mgm_key(new_management_key, touch=touch)
+        except APDUError:
+            ctx.fail('Changing the management key failed.')
 
 
 @piv.command('unblock-pin')

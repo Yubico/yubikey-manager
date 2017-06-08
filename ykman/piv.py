@@ -341,7 +341,8 @@ class PivmanData(object):
 
     def __init__(self, raw_data=Tlv(0x80)):
         data = _parse_tlv_dict(Tlv(raw_data).value)
-        self._flags = struct.unpack('>B', data[0x80]) if 0x80 in data else None
+        self._flags = struct.unpack(
+            '>B', data[0x81])[0] if 0x81 in data else None
         self.salt = data.get(0x82)
         self.pin_timestamp = struct.unpack('>I', data[0x83]) \
             if 0x83 in data else None
@@ -443,7 +444,7 @@ class PivController(object):
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
 
-    def use_derived_key(self, pin):
+    def use_derived_key(self, pin, touch=False):
         self.verify(pin)
         if not self.puk_blocked:
             self._block_puk()
@@ -451,7 +452,7 @@ class PivController(object):
 
         new_salt = os.urandom(16)
         new_key = _derive_key(pin, new_salt)
-        self.send_cmd(INS.SET_MGMKEY, 0xff, 0xff,
+        self.send_cmd(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
                       bytes([ALGO.TDES]) +
                       Tlv(SLOT.CARD_MANAGEMENT, new_key))
         self._pivman_data.salt = new_salt
