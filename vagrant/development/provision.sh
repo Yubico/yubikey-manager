@@ -17,6 +17,8 @@ sudo apt-get install -qq \
     python3-pyscard \
     python-cryptography \
     python3-cryptography \
+    python-openssl \
+    python3-openssl \
     libykpers-1-1 \
     libu2f-host0 \
     libssl-dev \
