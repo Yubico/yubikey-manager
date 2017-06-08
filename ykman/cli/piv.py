@@ -258,8 +258,14 @@ def generate_key(
 @click_management_key_option
 @click_pin_option
 @click_input_argument
-@click_cert_format_option
-def import_certificate(ctx, slot, management_key, pin, input, cert_format):
+@click.option(
+    '-f', '--cert-format',
+    type=click.Choice(['PEM', 'DER', 'PKCS12']), default='PEM',
+    help='Certificate format.')
+@click.option(
+    '-p', '--password', help='A password may be needed to decrypt the data.')
+def import_certificate(
+        ctx, slot, management_key, pin, input, cert_format, password):
     """
     Import a X.509 certificate.
     """
@@ -274,9 +280,16 @@ def import_certificate(ctx, slot, management_key, pin, input, cert_format):
         _authenticate(ctx, controller, management_key)
 
     data = input.read()
-    if cert_format == serialization.Encoding.PEM:
+    if cert_format in ['PEM', 'PKCS12']:
+        if cert_format == 'PKCS12':
+            try:
+                p12 = crypto.load_pkcs12(data, password)
+            except crypto.Error:
+                ctx.fail('PKCS12 import failed.')
+            data = crypto.dump_certificate(
+                crypto.FILETYPE_PEM, p12.get_certificate())
         cert = x509.load_pem_x509_certificate(data, default_backend())
-    elif cert_format == serialization.Encoding.DER:
+    elif cert_format == 'DER':
         cert = x509.load_der_x509_certificate(data, default_backend())
     controller.import_certificate(slot, cert)
 
