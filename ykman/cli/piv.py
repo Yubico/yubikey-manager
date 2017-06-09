@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from ..util import TRANSPORT, parse_private_key
+from ..util import TRANSPORT, parse_private_key, parse_certificate
 from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY)
@@ -39,7 +39,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from cryptography import utils
 from binascii import b2a_hex, a2b_hex
-from OpenSSL import crypto
 import click
 import os
 import datetime
@@ -259,13 +258,9 @@ def generate_key(
 @click_pin_option
 @click_input_argument
 @click.option(
-    '-f', '--cert-format',
-    type=click.Choice(['PEM', 'DER', 'PKCS12']), default='PEM',
-    help='Certificate format.')
-@click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
 def import_certificate(
-        ctx, slot, management_key, pin, input, cert_format, password):
+        ctx, slot, management_key, pin, input, password):
     """
     Import a X.509 certificate.
     """
@@ -280,17 +275,25 @@ def import_certificate(
         _authenticate(ctx, controller, management_key)
 
     data = input.read()
-    if cert_format in ['PEM', 'PKCS12']:
-        if cert_format == 'PKCS12':
-            try:
-                p12 = crypto.load_pkcs12(data, password)
-            except crypto.Error:
-                ctx.fail('PKCS12 import failed.')
-            data = crypto.dump_certificate(
-                crypto.FILETYPE_PEM, p12.get_certificate())
-        cert = x509.load_pem_x509_certificate(data, default_backend())
-    elif cert_format == 'DER':
-        cert = x509.load_der_x509_certificate(data, default_backend())
+
+    while True:
+        if password is not None:
+            password = password.encode()
+        try:
+            cert = parse_certificate(data, password)
+        except (ValueError, TypeError):
+            if password is None:
+                password = click.prompt(
+                    'Enter password to decrypt certificate',
+                    default='', hide_input=True,
+                    show_default=False)
+                continue
+            else:
+                password = None
+                click.echo('Wrong password.')
+            continue
+        break
+
     controller.import_certificate(slot, cert)
 
 

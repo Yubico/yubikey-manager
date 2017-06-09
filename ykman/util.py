@@ -33,6 +33,7 @@ import re
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
+from cryptography import x509
 from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
@@ -335,7 +336,7 @@ def parse_private_key(data, password):
         except:
             pass
 
-    # PKCS12 (.p12 / .pfx)
+    # PKCS12
     if is_pkcs12(data):
         try:
             p12 = crypto.load_pkcs12(data, password)
@@ -351,10 +352,40 @@ def parse_private_key(data, password):
         return serialization.load_der_private_key(
             data, password, backend=default_backend())
     except:
-        raise
+        pass
 
     # All parsing failed
     raise ValueError('Could not parse private key.')
+
+
+def parse_certificate(data, password):
+    """
+    Identifies, decrypts and returns a cryptography x509 certficate.
+    """
+    # PEM
+    if data.startswith(b'-----'):
+        try:
+            return x509.load_pem_x509_certificate(data, default_backend())
+        except:
+            pass
+
+    # PKCS12
+    if is_pkcs12(data):
+        try:
+            p12 = crypto.load_pkcs12(data, password)
+            data = crypto.dump_certificate(
+                crypto.FILETYPE_PEM, p12.get_certificate())
+            return x509.load_pem_x509_certificate(data, default_backend())
+        except crypto.Error as e:
+            raise ValueError(e)
+
+    # DER
+    try:
+        return x509.load_der_x509_certificate(data, default_backend())
+    except:
+        pass
+
+    raise ValueError('Could not parse certificate.')
 
 
 def is_pkcs12(data):
