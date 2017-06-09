@@ -31,11 +31,13 @@ import struct
 import hashlib
 import re
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
+from OpenSSL import crypto
+
 try:
     from urlparse import urlparse, parse_qs
     from urllib import unquote
@@ -313,3 +315,56 @@ def parse_b32_key(key):
     key = key.upper().replace(' ', '')
     key += '=' * (-len(key) % 8)  # Support unpadded
     return b32decode(key)
+
+
+def parse_private_key(data, password):
+    """
+    Identifies, decrypts and returns a cryptography private key object.
+    """
+    # PEM
+    if data.startswith(b'-----'):
+        if b'ENCRYPTED' in data:
+            if password is None:
+                raise TypeError('No password provided for encrypted key.')
+        try:
+            return serialization.load_pem_private_key(
+                data, password, backend=default_backend())
+        except ValueError:
+            # Cryptography raises ValueError if decryption fails.
+            raise
+        except:
+            pass
+
+    # PKCS12 (.p12 / .pfx)
+    if is_pkcs12(data):
+        try:
+            p12 = crypto.load_pkcs12(data, password)
+            data = crypto.dump_privatekey(
+                crypto.FILETYPE_PEM, p12.get_privatekey())
+            return serialization.load_pem_private_key(
+                data, password=None, backend=default_backend())
+        except crypto.Error as e:
+            raise ValueError(e)
+
+    # DER
+    try:
+        return serialization.load_der_private_key(
+            data, password, backend=default_backend())
+    except:
+        raise
+
+    # All parsing failed
+    raise ValueError('Could not parse private key.')
+
+
+def is_pkcs12(data):
+    """
+    Tries to identify a PKCS12 container.
+    The PFX PDU version is assumed to be v3.
+    See: https://tools.ietf.org/html/rfc7292.
+    """
+    tlv = Tlv(data)
+    if tlv.tag == 0x30:
+        header = Tlv(tlv.value)
+        return header.tag == 0x02 and header.value == b'\x03'
+    return False

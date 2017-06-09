@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from ..util import TRANSPORT
+from ..util import TRANSPORT, parse_private_key
 from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY)
@@ -301,17 +301,12 @@ def import_certificate(
 @click_management_key_option
 @click_pin_policy_option
 @click_touch_policy_option
-@click.option(
-    '-f', '--key-format', type=click.Choice(['PEM', 'DER', 'PKCS12']),
-    default='PEM', help='Key serialization format.')
 @click_input_argument
-@click.option(
-    '-e', '--encrypted', help='Key is encrypted with a password.', is_flag=True)
 @click.option(
     '-p', '--password', help='Password used to decrypt the private key.')
 def import_key(
         ctx, slot, management_key, pin, input,
-        key_format, pin_policy, touch_policy, encrypted, password):
+        pin_policy, touch_policy, password):
     """
     Import a private key.
     """
@@ -327,32 +322,23 @@ def import_key(
 
     data = input.read()
 
-    if key_format in ['PEM', 'PKCS12']:
-        loader = serialization.load_pem_private_key
-    elif key_format == 'DER':
-        loader = serialization.load_der_private_key
-
-    if key_format == 'PKCS12':
+    while True:
+        if password is not None:
+            password = password.encode()
         try:
-            p12 = crypto.load_pkcs12(data, password)
-        except crypto.Error:
-            ctx.fail('PKCS12 import failed.')
-        password = None  # Password used for p12 container, clear it.
-        #  Use crypto.PKey.to_cryptography_key when PyOpenSSL is >= 16.1
-        data = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-
-    if encrypted and password is None:
-        password = click.prompt(
-            'Enter password to decrypt key', default='', hide_input=True,
-            show_default=False)
-
-    if encrypted and password is not None:
-        password = password.encode()
-
-    try:
-        private_key = loader(data, password=password, backend=default_backend())
-    except TypeError as e:
-        raise ValueError(e)
+            private_key = parse_private_key(data, password)
+        except (ValueError, TypeError):
+            if password is None:
+                password = click.prompt(
+                    'Enter password to decrypt key',
+                    default='', hide_input=True,
+                    show_default=False)
+                continue
+            else:
+                password = None
+                click.echo('Wrong password.')
+            continue
+        break
 
     controller.import_key(
             slot,
