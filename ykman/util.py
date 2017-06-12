@@ -394,10 +394,11 @@ def is_pkcs12(data):
     The PFX PDU version is assumed to be v3.
     See: https://tools.ietf.org/html/rfc7292.
     """
-    if data is None:
+    if isinstance(data, bytes):
+        tlv = Tlv(data)
+        if tlv.tag == 0x30:
+            header = Tlv(tlv.value)
+            return header.tag == 0x02 and header.value == b'\x03'
         return False
-    tlv = Tlv(data)
-    if tlv.tag == 0x30:
-        header = Tlv(tlv.value)
-        return header.tag == 0x02 and header.value == b'\x03'
-    return False
+    else:
+        return False

@@ -128,27 +128,22 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertFalse(is_pkcs12('just a string'))
         self.assertFalse(is_pkcs12(None))
 
-        rsa_2048_key_pem = open(
-            os.path.join(
-                PKG_DIR, 'files', 'rsa_2048_key.pem'), 'rb')
-        self.assertFalse(is_pkcs12(rsa_2048_key_pem.read()))
+        def _open(filename):
+            return open(os.path.join(PKG_DIR, 'files', filename), 'rb')
 
-        rsa_2048_key_encrypted_pem = open(
-            os.path.join(
-                PKG_DIR, 'files', 'rsa_2048_key_encrypted.pem'), 'rb')
-        self.assertFalse(is_pkcs12(rsa_2048_key_encrypted_pem.read()))
+        with _open('rsa_2048_key.pem') as rsa_2048_key_pem:
+            self.assertFalse(is_pkcs12(rsa_2048_key_pem.read()))
 
-        rsa_2048_cert_pem = open(
-            os.path.join(
-                PKG_DIR, 'files', 'rsa_2048_cert.pem'), 'rb')
-        self.assertFalse(is_pkcs12(rsa_2048_cert_pem.read()))
+        with _open('rsa_2048_key_encrypted.pem') as rsa_2048_key_encrypted_pem:
+            self.assertFalse(is_pkcs12(rsa_2048_key_encrypted_pem.read()))
 
-        rsa_2048_key_cert_pfx = open(
-            os.path.join(
-                PKG_DIR, 'files', 'rsa_2048_key_cert.pfx'), 'rb')
-        self.assertTrue(is_pkcs12(rsa_2048_key_cert_pfx.read()))
+        with _open('rsa_2048_cert.pem') as rsa_2048_cert_pem:
+            self.assertFalse(is_pkcs12(rsa_2048_cert_pem.read()))
 
-        rsa_2048_key_cert_encrypted_pfx = open(
-            os.path.join(
-                PKG_DIR, 'files', 'rsa_2048_key_cert_encrypted.pfx'), 'rb')
-        self.assertTrue(is_pkcs12(rsa_2048_key_cert_encrypted_pfx.read()))
+        with _open('rsa_2048_key_cert.pfx') as rsa_2048_key_cert_pfx:
+            self.assertTrue(is_pkcs12(rsa_2048_key_cert_pfx.read()))
+
+        with _open(
+            'rsa_2048_key_cert_encrypted.pfx') as \
+                rsa_2048_key_cert_encrypted_pfx:
+            self.assertTrue(is_pkcs12(rsa_2048_key_cert_encrypted_pfx.read()))
