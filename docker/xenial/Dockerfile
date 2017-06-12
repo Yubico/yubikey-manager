@@ -20,6 +20,8 @@ RUN apt-get install -qq \
     python3-cryptography \
     python-click \
     python3-click \
+    python-openssl \
+    python3-openssl \
     python-enum34 \
     libykpers-1-1 \
     libu2f-host0 \
