@@ -1,9 +1,14 @@
-# vim: set fileencoding=utf-8 :
+#  vim: set fileencoding=utf-8 :
 
 from ykman.util import (b2len, derive_key, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
-                        parse_tlvs, parse_truncated, time_challenge, Tlv)
+                        parse_tlvs, parse_truncated, time_challenge, Tlv,
+                        is_pkcs12)
 import unittest
+import os
+
+
+PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 if not getattr(unittest.TestCase, 'assertRegex', None):
@@ -118,3 +123,32 @@ class TestUtilityFunctions(unittest.TestCase):
 
         self.assertEqual(b'\0\5hello\xff\0\x12\x82\x01\x90' + b'hi'*200,
                          tlv1 + tlv2 + tlv3)
+
+    def test_is_pkcs12(self):
+        self.assertFalse(is_pkcs12('just a string'))
+        self.assertFalse(is_pkcs12(None))
+
+        rsa_2048_key_pem = open(
+            os.path.join(
+                PKG_DIR, 'files', 'rsa_2048_key.pem'), 'rb')
+        self.assertFalse(is_pkcs12(rsa_2048_key_pem.read()))
+
+        rsa_2048_key_encrypted_pem = open(
+            os.path.join(
+                PKG_DIR, 'files', 'rsa_2048_key_encrypted.pem'), 'rb')
+        self.assertFalse(is_pkcs12(rsa_2048_key_encrypted_pem.read()))
+
+        rsa_2048_cert_pem = open(
+            os.path.join(
+                PKG_DIR, 'files', 'rsa_2048_cert.pem'), 'rb')
+        self.assertFalse(is_pkcs12(rsa_2048_cert_pem.read()))
+
+        rsa_2048_key_cert_pfx = open(
+            os.path.join(
+                PKG_DIR, 'files', 'rsa_2048_key_cert.pfx'), 'rb')
+        self.assertTrue(is_pkcs12(rsa_2048_key_cert_pfx.read()))
+
+        rsa_2048_key_cert_encrypted_pfx = open(
+            os.path.join(
+                PKG_DIR, 'files', 'rsa_2048_key_cert_encrypted.pfx'), 'rb')
+        self.assertTrue(is_pkcs12(rsa_2048_key_cert_encrypted_pfx.read()))
