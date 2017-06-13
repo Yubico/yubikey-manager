@@ -102,7 +102,7 @@ click_touch_policy_option = click.option(
 @click_skip_on_help
 def piv(ctx):
     """
-    Manage YubiKey PIV functions.
+    Manage YubiKey PIV functionality.
     """
     try:
         controller = PivController(ctx.obj['dev'].driver)
@@ -202,6 +202,8 @@ def generate_key(
         touch_policy):
     """
     Generate a asymmetric key pair.
+
+    The private key is generated on the device, and written to one of the slots.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -237,6 +239,8 @@ def import_certificate(
         ctx, slot, management_key, pin, input, password):
     """
     Import a X.509 certificate.
+
+    Write a certificate in one of the slots on the device.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -286,6 +290,8 @@ def import_key(
         pin_policy, touch_policy, password):
     """
     Import a private key.
+
+    Write a private key in one of the slots on the device.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -332,6 +338,9 @@ def import_key(
 def attest(ctx, slot, output, cert_format):
     """
     Generate a attestation certificate for a key.
+
+    Attestation is used to show that a certain asymmetric key has been
+    generated on device and not imported.
     """
     controller = ctx.obj['controller']
     try:
@@ -349,6 +358,8 @@ def attest(ctx, slot, output, cert_format):
 def export_certificate(ctx, slot, cert_format, output):
     """
     Export a X.509 certificate.
+
+    Reads a certificate from one of the slots on the device.
     """
     controller = ctx.obj['controller']
     try:
@@ -446,7 +457,8 @@ def generate_certificate(
     """
     Generate a self-signed X.509 certificate.
 
-    A private key need to exist in the slot.
+    A self-signed certificate is generated and written to one of the slots on
+    the device. A private key need to exist in the slot.
     """
     controller = ctx.obj['controller']
 
@@ -535,6 +547,8 @@ def generate_certificate_signing_request(
 def delete_certificate(ctx, slot, management_key, pin):
     """
     Delete a certificate.
+
+    Delete a certificate from a slot on the device.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -555,6 +569,10 @@ def delete_certificate(ctx, slot, management_key, pin):
 def change_pin(ctx, pin, new_pin):
     """
     Change the PIN code.
+
+    The PIN can be up to 8 characters long, and supports any type of
+    alphanumeric characters. For cross-platform compatibility,
+    a PIN of 6 - 8 numeric digits is recommended.
     """
     controller = ctx.obj['controller']
     if not pin:
@@ -577,6 +595,8 @@ def change_pin(ctx, pin, new_pin):
 def change_puk(ctx, puk, new_puk):
     """
     Change the PUK code.
+
+    If the PIN is lost or blocked it can be reset using a PUK.
     """
     controller = ctx.obj['controller']
     if not puk:
@@ -652,6 +672,8 @@ def change_management_key(
 def unblock_pin(ctx, puk, new_pin):
     """
     Unblock the PIN.
+
+    Reset the PIN using the PUK code.
     """
     controller = ctx.obj['controller']
     if not puk:
