@@ -44,32 +44,6 @@ import os
 import datetime
 
 
-def one_of(data):
-    def inner(ctx, param, key):
-        if key is not None:
-            return data[key]
-    return inner
-
-
-def get_or_fail(data):
-    def inner(key):
-        if key in data:
-            return data[key]
-        raise ValueError('Invalid value: {}. Must be one of: {}'.format(
-            key, ', '.join(data.keys())))
-    return inner
-
-
-def int_in_range(minval, maxval):
-    def inner(val):
-        intval = int(val)
-        if minval <= intval <= maxval:
-            return intval
-        raise ValueError('Invalid value: {}. Must be in range {}-{}'.format(
-            intval, minval, maxval))
-    return inner
-
-
 @click_callback()
 def click_parse_piv_slot(ctx, param, val):
     try:
