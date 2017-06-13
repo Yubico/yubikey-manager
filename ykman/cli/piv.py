@@ -215,9 +215,15 @@ def generate_key(
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
 
+    algorithm = ALGO.from_string(algorithm)
+
+    # ECCP384 not supported on NEO.
+    if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
+        ctx.fail('ECCP384 is not supported by this device.')
+
     public_key = controller.generate_key(
         slot,
-        ALGO.from_string(algorithm),
+        algorithm,
         PIN_POLICY.from_string(pin_policy),
         TOUCH_POLICY.from_string(touch_policy))
     key_encoding = serialization.Encoding.PEM \

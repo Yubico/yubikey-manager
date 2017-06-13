@@ -40,6 +40,10 @@ def _has_mode(mode):
     return yubikeys[0].mode.has_transport(mode)
 
 
+def _get_version():
+    return list(get_descriptors())[0].version
+
+
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
 @unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 class TestYkmanInfo(unittest.TestCase):
@@ -258,6 +262,7 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(_get_version() < (4, 0, 0), 'ECCP384 not available.')
     def test_piv_generate_key_eccp384(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'ECCP384', '-m',
