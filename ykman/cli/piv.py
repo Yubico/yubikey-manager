@@ -220,21 +220,9 @@ def generate_key(
     if touch_policy:
         touch_policy = TOUCH_POLICY.from_string(touch_policy)
 
-    # ECCP384 not supported on NEO.
-    if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
-        ctx.fail('ECCP384 is not supported by this device.')
-
-    # Pin policy not supported on NEO.
-    if pin_policy is not None and controller.version < (4, 0, 0):
-        ctx.fail('Pin policy is not supported by this device.')
-
-    # Pin policy not supported on NEO.
-    if touch_policy is not None:
-        if controller.version < (4, 0, 0):
-            ctx.fail('Touch policy is not supported by this device.')
-        if touch_policy == TOUCH_POLICY.CACHED \
-                and controller.version < (4, 3, 0):
-            ctx.fail('Touch policy "CACHED" not supported by this device.')
+    _check_eccp384(ctx, controller, algorithm)
+    _check_pin_policy(ctx, controller, pin_policy)
+    _check_touch_policy(ctx, controller, touch_policy)
 
     public_key = controller.generate_key(
         slot,
@@ -345,11 +333,19 @@ def import_key(
             continue
         break
 
+    if pin_policy:
+        pin_policy = PIN_POLICY.from_string(pin_policy)
+    if touch_policy:
+        touch_policy = TOUCH_POLICY.from_string(touch_policy)
+
+    _check_pin_policy(ctx, controller, pin_policy)
+    _check_touch_policy(ctx, controller, touch_policy)
+
     controller.import_key(
             slot,
             private_key,
-            pin_policy=PIN_POLICY.from_string(pin_policy),
-            touch_policy=TOUCH_POLICY.from_string(touch_policy))
+            pin_policy,
+            touch_policy)
 
 
 @piv.command()
@@ -736,6 +732,29 @@ def _authenticate(ctx, controller, management_key):
         controller.authenticate(management_key)
     except APDUError:
         ctx.fail('Authentication with management key failed.')
+
+
+def _check_eccp384(ctx, controller, algorithm):
+    #  ECCP384 not supported on NEO.
+    if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
+        ctx.fail('ECCP384 is not supported by this device.')
+
+
+def _check_pin_policy(ctx, controller, pin_policy):
+    #  Pin policy not supported on NEO.
+    if pin_policy is not None and controller.version < (4, 0, 0):
+        ctx.fail('Pin policy is not supported by this device.')
+
+
+def _check_touch_policy(ctx, controller, touch_policy):
+    #  Touch policy not supported on NEO.
+    if touch_policy is not None:
+        if controller.version < (4, 0, 0):
+            ctx.fail('Touch policy is not supported by this device.')
+        if touch_policy == TOUCH_POLICY.CACHED \
+                and controller.version < (4, 3, 0):
+            #  Cached policy was added in 4.3
+            ctx.fail('Touch policy "CACHED" not supported by this device.')
 
 
 piv.transports = TRANSPORT.CCID
