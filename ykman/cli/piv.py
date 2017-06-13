@@ -88,12 +88,10 @@ click_cert_format_option = click.option(
     help='Certificate format.', callback=click_parse_cert_format)
 click_pin_policy_option = click.option(
     '--pin-policy', type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
-    default='DEFAULT',
     help='PIN policy for slot.')
 click_touch_policy_option = click.option(
     '--touch-policy', type=click.Choice(
         ['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
-    default='DEFAULT',
     help='Touch policy for slot.')
 
 
@@ -217,15 +215,33 @@ def generate_key(
 
     algorithm = ALGO.from_string(algorithm)
 
+    if pin_policy:
+        pin_policy = PIN_POLICY.from_string(pin_policy)
+    if touch_policy:
+        touch_policy = TOUCH_POLICY.from_string(touch_policy)
+
     # ECCP384 not supported on NEO.
     if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
         ctx.fail('ECCP384 is not supported by this device.')
 
+    # Pin policy not supported on NEO.
+    if pin_policy is not None and controller.version < (4, 0, 0):
+        ctx.fail('Pin policy is not supported by this device.')
+
+    # Pin policy not supported on NEO.
+    if touch_policy is not None:
+        if controller.version < (4, 0, 0):
+            ctx.fail('Touch policy is not supported by this device.')
+        if touch_policy == TOUCH_POLICY.CACHED \
+                and controller.version < (4, 3, 0):
+            ctx.fail('Touch policy "CACHED" not supported by this device.')
+
     public_key = controller.generate_key(
         slot,
         algorithm,
-        PIN_POLICY.from_string(pin_policy),
-        TOUCH_POLICY.from_string(touch_policy))
+        pin_policy,
+        touch_policy)
+
     key_encoding = serialization.Encoding.PEM \
         if key_format == 'PEM' else serialization.Encoding.DER
     output.write(public_key.public_bytes(

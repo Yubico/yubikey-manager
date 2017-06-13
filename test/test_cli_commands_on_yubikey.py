@@ -278,12 +278,14 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(_is_NEO(), 'Pin policy not available.')
     def test_piv_generate_key_pin_policy_always(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '--pin-policy', 'ALWAYS', '-m',
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(_is_NEO(), 'Touch policy not available.')
     def test_piv_generate_key_touch_policy_always(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '--touch-policy', 'ALWAYS', '-m',
