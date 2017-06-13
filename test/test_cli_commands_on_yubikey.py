@@ -41,6 +41,8 @@ def _has_mode(mode):
 
 
 def _get_version():
+    if not _one_yubikey:
+        return None
     return list(get_descriptors())[0].version
 
 
