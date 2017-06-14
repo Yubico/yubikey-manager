@@ -421,7 +421,12 @@ class PivController(object):
         return tuple(six.iterbytes(self.send_cmd(INS.GET_VERSION)))
 
     def verify(self, pin):
-        self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
+        try:
+            self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
+        except APDUError:
+            raise ValueError(
+                'Pin verification failed. {} tries left.'.format(
+                        self.get_pin_tries()))
         if self.has_derived_key and not self._authenticated:
             self.authenticate(_derive_key(pin, self._pivman_data.salt))
 
@@ -438,8 +443,13 @@ class PivController(object):
                       _pack_pin(old_puk) + _pack_pin(new_puk))
 
     def unblock_pin(self, puk, new_pin):
-        self.send_cmd(INS.RESET_RETRY, 0, PIN,
-                      _pack_pin(puk) + _pack_pin(new_pin))
+        try:
+            self.send_cmd(
+                INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
+        except APDUError as e:
+            if e.sw == 0x6983:
+                raise ValueError('PUK is blocked.')
+            raise
 
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
