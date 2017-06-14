@@ -336,3 +336,4 @@ class TestPIV(unittest.TestCase):
             '-m', DEFAULT_MANAGEMENT_KEY)
         output = ykman_cli('piv', 'info')
         self.assertIn('Management key is derived from PIN', output)
+        ykman_cli('piv', 'reset', '-f')  # Cleanup, should maybe be done always?
