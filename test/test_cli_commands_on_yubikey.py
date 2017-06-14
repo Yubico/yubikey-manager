@@ -299,6 +299,7 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(_no_attestation(), 'Attestation not available.')
     def test_piv_attest_key(self):
         ykman_cli(
             'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
@@ -328,3 +329,10 @@ class TestPIV(unittest.TestCase):
     def test_piv_export_attestation_certificate(self):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
+
+    def test_piv_change_management_key_derive(self):
+        ykman_cli(
+            'piv', 'change-management-key', '-d', '-P', '123456',
+            '-m', DEFAULT_MANAGEMENT_KEY)
+        output = ykman_cli('piv', 'info')
+        self.assertIn('Management key is derived from PIN', output)
