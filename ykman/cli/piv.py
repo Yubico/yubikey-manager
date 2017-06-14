@@ -632,7 +632,6 @@ def change_puk(ctx, puk, new_puk):
 
 @piv.command('change-management-key')
 @click.pass_context
-@click_management_key_option
 @click_pin_option
 @click.option(
     '-t', '--touch', is_flag=True,
@@ -642,6 +641,9 @@ def change_puk(ctx, puk, new_puk):
     '-d', '--derive-from-pin', is_flag=True,
     help='Derive the management key from the current PIN code. \
             Blocks the PUK code.')
+@click.option(
+    '-m', '--management-key', help='Current management key.',
+    callback=click_parse_management_key)
 def change_management_key(
         ctx, management_key, pin, new_management_key, touch, derive_from_pin):
     """
