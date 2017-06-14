@@ -463,7 +463,7 @@ class PivController(object):
         new_salt = os.urandom(16)
         new_key = _derive_key(pin, new_salt)
         self.send_cmd(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
-                      bytes([ALGO.TDES]) +
+                      six.int2byte(ALGO.TDES) +
                       Tlv(SLOT.CARD_MANAGEMENT, new_key))
         self._pivman_data.salt = new_salt
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
@@ -492,8 +492,9 @@ class PivController(object):
         self._authenticated = True
 
     def set_mgm_key(self, new_key, touch=False):
-        self.send_cmd(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
-                      bytes([ALGO.TDES]) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
+        self.send_cmd(
+            INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
+            six.int2byte(ALGO.TDES) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
         if self.has_derived_key:
             self._pivman_data.salt = None
             self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
