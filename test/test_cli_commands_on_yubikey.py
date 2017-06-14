@@ -53,6 +53,13 @@ def _is_NEO():
         return False
 
 
+def _no_attestation():
+    if _one_yubikey:
+        return _get_version() < (4, 3, 0)
+    else:
+        return False
+
+
 @unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
 @unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
 class TestYkmanInfo(unittest.TestCase):
@@ -317,6 +324,7 @@ class TestPIV(unittest.TestCase):
             '-s', 'test-subject', '-P', '123456', '-')
         self.assertIn('BEGIN CERTIFICATE REQUEST', output)
 
+    @unittest.skipIf(_no_attestation(), 'Attestation not available.')
     def test_piv_export_attestation_certificate(self):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
