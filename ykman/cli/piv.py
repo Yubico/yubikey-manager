@@ -665,6 +665,10 @@ def change_management_key(
                             ' [blank to use the default key]')
         _authenticate(ctx, controller, management_key)
 
+    # Touch not supported on NEO.
+    if touch and controller.version < (4, 0, 0):
+        ctx.fail('Require touch not supported on your device.')
+
     if derive_from_pin:
         if not pin:
             pin = _prompt_pin(pin)
