@@ -447,9 +447,10 @@ class PivController(object):
             self.send_cmd(
                 INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
         except APDUError as e:
-            if e.sw == 0x6983:
+            tries = self._parse_tries_left(e.sw)
+            if tries == 0:
                 raise ValueError('PUK is blocked.')
-            raise
+            raise ValueError('Unblock PIN failed, {} tries left.'.format(tries))
 
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
@@ -509,12 +510,7 @@ class PivController(object):
             # Verify without PIN gives number of tries left.
             _, sw = self.send_cmd(INS.VERIFY, 0, PIN)
         except APDUError as e:
-            # PIN blocked, 0 tries left.
-            if e.sw == SW.AUTHENTICATION_BLOCKED:
-                return 0
-            if 0x63c0 <= e.sw <= 0x63cf:
-                return e.sw & 0xf
-            raise
+            return self._parse_tries_left(e.sw)
 
     def _get_puk_tries(self):
         try:
@@ -522,11 +518,19 @@ class PivController(object):
             # but also uses one try.
             _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2)
         except APDUError as e:
-            if e.sw == SW.AUTHENTICATION_BLOCKED:
-                return 0
-            if 0x63c0 <= e.sw <= 0x63cf:
-                return e.sw & 0xf
-            raise
+            return self._parse_tries_left(e.sw)
+
+    def _parse_tries_left(self, sw):
+        # Blocked, 0 tries left.
+        if sw == SW.AUTHENTICATION_BLOCKED:
+            return 0
+        # YK4, NEO with PIV >= 1.0.4
+        if 0x63c0 <= sw <= 0x63cf:
+            return sw & 0xf
+        # PIV applet < 1.04
+        if 0x6300 <= sw & 0x63ff:
+            return sw & 0xff
+        raise ValueError('Failed reading remaining PIN/PUK tries!')
 
     def _block_pin(self):
         while self.get_pin_tries() > 0:
