@@ -21,7 +21,8 @@ Commands:
   info     Show general information.
   mode     Manage connection modes.
   oath     Manage YubiKey OATH credentials.
-  openpgp  Manage YubiKey OpenPGP functions.
+  openpgp  Manage YubiKey OpenPGP functionality.
+  piv      Manage YubiKey PIV functionality.
   slot     Manage YubiKey Slots.
 ....
 
