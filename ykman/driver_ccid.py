@@ -116,10 +116,7 @@ class CCIDDriver(AbstractDriver):
         header = [cl, ins, p1, p2, len(data)]
         body = list(six.iterbytes(data))
         try:
-            from binascii import b2a_hex
             resp, sw1, sw2 = self._conn.transmit(header + body)
-            print('SEND:', b2a_hex(bytes(header + body)))
-            print('RECV:', b2a_hex(bytes(resp + [sw1, sw2])))
         except CardConnectionException as e:
             raise CCIDError(e)
         sw = sw1 << 8 | sw2
