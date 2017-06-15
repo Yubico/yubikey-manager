@@ -582,7 +582,8 @@ def delete_certificate(ctx, slot, management_key, pin):
 
 @piv.command('change-pin')
 @click.pass_context
-@click_pin_option
+@click.option(
+    '-P', '--pin', help='Current PIN code.')
 @click.option('-n', '--new-pin', help='A new PIN.')
 def change_pin(ctx, pin, new_pin):
     """
