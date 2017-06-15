@@ -1,5 +1,5 @@
 -   repo: git://github.com/pre-commit/pre-commit-hooks
-    sha: 18d7035de5388cc7775be57f529c154bf541aab9
+    sha: v0.8.0
     hooks:
     -   id: flake8
     -   id: double-quote-string-fixer
