@@ -452,8 +452,10 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
         if not pin:
             pin = _prompt_pin(pin)
         controller.verify(pin)
-
-    controller.set_pin_retries(pin_retries, puk_retries)
+    try:
+        controller.set_pin_retries(pin_retries, puk_retries)
+    except:
+        ctx.fail('Setting pin retries failed.')
 
 
 @piv.command('generate-certificate')
