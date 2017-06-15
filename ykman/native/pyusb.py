@@ -51,7 +51,7 @@ def _find_library_local(libname):
     if sys.platform == 'darwin':
         libpath = os.path.join(
             os.path.dirname(
-                sys.executable), "../Frameworks", libname + '.dylib')
+                sys.executable), '../Frameworks', libname + '.dylib')
         if os.path.isfile(libpath):
             return libpath
 

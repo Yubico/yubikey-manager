@@ -506,7 +506,7 @@ def generate_certificate(
         x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer), ]))
 
     # x509.random_serial_number added in cryptography 1.6
-    serial = utils.int_from_bytes(os.urandom(20), "big") >> 1
+    serial = utils.int_from_bytes(os.urandom(20), 'big') >> 1
     builder = builder.serial_number(serial)
 
     now = datetime.datetime.now()

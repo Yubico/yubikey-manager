@@ -4,7 +4,7 @@ from test.util import ykman_cli
 
 
 @unittest.skipIf(
-    os.environ.get('INTEGRATION_TESTS') != 'TRUE', "INTEGRATION_TESTS != TRUE")
+    os.environ.get('INTEGRATION_TESTS') != 'TRUE', 'INTEGRATION_TESTS != TRUE')
 class TestExternalLibraries(unittest.TestCase):
 
     def test_ykman_version(self):

@@ -65,4 +65,4 @@ def click_parse_b32_key(ctx, param, val):
 
 
 def prompt_for_touch():
-    click.echo("Touch your YubiKey...")
+    click.echo('Touch your YubiKey...')

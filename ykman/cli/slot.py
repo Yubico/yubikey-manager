@@ -63,7 +63,7 @@ def _failed_to_write_msg(ctx):
 @click.group()
 @click.pass_context
 @click_skip_on_help
-@click.option('--access-code', required=False, metavar="HEX",
+@click.option('--access-code', required=False, metavar='HEX',
               help='If your YubiKey is write-protected using an access code, '
               'you will need to specify it here for any operation that writes '
               'to the device. Set to empty to use a prompt for input.')
@@ -77,7 +77,7 @@ def slot(ctx, access_code):
 
     if access_code is not None:
         if access_code == '':
-            access_code = click.prompt("Enter access code", show_default=False)
+            access_code = click.prompt('Enter access code', show_default=False)
         access_code = a2b_hex(access_code)
         if len(access_code) != 6:
             raise ValueError('Must be exactly 6 bytes.')
@@ -420,7 +420,7 @@ def settings(ctx, slot, enter, force):
     """
     dev = ctx.obj['dev']
     if not dev.driver.slot_status[slot - 1]:
-        ctx.fail("Not possible to update settings on an empty slot.")
+        ctx.fail('Not possible to update settings on an empty slot.')
     force or click.confirm(
         'Update the settings for slot {}? '
         'All existing settings will be overwritten.'.format(slot), abort=True)

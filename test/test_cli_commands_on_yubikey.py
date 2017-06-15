@@ -21,8 +21,8 @@ if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
     try:
         from ykman.descriptor import get_descriptors
         click.confirm(
-            "Run integration tests? This will erase data on the YubiKey,"
-            " make sure it is a key used for development.", abort=True)
+            'Run integration tests? This will erase data on the YubiKey,'
+            ' make sure it is a key used for development.', abort=True)
         _one_yubikey = len(list(get_descriptors())) == 1
     except Exception:
         sys.exit()
@@ -60,8 +60,8 @@ def _no_attestation():
         return False
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 class TestYkmanInfo(unittest.TestCase):
 
     def test_ykman_info(self):
@@ -72,9 +72,9 @@ class TestYkmanInfo(unittest.TestCase):
         self.assertIn('Firmware version:', info)
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotStatus(unittest.TestCase):
 
     def test_ykman_slot_info(self):
@@ -89,9 +89,9 @@ class TestSlotStatus(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
 
     def test_ykman_program_otp_slot_2(self):
@@ -139,9 +139,9 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Slot 2: programmed', status)
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), "OTP needs to be enabled")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotCalculate(unittest.TestCase):
 
     def test_calculate_hex(self):
@@ -163,11 +163,11 @@ class TestSlotCalculate(unittest.TestCase):
         self.assertEqual(8, len(output.strip()))
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
-    "CCID needs to be enabled for this test.")
+    'CCID needs to be enabled for this test.')
 class TestOpenPGP(unittest.TestCase):
 
     def test_openpgp_info(self):
@@ -181,11 +181,11 @@ class TestOpenPGP(unittest.TestCase):
             output)
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
-    "CCID needs to be enabled for this test.")
+    'CCID needs to be enabled for this test.')
 class TestOATH(unittest.TestCase):
 
     def test_oath_info(self):
@@ -246,11 +246,11 @@ class TestOATH(unittest.TestCase):
         self.assertNotIn('remove-me', ykman_cli('oath', 'list'))
 
 
-@unittest.skipIf(_skip, "INTEGRATION_TESTS != TRUE")
-@unittest.skipIf(not _one_yubikey, "A single YubiKey need to be connected.")
+@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
-    "CCID needs to be enabled for this test.")
+    'CCID needs to be enabled for this test.')
 class TestPIV(unittest.TestCase):
 
     def test_piv_info(self):

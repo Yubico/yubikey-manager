@@ -32,9 +32,9 @@ from ykman.yubicommon.setup import setup
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
 if sys.version_info < (3, 4):
-    install_requires.append("enum34")
-if sys.platform == "win32":
-    install_requires.append("pypiwin32")
+    install_requires.append('enum34')
+if sys.platform == 'win32':
+    install_requires.append('pypiwin32')
 
 setup(
     name='yubikey-manager',

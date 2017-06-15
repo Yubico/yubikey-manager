@@ -248,7 +248,7 @@ def derive_key(salt, passphrase):
 
 
 def format_code(code, digits=6, steam=False):
-    STEAM_CHAR_TABLE = "23456789BCDFGHJKMNPQRTVWXY"
+    STEAM_CHAR_TABLE = '23456789BCDFGHJKMNPQRTVWXY'
     if steam:
         chars = []
         for i in range(5):
