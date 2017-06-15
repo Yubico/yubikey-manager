@@ -167,14 +167,14 @@ def reset(ctx):
     """
     Reset all PIV data.
 
-    This action will wipe all credentials and reset factory settings for
+    This action will wipe all data and reset factory settings for
     the PIV functionality on the device.
     """
 
     click.echo('Resetting PIV data...')
     ctx.obj['controller'].reset()
     click.echo(
-        'Success! All credentials have been cleared from the device.')
+        'Success! All PIV data have been cleared from the device.')
     click.echo('Your YubiKey now has the default PIN, PUK and Management Key:')
     click.echo('\tPIN:\t123456')
     click.echo('\tPUK:\t12345678')
@@ -465,9 +465,10 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
 @click_pin_option
 @click_input_argument
 @click.option(
-    '-s', '--subject', help='A subject name for the certificate', required=True)
+    '-s', '--subject',
+    help='A subject name for the certificate.', required=True)
 @click.option(
-    '-i', '--issuer', help='A issuer name for the certificate', required=True)
+    '-i', '--issuer', help='A issuer name for the certificate.', required=True)
 @click.option(
     '-d', '--valid-days',
     help='Number of days until the certificate expires.',
