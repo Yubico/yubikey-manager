@@ -77,7 +77,7 @@ def int_in_range(minval, maxval):
 @click_skip_on_help
 def openpgp(ctx):
     """
-    Manage YubiKey OpenPGP functions.
+    Manage YubiKey OpenPGP functionality.
     """
     try:
         controller = OpgpController(ctx.obj['dev'].driver)
