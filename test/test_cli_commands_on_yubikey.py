@@ -312,7 +312,7 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
         ykman_cli(
             'piv', 'generate-certificate', '9a', '/tmp/test-pub-key.pem',
-            '-s', 'test-subject', '-i', 'test-issuer', '-P', '123456')
+            '-s', 'test-subject', '-P', '123456')
         output = ykman_cli('piv', 'info')
         self.assertIn('test-subject', output)
 
