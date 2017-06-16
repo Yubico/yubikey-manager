@@ -201,7 +201,7 @@ def generate_key(
     ctx, slot, output, management_key, pin, algorithm, key_format, pin_policy,
         touch_policy):
     """
-    Generate a asymmetric key pair.
+    Generate an asymmetric key pair.
 
     The private key is generated on the device, and written to one of the slots.
     """
