@@ -82,7 +82,7 @@ click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
 click_key_format_option = click.option(
     '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
-    default='PEM', help='Key serialization format.')
+    default='PEM', help='Key serialization format.', show_default=True)
 click_cert_format_option = click.option(
     '-f', '--cert-format',
     type=click.Choice(['PEM', 'DER']), default='PEM',
@@ -191,7 +191,8 @@ def reset(ctx):
 @click.option(
     '-a', '--algorithm', help='Algorithm to use in key generation.',
     type=click.Choice(
-        ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048')
+        ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048',
+    show_default=True)
 @click_key_format_option
 @click_pin_policy_option
 @click_touch_policy_option
@@ -473,7 +474,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
 @click.option(
     '-d', '--valid-days',
     help='Number of days until the certificate expires.',
-    type=click.INT, default=365)
+    type=click.INT, default=365, show_default=True)
 def generate_certificate(
         ctx, slot, management_key, pin, input, subject, issuer, valid_days):
     """
