@@ -34,6 +34,13 @@ import re
 import click
 
 
+def _parse_transport_string(transport):
+    for t in TRANSPORT:
+        if t.name.startswith(transport):
+            return t
+    raise ValueError()
+
+
 def _parse_mode_string(ctx, param, mode):
     if mode is None:
         return None
@@ -45,19 +52,23 @@ def _parse_mode_string(ctx, param, mode):
     except ValueError:
         pass  # Not a numeric mode, parse string
 
-    found = set()
-    parts = set(filter(None, re.split(r'[+ ,]+', mode.upper())))
-    if len(parts) <= 3:
-        for p in parts:
-            for available in TRANSPORT:
-                if available.name.startswith(p):
-                    found.add(available)
-                    break
-            else:
-                ctx.fail('Invalid mode string: {}'.format(mode))
-    if len(found) > 0:
-        return Mode(sum(found))
-    ctx.fail('Invalid mode string: {}'.format(mode))
+    try:
+        transports = set()
+        if mode[0] in ['+', '-']:
+            transports.update(TRANSPORT.split(ctx.obj['dev'].mode.transports))
+            for mod in re.findall(r'[+-][A-Z]+', mode.upper()):
+                transport = _parse_transport_string(mod[1:])
+                if mod.startswith('+'):
+                    transports.add(transport)
+                else:
+                    transports.discard(transport)
+        else:
+            for t in filter(None, re.split(r'[+]+', mode.upper())):
+                transports.add(_parse_transport_string(t))
+    except ValueError:
+        ctx.fail('Invalid mode string: {}'.format(mode))
+
+    return Mode(sum(transports))
 
 
 @click.command()
