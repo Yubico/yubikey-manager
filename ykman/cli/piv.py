@@ -54,7 +54,7 @@ def click_parse_piv_slot(ctx, param, val):
 
 
 @click_callback()
-def click_parse_cert_format(ctx, param, val):
+def click_parse_format(ctx, param, val):
     if val == 'PEM':
         return serialization.Encoding.PEM
     elif val == 'DER':
@@ -80,13 +80,10 @@ click_management_key_option = click.option(
     callback=click_parse_management_key)
 click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
-click_key_format_option = click.option(
-    '-f', '--key-format', type=click.Choice(['PEM', 'DER']),
-    default='PEM', help='Key serialization format.', show_default=True)
-click_cert_format_option = click.option(
-    '-f', '--cert-format',
-    type=click.Choice(['PEM', 'DER']), default='PEM',
-    help='Certificate format.', callback=click_parse_cert_format)
+click_format_option = click.option(
+    '-F', '--format',
+    type=click.Choice(['PEM', 'DER']), default='PEM', show_default=True,
+    help='Encoding format.', callback=click_parse_format)
 click_pin_policy_option = click.option(
     '--pin-policy', type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
     help='PIN policy for slot.')
@@ -193,12 +190,12 @@ def reset(ctx):
     type=click.Choice(
         ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048',
     show_default=True)
-@click_key_format_option
+@click_format_option
 @click_pin_policy_option
 @click_touch_policy_option
 @click_output_argument
 def generate_key(
-    ctx, slot, output, management_key, pin, algorithm, key_format, pin_policy,
+    ctx, slot, output, management_key, pin, algorithm, format, pin_policy,
         touch_policy):
     """
     Generate an asymmetric key pair.
@@ -232,8 +229,7 @@ def generate_key(
         pin_policy,
         touch_policy)
 
-    key_encoding = serialization.Encoding.PEM \
-        if key_format == 'PEM' else serialization.Encoding.DER
+    key_encoding = format
     output.write(public_key.public_bytes(
             encoding=key_encoding,
             format=serialization.PublicFormat.SubjectPublicKeyInfo))
@@ -353,9 +349,9 @@ def import_key(
 @piv.command()
 @click.pass_context
 @click_slot_argument
-@click_cert_format_option
+@click_format_option
 @click_output_argument
-def attest(ctx, slot, output, cert_format):
+def attest(ctx, slot, output, format):
     """
     Generate a attestation certificate for a key.
 
@@ -367,15 +363,15 @@ def attest(ctx, slot, output, cert_format):
         cert = controller.attest(slot)
     except APDUError:
         ctx.fail('Attestation failed.')
-    output.write(cert.public_bytes(encoding=cert_format))
+    output.write(cert.public_bytes(encoding=format))
 
 
 @piv.command('export-certificate')
 @click.pass_context
 @click_slot_argument
-@click_cert_format_option
+@click_format_option
 @click_output_argument
-def export_certificate(ctx, slot, cert_format, output):
+def export_certificate(ctx, slot, format, output):
     """
     Export a X.509 certificate.
 
@@ -387,7 +383,7 @@ def export_certificate(ctx, slot, cert_format, output):
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail('No certificate found.')
-    output.write(cert.public_bytes(encoding=cert_format))
+    output.write(cert.public_bytes(encoding=format))
 
 
 @piv.command('set-chuid')
