@@ -207,7 +207,7 @@ def generate_key(
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -256,7 +256,7 @@ def import_certificate(
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -307,7 +307,7 @@ def import_key(
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -400,7 +400,7 @@ def set_chuid(ctx, management_key, pin):
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -420,7 +420,7 @@ def set_ccc(ctx, management_key, pin):
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -444,14 +444,14 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
     except:
@@ -486,7 +486,7 @@ def generate_certificate(
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -575,7 +575,7 @@ def delete_certificate(ctx, slot, management_key, pin):
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
@@ -661,7 +661,7 @@ def change_management_key(
     if controller.has_derived_key:
         if not pin:
             pin = _prompt_pin(pin)
-        controller.verify(pin)
+        _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(
