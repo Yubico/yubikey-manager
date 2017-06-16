@@ -518,7 +518,8 @@ def generate_certificate(
     builder = builder.not_valid_after(now + datetime.timedelta(days=valid_days))
 
     try:
-        cert = controller.sign_cert_builder(slot, algorithm, builder)
+        cert = _wait_for_touch(
+            controller.sign_cert_builder, slot, algorithm, builder)
     except APDUError:
         ctx.fail('Certificate generation failed.')
 
@@ -555,7 +556,8 @@ def generate_certificate_signing_request(
         x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
 
     try:
-        csr = controller.sign_csr_builder(slot, public_key, builder)
+        csr = _wait_for_touch(
+            controller.sign_csr_builder, slot, public_key, builder)
     except APDUError:
         ctx.fail('Certificate Signing Request generation failed.')
     output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
@@ -732,27 +734,29 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
 
 
 def _verify_pin(ctx, controller, pin):
-    # PIN doesn't have touch but mgm key might be derived,
-    # and have touch policy.
-    touch_timer = Timer(0.500, prompt_for_touch)
     try:
-        touch_timer.start()
-        controller.verify(pin)
-        touch_timer.cancel()
+        _wait_for_touch(controller.verify, pin)
     except APDUError:
         ctx.fail('PIN verification failed.')
 
 
 def _authenticate(ctx, controller, management_key):
-    # If mgm key has require touch set, prompt
-    # user to touch the key after 0.5 seconds.
-    touch_timer = Timer(0.500, prompt_for_touch)
     try:
-        touch_timer.start()
-        controller.authenticate(management_key)
-        touch_timer.cancel()
+        _wait_for_touch(controller.authenticate, management_key)
     except APDUError:
         ctx.fail('Authentication with management key failed.')
+
+
+def _wait_for_touch(inner, *args, **kwargs):
+    """
+    Run a function expecting a touch response from the device,
+    prompt the user after 0.5 seconds.
+    """
+    touch_timer = Timer(0.500, prompt_for_touch)
+    touch_timer.start()
+    data = inner(*args, **kwargs)
+    touch_timer.cancel()
+    return data
 
 
 def _check_eccp384(ctx, controller, algorithm):
