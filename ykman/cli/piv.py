@@ -32,13 +32,14 @@ from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
-from .util import click_skip_on_help, click_callback
+from .util import click_skip_on_help, click_callback, prompt_for_touch
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from cryptography import utils
 from binascii import b2a_hex, a2b_hex
+from threading import Timer
 import click
 import os
 import datetime
@@ -731,15 +732,25 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
 
 
 def _verify_pin(ctx, controller, pin):
+    # PIN doesn't have touch but mgm key might be derived,
+    # and have touch policy.
+    touch_timer = Timer(0.500, prompt_for_touch)
     try:
+        touch_timer.start()
         controller.verify(pin)
+        touch_timer.cancel()
     except APDUError:
         ctx.fail('PIN verification failed.')
 
 
 def _authenticate(ctx, controller, management_key):
+    # If mgm key has require touch set, prompt
+    # user to touch the key after 0.5 seconds.
+    touch_timer = Timer(0.500, prompt_for_touch)
     try:
+        touch_timer.start()
         controller.authenticate(management_key)
+        touch_timer.cancel()
     except APDUError:
         ctx.fail('Authentication with management key failed.')
 
