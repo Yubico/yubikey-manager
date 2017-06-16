@@ -72,8 +72,6 @@ def click_parse_management_key(ctx, param, val):
 
 
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
-click_input_argument = click.argument('input', type=click.File('rb'))
-click_output_argument = click.argument('output', type=click.File('wb'))
 click_management_key_option = click.option(
     '-m', '--management-key',
     help='The management key.',
@@ -193,14 +191,19 @@ def reset(ctx):
 @click_format_option
 @click_pin_policy_option
 @click_touch_policy_option
-@click_output_argument
+@click.argument(
+    'public-key-output', type=click.File('wb'), metavar='PUBLIC-KEY')
 def generate_key(
-    ctx, slot, output, management_key, pin, algorithm, format, pin_policy,
-        touch_policy):
+    ctx, slot, public_key_output, management_key, pin, algorithm,
+        format, pin_policy, touch_policy):
     """
     Generate an asymmetric key pair.
 
     The private key is generated on the device, and written to one of the slots.
+
+    \b
+    SLOT        PIV slot where private key should be stored.
+    PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -230,7 +233,7 @@ def generate_key(
         touch_policy)
 
     key_encoding = format
-    output.write(public_key.public_bytes(
+    public_key_output.output.write(public_key.public_bytes(
             encoding=key_encoding,
             format=serialization.PublicFormat.SubjectPublicKeyInfo))
 
@@ -240,15 +243,19 @@ def generate_key(
 @click_slot_argument
 @click_management_key_option
 @click_pin_option
-@click_input_argument
 @click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
+@click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(
-        ctx, slot, management_key, pin, input, password):
+        ctx, slot, management_key, pin, cert, password):
     """
     Import a X.509 certificate.
 
     Write a certificate in one of the slots on the device.
+
+    \b
+    SLOT            PIV slot to import the certificate to.
+    CERTIFICATE     File containing the certificate. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -260,7 +267,7 @@ def import_certificate(
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
 
-    data = input.read()
+    data = cert.read()
 
     while True:
         if password is not None:
@@ -290,16 +297,20 @@ def import_certificate(
 @click_management_key_option
 @click_pin_policy_option
 @click_touch_policy_option
-@click_input_argument
+@click.argument('private-key', type=click.File('rb'), metavar='PRIVATE-KEY')
 @click.option(
     '-p', '--password', help='Password used to decrypt the private key.')
 def import_key(
-        ctx, slot, management_key, pin, input,
+        ctx, slot, management_key, pin, private_key,
         pin_policy, touch_policy, password):
     """
     Import a private key.
 
     Write a private key in one of the slots on the device.
+
+    \b
+    SLOT        PIV slot to import the private key to.
+    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
     if controller.has_derived_key:
@@ -311,7 +322,7 @@ def import_key(
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
 
-    data = input.read()
+    data = private_key.read()
 
     while True:
         if password is not None:
@@ -350,32 +361,40 @@ def import_key(
 @click.pass_context
 @click_slot_argument
 @click_format_option
-@click_output_argument
-def attest(ctx, slot, output, format):
+@click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
+def attest(ctx, slot, certificate, format):
     """
     Generate a attestation certificate for a key.
 
     Attestation is used to show that a certain asymmetric key has been
     generated on device and not imported.
+
+    \b
+    SLOT        PIV slot with a private key to attest.
+    CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
     try:
         cert = controller.attest(slot)
     except APDUError:
         ctx.fail('Attestation failed.')
-    output.write(cert.public_bytes(encoding=format))
+    certificate.write(cert.public_bytes(encoding=format))
 
 
 @piv.command('export-certificate')
 @click.pass_context
 @click_slot_argument
 @click_format_option
-@click_output_argument
-def export_certificate(ctx, slot, format, output):
+@click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
+def export_certificate(ctx, slot, format, certificate):
     """
     Export a X.509 certificate.
 
     Reads a certificate from one of the slots on the device.
+
+    \b
+    SLOT        PIV slot to read certificate from.
+    CERTIFICATE File to write certificate to. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
     try:
@@ -383,7 +402,7 @@ def export_certificate(ctx, slot, format, output):
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail('No certificate found.')
-    output.write(cert.public_bytes(encoding=format))
+    certificate.write(cert.public_bytes(encoding=format))
 
 
 @piv.command('set-chuid')
@@ -461,23 +480,25 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
 @click_slot_argument
 @click_management_key_option
 @click_pin_option
-@click_input_argument
+@click.argument('public-key', type=click.File('rb'), metavar='PUBLIC-KEY')
 @click.option(
     '-s', '--subject',
     help='A subject name for the certificate.', required=True)
-@click.option(
-    '-i', '--issuer', help='A issuer name for the certificate.', required=True)
 @click.option(
     '-d', '--valid-days',
     help='Number of days until the certificate expires.',
     type=click.INT, default=365, show_default=True)
 def generate_certificate(
-        ctx, slot, management_key, pin, input, subject, issuer, valid_days):
+        ctx, slot, management_key, pin, public_key, subject, valid_days):
     """
     Generate a self-signed X.509 certificate.
 
     A self-signed certificate is generated and written to one of the slots on
     the device. A private key need to exist in the slot.
+
+    \b
+    SLOT            PIV slot where private key is stored.
+    PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
 
@@ -493,7 +514,7 @@ def generate_certificate(
             pin = _prompt_pin(ctx)
         _verify_pin(ctx, controller, pin)
 
-    data = input.read()
+    data = public_key.read()
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
@@ -503,8 +524,10 @@ def generate_certificate(
     builder = builder.public_key(public_key)
     builder = builder.subject_name(
         x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
+
+    # Same as subject on self-signed certificates.
     builder = builder.issuer_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer), ]))
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
 
     # x509.random_serial_number added in cryptography 1.6
     serial = utils.int_from_bytes(os.urandom(20), 'big') >> 1
@@ -526,25 +549,30 @@ def generate_certificate(
 @piv.command('generate-csr')
 @click.pass_context
 @click_slot_argument
-@click_input_argument
-@click_output_argument
 @click_pin_option
+@click.argument('public-key', type=click.File('rb'), metavar='PUBLIC-KEY')
+@click.argument('csr-output', type=click.File('wb'), metavar='CSR')
 @click.option(
     '-s', '--subject',
     help='A subject name for the requested certificate.', required=True)
 def generate_certificate_signing_request(
-        ctx, slot, pin, input, output, subject):
+        ctx, slot, pin, public_key, csr_output, subject):
     """
     Generate a Certificate Signing Request (CSR).
 
     A private key need to exist in the slot.
+
+    \b
+    SLOT        PIV slot where the private key is stored.
+    PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
+    CSR         File to write CSR to. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
     if not pin:
         pin = _prompt_pin(ctx)
     _verify_pin(ctx, controller, pin)
 
-    data = input.read()
+    data = public_key.read()
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
@@ -557,7 +585,7 @@ def generate_certificate_signing_request(
             controller.sign_csr_builder, slot, public_key, builder)
     except APDUError:
         ctx.fail('Certificate Signing Request generation failed.')
-    output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
+    csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
 
 
 @piv.command('delete-certificate')
