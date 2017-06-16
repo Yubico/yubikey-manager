@@ -233,7 +233,7 @@ def generate_key(
         touch_policy)
 
     key_encoding = format
-    public_key_output.output.write(public_key.public_bytes(
+    public_key_output.write(public_key.public_bytes(
             encoding=key_encoding,
             format=serialization.PublicFormat.SubjectPublicKeyInfo))
 
