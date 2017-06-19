@@ -39,7 +39,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from cryptography import utils
 from binascii import b2a_hex, a2b_hex
-from threading import Timer
 import click
 import os
 import datetime
@@ -538,8 +537,8 @@ def generate_certificate(
     builder = builder.not_valid_after(now + datetime.timedelta(days=valid_days))
 
     try:
-        cert = _wait_for_touch(
-            controller.sign_cert_builder, slot, algorithm, builder)
+        cert = controller.sign_cert_builder(
+            slot, algorithm, builder, touch_callback=prompt_for_touch)
     except APDUError:
         ctx.fail('Certificate generation failed.')
 
@@ -581,8 +580,8 @@ def generate_certificate_signing_request(
         x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
 
     try:
-        csr = _wait_for_touch(
-            controller.sign_csr_builder, slot, public_key, builder)
+        csr = controller.sign_csr_builder(
+            slot, public_key, builder, touch_callback=prompt_for_touch)
     except APDUError:
         ctx.fail('Certificate Signing Request generation failed.')
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
@@ -760,28 +759,16 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
 
 def _verify_pin(ctx, controller, pin):
     try:
-        _wait_for_touch(controller.verify, pin)
+        controller.verify(pin, touch_callback=prompt_for_touch)
     except APDUError:
         ctx.fail('PIN verification failed.')
 
 
 def _authenticate(ctx, controller, management_key):
     try:
-        _wait_for_touch(controller.authenticate, management_key)
+        controller.authenticate(management_key, touch_callback=prompt_for_touch)
     except APDUError:
         ctx.fail('Authentication with management key failed.')
-
-
-def _wait_for_touch(inner, *args, **kwargs):
-    """
-    Run a function expecting a touch response from the device,
-    prompt the user after 0.5 seconds.
-    """
-    touch_timer = Timer(0.500, prompt_for_touch)
-    touch_timer.start()
-    data = inner(*args, **kwargs)
-    touch_timer.cancel()
-    return data
 
 
 def _check_eccp384(ctx, controller, algorithm):

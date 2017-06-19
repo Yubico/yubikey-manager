@@ -40,6 +40,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from collections import OrderedDict
+from threading import Timer
 import struct
 import six
 import os
@@ -420,7 +421,7 @@ class PivController(object):
     def _read_version(self):
         return tuple(six.iterbytes(self.send_cmd(INS.GET_VERSION)))
 
-    def verify(self, pin):
+    def verify(self, pin, touch_callback=None):
         try:
             self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
         except APDUError:
@@ -428,7 +429,8 @@ class PivController(object):
                 'Pin verification failed. {} tries left.'.format(
                         self.get_pin_tries()))
         if self.has_derived_key and not self._authenticated:
-            self.authenticate(_derive_key(pin, self._pivman_data.salt))
+            self.authenticate(
+                _derive_key(pin, self._pivman_data.salt), touch_callback)
 
     def change_pin(self, old_pin, new_pin):
         self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
@@ -473,18 +475,25 @@ class PivController(object):
         self._pivman_data.pin_timestamp = timestamp
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
 
-    def authenticate(self, key):
+    def authenticate(self, key, touch_callback=None):
         ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                             Tlv(TAG.DYN_AUTH, Tlv(0x80)))[4:12]
         backend = default_backend()
         cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
         decryptor = cipher.decryptor()
         pt1 = decryptor.update(ct1) + decryptor.finalize()
-
         ct2 = os.urandom(8)
+
+        if touch_callback is not None:
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+
         pt2 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                             Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
                             )[4:12]
+
+        if touch_callback is not None:
+            touch_timer.cancel()
 
         encryptor = cipher.encryptor()
         pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
@@ -667,7 +676,7 @@ class PivController(object):
             Tlv(TAG.LRC)
         )
 
-    def sign_cert_builder(self, slot, algorithm, builder):
+    def sign_cert_builder(self, slot, algorithm, builder, touch_callback=None):
         dummy_key = _dummy_key(algorithm)
         cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
         message = cert.tbs_certificate_bytes
@@ -679,7 +688,15 @@ class PivController(object):
             h.update(message)
             message = h.finalize()
 
+        if touch_callback is not None:
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+
         sig = self.sign_raw(slot, algorithm, message)
+
+        if touch_callback is not None:
+            touch_timer.cancel()
+
         seq = parse_tlvs(Tlv(cert.public_bytes(Encoding.DER)).value)
         # Replace signature, add unused bits = 0
         seq[2] = Tlv(seq[2].tag, b'\0' + sig)
@@ -688,7 +705,7 @@ class PivController(object):
 
         return x509.load_der_x509_certificate(der, default_backend())
 
-    def sign_csr_builder(self, slot, public_key, builder):
+    def sign_csr_builder(self, slot, public_key, builder, touch_callback=None):
         algorithm = ALGO.from_public_key(public_key)
         dummy_key = _dummy_key(algorithm)
         cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
@@ -709,7 +726,15 @@ class PivController(object):
             pub_bytes = public_key.public_bytes(
                 Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
 
+        if touch_callback is not None:
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+
         sig = self.sign_raw(slot, algorithm, message)
+
+        if touch_callback is not None:
+            touch_timer.cancel()
+
         seq = parse_tlvs(Tlv(cert.public_bytes(Encoding.DER)).value)
         # Replace public key
         seq[0] = seq[0].replace(dummy_bytes, pub_bytes)
