@@ -34,7 +34,9 @@ from ..piv import (
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_skip_on_help, click_callback, prompt_for_touch
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from cryptography import utils
@@ -542,6 +544,21 @@ def generate_certificate(
     except APDUError:
         ctx.fail('Certificate generation failed.')
 
+    # Verify that the public key used in the certificate
+    # is from the same keypair as the private key.
+    cert_signature = cert.signature
+    cert_bytes = cert.tbs_certificate_bytes
+    if isinstance(public_key, rsa.RSAPublicKey):
+        verifier = public_key.verifier(
+            cert_signature, padding.PKCS1v15(), cert.signature_hash_algorithm)
+    elif isinstance(public_key, ec.EllipticCurvePublicKey):
+        verifier = public_key.verifier(
+            cert_signature, ec.ECDSA(cert.signature_hash_algorithm))
+    verifier.update(cert_bytes)
+    try:
+        verifier.verify()
+    except InvalidSignature:
+        ctx.fail('Invalid signature, certificate not imported.')
     controller.import_certificate(slot, cert)
 
 
