@@ -8,13 +8,20 @@
 image: Visual Studio 2015
 
 environment:
-    LIBU2F_HOST_VERSION: "1.1.3"
-    YKPERS_VERSION: "1.18.0"
-    LIBUSB_VERSION: "1.0.21"
+  LIBU2F_HOST_VERSION: "1.1.3"
+  YKPERS_VERSION: "1.18.0"
+  LIBUSB_VERSION: "1.0.21"
+
+  matrix:
+    - PYTHON: "C:\\Python27"
+    - PYTHON: "C:\\Python27-x64"
+    - PYTHON: "C:\\Python35"
+    - PYTHON: "C:\\Python35-x64"
+    - PYTHON: "C:\\Python36"
+    - PYTHON: "C:\\Python36-x64"
 
 init:
-  # Add python to PATH
-  - set PATH=%PATH%;C:\Python36\Scripts;
+  - set PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%"
 
 install:
   - git submodule update --init --recursive
@@ -25,11 +32,11 @@ install:
   - choco install swig -y
   - choco upgrade swig
 
-  - ps: wget "https://developers.yubico.com/libu2f-host/Releases/libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip" -OutFile "libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip"
+  - ps: appveyor DownloadFile "https://developers.yubico.com/libu2f-host/Releases/libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip"
   - 7z x libu2f-host-%LIBU2F_HOST_VERSION%-win32.zip -o".\libu2f-host" 
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libu2f-host\bin
 
-  - ps: wget "https://developers.yubico.com/yubikey-personalization/Releases/ykpers-$env:YKPERS_VERSION-win32.zip" -OutFile "ykpers-$env:YKPERS_VERSION-win32.zip"
+  - ps: appveyor DownloadFile "https://developers.yubico.com/yubikey-personalization/Releases/ykpers-$env:YKPERS_VERSION-win32.zip"
   - 7z x ykpers-%YKPERS_VERSION%-win32.zip -o".\ykpers"
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\ykpers\bin
 
