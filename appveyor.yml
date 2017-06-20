@@ -13,6 +13,7 @@ init:
   - set PATH=%PATH%;C:\Python36\Scripts;
   - set LIBU2F_HOST_VERSION=1.1.3
   - set YKPERS_VERSION=1.18.0
+  - set LIBUSB_VERSION=1.0.21
 
 install:
   - git submodule update --init --recursive
@@ -23,16 +24,16 @@ install:
   - choco install swig -y
   - choco upgrade swig
 
-  - ps: wget https://developers.yubico.com/libu2f-host/Releases/libu2f-host-%LIBU2F_HOST_VERSION%-win32.zip -OutFile libu2f-host-%LIBU2F_HOST_VERSION%-win32.zip
+  - ps: wget "https://developers.yubico.com/libu2f-host/Releases/libu2f-host-$LIBU2F_HOST_VERSION-win32.zip" -OutFile "libu2f-host-$LIBU2F_HOST_VERSION-win32.zip"
   - 7z x libu2f-host-%LIBU2F_HOST_VERSION%-win32.zip -o".\libu2f-host" 
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libu2f-host\bin
 
-  - ps: wget https://developers.yubico.com/yubikey-personalization/Releases/ykpers-%YKPERS_VERSION%-win32.zip -OutFile ykpers-%YKPERS_VERSION%-win32.zip  
+  - ps: wget "https://developers.yubico.com/yubikey-personalization/Releases/ykpers-$YKPERS_VERSION-win32.zip" -OutFile "ykpers-$YKPERS_VERSION-win32.zip"
   - 7z x ykpers-%YKPERS_VERSION%-win32.zip -o".\ykpers"
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\ykpers\bin
 
-  - ps: wget https://s3.eu-central-1.amazonaws.com/yubico-deps/yubikey-manager-qt/libusb-1.0.20.7z -OutFile libusb-1.0.20.7z
-  - 7z x libusb-1.0.20.7z -o".\libusb
+  - ps: wget "http://prdownloads.sourceforge.net/libusb/libusb-$LIBUSB_VERSION.7z" -OutFile "libusb-$LIBUSB_VERSION.7z"
+  - 7z x libusb-%LIBUSB_VERSION%.7z -o".\libusb
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libusb\MS32\dll
 
 build_script:
