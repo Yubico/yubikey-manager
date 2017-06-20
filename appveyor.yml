@@ -13,6 +13,7 @@ environment:
   LIBUSB_VERSION: "1.0.21"
 
   matrix:
+    fast_finish: true
     - PYTHON: "C:\\Python27"
     - PYTHON: "C:\\Python27-x64"
     - PYTHON: "C:\\Python35"
@@ -47,3 +48,6 @@ install:
 build_script:
   - pip3 install -e .
   - ykman -v
+
+test_script:
+  - python setup.py test
