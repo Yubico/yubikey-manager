@@ -12,17 +12,17 @@ environment:
   YKPERS_VERSION: "1.18.0"
   LIBUSB_VERSION: "1.0.21"
 
-  matrix:
-    - PYTHON: "C:\\Python27"
-    - PYTHON: "C:\\Python27-x64"
-    - PYTHON: "C:\\Python35"
-    - PYTHON: "C:\\Python35-x64"
-    - PYTHON: "C:\\Python36"
-    - PYTHON: "C:\\Python36-x64"
+  #  matrix:
+  #  - PYTHON: "C:\\Python27"
+  #  - PYTHON: "C:\\Python27-x64"
+  #  - PYTHON: "C:\\Python35"
+  #  - PYTHON: "C:\\Python35-x64"
+  #  - PYTHON: "C:\\Python36"
+  #  - PYTHON: "C:\\Python36-x64"
 
 
-matrix:
-  fast_finish: true
+# matrix:
+  # fast_finish: true
 
 init:
   - set PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%"
