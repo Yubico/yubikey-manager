@@ -36,15 +36,15 @@ install:
   - choco install swig -y
   - choco upgrade swig
 
-  - appveyor DownloadFile "https://developers.yubico.com/libu2f-host/Releases/libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip"
+  - ps: appveyor DownloadFile "https://developers.yubico.com/libu2f-host/Releases/libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip"
   - 7z x libu2f-host-%LIBU2F_HOST_VERSION%-win32.zip -o".\libu2f-host" 
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libu2f-host\bin
 
-  - appveyor DownloadFile "https://developers.yubico.com/yubikey-personalization/Releases/ykpers-$env:YKPERS_VERSION-win32.zip"
+  - ps: appveyor DownloadFile "https://developers.yubico.com/yubikey-personalization/Releases/ykpers-$env:YKPERS_VERSION-win32.zip"
   - 7z x ykpers-%YKPERS_VERSION%-win32.zip -o".\ykpers"
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\ykpers\bin
 
-  - appveyor DownloadFile "http://prdownloads.sourceforge.net/libusb/libusb-$env:LIBUSB_VERSION.7z"
+  - ps: appveyor DownloadFile "http://prdownloads.sourceforge.net/libusb/libusb-$env:LIBUSB_VERSION.7z"
   - 7z x libusb-%LIBUSB_VERSION%.7z -o".\libusb
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libusb\MS32\dll
 
