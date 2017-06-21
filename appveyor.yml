@@ -50,7 +50,7 @@ install:
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libusb\MS32\dll
 
 build_script:
-  - pip3 install -e .
+  - pip install -e .
   - ykman -v
 
 test_script:
