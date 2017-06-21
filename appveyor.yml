@@ -25,7 +25,8 @@ environment:
   # fast_finish: true
 
 init:
-  - set PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%"
+  - set PATH=%PATH%;C:\Python36\Scripts;
+  # - set PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%"
 
 install:
   - git submodule update --init --recursive
