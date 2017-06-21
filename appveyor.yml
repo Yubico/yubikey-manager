@@ -45,7 +45,7 @@ install:
   - 7z x ykpers-%YKPERS_VERSION%-win32.zip -o".\ykpers"
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\ykpers\bin
 
-  - ps: wget "http://prdownloads.sourceforge.net/libusb/libusb-$env:LIBUSB_VERSION.7z" -OutFile "libusb-$env:LIBUSB_VERSION.7z"
+  - ps: cmd /c appveyor DownloadFile "http://prdownloads.sourceforge.net/libusb/libusb-$env:LIBUSB_VERSION.7z" -OutFile "libusb-$env:LIBUSB_VERSION.7z"
   - 7z x libusb-%LIBUSB_VERSION%.7z -o".\libusb"
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libusb\MS32\dll
 
