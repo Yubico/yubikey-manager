@@ -134,6 +134,12 @@ class TestSlotProgramming(unittest.TestCase):
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: empty', status)
 
+    def test_access_code_slot_2(self):
+        ykman_cli('slot', '--access-code', '111111111111', 'static', '2', '-f')
+        ykman_cli('slot', '--access-code', '111111111111', 'delete', '2', '-f')
+        status = ykman_cli('slot', 'info')
+        self.assertIn('Slot 2: empty', status)
+
     def _check_slot_2_programmed(self):
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: programmed', status)
