@@ -63,16 +63,20 @@ def _failed_to_write_msg(ctx):
 @click.group()
 @click.pass_context
 @click_skip_on_help
-@click.option('--access-code', required=False, metavar='HEX',
-              help='If your YubiKey is write-protected using an access code, '
-              'you will need to specify it here for any operation that writes '
-              'to the device. Set to empty to use a prompt for input.')
+@click.option(
+    '--access-code', required=False, metavar='HEX',
+    help='A 6 byte access code. Set to empty to use a prompt for input.')
 def slot(ctx, access_code):
     """
     Manage YubiKey Slots.
 
     The YubiKey provides two keyboard-based slots which can each be configured
     with a credential. Several credential types are supported.
+
+    A slot configuration may be write-protected with an access code. This
+    prevents the configuration to be overwritten without the access code
+    provided. Mode switching the device is not possible when a slot is
+    configured with an access code.
     """
 
     if access_code is not None:
