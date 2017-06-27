@@ -78,7 +78,10 @@ def slot(ctx, access_code):
     if access_code is not None:
         if access_code == '':
             access_code = click.prompt('Enter access code', show_default=False)
-        access_code = a2b_hex(access_code)
+        try:
+            access_code = a2b_hex(access_code)
+        except TypeError as e:
+            raise ValueError(e)
         if len(access_code) != 6:
             raise ValueError('Must be exactly 6 bytes.')
     ctx.obj['dev'].driver.access_code = access_code
