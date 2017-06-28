@@ -416,7 +416,8 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
 @click.pass_context
 @click.option(
     '--enter/--no-enter',
-    # default=True,
+    default=True,
+    show_default=True,
     help="Should send 'Enter' keystroke after slot output.")
 def settings(ctx, slot, enter, force):
     """
