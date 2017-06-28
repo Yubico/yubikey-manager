@@ -415,11 +415,13 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
 @click_force_option
 @click.pass_context
 @click.option(
-    '--enter/--no-enter',
-    default=True,
-    show_default=True,
+    '--enter/--no-enter', default=True, show_default=True,
     help="Should send 'Enter' keystroke after slot output.")
-def settings(ctx, slot, enter, force):
+@click.option(
+    '-p', '--pacing', type=click.Choice(['0', '20', '40', '60']),
+    default='0', show_default=True, help='Throttle output speed by '
+    'adding a delay (in ms) between characters emitted.')
+def settings(ctx, slot, enter, pacing, force):
     """
     Update the settings for a slot.
 
@@ -433,8 +435,12 @@ def settings(ctx, slot, enter, force):
         'Update the settings for slot {}? '
         'All existing settings will be overwritten.'.format(slot), abort=True)
     click.echo('Updating settings for slot {}...'.format(slot))
+
+    if pacing is not None:
+        pacing = int(pacing)
+
     try:
-        dev.driver.update_settings(slot, enter)
+        dev.driver.update_settings(slot, enter=enter, pacing=pacing)
     except YkpersError:
         _failed_to_write_msg(ctx)
 

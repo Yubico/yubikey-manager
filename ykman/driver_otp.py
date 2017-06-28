@@ -347,11 +347,21 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def update_settings(self, slot, enter=True):
+    def update_settings(self, slot, enter=True, pacing=None):
         cmd = slot_to_cmd(slot, update=True)
         cfg = self._create_cfg(cmd)
         if enter:
             check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
+
+        # Output speed throttling
+        if pacing == 20:
+            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_10MS'))
+        elif pacing == 40:
+            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_20MS'))
+        elif pacing == 60:
+            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_10MS'))
+            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_20MS'))
+
         try:
             check(ykpers.yk_write_command(
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
