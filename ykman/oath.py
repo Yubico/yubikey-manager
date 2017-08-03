@@ -229,7 +229,7 @@ class OathController(object):
         # for Steam entries, so let's do it for all.
         digits = six.indexbytes(resp, 0)
         resp = resp[1:]
-        offset = resp[-1] & 0xF
+        offset = six.indexbytes(resp, -1) & 0xF
         code = resp[offset:offset + 4]
         code = parse_truncated(code)
         cred.code = format_code(code, digits, steam=cred.steam)
