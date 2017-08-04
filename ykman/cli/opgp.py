@@ -110,7 +110,7 @@ def reset(ctx):
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
     """
-    click.echo('Resetting OpenPGP data...')
+    click.echo("Resetting OpenPGP data, don't remove your YubiKey...")
     ctx.obj['controller'].reset()
     echo_default_pins()
 
