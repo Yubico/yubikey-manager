@@ -28,7 +28,8 @@
 
 import six
 from .util import AID
-from .driver_ccid import APDUError, SW_OK
+from .driver_ccid import (
+    APDUError, SW_OK, SW_NO_INPUT_DATA, SW_CONDITIONS_NOT_SATISFIED, INS_SELECT)
 from enum import IntEnum, unique
 from binascii import b2a_hex
 
@@ -67,8 +68,8 @@ TOUCH_METHOD_BUTTON = 0x20
 class OpgpController(object):
 
     def __init__(self, driver):
-        driver.select(AID.OPGP)
         self._driver = driver
+        self.send_apdu(0, INS_SELECT, 0x04, 0, AID.OPGP)
         self._version = self._read_version()
 
     @property
@@ -76,7 +77,13 @@ class OpgpController(object):
         return self._version
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
-        return self._driver.send_apdu(cl, ins, p1, p2, data, check)
+        try:
+            return self._driver.send_apdu(cl, ins, p1, p2, data, check)
+        except APDUError as e:
+            # If OpenPGP is in a terminated state send activate.
+            if e.sw in (SW_NO_INPUT_DATA, SW_CONDITIONS_NOT_SATISFIED):
+                self._driver.send_apdu(0, INS.ACTIVATE, 0, 0)
+                return self._driver.send_apdu(cl, ins, p1, p2, data, check)
 
     def _read_version(self):
         bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
