@@ -688,7 +688,7 @@ def change_puk(ctx, puk, new_puk):
 @click.option(
     '-d', '--derive-from-pin', is_flag=True,
     help='Derive the management key from the current PIN code. \
-            Blocks the PUK code.')
+Blocks the PUK code.')
 @click.option(
     '-m', '--management-key', help='Current management key.',
     callback=click_parse_management_key)
