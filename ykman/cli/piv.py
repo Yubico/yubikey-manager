@@ -686,14 +686,10 @@ def change_puk(ctx, puk, new_puk):
     help='Require touch on YubiKey when prompted for management key.')
 @click.option('-n', '--new-management-key', help='A new management key.')
 @click.option(
-    '-d', '--derive-from-pin', is_flag=True,
-    help='Derive the management key from the current PIN code. \
-Blocks the PUK code.')
-@click.option(
     '-m', '--management-key', help='Current management key.',
     callback=click_parse_management_key)
 def change_management_key(
-        ctx, management_key, pin, new_management_key, touch, derive_from_pin):
+        ctx, management_key, pin, new_management_key, touch):
     """
     Change the management key.
 
@@ -717,24 +713,19 @@ def change_management_key(
     if touch and controller.version < (4, 0, 0):
         ctx.fail('Require touch not supported on your device.')
 
-    if derive_from_pin:
-        if not pin:
-            pin = _prompt_pin(pin)
-        controller.use_derived_key(pin, touch=touch)
-    else:
-        if not new_management_key:
-            new_management_key = click.prompt(
-                'Enter your new management key',
-                default='', show_default=False,
-                hide_input=True, confirmation_prompt=True)
-        try:
-            new_management_key = a2b_hex(new_management_key)
-        except:
-            ctx.fail('New management key has the wrong format.')
-        try:
-            controller.set_mgm_key(new_management_key, touch=touch)
-        except APDUError:
-            ctx.fail('Changing the management key failed.')
+    if not new_management_key:
+        new_management_key = click.prompt(
+            'Enter your new management key',
+            default='', show_default=False,
+            hide_input=True, confirmation_prompt=True)
+    try:
+        new_management_key = a2b_hex(new_management_key)
+    except:
+        ctx.fail('New management key has the wrong format.')
+    try:
+        controller.set_mgm_key(new_management_key, touch=touch)
+    except APDUError:
+        ctx.fail('Changing the management key failed.')
 
 
 @piv.command('unblock-pin')
