@@ -125,6 +125,8 @@ def info(ctx):
         click.echo('PUK blocked.')
     if controller.has_derived_key:
         click.echo('Management key is derived from PIN.')
+    if controller.has_protected_mgm_key:
+        click.echo('Management key is stored on device and protected by PIN.')
     try:
         chuid = b2a_hex(controller.get_data(OBJ.CHUID)).decode()
     except APDUError as e:
@@ -688,8 +690,11 @@ def change_puk(ctx, puk, new_puk):
 @click.option(
     '-m', '--management-key', help='Current management key.',
     callback=click_parse_management_key)
+@click.option(
+    '-g', '--generate', is_flag=True,
+    help='Generate a random management key and store it on the device.')
 def change_management_key(
-        ctx, management_key, pin, new_management_key, touch):
+        ctx, management_key, pin, new_management_key, touch, generate):
     """
     Change the management key.
 
@@ -703,6 +708,10 @@ def change_management_key(
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
+        if generate:
+            if not pin:
+                pin = _prompt_pin(pin)
+            _verify_pin(ctx, controller, pin)
         if not management_key:
             management_key = _prompt_management_key(
                 ctx, prompt='Enter your current management key'
@@ -712,6 +721,11 @@ def change_management_key(
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):
         ctx.fail('Require touch not supported on your device.')
+
+    # Generate a random management key and store it on the device.
+    if generate:
+        store_on_device = True
+        new_management_key = b2a_hex(os.urandom(24)).decode()
 
     if not new_management_key:
         new_management_key = click.prompt(
@@ -723,8 +737,10 @@ def change_management_key(
     except:
         ctx.fail('New management key has the wrong format.')
     try:
-        controller.set_mgm_key(new_management_key, touch=touch)
-    except APDUError:
+        controller.set_mgm_key(
+            new_management_key, touch=touch, store_on_device=store_on_device)
+    except APDUError as e:
+        print(e)
         ctx.fail('Changing the management key failed.')
 
 

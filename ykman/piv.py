@@ -137,7 +137,6 @@ class OBJ(IntEnum):
     FINGERPRINTS = 0x5fc103
     SECURITY = 0x5fc106
     FACIAL = 0x5fc108
-    PRINTED = 0x5fc109
     SIGNATURE = 0x5fc10a  # cert for 9c key
     KEY_MANAGEMENT = 0x5fc10b  # cert for 9d key
     CARD_AUTH = 0x5fc101  # cert for 9e key
@@ -167,6 +166,7 @@ class OBJ(IntEnum):
     RETIRED20 = 0x5fc120
 
     PIVMAN_DATA = 0x5fff00
+    PROTECTED_PIVMAN_DATA = 0x5fc109
     ATTESTATION = 0x5fff01
 
     @classmethod
@@ -365,6 +365,14 @@ class PivmanData(object):
     def puk_blocked(self, value):
         self._set_flag(0x01, value)
 
+    @property
+    def mgm_key_protected(self):
+        return self._get_flag(0x02)
+
+    @mgm_key_protected.setter
+    def mgm_key_protected(self, value):
+        self._set_flag(0x02, value)
+
     def get_bytes(self):
         data = b''
         if self._flags is not None:
@@ -374,6 +382,19 @@ class PivmanData(object):
         if self.pin_timestamp is not None:
             data += Tlv(0x83, struct.pack('>I', self.pin_timestamp))
         return Tlv(0x80, data)
+
+
+class PivmanProtectedData(object):
+
+    def __init__(self, raw_data=Tlv(0x88)):
+        data = _parse_tlv_dict(Tlv(raw_data).value)
+        self.key = data.get(0x89)
+
+    def get_bytes(self):
+        data = b''
+        if self.key is not None:
+            data += Tlv(0x02, self.key)
+        return Tlv(0x88, data)
 
 
 class PivController(object):
@@ -395,6 +416,10 @@ class PivController(object):
     @property
     def has_derived_key(self):
         return self._pivman_data.salt is not None
+
+    @property
+    def has_protected_mgm_key(self):
+        return self._pivman_data.mgm_key_protected
 
     @property
     def puk_blocked(self):
@@ -420,6 +445,13 @@ class PivController(object):
 
     def _read_version(self):
         return tuple(six.iterbytes(self.send_cmd(INS.GET_VERSION)))
+
+    def _init_pivman_protected(self):
+        try:
+            self._pivman_protected_data = PivmanProtectedData(
+                self.get_data(OBJ.PROTECTED_PIVMAN_DATA))
+        except APDUError:
+            self._pivman_protected_data = PivmanProtectedData()
 
     def verify(self, pin, touch_callback=None):
         try:
@@ -507,13 +539,23 @@ class PivController(object):
             raise ValueError('Device challenge did not match!')
         self._authenticated = True
 
-    def set_mgm_key(self, new_key, touch=False):
+    def set_mgm_key(self, new_key, touch=False, store_on_device=False):
         self.send_cmd(
             INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
             six.int2byte(ALGO.TDES) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
+        # Update readable pivman data
         if self.has_derived_key:
             self._pivman_data.salt = None
-            self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
+        if store_on_device:
+            self._pivman_data.mgm_key_protected = True
+        self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
+        # Update protected pivman data
+        if store_on_device:
+            self._init_pivman_protected()
+            self._pivman_protected_data.key = new_key
+            self.put_data(
+                OBJ.PROTECTED_PIVMAN_DATA,
+                self._pivman_protected_data.get_bytes())
 
     def get_pin_tries(self):
         """
