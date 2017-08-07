@@ -209,7 +209,7 @@ def generate_key(
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -261,7 +261,7 @@ def import_certificate(
     CERTIFICATE     File containing the certificate. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -316,7 +316,7 @@ def import_key(
     PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -417,7 +417,7 @@ def set_chuid(ctx, management_key, pin):
     Generate and set a CHUID on the device.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -437,7 +437,7 @@ def set_ccc(ctx, management_key, pin):
     Generate and set a CCC on the device.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -461,7 +461,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     Set the number of PIN and PUK retries.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -505,7 +505,7 @@ def generate_certificate(
     """
     controller = ctx.obj['controller']
 
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -618,7 +618,7 @@ def delete_certificate(ctx, slot, management_key, pin):
     Delete a certificate from a slot on the device.
     """
     controller = ctx.obj['controller']
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
@@ -703,15 +703,11 @@ def change_management_key(
     """
     controller = ctx.obj['controller']
 
-    if controller.has_derived_key:
+    if controller.has_derived_key or controller.has_protected_mgm_key:
         if not pin:
             pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
-        if generate:
-            if not pin:
-                pin = _prompt_pin(pin)
-            _verify_pin(ctx, controller, pin)
         if not management_key:
             management_key = _prompt_management_key(
                 ctx, prompt='Enter your current management key'
