@@ -488,9 +488,15 @@ class PivController(object):
             touch_timer = Timer(0.500, touch_callback)
             touch_timer.start()
 
-        pt2 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                            Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
-                            )[4:12]
+        try:
+            pt2 = self.send_cmd(
+                INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
+                Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
+                )[4:12]
+        except:
+            if touch_callback is not None:
+                touch_timer.cancel()
+            raise
 
         if touch_callback is not None:
             touch_timer.cancel()
