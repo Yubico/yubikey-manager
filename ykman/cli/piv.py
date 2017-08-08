@@ -691,15 +691,17 @@ def change_puk(ctx, puk, new_puk):
     '-m', '--management-key', help='Current management key.',
     callback=click_parse_management_key)
 @click.option(
-    '-g', '--generate', is_flag=True,
-    help='Generate a random management key and store it on the device.')
+    '-p', '--protect', is_flag=True,
+    help='Store new management key on device, protected by PIN.'
+         'Will generate a random key if no key is provided.')
 def change_management_key(
-        ctx, management_key, pin, new_management_key, touch, generate):
+        ctx, management_key, pin, new_management_key, touch, protect):
     """
     Change the management key.
 
     Management functionality is guarded by a 24 byte management key.
     This key is required for administrative tasks, such as generating key pairs.
+    A random key may be generated and stored on the device, protected by PIN.
     """
     controller = ctx.obj['controller']
 
@@ -718,7 +720,9 @@ def change_management_key(
     if touch and controller.version < (4, 0, 0):
         ctx.fail('Require touch not supported on your device.')
 
-    if generate:
+    # If the key should be protected by PIN and no key is given,
+    # we generate a random key.
+    if protect and not new_management_key:
         new_management_key = _generate_random_management_key()
 
     if not new_management_key:
@@ -739,7 +743,7 @@ def change_management_key(
         ctx.fail('New management key has the wrong format.')
     try:
         controller.set_mgm_key(
-            new_management_key, touch=touch, store_on_device=generate)
+            new_management_key, touch=touch, store_on_device=protect)
     except APDUError as e:
         print(e)
         ctx.fail('Changing the management key failed.')
