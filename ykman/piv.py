@@ -166,7 +166,7 @@ class OBJ(IntEnum):
     RETIRED20 = 0x5fc120
 
     PIVMAN_DATA = 0x5fff00
-    PROTECTED_PIVMAN_DATA = 0x5fc109
+    PIVMAN_PROTECTED_DATA = 0x5fc109
     ATTESTATION = 0x5fff01
 
     @classmethod
@@ -449,7 +449,7 @@ class PivController(object):
     def _init_pivman_protected(self):
         try:
             self._pivman_protected_data = PivmanProtectedData(
-                self.get_data(OBJ.PROTECTED_PIVMAN_DATA))
+                self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
         except APDUError:
             self._pivman_protected_data = PivmanProtectedData()
 
@@ -559,7 +559,7 @@ class PivController(object):
             self._init_pivman_protected()
             self._pivman_protected_data.key = new_key
             self.put_data(
-                OBJ.PROTECTED_PIVMAN_DATA,
+                OBJ.PIVMAN_PROTECTED_DATA,
                 self._pivman_protected_data.get_bytes())
 
     def get_pin_tries(self):
