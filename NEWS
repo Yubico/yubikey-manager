@@ -1,3 +1,9 @@
+* Version 0.4.1 (unreleased)
+ ** PIV: Dropped support for deriving a management key from PIN.
+ ** PIV: Addded support for generating a random management key and storing it on the device protected by the PIN.
+ ** OpenPGP: The reset command now handles a device in terminated state.
+ ** OATH: Credential filtering is now working properly on Python 2.
+
 * Version 0.4.0 (released 2017-06-19)
  ** Added PIV support. The tool and library now supports most of the PIV functionality found on the YubiKey 4 and NEO. To list the available commands, run ykman piv -h.
  ** Mode command now supports adding and removing modes incrementally.
