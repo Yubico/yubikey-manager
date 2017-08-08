@@ -718,23 +718,28 @@ def change_management_key(
     if touch and controller.version < (4, 0, 0):
         ctx.fail('Require touch not supported on your device.')
 
-    # Generate a random management key and store it on the device.
     if generate:
-        store_on_device = True
-        new_management_key = b2a_hex(os.urandom(24)).decode()
+        new_management_key = _generate_random_management_key()
 
     if not new_management_key:
         new_management_key = click.prompt(
-            'Enter your new management key',
+            'Enter your new management key'
+            ' [blank to randomly generate]',
             default='', show_default=False,
             hide_input=True, confirmation_prompt=True)
+
+        if new_management_key == '':
+            new_management_key = _generate_random_management_key()
+            click.echo(
+                'Generated management key: {}'.format(new_management_key))
+
     try:
         new_management_key = a2b_hex(new_management_key)
     except:
         ctx.fail('New management key has the wrong format.')
     try:
         controller.set_mgm_key(
-            new_management_key, touch=touch, store_on_device=store_on_device)
+            new_management_key, touch=touch, store_on_device=generate)
     except APDUError as e:
         print(e)
         ctx.fail('Changing the management key failed.')
@@ -770,6 +775,10 @@ def _prompt_management_key(
         return a2b_hex(management_key)
     except:
         ctx.fail('Management key has the wrong format.')
+
+
+def _generate_random_management_key():
+    return b2a_hex(os.urandom(24)).decode()
 
 
 def _prompt_pin(ctx, prompt='Enter PIN'):
