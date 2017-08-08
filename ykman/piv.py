@@ -555,8 +555,8 @@ class PivController(object):
         # Update readable pivman data
         if self.has_derived_key:
             self._pivman_data.salt = None
-        if store_on_device:
-            self._pivman_data.mgm_key_protected = True
+        # Update readable is stored flag
+        self._pivman_data.mgm_key_protected = store_on_device
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
         # Update protected pivman data
         if store_on_device:
