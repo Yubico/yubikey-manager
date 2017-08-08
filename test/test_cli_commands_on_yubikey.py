@@ -341,12 +341,13 @@ class TestPIV(unittest.TestCase):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
-    def test_piv_change_management_key_derive(self):
+    def test_piv_change_management_key_generate(self):
         ykman_cli(
-            'piv', 'change-management-key', '-d', '-P', '123456',
+            'piv', 'change-management-key', '-g', '-P', '123456',
             '-m', DEFAULT_MANAGEMENT_KEY)
         output = ykman_cli('piv', 'info')
-        self.assertIn('Management key is derived from PIN', output)
+        self.assertIn(
+            'Management key is stored on device and protected by PIN', output)
         ykman_cli('piv', 'reset', '-f')  # Cleanup, should maybe be done always?
 
     def test_piv_change_pin(self):
