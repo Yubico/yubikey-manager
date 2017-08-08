@@ -166,7 +166,7 @@ class OBJ(IntEnum):
     RETIRED20 = 0x5fc120
 
     PIVMAN_DATA = 0x5fff00
-    PIVMAN_PROTECTED_DATA = 0x5fc109
+    PIVMAN_PROTECTED_DATA = 0x5fc109  # Use slot for printed information.
     ATTESTATION = 0x5fff01
 
     @classmethod
@@ -414,11 +414,15 @@ class PivController(object):
         return self._version
 
     @property
+    def has_protected_key(self):
+        return self.has_derived_key or self.has_stored_key
+
+    @property
     def has_derived_key(self):
         return self._pivman_data.salt is not None
 
     @property
-    def has_protected_mgm_key(self):
+    def has_stored_key(self):
         return self._pivman_data.mgm_key_protected
 
     @property
@@ -465,7 +469,7 @@ class PivController(object):
             self.authenticate(
                 _derive_key(pin, self._pivman_data.salt), touch_callback)
 
-        if self.has_protected_mgm_key and not self._authenticated:
+        if self.has_stored_key and not self._authenticated:
             self._init_pivman_protected()
             self.authenticate(self._pivman_protected_data.key, touch_callback)
 
