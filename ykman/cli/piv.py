@@ -705,16 +705,18 @@ def change_management_key(
     """
     controller = ctx.obj['controller']
 
-    if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
-        _verify_pin(ctx, controller, pin)
+    if management_key:
+        _authenticate(ctx, controller, management_key)
     else:
-        if not management_key:
+        if controller.has_protected_key:
+            if not pin:
+                pin = _prompt_pin(ctx)
+            _verify_pin(ctx, controller, pin)
+        else:
             management_key = _prompt_management_key(
                 ctx, prompt='Enter your current management key'
                             ' [blank to use the default key]')
-        _authenticate(ctx, controller, management_key)
+            _authenticate(ctx, controller, management_key)
 
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):
