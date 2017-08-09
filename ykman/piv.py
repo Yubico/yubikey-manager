@@ -534,13 +534,9 @@ class PivController(object):
                 INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                 Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
                 )[4:12]
-        except:
+        finally:
             if touch_callback is not None:
                 touch_timer.cancel()
-            raise
-
-        if touch_callback is not None:
-            touch_timer.cancel()
 
         encryptor = cipher.encryptor()
         pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
