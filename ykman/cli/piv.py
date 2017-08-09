@@ -213,8 +213,6 @@ def generate_key(
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
 
     algorithm = ALGO.from_string(algorithm)
@@ -263,8 +261,6 @@ def import_certificate(
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
 
     data = cert.read()
@@ -316,8 +312,6 @@ def import_key(
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
 
     data = private_key.read()
@@ -415,8 +409,6 @@ def set_chuid(ctx, management_key, pin):
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
     controller.update_chuid()
 
@@ -433,8 +425,6 @@ def set_ccc(ctx, management_key, pin):
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
     controller.update_ccc()
 
@@ -455,8 +445,6 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
         _verify_pin(ctx, controller, pin)
     try:
@@ -495,8 +483,6 @@ def generate_certificate(
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
         _verify_pin(ctx, controller, pin)
 
@@ -602,8 +588,6 @@ def delete_certificate(ctx, slot, management_key, pin):
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
-        if not management_key:
-            management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
     controller.delete_certificate(slot)
 
@@ -790,6 +774,8 @@ def _verify_pin(ctx, controller, pin):
 
 
 def _authenticate(ctx, controller, management_key):
+    if not management_key:
+        management_key = _prompt_management_key(ctx)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
     except APDUError:
