@@ -210,10 +210,8 @@ def generate_key(
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
+
+    _ensure_authenticated(ctx, controller, pin, management_key)
 
     algorithm = ALGO.from_string(algorithm)
 
@@ -258,10 +256,7 @@ def import_certificate(
     CERTIFICATE     File containing the certificate. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
+    _ensure_authenticated(ctx, controller, pin, management_key)
 
     data = cert.read()
 
@@ -309,10 +304,7 @@ def import_key(
     PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
+    _ensure_authenticated(ctx, controller, pin, management_key)
 
     data = private_key.read()
 
@@ -406,10 +398,7 @@ def set_chuid(ctx, management_key, pin):
     Generate and set a CHUID on the device.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
+    _ensure_authenticated(ctx, controller, pin, management_key)
     controller.update_chuid()
 
 
@@ -422,10 +411,7 @@ def set_ccc(ctx, management_key, pin):
     Generate and set a CCC on the device.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
+    _ensure_authenticated(ctx, controller, pin, management_key)
     controller.update_ccc()
 
 
@@ -585,10 +571,7 @@ def delete_certificate(ctx, slot, management_key, pin):
     Delete a certificate from a slot on the device.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
+    _ensure_authenticated(ctx, controller, pin, management_key)
     controller.delete_certificate(slot)
 
 
@@ -762,6 +745,13 @@ def _generate_random_management_key():
 def _prompt_pin(ctx, prompt='Enter PIN'):
     return click.prompt(
         prompt, default='', hide_input=True, show_default=False)
+
+
+def _ensure_authenticated(ctx, controller, pin=None, management_key=None):
+    if controller.has_protected_key:
+        _verify_pin(ctx, controller, pin)
+    else:
+        _authenticate(ctx, controller, management_key)
 
 
 def _verify_pin(ctx, controller, pin):
