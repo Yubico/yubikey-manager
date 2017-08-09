@@ -32,7 +32,8 @@ from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
-from .util import click_skip_on_help, click_callback, prompt_for_touch
+from .util import (
+    click_force_option, click_skip_on_help, click_callback, prompt_for_touch)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -694,8 +695,9 @@ def change_puk(ctx, puk, new_puk):
     '-p', '--protect', is_flag=True,
     help='Store new management key on device, protected by PIN.'
          ' Will generate a random key if no key is provided.')
+@click_force_option
 def change_management_key(
-        ctx, management_key, pin, new_management_key, touch, protect):
+        ctx, management_key, pin, new_management_key, touch, protect, force):
     """
     Change the management key.
 
@@ -727,10 +729,10 @@ def change_management_key(
         if pin:
             _verify_pin(ctx, controller, pin)
         else:
-            click.confirm(
-                'The previous management key is protected by PIN '
-                'and will not be cleared from the device. Continue?',
-                abort=True)
+            force or click.confirm(
+                    'The previous management key is protected by PIN '
+                    'and will not be cleared from the device. Continue?',
+                    abort=True)
 
     # If the key should be protected by PIN and no key is given,
     # we generate a random key.
@@ -738,13 +740,14 @@ def change_management_key(
         new_management_key = _generate_random_management_key()
 
     if not new_management_key:
-        new_management_key = click.prompt(
-            'Enter your new management key'
-            ' [blank to randomly generate]',
-            default='', show_default=False,
-            hide_input=True, confirmation_prompt=True)
+        if not force:
+            new_management_key = click.prompt(
+                'Enter your new management key'
+                ' [blank to randomly generate]',
+                default='', show_default=False,
+                hide_input=True, confirmation_prompt=True)
 
-        if new_management_key == '':
+        if force or new_management_key == '':
             new_management_key = _generate_random_management_key()
             click.echo(
                 'Generated management key: {}'.format(new_management_key))
