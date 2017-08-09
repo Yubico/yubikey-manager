@@ -746,8 +746,7 @@ def change_management_key(
     try:
         controller.set_mgm_key(
             new_management_key, touch=touch, store_on_device=protect)
-    except APDUError as e:
-        print(e)
+    except APDUError:
         ctx.fail('Changing the management key failed.')
 
 
