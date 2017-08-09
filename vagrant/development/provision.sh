@@ -30,6 +30,7 @@ sudo apt-get install -qq \
 
 pip install --upgrade pip
 pip3 install --upgrade pip
+pip install enum34 --user
 
 # Install flake8 for linting
 pip install pre-commit flake8
