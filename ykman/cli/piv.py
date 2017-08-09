@@ -428,11 +428,8 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     Set the number of PIN and PUK retries.
     """
     controller = ctx.obj['controller']
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
-        _verify_pin(ctx, controller, pin)
+    _ensure_authenticated(
+        ctx, controller, pin, management_key, require_pin_and_key=True)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
     except:
@@ -465,12 +462,8 @@ def generate_certificate(
     PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
     """
     controller = ctx.obj['controller']
-
-    if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
-    else:
-        _authenticate(ctx, controller, management_key)
-        _verify_pin(ctx, controller, pin)
+    _ensure_authenticated(
+        ctx, controller, pin, management_key, require_pin_and_key=True)
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(
@@ -747,10 +740,14 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
         prompt, default='', hide_input=True, show_default=False)
 
 
-def _ensure_authenticated(ctx, controller, pin=None, management_key=None):
+def _ensure_authenticated(
+        ctx, controller, pin=None, management_key=None,
+        require_pin_and_key=False):
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
+        if require_pin_and_key:
+            _verify_pin(ctx, controller, management_key)
         _authenticate(ctx, controller, management_key)
 
 
