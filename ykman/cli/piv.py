@@ -747,7 +747,7 @@ def _ensure_authenticated(
         _verify_pin(ctx, controller, pin)
     else:
         if require_pin_and_key:
-            _verify_pin(ctx, controller, management_key)
+            _verify_pin(ctx, controller, pin)
         _authenticate(ctx, controller, management_key)
 
 
