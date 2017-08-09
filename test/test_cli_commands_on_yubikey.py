@@ -341,9 +341,9 @@ class TestPIV(unittest.TestCase):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
-    def test_piv_change_management_key_generate(self):
+    def test_piv_change_management_key_protect(self):
         ykman_cli(
-            'piv', 'change-management-key', '-g', '-P', '123456',
+            'piv', 'change-management-key', '-p', '-P', '123456',
             '-m', DEFAULT_MANAGEMENT_KEY)
         output = ykman_cli('piv', 'info')
         self.assertIn(
