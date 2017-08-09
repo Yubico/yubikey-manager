@@ -549,22 +549,36 @@ class PivController(object):
         self._authenticated = True
 
     def set_mgm_key(self, new_key, touch=False, store_on_device=False):
+        # Set the new management key
         self.send_cmd(
             INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
             six.int2byte(ALGO.TDES) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
-        # Update readable pivman data
         if self.has_derived_key:
+            # Clear salt for old derived keys.
             self._pivman_data.salt = None
-        # Update readable is stored flag
+        # Set flag for stored or not stored key.
         self._pivman_data.mgm_key_protected = store_on_device
+        # Update readable pivman data
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
-        # Update protected pivman data
         if store_on_device:
+            # Store key in protected pivman data
             self._init_pivman_protected()
             self._pivman_protected_data.key = new_key
             self.put_data(
                 OBJ.PIVMAN_PROTECTED_DATA,
                 self._pivman_protected_data.get_bytes())
+        elif not store_on_device and self.has_stored_key:
+            # If new key should not be stored and there is an old stored key,
+            # try to clear it.
+            try:
+                self._init_pivman_protected()
+                self._pivman_protected_data.key = None
+                self.put_data(
+                    OBJ.PIVMAN_PROTECTED_DATA,
+                    self._pivman_protected_data.get_bytes())
+            except APDUError:
+                # No pin provided, can't clear key..
+                pass
 
     def get_pin_tries(self):
         """

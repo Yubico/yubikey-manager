@@ -722,6 +722,16 @@ def change_management_key(
     if touch and controller.version < (4, 0, 0):
         ctx.fail('Require touch not supported on your device.')
 
+    # If an old stored key needs to be cleared, the PIN is needed.
+    if not protect and controller.has_stored_key:
+        if pin:
+            _verify_pin(ctx, controller, pin)
+        else:
+            click.confirm(
+                'The previous management key is protected by PIN '
+                'and will not be cleared from the device. Continue?',
+                abort=True)
+
     # If the key should be protected by PIN and no key is given,
     # we generate a random key.
     if protect and not new_management_key:
