@@ -211,8 +211,6 @@ def generate_key(
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
@@ -263,8 +261,6 @@ def import_certificate(
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
@@ -318,8 +314,6 @@ def import_key(
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
@@ -419,8 +413,6 @@ def set_chuid(ctx, management_key, pin):
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
@@ -439,8 +431,6 @@ def set_ccc(ctx, management_key, pin):
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
@@ -463,15 +453,11 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
@@ -507,15 +493,11 @@ def generate_certificate(
     controller = ctx.obj['controller']
 
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
             management_key = _prompt_management_key(ctx)
         _authenticate(ctx, controller, management_key)
-        if not pin:
-            pin = _prompt_pin(ctx)
         _verify_pin(ctx, controller, pin)
 
     data = public_key.read()
@@ -587,8 +569,6 @@ def generate_certificate_signing_request(
     CSR         File to write CSR to. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
-    if not pin:
-        pin = _prompt_pin(ctx)
     _verify_pin(ctx, controller, pin)
 
     data = public_key.read()
@@ -620,8 +600,6 @@ def delete_certificate(ctx, slot, management_key, pin):
     """
     controller = ctx.obj['controller']
     if controller.has_protected_key:
-        if not pin:
-            pin = _prompt_pin(pin)
         _verify_pin(ctx, controller, pin)
     else:
         if not management_key:
@@ -711,8 +689,6 @@ def change_management_key(
         _authenticate(ctx, controller, management_key)
     else:
         if controller.has_protected_key:
-            if not pin:
-                pin = _prompt_pin(ctx)
             _verify_pin(ctx, controller, pin)
         else:
             management_key = _prompt_management_key(
@@ -805,6 +781,8 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
 
 
 def _verify_pin(ctx, controller, pin):
+    if not pin:
+        pin = _prompt_pin(ctx)
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
     except APDUError:
