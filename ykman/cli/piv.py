@@ -661,8 +661,8 @@ def change_management_key(
             _verify_pin(ctx, controller, pin)
         else:
             force or click.confirm(
-                    'The previous management key is protected by PIN '
-                    'and will not be cleared from the device. Continue?',
+                    'The current management key is stored on the device'
+                    ' and will not be cleared if no PIN is provided. Continue?',
                     abort=True)
 
     # If the key should be protected by PIN and no key is given,
@@ -741,7 +741,10 @@ def _ensure_authenticated(
         mgm_key_prompt=None):
 
     if controller.has_protected_key:
-        _verify_pin(ctx, controller, pin)
+        if not management_key:
+            _verify_pin(ctx, controller, pin)
+        else:
+            _authenticate(ctx, controller, management_key, mgm_key_prompt)
     else:
         if require_pin_and_key:
             _verify_pin(ctx, controller, pin)
