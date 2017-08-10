@@ -28,7 +28,7 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
-from .driver_ccid import APDUError, SW_OK
+from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from .util import AID, Tlv, parse_tlvs
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -454,8 +454,12 @@ class PivController(object):
         try:
             self._pivman_protected_data = PivmanProtectedData(
                 self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
-        except APDUError:
-            self._pivman_protected_data = PivmanProtectedData()
+        except APDUError as e:
+            if e.sw == SW_APPLICATION_NOT_FOUND:
+                # No data there, initialise a new object.
+                self._pivman_protected_data = PivmanProtectedData()
+            else:
+                raise
 
     def verify(self, pin, touch_callback=None):
         try:

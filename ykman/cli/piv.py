@@ -645,16 +645,11 @@ def change_management_key(
     """
     controller = ctx.obj['controller']
 
-    if management_key:
-        _authenticate(ctx, controller, management_key)
-    else:
-        if controller.has_protected_key:
-            _verify_pin(ctx, controller, pin)
-        else:
-            management_key = _prompt_management_key(
-                ctx, prompt='Enter your current management key'
-                            ' [blank to use the default key]')
-            _authenticate(ctx, controller, management_key)
+    _ensure_authenticated(
+        ctx, controller, pin, management_key,
+        require_pin_and_key=protect,
+        mgm_key_prompt='Enter your current management key '
+                       '[blank to use default key]')
 
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):
@@ -742,13 +737,15 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
 
 def _ensure_authenticated(
         ctx, controller, pin=None, management_key=None,
-        require_pin_and_key=False):
+        require_pin_and_key=False,
+        mgm_key_prompt=None):
+
     if controller.has_protected_key:
         _verify_pin(ctx, controller, pin)
     else:
         if require_pin_and_key:
             _verify_pin(ctx, controller, pin)
-        _authenticate(ctx, controller, management_key)
+        _authenticate(ctx, controller, management_key, mgm_key_prompt)
 
 
 def _verify_pin(ctx, controller, pin):
@@ -760,9 +757,12 @@ def _verify_pin(ctx, controller, pin):
         ctx.fail('PIN verification failed.')
 
 
-def _authenticate(ctx, controller, management_key):
+def _authenticate(ctx, controller, management_key, mgm_key_prompt):
     if not management_key:
-        management_key = _prompt_management_key(ctx)
+        if mgm_key_prompt is None:
+            management_key = _prompt_management_key(ctx)
+        else:
+            management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
     except APDUError:
