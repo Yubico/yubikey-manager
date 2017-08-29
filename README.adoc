@@ -2,7 +2,7 @@
 image:https://travis-ci.org/Yubico/yubikey-manager.svg?branch=master["Build Status", link="https://travis-ci.org/Yubico/yubikey-manager"]
 image:https://ci.appveyor.com/api/projects/status/yy9guu6hova626c5?svg=true["Appveyor Status", link="https://ci.appveyor.com/project/Yubico53275/yubikey-manager"]
 
-Python library and command line tool for configuring a YubiKey. If you're looking for the full graphical application, which also includes the command line tool, it's https://github.com/Yubico/yubikey-manager-qt[here].
+Python library and command line tool for configuring a YubiKey. If you're looking for the full graphical application, which also includes the command line tool, it's https://developers.yubico.com/yubikey-manager-qt/[here].
 
 NOTE: This project is in BETA. Any part of the application may change before
 the next release, and some functionality and documentation is missing at this
