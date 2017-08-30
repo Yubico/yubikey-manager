@@ -260,7 +260,7 @@ def list(ctx, show_hidden, oath_type, algorithm, period):
     creds = [c for c in controller.list()]
     creds.sort()
     for cred in creds:
-        if cred.issuer == '_hidden' and not show_hidden:
+        if cred.is_hidden() and not show_hidden:
             continue
         full_name = cred.issuer + ':' + cred.name if cred.issuer else cred.name
         click.echo(full_name, nl=False)
@@ -293,7 +293,7 @@ Touch and HOTP credentials require a single match to be triggered.
 
     # Remove hidden creds
     if not show_hidden:
-        creds = [c for c in creds if not c.issuer == '_hidden']
+        creds = [c for c in creds if not c.is_hidden()]
     if query:
         hits = _search(creds, query)
         if len(hits) == 1:

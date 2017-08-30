@@ -124,6 +124,9 @@ class Credential(object):
     def is_steam(self):
         return self.issuer == 'Steam'
 
+    def is_hidden(self):
+        return self.issuer == '_hidden'
+
     def update_expiration(self, timestamp):
         self.expiration = (
             ((timestamp + self.period) // self.period) * self.period)
