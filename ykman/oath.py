@@ -104,16 +104,16 @@ class SW(IntEnum):
 class Credential(object):
 
     def __init__(
-            self, name, code=None, oath_type='', touch=False, algo=None,
-            expiration=None):
+            self, name, issuer='', code=None, oath_type='', touch=False,
+            algo=None, expiration=None, period=30):
         self.name = name
+        self.issuer = issuer
         self.code = code
         self.oath_type = oath_type
         self.touch = touch
         self.algo = algo
-        self.hidden = name.startswith('_hidden:')
-        self.steam = name.startswith('Steam:')
         self.expiration = expiration
+        self.period = period
 
     def __lt__(self, other):
         return self.name.lower() < other.name.lower()
@@ -121,12 +121,39 @@ class Credential(object):
     def to_dict(self):
         return dict(self.__dict__)
 
+    def is_steam(self):
+        return self.issuer == 'Steam'
+
+    def update_expiration(self, timestamp):
+        self.expiration = (
+            ((timestamp + self.period) // self.period) * self.period)
+
     @staticmethod
     def from_dict(data):
         kwargs = dict(data)
-        del kwargs['steam']
-        del kwargs['hidden']
         return Credential(**kwargs)
+
+    @staticmethod
+    def parse_name(name):
+        if '/' in name:
+            period, name = name.split('/', 1)
+        else:
+            period = 30
+        if ':' in name:
+            issuer, name = name.split(':', 1)
+        else:
+            issuer = None
+        return period, issuer, name
+
+    @staticmethod
+    def serialize_name(name, issuer=None, period=30):
+        res = ''
+        if period != 30:
+            res += str(period) + '/'
+        if issuer:
+            res += issuer + ':'
+        res += name
+        return res
 
 
 class OathController(object):
@@ -204,7 +231,10 @@ class OathController(object):
             algo = MASK.ALGO & six.indexbytes(resp, 2)
             algo = ALGO(algo).name
             name = resp[3:3 + length].decode('utf-8')
-            cred = Credential(name, oath_type=oath_type, algo=algo)
+            period, issuer, name = Credential.parse_name(name)
+            cred = Credential(
+                name, issuer=issuer, period=period, oath_type=oath_type,
+                algo=algo)
             yield cred
             resp = resp[3 + length:]
 
@@ -220,8 +250,10 @@ class OathController(object):
 
         if timestamp is None:
             timestamp = int(time.time())
-        challenge = time_challenge(timestamp)
-        data = Tlv(TAG.NAME, cred.name.encode('utf-8')) + \
+        challenge = time_challenge(timestamp, period=cred.period)
+        full_name = Credential.serialize_name(
+                cred.name, cred.issuer, cred.period)
+        data = Tlv(TAG.NAME, full_name.encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
@@ -232,9 +264,9 @@ class OathController(object):
         offset = six.indexbytes(resp, -1) & 0xF
         code = resp[offset:offset + 4]
         code = parse_truncated(code)
-        cred.code = format_code(code, digits, steam=cred.steam)
+        cred.code = format_code(code, digits, steam=cred.is_steam())
         if cred.oath_type != 'hotp':
-            cred.expiration = ((timestamp + 30) // 30) * 30
+            cred.update_expiration(timestamp)
         return cred
 
     def delete(self, cred):
@@ -248,18 +280,19 @@ class OathController(object):
         resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
         tlvs = parse_tlvs(resp)
         while tlvs:
-            name = tlvs.pop(0).value.decode('utf-8')
+            full_name = tlvs.pop(0).value.decode('utf-8')
+            period, issuer, name = Credential.parse_name(full_name)
             resp = tlvs.pop(0)
             digits = six.indexbytes(resp.value, 0)
-            cred = Credential(name)
+            cred = Credential(name, issuer=issuer, period=int(period))
             if resp.tag == TAG.TRUNCATED_RESPONSE:
                 cred.oath_type = 'totp'
-                if cred.steam:
+                if cred.is_steam() or cred.period != 30:
                     cred = self.calculate(cred, timestamp)
                 else:
                     code = parse_truncated(resp.value[1:])
                     cred.code = format_code(code, digits)
-                    cred.expiration = ((timestamp + 30) // 30) * 30
+                    cred.update_expiration(timestamp)
             elif resp.tag == TAG.HOTP:
                 cred.oath_type = 'hotp'
             elif resp.tag == TAG.TOUCH:

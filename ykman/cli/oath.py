@@ -248,7 +248,8 @@ def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
 @click.pass_context
 @click.option('-o', '--oath-type', is_flag=True, help='Display the OATH type.')
 @click.option('-a', '--algorithm', is_flag=True, help='Display the algorithm.')
-def list(ctx, show_hidden, oath_type, algorithm):
+@click.option('-p', '--period', is_flag=True, help='Display the period.')
+def list(ctx, show_hidden, oath_type, algorithm, period):
     """
     List all credentials.
 
@@ -259,13 +260,16 @@ def list(ctx, show_hidden, oath_type, algorithm):
     creds = [c for c in controller.list()]
     creds.sort()
     for cred in creds:
-        if cred.hidden and not show_hidden:
+        if cred.issuer == '_hidden' and not show_hidden:
             continue
-        click.echo(cred.name, nl=False)
+        full_name = cred.issuer + ':' + cred.name if cred.issuer else cred.name
+        click.echo(full_name, nl=False)
         if oath_type:
             click.echo(', {}'.format(cred.oath_type), nl=False)
         if algorithm:
             click.echo(', {}'.format(cred.algo), nl=False)
+        if period:
+            click.echo(', {}'.format(cred.period), nl=False)
         click.echo()
 
 
@@ -289,7 +293,7 @@ Touch and HOTP credentials require a single match to be triggered.
 
     # Remove hidden creds
     if not show_hidden:
-        creds = [c for c in creds if not c.hidden]
+        creds = [c for c in creds if not c.issuer == '_hidden']
     if query:
         hits = _search(creds, query)
         if len(hits) == 1:
@@ -305,22 +309,24 @@ Touch and HOTP credentials require a single match to be triggered.
                 hotp_touch_timer.cancel()
             else:
                 cred = controller.calculate(cred)
-            click.echo('{} {}'.format(cred.name, cred.code))
+            click.echo('{}:{} {}'.format(cred.issuer, cred.name, cred.code))
             ctx.exit()
         creds = hits
 
-    longest = max(len(cred.name) for cred in creds) if creds else 0
+    longest = max(len('{}:{}'.format(
+        cred.issuer, cred.name)) for cred in creds) if creds else 0
     format_str = '{:<%d}  {:>10}' % longest
 
     creds.sort()
 
     for cred in creds:
+        full_name = cred.issuer + ':' + cred.name if cred.issuer else cred.name
         if cred.oath_type == 'totp':
-            click.echo(format_str.format(cred.name, cred.code))
+            click.echo(format_str.format(full_name, cred.code))
         if cred.touch:
-            click.echo(format_str.format(cred.name, '[Touch Credential]'))
+            click.echo(format_str.format(full_name, '[Touch Credential]'))
         if cred.oath_type == 'hotp':
-            click.echo(format_str.format(cred.name, '[HOTP Credential]'))
+            click.echo(format_str.format(full_name, '[HOTP Credential]'))
 
 
 @oath.command()

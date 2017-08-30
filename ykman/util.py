@@ -281,8 +281,8 @@ def hmac_shorten_key(key, algo):
     return key
 
 
-def time_challenge(timestamp):
-    return struct.pack('>q', int(timestamp // 30))
+def time_challenge(timestamp, period=30):
+    return struct.pack('>q', int(timestamp // period))
 
 
 def parse_uri(val):
