@@ -138,14 +138,14 @@ class Credential(object):
 
     @staticmethod
     def parse_name(name):
+        issuer = None
+        period = 30
         if '/' in name:
-            period, name = name.split('/', 1)
-        else:
-            period = 30
+            first, second = name.split('/', 1)
+            if first.isdigit():
+                period, name = first, second
         if ':' in name:
             issuer, name = name.split(':', 1)
-        else:
-            issuer = None
         return int(period), issuer, name
 
     @staticmethod
