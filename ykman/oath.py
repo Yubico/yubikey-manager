@@ -146,7 +146,7 @@ class Credential(object):
             issuer, name = name.split(':', 1)
         else:
             issuer = None
-        return period, issuer, name
+        return int(period), issuer, name
 
     @staticmethod
     def serialize_name(name, issuer=None, period=30):
