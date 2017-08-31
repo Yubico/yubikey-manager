@@ -106,7 +106,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             autoeject = None
             if touch_eject:
                 ctx.fail('--touch-eject can only be used when setting'
-                         'CCID-only mode')
+                         ' CCID-only mode')
 
         if not force:
             if mode == dev.mode:
