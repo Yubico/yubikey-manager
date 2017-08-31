@@ -131,13 +131,22 @@ class Credential(object):
         self.expiration = (
             ((timestamp + self.period) // self.period) * self.period)
 
+    def long_name(self):
+        res = ''
+        if self.period != 30:
+            res += str(self.period) + '/'
+        if self.issuer:
+            res += self.issuer + ':'
+        res += self.name
+        return res
+
     @staticmethod
     def from_dict(data):
         kwargs = dict(data)
         return Credential(**kwargs)
 
     @staticmethod
-    def parse_name(name):
+    def parse_long_name(name):
         issuer = None
         period = 30
         if '/' in name:
@@ -147,16 +156,6 @@ class Credential(object):
         if ':' in name:
             issuer, name = name.split(':', 1)
         return int(period), issuer, name
-
-    @staticmethod
-    def serialize_name(name, issuer=None, period=30):
-        res = ''
-        if period != 30:
-            res += str(period) + '/'
-        if issuer:
-            res += issuer + ':'
-        res += name
-        return res
 
 
 class OathController(object):
@@ -233,8 +232,8 @@ class OathController(object):
             oath_type = OATH_TYPE(oath_type).name
             algo = MASK.ALGO & six.indexbytes(resp, 2)
             algo = ALGO(algo).name
-            name = resp[3:3 + length].decode('utf-8')
-            period, issuer, name = Credential.parse_name(name)
+            long_name = resp[3:3 + length].decode('utf-8')
+            period, issuer, name = Credential.parse_long_name(long_name)
             cred = Credential(
                 name, issuer=issuer, period=period, oath_type=oath_type,
                 algo=algo)
@@ -254,9 +253,7 @@ class OathController(object):
         if timestamp is None:
             timestamp = int(time.time())
         challenge = time_challenge(timestamp, period=cred.period)
-        full_name = Credential.serialize_name(
-                cred.name, cred.issuer, cred.period)
-        data = Tlv(TAG.NAME, full_name.encode('utf-8')) + \
+        data = Tlv(TAG.NAME, cred.long_name().encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
@@ -273,7 +270,7 @@ class OathController(object):
         return cred
 
     def delete(self, cred):
-        data = Tlv(TAG.NAME, cred.name.encode('utf-8'))
+        data = Tlv(TAG.NAME, cred.long_name().encode('utf-8'))
         self.send_apdu(INS.DELETE, 0, 0, data)
 
     def calculate_all(self, timestamp=None):
@@ -283,8 +280,8 @@ class OathController(object):
         resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
         tlvs = parse_tlvs(resp)
         while tlvs:
-            full_name = tlvs.pop(0).value.decode('utf-8')
-            period, issuer, name = Credential.parse_name(full_name)
+            long_name = tlvs.pop(0).value.decode('utf-8')
+            period, issuer, name = Credential.parse_long_name(long_name)
             resp = tlvs.pop(0)
             digits = six.indexbytes(resp.value, 0)
             cred = Credential(name, issuer=issuer, period=int(period))
