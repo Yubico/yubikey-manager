@@ -131,10 +131,15 @@ def reset(ctx):
 @click.option(
     '-c', '--counter', type=click.INT, default=0,
     help='Initial counter value for HOTP credentials.')
+@click.option('-i', '--issuer', help='Issuer of the credential.')
+@click.option(
+    '-p', '--period', help='Number of seconds a TOTP code is valid.',
+    default=30, show_default=True)
 @click_touch_option
 @click_force_option
 @click.pass_context
-def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
+def add(ctx, key, name, issuer, period, oath_type, digits, touch, algorithm,
+        counter, force):
     """
     Add a new credential.
 
@@ -154,7 +159,8 @@ def add(ctx, key, name, oath_type, digits, touch, algorithm, counter, force):
     ensure_validated(ctx)
 
     _add_cred(
-        ctx, key, name, oath_type, digits, touch, algorithm, counter, force)
+        ctx, key, name, issuer, period, oath_type, digits, touch, algorithm,
+        counter, force)
 
 
 @oath.command()
@@ -198,7 +204,8 @@ def uri(ctx, uri, touch, force):
     _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force)
 
 
-def _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force):
+def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
+              counter, force):
 
     controller = ctx.obj['controller']
 
