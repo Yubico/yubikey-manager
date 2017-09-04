@@ -346,22 +346,24 @@ Touch and HOTP credentials require a single match to be triggered.
 @oath.command()
 @click.pass_context
 @click.argument('query')
-def remove(ctx, query):
+def delete(ctx, query):
     """
-    Remove a credential.
+    Delete a credential.
 
-    Remove a credential from the device. \
-Provide a query string to match the credential to remove.
+    Delete a credential from the device. \
+Provide a query string to match the credential to delete.
     """
 
     ensure_validated(ctx)
     controller = ctx.obj['controller']
     creds = controller.list()
     hits = _search(creds, query)
-    if len(hits) == 1:
+    if len(hits) == 0:
+        click.echo('No matches, nothing to be done.')
+    elif len(hits) == 1:
         controller.delete(hits[0])
-        click.echo('Removed {}.'.format(hits[0].long_name()))
-    elif len(hits) > 1:
+        click.echo('Deleted {}.'.format(hits[0].long_name()))
+    else:
         click.echo('To many matches, please specify the query.')
 
 

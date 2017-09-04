@@ -251,10 +251,10 @@ class TestOATH(unittest.TestCase):
         cred = ykman_cli('oath', 'code', 'steam-cred')
         self.assertIn('CGC3K', cred)
 
-    def test_oath_remove(self):
-        ykman_cli('oath', 'add', 'remove-me', 'abba')
-        ykman_cli('oath', 'remove', 'remove-me')
-        self.assertNotIn('remove-me', ykman_cli('oath', 'list'))
+    def test_oath_delete(self):
+        ykman_cli('oath', 'add', 'delete-me', 'abba')
+        ykman_cli('oath', 'delete', 'delete-me')
+        self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 
 @unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
