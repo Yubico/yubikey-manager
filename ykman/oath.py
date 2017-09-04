@@ -132,13 +132,7 @@ class Credential(object):
             ((timestamp + self.period) // self.period) * self.period)
 
     def long_name(self):
-        res = ''
-        if self.period != 30:
-            res += str(self.period) + '/'
-        if self.issuer:
-            res += self.issuer + ':'
-        res += self.name
-        return res
+        return Credential.build_long_name(self.period, self.issuer, self.name)
 
     @staticmethod
     def from_dict(data):
@@ -156,6 +150,16 @@ class Credential(object):
         if ':' in name:
             issuer, name = name.split(':', 1)
         return int(period), issuer, name
+
+    @staticmethod
+    def build_long_name(period, issuer, name):
+        res = ''
+        if period != 30:
+            res += str(period) + '/'
+        if issuer:
+            res += issuer + ':'
+        res += name
+        return res
 
 
 class OathController(object):
@@ -205,7 +209,7 @@ class OathController(object):
         oath_type = OATH_TYPE[oath_type.upper()].value
         algo = ALGO[algo].value
 
-        long_name = Credential(name, issuer=issuer, period=period).long_name()
+        long_name = Credential.build_long_name(int(period), issuer, name)
         data = bytearray(Tlv(TAG.NAME, long_name.encode('utf8')))
 
         key = hmac_shorten_key(key, ALGO(algo).name)

@@ -34,7 +34,7 @@ from .util import (
     prompt_for_touch)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT, derive_key, parse_uri, parse_b32_key
-from ..oath import OathController, SW
+from ..oath import OathController, SW, Credential
 
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
@@ -188,20 +188,24 @@ def uri(ctx, uri, touch, force):
     ensure_validated(ctx)
 
     params = uri
-    name = params.get('name')
+    period, issuer, name = Credential.parse_long_name(params.get('name'))
     key = params.get('secret')
     key = parse_b32_key(key.upper())
     oath_type = params.get('type')
     digits = params.get('digits') or 6
     algo = params.get('algorithm') or 'SHA1'
     counter = params.get('counter') or 0
+    issuer = params.get('issuer') or issuer
+    period = params.get('period') or period
 
     # Steam is a special case where we allow the otpauth
     # URI to contain a 'digits' value of '5'.
     if digits == 5 and name.startswith('Steam:'):
         digits = 6
 
-    _add_cred(ctx, key, name, oath_type, digits, touch, algo, counter, force)
+    _add_cred(ctx, key=key, name=name, issuer=issuer, period=period,
+              oath_type=oath_type, digits=digits, touch=touch, algo=algo,
+              counter=counter, force=force)
 
 
 def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
@@ -221,7 +225,9 @@ def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
     if counter and not oath_type == 'hotp':
         ctx.fail('Counter only supported for HOTP credentials.')
 
-    if not force and any(cred.name == name for cred in controller.list()):
+    long_name = Credential.build_long_name(int(period), issuer, name)
+    if not force and any(
+            cred.long_name() == long_name for cred in controller.list()):
         click.confirm(
             'A credential called {} already exists on the device.'
             ' Do you want to overwrite it?'.format(name), abort=True)
@@ -238,7 +244,7 @@ def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
 
     try:
         controller.put(
-            key, name, issuer=issuer, period=period, oath_type=oath_type,
+            key, name, issuer=issuer, period=int(period), oath_type=oath_type,
             digits=int(digits), require_touch=touch, algo=algo,
             counter=int(counter))
     except APDUError as e:
@@ -355,7 +361,7 @@ Provide a query string to match the credential to remove.
     if len(hits) == 1:
         controller.delete(hits[0])
         click.echo('Removed {}.'.format(hits[0].long_name()))
-    else:
+    elif len(hits) > 1:
         click.echo('To many matches, please specify the query.')
 
 
@@ -406,9 +412,9 @@ def _validate(ctx, password):
 def _search(creds, query):
     hits = []
     for c in creds:
-        if c.name == query:
+        if c.long_name() == query:
             return [c]
-        if query.lower() in c.name.lower():
+        if query.lower() in c.long_name().lower():
             hits.append(c)
     return hits
 
