@@ -199,13 +199,14 @@ class OathController(object):
     def reset(self):
         self.send_apdu(INS.RESET, 0xde, 0xad)
 
-    def put(self, key, name, oath_type='totp', digits=6,
+    def put(self, key, name, issuer='', period=30, oath_type='totp', digits=6,
             algo='SHA1', counter=0, require_touch=False):
 
         oath_type = OATH_TYPE[oath_type.upper()].value
         algo = ALGO[algo].value
 
-        data = bytearray(Tlv(TAG.NAME, name.encode('utf8')))
+        long_name = Credential(name, issuer=issuer, period=period).long_name()
+        data = bytearray(Tlv(TAG.NAME, long_name.encode('utf8')))
 
         key = hmac_shorten_key(key, ALGO(algo).name)
         key = bytearray([oath_type | algo, digits]) + key

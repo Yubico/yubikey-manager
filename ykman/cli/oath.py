@@ -238,8 +238,9 @@ def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
 
     try:
         controller.put(
-            key, name, oath_type=oath_type, digits=int(digits),
-            require_touch=touch, algo=algo, counter=int(counter))
+            key, name, issuer=issuer, period=period, oath_type=oath_type,
+            digits=int(digits), require_touch=touch, algo=algo,
+            counter=int(counter))
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
             ctx.fail('No space left on device.')
@@ -353,7 +354,7 @@ Provide a query string to match the credential to remove.
     hits = _search(creds, query)
     if len(hits) == 1:
         controller.delete(hits[0])
-        click.echo('Removed {}.'.format(hits[0].name))
+        click.echo('Removed {}.'.format(hits[0].long_name()))
     else:
         click.echo('To many matches, please specify the query.')
 
