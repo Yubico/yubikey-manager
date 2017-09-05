@@ -293,11 +293,6 @@ def parse_uri(val):
         params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
         params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
         params['type'] = parsed.hostname
-        # Issuer can come both in a param and inside name param.
-        # We store both in the name field on the key.
-        if 'issuer' in params \
-                and not params['name'].startswith(params['issuer']):
-                    params['name'] = params['issuer'] + ':' + params['name']
         return params
     except:
         raise ValueError('URI seems to have the wrong format.')
