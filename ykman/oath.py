@@ -207,8 +207,9 @@ class OathController(object):
     def reset(self):
         self.send_apdu(INS.RESET, 0xde, 0xad)
 
-    def put(self, key, name, issuer='', period=30, oath_type='totp', digits=6,
-            algo='SHA1', counter=0, require_touch=False):
+    def put(self, key, name, oath_type='totp', digits=6,
+            algo='SHA1', counter=0, require_touch=False, issuer='',
+            period=30):
 
         oath_type = OATH_TYPE[oath_type.upper()].value
         algo = ALGO[algo].value
