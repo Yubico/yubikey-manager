@@ -1,3 +1,6 @@
+* Version 0.4.3 (released 2017-09-06)
+ ** OATH: Fix issue with backwards compability, when used as a library.
+
 * Version 0.4.2 (released 2017-09-05)
  ** OATH: Support 7 digit credentials.
  ** OATH: Support credentials with a period other than 30 seconds.
