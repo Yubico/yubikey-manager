@@ -42,6 +42,7 @@ from .oath import oath
 from .piv import piv
 import usb.core
 import click
+import click_repl
 import sys
 
 
@@ -80,8 +81,11 @@ def cli(ctx):
     """
     Configure your YubiKey via the command line.
     """
-    subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
-    transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
+    if ctx.invoked_subcommand == 'repl':
+        transports = TRANSPORT.usb_transports()
+    else:
+        subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
+        transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
         try:
             descriptors = list(get_descriptors())
@@ -111,6 +115,7 @@ def cli(ctx):
 for cmd in COMMANDS:
     cli.add_command(cmd)
 
+click_repl.register_repl(cli)
 
 def main():
     try:
