@@ -227,7 +227,7 @@ def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
 
     long_name = Credential.build_long_name(int(period), issuer, name)
     if not force and any(
-            cred.long_name() == long_name for cred in controller.list()):
+            cred.long_name == long_name for cred in controller.list()):
         click.confirm(
             'A credential called {} already exists on the device.'
             ' Do you want to overwrite it?'.format(name), abort=True)
@@ -365,7 +365,7 @@ Provide a query string to match the credential to delete.
         click.echo('No matches, nothing to be done.')
     elif len(hits) == 1:
         controller.delete(hits[0])
-        click.echo('Deleted {}.'.format(hits[0].long_name()))
+        click.echo('Deleted {}.'.format(hits[0].long_name))
     else:
         click.echo('To many matches, please specify the query.')
 
@@ -417,9 +417,9 @@ def _validate(ctx, password):
 def _search(creds, query):
     hits = []
     for c in creds:
-        if c.long_name() == query:
+        if c.long_name == query:
             return [c]
-        if query.lower() in c.long_name().lower():
+        if query.lower() in c.long_name.lower():
             hits.append(c)
     return hits
 

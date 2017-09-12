@@ -114,6 +114,8 @@ class Credential(object):
         self.algo = algo
         self.expiration = expiration
         self.period = period
+        self.long_name = Credential.build_long_name(
+            self.period, self.issuer, self.name)
 
     def __lt__(self, other):
         return self.name.lower() < other.name.lower()
@@ -135,12 +137,10 @@ class Credential(object):
         self.expiration = (
             ((timestamp + self.period) // self.period) * self.period)
 
-    def long_name(self):
-        return Credential.build_long_name(self.period, self.issuer, self.name)
-
     @staticmethod
     def from_dict(data):
         kwargs = dict(data)
+        del kwargs['long_name']
         return Credential(**kwargs)
 
     @staticmethod
@@ -263,7 +263,7 @@ class OathController(object):
         if timestamp is None:
             timestamp = int(time.time())
         challenge = time_challenge(timestamp, period=cred.period)
-        data = Tlv(TAG.NAME, cred.long_name().encode('utf-8')) + \
+        data = Tlv(TAG.NAME, cred.long_name.encode('utf-8')) + \
             Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
@@ -280,7 +280,7 @@ class OathController(object):
         return cred
 
     def delete(self, cred):
-        data = Tlv(TAG.NAME, cred.long_name().encode('utf-8'))
+        data = Tlv(TAG.NAME, cred.long_name.encode('utf-8'))
         self.send_apdu(INS.DELETE, 0, 0, data)
 
     def calculate_all(self, timestamp=None):

@@ -35,22 +35,22 @@ class TestOathFunctions(unittest.TestCase):
         self.assertEqual('name', name)
 
     def test_credential_serialize_name(self):
-        self.assertEqual('name', Credential('name').long_name())
+        self.assertEqual('name', Credential('name').long_name)
         self.assertEqual(
-            'Issuer:name', Credential('name', issuer='Issuer').long_name())
+            'Issuer:name', Credential('name', issuer='Issuer').long_name)
         self.assertEqual(
             '20/Issuer:name', Credential(
-                'name', issuer='Issuer', period=20).long_name())
+                'name', issuer='Issuer', period=20).long_name)
         self.assertEqual(
             'Issuer:name', Credential(
-                'name', issuer='Issuer', period=30).long_name())
+                'name', issuer='Issuer', period=30).long_name)
         self.assertEqual(
-            '20/name', Credential('name', period=20).long_name())
+            '20/name', Credential('name', period=20).long_name)
         self.assertEqual(
             'Issuer:name', Credential(
-                'name', issuer='Issuer', period=None).long_name())
+                'name', issuer='Issuer', period=None).long_name)
         self.assertEqual(
-            'name', Credential('name', period=None).long_name())
+            'name', Credential('name', period=None).long_name)
 
     def test_credential_expiration(self):
         cred = Credential('name')
