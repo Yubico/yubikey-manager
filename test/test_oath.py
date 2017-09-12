@@ -46,6 +46,11 @@ class TestOathFunctions(unittest.TestCase):
                 'name', issuer='Issuer', period=30).long_name())
         self.assertEqual(
             '20/name', Credential('name', period=20).long_name())
+        self.assertEqual(
+            'Issuer:name', Credential(
+                'name', issuer='Issuer', period=None).long_name())
+        self.assertEqual(
+            'name', Credential('name', period=None).long_name())
 
     def test_credential_expiration(self):
         cred = Credential('name')

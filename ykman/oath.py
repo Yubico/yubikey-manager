@@ -158,7 +158,7 @@ class Credential(object):
     @staticmethod
     def build_long_name(period, issuer, name):
         res = ''
-        if period != 30:
+        if period != 30 and period is not None:
             res += str(period) + '/'
         if issuer:
             res += issuer + ':'
