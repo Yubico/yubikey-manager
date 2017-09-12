@@ -323,7 +323,10 @@ Touch and HOTP credentials require a single match to be triggered.
                 hotp_touch_timer.cancel()
             else:
                 cred = controller.calculate(cred)
-            click.echo('{}:{} {}'.format(cred.issuer, cred.name, cred.code))
+            if cred.issuer:
+                click.echo('{}:{} {}'.format(cred.issuer, cred.name, cred.code))
+            else:
+                click.echo('{} {}'.format(cred.name, cred.code))
             ctx.exit()
         creds = hits
 
