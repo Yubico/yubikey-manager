@@ -1,3 +1,6 @@
+* Version 0.4.5 (released 2017-09-14)
+ ** OATH: Don't print issuer if there is no issuer.
+
 * Version 0.4.4 (released 2017-09-06)
  ** OATH: Fix yet another issue with backwards compability, for adding new credentials.
 
