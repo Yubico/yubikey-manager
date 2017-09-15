@@ -28,11 +28,10 @@ RUN apt-get install -qq \
     pcscd \
     debhelper \
     devscripts
-RUN git clone --recursive https://github.com/Yubico/yubikey-manager
+COPY . yubikey-manager
 RUN cd yubikey-manager && debuild -us -uc
-RUN mkdir /deploy
-RUN mv /yubikey-manager_* /deploy
-RUN mv /python3-yubikey-manager_* /deploy
-RUN mv /python-yubikey-manager_* /deploy
-RUN cd / && tar czf yubikey-manager-debian-builds.tar.gz deploy
-
+RUN mkdir /deb
+RUN mv /yubikey-manager_* /deb
+RUN mv /python3-yubikey-manager_* /deb
+RUN mv /python-yubikey-manager_* /deb
+RUN cd / && tar czf yubikey-manager-debian-builds.tar.gz deb

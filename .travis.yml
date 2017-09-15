@@ -16,14 +16,13 @@ cache:
     - $HOME/.cache/pip
 
 before_install:
-  - docker build -t xenial docker/xenial
+  - docker build -t xenial -f docker/xenial/Dockerfile .
   - sudo apt-add-repository -y ppa:yubico/stable
   - sudo apt-get update
-  - sudo apt-get install -qq libu2f-host0 libykpers-1-1 python-pyscard
+  - sudo apt-get install -qq libu2f-host0 libykpers-1-1 python-pyscard swig libpcsclite-dev
   - pip install --disable-pip-version-check --upgrade pip
 
 install:
-  - sudo apt-get install swig libpcsclite-dev
   - pip install pre-commit
   - pip install -e .
 
@@ -34,8 +33,7 @@ script:
 after_success:
   - mkdir deploy
   - id=$(docker create xenial)
-  - docker cp $id:/yubikey-manager-debian-builds.tar.gz deploy/
-  - mv deploy/yubikey-manager-debian-builds.tar.gz deploy/yubikey-manager-debian-builds-$TRAVIS_BRANCH-HEAD.tar.gz
+  - docker cp $id:/yubikey-manager-debian-packages.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-deb.tar.gz
 
 deploy:
   provider: s3
