@@ -112,11 +112,11 @@ def reset(ctx):
     """
     click.echo("Resetting OpenPGP data, don't remove your YubiKey...")
     ctx.obj['controller'].reset()
+    click.echo('Success! All data has been cleared and default PINs are set.')
     echo_default_pins()
 
 
 def echo_default_pins():
-    click.echo('Success! All data has been cleared and default PINs are set.')
     click.echo('PIN:         123456')
     click.echo('Reset code:  NOT SET')
     click.echo('Admin PIN:   12345678')
@@ -182,6 +182,7 @@ def set_pin_retries(ctx, pw_attempts, admin_pin, force):
     controller.set_pin_retries(*(pw_attempts + (admin_pin.encode('utf8'),)))
     click.echo('PIN retries successfully set.')
     if resets_pins:
+        click.echo('Default PINs are set.')
         echo_default_pins()
 
 
