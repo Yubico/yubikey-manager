@@ -51,4 +51,4 @@ To run integration tests:
 == Using vagrant for development
 
 A Vagrantfile with a development environment based on Ubuntu 16.04 is included in the repository.
-Modify the provision.sh script to set up a USB filter to capture the device with VirtualBox.
+Modify the Vagrantfile to set up a USB filter to capture the device with VirtualBox.
