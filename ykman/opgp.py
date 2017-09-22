@@ -84,6 +84,7 @@ class OpgpController(object):
             if e.sw in (SW_NO_INPUT_DATA, SW_CONDITIONS_NOT_SATISFIED):
                 self._driver.send_apdu(0, INS.ACTIVATE, 0, 0)
                 return self._driver.send_apdu(cl, ins, p1, p2, data, check)
+            raise
 
     def _read_version(self):
         bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
