@@ -108,20 +108,23 @@ class Descriptor(object):
     def device_name(self):
         return self._device_name
 
-    def open_device(self, transports=sum(TRANSPORT)):
+    def open_device(self, transports=sum(TRANSPORT), attempts=5):
         transports &= self.mode.transports
         dev = None
-        try:
-            if TRANSPORT.CCID & transports:
-                dev = open_ccid()
-            if TRANSPORT.OTP & transports and not dev:
-                dev = open_otp()
-            if TRANSPORT.U2F & transports and not dev:
-                dev = open_u2f()
-        except Exception as e:
-            raise FailedOpeningDeviceException(e)
-
-        return YubiKey(self, dev) if dev is not None else None
+        for attempt in range(attempts):
+            try:
+                if TRANSPORT.CCID & transports:
+                    dev = open_ccid()
+                if TRANSPORT.OTP & transports and not dev:
+                    dev = open_otp()
+                if TRANSPORT.U2F & transports and not dev:
+                    dev = open_u2f()
+                if not dev:
+                    continue
+                return YubiKey(self, dev)
+            except:
+                pass
+        raise FailedOpeningDeviceException()
 
 
 def get_descriptors():
