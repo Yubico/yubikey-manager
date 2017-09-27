@@ -33,7 +33,7 @@ from .driver_otp import open_device as open_otp
 from .native.pyusb import get_usb_backend
 
 import usb.core
-
+import time
 
 YKS = 'YubiKey Standard'
 NEO = 'YubiKey NEO'
@@ -108,7 +108,7 @@ class Descriptor(object):
     def device_name(self):
         return self._device_name
 
-    def open_device(self, transports=sum(TRANSPORT), attempts=5):
+    def open_device(self, transports=sum(TRANSPORT), attempts=3):
         transports &= self.mode.transports
         dev = None
         for attempt in range(attempts):
@@ -120,6 +120,8 @@ class Descriptor(object):
                 if TRANSPORT.U2F & transports and not dev:
                     dev = open_u2f()
                 if not dev:
+                    #  Wait a little before trying again.
+                    time.sleep(attempt * 0.1)
                     continue
                 return YubiKey(self, dev)
             except:
