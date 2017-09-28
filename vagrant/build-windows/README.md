@@ -7,21 +7,23 @@ Usage
 
 The following steps assume using the VirtualBox provider.
 
- 1. Modify the USB passthrough settings in the `Vagrantfile` as necessary. The
-    default rules will make the VM capture all YubiKey 4s with _all_ of the OTP,
-    U2F and CCID transport modes enabled (device ID `1050:0407`).
+ 1. _Optional:_ Modify the USB passthrough settings in the `Vagrantfile` as
+    necessary. The default rules will make the VM capture all YubiKey 4s with
+    _all_ of the OTP, U2F and CCID transport modes enabled (device ID
+    `1050:0407`).
 
  2. Fire up the VM and wait for provisioning to finish:
 
         $ cd yubikey-manager/vagrant/build-windows
         $ vagrant up
 
-    Also review the provisioning log output to ensure all required software
-    installed successfully.
+    This can take a few minutes. Also review the output from `vagrant up` to
+    ensure the provisioner installs all dependencies successfully.
 
  3. Log in as user `vagrant` with password `vagrant`
- 4. Open a command prompt as administrator (keyboard shortcut: `<Win>` `c` `m` `d` `<Ctrl>`+`<Shift>`+`<Enter>`)
- 5. Go to the `Z:` drive. If this fails, map the drive manually:
+ 4. Open a command prompt with administrator privileges (keyboard shortcut:
+    `<Win>` `c` `m` `d` `<Ctrl>+<Shift>+<Enter>`)
+ 5. Navigate to the `Z:` drive. If this fails, map the drive manually:
 
         C:\Users\vagrant> net use Z: \\VBOXSVR\vagrant
 
@@ -29,7 +31,7 @@ The following steps assume using the VirtualBox provider.
 
         Z:\> pip install -e .
 
-    If this fails to find needed commands (this seems to happen if you log in
+    If this fails with "command not found" (this seems to happen if you log in
     before provisioning finishes), try running `refreshenv` to refresh the
     `PATH`. If it still fails, discard the VM and try again from (1).
 
