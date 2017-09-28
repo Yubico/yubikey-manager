@@ -112,6 +112,7 @@ class Descriptor(object):
         transports &= self.mode.transports
         dev = None
         for attempt in range(attempts):
+            sleep_time = (attempt + 1) * 0.1
             try:
                 if TRANSPORT.CCID & transports:
                     dev = open_ccid()
@@ -121,7 +122,7 @@ class Descriptor(object):
                     dev = open_u2f()
                 if not dev:
                     #  Wait a little before trying again.
-                    time.sleep(attempt * 0.1)
+                    time.sleep(sleep_time)
                     continue
                 return YubiKey(self, dev)
             except:
