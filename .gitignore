@@ -16,3 +16,9 @@ ykman-gui.pkg
 ykman-script.py
 ykman.pkg
 lib/
+
+# Libraries unpacked by Windows VM
+/libjson-c*.dll
+/libusb-*.dll
+/libykpers-*.dll
+/libyubikey-*.dll
