@@ -17,5 +17,9 @@ REM Download ykpers DLLs
 powershell -Command "(New-Object Net.WebClient).DownloadFile('https://developers.yubico.com/yubikey-personalization/Releases/ykpers-1.18.0-win64.zip', 'ykpers-1.18.0-win64.zip')"
 7z e ykpers-1.18.0-win64.zip bin/libykpers-1-1.dll bin/libyubikey-0.dll bin/libjson-c-2.dll
 
+REM Download libu2f-host DLLs
+powershell -Command "(New-Object Net.WebClient).DownloadFile('https://developers.yubico.com/libu2f-host/Releases/libu2f-host-1.1.4-win64.zip', 'libu2f-host-1.1.4-win64.zip')"
+7z e libu2f-host-1.1.4-win64.zip bin/libu2f-host-0.dll bin/libhidapi-0.dll
+
 REM Move DLLs to installation directory
-mv libusb-1.0.dll libykpers-1-1.dll libyubikey-0.dll libjson-c-2.dll Z:\
+mv libusb-1.0.dll libykpers-1-1.dll libyubikey-0.dll libjson-c-2.dll libu2f-host-0.dll libhidapi-0.dll Z:\
