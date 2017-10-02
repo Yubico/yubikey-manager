@@ -37,6 +37,8 @@ Commands:
 
 ==== macOS
 
+    $ brew install ykman
+
 Or from source:
 
     $ brew install swig ykpers libu2f-host libusb
