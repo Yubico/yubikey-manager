@@ -7,7 +7,7 @@ Vagrant.configure("2") do |config|
   config.vm.box = "senglin/win-10-enterprise-vs2015community"
   config.vm.box_version = "1.0.0"
 
-  # Install dependencies needed for yubikey-piv-manager development.
+  # Install dependencies needed for yubikey-manager development.
   config.vm.provision "shell", path: "provision.bat"
 
   # Sync repository to /vagrant
