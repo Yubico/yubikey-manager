@@ -283,6 +283,12 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    def test_piv_generate_key_rsa2048(self):
+        output = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'RSA2048',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertIn('BEGIN PUBLIC KEY', output)
+
     def test_piv_generate_key_eccp256(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
