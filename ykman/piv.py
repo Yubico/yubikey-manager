@@ -96,6 +96,16 @@ class ALGO(IntEnum):
             return cls.ECCP384
         raise ValueError('Unsupported algorithm!')
 
+    @classmethod
+    def is_rsa(cls, algorithm_int):
+        # Implemented as "not not RSA" to reduce risk of false negatives if
+        # more algorithms are added
+        return not (
+            algorithm_int == cls.TDES
+            or algorithm_int == cls.ECCP256
+            or algorithm_int == cls.ECCP384
+        )
+
 
 @unique
 class SLOT(IntEnum):
