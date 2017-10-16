@@ -28,7 +28,7 @@
 from __future__ import absolute_import, print_function
 
 from ykman import __version__
-from ..util import TRANSPORT
+from ..util import TRANSPORT, Cve201715361VulnerableError
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
@@ -118,6 +118,10 @@ def main():
     except ValueError as e:
         print('Error:', e)
         return 1
+
+    except Cve201715361VulnerableError as err:
+        print('Error:', err)
+        return 2
 
 
 if __name__ == '__main__':

@@ -3,7 +3,9 @@ import sys
 import unittest
 import time
 import click
-from ykman.util import TRANSPORT
+from ykman.util import (
+    TRANSPORT, is_cve201715361_vulnerable_firmware_version,
+    Cve201715361VulnerableError)
 from test.util import ykman_cli
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
@@ -56,6 +58,13 @@ def _is_NEO():
 def _no_attestation():
     if _one_yubikey:
         return _get_version() < (4, 3, 0)
+    else:
+        return False
+
+
+def _is_cve201715361_vulnerable_yubikey():
+    if _one_yubikey:
+        return is_cve201715361_vulnerable_firmware_version(_get_version())
     else:
         return False
 
@@ -272,22 +281,64 @@ class TestPIV(unittest.TestCase):
         output = ykman_cli('piv', 'reset', '-f')
         self.assertIn('Success!', output)
 
+    @unittest.skipIf(
+        _is_cve201715361_vulnerable_yubikey(),
+        'Not applicable to CVE-2017-15361 affected YubiKey.'
+    )
     def test_piv_generate_key_default(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(
+        not _is_cve201715361_vulnerable_yubikey(),
+        'Applicable only to CVE-2017-15361 affected YubiKey.'
+    )
+    def test_piv_generate_key_default_cve201715361(self):
+        with self.assertRaises(Cve201715361VulnerableError):
+            ykman_cli(
+                'piv', 'generate-key', '9a',
+                '-m', DEFAULT_MANAGEMENT_KEY, '-')
+
+    @unittest.skipIf(
+        _is_cve201715361_vulnerable_yubikey(),
+        'Not applicable to CVE-2017-15361 affected YubiKey.'
+    )
     def test_piv_generate_key_rsa1024(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(
+        _is_cve201715361_vulnerable_yubikey(),
+        'Not applicable to CVE-2017-15361 affected YubiKey.'
+    )
     def test_piv_generate_key_rsa2048(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA2048',
             '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
+
+    @unittest.skipIf(
+        not _is_cve201715361_vulnerable_yubikey(),
+        'Applicable only to CVE-2017-15361 affected YubiKey.'
+    )
+    def test_piv_generate_key_rsa1024_cve201715361(self):
+        with self.assertRaises(Cve201715361VulnerableError):
+            ykman_cli(
+                'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
+                DEFAULT_MANAGEMENT_KEY, '-')
+
+    @unittest.skipIf(
+        not _is_cve201715361_vulnerable_yubikey(),
+        'Applicable only to CVE-2017-15361 affected YubiKey.'
+    )
+    def test_piv_generate_key_rsa2048_cve201715361(self):
+        with self.assertRaises(Cve201715361VulnerableError):
+            ykman_cli(
+                'piv', 'generate-key', '9a', '-a', 'RSA2048',
+                '-m', DEFAULT_MANAGEMENT_KEY, '-')
 
     def test_piv_generate_key_eccp256(self):
         output = ykman_cli(
@@ -306,26 +357,27 @@ class TestPIV(unittest.TestCase):
     def test_piv_generate_key_pin_policy_always(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '--pin-policy', 'ALWAYS', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-')
+            DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
     @unittest.skipIf(_is_NEO(), 'Touch policy not available.')
     def test_piv_generate_key_touch_policy_always(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '--touch-policy', 'ALWAYS', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-')
+            DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
     @unittest.skipIf(_no_attestation(), 'Attestation not available.')
     def test_piv_attest_key(self):
         ykman_cli(
-            'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
+            'piv', 'generate-key', '9a', '-a', 'ECCP256',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-')
         output = ykman_cli('piv', 'attest', '9a', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
     def test_piv_generate_self_signed(self):
         ykman_cli(
-            'piv', 'generate-key', '9a', '-m',
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
             DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
         ykman_cli(
             'piv', 'generate-certificate', '9a', '-m',
@@ -336,7 +388,7 @@ class TestPIV(unittest.TestCase):
 
     def test_piv_generate_csr(self):
         ykman_cli(
-            'piv', 'generate-key', '9a', '-m',
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
             DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
         output = ykman_cli(
             'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',

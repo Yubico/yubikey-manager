@@ -91,6 +91,20 @@ class TRANSPORT(BitflagEnum):
         return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F
 
 
+class Cve201715361VulnerableError(Exception):
+    """Thrown if on-chip RSA key generation is attempted on a YubiKey vulnerable
+    to CVE-2017-15361."""
+
+    def __init__(self, f_version):
+        self.f_version = f_version
+
+    def __str__(self):
+        return (
+            'On-chip RSA key generation on this YubiKey has been blocked.\n'
+            'Please see https://yubi.co/ysa201701 for details.'
+        )
+
+
 class Mode(object):
     _modes = [
         TRANSPORT.OTP,  # 0x00
@@ -224,6 +238,15 @@ _MODHEX = b'cbdefghijklnrtuv'
 _MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
 _HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i:i+1]) for i in range(16))
 _PW_CHARS = _MODHEX + _MODHEX.upper()
+
+
+def ensure_not_cve201715361_vulnerable_firmware_version(f_version):
+    if is_cve201715361_vulnerable_firmware_version(f_version):
+        raise Cve201715361VulnerableError(f_version)
+
+
+def is_cve201715361_vulnerable_firmware_version(f_version):
+    return (4, 2, 0) <= f_version < (4, 3, 5)
 
 
 def modhex_decode(value):

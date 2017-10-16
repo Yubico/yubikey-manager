@@ -29,7 +29,9 @@
 from __future__ import absolute_import
 from enum import IntEnum, unique
 from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
-from .util import AID, Tlv, parse_tlvs
+from .util import (
+    AID, Tlv, parse_tlvs,
+    ensure_not_cve201715361_vulnerable_firmware_version)
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
@@ -650,6 +652,10 @@ class PivController(object):
 
     def generate_key(self, slot, algorithm, pin_policy=PIN_POLICY.DEFAULT,
                      touch_policy=TOUCH_POLICY.DEFAULT):
+
+        if ALGO.is_rsa(algorithm):
+            ensure_not_cve201715361_vulnerable_firmware_version(self.version)
+
         data = Tlv(TAG.ALGO, six.int2byte(algorithm))
         if pin_policy:
             data += Tlv(TAG.PIN_POLICY, six.int2byte(pin_policy))
