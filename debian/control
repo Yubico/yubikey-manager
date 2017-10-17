@@ -1,7 +1,8 @@
 Source: yubikey-manager
 Maintainer: Debian Authentication Maintainers <pkg-auth-maintainers@lists.alioth.debian.org>
 Uploaders: Dag Heyman <dag@yubico.com>,
-           Dain Nilsson <dain@yubico.com>
+           Dain Nilsson <dain@yubico.com>,
+           Emil Lundberg <emil@yubico.com>
 Section: utils
 Priority: optional
 Standards-Version: 3.9.7
