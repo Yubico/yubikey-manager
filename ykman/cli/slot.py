@@ -38,7 +38,6 @@ from ..driver_otp import YkpersError
 import os
 import struct
 import click
-import hashlib
 
 
 def parse_hex(length):
@@ -302,11 +301,6 @@ def chalresp(ctx, slot, key, totp, touch, force):
     else:
         if totp:
             key = parse_b32_key(key)
-            if len(key) > 64:  # Keys longer than 64 bytes are hashed.
-                key = hashlib.sha1(key).digest()
-            if len(key) > 20:
-                ctx.fail('YubiKey Slots cannot handle TOTP keys over 20 bytes.')
-            key += b'\x00' * (20 - len(key))  # Keys must be padded to 20 bytes.
         else:
             key = parse_key(key)
 
@@ -349,7 +343,7 @@ credential, and read the response. Supports output as a OATH-TOTP code.
     if challenge and totp:
         try:
             challenge = int(challenge)
-        except:
+        except Exception:
             ctx.fail('Timestamp challenge for TOTP must be an integer.')
     try:
         res = dev.driver.calculate(
