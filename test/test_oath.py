@@ -1,3 +1,5 @@
+#  vim: set fileencoding=utf-8 :
+
 from ykman.oath import Credential, CredentialData, _derive_key, OATH_TYPE, ALGO
 import unittest
 
