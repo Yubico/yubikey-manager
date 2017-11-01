@@ -27,16 +27,20 @@
 
 
 import os
-import hashlib
+import re
 import struct
-import hmac
 import six
 import time
+from base64 import b64encode
 from functools import total_ordering
 from enum import IntEnum, unique
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hmac, hashes
+from cryptography.hazmat.backends import default_backend
+from six.moves.urllib.parse import unquote, urlparse, parse_qs
 from .driver_ccid import APDUError, SW_OK
 from .util import (
-    AID, Tlv, parse_tlvs, time_challenge,
+    AID, Tlv, parse_tlvs, time_challenge, parse_b32_key,
     format_code, parse_truncated, hmac_shorten_key)
 
 
@@ -48,7 +52,7 @@ class TAG(IntEnum):
     CHALLENGE = 0x74
     RESPONSE = 0x75
     TRUNCATED_RESPONSE = 0x76
-    HOTP = 0x77
+    NO_RESPONSE = 0x77
     PROPERTY = 0x78
     VERSION = 0x79
     IMF = 0x7a
@@ -60,6 +64,7 @@ class TAG(IntEnum):
 class ALGO(IntEnum):
     SHA1 = 0x01
     SHA256 = 0x02
+    SHA512 = 0x03
 
 
 @unique
@@ -100,70 +105,110 @@ class SW(IntEnum):
     INVALID_INSTRUCTION = 0x6d00
 
 
+class CredentialData(object):
+
+    def __init__(self, secret, issuer, name, oath_type=OATH_TYPE.TOTP,
+                 algorithm=ALGO.SHA1, digits=6, period=30, counter=0,
+                 touch=False):
+        self.secret = secret
+        self.issuer = issuer
+        self.name = name
+        self.oath_type = oath_type
+        self.algorithm = algorithm
+        self.digits = digits
+        self.period = period
+        self.counter = counter
+        self.touch = touch
+
+    @classmethod
+    def from_uri(cls, uri):
+        parsed = urlparse(uri.strip())
+        if parsed.scheme != 'otpauth':
+            raise ValueError('Invalid URI scheme')
+
+        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
+        params['secret'] = parse_b32_key(params['secret'])
+        params['algorithm'] = ALGO[params.get('algorithm', 'SHA1').upper()]
+        issuer = None
+        name = unquote(parsed.path)[1:]  # Unquote and strip leading /
+        if ':' in name:
+            issuer, name = name.split(':', 1)
+        params['issuer'] = params.get('issuer', issuer)
+        params['name'] = name
+        params['oath_type'] = OATH_TYPE[parsed.hostname.upper()]
+        params['digits'] = int(params.get('digits', 6))
+        params['period'] = int(params.get('period', 30))
+        params['counter'] = int(params.get('counter', 0))
+        return cls(**params)
+
+    def make_key(self):
+        key = self.name
+        if self.issuer:
+            key = '%s:%s' % (self.issuer, key)
+        if self.oath_type == OATH_TYPE.TOTP and self.period != 30:
+            key = '%d/%s' % (self.period, key)
+        return key.encode('utf-8')
+
+
 @total_ordering
 class Credential(object):
 
-    def __init__(
-            self, name, issuer='', code=None, oath_type='', touch=False,
-            algo=None, expiration=None, period=30):
-        self.name = name
-        self.issuer = issuer
-        self.code = code
+    def __init__(self, key, oath_type=OATH_TYPE.TOTP, touch=False):
+        self.key = key
         self.oath_type = oath_type
         self.touch = touch
-        self.algo = algo
-        self.expiration = expiration
-        self.period = period
-        self.long_name = Credential.build_long_name(
-            self.period, self.issuer, self.name)
+        self.issuer, self.name, self.period = Credential.parse_key(key)
 
     def __lt__(self, other):
-        return self.name.lower() < other.name.lower()
+        a = ((self.issuer or self.name).lower(), self.name.lower())
+        b = ((other.issuer or other.name).lower(), other.name.lower())
+        return a < b
 
-    def to_dict(self):
-        return dict(self.__dict__)
-
+    @property
     def is_steam(self):
         return self.issuer == 'Steam'
 
+    @property
     def is_hidden(self):
         return self.issuer == '_hidden'
 
-    @property
-    def hidden(self):
-        return self.is_hidden()
-
-    def update_expiration(self, timestamp):
-        self.expiration = (
-            ((timestamp + self.period) // self.period) * self.period)
-
     @staticmethod
-    def from_dict(data):
-        kwargs = dict(data)
-        del kwargs['long_name']
-        return Credential(**kwargs)
+    def parse_key(data):
+        if re.match(br'^\d+/', data):
+            period, data = data.split(b'/', 1)
+            period = int(period)
+        else:
+            period = 30
 
-    @staticmethod
-    def parse_long_name(name):
-        issuer = None
-        period = 30
-        if '/' in name:
-            first, second = name.split('/', 1)
-            if first.isdigit():
-                period, name = first, second
-        if ':' in name:
-            issuer, name = name.split(':', 1)
-        return int(period), issuer, name
+        if b':' in data:
+            issuer, data = data.split(b':', 1)
+            issuer = issuer.decode('utf-8')
+        else:
+            issuer = None
+        return issuer, data.decode('utf-8'), period
 
-    @staticmethod
-    def build_long_name(period, issuer, name):
-        res = ''
-        if period != 30 and period is not None:
-            res += str(period) + '/'
-        if issuer:
-            res += issuer + ':'
-        res += name
-        return res
+
+def _derive_key(salt, passphrase):
+    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
+    return kdf.derive(passphrase.encode('utf-8'))
+
+
+def _get_device_id(device_salt):
+    h = hashes.Hash(hashes.SHA256(), default_backend())
+    h.update(device_salt)
+    d = h.finalize()[:16]
+    return b64encode(d).replace(b'=', b'')
+
+
+class Code(object):
+
+    def __init__(self, value, valid_from, valid_to):
+        self.value = value
+        self.valid_from = valid_from
+        self.valid_to = valid_to
+
+    def __str__(self):
+        return self.value
 
 
 class OathController(object):
@@ -172,7 +217,8 @@ class OathController(object):
         resp = driver.select(AID.OATH)
         tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
         self._version = tuple(six.iterbytes(tags[TAG.VERSION]))
-        self._id = tags[TAG.NAME]
+        self._salt = tags[TAG.NAME]
+        self._id = _get_device_id(self._salt)
         self._challenge = tags.get(TAG.CHALLENGE)
         self._driver = driver
 
@@ -192,6 +238,9 @@ class OathController(object):
     def _426device(self):
         return (4, 2, 0) <= self.version <= (4, 2, 6)
 
+    def derive_key(self, password):
+        return _derive_key(self._salt, password)
+
     def send_apdu(self, ins, p1, p2, data=b''):
         resp, sw = self._driver.send_apdu(0, ins, p1, p2, data, check=None)
         while (sw >> 8) == SW.MORE_DATA:
@@ -207,48 +256,38 @@ class OathController(object):
     def reset(self):
         self.send_apdu(INS.RESET, 0xde, 0xad)
 
-    def put(self, key, name, oath_type='totp', digits=6,
-            algo='SHA1', counter=0, require_touch=False, issuer='',
-            period=30):
-
-        oath_type = OATH_TYPE[oath_type.upper()].value
-        algo = ALGO[algo].value
-
-        long_name = Credential.build_long_name(int(period), issuer, name)
-        data = bytearray(Tlv(TAG.NAME, long_name.encode('utf8')))
-
-        key = hmac_shorten_key(key, ALGO(algo).name)
-        key = bytearray([oath_type | algo, digits]) + key
-        data += Tlv(TAG.KEY, key)
+    def put(self, credential_data):
+        d = credential_data
+        key = d.make_key()
+        secret_header = bytearray([d.oath_type | d.algorithm, d.digits])
+        secret = hmac_shorten_key(d.secret, d.algorithm.name)
+        data = Tlv(TAG.NAME, key) + Tlv(TAG.KEY, secret_header + secret)
 
         properties = 0
 
-        if require_touch:
+        if d.touch:
             properties |= PROPERTIES.REQUIRE_TOUCH
 
         if properties:
-            data.extend([TAG.PROPERTY, properties])
+            data += bytearray([TAG.PROPERTY, properties])
 
-        if counter > 0:
-            data += Tlv(TAG.IMF, struct.pack('>I', counter))
+        if d.counter > 0:
+            data += Tlv(TAG.IMF, struct.pack('>I', d.counter))
 
         self.send_apdu(INS.PUT, 0, 0, bytes(data))
+        return Credential(key, d.oath_type, d.touch)
 
     def list(self):
-        resp = self.send_apdu(INS.LIST, 0, 0)
-        while resp:
-            length = six.indexbytes(resp, 1) - 1
-            oath_type = MASK.TYPE & six.indexbytes(resp, 2)
-            oath_type = OATH_TYPE(oath_type).name
-            algo = MASK.ALGO & six.indexbytes(resp, 2)
-            algo = ALGO(algo).name
-            long_name = resp[3:3 + length].decode('utf-8')
-            period, issuer, name = Credential.parse_long_name(long_name)
-            cred = Credential(
-                name, issuer=issuer, period=period, oath_type=oath_type,
-                algo=algo)
-            yield cred
-            resp = resp[3 + length:]
+        def _gen_creds():
+            resp = self.send_apdu(INS.LIST, 0, 0)
+            while resp:
+                length = six.indexbytes(resp, 1) - 1
+                oath_type = OATH_TYPE(MASK.TYPE & six.indexbytes(resp, 2))
+                key = resp[3:3 + length]
+                yield Credential(key, oath_type)
+                resp = resp[3 + length:]
+
+        return list(_gen_creds())
 
     def calculate(self, cred, timestamp=None):
 
@@ -258,13 +297,12 @@ class OathController(object):
         # the command will hang. A workaround is to send an invalid command
         # (resulting in a short reply) prior to the "calculate" command.
         if self._426device and cred.touch:
-            self._send_invalid_apdu()
+            self._driver.send_apdu(0, 0, 0, 0, '', check=SW.INVALID_INSTRUCTION)
 
         if timestamp is None:
             timestamp = int(time.time())
         challenge = time_challenge(timestamp, period=cred.period)
-        data = Tlv(TAG.NAME, cred.long_name.encode('utf-8')) + \
-            Tlv(TAG.CHALLENGE, challenge)
+        data = Tlv(TAG.NAME, cred.key) + Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
         # Manual dynamic truncation is required
@@ -272,64 +310,79 @@ class OathController(object):
         digits = six.indexbytes(resp, 0)
         resp = resp[1:]
         offset = six.indexbytes(resp, -1) & 0xF
-        code = resp[offset:offset + 4]
-        code = parse_truncated(code)
-        cred.code = format_code(code, digits, steam=cred.is_steam())
-        if cred.oath_type != 'hotp':
-            cred.update_expiration(timestamp)
-        return cred
+        code_data = resp[offset:offset + 4]
+        code_data = parse_truncated(code_data)
+        code_value = format_code(code_data, digits, steam=cred.is_steam)
+        if cred.oath_type == OATH_TYPE.TOTP:
+            valid_from = timestamp % cred.period
+            valid_to = valid_from + cred.period
+        else:
+            valid_from = timestamp
+            valid_to = float('Inf')
+        return Code(code_value, valid_from, valid_to)
 
     def delete(self, cred):
-        data = Tlv(TAG.NAME, cred.long_name.encode('utf-8'))
+        data = Tlv(TAG.NAME, cred.key)
         self.send_apdu(INS.DELETE, 0, 0, data)
 
     def calculate_all(self, timestamp=None):
         if timestamp is None:
             timestamp = int(time.time())
-        data = Tlv(TAG.CHALLENGE, time_challenge(timestamp))
-        resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
-        tlvs = parse_tlvs(resp)
-        while tlvs:
-            long_name = tlvs.pop(0).value.decode('utf-8')
-            period, issuer, name = Credential.parse_long_name(long_name)
-            resp = tlvs.pop(0)
-            digits = six.indexbytes(resp.value, 0)
-            cred = Credential(name, issuer=issuer, period=int(period))
-            if resp.tag == TAG.TRUNCATED_RESPONSE:
-                cred.oath_type = 'totp'
-                if cred.is_steam() or cred.period != 30:
-                    cred = self.calculate(cred, timestamp)
-                else:
-                    code = parse_truncated(resp.value[1:])
-                    cred.code = format_code(code, digits)
-                    cred.update_expiration(timestamp)
-            elif resp.tag == TAG.HOTP:
-                cred.oath_type = 'hotp'
-            elif resp.tag == TAG.TOUCH:
-                cred.touch = True
-            yield cred
 
-    def set_password(self, key):
+        def _gen_all():
+            valid_from = timestamp % 30
+            valid_to = valid_from + 30
+            data = Tlv(TAG.CHALLENGE, time_challenge(timestamp))
+            resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
+            tlvs = parse_tlvs(resp)
+            while tlvs:
+                key = tlvs.pop(0).value
+                resp = tlvs.pop(0)
+                oath_type = OATH_TYPE.HOTP if resp.tag == TAG.NO_RESPONSE else \
+                    OATH_TYPE.TOTP
+                touch = resp.tag == TAG.TOUCH
+                cred = Credential(key, oath_type, touch)
+
+                if resp.tag == TAG.TRUNCATED_RESPONSE:
+                    if cred.period != 30 or cred.is_steam:
+                        code = self.calculate(cred, timestamp)
+                    else:
+                        digits = six.indexbytes(resp.value, 0)
+                        code_value = parse_truncated(resp.value[1:])
+                        code_value = format_code(code_value, digits)
+                        code = Code(code_value, valid_from, valid_to)
+                else:
+                    code = None
+
+                yield cred, code
+        return list(_gen_all())
+
+    def set_password(self, password):
+        key = self.derive_key(password)
         keydata = bytearray([OATH_TYPE.TOTP | ALGO.SHA1]) + key
         challenge = os.urandom(8)
-        response = hmac.new(key, challenge, hashlib.sha1).digest()
+        h = hmac.HMAC(key, hashes.SHA1(), default_backend())
+        h.update(challenge)
+        response = h.finalize()
         data = Tlv(TAG.KEY, keydata) + Tlv(TAG.CHALLENGE, challenge) + Tlv(
             TAG.RESPONSE, response)
         self.send_apdu(INS.SET_CODE, 0, 0, data)
+        return key
 
     def clear_password(self):
         self.send_apdu(INS.SET_CODE, 0, 0, Tlv(TAG.KEY, b''))
 
     def validate(self, key):
-        response = hmac.new(key, self._challenge, hashlib.sha1).digest()
+        h = hmac.HMAC(key, hashes.SHA1(), default_backend())
+        h.update(self._challenge)
+        response = h.finalize()
         challenge = os.urandom(8)
-        verification = hmac.new(key, challenge, hashlib.sha1).digest()
+        h = hmac.HMAC(key, hashes.SHA1(), default_backend())
+        h.update(challenge)
+        verification = h.finalize()
         data = Tlv(TAG.RESPONSE, response) + Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.VALIDATE, 0, 0, data)
         if parse_tlvs(resp)[0].value != verification:
             raise ValueError(
                 'Response from validation does not match verification!')
         self._challenge = None
-
-    def _send_invalid_apdu(self):
-        self._driver.send_apdu(0, 0, 0, 0, '', check=SW.INVALID_INSTRUCTION)

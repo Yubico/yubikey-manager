@@ -28,9 +28,7 @@
 import os
 import six
 import struct
-import hashlib
 import re
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
@@ -38,12 +36,6 @@ from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
-
-try:
-    from urlparse import urlparse, parse_qs
-    from urllib import unquote
-except ImportError:
-    from urllib.parse import unquote, urlparse, parse_qs
 
 
 class BitflagEnum(IntEnum):
@@ -265,11 +257,6 @@ def generate_static_pw(length):
                            for d in six.iterbytes(data)))
 
 
-def derive_key(salt, passphrase):
-    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
-    return kdf.derive(passphrase.encode('utf-8'))
-
-
 def format_code(code, digits=6, steam=False):
     STEAM_CHAR_TABLE = '23456789BCDFGHJKMNPQRTVWXY'
     if steam:
@@ -293,32 +280,23 @@ def parse_truncated(resp):
 
 def hmac_shorten_key(key, algo):
     if algo.upper() == 'SHA1':
-        h = hashlib.sha1()
+        h = hashes.SHA1()
     elif algo.upper() == 'SHA256':
-        h = hashlib.sha256()
+        h = hashes.SHA256()
+    elif algo.upper() == 'SHA512':
+        h = hashes.SHA512()
     else:
         raise ValueError('Unsupported algorithm!')
+
     if len(key) > h.block_size:
+        h = hashes.Hash(h, default_backend())
         h.update(key)
-        key = h.digest()
+        key = h.finalize()
     return key
 
 
 def time_challenge(timestamp, period=30):
     return struct.pack('>q', int(timestamp // period))
-
-
-def parse_uri(val):
-    try:
-        uri = val.strip()
-        parsed = urlparse(uri)
-        assert parsed.scheme == 'otpauth'
-        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
-        params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
-        params['type'] = parsed.hostname
-        return params
-    except Exception:
-        raise ValueError('URI seems to have the wrong format.')
 
 
 def parse_key(val):

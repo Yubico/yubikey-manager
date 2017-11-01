@@ -33,8 +33,8 @@ from .util import (
     click_callback, click_parse_b32_key,
     prompt_for_touch)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
-from ..util import TRANSPORT, derive_key, parse_uri, parse_b32_key
-from ..oath import OathController, SW, Credential
+from ..util import TRANSPORT, parse_b32_key
+from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
 
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
@@ -58,7 +58,7 @@ def _clear_callback(ctx, param, clear):
 @click_callback()
 def click_parse_uri(ctx, param, val):
     try:
-        return parse_uri(val)
+        return CredentialData.from_uri(val)
     except ValueError:
         raise click.BadParameter('URI seems to have the wrong format.')
 
@@ -116,7 +116,7 @@ def reset(ctx):
 
 @oath.command()
 @click.argument('name')
-@click.argument('key', callback=click_parse_b32_key, required=False)
+@click.argument('secret', callback=click_parse_b32_key, required=False)
 @click.option(
     '-o', '--oath-type', type=click.Choice(['TOTP', 'HOTP']), default='TOTP',
     help='Time-based (TOTP) or counter-based'
@@ -125,7 +125,7 @@ def reset(ctx):
     '-d', '--digits', type=click.Choice(['6', '7', '8']), default='6',
     help='Number of digits in generated code.', show_default=True)
 @click.option(
-    '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256']),
+    '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256', 'SHA512']),
     default='SHA1', help='Algorithm to use for '
     'code generation.', show_default=True)
 @click.option(
@@ -138,7 +138,7 @@ def reset(ctx):
 @click_touch_option
 @click_force_option
 @click.pass_context
-def add(ctx, key, name, issuer, period, oath_type, digits, touch, algorithm,
+def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
         counter, force):
     """
     Add a new credential.
@@ -146,11 +146,15 @@ def add(ctx, key, name, issuer, period, oath_type, digits, touch, algorithm,
     This will add a new credential to the device.
     """
 
-    if not key:
+    oath_type = OATH_TYPE[oath_type]
+    algorithm = ALGO[algorithm]
+    digits = int(digits)
+
+    if not secret:
         while True:
-            key = click.prompt('Enter a secret key (base32)')
+            secret = click.prompt('Enter a secret key (base32)')
             try:
-                key = parse_b32_key(key)
+                secret = parse_b32_key(secret)
                 break
             except Exception as e:
                 click.echo(e)
@@ -158,9 +162,8 @@ def add(ctx, key, name, issuer, period, oath_type, digits, touch, algorithm,
 
     ensure_validated(ctx)
 
-    _add_cred(
-        ctx, key, name, issuer, period, oath_type, digits, touch, algorithm,
-        counter, force)
+    _add_cred(ctx, CredentialData(secret, issuer, name, oath_type, algorithm,
+                                  digits, period, counter, touch), force)
 
 
 @oath.command()
@@ -179,62 +182,50 @@ def uri(ctx, uri, touch, force):
         while True:
             uri = click.prompt('Enter an OATH URI')
             try:
-                uri = parse_uri(uri)
+                uri = CredentialData.from_uri(uri)
                 break
             except Exception as e:
                 click.echo(e)
                 pass
 
     ensure_validated(ctx)
-
-    params = uri
-    period, issuer, name = Credential.parse_long_name(params.get('name'))
-    key = params.get('secret')
-    key = parse_b32_key(key.upper())
-    oath_type = params.get('type')
-    digits = params.get('digits') or 6
-    algo = params.get('algorithm') or 'SHA1'
-    counter = params.get('counter') or 0
-    issuer = params.get('issuer') or issuer
-    period = params.get('period') or period
+    data = uri
 
     # Steam is a special case where we allow the otpauth
     # URI to contain a 'digits' value of '5'.
-    if digits == 5 and name.startswith('Steam:'):
-        digits = 6
+    if data.digits == 5 and data.issuer == 'Steam':
+        data.digits = 6
 
-    _add_cred(ctx, key=key, name=name, issuer=issuer, period=period,
-              oath_type=oath_type, digits=digits, touch=touch, algo=algo,
-              counter=counter, force=force)
+    data.touch = touch
+
+    _add_cred(ctx, data, force=force)
 
 
-def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
-              counter, force):
+def _add_cred(ctx, data, force):
 
     controller = ctx.obj['controller']
 
-    if len(name) not in range(1, 65):
+    if not (0 < len(data.name) <= 64):
         ctx.fail('Name must be between 1 and 64 bytes.')
 
-    if len(key) < 2:
-        ctx.fail('Key must be at least 2 bytes.')
+    if len(data.secret) < 2:
+        ctx.fail('Secret must be at least 2 bytes.')
 
-    if touch and controller.version < (4, 2, 6):
+    if data.touch and controller.version < (4, 2, 6):
         ctx.fail('Touch-required credentials not supported on this key.')
 
-    if counter and not oath_type == 'hotp':
+    if data.counter and data.oath_type != OATH_TYPE.HOTP:
         ctx.fail('Counter only supported for HOTP credentials.')
 
-    long_name = Credential.build_long_name(int(period), issuer, name)
-    if not force and any(
-            cred.long_name == long_name for cred in controller.list()):
+    key = data.make_key()
+    if not force and any(cred.key == key for cred in controller.list()):
         click.confirm(
             'A credential called {} already exists on the device.'
-            ' Do you want to overwrite it?'.format(name), abort=True)
+            ' Do you want to overwrite it?'.format(data.name), abort=True)
 
     firmware_overwrite_issue = (4, 0, 0) < controller.version < (4, 3, 5)
     cred_is_subset = any(
-        (cred.name.startswith(name) and cred.name != name)
+        (cred.key.startswith(key) and cred.key != key)
         for cred in controller.list())
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
@@ -243,10 +234,7 @@ def _add_cred(ctx, key, name, issuer, period, oath_type, digits, touch, algo,
             'Choose a name that is not a subset of an existing credential.')
 
     try:
-        controller.put(
-            key, name, issuer=issuer, period=int(period), oath_type=oath_type,
-            digits=int(digits), require_touch=touch, algo=algo,
-            counter=int(counter))
+        controller.put(data)
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
             ctx.fail('No space left on device.')
@@ -271,13 +259,12 @@ def list(ctx, show_hidden, oath_type, algorithm, period):
     """
     ensure_validated(ctx)
     controller = ctx.obj['controller']
-    creds = [c for c in controller.list()]
+    creds = controller.list()
     creds.sort()
     for cred in creds:
-        if cred.is_hidden() and not show_hidden:
+        if cred.is_hidden and not show_hidden:
             continue
-        full_name = cred.issuer + ':' + cred.name if cred.issuer else cred.name
-        click.echo(full_name, nl=False)
+        click.echo(_cred_name(cred), nl=False)
         if oath_type:
             click.echo(', {}'.format(cred.oath_type), nl=False)
         if algorithm:
@@ -303,46 +290,48 @@ Touch and HOTP credentials require a single match to be triggered.
     ensure_validated(ctx)
 
     controller = ctx.obj['controller']
-    creds = [c for c in controller.calculate_all()]
+    creds = controller.calculate_all()
 
     # Remove hidden creds
     if not show_hidden:
-        creds = [c for c in creds if not c.is_hidden()]
+        creds = [(cr, c) for (cr, c) in creds if not cr.is_hidden]
     if query:
         hits = _search(creds, query)
         if len(hits) == 1:
-            cred = hits[0]
+            cred, code = hits[0]
             if cred.touch:
                 prompt_for_touch()
-            if cred.oath_type == 'hotp':
+            if cred.oath_type == OATH_TYPE.HOTP:
                 # HOTP might require touch, we don't know.
                 # Assume yes after 500ms.
                 hotp_touch_timer = Timer(0.500, prompt_for_touch)
                 hotp_touch_timer.start()
-                cred = controller.calculate(cred)
+                code = controller.calculate(cred)
                 hotp_touch_timer.cancel()
-            else:
-                cred = controller.calculate(cred)
+            elif code is None:
+                code = controller.calculate(cred)
+
             if cred.issuer:
-                click.echo('{}:{} {}'.format(cred.issuer, cred.name, cred.code))
+                click.echo('{}:{} {}'.format(cred.issuer, cred.name,
+                                             code.value))
             else:
-                click.echo('{} {}'.format(cred.name, cred.code))
+                click.echo('{} {}'.format(cred.name, code.value))
             ctx.exit()
         creds = hits
 
     longest = max(len('{}:{}'.format(
-        cred.issuer, cred.name)) for cred in creds) if creds else 0
+        cr.issuer, cr.name)) for (cr, c) in creds) if creds else 0
     format_str = '{:<%d}  {:>10}' % longest
 
     creds.sort()
 
-    for cred in creds:
-        full_name = cred.issuer + ':' + cred.name if cred.issuer else cred.name
-        if cred.oath_type == 'totp':
-            click.echo(format_str.format(full_name, cred.code))
+    for cred, code in creds:
+        full_name = _cred_name(cred)
+        if code is not None:
+            click.echo(format_str.format(full_name, code.value))
         if cred.touch:
             click.echo(format_str.format(full_name, '[Touch Credential]'))
-        if cred.oath_type == 'hotp':
+        if cred.oath_type == OATH_TYPE.HOTP:
             click.echo(format_str.format(full_name, '[HOTP Credential]'))
 
 
@@ -364,10 +353,13 @@ Provide a query string to match the credential to delete.
     if len(hits) == 0:
         click.echo('No matches, nothing to be done.')
     elif len(hits) == 1:
-        controller.delete(hits[0])
-        click.echo('Deleted {}.'.format(hits[0].long_name))
+        cred = hits[0]
+        controller.delete(cred)
+        click.echo('Deleted {}.'.format(_cred_name(cred)))
     else:
-        click.echo('To many matches, please specify the query.')
+        click.echo('Multiple matches, make the query more specific.')
+        for cred in hits:
+            click.echo(_cred_name(cred))
 
 
 @oath.command()
@@ -394,8 +386,8 @@ def password(ctx, new_password):
             confirmation_prompt=True)
 
     controller = ctx.obj['controller']
-    key = derive_key(controller.id, new_password)
-    controller.set_password(key)
+    key = controller.set_password(new_password)
+    assert key  # TODO: Store key
     click.echo('New password set.')
 
 
@@ -408,7 +400,7 @@ def ensure_validated(ctx, prompt='Enter your password'):
 def _validate(ctx, password):
     try:
         controller = ctx.obj['controller']
-        key = derive_key(controller.id, password)
+        key = controller.derive_key(password)
         controller.validate(key)
     except Exception:
         ctx.fail('Authentication to the device failed. Wrong password?')
@@ -416,12 +408,18 @@ def _validate(ctx, password):
 
 def _search(creds, query):
     hits = []
-    for c in creds:
-        if c.long_name == query:
-            return [c]
-        if query.lower() in c.long_name.lower():
-            hits.append(c)
+    for entry in creds:
+        c = entry[0] if isinstance(entry, tuple) else entry
+        long_name = _cred_name(c)
+        if long_name == query:
+            return [entry]
+        if query.lower() in long_name.lower():
+            hits.append(entry)
     return hits
+
+
+def _cred_name(cred):
+    return cred.issuer + ':' + cred.name if cred.issuer else cred.name
 
 
 oath.transports = TRANSPORT.CCID
