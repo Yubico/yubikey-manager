@@ -51,7 +51,7 @@ import datetime
 def click_parse_piv_slot(ctx, param, val):
     try:
         return SLOT(int(val, 16))
-    except:
+    except Exception:
         raise ValueError(val)
 
 
@@ -69,7 +69,7 @@ def click_parse_format(ctx, param, val):
 def click_parse_management_key(ctx, param, val):
     try:
         return a2b_hex(val)
-    except:
+    except Exception:
         return ValueError(val)
 
 
@@ -432,7 +432,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
         ctx, controller, pin, management_key, require_pin_and_key=True)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
-    except:
+    except Exception:
         ctx.fail('Setting pin retries failed.')
 
 
@@ -685,7 +685,7 @@ def change_management_key(
 
     try:
         new_management_key = a2b_hex(new_management_key)
-    except:
+    except Exception:
         ctx.fail('New management key has the wrong format.')
     try:
         controller.set_mgm_key(
@@ -722,7 +722,7 @@ def _prompt_management_key(
         return DEFAULT_MANAGEMENT_KEY
     try:
         return a2b_hex(management_key)
-    except:
+    except Exception:
         ctx.fail('Management key has the wrong format.')
 
 

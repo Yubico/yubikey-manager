@@ -153,19 +153,19 @@ class Tlv(bytes):
 
     @property
     def length(self):
-        l = six.indexbytes(self, 1)
+        ln = six.indexbytes(self, 1)
         offs = 2
-        if l > 0x80:
-            n_bytes = l - 0x80
-            l = b2len(self[offs:offs + n_bytes])
-        return l
+        if ln > 0x80:
+            n_bytes = ln - 0x80
+            ln = b2len(self[offs:offs + n_bytes])
+        return ln
 
     @property
     def value(self):
-        l = self.length
-        if l == 0:
+        ln = self.length
+        if ln == 0:
             return b''
-        return bytes(self[-l:])
+        return bytes(self[-ln:])
 
     def __repr__(self):
         return u'{}(tag={:02x}, value={})'.format(
@@ -182,13 +182,13 @@ class Tlv(bytes):
                 value = b''
             else:  # Called with binary TLV data
                 tag = six.indexbytes(data, 0)
-                l = six.indexbytes(data, 1)
+                ln = six.indexbytes(data, 1)
                 offs = 2
-                if l > 0x80:
-                    n_bytes = l - 0x80
-                    l = b2len(data[offs:offs + n_bytes])
+                if ln > 0x80:
+                    n_bytes = ln - 0x80
+                    ln = b2len(data[offs:offs + n_bytes])
                     offs = offs + n_bytes
-                value = data[offs:offs+l]
+                value = data[offs:offs+ln]
         elif len(args) == 2:  # Called with tag and value.
             (tag, value) = args
         else:
@@ -226,11 +226,11 @@ def parse_tlvs(data):
 
 
 def b2len(bs):
-    l = 0
+    ln = 0
     for b in six.iterbytes(bs):
-        l *= 256
-        l += b
-    return l
+        ln *= 256
+        ln += b
+    return ln
 
 
 _HEX = b'0123456789abcdef'
@@ -317,7 +317,7 @@ def parse_uri(val):
         params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
         params['type'] = parsed.hostname
         return params
-    except:
+    except Exception:
         raise ValueError('URI seems to have the wrong format.')
 
 
@@ -351,7 +351,7 @@ def parse_private_key(data, password):
         except ValueError:
             # Cryptography raises ValueError if decryption fails.
             raise
-        except:
+        except Exception:
             pass
 
     # PKCS12
@@ -369,7 +369,7 @@ def parse_private_key(data, password):
     try:
         return serialization.load_der_private_key(
             data, password, backend=default_backend())
-    except:
+    except Exception:
         pass
 
     # All parsing failed
@@ -384,7 +384,7 @@ def parse_certificate(data, password):
     if data.startswith(b'-----'):
         try:
             return x509.load_pem_x509_certificate(data, default_backend())
-        except:
+        except Exception:
             pass
 
     # PKCS12
@@ -400,7 +400,7 @@ def parse_certificate(data, password):
     # DER
     try:
         return x509.load_der_x509_certificate(data, default_backend())
-    except:
+    except Exception:
         pass
 
     raise ValueError('Could not parse certificate.')

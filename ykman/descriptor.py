@@ -125,7 +125,7 @@ class Descriptor(object):
                     time.sleep(sleep_time)
                     continue
                 return YubiKey(self, dev)
-            except:
+            except Exception:
                 pass
         raise FailedOpeningDeviceException()
 

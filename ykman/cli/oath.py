@@ -410,7 +410,7 @@ def _validate(ctx, password):
         controller = ctx.obj['controller']
         key = derive_key(controller.id, password)
         controller.validate(key)
-    except:
+    except Exception:
         ctx.fail('Authentication to the device failed. Wrong password?')
 
 

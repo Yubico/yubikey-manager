@@ -158,7 +158,7 @@ class CCIDDriver(AbstractDriver):
     def __del__(self):
         try:
             self._conn.disconnect()
-        except:
+        except Exception:
             pass  # Ignore
 
 

@@ -51,7 +51,7 @@ try:
     if u2fh.u2fh_global_init(0) is not 0:
         raise Exception('u2fh_global_init failed!')
     libversion = u2fh.u2fh_check_version(None).decode('ascii')
-except:
+except Exception:
     u2fh = MissingLibrary(
         'libu2f-host not found, U2F connectability not available!')
     libversion = None
@@ -91,7 +91,7 @@ class U2FDriver(AbstractDriver):
     def read_capabilities(self):
         try:
             return self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
-        except:
+        except Exception:
             return None
 
     def sendrecv(self, cmd, data):
