@@ -31,10 +31,9 @@ import time
 from .native.ykpers import Ykpers
 from ctypes import sizeof, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT, MissingLibrary
+from .util import (TRANSPORT, MissingLibrary, time_challenge, parse_totp_hash,
+                   format_code, hmac_shorten_key)
 from .scanmap import us
-from ykman.util import time_challenge, parse_totp_hash, format_code
-from hashlib import sha1
 from binascii import a2b_hex, b2a_hex
 
 INS_SELECT = 0xa4
@@ -55,7 +54,7 @@ try:
     if not ykpers.yk_init():
         raise Exception('yk_init failed.')
     libversion = ykpers.ykpers_check_version(None).decode('ascii')
-except:
+except Exception:
     ykpers = MissingLibrary(
         'libykpers not found, slot functionality not available!')
     libversion = None
@@ -243,6 +242,7 @@ class OTPDriver(AbstractDriver):
         if self._version < (2, 2, 0):
             raise ValueError('challenge-response requires YubiKey 2.2.0 or '
                              'later')
+        key = hmac_shorten_key(key, 'SHA1')
         if len(key) > 20:
             raise ValueError('key lengths >20 bytes not supported')
         cmd = slot_to_cmd(slot)
@@ -293,11 +293,10 @@ class OTPDriver(AbstractDriver):
     def program_hotp(self, slot, key, imf=0, hotp8=False, append_cr=True):
         if self._version < (2, 1, 0):
             raise ValueError('HOTP requires YubiKey 2.1.0 or later')
-        if len(key) > 64:
-            key = sha1(key).digest()
+        key = hmac_shorten_key(key, 'SHA1')
         if len(key) > 20:
             raise ValueError('key lengths >20 bytes not supported')
-        key += b'\0' * (20 - len(key))
+        key = key.ljust(20, b'\0')  # Pad key to 20 bytes
         if imf % 16 != 0:
             raise ValueError('imf must be a multiple of 16')
         cmd = slot_to_cmd(slot)
