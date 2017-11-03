@@ -303,7 +303,9 @@ def list(ctx, show_hidden, oath_type, algorithm, period):
 @click_show_hidden_option
 @click.pass_context
 @click.argument('query', required=False)
-def code(ctx, show_hidden, query):
+@click.option('-s', '--single', is_flag=True, help='Ensure only a single '
+              'match, and output only the code.')
+def code(ctx, show_hidden, query, single):
     """
     Generate codes.
 
@@ -336,15 +338,16 @@ def code(ctx, show_hidden, query):
             elif code is None:
                 code = controller.calculate(cred)
 
-            if not click.get_text_stream('stdout').isatty():
-                # Output only the code
-                click.echo(creds[0][1].value)
+            if single:
+                click.echo(code.value)
             elif cred.issuer:
                 click.echo('{}:{} {}'.format(cred.issuer, cred.name,
                                              code.value))
             else:
                 click.echo('{} {}'.format(cred.name, code.value))
             ctx.exit()
+        elif single:
+            ctx.fail('Multiple matches, make the query more specific.')
         creds = hits
 
     longest = max(len('{}:{}'.format(
