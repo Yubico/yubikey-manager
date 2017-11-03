@@ -336,7 +336,10 @@ def code(ctx, show_hidden, query):
             elif code is None:
                 code = controller.calculate(cred)
 
-            if cred.issuer:
+            if not click.get_text_stream('stdout').isatty():
+                # Output only the code
+                click.echo(creds[0][1].value)
+            elif cred.issuer:
                 click.echo('{}:{} {}'.format(cred.issuer, cred.name,
                                              code.value))
             else:
