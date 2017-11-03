@@ -197,7 +197,7 @@ def _get_device_id(device_salt):
     h = hashes.Hash(hashes.SHA256(), default_backend())
     h.update(device_salt)
     d = h.finalize()[:16]
-    return b64encode(d).replace(b'=', b'')
+    return b64encode(d).replace(b'=', b'').decode()
 
 
 class Code(object):
@@ -255,6 +255,10 @@ class OathController(object):
 
     def reset(self):
         self.send_apdu(INS.RESET, 0xde, 0xad)
+        resp = self._driver.select(AID.OATH)
+        tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
+        self._salt = tags[TAG.NAME]
+        self._id = _get_device_id(self._salt)
 
     def put(self, credential_data):
         d = credential_data

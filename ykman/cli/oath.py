@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 import click
 from threading import Timer
+from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_b32_key,
@@ -35,6 +36,7 @@ from .util import (
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
+from ..settings import Settings
 
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
@@ -50,7 +52,15 @@ click_show_hidden_option = click.option(
 def _clear_callback(ctx, param, clear):
     if clear:
         ensure_validated(ctx)
-        ctx.obj['controller'].clear_password()
+        controller = ctx.obj['controller']
+        settings = ctx.obj['settings']
+
+        controller.clear_password()
+        keys = settings.setdefault('keys', {})
+        if controller.id in keys:
+            del keys[controller.id]
+            settings.write()
+
         click.echo('Password cleared.')
         ctx.exit()
 
@@ -74,13 +84,15 @@ def oath(ctx, password):
     try:
         controller = OathController(ctx.obj['dev'].driver)
         ctx.obj['controller'] = controller
+        ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The applet can't be found on the device.")
         raise
 
-    if password and controller.locked:
-        _validate(ctx, password)
+    if controller.locked:
+        if password:
+            _validate(ctx, password)
 
 
 @oath.command()
@@ -93,6 +105,12 @@ def info(ctx):
     version = controller.version
     click.echo(
         'OATH version: {}.{}.{}'.format(version[0], version[1], version[2]))
+    click.echo(
+        'Password protection ' + 'enabled' if controller.locked else 'disabled')
+
+    keys = ctx.obj['settings'].get('keys', {})
+    if controller.locked and controller.id in keys:
+        click.echo('The password for this YubiKey is remembered by ykman.')
 
 
 @oath.command()
@@ -109,7 +127,14 @@ def reset(ctx):
     """
 
     click.echo('Resetting OATH data...')
+    old_id = ctx.obj['controller'].id
     ctx.obj['controller'].reset()
+
+    keys = ctx.obj['settings'].setdefault('keys', {})
+    if old_id in keys:
+        del keys[old_id]
+        ctx.obj['settings'].write()
+
     click.echo(
         'Success! All credentials have been cleared from the device.')
 
@@ -282,9 +307,9 @@ def code(ctx, show_hidden, query):
     """
     Generate codes.
 
-    Generate codes from credentials stored on the device. \
-Provide a query string to match one or more specific credentials. \
-Touch and HOTP credentials require a single match to be triggered.
+    Generate codes from credentials stored on the device.
+    Provide a query string to match one or more specific credentials.
+    Touch and HOTP credentials require a single match to be triggered.
     """
 
     ensure_validated(ctx)
@@ -342,8 +367,8 @@ def delete(ctx, query):
     """
     Delete a credential.
 
-    Delete a credential from the device. \
-Provide a query string to match the credential to delete.
+    Delete a credential from the device.
+    Provide a query string to match the credential to delete.
     """
 
     ensure_validated(ctx)
@@ -370,13 +395,14 @@ Provide a query string to match the credential to delete.
 @click.option(
     '-n', '--new-password',
     help='Provide a new password as an argument.')
-def password(ctx, new_password):
+@click.option('-r', '--remember', is_flag=True, help='Remember the password on '
+              'this machine.')
+def password(ctx, new_password, remember):
     """
     Password protect the OATH functionality.
 
-    Allows you to require and set a password
-    to access and use the OATH functionality
-    on the device.
+    Allows you to require and set a password to access and use the OATH
+    functionality on the device.
     """
     ensure_validated(ctx, prompt='Enter your current password')
     if not new_password:
@@ -386,13 +412,32 @@ def password(ctx, new_password):
             confirmation_prompt=True)
 
     controller = ctx.obj['controller']
+    settings = ctx.obj['settings']
+    keys = settings.setdefault('keys', {})
     key = controller.set_password(new_password)
-    assert key  # TODO: Store key
+    if remember:
+        keys[controller.id] = b2a_hex(key).decode()
+        settings.write()
+    elif controller.id in keys:
+        del keys[controller.id]
+        settings.write()
+
     click.echo('New password set.')
 
 
 def ensure_validated(ctx, prompt='Enter your password'):
-    if ctx.obj['controller'].locked:
+    controller = ctx.obj['controller']
+    if controller.locked:
+        # Use stored key if available
+        keys = ctx.obj['settings'].setdefault('keys', {})
+        if controller.id in keys:
+            try:
+                controller.validate(a2b_hex(keys[controller.id]))
+                return
+            except Exception:
+                del keys[controller.id]
+
+        # Prompt for password
         password = click.prompt(prompt, hide_input=True)
         _validate(ctx, password)
 
