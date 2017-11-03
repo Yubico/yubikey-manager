@@ -423,15 +423,24 @@ def set_ccc(ctx, management_key, pin):
     'puk-retries', type=click.IntRange(1, 255), metavar='PUK-RETRIES')
 @click_management_key_option
 @click_pin_option
-def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
+@click_force_option
+def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     """
     Set the number of PIN and PUK retries.
+    NOTE: This will reset the PIN and PUK to their factory defaults.
     """
     controller = ctx.obj['controller']
     _ensure_authenticated(
         ctx, controller, pin, management_key, require_pin_and_key=True)
+    click.echo('WARNING: This will reset the PIN and PUK to the factory '
+               'defaults!')
+    force or click.confirm('Set PIN and PUK retry counters to: {} {}?'.format(
+        pin_retries, puk_retries), abort=True)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
+        click.echo('Default PINs are set.')
+        click.echo('PIN:    123456')
+        click.echo('PUK:    12345678')
     except Exception:
         ctx.fail('Setting pin retries failed.')
 
