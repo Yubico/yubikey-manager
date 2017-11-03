@@ -76,7 +76,8 @@ def click_parse_uri(ctx, param, val):
 @click.group()
 @click.pass_context
 @click_skip_on_help
-@click.option('-p', '--password', help='Provide a password to unlock device.')
+@click.option('-p', '--password', help='Provide a password to unlock the '
+              'YubiKey.')
 def oath(ctx, password):
     """
     Manage YubiKey OATH credentials.
@@ -87,12 +88,11 @@ def oath(ctx, password):
         ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
-            ctx.fail("The applet can't be found on the device.")
+            ctx.fail("The OATH functionality can't be found on this YubiKey.")
         raise
 
-    if controller.locked:
-        if password:
-            _validate(ctx, password)
+    if password:
+        ctx.obj['key'] = controller.derive_key(password)
 
 
 @oath.command()
@@ -105,8 +105,8 @@ def info(ctx):
     version = controller.version
     click.echo(
         'OATH version: {}.{}.{}'.format(version[0], version[1], version[2]))
-    click.echo(
-        'Password protection ' + 'enabled' if controller.locked else 'disabled')
+    click.echo('Password protection ' +
+               ('enabled' if controller.locked else 'disabled'))
 
     keys = ctx.obj['settings'].get('keys', {})
     if controller.locked and controller.id in keys:
@@ -123,7 +123,7 @@ def reset(ctx):
     Reset all OATH data.
 
     This action will wipe all credentials and reset factory settings for
-    the OATH functionality on the device.
+    the OATH functionality on the YubiKey.
     """
 
     click.echo('Resetting OATH data...')
@@ -136,7 +136,7 @@ def reset(ctx):
         ctx.obj['settings'].write()
 
     click.echo(
-        'Success! All credentials have been cleared from the device.')
+        'Success! All OATH credentials have been cleared from your YubiKey.')
 
 
 @oath.command()
@@ -168,7 +168,7 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
     """
     Add a new credential.
 
-    This will add a new credential to the device.
+    This will add a new credential to your YubiKey.
     """
 
     oath_type = OATH_TYPE[oath_type]
@@ -200,7 +200,7 @@ def uri(ctx, uri, touch, force):
     """
     Add a new credential from URI.
 
-    Use a URI to add a new credential to the device.
+    Use a URI to add a new credential to your YubiKey.
     """
 
     if not uri:
@@ -245,7 +245,7 @@ def _add_cred(ctx, data, force):
     key = data.make_key()
     if not force and any(cred.key == key for cred in controller.list()):
         click.confirm(
-            'A credential called {} already exists on the device.'
+            'A credential called {} already exists on this YubiKey.'
             ' Do you want to overwrite it?'.format(data.name), abort=True)
 
     firmware_overwrite_issue = (4, 0, 0) < controller.version < (4, 3, 5)
@@ -262,10 +262,10 @@ def _add_cred(ctx, data, force):
         controller.put(data)
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
-            ctx.fail('No space left on device.')
+            ctx.fail('No space left on your YubiKey for OATH credentials.')
         elif e.sw == SW.COMMAND_ABORTED:
             ctx.fail(
-                'The command failed. Do you have enough space on the device?')
+                'The command failed. Is there enough space on your YubiKey?')
         else:
             raise
 
@@ -280,7 +280,7 @@ def list(ctx, show_hidden, oath_type, algorithm, period):
     """
     List all credentials.
 
-    List all credentials stored on the device.
+    List all credentials stored on your YubiKey.
     """
     ensure_validated(ctx)
     controller = ctx.obj['controller']
@@ -307,7 +307,7 @@ def code(ctx, show_hidden, query):
     """
     Generate codes.
 
-    Generate codes from credentials stored on the device.
+    Generate codes from credentials stored on your YubiKey.
     Provide a query string to match one or more specific credentials.
     Touch and HOTP credentials require a single match to be triggered.
     """
@@ -367,7 +367,7 @@ def delete(ctx, query):
     """
     Delete a credential.
 
-    Delete a credential from the device.
+    Delete a credential from your YubiKey.
     Provide a query string to match the credential to delete.
     """
 
@@ -387,7 +387,7 @@ def delete(ctx, query):
             click.echo(_cred_name(cred))
 
 
-@oath.command()
+@oath.command('set-password')
 @click.pass_context
 @click.option(
     '-c', '--clear', is_flag=True, expose_value=False,
@@ -395,14 +395,14 @@ def delete(ctx, query):
 @click.option(
     '-n', '--new-password',
     help='Provide a new password as an argument.')
-@click.option('-r', '--remember', is_flag=True, help='Remember the password on '
-              'this machine.')
-def password(ctx, new_password, remember):
+@click.option('-r', '--remember', is_flag=True, help='Remember the new '
+              'password on this machine.')
+def set_password(ctx, new_password, remember):
     """
-    Password protect the OATH functionality.
+    Password protect the OATH credentials.
 
-    Allows you to require and set a password to access and use the OATH
-    functionality on the device.
+    Allows you to set a password that will be required to access the OATH
+    credentials stored on your YubiKey.
     """
     ensure_validated(ctx, prompt='Enter your current password')
     if not new_password:
@@ -415,19 +415,51 @@ def password(ctx, new_password, remember):
     settings = ctx.obj['settings']
     keys = settings.setdefault('keys', {})
     key = controller.set_password(new_password)
+    click.echo('Password updated.')
     if remember:
         keys[controller.id] = b2a_hex(key).decode()
         settings.write()
+        click.echo('Password remembered')
     elif controller.id in keys:
         del keys[controller.id]
         settings.write()
 
-    click.echo('New password set.')
+
+@oath.command('remember-password')
+@click.pass_context
+@click.option('-F', '--forget', is_flag=True, help='Forget a password.')
+@click.option('-c', '--clear-all', is_flag=True, help='Remove all stored '
+              'passwords from this computer.')
+def remember_password(ctx, forget, clear_all):
+    """
+    Manage local password storage.
+
+    Store your YubiKeys password on this computer to avoid having to enter it
+    on each use, or delete stored passwords.
+    """
+    controller = ctx.obj['controller']
+    settings = ctx.obj['settings']
+    keys = settings.setdefault('keys', {})
+    if clear_all:
+        del settings['keys']
+        settings.write()
+        click.echo('All passwords have been cleared.')
+    elif forget:
+        if controller.id in keys:
+            del keys[controller.id]
+            settings.write()
+        click.echo('Password forgotten.')
+    else:
+        ensure_validated(ctx, remember=True)
 
 
-def ensure_validated(ctx, prompt='Enter your password'):
+def ensure_validated(ctx, prompt='Enter your password', remember=False):
     controller = ctx.obj['controller']
     if controller.locked:
+        # If password given as arg, use it
+        if 'key' in ctx.obj:
+            _validate(ctx, ctx.obj['key'], remember)
+
         # Use stored key if available
         keys = ctx.obj['settings'].setdefault('keys', {})
         if controller.id in keys:
@@ -439,16 +471,22 @@ def ensure_validated(ctx, prompt='Enter your password'):
 
         # Prompt for password
         password = click.prompt(prompt, hide_input=True)
-        _validate(ctx, password)
+        key = controller.derive_key(password)
+        _validate(ctx, key, remember)
 
 
-def _validate(ctx, password):
+def _validate(ctx, key, remember):
     try:
         controller = ctx.obj['controller']
-        key = controller.derive_key(password)
         controller.validate(key)
+        if remember:
+            settings = ctx.obj['settings']
+            keys = settings.setdefault('keys', {})
+            keys[controller.id] = b2a_hex(key).decode()
+            settings.write()
+            click.echo('Password remembered.')
     except Exception:
-        ctx.fail('Authentication to the device failed. Wrong password?')
+        ctx.fail('Authentication to the YubiKey failed. Wrong password?')
 
 
 def _search(creds, query):
