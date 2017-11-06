@@ -113,7 +113,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
                 click.echo('Mode is already {}, nothing to do...'.format(mode))
                 ctx.exit()
             elif not dev.has_mode(mode):
-                click.echo('Mode {} is not supported on this device!'
+                click.echo('Mode {} is not supported on this YubiKey!'
                            .format(mode))
                 ctx.fail('Use --force to attempt to set it anyway.')
             force or click.confirm('Set mode of YubiKey to {}?'.format(mode),
@@ -124,8 +124,8 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             click.echo('Mode set! You must remove and re-insert your YubiKey '
                        'for this change to take effect.')
         except ModeSwitchError:
-            click.echo('Failed to switch mode on the device. '
-                       'Make sure the device does not have restricted access.')
+            click.echo('Failed to switch mode on the YubiKey. Make sure your '
+                       'YubiKey does not have an access code set.')
 
     else:
         click.echo('Current connection mode is: {}'.format(dev.mode))

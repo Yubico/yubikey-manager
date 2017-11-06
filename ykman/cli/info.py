@@ -41,7 +41,7 @@ def info(ctx):
     firmware version, capabilities, etc.
     """
     dev = ctx.obj['dev']
-    click.echo('Device name: {}'.format(dev.device_name))
+    click.echo('Device type: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))
     f_version = '.'.join(str(x) for x in dev.version)
