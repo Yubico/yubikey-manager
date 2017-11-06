@@ -65,4 +65,7 @@ def click_parse_b32_key(ctx, param, val):
 
 
 def prompt_for_touch():
-    click.echo('Touch your YubiKey...')
+    try:
+        click.echo('Touch your YubiKey...', err=True)
+    except Exception:
+        sys.stderr.write('Touch your YubiKey...\n')
