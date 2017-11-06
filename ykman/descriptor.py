@@ -130,7 +130,7 @@ class Descriptor(object):
         raise FailedOpeningDeviceException()
 
 
-def get_descriptors():
+def _gen_descriptors():
     found = []  # Composite devices are listed multiple times on Windows...
     for dev in usb.core.find(True, idVendor=0x1050, backend=get_usb_backend()):
         if dev.idProduct in _YUBIKEY_PIDS:
@@ -138,3 +138,7 @@ def get_descriptors():
             if addr not in found:
                 found.append(addr)
                 yield Descriptor(dev)
+
+
+def get_descriptors():
+    return list(_gen_descriptors())
