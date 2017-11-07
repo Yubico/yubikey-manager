@@ -157,7 +157,8 @@ class Credential(object):
         self.key = key
         self.oath_type = oath_type
         self.touch = touch
-        self.issuer, self.name, self.period = Credential.parse_key(key)
+        self.issuer, self.name, period = Credential.parse_key(key)
+        self.period = period if oath_type == OATH_TYPE.TOTP else None
 
     def __lt__(self, other):
         a = ((self.issuer or self.name).lower(), self.name.lower())
@@ -305,7 +306,14 @@ class OathController(object):
 
         if timestamp is None:
             timestamp = int(time.time())
-        challenge = time_challenge(timestamp, period=cred.period)
+        if cred.oath_type == OATH_TYPE.TOTP:
+            valid_from = timestamp - (timestamp % cred.period)
+            valid_to = valid_from + cred.period
+            challenge = time_challenge(timestamp, period=cred.period)
+        else:
+            valid_from = timestamp
+            valid_to = float('Inf')
+            challenge = b''
         data = Tlv(TAG.NAME, cred.key) + Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
         resp = parse_tlvs(resp)[0].value
@@ -317,12 +325,6 @@ class OathController(object):
         code_data = resp[offset:offset + 4]
         code_data = parse_truncated(code_data)
         code_value = format_code(code_data, digits, steam=cred.is_steam)
-        if cred.oath_type == OATH_TYPE.TOTP:
-            valid_from = timestamp - (timestamp % cred.period)
-            valid_to = valid_from + cred.period
-        else:
-            valid_from = timestamp
-            valid_to = float('Inf')
         return Code(code_value, valid_from, valid_to)
 
     def delete(self, cred):
