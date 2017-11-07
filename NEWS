@@ -1,3 +1,6 @@
+* Version 0.4.7 (unreleased)
+ ** OATH: Support for remembering passwords locally.
+
 * Version 0.4.6 (released 2017-10-17)
  ** Will now attempt to open device 3 times before failing
  ** OpenPGP: Don't say data is removed when not
