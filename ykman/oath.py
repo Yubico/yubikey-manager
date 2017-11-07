@@ -318,7 +318,7 @@ class OathController(object):
         code_data = parse_truncated(code_data)
         code_value = format_code(code_data, digits, steam=cred.is_steam)
         if cred.oath_type == OATH_TYPE.TOTP:
-            valid_from = timestamp % cred.period
+            valid_from = timestamp - (timestamp % cred.period)
             valid_to = valid_from + cred.period
         else:
             valid_from = timestamp
@@ -334,7 +334,7 @@ class OathController(object):
             timestamp = int(time.time())
 
         def _gen_all():
-            valid_from = timestamp % 30
+            valid_from = timestamp - (timestamp % 30)
             valid_to = valid_from + 30
             data = Tlv(TAG.CHALLENGE, time_challenge(timestamp))
             resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
