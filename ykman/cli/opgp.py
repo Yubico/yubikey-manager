@@ -84,7 +84,8 @@ def openpgp(ctx):
         ctx.obj['controller'] = controller
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
-            ctx.fail("The applet can't be found on the device.")
+            ctx.fail("The OpenPGP functionality can't be found on this "
+                     'YubiKey.')
         raise
 
 

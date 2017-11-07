@@ -105,7 +105,7 @@ def piv(ctx):
         ctx.obj['controller'] = controller
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
-            ctx.fail("The applet can't be found on the device.")
+            ctx.fail("The PIV functionality can't be found on this YubiKey.")
         raise
 
 
@@ -127,7 +127,7 @@ def info(ctx):
     if controller.has_derived_key:
         click.echo('Management key is derived from PIN.')
     if controller.has_stored_key:
-        click.echo('Management key is stored on device and protected by PIN.')
+        click.echo('Management key is stored on the YubiKey, protected by PIN.')
     try:
         chuid = b2a_hex(controller.get_data(OBJ.CHUID)).decode()
     except APDUError as e:
@@ -168,13 +168,13 @@ def reset(ctx):
     Reset all PIV data.
 
     This action will wipe all data and reset factory settings for
-    the PIV functionality on the device.
+    the PIV functionality on your YubiKey.
     """
 
     click.echo('Resetting PIV data...')
     ctx.obj['controller'].reset()
     click.echo(
-        'Success! All PIV data have been cleared from the device.')
+        'Success! All PIV data have been cleared from your YubiKey.')
     click.echo('Your YubiKey now has the default PIN, PUK and Management Key:')
     click.echo('\tPIN:\t123456')
     click.echo('\tPUK:\t12345678')
@@ -203,7 +203,8 @@ def generate_key(
     """
     Generate an asymmetric key pair.
 
-    The private key is generated on the device, and written to one of the slots.
+    The private key is generated on the YubiKey, and written to one of the
+    slots.
 
     \b
     SLOT        PIV slot where private key should be stored.
@@ -249,7 +250,7 @@ def import_certificate(
     """
     Import a X.509 certificate.
 
-    Write a certificate in one of the slots on the device.
+    Write a certificate to one of the slots on the YubiKey.
 
     \b
     SLOT            PIV slot to import the certificate to.
@@ -297,7 +298,7 @@ def import_key(
     """
     Import a private key.
 
-    Write a private key in one of the slots on the device.
+    Write a private key to one of the slots on the YubiKey.
 
     \b
     SLOT        PIV slot to import the private key to.
@@ -350,8 +351,8 @@ def attest(ctx, slot, certificate, format):
     """
     Generate a attestation certificate for a key.
 
-    Attestation is used to show that a certain asymmetric key has been
-    generated on device and not imported.
+    Attestation is used to show that an asymmetric key was generated on the
+    YubiKey and therefore doesn't exist outside the device.
 
     \b
     SLOT        PIV slot with a private key to attest.
@@ -374,7 +375,7 @@ def export_certificate(ctx, slot, format, certificate):
     """
     Export a X.509 certificate.
 
-    Reads a certificate from one of the slots on the device.
+    Reads a certificate from one of the slots on the YubiKey.
 
     \b
     SLOT        PIV slot to read certificate from.
@@ -395,7 +396,7 @@ def export_certificate(ctx, slot, format, certificate):
 @click_management_key_option
 def set_chuid(ctx, management_key, pin):
     """
-    Generate and set a CHUID on the device.
+    Generate and set a CHUID on the YubiKey.
     """
     controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -408,7 +409,7 @@ def set_chuid(ctx, management_key, pin):
 @click_management_key_option
 def set_ccc(ctx, management_key, pin):
     """
-    Generate and set a CCC on the device.
+    Generate and set a CCC on the YubiKey.
     """
     controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -423,15 +424,24 @@ def set_ccc(ctx, management_key, pin):
     'puk-retries', type=click.IntRange(1, 255), metavar='PUK-RETRIES')
 @click_management_key_option
 @click_pin_option
-def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries):
+@click_force_option
+def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     """
     Set the number of PIN and PUK retries.
+    NOTE: This will reset the PIN and PUK to their factory defaults.
     """
     controller = ctx.obj['controller']
     _ensure_authenticated(
         ctx, controller, pin, management_key, require_pin_and_key=True)
+    click.echo('WARNING: This will reset the PIN and PUK to the factory '
+               'defaults!')
+    force or click.confirm('Set PIN and PUK retry counters to: {} {}?'.format(
+        pin_retries, puk_retries), abort=True)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
+        click.echo('Default PINs are set.')
+        click.echo('PIN:    123456')
+        click.echo('PUK:    12345678')
     except Exception:
         ctx.fail('Setting pin retries failed.')
 
@@ -455,7 +465,7 @@ def generate_certificate(
     Generate a self-signed X.509 certificate.
 
     A self-signed certificate is generated and written to one of the slots on
-    the device. A private key need to exist in the slot.
+    the YubiKey. A private key need to exist in the slot.
 
     \b
     SLOT            PIV slot where private key is stored.
@@ -561,7 +571,7 @@ def delete_certificate(ctx, slot, management_key, pin):
     """
     Delete a certificate.
 
-    Delete a certificate from a slot on the device.
+    Delete a certificate from a slot on the YubiKey.
     """
     controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -631,8 +641,8 @@ def change_puk(ctx, puk, new_puk):
     callback=click_parse_management_key)
 @click.option(
     '-p', '--protect', is_flag=True,
-    help='Store new management key on device, protected by PIN.'
-         ' Will generate a random key if no key is provided.')
+    help='Store new management key on your YubiKey, protected by PIN.'
+         ' A random key will be used if no key is provided.')
 @click_force_option
 def change_management_key(
         ctx, management_key, pin, new_management_key, touch, protect, force):
@@ -641,7 +651,7 @@ def change_management_key(
 
     Management functionality is guarded by a 24 byte management key.
     This key is required for administrative tasks, such as generating key pairs.
-    A random key may be generated and stored on the device, protected by PIN.
+    A random key may be generated and stored on the YubiKey, protected by PIN.
     """
     controller = ctx.obj['controller']
 
@@ -653,7 +663,7 @@ def change_management_key(
 
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):
-        ctx.fail('Require touch not supported on your device.')
+        ctx.fail('Require touch not supported on this YubiKey.')
 
     # If an old stored key needs to be cleared, the PIN is needed.
     if not protect and controller.has_stored_key:
@@ -661,7 +671,7 @@ def change_management_key(
             _verify_pin(ctx, controller, pin)
         else:
             force or click.confirm(
-                    'The current management key is stored on the device'
+                    'The current management key is stored on the YubiKey'
                     ' and will not be cleared if no PIN is provided. Continue?',
                     abort=True)
 
@@ -775,24 +785,24 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt):
 def _check_eccp384(ctx, controller, algorithm):
     #  ECCP384 not supported on NEO.
     if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
-        ctx.fail('ECCP384 is not supported by this device.')
+        ctx.fail('ECCP384 is not supported by this YubiKey.')
 
 
 def _check_pin_policy(ctx, controller, pin_policy):
     #  Pin policy not supported on NEO.
     if pin_policy is not None and controller.version < (4, 0, 0):
-        ctx.fail('Pin policy is not supported by this device.')
+        ctx.fail('Pin policy is not supported by this YubiKey.')
 
 
 def _check_touch_policy(ctx, controller, touch_policy):
     #  Touch policy not supported on NEO.
     if touch_policy is not None:
         if controller.version < (4, 0, 0):
-            ctx.fail('Touch policy is not supported by this device.')
+            ctx.fail('Touch policy is not supported by this YubiKey.')
         if touch_policy == TOUCH_POLICY.CACHED \
                 and controller.version < (4, 3, 0):
             #  Cached policy was added in 4.3
-            ctx.fail('Touch policy "CACHED" not supported by this device.')
+            ctx.fail('Touch policy "CACHED" not supported by this YubiKey.')
 
 
 piv.transports = TRANSPORT.CCID
