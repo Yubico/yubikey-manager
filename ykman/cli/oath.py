@@ -283,11 +283,12 @@ def list(ctx, show_hidden, oath_type, period):
     """
     ensure_validated(ctx)
     controller = ctx.obj['controller']
-    creds = controller.list()
+    creds = [cred
+             for cred in controller.list()
+             if show_hidden or not cred.is_hidden
+             ]
     creds.sort()
     for cred in creds:
-        if cred.is_hidden and not show_hidden:
-            continue
         click.echo(_cred_name(cred), nl=False)
         if oath_type:
             click.echo(', {}'.format(cred.oath_type), nl=False)
@@ -314,11 +315,11 @@ def code(ctx, show_hidden, query, single):
     ensure_validated(ctx)
 
     controller = ctx.obj['controller']
-    creds = controller.calculate_all()
+    creds = [(cr, c)
+             for (cr, c) in controller.calculate_all()
+             if show_hidden or not cr.is_hidden
+             ]
 
-    # Remove hidden creds
-    if not show_hidden:
-        creds = [(cr, c) for (cr, c) in creds if not cr.is_hidden]
     if query:
         hits = _search(creds, query)
         if len(hits) == 1:
