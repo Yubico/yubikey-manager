@@ -321,32 +321,32 @@ def code(ctx, show_hidden, query, single):
              ]
 
     if query:
-        hits = _search(creds, query)
-        if len(hits) == 1:
-            cred, code = hits[0]
-            if cred.touch:
-                prompt_for_touch()
-            if cred.oath_type == OATH_TYPE.HOTP:
-                # HOTP might require touch, we don't know.
-                # Assume yes after 500ms.
-                hotp_touch_timer = Timer(0.500, prompt_for_touch)
-                hotp_touch_timer.start()
-                code = controller.calculate(cred)
-                hotp_touch_timer.cancel()
-            elif code is None:
-                code = controller.calculate(cred)
+        creds = _search(creds, query)
 
-            if single:
-                click.echo(code.value)
-            elif cred.issuer:
-                click.echo('{}:{} {}'.format(cred.issuer, cred.name,
-                                             code.value))
-            else:
-                click.echo('{} {}'.format(cred.name, code.value))
-            ctx.exit()
-        elif single:
-            ctx.fail('Multiple matches, make the query more specific.')
-        creds = hits
+    if len(creds) == 1:
+        cred, code = creds[0]
+        if cred.touch:
+            prompt_for_touch()
+        if cred.oath_type == OATH_TYPE.HOTP:
+            # HOTP might require touch, we don't know.
+            # Assume yes after 500ms.
+            hotp_touch_timer = Timer(0.500, prompt_for_touch)
+            hotp_touch_timer.start()
+            code = controller.calculate(cred)
+            hotp_touch_timer.cancel()
+        elif code is None:
+            code = controller.calculate(cred)
+
+        if single:
+            click.echo(code.value)
+        elif cred.issuer:
+            click.echo('{}:{} {}'.format(cred.issuer, cred.name,
+                                         code.value))
+        else:
+            click.echo('{} {}'.format(cred.name, code.value))
+        ctx.exit()
+    elif single:
+        ctx.fail('Multiple matches, make the query more specific.')
 
     longest = max(len('{}:{}'.format(
         cr.issuer, cr.name)) for (cr, c) in creds) if creds else 0
