@@ -300,7 +300,7 @@ def list(ctx, show_hidden, oath_type, period):
 @oath.command()
 @click_show_hidden_option
 @click.pass_context
-@click.argument('query', required=False)
+@click.argument('query', required=False, default='')
 @click.option('-s', '--single', is_flag=True, help='Ensure only a single '
               'match, and output only the code.')
 def code(ctx, show_hidden, query, single):
@@ -320,8 +320,7 @@ def code(ctx, show_hidden, query, single):
              if show_hidden or not cr.is_hidden
              ]
 
-    if query:
-        creds = _search(creds, query)
+    creds = _search(creds, query)
 
     if len(creds) == 1:
         cred, code = creds[0]
