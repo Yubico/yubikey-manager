@@ -331,36 +331,34 @@ def code(ctx, show_hidden, query, single):
             # Assume yes after 500ms.
             hotp_touch_timer = Timer(0.500, prompt_for_touch)
             hotp_touch_timer.start()
-            code = controller.calculate(cred)
+            creds = [(cred, controller.calculate(cred))]
             hotp_touch_timer.cancel()
         elif code is None:
-            code = controller.calculate(cred)
-
-        if single:
-            click.echo(code.value)
-        elif cred.issuer:
-            click.echo('{}:{} {}'.format(cred.issuer, cred.name,
-                                         code.value))
-        else:
-            click.echo('{} {}'.format(cred.name, code.value))
-        ctx.exit()
+            creds = [(cred, controller.calculate(cred))]
     elif single:
         ctx.fail('Multiple matches, make the query more specific.')
 
-    longest_name = max(len(_cred_name(cr)) for (cr, c) in creds) if creds else 0
-    longest_code = max(len(c.value) for (cr, c) in creds) if creds else 0
-    format_str = '{:<%d}  {:>%d}' % (longest_name, longest_code)
+    if single:
+        click.echo(creds[0][1].value)
+    else:
+        creds.sort()
 
-    creds.sort()
+        outputs = [
+            (
+                _cred_name(cr),
+                c.value if c
+                else '[Touch Credential]' if cr.touch
+                else '[HOTP Credential]' if cr.oath_type == OATH_TYPE.HOTP
+                else ''
+            ) for (cr, c) in creds
+        ]
 
-    for cred, code in creds:
-        full_name = _cred_name(cred)
-        if code is not None:
-            click.echo(format_str.format(full_name, code.value))
-        if cred.touch:
-            click.echo(format_str.format(full_name, '[Touch Credential]'))
-        if cred.oath_type == OATH_TYPE.HOTP:
-            click.echo(format_str.format(full_name, '[HOTP Credential]'))
+        longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
+        longest_code = max(len(c) for (n, c) in outputs) if outputs else 0
+        format_str = '{:<%d}  {:>%d}' % (longest_name, longest_code)
+
+        for name, result in outputs:
+            click.echo(format_str.format(name, result))
 
 
 @oath.command()
