@@ -274,9 +274,8 @@ def _add_cred(ctx, data, force):
 @click_show_hidden_option
 @click.pass_context
 @click.option('-o', '--oath-type', is_flag=True, help='Display the OATH type.')
-@click.option('-a', '--algorithm', is_flag=True, help='Display the algorithm.')
 @click.option('-p', '--period', is_flag=True, help='Display the period.')
-def list(ctx, show_hidden, oath_type, algorithm, period):
+def list(ctx, show_hidden, oath_type, period):
     """
     List all credentials.
 
@@ -292,8 +291,6 @@ def list(ctx, show_hidden, oath_type, algorithm, period):
         click.echo(_cred_name(cred), nl=False)
         if oath_type:
             click.echo(', {}'.format(cred.oath_type), nl=False)
-        if algorithm:
-            click.echo(', {}'.format(cred.algo), nl=False)
         if period:
             click.echo(', {}'.format(cred.period), nl=False)
         click.echo()
