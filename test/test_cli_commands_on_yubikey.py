@@ -25,7 +25,7 @@ if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
         click.confirm(
             'Run integration tests? This will erase data on the YubiKey,'
             ' make sure it is a key used for development.', abort=True)
-        _one_yubikey = len(list(get_descriptors())) == 1
+        _one_yubikey = len(get_descriptors()) == 1
     except Exception:
         sys.exit()
     _skip = False
@@ -36,7 +36,7 @@ else:
 def _has_mode(mode):
     if not _one_yubikey:
         return False
-    yubikeys = list(get_descriptors())
+    yubikeys = get_descriptors()
     if len(yubikeys) is not 1:
         return False
     return yubikeys[0].mode.has_transport(mode)
@@ -45,7 +45,7 @@ def _has_mode(mode):
 def _get_version():
     if not _one_yubikey:
         return None
-    return list(get_descriptors())[0].version
+    return get_descriptors()[0].version
 
 
 def _is_NEO():

@@ -84,7 +84,7 @@ def cli(ctx):
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
         try:
-            descriptors = list(get_descriptors())
+            descriptors = get_descriptors()
         except usb.core.NoBackendError:
             ctx.fail('No PyUSB backend detected!')
         n_keys = len(descriptors)
