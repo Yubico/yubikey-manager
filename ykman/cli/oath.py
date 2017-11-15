@@ -347,9 +347,9 @@ def code(ctx, show_hidden, query, single):
     elif single:
         ctx.fail('Multiple matches, make the query more specific.')
 
-    longest = max(len('{}:{}'.format(
-        cr.issuer, cr.name)) for (cr, c) in creds) if creds else 0
-    format_str = '{:<%d}  {:>10}' % longest
+    longest_name = max(len(_cred_name(cr)) for (cr, c) in creds) if creds else 0
+    longest_code = max(len(c.value) for (cr, c) in creds) if creds else 0
+    format_str = '{:<%d}  {:>%d}' % (longest_name, longest_code)
 
     creds.sort()
 
