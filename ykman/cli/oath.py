@@ -336,7 +336,7 @@ def code(ctx, show_hidden, query, single):
         elif code is None:
             creds = [(cred, controller.calculate(cred))]
     elif single:
-        ctx.fail('Multiple matches, make the query more specific.')
+        _error_multiple_hits(ctx, [cr for cr, c in creds])
 
     if single:
         click.echo(creds[0][1].value)
@@ -383,9 +383,7 @@ def delete(ctx, query):
         controller.delete(cred)
         click.echo('Deleted {}.'.format(cred.printable_key))
     else:
-        click.echo('Multiple matches, make the query more specific.')
-        for cred in hits:
-            click.echo(cred.printable_key)
+        _error_multiple_hits(ctx, hits)
 
 
 @oath.command('set-password')
@@ -499,6 +497,17 @@ def _search(creds, query):
         if query.lower() in c.printable_key.lower():
             hits.append(entry)
     return hits
+
+
+def _error_multiple_hits(ctx, hits):
+    click.echo(
+        'Error: Multiple matches, please make the query more specific.',
+        err=True
+    )
+    click.echo('', err=True)
+    for cred in hits:
+        click.echo(cred.printable_key, err=True)
+    ctx.exit(1)
 
 
 oath.transports = TRANSPORT.CCID
