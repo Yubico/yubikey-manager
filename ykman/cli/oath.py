@@ -364,7 +364,9 @@ def code(ctx, show_hidden, query, single):
 @oath.command()
 @click.pass_context
 @click.argument('query')
-def delete(ctx, query):
+@click.option('-f', '--force', is_flag=True,
+              help='Confirm deletion without prompting')
+def delete(ctx, query, force):
     """
     Delete a credential.
 
@@ -380,8 +382,15 @@ def delete(ctx, query):
         click.echo('No matches, nothing to be done.')
     elif len(hits) == 1:
         cred = hits[0]
-        controller.delete(cred)
-        click.echo('Deleted {}.'.format(cred.printable_key))
+        if force or (click.confirm(
+                'Delete credential: {} ?'.format(cred.printable_key),
+                default=False
+        )):
+            controller.delete(cred)
+            click.echo('Deleted {}.'.format(cred.printable_key))
+        else:
+            click.echo('Deletion aborted by user.')
+
     else:
         _error_multiple_hits(ctx, hits)
 
