@@ -173,6 +173,10 @@ class Credential(object):
     def is_hidden(self):
         return self.issuer == '_hidden'
 
+    @property
+    def printable_key(self):
+        return self.key.decode('utf-8')
+
     @staticmethod
     def parse_key(data):
         if re.match(br'^\d+/', data):
