@@ -289,7 +289,7 @@ def list(ctx, show_hidden, oath_type, period):
              ]
     creds.sort()
     for cred in creds:
-        click.echo(_cred_name(cred), nl=False)
+        click.echo(cred.printable_key, nl=False)
         if oath_type:
             click.echo(', {}'.format(cred.oath_type), nl=False)
         if period:
@@ -345,7 +345,7 @@ def code(ctx, show_hidden, query, single):
 
         outputs = [
             (
-                _cred_name(cr),
+                cr.printable_key,
                 c.value if c
                 else '[Touch Credential]' if cr.touch
                 else '[HOTP Credential]' if cr.oath_type == OATH_TYPE.HOTP
@@ -381,11 +381,11 @@ def delete(ctx, query):
     elif len(hits) == 1:
         cred = hits[0]
         controller.delete(cred)
-        click.echo('Deleted {}.'.format(_cred_name(cred)))
+        click.echo('Deleted {}.'.format(cred.printable_key))
     else:
         click.echo('Multiple matches, make the query more specific.')
         for cred in hits:
-            click.echo(_cred_name(cred))
+            click.echo(cred.printable_key)
 
 
 @oath.command('set-password')
@@ -494,16 +494,11 @@ def _search(creds, query):
     hits = []
     for entry in creds:
         c = entry[0] if isinstance(entry, tuple) else entry
-        long_name = _cred_name(c)
-        if long_name == query:
+        if c.printable_key == query:
             return [entry]
-        if query.lower() in long_name.lower():
+        if query.lower() in c.printable_key.lower():
             hits.append(entry)
     return hits
-
-
-def _cred_name(cred):
-    return cred.issuer + ':' + cred.name if cred.issuer else cred.name
 
 
 oath.transports = TRANSPORT.CCID
