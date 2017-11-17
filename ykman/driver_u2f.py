@@ -30,7 +30,7 @@ from __future__ import print_function
 from .native.u2fh import U2fh, u2fh_devs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT, MissingLibrary
+from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary
 import struct
 
 
@@ -74,25 +74,42 @@ def check(status):
         raise U2FHostError(status)
 
 
+def _pid_from_name(name):
+    if 'Security Key' in name:
+        return PID.SKY_U2F
+
+    transports = 0
+    for t in TRANSPORT:
+        if t.name in name:
+            transports += t
+
+    key_type = YUBIKEY.NEO if 'NEO' in name else YUBIKEY.YK4
+    return key_type.get_pid(transports)
+
+
+_instances = set()
+
+
 class U2FDriver(AbstractDriver):
     """
     libu2f-host based U2F driver
-    Version number reported by this driver are minimums determined by heuristics
     """
     transport = TRANSPORT.U2F
-    sky = False
 
-    def __init__(self, devs, index, name=''):
+    def __init__(self, devs, index, name):
         self._devs = devs
         self._index = index
-        if 'Security Key' in name:
-            self.sky = True
+        self._pid = _pid_from_name(name)
+        _instances.add(self)
 
     def read_capabilities(self):
         try:
             return self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
         except Exception:
-            return None
+            return b''
+
+    def guess_version(self):
+        return (None, None, None)  # TODO
 
     def sendrecv(self, cmd, data):
         buf_size = c_size_t(1024)
@@ -109,10 +126,12 @@ class U2FDriver(AbstractDriver):
             raise ModeSwitchError()
 
     def __del__(self):
-        u2fh.u2fh_devs_done(self._devs)
+        _instances.remove(self)
+        if not _instances:
+            u2fh.u2fh_devs_done(self._devs)
 
 
-def open_device():
+def open_devices():
     devs = POINTER(u2fh_devs)()
     check(u2fh.u2fh_devs_init(byref(devs)))
     max_index = c_uint()
@@ -125,4 +144,4 @@ def open_device():
             name = resp.value.decode('utf8')
             if name.startswith('Yubikey') \
                     or name.startswith('Security Key by Yubico'):
-                return U2FDriver(devs, index, name)
+                yield U2FDriver(devs, index, name)

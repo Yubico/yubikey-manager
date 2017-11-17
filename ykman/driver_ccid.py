@@ -35,7 +35,7 @@ from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError
-from .util import AID, CAPABILITY, TRANSPORT
+from .util import AID, CAPABILITY, TRANSPORT, YUBIKEY
 
 SW_OK = 0x9000
 SW_APPLICATION_NOT_FOUND = 0x6a82
@@ -77,24 +77,39 @@ class APDUError(CCIDError):
         return 'APDU error: SW=0x{:04x}'.format(self.sw)
 
 
+def _pid_from_name(name):
+    transports = 0
+    for t in TRANSPORT:
+        if t.name in name:
+            transports += t
+
+    key_type = YUBIKEY.NEO if 'NEO' in name else YUBIKEY.YK4
+    return key_type.get_pid(transports)
+
+
 class CCIDDriver(AbstractDriver):
     """
     Pyscard based CCID driver
     """
     transport = TRANSPORT.CCID
 
-    def __init__(self, connection, name=''):
+    def __init__(self, connection, name):
         self._conn = connection
+        self._pid = _pid_from_name(name)
         try:
             self._read_serial()
         except APDUError:
-            pass  # Can't read serial
+            pass  # Can't read serial or version
 
     def _read_serial(self):
-        self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
+        s = self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
+        self._version = tuple(c for c in six.iterbytes(s[:3]))
         serial = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
         if len(serial) == 4:
             self._serial = struct.unpack('>I', serial)[0]
+
+    def guess_version(self):
+        return self._version
 
     def read_capabilities(self):
         try:
@@ -207,14 +222,15 @@ def _list_readers():
         return System.readers()
 
 
-def open_device():
+def open_devices(name_filter='yubico yubikey'):
     for reader in _list_readers():
-        if reader.name.lower().startswith('yubico yubikey'):
+        if reader.name.lower().startswith(name_filter):
             try:
                 conn = reader.createConnection()
                 conn.connect()
+                driver = CCIDDriver(conn, reader.name)
+                yield driver
             except CardConnectionException:
                 if kill_scdaemon():
-                    return open_device()
+                    return open_devices()
                 raise
-            return CCIDDriver(conn, reader.name)
