@@ -105,7 +105,7 @@ def cli(ctx, device):
                             _disabled_transport(ctx, transports, subcmd.name)
                         else:
                             ctx.fail("Command '{}' is not supported by this "
-                                     "device.".format(subcmd.name))
+                                     'device.'.format(subcmd.name))
                 except FailedOpeningDeviceException:
                     ctx.fail('Failed connecting to a YubiKey with serial: {}'
                              .format(device))
