@@ -28,10 +28,12 @@
 from __future__ import print_function
 
 from .native.u2fh import U2fh, u2fh_devs
-from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary
+from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary, parse_tlvs
+from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
+from binascii import b2a_hex
 import struct
+import six
 
 
 INS_SELECT = 0xa4
@@ -78,6 +80,8 @@ def _pid_from_name(name):
     if 'Security Key' in name:
         return PID.SKY_U2F
 
+    # TODO: Plus?
+
     transports = 0
     for t in TRANSPORT:
         if t.name in name:
@@ -102,14 +106,31 @@ class U2FDriver(AbstractDriver):
         self._pid = _pid_from_name(name)
         _instances.add(self)
 
+        self._version = [0, 0, 0]
+        self._capa = b''
+        if self.key_type == YUBIKEY.YK4:
+            self._version[0] = 4
+            try:
+                self._capa = self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
+                data = self._capa
+                c_len, data = six.indexbytes(data, 0), data[1:]
+                data = data[:c_len]
+                for tlv in parse_tlvs(data):
+                    if tlv.tag == 0x02:
+                        self._serial = int(b2a_hex(tlv.value), 16)
+                self._version[1] = 2
+            except U2FHostError:  # Pre 4.2
+                self._version[1] = 1
+        elif self.key_type == YUBIKEY.NEO:
+            self._version = [3, 2, 0]
+        elif self.key_type == YUBIKEY.YKP:
+            self._version = [4, 0, 0]
+
     def read_capabilities(self):
-        try:
-            return self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
-        except Exception:
-            return b''
+        return self._capa
 
     def guess_version(self):
-        return (None, None, None)  # TODO
+        return tuple(self._version)
 
     def sendrecv(self, cmd, data):
         buf_size = c_size_t(1024)
