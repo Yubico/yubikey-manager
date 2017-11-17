@@ -41,7 +41,6 @@ class FailedOpeningDeviceException(Exception):
 
 
 class Descriptor(object):
-    _device_name = 'YubiKey'
 
     def __init__(self, pid, version, serial=None):
         self._version = version
@@ -55,12 +54,16 @@ class Descriptor(object):
         return self._version
 
     @property
+    def pid(self):
+        return self._pid
+
+    @property
     def mode(self):
         return self._mode
 
     @property
-    def device_name(self):
-        return self._key_type.value
+    def key_type(self):
+        return self._key_type
 
     def open_device(self, transports=sum(TRANSPORT), attempts=3):
         transports &= self.mode.transports
@@ -131,6 +134,10 @@ def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
 
 def open_device(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
     driver = open_driver(transports, serial, pid, attempts)
-    descriptor = Descriptor.from_driver(driver)
-    # TODO: Improve version based on usb descriptors?
+    matches = [d for d in get_descriptors() if d.pid == driver.pid]
+    if len(matches) > 0:  # Use the descriptor with the lowest version
+        matches.sort(key=lambda d: d.version)
+        descriptor = matches[0]
+    else:
+        descriptor = Descriptor.from_driver(driver)
     return YubiKey(descriptor, driver)

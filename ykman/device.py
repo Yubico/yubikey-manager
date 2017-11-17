@@ -55,7 +55,7 @@ class YubiKey(object):
             raise ValueError('No driver given!')
         self._descriptor = descriptor
         self._driver = driver
-        self.device_name = descriptor.device_name
+        self.device_name = descriptor.key_type.value
 
         if driver.key_type == YUBIKEY.SKY:
             self.capabilities = CAPABILITY.U2F
