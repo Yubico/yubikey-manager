@@ -42,8 +42,9 @@ class FailedOpeningDeviceException(Exception):
 
 class Descriptor(object):
 
-    def __init__(self, pid, version, serial=None):
+    def __init__(self, pid, version, certain, serial=None):
         self._version = version
+        self._certain = certain
         self._pid = pid
         self._serial = serial
         self._key_type = pid.get_type()
@@ -52,6 +53,10 @@ class Descriptor(object):
     @property
     def version(self):
         return self._version
+
+    @property
+    def version_certain(self):
+        return self._certain
 
     @property
     def pid(self):
@@ -77,11 +82,12 @@ class Descriptor(object):
         v_int = usb_dev.bcdDevice
         version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
         pid = PID(usb_dev.idProduct)
-        return cls(pid, version)
+        return cls(pid, version, True)
 
     @classmethod
     def from_driver(cls, driver):
-        return cls(driver.pid, driver.guess_version(), driver.serial)
+        version, certain = driver.guess_version()
+        return cls(driver.pid, version, certain, driver.serial)
 
 
 def _gen_descriptors():
@@ -135,8 +141,7 @@ def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
 def open_device(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
     driver = open_driver(transports, serial, pid, attempts)
     matches = [d for d in get_descriptors() if d.pid == driver.pid]
-    if len(matches) > 0:  # Use the descriptor with the lowest version
-        matches.sort(key=lambda d: d.version)
+    if len(matches) == 1:  # Only one matching descriptor, must be it
         descriptor = matches[0]
     else:
         descriptor = Descriptor.from_driver(driver)

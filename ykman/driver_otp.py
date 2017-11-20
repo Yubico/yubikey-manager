@@ -152,7 +152,7 @@ class OTPDriver(AbstractDriver):
         return resp.raw[:buf_size.value]
 
     def guess_version(self):
-        return self._version
+        return self._version, True
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()

@@ -80,7 +80,8 @@ def _pid_from_name(name):
     if 'Security Key' in name:
         return PID.SKY_U2F
 
-    # TODO: Plus?
+    if 'Plus' in name:
+        return PID.YKP_OTP_U2F
 
     transports = 0
     for t in TRANSPORT:
@@ -130,7 +131,7 @@ class U2FDriver(AbstractDriver):
         return self._capa
 
     def guess_version(self):
-        return tuple(self._version)
+        return tuple(self._version), False
 
     def sendrecv(self, cmd, data):
         buf_size = c_size_t(1024)

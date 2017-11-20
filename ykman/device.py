@@ -114,6 +114,10 @@ class YubiKey(object):
         return self._descriptor.version
 
     @property
+    def version_certain(self):
+        return self._descriptor.version_certain
+
+    @property
     def serial(self):
         return self._serial or self._driver.serial
 

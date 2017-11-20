@@ -62,4 +62,5 @@ class AbstractDriver(object):
         raise NotImplementedError()
 
     def guess_version(self):
-        raise (None, None, None)
+        # Second arg is True if the version is certain, False if not.
+        return (0, 0, 0), False

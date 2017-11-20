@@ -109,7 +109,7 @@ class CCIDDriver(AbstractDriver):
             self._serial = struct.unpack('>I', serial)[0]
 
     def guess_version(self):
-        return self._version
+        return self._version, self.key_type != YUBIKEY.NEO
 
     def read_capabilities(self):
         try:
