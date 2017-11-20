@@ -52,7 +52,8 @@ try:
     # TODO: Allow debug output
     if u2fh.u2fh_global_init(0) is not 0:
         raise Exception('u2fh_global_init failed!')
-    libversion = u2fh.u2fh_check_version(None).decode('ascii')
+    libversion = tuple(int(x) for x in u2fh.u2fh_check_version(None)
+                       .decode('ascii').split('.'))
 except Exception:
     u2fh = MissingLibrary(
         'libu2f-host not found, U2F connectability not available!')
