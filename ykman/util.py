@@ -97,6 +97,46 @@ class Cve201715361VulnerableError(Exception):
         )
 
 
+@unique
+class YUBIKEY(Enum):
+    YKS = 'YubiKey Standard'
+    NEO = 'YubiKey NEO'
+    SKY = 'FIDO U2F Security Key by Yubico'
+    YKP = 'YubiKey Plus'
+    YK4 = 'YubiKey 4'
+
+    def get_pid(self, transports):
+        suffix = '_'.join(t.name for t in TRANSPORT.split(transports))
+        return PID[self.name + '_' + suffix]
+
+
+@unique
+class PID(IntEnum):
+    YKS_OTP = 0x0010
+    NEO_OTP = 0x0110
+    NEO_OTP_CCID = 0x0111
+    NEO_CCID = 0x0112
+    NEO_U2F = 0x0113
+    NEO_OTP_U2F = 0x0114
+    NEO_U2F_CCID = 0x0115
+    NEO_OTP_U2F_CCID = 0x0116
+    SKY_U2F = 0x0120
+    YK4_OTP = 0x0401
+    YK4_U2F = 0x0402
+    YK4_OTP_U2F = 0x0403
+    YK4_CCID = 0x0404
+    YK4_OTP_CCID = 0x0405
+    YK4_U2F_CCID = 0x0406
+    YK4_OTP_U2F_CCID = 0x0407
+    YKP_OTP_U2F = 0x0410
+
+    def get_type(self):
+        return YUBIKEY[self.name.split('_', 1)[0]]
+
+    def get_transports(self):
+        return sum(TRANSPORT[x] for x in self.name.split('_')[1:])
+
+
 class Mode(object):
     _modes = [
         TRANSPORT.OTP,  # 0x00
@@ -135,6 +175,10 @@ class Mode(object):
     def from_code(cls, code):
         code = code & 0b00000111
         return cls(cls._modes[code])
+
+    @classmethod
+    def from_pid(cls, pid):
+        return cls(PID(pid).get_transports())
 
 
 class Tlv(bytes):

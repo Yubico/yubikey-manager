@@ -37,10 +37,23 @@ class AbstractDriver(object):
 
     transport = None
     _serial = None
+    _pid = None
 
     @property
     def serial(self):
         return self._serial
+
+    @property
+    def pid(self):
+        return self._pid
+
+    @property
+    def key_type(self):
+        return self._pid.get_type()
+
+    @property
+    def transports(self):
+        return self._pid.get_transports()
 
     def set_mode(self, mode_code):
         raise NotImplementedError()
@@ -48,5 +61,6 @@ class AbstractDriver(object):
     def read_capabilities(self):
         raise NotImplementedError()
 
-    def __str__(self):
-        return 'Driver: {}, m: {}'.format(self.transport, self.mode)
+    def guess_version(self):
+        # Second arg is True if the version is certain, False if not.
+        return (0, 0, 0), False

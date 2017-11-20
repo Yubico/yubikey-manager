@@ -262,7 +262,7 @@ class TestOATH(unittest.TestCase):
 
     def test_oath_delete(self):
         ykman_cli('oath', 'add', 'delete-me', 'abba')
-        ykman_cli('oath', 'delete', 'delete-me')
+        ykman_cli('oath', 'delete', 'delete-me', '-f')
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 

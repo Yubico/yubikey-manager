@@ -25,51 +25,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .util import TRANSPORT, Mode
+from .util import PID, TRANSPORT, Mode
 from .device import YubiKey
-from .driver_ccid import open_device as open_ccid
-from .driver_u2f import open_device as open_u2f
-from .driver_otp import open_device as open_otp
+from .driver_ccid import open_devices as open_ccid
+from .driver_u2f import open_devices as open_u2f
+from .driver_otp import open_devices as open_otp
 from .native.pyusb import get_usb_backend
 
 import usb.core
 import time
-
-YKS = 'YubiKey Standard'
-NEO = 'YubiKey NEO'
-SKY = 'FIDO U2F Security Key by Yubico'
-YKP = 'YubiKey Plus'
-YK4 = 'YubiKey 4'
-
-
-_YUBIKEY_PIDS = {
-    # YubiKey Standard
-    0x0010: (YKS, TRANSPORT.OTP),
-
-    # YubiKey NEO
-    0x0110: (NEO, TRANSPORT.OTP),
-    0x0111: (NEO, TRANSPORT.OTP | TRANSPORT.CCID),
-    0x0112: (NEO, TRANSPORT.CCID),
-    0x0113: (NEO, TRANSPORT.U2F),
-    0x0114: (NEO, TRANSPORT.OTP | TRANSPORT.U2F),
-    0x0115: (NEO, TRANSPORT.U2F | TRANSPORT.CCID),
-    0x0116: (NEO, TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F),
-
-    # FIDO U2F Security Key by Yubico
-    0x0120: (SKY, TRANSPORT.U2F),
-
-    # YubiKey 4
-    0x0401: (YK4, TRANSPORT.OTP),
-    0x0402: (YK4, TRANSPORT.U2F),
-    0x0403: (YK4, TRANSPORT.OTP | TRANSPORT.U2F),
-    0x0404: (YK4, TRANSPORT.CCID),
-    0x0405: (YK4, TRANSPORT.OTP | TRANSPORT.CCID),
-    0x0406: (YK4, TRANSPORT.U2F | TRANSPORT.CCID),
-    0x0407: (YK4, TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F),
-
-    # YubiKey Plus
-    0x0410: (YKP, TRANSPORT.OTP | TRANSPORT.U2F),
-}
 
 
 class FailedOpeningDeviceException(Exception):
@@ -77,68 +41,108 @@ class FailedOpeningDeviceException(Exception):
 
 
 class Descriptor(object):
-    _device_name = 'YubiKey'
 
-    def __init__(self, usb_dev):
-        v_int = usb_dev.bcdDevice
-        self._version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
-        name, transports = _YUBIKEY_PIDS[usb_dev.idProduct]
-        self._mode = Mode(transports)
-        self._device_name = name
-        self.fingerprint = self._read_fingerprint(usb_dev)
-
-    def _read_fingerprint(self, dev):
-        return (
-            dev.idProduct,
-            dev.bcdDevice,
-            dev.bus,
-            dev.address,
-            dev.iSerialNumber
-        )
+    def __init__(self, pid, version, certain, serial=None):
+        self._version = version
+        self._certain = certain
+        self._pid = pid
+        self._serial = serial
+        self._key_type = pid.get_type()
+        self._mode = Mode.from_pid(pid)
 
     @property
     def version(self):
         return self._version
 
     @property
+    def version_certain(self):
+        return self._certain
+
+    @property
+    def pid(self):
+        return self._pid
+
+    @property
     def mode(self):
         return self._mode
 
     @property
-    def device_name(self):
-        return self._device_name
+    def key_type(self):
+        return self._key_type
 
     def open_device(self, transports=sum(TRANSPORT), attempts=3):
         transports &= self.mode.transports
-        dev = None
-        for attempt in range(attempts):
-            sleep_time = (attempt + 1) * 0.1
-            try:
-                if TRANSPORT.CCID & transports:
-                    dev = open_ccid()
-                if TRANSPORT.OTP & transports and not dev:
-                    dev = open_otp()
-                if TRANSPORT.U2F & transports and not dev:
-                    dev = open_u2f()
-                if not dev:
-                    #  Wait a little before trying again.
-                    time.sleep(sleep_time)
-                    continue
-                return YubiKey(self, dev)
-            except Exception:
-                pass
-        raise FailedOpeningDeviceException()
+        driver = open_driver(transports, self._serial, self._pid, attempts)
+        if self._serial is None:
+            self._serial = driver.serial
+        return YubiKey(self, driver)
+
+    @classmethod
+    def from_usb(cls, usb_dev):
+        v_int = usb_dev.bcdDevice
+        version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
+        pid = PID(usb_dev.idProduct)
+        return cls(pid, version, True)
+
+    @classmethod
+    def from_driver(cls, driver):
+        version, certain = driver.guess_version()
+        return cls(driver.pid, version, certain, driver.serial)
 
 
 def _gen_descriptors():
     found = []  # Composite devices are listed multiple times on Windows...
     for dev in usb.core.find(True, idVendor=0x1050, backend=get_usb_backend()):
-        if dev.idProduct in _YUBIKEY_PIDS:
+        try:
             addr = (dev.bus, dev.address)
             if addr not in found:
                 found.append(addr)
-                yield Descriptor(dev)
+                yield Descriptor.from_usb(dev)
+        except ValueError:
+            pass  # Invalid PID.
 
 
 def get_descriptors():
     return list(_gen_descriptors())
+
+
+def list_drivers(transports=sum(TRANSPORT)):
+    if TRANSPORT.CCID & transports:
+        for dev in open_ccid():
+            if dev:
+                yield dev
+    if TRANSPORT.OTP & transports:
+        for dev in open_otp():
+            if dev:
+                yield dev
+    if TRANSPORT.U2F & transports:
+        for dev in open_u2f():
+            if dev:
+                yield dev
+
+
+def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
+    for attempt in range(attempts):
+        sleep_time = (attempt + 1) * 0.1
+        for drv in list_drivers(transports):
+            if drv is not None:
+                if serial is not None and drv.serial != serial:
+                    del drv
+                    continue
+                if pid is not None and drv.pid != pid:
+                    del drv
+                    continue
+                return drv
+        #  Wait a little before trying again.
+        time.sleep(sleep_time)
+    raise FailedOpeningDeviceException()
+
+
+def open_device(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
+    driver = open_driver(transports, serial, pid, attempts)
+    matches = [d for d in get_descriptors() if d.pid == driver.pid]
+    if len(matches) == 1:  # Only one matching descriptor, must be it
+        descriptor = matches[0]
+    else:
+        descriptor = Descriptor.from_driver(driver)
+    return YubiKey(descriptor, driver)

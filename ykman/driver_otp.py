@@ -29,10 +29,10 @@
 import six
 import time
 from .native.ykpers import Ykpers
-from ctypes import sizeof, byref, c_uint, c_size_t, create_string_buffer
+from ctypes import sizeof, byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import (TRANSPORT, MissingLibrary, time_challenge, parse_totp_hash,
-                   format_code, hmac_shorten_key)
+from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
+                   parse_totp_hash, format_code, hmac_shorten_key)
 from .scanmap import us
 from binascii import a2b_hex, b2a_hex
 
@@ -53,7 +53,8 @@ try:
     ykpers = Ykpers('ykpers-1', '1')
     if not ykpers.yk_init():
         raise Exception('yk_init failed.')
-    libversion = ykpers.ykpers_check_version(None).decode('ascii')
+    libversion = tuple(int(x) for x in ykpers.ykpers_check_version(None)
+                       .decode('ascii').split('.'))
 except Exception:
     ykpers = MissingLibrary(
         'libykpers not found, slot functionality not available!')
@@ -102,6 +103,7 @@ class OTPDriver(AbstractDriver):
         self._dev = dev
         self._access_code = None
         self._serial = self._read_serial()
+        self._pid = self._read_pid()
         self._slot1_valid = False
         self._slot2_valid = False
         self._status = (0, 0, 0)
@@ -115,12 +117,17 @@ class OTPDriver(AbstractDriver):
     def access_code(self, value):
         self._access_code = value
 
+    def _read_pid(self):
+        vid, pid = c_int(), c_int()
+        check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
+        return PID(pid.value)
+
     def _read_serial(self):
         serial = c_uint()
         if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
             return serial.value
         else:
-            return None
+            return None  # Serial not visible
 
     def _read_status(self):
         status = ykpers.ykds_alloc()
@@ -143,6 +150,9 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_capabilities(
             self._dev, 0, 0, resp, byref(buf_size)))
         return resp.raw[:buf_size.value]
+
+    def guess_version(self):
+        return self._version, True
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()
@@ -371,7 +381,14 @@ class OTPDriver(AbstractDriver):
         ykpers.yk_close_key(self._dev)
 
 
-def open_device():
-    dev = ykpers.yk_open_first_key()
-    if dev:
-        return OTPDriver(dev)
+def open_devices():
+    if libversion < (1, 18):
+        yield OTPDriver(ykpers.yk_open_first_key())
+    else:
+        i = 0
+        while True:
+            dev = ykpers.yk_open_key(i)
+            if ykpers.yk_get_errno() != 0:
+                break
+            i += 1
+            yield OTPDriver(dev)

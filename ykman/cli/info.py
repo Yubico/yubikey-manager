@@ -44,8 +44,12 @@ def info(ctx):
     click.echo('Device type: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))
-    f_version = '.'.join(str(x) for x in dev.version)
-    click.echo('Firmware version: {}'.format(f_version))
+    if dev.version_certain:
+        f_version = '.'.join(str(x) for x in dev.version)
+        click.echo('Firmware version: {}'.format(f_version))
+    else:
+        click.echo('Firmware version: Uncertain, re-run with only one '
+                   'YubiKey connected')
     click.echo('Enabled connection(s): {}'.format(dev.mode))
     click.echo()
 
