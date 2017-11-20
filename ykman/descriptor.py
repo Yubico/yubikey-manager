@@ -42,13 +42,18 @@ class FailedOpeningDeviceException(Exception):
 
 class Descriptor(object):
 
-    def __init__(self, pid, version, certain, serial=None):
+    def __init__(self, pid, version, certain, fingerprint, serial=None):
         self._version = version
         self._certain = certain
         self._pid = pid
         self._serial = serial
         self._key_type = pid.get_type()
         self._mode = Mode.from_pid(pid)
+        self._fingerprint = fingerprint
+
+    @property
+    def fingerprint(self):
+        return self._fingerprint
 
     @property
     def version(self):
@@ -82,12 +87,14 @@ class Descriptor(object):
         v_int = usb_dev.bcdDevice
         version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
         pid = PID(usb_dev.idProduct)
-        return cls(pid, version, True)
+        fp = (pid, version, usb_dev.bus, usb_dev.address, usb_dev.iSerialNumber)
+        return cls(pid, version, True, fp)
 
     @classmethod
     def from_driver(cls, driver):
         version, certain = driver.guess_version()
-        return cls(driver.pid, version, certain, driver.serial)
+        fp = (driver.pid, version, driver.serial)
+        return cls(driver.pid, version, certain, fp, driver.serial)
 
 
 def _gen_descriptors():
