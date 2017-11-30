@@ -32,8 +32,11 @@ from .driver_u2f import open_devices as open_u2f
 from .driver_otp import open_devices as open_otp
 from .native.pyusb import get_usb_backend
 
+import logging
 import usb.core
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class FailedOpeningDeviceException(Exception):
@@ -43,6 +46,7 @@ class FailedOpeningDeviceException(Exception):
 class Descriptor(object):
 
     def __init__(self, pid, version, certain, fingerprint, serial=None):
+        self._logger = logger.getChild('Descriptor')
         self._version = version
         self._certain = certain
         self._pid = pid
@@ -76,6 +80,9 @@ class Descriptor(object):
         return self._key_type
 
     def open_device(self, transports=sum(TRANSPORT), attempts=3):
+        self._logger.debug('transports: 0x%x, self.mode.transports: 0x%x',
+                           transports, self.mode.transports)
+
         transports &= self.mode.transports
         driver = open_driver(transports, self._serial, self._pid, attempts)
         if self._serial is None:
