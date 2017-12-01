@@ -41,7 +41,7 @@ from .slot import slot
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
-import ykman.cli.logging
+import ykman.cli.logging_setup
 import usb.core
 import click
 import sys
@@ -122,7 +122,7 @@ def _run_cmd_for_single(ctx, cmd, transports):
               expose_value=False, is_eager=True)
 @click.option('-d', '--device', type=int, metavar='SERIAL')
 @click.option('-l', '--log-level', default=None,
-              type=click.Choice(ykman.cli.logging.LOG_LEVEL_NAMES),
+              type=click.Choice(ykman.cli.logging_setup.LOG_LEVEL_NAMES),
               help='Enable logging at given verbosity level',
               )
 @click.pass_context
@@ -133,7 +133,7 @@ def cli(ctx, device, log_level):
     """
 
     if log_level:
-        ykman.cli.logging.setup(log_level)
+        ykman.cli.logging_setup.setup(log_level)
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     if subcmd == list_keys:
