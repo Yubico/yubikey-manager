@@ -233,6 +233,8 @@ def open_devices(name_filter='yubico yubikey'):
                 yield CCIDDriver(conn, reader.name)
             except CardConnectionException:
                 try_again.append(reader)
+            except Exception:
+                pass  # Try with next reader.
         if try_again and kill_scdaemon():
             readers = try_again
         else:
