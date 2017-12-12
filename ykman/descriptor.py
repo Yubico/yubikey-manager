@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import
+
 from .util import PID, TRANSPORT, Mode
 from .device import YubiKey
 from .driver_ccid import open_devices as open_ccid

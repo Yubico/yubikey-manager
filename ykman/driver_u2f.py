@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from __future__ import absolute_import
 
 from .native.u2fh import U2fh, u2fh_devs
 from .driver import AbstractDriver, ModeSwitchError

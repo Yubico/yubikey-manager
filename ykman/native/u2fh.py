@@ -24,6 +24,9 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+
+from __future__ import absolute_import
+
 from ctypes import (Structure, POINTER, c_int, c_uint, c_uint8, c_uint16,
                     c_char_p, c_size_t)
 

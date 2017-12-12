@@ -25,11 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import
 
-import six
 from .util import CAPABILITY, TRANSPORT, YUBIKEY, parse_tlvs
 from .driver import AbstractDriver
 from binascii import b2a_hex
+import six
 
 
 YK4_CAPA_TAG = 0x01
