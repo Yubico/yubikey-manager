@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import logging
 import struct
 import subprocess
 import time
@@ -60,6 +61,8 @@ KNOWN_APPLETS = {
     AID.OPGP: CAPABILITY.OPGP,
     AID.OATH: CAPABILITY.OATH
 }
+
+logger = logging.getLogger(__name__)
 
 
 class CCIDError(Exception):
@@ -233,8 +236,11 @@ def open_devices(name_filter='yubico yubikey'):
                 yield CCIDDriver(conn, reader.name)
             except CardConnectionException:
                 try_again.append(reader)
-            except Exception:
-                pass  # Try with next reader.
+            except Exception as e:
+                # Try with next reader.
+                logger.debug('Failed to connect to reader %s', str(reader),
+                             exc_info=e)
+
         if try_again and kill_scdaemon():
             readers = try_again
         else:
