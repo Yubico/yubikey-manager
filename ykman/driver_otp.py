@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 
 import six
+import sys
 import time
 from .native.ykpers import Ykpers
 from ctypes import sizeof, byref, c_int, c_uint, c_size_t, create_string_buffer
@@ -386,10 +387,9 @@ def open_devices():
     if libversion < (1, 18):
         yield OTPDriver(ykpers.yk_open_first_key())
     else:
-        i = 0
-        while True:
+        for i in range(255):
             dev = ykpers.yk_open_key(i)
             if ykpers.yk_get_errno() != 0:
-                break
-            i += 1
+                if not (sys.platform == 'win32' and ykpers.yk_get_errno() == 1):
+                    break  # A bug in ykpers sets errno = 1 on Windows.
             yield OTPDriver(dev)
