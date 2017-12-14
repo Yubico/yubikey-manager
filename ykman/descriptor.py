@@ -138,19 +138,29 @@ def list_drivers(transports=sum(TRANSPORT)):
 
 
 def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
-    for attempt in range(attempts):
-        sleep_time = (attempt + 1) * 0.1
+    logger.debug('Opening driver for serial: %s, pid: %s', serial, pid)
+    for attempt in range(1, attempts + 1):
+        logger.debug('Attempt %d of %d', attempt, attempts)
+        sleep_time = attempt * 0.1
         for drv in list_drivers(transports):
             if drv is not None:
+                logger.debug('Found driver: %s serial: %s, pid: %s',
+                             drv, drv.serial, drv.pid)
                 if serial is not None and drv.serial != serial:
+                    logger.debug('Serial does not match. Want: %s, got: %s',
+                                 serial, drv.serial)
                     del drv
                     continue
                 if pid is not None and drv.pid != pid:
+                    logger.debug('PID does not match. Want: %s, got: %s',
+                                 pid, drv.pid)
                     del drv
                     continue
                 return drv
         #  Wait a little before trying again.
+        logger.debug('Sleeping for %f s', sleep_time)
         time.sleep(sleep_time)
+    logger.debug('No driver found for serial: %s, pid: %s', serial, pid)
     raise FailedOpeningDeviceException()
 
 
