@@ -94,6 +94,9 @@ def _pid_from_name(name):
     return key_type.get_pid(transports)
 
 
+_instances = weakref.WeakSet()
+
+
 class U2FDriver(AbstractDriver):
     """
     libu2f-host based U2F driver
@@ -104,6 +107,7 @@ class U2FDriver(AbstractDriver):
         self._devs = devs
         self._index = index
         self._pid = _pid_from_name(name)
+        _instances.add(self)
 
         self._version = [0, 0, 0]
         self._capa = b''
@@ -145,18 +149,15 @@ class U2FDriver(AbstractDriver):
         except U2FHostError:
             raise ModeSwitchError()
 
-
-_devs = lambda: None  # noqa
+    def __del__(self):
+        _instances.remove(self)
+        if not _instances:
+            u2fh.u2fh_devs_done(self._devs)
 
 
 def open_devices():
-    global _devs
-    devs = _devs()
-    if not devs:
-        devs = POINTER(u2fh_devs)()
-        check(u2fh.u2fh_devs_init(byref(devs)))
-        _devs = weakref.ref(devs, lambda r: u2fh.u2fh_devs_done(r()))
-
+    devs = POINTER(u2fh_devs)()
+    check(u2fh.u2fh_devs_init(byref(devs)))
     max_index = c_uint()
     u2fh.u2fh_devs_discover(devs, byref(max_index))
     resp = create_string_buffer(1024)
