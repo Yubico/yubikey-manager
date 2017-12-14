@@ -32,6 +32,7 @@ from .driver import AbstractDriver, ModeSwitchError
 from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary, parse_tlvs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from binascii import b2a_hex
+import weakref
 import struct
 import six
 
@@ -93,7 +94,7 @@ def _pid_from_name(name):
     return key_type.get_pid(transports)
 
 
-_instances = set()
+_instances = weakref.WeakSet()
 
 
 class U2FDriver(AbstractDriver):
