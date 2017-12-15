@@ -150,8 +150,7 @@ class U2FDriver(AbstractDriver):
             raise ModeSwitchError()
 
     def __del__(self):
-        _instances.remove(self)
-        if not _instances:
+        if not _instances.difference({self}):
             u2fh.u2fh_devs_done(self._devs)
 
 
