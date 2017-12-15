@@ -1,6 +1,6 @@
 #  vim: set fileencoding=utf-8 :
 
-from ykman.util import (b2len, derive_key, format_code, generate_static_pw,
+from ykman.util import (b2len, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
                         parse_tlvs, parse_truncated, time_challenge, Tlv,
                         is_pkcs12)
@@ -22,17 +22,6 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(0x57, b2len(b'\x57'))
         self.assertEqual(0x1234, b2len(b'\x12\x34'))
         self.assertEqual(0xcafed00d, b2len(b'\xca\xfe\xd0\x0d'))
-
-    def test_derive_key(self):
-        self.assertEqual(
-            b'\xb0}\xa1\xe7\xde\x87\xf8\x9a\x87\xa2\xb5\x98\xea\xa2\x18\x8c',
-            derive_key(b'\0\0\0\0\0\0\0\0', u'foobar'))
-        self.assertEqual(
-            b'\xda\x81\x8ek,\xf0\xa2\xd0\xbf\x19\xb3\xdd\xd3K\x83\xf5',
-            derive_key(b'12345678', u'Hallå världen!'))
-        self.assertEqual(
-            b'\xf3\xdf\xa7\x81T\xc8\x102\x99E\xfb\xc4\xb55\xe57',
-            derive_key(b'saltsalt', u'Ťᶒśƫ ᵽĥřӓşḛ'))
 
     def test_format_code(self):
         self.assertEqual('000000', format_code(0))

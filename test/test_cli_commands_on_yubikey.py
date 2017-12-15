@@ -25,7 +25,7 @@ if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
         click.confirm(
             'Run integration tests? This will erase data on the YubiKey,'
             ' make sure it is a key used for development.', abort=True)
-        _one_yubikey = len(list(get_descriptors())) == 1
+        _one_yubikey = len(get_descriptors()) == 1
     except Exception:
         sys.exit()
     _skip = False
@@ -36,7 +36,7 @@ else:
 def _has_mode(mode):
     if not _one_yubikey:
         return False
-    yubikeys = list(get_descriptors())
+    yubikeys = get_descriptors()
     if len(yubikeys) is not 1:
         return False
     return yubikeys[0].mode.has_transport(mode)
@@ -45,7 +45,7 @@ def _has_mode(mode):
 def _get_version():
     if not _one_yubikey:
         return None
-    return list(get_descriptors())[0].version
+    return get_descriptors()[0].version
 
 
 def _is_NEO():
@@ -76,7 +76,7 @@ class TestYkmanInfo(unittest.TestCase):
     def test_ykman_info(self):
         time.sleep(3)
         info = ykman_cli('info')
-        self.assertIn('Device name:', info)
+        self.assertIn('Device type:', info)
         self.assertIn('Serial number:', info)
         self.assertIn('Firmware version:', info)
 
@@ -105,9 +105,9 @@ class TestSlotProgramming(unittest.TestCase):
 
     def test_ykman_program_otp_slot_2(self):
         output = ykman_cli('slot', 'otp', '2', '-f')
-        self.assertIn('Using device serial as public ID:', output)
-        self.assertIn('Using a randomly generated private ID:', output)
-        self.assertIn('Using a randomly generated secret key:', output)
+        self.assertIn('Using YubiKey serial as public ID', output)
+        self.assertIn('Using a randomly generated private ID', output)
+        self.assertIn('Using a randomly generated secret key', output)
         self._check_slot_2_programmed()
 
     def test_ykman_program_chalresp_slot_2(self):
@@ -145,6 +145,7 @@ class TestSlotProgramming(unittest.TestCase):
 
     def test_access_code_slot_2(self):
         ykman_cli('slot', '--access-code', '111111111111', 'static', '2', '-f')
+        self._check_slot_2_programmed()
         ykman_cli('slot', '--access-code', '111111111111', 'delete', '2', '-f')
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: empty', status)
@@ -205,7 +206,7 @@ class TestOATH(unittest.TestCase):
 
     def test_oath_info(self):
         output = ykman_cli('oath', 'info')
-        self.assertIn('OATH version:', output)
+        self.assertIn('version:', output)
 
     def test_oath_add_credential(self):
         ykman_cli('oath', 'add', 'test-name', 'abba')
@@ -246,9 +247,8 @@ class TestOATH(unittest.TestCase):
 
     def test_oath_reset(self):
         output = ykman_cli('oath', 'reset', '-f')
-        self.assertIn(
-            'Success! All credentials have been cleared from the device.',
-            output)
+        self.assertIn('Success! All OATH credentials have been cleared from '
+                      'your YubiKey', output)
 
     def test_oath_hotp_code(self):
         ykman_cli('oath', 'add', '-o', 'HOTP', 'hotp-cred', 'abba')
@@ -262,7 +262,7 @@ class TestOATH(unittest.TestCase):
 
     def test_oath_delete(self):
         ykman_cli('oath', 'add', 'delete-me', 'abba')
-        ykman_cli('oath', 'delete', 'delete-me')
+        ykman_cli('oath', 'delete', 'delete-me', '-f')
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 
@@ -406,7 +406,8 @@ class TestPIV(unittest.TestCase):
             '-m', DEFAULT_MANAGEMENT_KEY)
         output = ykman_cli('piv', 'info')
         self.assertIn(
-            'Management key is stored on device and protected by PIN', output)
+            'Management key is stored on the YubiKey, protected by PIN',
+            output)
         ykman_cli('piv', 'reset', '-f')  # Cleanup, should maybe be done always?
 
     def test_piv_change_pin(self):

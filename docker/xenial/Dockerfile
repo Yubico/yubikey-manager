@@ -34,4 +34,4 @@ RUN mkdir /deb
 RUN mv /yubikey-manager_* /deb
 RUN mv /python3-yubikey-manager_* /deb
 RUN mv /python-yubikey-manager_* /deb
-RUN cd / && tar czf yubikey-manager-debian-builds.tar.gz deb
+RUN cd / && tar czf yubikey-manager-debian-packages.tar.gz deb

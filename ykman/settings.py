@@ -1,4 +1,4 @@
-# Copyright (c) 2013 Yubico AB
+# Copyright (c) 2017 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -27,32 +27,30 @@
 
 from __future__ import absolute_import
 
-from ctypes import (Structure, POINTER, c_int, c_uint, c_uint8, c_uint16,
-                    c_char_p, c_size_t)
-
-from ..yubicommon.ctypes import CLibrary
+import os
+import json
 
 
-u2fh_rc = c_int
-u2fh_initflags = c_uint
-u2fh_devs = type('u2fh_devs', (Structure,), {})
+DIR_NAME = '.ykman'
 
 
-class U2fh(CLibrary):
-    u2fh_strerror = [u2fh_rc], c_char_p
-    u2fh_strerror_name = [u2fh_rc], c_char_p
+def _get_conf_dir():
+    if os.path.isdir(DIR_NAME):
+        return os.path.abspath(DIR_NAME)
+    return os.path.join(os.path.expanduser('~'), DIR_NAME)
 
-    u2fh_check_version = [c_char_p], c_char_p
 
-    u2fh_global_init = [u2fh_initflags], u2fh_rc
-    u2fh_global_done = [], None
+class Settings(dict):
+    def __init__(self, name):
+        self.fname = os.path.join(_get_conf_dir(), name + '.json')
+        if os.path.isfile(self.fname):
+            with open(self.fname, 'r') as f:
+                self.update(json.load(f))
 
-    u2fh_devs_init = [POINTER(POINTER(u2fh_devs))], u2fh_rc
-    u2fh_devs_discover = [POINTER(u2fh_devs), POINTER(c_uint)], u2fh_rc
-    u2fh_devs_done = [POINTER(u2fh_devs)], None
-
-    u2fh_is_alive = [POINTER(u2fh_devs), c_uint], c_int
-    u2fh_sendrecv = [POINTER(u2fh_devs), c_uint, c_uint8, c_char_p, c_uint16,
-                     c_char_p, POINTER(c_size_t)], u2fh_rc
-    u2fh_get_device_description = [POINTER(u2fh_devs), c_int, c_char_p,
-                                   POINTER(c_size_t)], u2fh_rc
+    def write(self):
+        conf_dir = os.path.dirname(self.fname)
+        if not os.path.isdir(conf_dir):
+            os.makedirs(conf_dir)
+        data = json.dumps(self, indent=2)
+        with open(self.fname, 'w') as f:
+            f.write(data)

@@ -38,7 +38,6 @@ from ..driver_otp import YkpersError
 import os
 import struct
 import click
-import hashlib
 
 
 def parse_hex(length):
@@ -56,7 +55,7 @@ click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
 
 
 def _failed_to_write_msg(ctx):
-    ctx.fail('Failed to write to the device. Make sure the device does not '
+    ctx.fail('Failed to write to the YubiKey. Make sure the device does not '
              'have restricted access.')
 
 
@@ -75,7 +74,7 @@ def slot(ctx, access_code):
 
     A slot configuration may be write-protected with an access code. This
     prevents the configuration to be overwritten without the access code
-    provided. Mode switching the device is not possible when a slot is
+    provided. Mode switching the YubiKey is not possible when a slot is
     configured with an access code.
     """
 
@@ -144,7 +143,7 @@ def delete(ctx, slot, force):
 @slot.command()
 @click_slot_argument
 @click.option('-P', '--public-id', required=False,
-              help='Static part of the OTP, defaults to the devices serial '
+              help='Static part of the OTP, defaults to the YubiKey serial '
               'number converted to modhex.', metavar='MODHEX')
 @click.option('-p', '--private-id', required=False, metavar='HEX',
               callback=parse_hex(6), help='6 byte private identifier of the '
@@ -166,7 +165,7 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
     if not public_id:
         if not force:
             public_id = click.prompt(
-                'Enter public ID [blank to use device serial]',
+                'Enter public ID [blank to use YubiKey serial number]',
                 default='',
                 show_default=False)
         if force or public_id == '':
@@ -174,7 +173,7 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
                 ctx.fail('Serial number not set, public-id must be provided')
             public_id = b'\xff\x00' + struct.pack(b'>I', dev.serial)
             click.echo(
-                'Using device serial as public ID: {}'.format(
+                'Using YubiKey serial as public ID: {}'.format(
                     modhex_encode(public_id)))
 
     else:
@@ -302,11 +301,6 @@ def chalresp(ctx, slot, key, totp, touch, force):
     else:
         if totp:
             key = parse_b32_key(key)
-            if len(key) > 64:  # Keys longer than 64 bytes are hashed.
-                key = hashlib.sha1(key).digest()
-            if len(key) > 20:
-                ctx.fail('YubiKey Slots cannot handle TOTP keys over 20 bytes.')
-            key += b'\x00' * (20 - len(key))  # Keys must be padded to 20 bytes.
         else:
             key = parse_key(key)
 
@@ -349,7 +343,7 @@ credential, and read the response. Supports output as a OATH-TOTP code.
     if challenge and totp:
         try:
             challenge = int(challenge)
-        except:
+        except Exception:
             ctx.fail('Timestamp challenge for TOTP must be an integer.')
     try:
         res = dev.driver.calculate(

@@ -25,13 +25,16 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from __future__ import absolute_import
 
 from .native.u2fh import U2fh, u2fh_devs
-from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT, MissingLibrary
+from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary, parse_tlvs
+from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
+from binascii import b2a_hex
+import weakref
 import struct
+import six
 
 
 INS_SELECT = 0xa4
@@ -50,8 +53,9 @@ try:
     # TODO: Allow debug output
     if u2fh.u2fh_global_init(0) is not 0:
         raise Exception('u2fh_global_init failed!')
-    libversion = u2fh.u2fh_check_version(None).decode('ascii')
-except:
+    libversion = tuple(int(x) for x in u2fh.u2fh_check_version(None)
+                       .decode('ascii').split('.'))
+except Exception:
     u2fh = MissingLibrary(
         'libu2f-host not found, U2F connectability not available!')
     libversion = None
@@ -74,25 +78,62 @@ def check(status):
         raise U2FHostError(status)
 
 
+def _pid_from_name(name):
+    if 'Security Key' in name:
+        return PID.SKY_U2F
+
+    if 'Plus' in name:
+        return PID.YKP_OTP_U2F
+
+    transports = 0
+    for t in TRANSPORT:
+        if t.name in name:
+            transports += t
+
+    key_type = YUBIKEY.NEO if 'NEO' in name else YUBIKEY.YK4
+    return key_type.get_pid(transports)
+
+
+_instances = weakref.WeakSet()
+
+
 class U2FDriver(AbstractDriver):
     """
     libu2f-host based U2F driver
-    Version number reported by this driver are minimums determined by heuristics
     """
     transport = TRANSPORT.U2F
-    sky = False
 
-    def __init__(self, devs, index, name=''):
+    def __init__(self, devs, index, name):
         self._devs = devs
         self._index = index
-        if 'Security Key' in name:
-            self.sky = True
+        self._pid = _pid_from_name(name)
+        _instances.add(self)
+
+        self._version = [0, 0, 0]
+        self._capa = b''
+        if self.key_type == YUBIKEY.YK4:
+            self._version[0] = 4
+            try:
+                self._capa = self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
+                data = self._capa
+                c_len, data = six.indexbytes(data, 0), data[1:]
+                data = data[:c_len]
+                for tlv in parse_tlvs(data):
+                    if tlv.tag == 0x02:
+                        self._serial = int(b2a_hex(tlv.value), 16)
+                self._version[1] = 2
+            except U2FHostError:  # Pre 4.2
+                self._version[1] = 1
+        elif self.key_type == YUBIKEY.NEO:
+            self._version = [3, 2, 0]
+        elif self.key_type == YUBIKEY.YKP:
+            self._version = [4, 0, 0]
 
     def read_capabilities(self):
-        try:
-            return self.sendrecv(U2FHID_YK4_CAPABILITIES, b'\x00')
-        except:
-            return None
+        return self._capa
+
+    def guess_version(self):
+        return tuple(self._version), False
 
     def sendrecv(self, cmd, data):
         buf_size = c_size_t(1024)
@@ -109,10 +150,11 @@ class U2FDriver(AbstractDriver):
             raise ModeSwitchError()
 
     def __del__(self):
-        u2fh.u2fh_devs_done(self._devs)
+        if not _instances.difference({self}):
+            u2fh.u2fh_devs_done(self._devs)
 
 
-def open_device():
+def open_devices():
     devs = POINTER(u2fh_devs)()
     check(u2fh.u2fh_devs_init(byref(devs)))
     max_index = c_uint()
@@ -125,4 +167,4 @@ def open_device():
             name = resp.value.decode('utf8')
             if name.startswith('Yubikey') \
                     or name.startswith('Security Key by Yubico'):
-                return U2FDriver(devs, index, name)
+                yield U2FDriver(devs, index, name)

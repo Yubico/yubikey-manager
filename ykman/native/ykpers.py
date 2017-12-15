@@ -51,6 +51,7 @@ class Ykpers(CLibrary):
     yk_init = [], bool
     yk_release = [], bool
 
+    yk_open_key = [c_int], POINTER(YK_KEY)
     yk_open_first_key = [], POINTER(YK_KEY)
     yk_close_key = [POINTER(YK_KEY)], bool
 

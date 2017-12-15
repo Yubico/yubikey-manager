@@ -24,6 +24,9 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+
+from __future__ import absolute_import
+
 import functools
 import click
 import sys
@@ -65,4 +68,7 @@ def click_parse_b32_key(ctx, param, val):
 
 
 def prompt_for_touch():
-    click.echo('Touch your YubiKey...')
+    try:
+        click.echo('Touch your YubiKey...', err=True)
+    except Exception:
+        sys.stderr.write('Touch your YubiKey...\n')

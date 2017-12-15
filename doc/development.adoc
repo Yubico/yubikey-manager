@@ -52,3 +52,22 @@ To run integration tests:
 
 A Vagrantfile with a development environment based on Ubuntu 16.04 is included in the repository.
 Modify the Vagrantfile to set up a USB filter to capture the device with VirtualBox.
+
+
+== Publishing to Ubuntu PPA
+
+ 1. Update version number and signoff in `debian/changelog`.
+ 2. Build and upload package.
+
+For (2) you can use the Vagrant VM in `vagrant/ppa`. You'll need to set up the
+VM to capture the YubiKey containing your signing key. If you use VirtualBox,
+you can do this by uncommenting the USB filter included in the `Vagrantfile`.
+Then:
+
+    alice@work $ cd yubikey-manager/vagrant/ppa
+    alice@work $ vagrant up
+    alice@work $ vagrant ssh
+    ubuntu@ubuntu-xenial $ gpg2 --recv-keys ABCDEF78
+    ubuntu@ubuntu-xenial $ gpg2 --card-status
+    ubuntu@ubuntu-xenial $ cd yubikey-manager
+    ubuntu@ubuntu-xenial $ ~/scripts/make-ppa -k ABCDEF78 -p gpg2

@@ -25,16 +25,16 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import
 
 import six
 import time
 from .native.ykpers import Ykpers
-from ctypes import sizeof, byref, c_uint, c_size_t, create_string_buffer
+from ctypes import sizeof, byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT, MissingLibrary
+from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
+                   parse_totp_hash, format_code, hmac_shorten_key)
 from .scanmap import us
-from ykman.util import time_challenge, parse_totp_hash, format_code
-from hashlib import sha1
 from binascii import a2b_hex, b2a_hex
 
 INS_SELECT = 0xa4
@@ -54,8 +54,9 @@ try:
     ykpers = Ykpers('ykpers-1', '1')
     if not ykpers.yk_init():
         raise Exception('yk_init failed.')
-    libversion = ykpers.ykpers_check_version(None).decode('ascii')
-except:
+    libversion = tuple(int(x) for x in ykpers.ykpers_check_version(None)
+                       .decode('ascii').split('.'))
+except Exception:
     ykpers = MissingLibrary(
         'libykpers not found, slot functionality not available!')
     libversion = None
@@ -103,6 +104,7 @@ class OTPDriver(AbstractDriver):
         self._dev = dev
         self._access_code = None
         self._serial = self._read_serial()
+        self._pid = self._read_pid()
         self._slot1_valid = False
         self._slot2_valid = False
         self._status = (0, 0, 0)
@@ -116,12 +118,17 @@ class OTPDriver(AbstractDriver):
     def access_code(self, value):
         self._access_code = value
 
+    def _read_pid(self):
+        vid, pid = c_int(), c_int()
+        check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
+        return PID(pid.value)
+
     def _read_serial(self):
         serial = c_uint()
         if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
             return serial.value
         else:
-            return None
+            return None  # Serial not visible
 
     def _read_status(self):
         status = ykpers.ykds_alloc()
@@ -144,6 +151,9 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_capabilities(
             self._dev, 0, 0, resp, byref(buf_size)))
         return resp.raw[:buf_size.value]
+
+    def guess_version(self):
+        return self._version, True
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()
@@ -243,6 +253,7 @@ class OTPDriver(AbstractDriver):
         if self._version < (2, 2, 0):
             raise ValueError('challenge-response requires YubiKey 2.2.0 or '
                              'later')
+        key = hmac_shorten_key(key, 'SHA1')
         if len(key) > 20:
             raise ValueError('key lengths >20 bytes not supported')
         cmd = slot_to_cmd(slot)
@@ -293,11 +304,10 @@ class OTPDriver(AbstractDriver):
     def program_hotp(self, slot, key, imf=0, hotp8=False, append_cr=True):
         if self._version < (2, 1, 0):
             raise ValueError('HOTP requires YubiKey 2.1.0 or later')
-        if len(key) > 64:
-            key = sha1(key).digest()
+        key = hmac_shorten_key(key, 'SHA1')
         if len(key) > 20:
             raise ValueError('key lengths >20 bytes not supported')
-        key += b'\0' * (20 - len(key))
+        key = key.ljust(20, b'\0')  # Pad key to 20 bytes
         if imf % 16 != 0:
             raise ValueError('imf must be a multiple of 16')
         cmd = slot_to_cmd(slot)
@@ -372,7 +382,12 @@ class OTPDriver(AbstractDriver):
         ykpers.yk_close_key(self._dev)
 
 
-def open_device():
-    dev = ykpers.yk_open_first_key()
-    if dev:
-        return OTPDriver(dev)
+def open_devices():
+    if libversion < (1, 18):
+        yield OTPDriver(ykpers.yk_open_first_key())
+    else:
+        for i in range(255):
+            dev = ykpers.yk_open_key(i)
+            if not dev:
+                break
+            yield OTPDriver(dev)

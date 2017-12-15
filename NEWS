@@ -1,3 +1,30 @@
+* Version 0.5.0
+ ** API breaking changes:
+  *** OATH: New API more similar to yubioath-android
+ ** CLI breaking changes:
+  *** OATH: Touch prompt now written to stderr instead of stdout
+  *** OATH: `-a|--algorithm` option to `list` command removed
+  *** OATH: Columns in `code` command are now dymanically spaced depending on contents
+  *** OATH: `delete` command now requires confirmation or `-f|--force` argument
+  *** OATH: IDs printed by `list` command now include TOTP period if not 30
+  *** Changed outputs:
+   **** INFO: "Device name" output changed to "Device type"
+   **** PIV: "Management key is stored on device" output changed to "Management key is stored on the YubiKey"
+   **** PIV: "All PIV data have been cleared from the device" output changed to "All PIV data have been cleared from your YubiKey"
+   **** PIV: "The current management key is stored on the device" prompt changed to "The current management key is stored on the YubiKey"
+   **** SLOT: "blank to use device serial" prompt changed to "blank to use YubiKey serial number"
+   **** SLOT: "Using device serial" output changed to "Using YubiKey device serial"
+   **** Lots of failure case outputs changed
+ ** New features:
+  *** Support for multiple devices via new top-level option `-d|--device`
+  *** New top-level option `-l|--log-level` to enable logging
+  *** OATH: Support for remembering passwords locally.
+  *** OATH: New option `-s|--single` for `code` command
+  *** PIV: `set-pin-retries` command now warns that PIN and PUK will be reset to factory defaults, and prints those defaults after resetting
+ ** API bug fixes:
+  *** OATH: `valid_from` and `valid_to` for `Code`s are now absolute instead of relative to the credential period
+  *** OATH: `period` for non-TOTP `Code`s is now `None`
+
 * Version 0.4.6 (released 2017-10-17)
  ** Will now attempt to open device 3 times before failing
  ** OpenPGP: Don't say data is removed when not

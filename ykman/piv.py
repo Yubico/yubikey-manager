@@ -278,30 +278,30 @@ def _get_key_data(key):
 
         if key.key_size == 1024:
             algo = ALGO.RSA1024
-            l = 64
+            ln = 64
         elif key.key_size == 2048:
             algo = ALGO.RSA2048
-            l = 128
+            ln = 128
         else:
             raise ValueError('Unsupported RSA key size!')
 
         priv = key.private_numbers()
-        data = Tlv(0x01, int_to_bytes(priv.p, l)) + \
-            Tlv(0x02, int_to_bytes(priv.q, l)) + \
-            Tlv(0x03, int_to_bytes(priv.dmp1, l)) + \
-            Tlv(0x04, int_to_bytes(priv.dmq1, l)) + \
-            Tlv(0x05, int_to_bytes(priv.iqmp, l))
+        data = Tlv(0x01, int_to_bytes(priv.p, ln)) + \
+            Tlv(0x02, int_to_bytes(priv.q, ln)) + \
+            Tlv(0x03, int_to_bytes(priv.dmp1, ln)) + \
+            Tlv(0x04, int_to_bytes(priv.dmq1, ln)) + \
+            Tlv(0x05, int_to_bytes(priv.iqmp, ln))
     elif isinstance(key, ec.EllipticCurvePrivateKey):
         if isinstance(key.curve, ec.SECP256R1):
             algo = ALGO.ECCP256
-            l = 32
+            ln = 32
         elif isinstance(key.curve, ec.SECP384R1):
             algo = ALGO.ECCP384
-            l = 48
+            ln = 48
         else:
             raise ValueError('Unsupported elliptic curve!')
         priv = key.private_numbers()
-        data = Tlv(0x06, int_to_bytes(priv.private_value, l))
+        data = Tlv(0x06, int_to_bytes(priv.private_value, ln))
     else:
         raise ValueError('Unsupported key type!')
     return algo, data
@@ -330,18 +330,18 @@ def _pkcs1_15_pad(algorithm, message):
 
 
 _sign_len_conditions = {
-    ALGO.RSA1024: lambda l: l == 128,
-    ALGO.RSA2048: lambda l: l == 256,
-    ALGO.ECCP256: lambda l: l <= 32,
-    ALGO.ECCP384: lambda l: l <= 48
+    ALGO.RSA1024: lambda ln: ln == 128,
+    ALGO.RSA2048: lambda ln: ln == 256,
+    ALGO.ECCP256: lambda ln: ln <= 32,
+    ALGO.ECCP384: lambda ln: ln <= 48
 }
 
 
 _decrypt_len_conditions = {
-    ALGO.RSA1024: lambda l: l == 128,
-    ALGO.RSA2048: lambda l: l == 256,
-    ALGO.ECCP256: lambda l: l == 65,
-    ALGO.ECCP384: lambda l: l == 97
+    ALGO.RSA1024: lambda ln: ln == 128,
+    ALGO.RSA2048: lambda ln: ln == 256,
+    ALGO.ECCP256: lambda ln: ln == 65,
+    ALGO.ECCP384: lambda ln: ln == 97
 }
 
 

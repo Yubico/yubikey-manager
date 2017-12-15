@@ -28,11 +28,12 @@
 from __future__ import absolute_import, print_function
 
 from ykman import __version__
-from ..util import TRANSPORT, Cve201715361VulnerableError
+from ..util import TRANSPORT, Mode, Cve201715361VulnerableError
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
-from ..descriptor import get_descriptors, FailedOpeningDeviceException
+from ..descriptor import (get_descriptors, list_drivers, open_device,
+                          FailedOpeningDeviceException)
 from .util import click_skip_on_help
 from .info import info
 from .mode import mode
@@ -40,12 +41,10 @@ from .slot import slot
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
+import ykman.cli.logging_setup
 import usb.core
 import click
 import sys
-
-
-COMMANDS = (info, mode, slot, openpgp, oath, piv)
 
 
 CLICK_CONTEXT_SETTINGS = dict(
@@ -59,10 +58,12 @@ def print_version(ctx, param, value):
         return
     click.echo('YubiKey Manager (ykman) version: {}'.format(__version__))
     libs = []
-    libs.append('libykpers ' + (
-        ykpers_version if ykpers_version is not None else 'not found!'))
-    libs.append('libu2f-host ' + (
-        u2fhost_version if u2fhost_version is not None else 'not found!'))
+    libs.append('libykpers ' + ('.'.join('%d' % d for d in ykpers_version)
+                                if ykpers_version is not None
+                                else 'not found!'))
+    libs.append('libu2f-host ' + ('.'.join('%d' % d for d in u2fhost_version)
+                                  if u2fhost_version is not None
+                                  else 'not found!'))
     usb_lib = get_usb_backend_version()
     libs.append(usb_lib or '<pyusb backend missing>')
     click.echo('Libraries:')
@@ -71,41 +72,111 @@ def print_version(ctx, param, value):
     ctx.exit()
 
 
+def _disabled_transport(ctx, transports, cmd_name):
+    req = ', '.join((t.name for t in TRANSPORT if t & transports))
+    click.echo("Command '{}' requires one of the following transports "
+               "to be enabled: '{}'.".format(cmd_name, req))
+    ctx.fail("Use 'ykman mode' to set the enabled connections.")
+
+
+def _run_cmd_for_serial(ctx, cmd, transports, serial):
+    try:
+        ctx.obj['dev'] = open_device(transports, serial=serial)
+    except FailedOpeningDeviceException:
+        try:  # Retry, any transport
+            dev = open_device(serial=serial)
+            if not dev.mode.transports & transports:
+                if dev.capabilities & transports:
+                    _disabled_transport(ctx, transports, cmd)
+                else:
+                    ctx.fail("Command '{}' is not supported by this device."
+                             .format(cmd))
+        except FailedOpeningDeviceException:
+            ctx.fail('Failed connecting to a YubiKey with serial: {}'
+                     .format(serial))
+
+
+def _run_cmd_for_single(ctx, cmd, transports):
+    try:
+        descriptors = get_descriptors()
+    except usb.core.NoBackendError:
+        ctx.fail('No PyUSB backend detected!')
+    n_keys = len(descriptors)
+    if n_keys == 0:
+        ctx.fail('No YubiKey detected!')
+    if n_keys > 1:
+        ctx.fail('Multiple YubiKeys detected. Use --device SERIAL to specify '
+                 'which one to use.')
+    descriptor = descriptors[0]
+    if descriptor.mode.transports & transports:
+        try:
+            ctx.obj['dev'] = descriptor.open_device(transports)
+        except FailedOpeningDeviceException:
+            ctx.fail('Failed connecting to the YubiKey.')
+    else:
+        _disabled_transport(ctx, transports, cmd)
+
+
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option('-v', '--version', is_flag=True, callback=print_version,
               expose_value=False, is_eager=True)
+@click.option('-d', '--device', type=int, metavar='SERIAL')
+@click.option('-l', '--log-level', default=None,
+              type=click.Choice(ykman.cli.logging_setup.LOG_LEVEL_NAMES),
+              help='Enable logging at given verbosity level',
+              )
 @click.pass_context
 @click_skip_on_help
-def cli(ctx):
+def cli(ctx, device, log_level):
     """
     Configure your YubiKey via the command line.
     """
+
+    if log_level:
+        ykman.cli.logging_setup.setup(log_level)
+
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
+    if subcmd == list_keys:
+        return
+
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
-        try:
-            descriptors = list(get_descriptors())
-        except usb.core.NoBackendError:
-            ctx.fail('No PyUSB backend detected!')
-        n_keys = len(descriptors)
-        if n_keys == 0:
-            ctx.fail('No YubiKey detected!')
-        if n_keys > 1:
-            ctx.fail('Multiple YubiKeys detected. Only a single YubiKey at a '
-                     'time is supported.')
-        descriptor = descriptors[0]
-        if descriptor.mode.transports & transports:
-            try:
-                ctx.obj['dev'] = descriptor.open_device(transports)
-                if not ctx.obj['dev']:  # Key should be there, busy?
-                    raise FailedOpeningDeviceException()
-            except FailedOpeningDeviceException:
-                ctx.fail('Failed connecting to the YubiKey.')
+        if device is not None:
+            _run_cmd_for_serial(ctx, subcmd.name, transports, device)
         else:
-            req = ', '.join((t.name for t in TRANSPORT if t & transports))
-            click.echo("Command '{}' requires one of the following transports "
-                       "to be enabled: '{}'.".format(subcmd.name, req))
-            ctx.fail("Use 'ykman mode' to set the enabled connections.")
+            _run_cmd_for_single(ctx, subcmd.name, transports)
+
+
+@cli.command('list')
+@click.option('-s', '--serials', is_flag=True, help='Output only serial '
+              'numbers, one per line.')
+@click.pass_context
+def list_keys(ctx, serials):
+    """
+    List connected YubiKeys.
+    """
+    descriptors = get_descriptors()
+    handled = set()
+    for drv in list_drivers():
+        serial = drv.serial
+        if serial not in handled:
+            handled.add(serial)
+            matches = [d for d in descriptors if d.pid == drv.pid]
+            if len(matches) > 0:
+                d = matches[0]
+                descriptors.remove(d)
+                if serials:
+                    click.echo(serial)
+                else:
+                    click.echo('{} [{}] Serial: {}'.format(
+                        drv.key_type.value,
+                        Mode(drv.transports),
+                        serial or 'Not available')
+                    )
+        del drv
+
+
+COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv)
 
 
 for cmd in COMMANDS:

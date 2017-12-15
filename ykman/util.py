@@ -25,12 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import
+
 import os
 import six
 import struct
-import hashlib
 import re
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
@@ -38,12 +38,6 @@ from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
-
-try:
-    from urlparse import urlparse, parse_qs
-    from urllib import unquote
-except ImportError:
-    from urllib.parse import unquote, urlparse, parse_qs
 
 
 class BitflagEnum(IntEnum):
@@ -105,6 +99,46 @@ class Cve201715361VulnerableError(Exception):
         )
 
 
+@unique
+class YUBIKEY(Enum):
+    YKS = 'YubiKey Standard'
+    NEO = 'YubiKey NEO'
+    SKY = 'FIDO U2F Security Key by Yubico'
+    YKP = 'YubiKey Plus'
+    YK4 = 'YubiKey 4'
+
+    def get_pid(self, transports):
+        suffix = '_'.join(t.name for t in TRANSPORT.split(transports))
+        return PID[self.name + '_' + suffix]
+
+
+@unique
+class PID(IntEnum):
+    YKS_OTP = 0x0010
+    NEO_OTP = 0x0110
+    NEO_OTP_CCID = 0x0111
+    NEO_CCID = 0x0112
+    NEO_U2F = 0x0113
+    NEO_OTP_U2F = 0x0114
+    NEO_U2F_CCID = 0x0115
+    NEO_OTP_U2F_CCID = 0x0116
+    SKY_U2F = 0x0120
+    YK4_OTP = 0x0401
+    YK4_U2F = 0x0402
+    YK4_OTP_U2F = 0x0403
+    YK4_CCID = 0x0404
+    YK4_OTP_CCID = 0x0405
+    YK4_U2F_CCID = 0x0406
+    YK4_OTP_U2F_CCID = 0x0407
+    YKP_OTP_U2F = 0x0410
+
+    def get_type(self):
+        return YUBIKEY[self.name.split('_', 1)[0]]
+
+    def get_transports(self):
+        return sum(TRANSPORT[x] for x in self.name.split('_')[1:])
+
+
 class Mode(object):
     _modes = [
         TRANSPORT.OTP,  # 0x00
@@ -144,6 +178,10 @@ class Mode(object):
         code = code & 0b00000111
         return cls(cls._modes[code])
 
+    @classmethod
+    def from_pid(cls, pid):
+        return cls(PID(pid).get_transports())
+
 
 class Tlv(bytes):
 
@@ -153,19 +191,19 @@ class Tlv(bytes):
 
     @property
     def length(self):
-        l = six.indexbytes(self, 1)
+        ln = six.indexbytes(self, 1)
         offs = 2
-        if l > 0x80:
-            n_bytes = l - 0x80
-            l = b2len(self[offs:offs + n_bytes])
-        return l
+        if ln > 0x80:
+            n_bytes = ln - 0x80
+            ln = b2len(self[offs:offs + n_bytes])
+        return ln
 
     @property
     def value(self):
-        l = self.length
-        if l == 0:
+        ln = self.length
+        if ln == 0:
             return b''
-        return bytes(self[-l:])
+        return bytes(self[-ln:])
 
     def __repr__(self):
         return u'{}(tag={:02x}, value={})'.format(
@@ -182,13 +220,13 @@ class Tlv(bytes):
                 value = b''
             else:  # Called with binary TLV data
                 tag = six.indexbytes(data, 0)
-                l = six.indexbytes(data, 1)
+                ln = six.indexbytes(data, 1)
                 offs = 2
-                if l > 0x80:
-                    n_bytes = l - 0x80
-                    l = b2len(data[offs:offs + n_bytes])
+                if ln > 0x80:
+                    n_bytes = ln - 0x80
+                    ln = b2len(data[offs:offs + n_bytes])
                     offs = offs + n_bytes
-                value = data[offs:offs+l]
+                value = data[offs:offs+ln]
         elif len(args) == 2:  # Called with tag and value.
             (tag, value) = args
         else:
@@ -226,11 +264,11 @@ def parse_tlvs(data):
 
 
 def b2len(bs):
-    l = 0
+    ln = 0
     for b in six.iterbytes(bs):
-        l *= 256
-        l += b
-    return l
+        ln *= 256
+        ln += b
+    return ln
 
 
 _HEX = b'0123456789abcdef'
@@ -265,11 +303,6 @@ def generate_static_pw(length):
                            for d in six.iterbytes(data)))
 
 
-def derive_key(salt, passphrase):
-    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
-    return kdf.derive(passphrase.encode('utf-8'))
-
-
 def format_code(code, digits=6, steam=False):
     STEAM_CHAR_TABLE = '23456789BCDFGHJKMNPQRTVWXY'
     if steam:
@@ -293,32 +326,23 @@ def parse_truncated(resp):
 
 def hmac_shorten_key(key, algo):
     if algo.upper() == 'SHA1':
-        h = hashlib.sha1()
+        h = hashes.SHA1()
     elif algo.upper() == 'SHA256':
-        h = hashlib.sha256()
+        h = hashes.SHA256()
+    elif algo.upper() == 'SHA512':
+        h = hashes.SHA512()
     else:
         raise ValueError('Unsupported algorithm!')
+
     if len(key) > h.block_size:
+        h = hashes.Hash(h, default_backend())
         h.update(key)
-        key = h.digest()
+        key = h.finalize()
     return key
 
 
 def time_challenge(timestamp, period=30):
     return struct.pack('>q', int(timestamp // period))
-
-
-def parse_uri(val):
-    try:
-        uri = val.strip()
-        parsed = urlparse(uri)
-        assert parsed.scheme == 'otpauth'
-        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
-        params['name'] = unquote(parsed.path)[1:]  # Unquote and strip leading /
-        params['type'] = parsed.hostname
-        return params
-    except:
-        raise ValueError('URI seems to have the wrong format.')
 
 
 def parse_key(val):
@@ -351,7 +375,7 @@ def parse_private_key(data, password):
         except ValueError:
             # Cryptography raises ValueError if decryption fails.
             raise
-        except:
+        except Exception:
             pass
 
     # PKCS12
@@ -369,7 +393,7 @@ def parse_private_key(data, password):
     try:
         return serialization.load_der_private_key(
             data, password, backend=default_backend())
-    except:
+    except Exception:
         pass
 
     # All parsing failed
@@ -384,7 +408,7 @@ def parse_certificate(data, password):
     if data.startswith(b'-----'):
         try:
             return x509.load_pem_x509_certificate(data, default_backend())
-        except:
+        except Exception:
             pass
 
     # PKCS12
@@ -400,7 +424,7 @@ def parse_certificate(data, password):
     # DER
     try:
         return x509.load_der_x509_certificate(data, default_backend())
-    except:
+    except Exception:
         pass
 
     raise ValueError('Could not parse certificate.')

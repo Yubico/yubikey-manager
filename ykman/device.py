@@ -25,20 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import
 
-import six
-from .util import CAPABILITY, TRANSPORT, parse_tlvs
+from .util import CAPABILITY, TRANSPORT, YUBIKEY, parse_tlvs
 from .driver import AbstractDriver
 from binascii import b2a_hex
+import six
 
 
 YK4_CAPA_TAG = 0x01
 YK4_SERIAL_TAG = 0x02
 YK4_ENABLED_TAG = 0x03
-
-
-class FailedOpeningDeviceException(Exception):
-    pass
 
 
 _NULL_DRIVER = AbstractDriver()
@@ -59,9 +56,9 @@ class YubiKey(object):
             raise ValueError('No driver given!')
         self._descriptor = descriptor
         self._driver = driver
-        self.device_name = descriptor.device_name
+        self.device_name = descriptor.key_type.value
 
-        if driver.transport == TRANSPORT.U2F and driver.sky:
+        if driver.key_type == YUBIKEY.SKY:
             self.capabilities = CAPABILITY.U2F
             self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
@@ -116,6 +113,10 @@ class YubiKey(object):
     @property
     def version(self):
         return self._descriptor.version
+
+    @property
+    def version_certain(self):
+        return self._descriptor.version_certain
 
     @property
     def serial(self):
