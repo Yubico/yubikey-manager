@@ -2,4 +2,4 @@ yubikey-manager (0.5.0-1) xenial; urgency=low
 
   * Build for ppa
 
- -- Emil Lundberg <emil@yubico.com>  Tue, 17 Oct 2017 17:19:03 +0200
+ -- Emil Lundberg <emil@yubico.com>  Fri, 15 Dec 2017 19:59:28 +0100
