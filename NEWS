@@ -1,4 +1,4 @@
-* Version 0.5.0
+* Version 0.5.0 (released 2017-12-15)
  ** API breaking changes:
   *** OATH: New API more similar to yubioath-android
  ** CLI breaking changes:
@@ -22,8 +22,8 @@
   *** OATH: New option `-s|--single` for `code` command
   *** PIV: `set-pin-retries` command now warns that PIN and PUK will be reset to factory defaults, and prints those defaults after resetting
  ** API bug fixes:
-  *** OATH: `valid_from` and `valid_to` for `Code`s are now absolute instead of relative to the credential period
-  *** OATH: `period` for non-TOTP `Code`s is now `None`
+  *** OATH: `valid_from` and `valid_to` for `Code` are now absolute instead of relative to the credential period
+  *** OATH: `period` for non-TOTP `Code` is now `None`
 
 * Version 0.4.6 (released 2017-10-17)
  ** Will now attempt to open device 3 times before failing
