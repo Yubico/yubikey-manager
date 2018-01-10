@@ -33,6 +33,7 @@ from .driver_ccid import (
     APDUError, SW_OK, SW_NO_INPUT_DATA, SW_CONDITIONS_NOT_SATISFIED, INS_SELECT)
 from enum import IntEnum, unique
 from binascii import b2a_hex
+from collections import namedtuple
 
 
 @unique
@@ -58,6 +59,9 @@ class INS(IntEnum):  # noqa: N801
     TERMINATE = 0xe6
     ACTIVATE = 0x44
     PUT_DATA = 0xda
+
+
+PinRetries = namedtuple('PinRetries', ['pin', 'reset', 'admin'])
 
 
 PW1 = 0x81
@@ -96,19 +100,14 @@ class OpgpController(object):
         return tuple(six.iterbytes(data[4:7]))
 
     def get_remaining_pin_tries(self):
-        (pin, reset, admin) = self._get_remaining_pin_tries()
-        return {
-            'pin': pin,
-            'reset': reset,
-            'admin': admin,
-        }
+        return PinRetries(*self._get_remaining_pin_tries())
 
     def _block_pins(self):
         retries = self.get_remaining_pin_tries()
 
-        for _ in range(retries['pin']):
+        for _ in range(retries.pin):
             self.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN, check=None)
-        for _ in range(retries['admin']):
+        for _ in range(retries.admin):
             self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN, check=None)
 
     def reset(self):
