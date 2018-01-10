@@ -98,9 +98,9 @@ def info(ctx):
     controller = ctx.obj['controller']
     click.echo('OpenPGP version: %d.%d.%d' % controller.version)
     retries = controller.get_remaining_pin_tries()
-    click.echo('PIN tries remaining: {}'.format(retries[0]))
-    click.echo('Reset code tries remaining: {}'.format(retries[1]))
-    click.echo('Admin PIN tries remaining: {}'.format(retries[2]))
+    click.echo('PIN tries remaining: {}'.format(retries['pin']))
+    click.echo('Reset code tries remaining: {}'.format(retries['reset']))
+    click.echo('Admin PIN tries remaining: {}'.format(retries['admin']))
 
 
 @openpgp.command()
