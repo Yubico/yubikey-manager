@@ -95,12 +95,9 @@ class OpgpController(object):
         bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
         return tuple(int(bcd_hex[i:i+2]) for i in range(0, 6, 2))
 
-    def _get_remaining_pin_tries(self):
-        data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
-        return tuple(six.iterbytes(data[4:7]))
-
     def get_remaining_pin_tries(self):
-        return PinRetries(*self._get_remaining_pin_tries())
+        data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
+        return PinRetries(*six.iterbytes(data[4:7]))
 
     def _block_pins(self):
         retries = self.get_remaining_pin_tries()
@@ -122,7 +119,7 @@ class OpgpController(object):
         try:
             self.send_apdu(0, INS.VERIFY, 0, pw, pin)
         except APDUError:
-            pw_remaining = self._get_remaining_pin_tries()[pw-PW1]
+            pw_remaining = self.get_remaining_pin_tries()[pw-PW1]
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))
 
