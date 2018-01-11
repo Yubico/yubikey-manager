@@ -1,3 +1,6 @@
+* Version 0.5.1 (unreleased)
+ ** OpenPGP: Expose remaining PIN retries in info command and API.
+
 * Version 0.5.0 (released 2017-12-15)
  ** API breaking changes:
   *** OATH: New API more similar to yubioath-android
