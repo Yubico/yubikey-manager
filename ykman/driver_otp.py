@@ -29,6 +29,7 @@ from __future__ import absolute_import
 
 import six
 import time
+import logging
 from .native.ykpers import Ykpers
 from ctypes import sizeof, byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
@@ -36,6 +37,8 @@ from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
                    parse_totp_hash, format_code, hmac_shorten_key)
 from .scanmap import us
 from binascii import a2b_hex, b2a_hex
+
+logger = logging.getLogger(__name__)
 
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
@@ -123,12 +126,16 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
         return PID(pid.value)
 
-    def _read_serial(self):
+    def _read_serial(self, attempts=3):
         serial = c_uint()
-        if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
-            return serial.value
-        else:
-            return None  # Serial not visible
+        for i in range(1, attempts):
+            if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
+                return serial.value
+            else:
+                logger.debug(
+                    'Failed to read serial from device. Attempt %s.', i)
+                continue
+        return None  # Serial not visible
 
     def _read_status(self):
         status = ykpers.ykds_alloc()
@@ -286,6 +293,10 @@ class OTPDriver(AbstractDriver):
         # Give the YubiKey 10 tries to do the calculation.
         for idx in range(10):
             try:
+                logger.debug(
+                    'Sending a challenge to the device. Slot %s. '
+                    'Attempt %s. Wait for touch is %s.', slot, idx,
+                    wait_for_touch)
                 check(ykpers.yk_challenge_response(
                         self._dev, SLOTS[slot], wait_for_touch,
                         len(challenge), challenge, sizeof(resp), resp))
@@ -294,8 +305,17 @@ class OTPDriver(AbstractDriver):
                     # Error 11 when wait_for_touch is true is an unexpected
                     # state, let's try again.
                     continue
-                else:
+                elif wait_for_touch is False:
+                    logger.debug('Got %s as expected.', e)
+                    # NEOs and very old YK4s might still be blinking,
+                    # lets try to read the serial to cancel it.
+                    self._read_serial()
                     raise
+                else:
+                    logger.debug('YkpersError: %s', e)
+                    raise
+            # We got a result, break the loop.
+            break
         if totp:
             return format_code(parse_totp_hash(resp.raw[:20]), digits)
         else:
