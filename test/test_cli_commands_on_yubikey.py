@@ -103,11 +103,18 @@ class TestSlotStatus(unittest.TestCase):
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
 
-    def test_ykman_program_otp_slot_2(self):
+    def test_ykman_program_otp_slot_2_force_generated(self):
         output = ykman_cli('slot', 'otp', '2', '-f')
         self.assertIn('Using YubiKey serial as public ID', output)
         self.assertIn('Using a randomly generated private ID', output)
         self.assertIn('Using a randomly generated secret key', output)
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_cli_arguments(self):
+        ykman_cli(
+            'slot', 'otp', '2', '--public-id', 'vvccccfiluij',
+            '--private-id', '267e0a88949b',
+            '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4', '-f')
         self._check_slot_2_programmed()
 
     def test_ykman_program_chalresp_slot_2(self):
