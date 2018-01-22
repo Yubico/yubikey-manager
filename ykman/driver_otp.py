@@ -126,15 +126,13 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
         return PID(pid.value)
 
-    def _read_serial(self, attempts=3):
+    def _read_serial(self):
         serial = c_uint()
-        for i in range(1, attempts):
-            if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
-                return serial.value
-            else:
-                logger.debug(
-                    'Failed to read serial from device. Attempt %s.', i)
-                continue
+        if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
+            return serial.value
+        else:
+            logger.debug(
+                'Failed to read serial from device.')
         return None  # Serial not visible
 
     def _read_status(self):
@@ -295,7 +293,7 @@ class OTPDriver(AbstractDriver):
             try:
                 logger.debug(
                     'Sending a challenge to the device. Slot %s. '
-                    'Attempt %s. Wait for touch is %s.', slot, idx,
+                    'Attempt %s. Wait for touch is %s.', slot, idx + 1,
                     wait_for_touch)
                 check(ykpers.yk_challenge_response(
                         self._dev, SLOTS[slot], wait_for_touch,
