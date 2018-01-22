@@ -170,14 +170,13 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
                 show_default=False)
         if force or public_id == '':
             if dev.serial is None:
-                ctx.fail('Serial number not set, public-id must be provided')
-            public_id = b'\xff\x00' + struct.pack(b'>I', dev.serial)
+                ctx.fail('Serial number not set, public ID must be provided')
+            public_id = modhex_encode(
+                b'\xff\x00' + struct.pack(b'>I', dev.serial))
             click.echo(
-                'Using YubiKey serial as public ID: {}'.format(
-                    modhex_encode(public_id)))
+                'Using YubiKey serial as public ID: {}'.format(public_id))
 
-    else:
-        public_id = modhex_decode(public_id)
+    public_id = modhex_decode(public_id)
 
     if not private_id:
         if not force:
@@ -190,6 +189,8 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
             click.echo(
                 'Using a randomly generated private ID: {}'.format(
                     b2a_hex(private_id).decode('ascii')))
+        else:
+            private_id = a2b_hex(private_id)
 
     if not key:
         if not force:
@@ -201,6 +202,8 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
             click.echo(
                 'Using a randomly generated secret key: {}'.format(
                     b2a_hex(key).decode('ascii')))
+        else:
+            key = a2b_hex(key)
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True)
