@@ -733,7 +733,7 @@ class PivController(object):
         for slot in set(SLOT) - {SLOT.CARD_MANAGEMENT, SLOT.ATTESTATION}:
             try:
                 certs[slot] = self.read_certificate(slot)
-            except APDUError as e:
+            except APDUError:
                 pass
         return certs
 
