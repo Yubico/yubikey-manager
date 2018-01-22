@@ -35,9 +35,13 @@ from ..util import (
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
+import logging
 import os
 import struct
 import click
+
+
+logger = logging.getLogger(__name__)
 
 
 def parse_hex(length):
@@ -54,7 +58,8 @@ click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
                                      callback=lambda c, p, v: int(v))
 
 
-def _failed_to_write_msg(ctx):
+def _failed_to_write_msg(ctx, exc_info):
+    logger.error('Failed to write message to driver', exc_info=exc_info)
     ctx.fail('Failed to write to the YubiKey. Make sure the device does not '
              'have restricted access.')
 
@@ -115,8 +120,8 @@ def swap(ctx):
     click.echo('Swapping slots...')
     try:
         dev.driver.swap_slots()
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @slot.command()
@@ -136,8 +141,8 @@ def delete(ctx, slot, force):
     click.echo('Deleting the configuration of slot {}...'.format(slot))
     try:
         dev.driver.zap_slot(slot)
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @slot.command()
@@ -209,8 +214,8 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
                            abort=True)
     try:
         dev.driver.program_otp(slot, key, public_id, private_id, not no_enter)
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @slot.command()
@@ -258,8 +263,8 @@ a random one may be generated.
 
     try:
         dev.driver.program_static(slot, password, not no_enter)
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @slot.command()
@@ -312,8 +317,8 @@ def chalresp(ctx, slot, key, totp, touch, force):
                            .format(cred_type, slot), abort=True)
     try:
         dev.driver.program_chalresp(slot, key, touch)
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @slot.command()
@@ -346,7 +351,8 @@ credential, and read the response. Supports output as a OATH-TOTP code.
     if challenge and totp:
         try:
             challenge = int(challenge)
-        except Exception:
+        except Exception as e:
+            logger.error('Error', exc_info=e)
             ctx.fail('Timestamp challenge for TOTP must be an integer.')
     try:
         res = dev.driver.calculate(
@@ -403,8 +409,8 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     try:
         dev.driver.program_hotp(
             slot, key, counter, int(digits) == 8, not no_enter)
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @slot.command()
@@ -438,8 +444,8 @@ def settings(ctx, slot, enter, pacing, force):
 
     try:
         dev.driver.update_settings(slot, enter=enter, pacing=pacing)
-    except YkpersError:
-        _failed_to_write_msg(ctx)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 slot.transports = TRANSPORT.OTP

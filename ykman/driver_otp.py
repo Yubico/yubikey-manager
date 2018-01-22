@@ -59,7 +59,8 @@ try:
         raise Exception('yk_init failed.')
     libversion = tuple(int(x) for x in ykpers.ykpers_check_version(None)
                        .decode('ascii').split('.'))
-except Exception:
+except Exception as e:
+    logger.error('libykpers not found', exc_info=e)
     ykpers = MissingLibrary(
         'libykpers not found, slot functionality not available!')
     libversion = None

@@ -43,8 +43,12 @@ from cryptography.x509.oid import NameOID
 from cryptography import utils
 from binascii import b2a_hex, a2b_hex
 import click
+import logging
 import os
 import datetime
+
+
+logger = logging.getLogger(__name__)
 
 
 @click_callback()
@@ -361,7 +365,8 @@ def attest(ctx, slot, certificate, format):
     controller = ctx.obj['controller']
     try:
         cert = controller.attest(slot)
-    except APDUError:
+    except APDUError as e:
+        logger.error('Attestation failed', exc_info=e)
         ctx.fail('Attestation failed.')
     certificate.write(cert.public_bytes(encoding=format))
 
@@ -387,6 +392,9 @@ def export_certificate(ctx, slot, format, certificate):
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail('No certificate found.')
+        else:
+            logger.error('Failed to read certificate from slot %s', slot,
+                         exc_info=e)
     certificate.write(cert.public_bytes(encoding=format))
 
 
@@ -442,7 +450,8 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo('Default PINs are set.')
         click.echo('PIN:    123456')
         click.echo('PUK:    12345678')
-    except Exception:
+    except Exception as e:
+        logger.error('Failed to set PIN retries', e)
         ctx.fail('Setting pin retries failed.')
 
 
@@ -501,7 +510,9 @@ def generate_certificate(
     try:
         cert = controller.sign_cert_builder(
             slot, algorithm, builder, touch_callback=prompt_for_touch)
-    except APDUError:
+    except APDUError as e:
+        logger.error('Failed to generate certificate for slot %s', slot,
+                     exc_info=e)
         ctx.fail('Certificate generation failed.')
 
     # Verify that the public key used in the certificate
@@ -557,7 +568,10 @@ def generate_certificate_signing_request(
     try:
         csr = controller.sign_csr_builder(
             slot, public_key, builder, touch_callback=prompt_for_touch)
-    except APDUError:
+    except APDUError as e:
+        logger.error(
+            'Failed to generate Certificate Signing Request for slot %s', slot,
+            exc_info=e)
         ctx.fail('Certificate Signing Request generation failed.')
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
 
@@ -600,7 +614,8 @@ def change_pin(ctx, pin, new_pin):
             show_default=False, confirmation_prompt=True)
     try:
         controller.change_pin(pin, new_pin)
-    except APDUError:
+    except APDUError as e:
+        logger.error('Failed to change PIN', exc_info=e)
         ctx.fail('Changing the PIN failed.')
     click.echo('New PIN set.')
 
@@ -624,7 +639,8 @@ def change_puk(ctx, puk, new_puk):
             show_default=False, confirmation_prompt=True)
     try:
         controller.change_puk(puk, new_puk)
-    except APDUError:
+    except APDUError as e:
+        logger.error('Failed to change PUK', exc_info=e)
         ctx.fail('Changing the PUK failed.')
     click.echo('New PUK set.')
 
@@ -700,7 +716,8 @@ def change_management_key(
     try:
         controller.set_mgm_key(
             new_management_key, touch=touch, store_on_device=protect)
-    except APDUError:
+    except APDUError as e:
+        logger.error('Failed to change management key', exc_info=e)
         ctx.fail('Changing the management key failed.')
 
 

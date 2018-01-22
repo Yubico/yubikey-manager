@@ -102,8 +102,9 @@ class CCIDDriver(AbstractDriver):
         self._pid = _pid_from_name(name)
         try:
             self._read_serial()
-        except APDUError:
-            pass  # Can't read serial or version
+        except APDUError as e:
+            # Can't read serial or version
+            logger.error('Failed to read serial number', exc_info=e)
 
     def _read_serial(self):
         s = self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
@@ -120,7 +121,8 @@ class CCIDDriver(AbstractDriver):
             self.send_apdu(0, INS_SELECT, 4, 0, AID.MGR)
             capa = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
             return capa
-        except APDUError:
+        except APDUError as e:
+            logger.error('Failed to read capabilities', exc_info=e)
             return b''
 
     def probe_capabilities_support(self):
@@ -129,8 +131,10 @@ class CCIDDriver(AbstractDriver):
             try:
                 self.send_apdu(0, INS_SELECT, 4, 0, aid)
                 capa |= code
-            except APDUError:
-                pass
+            except APDUError as e:
+                logger.error(
+                    'Failed to probe for capability support. aid: %s, code: %s',
+                    aid, code, exc_info=e)
         return capa
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
@@ -177,8 +181,8 @@ class CCIDDriver(AbstractDriver):
     def __del__(self):
         try:
             self._conn.disconnect()
-        except Exception:
-            pass  # Ignore
+        except Exception as e:
+            logger.debug('Exception in destructor', exc_info=e)
 
 
 def _pgm_seq_ok(pgm_seq_old, pgm_seq_new):

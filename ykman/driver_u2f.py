@@ -32,10 +32,13 @@ from .driver import AbstractDriver, ModeSwitchError
 from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary, parse_tlvs
 from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
 from binascii import b2a_hex
+import logging
 import weakref
 import struct
 import six
 
+
+logger = logging.getLogger(__name__)
 
 INS_SELECT = 0xa4
 INS_YK4_CAPABILITIES = 0x1d
@@ -55,7 +58,8 @@ try:
         raise Exception('u2fh_global_init failed!')
     libversion = tuple(int(x) for x in u2fh.u2fh_check_version(None)
                        .decode('ascii').split('.'))
-except Exception:
+except Exception as e:
+    logger.error('libu2f-host not found', exc_info=e)
     u2fh = MissingLibrary(
         'libu2f-host not found, U2F connectability not available!')
     libversion = None
