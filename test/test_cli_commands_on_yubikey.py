@@ -16,7 +16,13 @@ URI_TOTP_EXAMPLE = (
         'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
         '&algorithm=SHA1&digits=6&period=30')
 
+URI_TOTP_EXAMPLE_B = (
+        'otpauth://totp/ACME%20Co:john.doe.b@email.com?'
+        'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
+        '&algorithm=SHA1&digits=6&period=30')
+
 DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
+NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 _one_yubikey = False
 if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
@@ -103,27 +109,42 @@ class TestSlotStatus(unittest.TestCase):
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
 
-    def test_ykman_program_otp_slot_2_force_generated(self):
-        output = ykman_cli('slot', 'otp', '2', '-f')
-        self.assertIn('Using YubiKey serial as public ID', output)
-        self.assertIn('Using a randomly generated private ID', output)
-        self.assertIn('Using a randomly generated secret key', output)
-        self._check_slot_2_programmed()
-
-    def test_ykman_program_otp_slot_2_cli_arguments(self):
+    def test_ykman_program_otp_slot_2(self):
         ykman_cli(
             'slot', 'otp', '2', '--public-id', 'vvccccfiluij',
             '--private-id', '267e0a88949b',
             '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4', '-f')
         self._check_slot_2_programmed()
 
+    def test_ykman_program_otp_slot_2_generated(self):
+        output = ykman_cli('slot', 'otp', '2', '-f')
+        self.assertIn('Using YubiKey serial as public ID', output)
+        self.assertIn('Using a randomly generated private ID', output)
+        self.assertIn('Using a randomly generated secret key', output)
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_prompt(self):
+        ykman_cli(
+            'slot', 'otp', '2',
+            input='vvccccfiluij\n'
+            '267e0a88949b\nb8e31ab90bb8830e3c1fe1b483a8e0d4\ny\n')
+        self._check_slot_2_programmed()
+
     def test_ykman_program_chalresp_slot_2(self):
+        ykman_cli('slot', 'chalresp', '2', 'abba', '-f')
+        self._check_slot_2_programmed()
+        ykman_cli('slot', 'chalresp', '2', '--totp', 'abba', '-f')
+        self._check_slot_2_programmed()
+        ykman_cli('slot', 'chalresp', '2', '--touch', 'abba', '-f')
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_chalresp_slot_2_generated(self):
         output = ykman_cli('slot', 'chalresp', '2', '-f')
         self.assertIn('Using a randomly generated key', output)
         self._check_slot_2_programmed()
 
-    def test_chal_resp_totp(self):
-        ykman_cli('slot', 'chalresp', '2', '-T', 'abba', '-f')
+    def test_ykman_program_chalresp_slot_2_prompt(self):
+        ykman_cli('slot', 'chalresp', '2', input='abba\ny\n')
         self._check_slot_2_programmed()
 
     def test_ykman_program_hotp_slot_2(self):
@@ -132,10 +153,20 @@ class TestSlotProgramming(unittest.TestCase):
             '27KIZZE3SD7GE2FVJJBAXEI3I6RRTPGM', '-f')
         self._check_slot_2_programmed()
 
+    def test_ykman_program_hotp_slot_2_prompt(self):
+        ykman_cli('slot', 'hotp', '2', input='abba\ny\n')
+        self._check_slot_2_programmed()
+
     def test_ykman_program_static_slot_2(self):
         ykman_cli(
             'slot', 'static', '2',
             'higngdukgerjktbbikrhirngtlkkttkb', '-f')
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_static_slot_2_prompt(self):
+        ykman_cli(
+            'slot', 'static', '2',
+            input='higngdukgerjktbbikrhirngtlkkttkb\ny\n')
         self._check_slot_2_programmed()
 
     def test_update_settings_enter_slot_2(self):
@@ -220,6 +251,11 @@ class TestOATH(unittest.TestCase):
         creds = ykman_cli('oath', 'list')
         self.assertIn('test-name', creds)
 
+    def test_oath_add_credential_prompt(self):
+        ykman_cli('oath', 'add', 'test-name-2', input='abba')
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('test-name-2', creds)
+
     def test_oath_add_credential_with_space(self):
         ykman_cli('oath', 'add', 'test-name-space', 'ab ba')
         creds = ykman_cli('oath', 'list')
@@ -239,6 +275,11 @@ class TestOATH(unittest.TestCase):
 
     def test_oath_add_uri_totp(self):
         ykman_cli('oath', 'uri', URI_TOTP_EXAMPLE)
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('john.doe', creds)
+
+    def test_oath_add_uri_totp_prompt(self):
+        ykman_cli('oath', 'uri', input=URI_TOTP_EXAMPLE_B)
         creds = ykman_cli('oath', 'list')
         self.assertIn('john.doe', creds)
 
@@ -417,10 +458,28 @@ class TestPIV(unittest.TestCase):
             output)
         ykman_cli('piv', 'reset', '-f')  # Cleanup, should maybe be done always?
 
+    def test_piv_change_management_key_prompt(self):
+        ykman_cli('piv', 'change-management-key',
+                  input=DEFAULT_MANAGEMENT_KEY + '\n' +
+                  NON_DEFAULT_MANAGEMENT_KEY +
+                  '\n' + NON_DEFAULT_MANAGEMENT_KEY + '\n')
+        ykman_cli('piv', 'change-management-key',
+                  input=NON_DEFAULT_MANAGEMENT_KEY + '\n' +
+                  DEFAULT_MANAGEMENT_KEY +
+                  '\n' + DEFAULT_MANAGEMENT_KEY + '\n')
+
     def test_piv_change_pin(self):
         ykman_cli('piv', 'change-pin', '-P', '123456', '-n', '654321')
         ykman_cli('piv', 'change-pin', '-P', '654321', '-n', '123456')
 
+    def test_piv_change_pin_prompt(self):
+        ykman_cli('piv', 'change-pin', input='123456\n654321\n654321\n')
+        ykman_cli('piv', 'change-pin', input='654321\n123456\n123456\n')
+
     def test_piv_change_puk(self):
         ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
         ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+
+    def test_piv_change_puk_prompt(self):
+        ykman_cli('piv', 'change-puk', input='12345678\n87654321\n87654321\n')
+        ykman_cli('piv', 'change-puk', input='87654321\n12345678\n12345678\n')
