@@ -451,7 +451,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo('PIN:    123456')
         click.echo('PUK:    12345678')
     except Exception as e:
-        logger.error('Failed to set PIN retries', e)
+        logger.error('Failed to set PIN retries', exc_info=e)
         ctx.fail('Setting pin retries failed.')
 
 
