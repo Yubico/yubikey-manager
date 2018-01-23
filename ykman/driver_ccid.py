@@ -101,14 +101,19 @@ class CCIDDriver(AbstractDriver):
         self._conn = connection
         self._pid = _pid_from_name(name)
         try:
+            self._read_version()
+        except APDUError as e:
+            logger.error('Failed to read firmware version', exc_info=e)
+        try:
             self._read_serial()
         except APDUError as e:
-            # Can't read serial or version
             logger.error('Failed to read serial number', exc_info=e)
 
-    def _read_serial(self):
+    def _read_version(self):
         s = self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
         self._version = tuple(c for c in six.iterbytes(s[:3]))
+
+    def _read_serial(self):
         serial = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
         if len(serial) == 4:
             self._serial = struct.unpack('>I', serial)[0]
