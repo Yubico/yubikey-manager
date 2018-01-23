@@ -59,7 +59,7 @@ click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
 
 
 def _failed_to_write_msg(ctx, exc_info):
-    logger.error('Failed to write message to driver', exc_info=exc_info)
+    logger.error('Failed to write to device', exc_info=exc_info)
     ctx.fail('Failed to write to the YubiKey. Make sure the device does not '
              'have restricted access.')
 
