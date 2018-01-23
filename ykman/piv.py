@@ -593,7 +593,7 @@ class PivController(object):
                     OBJ.PIVMAN_PROTECTED_DATA,
                     self._pivman_protected_data.get_bytes())
             except APDUError as e:
-                logger.debug("No pin provided, can't clear key..", exc_info=e)
+                logger.debug("No PIN provided, can't clear key..", exc_info=e)
 
     def get_pin_tries(self):
         """
