@@ -30,8 +30,12 @@ from __future__ import absolute_import
 from .util import click_force_option
 from ..util import Mode, TRANSPORT
 from ..driver import ModeSwitchError
+import logging
 import re
 import click
+
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_transport_string(transport):
@@ -123,7 +127,8 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             dev.set_mode(mode, chalresp_timeout, autoeject)
             click.echo('Mode set! You must remove and re-insert your YubiKey '
                        'for this change to take effect.')
-        except ModeSwitchError:
+        except ModeSwitchError as e:
+            logger.debug('Failed to switch mode', exc_info=e)
             click.echo('Failed to switch mode on the YubiKey. Make sure your '
                        'YubiKey does not have an access code set.')
 

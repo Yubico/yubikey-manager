@@ -27,6 +27,7 @@
 
 from __future__ import absolute_import
 import click
+import logging
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
@@ -37,6 +38,9 @@ from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
 from ..settings import Settings
+
+
+logger = logging.getLogger(__name__)
 
 click_touch_option = click.option(
     '-t', '--touch', is_flag=True,
@@ -474,7 +478,8 @@ def ensure_validated(ctx, prompt='Enter your password', remember=False):
             try:
                 controller.validate(a2b_hex(keys[controller.id]))
                 return
-            except Exception:
+            except Exception as e:
+                logger.debug('Error', exc_info=e)
                 del keys[controller.id]
 
         # Prompt for password
