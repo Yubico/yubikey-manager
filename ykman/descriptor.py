@@ -81,7 +81,7 @@ class Descriptor(object):
     def key_type(self):
         return self._key_type
 
-    def open_device(self, transports=sum(TRANSPORT), attempts=3):
+    def open_device(self, transports=sum(TRANSPORT), attempts=10):
         self._logger.debug('transports: 0x%x, self.mode.transports: 0x%x',
                            transports, self.mode.transports)
 
@@ -137,7 +137,7 @@ def list_drivers(transports=sum(TRANSPORT)):
                 yield dev
 
 
-def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
+def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=10):
     logger.debug('Opening driver for serial: %s, pid: %s', serial, pid)
     for attempt in range(1, attempts + 1):
         logger.debug('Attempt %d of %d', attempt, attempts)
@@ -164,7 +164,7 @@ def open_driver(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
     raise FailedOpeningDeviceException()
 
 
-def open_device(transports=sum(TRANSPORT), serial=None, pid=None, attempts=3):
+def open_device(transports=sum(TRANSPORT), serial=None, pid=None, attempts=10):
     driver = open_driver(transports, serial, pid, attempts)
     matches = [d for d in get_descriptors() if d.pid == driver.pid]
     if len(matches) == 1:  # Only one matching descriptor, must be it
