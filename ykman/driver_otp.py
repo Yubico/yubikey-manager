@@ -407,5 +407,7 @@ def open_devices():
         for i in range(255):
             dev = ykpers.yk_open_key(i)
             if not dev:
+                logger.debug('Failed to open key at position %s', i)
                 break
+            logger.debug('Success in opening key at position %s', i)
             yield OTPDriver(dev)
