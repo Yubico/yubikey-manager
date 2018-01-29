@@ -43,9 +43,13 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from collections import OrderedDict
 from threading import Timer
+import logging
 import struct
 import six
 import os
+
+
+logger = logging.getLogger(__name__)
 
 
 @unique
@@ -588,9 +592,8 @@ class PivController(object):
                 self.put_data(
                     OBJ.PIVMAN_PROTECTED_DATA,
                     self._pivman_protected_data.get_bytes())
-            except APDUError:
-                # No pin provided, can't clear key..
-                pass
+            except APDUError as e:
+                logger.debug("No PIN provided, can't clear key..", exc_info=e)
 
     def get_pin_tries(self):
         """

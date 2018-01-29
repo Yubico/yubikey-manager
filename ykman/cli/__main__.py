@@ -44,7 +44,11 @@ from .piv import piv
 import ykman.cli.logging_setup
 import usb.core
 import click
+import logging
 import sys
+
+
+logger = logging.getLogger(__name__)
 
 
 CLICK_CONTEXT_SETTINGS = dict(
@@ -187,10 +191,12 @@ def main():
     try:
         cli(obj={})
     except ValueError as e:
+        logger.error('Error', exc_info=e)
         print('Error:', e)
         return 1
 
     except Cve201715361VulnerableError as err:
+        logger.error('Error', exc_info=err)
         print('Error:', err)
         return 2
 

@@ -114,8 +114,8 @@ def _gen_descriptors():
             if addr not in found:
                 found.append(addr)
                 yield Descriptor.from_usb(dev)
-        except ValueError:
-            pass  # Invalid PID.
+        except ValueError as e:
+            logger.debug('Invalid PID', exc_info=e)
 
 
 def get_descriptors():
