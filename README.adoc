@@ -44,11 +44,16 @@ Or from source:
     $ brew install swig ykpers libu2f-host libusb
     $ pip install --user yubikey-manager
 
+==== Windows
+
+The command line tool is installed together with the GUI version of https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager].
+
 ==== Pip
 
     $ pip install yubikey-manager
 
 In order for the pip package to work https://developers.yubico.com/libu2f-host/[libu2f-host], https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
+https://pyscard.sourceforge.io/[Pyscard] is also needed in some form, and if it's not installed pip builds it using http://www.swig.org/[swig] and potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
 
 === Bash completion
 
