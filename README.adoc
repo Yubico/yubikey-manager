@@ -44,6 +44,10 @@ Or from source:
     $ brew install swig ykpers libu2f-host libusb
     $ pip install --user yubikey-manager
 
+==== Windows
+
+The command line tool is installed together with the GUI version of https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager].
+
 ==== Pip
 
     $ pip install yubikey-manager
