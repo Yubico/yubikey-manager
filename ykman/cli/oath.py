@@ -295,7 +295,7 @@ def list(ctx, show_hidden, oath_type, period):
     for cred in creds:
         click.echo(cred.printable_key, nl=False)
         if oath_type:
-            click.echo(', {}'.format(cred.oath_type), nl=False)
+            click.echo(', {}'.format(cred.oath_type.name), nl=False)
         if period:
             click.echo(', {}'.format(cred.period), nl=False)
         click.echo()
