@@ -45,8 +45,12 @@ def setup(log_level_name):
     if log_level_value is None:
         raise ValueError('Unknown log level: ' + log_level_name)
 
+    logging.disable(logging.NOTSET)
     logging.basicConfig(
         datefmt='%Y-%m-%dT%H:%M:%S%z',
         format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
         level=log_level_value
     )
+
+
+logging.disable(logging.CRITICAL * 2)
