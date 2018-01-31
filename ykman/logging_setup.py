@@ -35,7 +35,7 @@ LOG_LEVELS = [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR,
 LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
 
 
-def setup(log_level_name):
+def setup(log_level_name, log_file=None):
     log_level_name = strip_quotes(log_level_name)
 
     log_level_value = next(
@@ -50,6 +50,7 @@ def setup(log_level_name):
     logging.disable(logging.NOTSET)
     logging.basicConfig(
         datefmt='%Y-%m-%dT%H:%M:%S%z',
+        filename=log_file,
         format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
         level=log_level_value
     )
