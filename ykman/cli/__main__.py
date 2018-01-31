@@ -127,7 +127,8 @@ def _run_cmd_for_single(ctx, cmd, transports):
               )
 @click.option('--log-file', default=None,
               type=str, metavar='FILE',
-              help='Write logs to the given FILE instead of standard error',
+              help='Write logs to the given FILE instead of standard error; '
+                   'ignored unless --log-level is also set',
               )
 @click.pass_context
 @click_skip_on_help
