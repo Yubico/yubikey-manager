@@ -50,7 +50,7 @@ def setup(log_level_name, log_file=None):
     logging.disable(logging.NOTSET)
     logging.basicConfig(
         datefmt='%Y-%m-%dT%H:%M:%S%z',
-        filename=log_file,
+        filename=strip_quotes(log_file) if log_file is not None else None,
         format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
         level=log_level_value
     )
