@@ -36,7 +36,7 @@ LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
 
 
 def setup(log_level_name, log_file=None):
-    log_level_name = strip_quotes(log_level_name.toUpper())
+    log_level_name = strip_quotes(log_level_name.upper())
 
     log_level_value = next(
         (lvl for lvl in LOG_LEVELS
