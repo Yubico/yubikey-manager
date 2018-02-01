@@ -36,8 +36,6 @@ LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
 
 
 def setup(log_level_name, log_file=None):
-    log_level_name = strip_quotes(log_level_name.upper())
-
     log_level_value = next(
         (lvl for lvl in LOG_LEVELS
          if logging.getLevelName(lvl) == log_level_name),
@@ -50,17 +48,10 @@ def setup(log_level_name, log_file=None):
     logging.disable(logging.NOTSET)
     logging.basicConfig(
         datefmt='%Y-%m-%dT%H:%M:%S%z',
-        filename=strip_quotes(log_file) if log_file is not None else None,
+        filename=log_file,
         format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
         level=log_level_value
     )
-
-
-def strip_quotes(s):
-    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-        return s[1:-1]
-    else:
-        return s
 
 
 logging.disable(logging.CRITICAL * 2)
