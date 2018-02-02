@@ -39,7 +39,6 @@ if sys.platform == 'win32':
 setup(
     name='yubikey-manager',
     version=__version__,
-    long_name='YubiKey Manager',
     author='Dain Nilsson',
     author_email='dain@yubico.com',
     maintainer='Yubico Open Source Maintainers',
@@ -51,7 +50,6 @@ setup(
         'console_scripts': ['ykman=ykman.cli.__main__:main'],
     },
     install_requires=install_requires,
-    yc_requires=['ctypes'],
     test_suite='test',
     classifiers=[
         'License :: OSI Approved :: BSD License',
