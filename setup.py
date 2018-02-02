@@ -26,8 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
-from ykman.yubicommon.setup import setup
-
+from setuptools import setup
 
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
