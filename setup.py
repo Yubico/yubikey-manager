@@ -27,6 +27,7 @@
 
 import sys
 from setuptools import setup
+from ykman import __version__
 
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
@@ -37,6 +38,7 @@ if sys.platform == 'win32':
 
 setup(
     name='yubikey-manager',
+    version=__version__,
     long_name='YubiKey Manager',
     author='Dain Nilsson',
     author_email='dain@yubico.com',

@@ -28,11 +28,6 @@ init:
   - set PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%
 
 install:
-  - git submodule update --init --recursive
-
-  - rm .\ykman\yubicommon
-  - xcopy /i /e .\vendor\yubicommon\yubicommon .\ykman\yubicommon
-
   - choco install swig -y
   - choco upgrade swig
 
