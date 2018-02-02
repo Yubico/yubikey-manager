@@ -41,7 +41,7 @@ from .slot import slot
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
-import ykman.cli.logging_setup
+import ykman.logging_setup
 import usb.core
 import click
 import logging
@@ -126,18 +126,23 @@ def _run_cmd_for_single(ctx, cmd, transports):
               expose_value=False, is_eager=True)
 @click.option('-d', '--device', type=int, metavar='SERIAL')
 @click.option('-l', '--log-level', default=None,
-              type=click.Choice(ykman.cli.logging_setup.LOG_LEVEL_NAMES),
+              type=click.Choice(ykman.logging_setup.LOG_LEVEL_NAMES),
               help='Enable logging at given verbosity level',
+              )
+@click.option('--log-file', default=None,
+              type=str, metavar='FILE',
+              help='Write logs to the given FILE instead of standard error; '
+                   'ignored unless --log-level is also set',
               )
 @click.pass_context
 @click_skip_on_help
-def cli(ctx, device, log_level):
+def cli(ctx, device, log_level, log_file):
     """
     Configure your YubiKey via the command line.
     """
 
     if log_level:
-        ykman.cli.logging_setup.setup(log_level)
+        ykman.logging_setup.setup(log_level, log_file=log_file)
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     if subcmd == list_keys:
