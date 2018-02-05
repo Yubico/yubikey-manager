@@ -3,4 +3,5 @@ include NEWS
 include ChangeLog
 include resources/*
 include doc/*.adoc
+include test/*/*
 include README.adoc
