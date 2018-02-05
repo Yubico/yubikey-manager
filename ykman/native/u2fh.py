@@ -30,7 +30,7 @@ from __future__ import absolute_import
 from ctypes import (Structure, POINTER, c_int, c_uint, c_uint8, c_uint16,
                     c_char_p, c_size_t)
 
-from .modifiedctypes import CLibrary
+from .util import CLibrary
 
 
 u2fh_rc = c_int
