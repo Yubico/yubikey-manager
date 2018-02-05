@@ -6,7 +6,7 @@ Install development dependencies:
 
 Setup the repository:
 
-    $ git clone --recursive https://github.com/Yubico/yubikey-manager.git
+    $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
 
 Install in editable mode with pip (from root of repository):
@@ -20,7 +20,6 @@ Run the app:
 To update once installed, just make sure the repo is up to date:
 
     $ git pull
-    $ git submodule update
 
 To uninstall, run:
 
