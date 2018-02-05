@@ -49,7 +49,9 @@ setup(
     entry_points={
         'console_scripts': ['ykman=ykman.cli.__main__:main'],
     },
-    packages=['ykman', 'ykman.native', 'ykman.native.modifiedctypes'],
+    packages=[
+        'ykman', 'ykman.native', 'ykman.native.modifiedctypes',
+        'ykman.scanmap', 'ykman.cli'],
     install_requires=install_requires,
     test_suite='test',
     classifiers=[
