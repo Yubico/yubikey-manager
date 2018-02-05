@@ -29,7 +29,7 @@ from __future__ import print_function, absolute_import
 
 from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
                     c_char_p, c_ushort, c_size_t, c_ulong)
-from ..yubicommon.ctypes import CLibrary
+from .modifiedctypes import CLibrary
 
 
 YK_KEY = type('YK_KEY', (Structure,), {})
