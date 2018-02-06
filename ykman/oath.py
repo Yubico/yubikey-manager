@@ -45,6 +45,9 @@ from .util import (
     format_code, parse_truncated, hmac_shorten_key)
 
 
+HMAC_MINIMUM_KEY_SIZE = 14
+
+
 @unique
 class TAG(IntEnum):
     NAME = 0x71
@@ -271,8 +274,9 @@ class OathController(object):
         key = d.make_key()
         secret_header = bytearray([d.oath_type | d.algorithm, d.digits])
         secret = hmac_shorten_key(d.secret, d.algorithm.name)
+        if len(secret) < HMAC_MINIMUM_KEY_SIZE:
+            secret = secret.ljust(HMAC_MINIMUM_KEY_SIZE, b'\x00')
         data = Tlv(TAG.NAME, key) + Tlv(TAG.KEY, secret_header + secret)
-
         properties = 0
 
         if d.touch:
