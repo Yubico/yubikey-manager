@@ -1,6 +1,6 @@
-* Version 0.6.0-rc1 (unreleased)
+* Version 0.6.0 (unreleased)
  ** OpenPGP: Expose remaining PIN retries in info command and API.
- ** CCID: Only try YubiKey readers by default.
+ ** CCID: Only try YubiKey smart card readers by default.
  ** Handle NEO issues with challenge-response credentials better.
  ** Improve logging.
  ** Improve error handling when opening device over OTP.
