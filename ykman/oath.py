@@ -274,8 +274,7 @@ class OathController(object):
         key = d.make_key()
         secret_header = bytearray([d.oath_type | d.algorithm, d.digits])
         secret = hmac_shorten_key(d.secret, d.algorithm.name)
-        if len(secret) < HMAC_MINIMUM_KEY_SIZE:
-            secret = secret.ljust(HMAC_MINIMUM_KEY_SIZE, b'\x00')
+        secret = secret.ljust(HMAC_MINIMUM_KEY_SIZE, b'\x00')
         data = Tlv(TAG.NAME, key) + Tlv(TAG.KEY, secret_header + secret)
         properties = 0
 
