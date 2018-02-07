@@ -637,12 +637,14 @@ def change_puk(ctx, puk, new_puk):
         new_puk = click.prompt(
             'Enter your new PUK', default='', hide_input=True,
             show_default=False, confirmation_prompt=True)
-    try:
-        controller.change_puk(puk, new_puk)
-    except APDUError as e:
-        logger.error('Failed to change PUK', exc_info=e)
-        ctx.fail('Changing the PUK failed.')
-    click.echo('New PUK set.')
+
+    (success, retries) = controller.change_puk(puk, new_puk)
+
+    if success:
+        click.echo('New PUK set.')
+    else:
+        logger.debug('Failed to change PUK, %d tries left', retries)
+        ctx.fail('PUK change failed - %d tries left.' % retries)
 
 
 @piv.command('change-management-key')

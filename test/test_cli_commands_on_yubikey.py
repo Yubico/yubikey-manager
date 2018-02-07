@@ -477,8 +477,14 @@ class TestPIV(unittest.TestCase):
         ykman_cli('piv', 'change-pin', input='654321\n123456\n123456\n')
 
     def test_piv_change_puk(self):
-        ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
-        ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+        o1 = ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
+        self.assertIn('New PUK set.', o1)
+
+        o2 = ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+        self.assertIn('New PUK set.', o2)
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
 
     def test_piv_change_puk_prompt(self):
         ykman_cli('piv', 'change-puk', input='12345678\n87654321\n87654321\n')
