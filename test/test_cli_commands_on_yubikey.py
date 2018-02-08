@@ -28,6 +28,7 @@ _one_yubikey = False
 _the_yubikey = None
 
 _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
+_no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
 if _test_serial is None:
     _skip = True
@@ -38,11 +39,13 @@ else:
         _one_yubikey = len(descriptors)
         _the_yubikey = descriptors[0]
 
-        click.confirm(
-            'Run integration tests? This will erase data on the YubiKey with'
-            ' serial number: %s. Make sure it is a key used for development.'
-            % _test_serial,
-            abort=True)
+        if not _no_prompt:
+            click.confirm(
+                'Run integration tests? This will erase data on the YubiKey'
+                ' with serial number: %s. Make sure it is a key used for'
+                ' development.'
+                % _test_serial,
+                abort=True)
 
     except Exception:
         sys.exit()
