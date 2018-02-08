@@ -25,6 +25,7 @@ DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
 NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 _one_yubikey = False
+_the_yubikey = None
 
 _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
 
@@ -33,12 +34,15 @@ if _test_serial is None:
 else:
     try:
         from ykman.descriptor import get_descriptors
+        descriptors = get_descriptors()
+        _one_yubikey = len(descriptors)
+        _the_yubikey = descriptors[0]
+
         click.confirm(
             'Run integration tests? This will erase data on the YubiKey with'
             ' serial number: %s. Make sure it is a key used for development.'
             % _test_serial,
             abort=True)
-        _one_yubikey = len(get_descriptors()) == 1
 
     except Exception:
         sys.exit()
@@ -48,16 +52,13 @@ else:
 def _has_mode(mode):
     if not _one_yubikey:
         return False
-    yubikeys = get_descriptors()
-    if len(yubikeys) is not 1:
-        return False
-    return yubikeys[0].mode.has_transport(mode)
+    return _the_yubikey.mode.has_transport(mode)
 
 
 def _get_version():
     if not _one_yubikey:
         return None
-    return get_descriptors()[0].version
+    return _the_yubikey.version
 
 
 def _is_NEO():
