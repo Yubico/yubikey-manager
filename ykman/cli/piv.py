@@ -30,7 +30,7 @@ from __future__ import absolute_import
 from ..util import TRANSPORT, parse_private_key, parse_certificate
 from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
-    DEFAULT_MANAGEMENT_KEY)
+    DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import (
     click_force_option, click_skip_on_help, click_callback, prompt_for_touch)
@@ -696,7 +696,7 @@ def change_management_key(
     # If the key should be protected by PIN and no key is given,
     # we generate a random key.
     if protect and not new_management_key:
-        new_management_key = _generate_random_management_key()
+        new_management_key = generate_random_management_key()
 
     if not new_management_key:
         if not force:
@@ -707,7 +707,7 @@ def change_management_key(
                 hide_input=True, confirmation_prompt=True)
 
         if force or new_management_key == '':
-            new_management_key = _generate_random_management_key()
+            new_management_key = generate_random_management_key()
             click.echo(
                 'Generated management key: {}'.format(new_management_key))
 
@@ -753,10 +753,6 @@ def _prompt_management_key(
         return a2b_hex(management_key)
     except Exception:
         ctx.fail('Management key has the wrong format.')
-
-
-def _generate_random_management_key():
-    return b2a_hex(os.urandom(24)).decode()
 
 
 def _prompt_pin(ctx, prompt='Enter PIN'):

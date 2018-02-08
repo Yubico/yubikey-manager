@@ -32,6 +32,7 @@ from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from .util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
+from binascii import b2a_hex
 from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -356,6 +357,10 @@ _decrypt_len_conditions = {
 def _derive_key(pin, salt):
     kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())
     return kdf.derive(pin.encode('utf-8'))
+
+
+def generate_random_management_key():
+    return b2a_hex(os.urandom(24)).decode()
 
 
 class PivmanData(object):
