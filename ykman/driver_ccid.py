@@ -56,8 +56,8 @@ INS_NEO_TEST = 0x16
 
 KNOWN_APPLETS = {
     AID.OTP: CAPABILITY.OTP,
-    b'\xa0\x00\x00\x06\x47\x2f\x00\x01': CAPABILITY.U2F,  # Official
-    b'\xa0\x00\x00\x05\x27\x10\x02': CAPABILITY.U2F,  # Yubico - No longer used
+    AID.U2F: CAPABILITY.U2F,
+    AID.U2F_YUBICO: CAPABILITY.U2F,
     AID.PIV: CAPABILITY.PIV,
     AID.OPGP: CAPABILITY.OPGP,
     AID.OATH: CAPABILITY.OATH
@@ -136,10 +136,12 @@ class CCIDDriver(AbstractDriver):
             try:
                 self.send_apdu(0, INS_SELECT, 4, 0, aid)
                 capa |= code
+                logger.debug(
+                    'Found applet: aid: %s , capability: %s', aid, code)
             except APDUError as e:
-                logger.error(
-                    'Failed to probe for capability support. aid: %s, code: %s',
-                    aid, code, exc_info=e)
+                logger.debug(
+                    'Missing applet: aid: %s , capability: %s', aid, code)
+                pass
         return capa
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
