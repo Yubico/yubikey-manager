@@ -138,7 +138,7 @@ class CCIDDriver(AbstractDriver):
                 capa |= code
                 logger.debug(
                     'Found applet: aid: %s , capability: %s', aid, code)
-            except APDUError as e:
+            except APDUError:
                 logger.debug(
                     'Missing applet: aid: %s , capability: %s', aid, code)
                 pass
