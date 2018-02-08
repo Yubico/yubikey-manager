@@ -60,32 +60,6 @@ class CTAPHID(IntEnum):
     YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
 
 
-@unique
-class CTAP2_CMD(IntEnum):
-    GET_INFO = 0x04
-    CLIENT_PIN = 0x06
-    RESET = 0x07
-
-
-@unique
-class CTAP2_PIN_ARG(IntEnum):
-    PIN_PROTOCOL = 0x01
-    COMMAND = 0x02
-    KEY_AGREEMENT = 0x03
-    PIN_AUTH = 0x04
-    NEW_PIN_ENC = 0x05
-    PIN_HASH_ENC = 0x06
-    GET_KEY_AGREEMENT = 0x07
-    GET_RETRIES = 0x08
-
-
-@unique
-class CTAP2_PIN_RES(IntEnum):
-    KEY_AGREEMENT = 0x01
-    PIN_TOKEN = 0x02
-    RETRIES = 0x03
-
-
 try:
     u2fh = U2fh('u2f-host', '0')
 
@@ -170,10 +144,9 @@ class U2FDriver(AbstractDriver):
             self._version = [4, 0, 0]
 
         try:
-            self._fido2_info = self._fido2_get_info()
-            self._fido2_shared_key = None
+            self.fido2 = Fido2Client(self)
         except U2FHostError:
-            self._fido2_info = None
+            self.fido2 = None
 
     def read_capabilities(self):
         return self._capa
@@ -199,14 +172,71 @@ class U2FDriver(AbstractDriver):
         if not _instances.difference({self}):
             u2fh.u2fh_devs_done(self._devs)
 
+
+class CTAP2Error(Exception):
+    def __init__(self, code):
+        self.code = code
+        self.message = 'Error code: 0x%02x' % code
+
+    def __str__(self):
+        return self.message
+
+
+@unique
+class CTAP2_CMD(IntEnum):
+    GET_INFO = 0x04
+    CLIENT_PIN = 0x06
+    RESET = 0x07
+
+
+@unique
+class CTAP2_PIN_ARG(IntEnum):
+    PIN_PROTOCOL = 0x01
+    COMMAND = 0x02
+    KEY_AGREEMENT = 0x03
+    PIN_AUTH = 0x04
+    NEW_PIN_ENC = 0x05
+    PIN_HASH_ENC = 0x06
+    GET_KEY_AGREEMENT = 0x07
+    GET_RETRIES = 0x08
+
+
+@unique
+class CTAP2_PIN_RES(IntEnum):
+    KEY_AGREEMENT = 0x01
+    PIN_TOKEN = 0x02
+    RETRIES = 0x03
+
+
+def _pad_pin(pin):
+    if not isinstance(pin, six.text_type):
+        raise ValueError('PIN of wrong type, expecting %s' % six.text_type)
+    if len(pin) < 4:
+        raise ValueError('PIN must be >= 4 characters')
+    pin = pin.encode('utf8').ljust(64, b'\0')
+    pin += b'\0' * (-(len(pin) - 16) % 16)
+    if len(pin) > 255:
+        raise ValueError('PIN must be <= 255 bytes')
+    return pin
+
+
+class Fido2Client(object):
+
+    def __init__(self, driver):
+        self._driver = driver
+        self._info = self._get_info()
+        self._pin = self._info[4]['clientPin']
+        self._key_agreement = None
+        self._shared = None
+
     def send_cbor_cmd(self, cmd, data=None):
         request = struct.pack('>B', cmd)
         if data is not None:
             request += cbor.serialize(data)
-        data = self.sendrecv(CTAPHID.CBOR, request)
+        data = self._driver.sendrecv(CTAPHID.CBOR, request)
         status = six.indexbytes(data, 0)
         if status != 0x00:
-            raise ValueError('Error code: %02x' % status)
+            raise CTAP2Error(status)
         if len(data) == 1:
             return None
         response, rest = cbor.deserialize(data[1:])
@@ -215,39 +245,20 @@ class U2FDriver(AbstractDriver):
         return response
 
     @property
-    def fido2_info(self):
-        return self._fido2_info
+    def has_pin(self):
+        return self._pin
 
-    @property
-    def _fido2_shared_key(self):
-        if self._shared is None:
-            self._shared = self._fido2_get_key_agreement()
-        return self._shared
-
-    def _fido2_get_info(self):
+    def _get_info(self):
         return self.send_cbor_cmd(CTAP2_CMD.GET_INFO)
 
-    def _fido2_auth_client_pin(self, cmd, args):
-        args.update({
-            CTAP2_PIN_ARG.PIN_PROTOCOL: 1,
-            CTAP2_PIN_ARG.COMMAND: cmd
-        })
-        return self.send_cbor_cmd(CTAP2_CMD.CLIENT_PIN, args)
-
-    def fido2_get_pin_retries(self):
-        resp = self._fido2_auth_client_pin(1, {
-            CTAP2_PIN_ARG.GET_RETRIES: True
-        })
-        return resp[CTAP2_PIN_RES.RETRIES]
-
-    def _fido2_get_key_agreement(self):
-        resp = self._fido2_auth_client_pin(2, {
+    def _init_shared_secret(self):
+        resp = self._auth_client_pin(2, {
             CTAP2_PIN_ARG.GET_KEY_AGREEMENT: True
         })
         be = default_backend()
         sk = ec.generate_private_key(ec.SECP256R1(), be)
         pk = sk.public_key().public_numbers()
-        key_agreement = {
+        self._key_agreement = {
             1: 2,
             3: -15,
             -1: 1,
@@ -260,64 +271,23 @@ class U2FDriver(AbstractDriver):
         pk = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key(be)
         h = hashes.Hash(hashes.SHA256(), be)
         h.update(sk.exchange(ec.ECDH(), pk))
-        shared_secret = h.finalize()
-        return shared_secret, key_agreement
+        self._shared = h.finalize()
 
-    def fido2_set_pin(self, pin):
-        if len(pin) < 4:
-            raise ValueError('PIN must be >= 4 characters')
-        pin = pin.encode('utf8').ljust(64, b'\0')
-        if len(pin) > 255:
-            raise ValueError('PIN must be <= 255 bytes')
-        pin += b'\0' * (-(len(pin) - 16) % 16)
+    def _ensure_shared(self):
+        if self._shared is None:
+            self._init_shared_secret()
 
-        secret, key_agreement = self._fido2_shared_key
-        be = default_backend()
-        cipher = Cipher(algorithms.AES(secret), modes.CBC(IV), be)
-        enc = cipher.encryptor()
-        pin_enc = enc.update(pin) + enc.finalize()
-        h = hmac.HMAC(secret, hashes.SHA256(), be)
-        h.update(pin_enc)
-        pin_auth = h.finalize()[:16]
-        self._fido2_auth_client_pin(3, {
-            CTAP2_PIN_ARG.KEY_AGREEMENT: key_agreement,
-            CTAP2_PIN_ARG.NEW_PIN_ENC: pin_enc,
-            CTAP2_PIN_ARG.PIN_AUTH: pin_auth
+    def _auth_client_pin(self, cmd, args):
+        args.update({
+            CTAP2_PIN_ARG.PIN_PROTOCOL: 1,
+            CTAP2_PIN_ARG.COMMAND: cmd
         })
+        return self.send_cbor_cmd(CTAP2_CMD.CLIENT_PIN, args)
 
-    def fido2_change_pin(self, old_pin, new_pin):
-        if len(new_pin) < 4:
-            raise ValueError('PIN must be >= 4 characters')
-        new_pin = new_pin.encode('utf8').ljust(64, b'\0')
-        if len(new_pin) > 255:
-            raise ValueError('PIN must be <= 255 bytes')
-        new_pin += b'\0' * (-(len(new_pin) - 16) % 16)
-
-        secret, key_agreement = self._fido2_shared_key
+    def _get_pin_token(self, pin):
+        self._ensure_shared()
         be = default_backend()
-        cipher = Cipher(algorithms.AES(secret), modes.CBC(IV), be)
-        h = hashes.Hash(hashes.SHA256(), default_backend())
-        h.update(old_pin.encode('utf8'))
-        pin_hash = h.finalize()[:16]
-        enc = cipher.encryptor()
-        pin_hash_enc = enc.update(pin_hash) + enc.finalize()
-        enc = cipher.encryptor()
-        pin_enc = enc.update(new_pin) + enc.finalize()
-        h = hmac.HMAC(secret, hashes.SHA256(), be)
-        h.update(pin_enc)
-        h.update(pin_hash_enc)
-        pin_auth = h.finalize()[:16]
-        self._fido2_auth_client_pin(4, {
-            CTAP2_PIN_ARG.KEY_AGREEMENT: key_agreement,
-            CTAP2_PIN_ARG.PIN_HASH_ENC: pin_hash_enc,
-            CTAP2_PIN_ARG.NEW_PIN_ENC: pin_enc,
-            CTAP2_PIN_ARG.PIN_AUTH: pin_auth
-        })
-
-    def fido2_get_pin_token(self, pin):
-        secret, key_agreement = self._fido2_shared_key
-        be = default_backend()
-        cipher = Cipher(algorithms.AES(secret), modes.CBC(IV), be)
+        cipher = Cipher(algorithms.AES(self._shared), modes.CBC(IV), be)
         h = hashes.Hash(hashes.SHA256(), default_backend())
         h.update(pin.encode('utf8'))
         pin_hash = h.finalize()[:16]
@@ -325,15 +295,68 @@ class U2FDriver(AbstractDriver):
         pin_hash_enc = enc.update(pin_hash) + enc.finalize()
 
         try:
-            resp = self._fido2_auth_client_pin(5, {
-                CTAP2_PIN_ARG.KEY_AGREEMENT: key_agreement,
+            resp = self._auth_client_pin(5, {
+                CTAP2_PIN_ARG.KEY_AGREEMENT: self._key_agreement,
                 CTAP2_PIN_ARG.PIN_HASH_ENC: pin_hash_enc
             })
+            dec = cipher.decryptor()
+            return dec.update(resp[CTAP2_PIN_RES.PIN_TOKEN]) + dec.finalize()
         except ValueError:
-            self._fido2_shared = None
+            self._shared = None
+            self._key_agreement = None
             raise
-        dec = cipher.decryptor()
-        return dec.update(resp[CTAP2_PIN_RES.PIN_TOKEN]) + dec.finalize()
+
+    def get_pin_retries(self):
+        resp = self._auth_client_pin(1, {
+            CTAP2_PIN_ARG.GET_RETRIES: True
+        })
+        return resp[CTAP2_PIN_RES.RETRIES]
+
+    def set_pin(self, pin):
+        pin = _pad_pin(pin)
+
+        self._ensure_shared()
+        be = default_backend()
+        cipher = Cipher(algorithms.AES(self._shared), modes.CBC(IV), be)
+        enc = cipher.encryptor()
+        pin_enc = enc.update(pin) + enc.finalize()
+        h = hmac.HMAC(self._shared, hashes.SHA256(), be)
+        h.update(pin_enc)
+        pin_auth = h.finalize()[:16]
+        self._auth_client_pin(3, {
+            CTAP2_PIN_ARG.KEY_AGREEMENT: self._key_agreement,
+            CTAP2_PIN_ARG.NEW_PIN_ENC: pin_enc,
+            CTAP2_PIN_ARG.PIN_AUTH: pin_auth
+        })
+        self._pin = True
+
+    def change_pin(self, old_pin, new_pin):
+        new_pin = _pad_pin(new_pin)
+
+        self._ensure_shared()
+        be = default_backend()
+        cipher = Cipher(algorithms.AES(self._shared), modes.CBC(IV), be)
+        h = hashes.Hash(hashes.SHA256(), default_backend())
+        h.update(old_pin.encode('utf8'))
+        pin_hash = h.finalize()[:16]
+        enc = cipher.encryptor()
+        pin_hash_enc = enc.update(pin_hash) + enc.finalize()
+        enc = cipher.encryptor()
+        pin_enc = enc.update(new_pin) + enc.finalize()
+        h = hmac.HMAC(self._shared, hashes.SHA256(), be)
+        h.update(pin_enc)
+        h.update(pin_hash_enc)
+        pin_auth = h.finalize()[:16]
+        self._auth_client_pin(4, {
+            CTAP2_PIN_ARG.KEY_AGREEMENT: self._key_agreement,
+            CTAP2_PIN_ARG.PIN_HASH_ENC: pin_hash_enc,
+            CTAP2_PIN_ARG.NEW_PIN_ENC: pin_enc,
+            CTAP2_PIN_ARG.PIN_AUTH: pin_auth
+        })
+
+    def reset(self):
+        self.send_cbor_cmd(CTAP2_CMD.RESET)
+        self._pin = False
 
 
 def open_devices():
