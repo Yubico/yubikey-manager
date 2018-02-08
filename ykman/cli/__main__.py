@@ -41,6 +41,7 @@ from .slot import slot
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
+from .fido import fido
 import ykman.logging_setup
 import usb.core
 import click
@@ -185,7 +186,7 @@ def list_keys(ctx, serials):
         del drv
 
 
-COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv)
+COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv, fido)
 
 
 for cmd in COMMANDS:
