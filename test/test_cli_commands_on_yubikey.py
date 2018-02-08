@@ -6,7 +6,7 @@ import click
 from ykman.util import (
     TRANSPORT, is_cve201715361_vulnerable_firmware_version,
     Cve201715361VulnerableError)
-from test.util import ykman_cli
+import test.util
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
         'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
@@ -25,18 +25,24 @@ DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
 NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 _one_yubikey = False
-if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
+
+_test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
+
+if _test_serial is None:
+    _skip = True
+else:
     try:
         from ykman.descriptor import get_descriptors
         click.confirm(
-            'Run integration tests? This will erase data on the YubiKey,'
-            ' make sure it is a key used for development.', abort=True)
+            'Run integration tests? This will erase data on the YubiKey with'
+            ' serial number: %s. Make sure it is a key used for development.'
+            % _test_serial,
+            abort=True)
         _one_yubikey = len(get_descriptors()) == 1
+
     except Exception:
         sys.exit()
     _skip = False
-else:
-    _skip = True
 
 
 def _has_mode(mode):
@@ -75,7 +81,14 @@ def _is_cve201715361_vulnerable_yubikey():
         return False
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+def ykman_cli(*args, **kwargs):
+    return test.util.ykman_cli(
+        '--device', _test_serial,
+        *args, **kwargs
+    )
+
+
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 class TestYkmanInfo(unittest.TestCase):
 
@@ -87,7 +100,7 @@ class TestYkmanInfo(unittest.TestCase):
         self.assertIn('Firmware version:', info)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotStatus(unittest.TestCase):
@@ -104,7 +117,7 @@ class TestSlotStatus(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
@@ -193,7 +206,7 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Slot 2: programmed', status)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotCalculate(unittest.TestCase):
@@ -217,7 +230,7 @@ class TestSlotCalculate(unittest.TestCase):
         self.assertEqual(8, len(output.strip()))
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -235,7 +248,7 @@ class TestOpenPGP(unittest.TestCase):
             output)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -314,7 +327,7 @@ class TestOATH(unittest.TestCase):
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
