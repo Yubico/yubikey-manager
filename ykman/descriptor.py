@@ -95,6 +95,13 @@ class Descriptor(object):
             self._serial = driver.serial
         return YubiKey(self, driver)
 
+    def wink(self):
+        if self.mode.has_transport(TRANSPORT.U2F):
+            device = self.open_device(TRANSPORT.U2F)
+            return device.driver.wink()
+        else:
+            return False
+
     @classmethod
     def from_usb(cls, usb_dev):
         v_int = usb_dev.bcdDevice

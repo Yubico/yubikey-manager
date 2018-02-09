@@ -46,6 +46,7 @@ INS_YK4_CAPABILITIES = 0x1d
 U2F_VENDOR_FIRST = 0x40
 TYPE_INIT = 0x80
 U2FHID_PING = TYPE_INIT | 0x01
+U2FHID_WINK = TYPE_INIT | 0x08
 U2FHID_YUBIKEY_DEVICE_CONFIG = TYPE_INIT | U2F_VENDOR_FIRST
 U2FHID_YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
 
@@ -152,6 +153,18 @@ class U2FDriver(AbstractDriver):
             self.sendrecv(U2FHID_YUBIKEY_DEVICE_CONFIG, data)
         except U2FHostError:
             raise ModeSwitchError()
+
+    def wink(self):
+        """
+        Briefly blink the LED.
+
+        Return True if the command succeeded, False otherwise.
+        """
+        try:
+            self.sendrecv(U2FHID_WINK, b'\x00')
+            return True
+        except U2FHostError:
+            return False
 
     def __del__(self):
         if not _instances.difference({self}):

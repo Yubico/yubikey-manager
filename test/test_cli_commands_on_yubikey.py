@@ -42,11 +42,14 @@ if _test_serial is not None:
             _the_yubikey = descriptors[0]
 
             if not _no_prompt:
+                wink_success = _the_yubikey.wink()
+
                 click.confirm(
                     'Run integration tests? This will erase data on the YubiKey'
-                    ' with serial number: %s. Make sure it is a key used for'
+                    ' with serial number: {}{}. Make sure it is a key used for'
                     ' development.'
-                    % _test_serial,
+                    .format(_test_serial,
+                            ' (the blinking one)' if wink_success else ''),
                     abort=True)
 
             _skip = False
