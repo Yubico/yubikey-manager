@@ -62,6 +62,10 @@ class Descriptor(object):
         return self._fingerprint
 
     @property
+    def serial(self):
+        return self._serial
+
+    @property
     def version(self):
         return self._version
 
@@ -127,6 +131,22 @@ def _gen_descriptors():
 
 def get_descriptors():
     return list(_gen_descriptors())
+
+
+def get_descriptors_with_serials():
+    descriptors = get_descriptors()
+    handled = set()
+    result = []
+    for drv in list_drivers():
+        serial = drv.serial
+        if serial not in handled:
+            handled.add(serial)
+            matches = [d for d in descriptors if d.pid == drv.pid]
+            if len(matches) > 0:
+                descriptors.remove(matches[0])
+                result.append(Descriptor.from_driver(drv))
+        del drv
+    return result
 
 
 def list_drivers(transports=sum(TRANSPORT)):

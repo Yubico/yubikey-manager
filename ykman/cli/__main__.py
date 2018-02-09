@@ -28,12 +28,12 @@
 from __future__ import absolute_import, print_function
 
 from ykman import __version__
-from ..util import TRANSPORT, Mode, Cve201715361VulnerableError
+from ..util import TRANSPORT, Cve201715361VulnerableError
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..driver_u2f import libversion as u2fhost_version
-from ..descriptor import (get_descriptors, list_drivers, open_device,
-                          FailedOpeningDeviceException)
+from ..descriptor import (get_descriptors, get_descriptors_with_serials,
+                          open_device, FailedOpeningDeviceException)
 from .util import click_skip_on_help
 from .info import info
 from .mode import mode
@@ -164,25 +164,16 @@ def list_keys(ctx, serials):
     """
     List connected YubiKeys.
     """
-    descriptors = get_descriptors()
-    handled = set()
-    for drv in list_drivers():
-        serial = drv.serial
-        if serial not in handled:
-            handled.add(serial)
-            matches = [d for d in descriptors if d.pid == drv.pid]
-            if len(matches) > 0:
-                d = matches[0]
-                descriptors.remove(d)
-                if serials:
-                    click.echo(serial)
-                else:
-                    click.echo('{} [{}] Serial: {}'.format(
-                        drv.key_type.value,
-                        Mode(drv.transports),
-                        serial or 'Not available')
-                    )
-        del drv
+    for descriptor in get_descriptors_with_serials():
+        serial = descriptor.serial
+        if serials:
+            click.echo(serial)
+        else:
+            click.echo('{} [{}] Serial: {}'.format(
+                descriptor.key_type.value,
+                descriptor.mode,
+                serial or 'Not available')
+            )
 
 
 COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv)

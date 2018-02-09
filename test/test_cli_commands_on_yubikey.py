@@ -26,33 +26,36 @@ NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 _one_yubikey = False
 _the_yubikey = None
+_skip = True
 
 _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
-if _test_serial is None:
-    _skip = True
-else:
+if _test_serial is not None:
     try:
-        from ykman.descriptor import get_descriptors
-        descriptors = get_descriptors()
-        _one_yubikey = len(descriptors)
-        _the_yubikey = descriptors[0]
+        from ykman.descriptor import get_descriptors_with_serials
+        descriptors = [d for d in get_descriptors_with_serials()
+                       if str(d.serial) == _test_serial]
+        _one_yubikey = len(descriptors) == 1
 
-        if not _no_prompt:
-            wink_success = _the_yubikey.wink()
+        if (_one_yubikey):
+            _the_yubikey = descriptors[0]
 
-            click.confirm(
-                'Run integration tests? This will erase data on the YubiKey'
-                ' with serial number: {}{}. Make sure it is a key used for'
-                ' development.'
-                .format(_test_serial,
-                        ' (the blinking one)' if wink_success else ''),
-                abort=True)
+            if not _no_prompt:
+                wink_success = _the_yubikey.wink()
+
+                click.confirm(
+                    'Run integration tests? This will erase data on the YubiKey'
+                    ' with serial number: {}{}. Make sure it is a key used for'
+                    ' development.'
+                    .format(_test_serial,
+                            ' (the blinking one)' if wink_success else ''),
+                    abort=True)
+
+            _skip = False
 
     except Exception:
         sys.exit()
-    _skip = False
 
 
 def _has_mode(mode):
