@@ -62,10 +62,6 @@ class Descriptor(object):
         return self._fingerprint
 
     @property
-    def serial(self):
-        return self._serial
-
-    @property
     def version(self):
         return self._version
 
