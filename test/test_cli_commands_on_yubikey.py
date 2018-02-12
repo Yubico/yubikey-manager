@@ -37,7 +37,6 @@ if _test_serial is not None:
     _skip = False
 
     if (_one_yubikey):
-        _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
         if not _no_prompt:
             click.confirm(
                 'Run integration tests? This will erase data on the YubiKey'
@@ -45,6 +44,7 @@ if _test_serial is not None:
                 ' development.'
                 % _test_serial,
                 abort=True)
+        _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
 
 
 def _has_mode(mode):
