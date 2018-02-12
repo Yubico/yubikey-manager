@@ -33,14 +33,13 @@ _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
 if _test_serial is not None:
     try:
-        from ykman.descriptor import get_descriptors_with_serials
-        descriptors = [d for d in get_descriptors_with_serials()
-                       if str(d.serial) == _test_serial]
-        _one_yubikey = len(descriptors) == 1
+        from ykman.descriptor import (get_descriptors, open_device)
+        _one_yubikey = len(get_descriptors()) == 1
+
+        _skip = False
 
         if (_one_yubikey):
-            _the_yubikey = descriptors[0]
-
+            _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
             if not _no_prompt:
                 click.confirm(
                     'Run integration tests? This will erase data on the YubiKey'
@@ -48,8 +47,6 @@ if _test_serial is not None:
                     ' development.'
                     % _test_serial,
                     abort=True)
-
-            _skip = False
 
     except Exception:
         sys.exit()
