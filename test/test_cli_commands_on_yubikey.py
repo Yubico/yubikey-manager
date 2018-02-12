@@ -1,5 +1,4 @@
 import os
-import sys
 import unittest
 import time
 import click
@@ -32,24 +31,20 @@ _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
 if _test_serial is not None:
-    try:
-        from ykman.descriptor import (get_descriptors, open_device)
-        _one_yubikey = len(get_descriptors()) == 1
+    from ykman.descriptor import (get_descriptors, open_device)
+    _one_yubikey = len(get_descriptors()) == 1
 
-        _skip = False
+    _skip = False
 
-        if (_one_yubikey):
-            _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
-            if not _no_prompt:
-                click.confirm(
-                    'Run integration tests? This will erase data on the YubiKey'
-                    ' with serial number: %s. Make sure it is a key used for'
-                    ' development.'
-                    % _test_serial,
-                    abort=True)
-
-    except Exception:
-        sys.exit()
+    if (_one_yubikey):
+        _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
+        if not _no_prompt:
+            click.confirm(
+                'Run integration tests? This will erase data on the YubiKey'
+                ' with serial number: %s. Make sure it is a key used for'
+                ' development.'
+                % _test_serial,
+                abort=True)
 
 
 def _has_mode(mode):
