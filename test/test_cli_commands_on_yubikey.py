@@ -1,4 +1,6 @@
+from __future__ import print_function
 import os
+import sys
 import unittest
 import time
 import click
@@ -31,7 +33,8 @@ _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
 if _test_serial is not None:
-    from ykman.descriptor import (get_descriptors, open_device)
+    from ykman.descriptor import (get_descriptors, open_device,
+                                  FailedOpeningDeviceException)
     _one_yubikey = len(get_descriptors()) == 1
 
     _skip = False
@@ -44,7 +47,14 @@ if _test_serial is not None:
                 ' development.'
                 % _test_serial,
                 abort=True)
-        _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
+        try:
+            _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
+
+        except FailedOpeningDeviceException:
+            print('Failed to open device. Please make sure you have connected'
+                  ' the YubiKey with serial number: {}'.format(_test_serial),
+                  file=sys.stderr)
+            sys.exit(1)
 
 
 def _has_mode(mode):
