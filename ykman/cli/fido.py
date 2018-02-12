@@ -29,8 +29,9 @@ from __future__ import absolute_import
 import click
 import logging
 from .util import click_skip_on_help
+from ..driver_u2f import U2FHostError
 from ..util import TRANSPORT
-from ..driver_u2f import Fido2Client
+from ..fido import Fido2Controller
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,10 @@ def fido(ctx):
     """
     Manage YubiKey FIDO 2 credentials.
     """
-    ctx.obj['controller'] = Fido2Client(ctx.obj['dev'].driver)
+    try:
+        ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
+    except U2FHostError:
+        ctx.fail('FIDO functionality not supported.')
 
 
 @fido.command()
