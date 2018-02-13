@@ -32,6 +32,7 @@ from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from .util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
+from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
@@ -252,6 +253,9 @@ class SW(IntEnum):
     NOT_FOUND = 0x6a82
     ACCESS_DENIED = 0x6982
     AUTHENTICATION_BLOCKED = 0x6983
+
+
+CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
 
 
 PIN = 0x80
@@ -502,8 +506,15 @@ class PivController(object):
             self.use_derived_key(new_pin)
 
     def change_puk(self, old_puk, new_puk):
-        self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
-                      _pack_pin(old_puk) + _pack_pin(new_puk))
+        try:
+            self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
+                          _pack_pin(old_puk) + _pack_pin(new_puk))
+            return CodeChangeResult(True, None)
+        except APDUError as e:
+            retries = self._parse_tries_left(e.sw)
+            logger.debug('PUK change failed, %d tries remaining', retries,
+                         exc_info=e)
+            return CodeChangeResult(False, retries)
 
     def unblock_pin(self, puk, new_pin):
         try:

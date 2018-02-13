@@ -1,12 +1,15 @@
+from __future__ import print_function
 import os
 import sys
 import unittest
 import time
 import click
+from ykman.descriptor import (
+    get_descriptors, open_device, FailedOpeningDeviceException)
 from ykman.util import (
     TRANSPORT, is_cve201715361_vulnerable_firmware_version,
     Cve201715361VulnerableError)
-from test.util import ykman_cli
+import test.util
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
         'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
@@ -25,33 +28,45 @@ DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
 NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 _one_yubikey = False
-if os.environ.get('INTEGRATION_TESTS') == 'TRUE':
-    try:
-        from ykman.descriptor import get_descriptors
-        click.confirm(
-            'Run integration tests? This will erase data on the YubiKey,'
-            ' make sure it is a key used for development.', abort=True)
-        _one_yubikey = len(get_descriptors()) == 1
-    except Exception:
-        sys.exit()
+_the_yubikey = None
+_skip = True
+
+_test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
+_no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
+
+if _test_serial is not None:
+    _one_yubikey = len(get_descriptors()) == 1
+
     _skip = False
-else:
-    _skip = True
+
+    if (_one_yubikey):
+        if not _no_prompt:
+            click.confirm(
+                'Run integration tests? This will erase data on the YubiKey'
+                ' with serial number: %s. Make sure it is a key used for'
+                ' development.'
+                % _test_serial,
+                abort=True)
+        try:
+            _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
+
+        except FailedOpeningDeviceException:
+            print('Failed to open device. Please make sure you have connected'
+                  ' the YubiKey with serial number: {}'.format(_test_serial),
+                  file=sys.stderr)
+            sys.exit(1)
 
 
 def _has_mode(mode):
     if not _one_yubikey:
         return False
-    yubikeys = get_descriptors()
-    if len(yubikeys) is not 1:
-        return False
-    return yubikeys[0].mode.has_transport(mode)
+    return _the_yubikey.mode.has_transport(mode)
 
 
 def _get_version():
     if not _one_yubikey:
         return None
-    return get_descriptors()[0].version
+    return _the_yubikey.version
 
 
 def _is_NEO():
@@ -75,7 +90,14 @@ def _is_cve201715361_vulnerable_yubikey():
         return False
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+def ykman_cli(*args, **kwargs):
+    return test.util.ykman_cli(
+        '--device', _test_serial,
+        *args, **kwargs
+    )
+
+
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 class TestYkmanInfo(unittest.TestCase):
 
@@ -87,7 +109,7 @@ class TestYkmanInfo(unittest.TestCase):
         self.assertIn('Firmware version:', info)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotStatus(unittest.TestCase):
@@ -104,7 +126,7 @@ class TestSlotStatus(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
@@ -193,7 +215,7 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Slot 2: programmed', status)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotCalculate(unittest.TestCase):
@@ -217,7 +239,7 @@ class TestSlotCalculate(unittest.TestCase):
         self.assertEqual(8, len(output.strip()))
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -235,7 +257,7 @@ class TestOpenPGP(unittest.TestCase):
             output)
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -314,7 +336,7 @@ class TestOATH(unittest.TestCase):
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 
-@unittest.skipIf(_skip, 'INTEGRATION_TESTS != TRUE')
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -477,8 +499,14 @@ class TestPIV(unittest.TestCase):
         ykman_cli('piv', 'change-pin', input='654321\n123456\n123456\n')
 
     def test_piv_change_puk(self):
-        ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
-        ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+        o1 = ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
+        self.assertIn('New PUK set.', o1)
+
+        o2 = ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+        self.assertIn('New PUK set.', o2)
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
 
     def test_piv_change_puk_prompt(self):
         ykman_cli('piv', 'change-puk', input='12345678\n87654321\n87654321\n')
