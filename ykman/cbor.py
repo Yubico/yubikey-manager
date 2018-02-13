@@ -29,8 +29,9 @@ def ser_list(data):
     return ser_int(len(data), mt=4) + b''.join([serialize(x) for x in data])
 
 
-def _sort_keys(x):
-    return (six.indexbytes(x, 0), len(x), x)
+def _sort_keys(entry):
+    key = entry[0]
+    return (six.indexbytes(key, 0), len(key), key)
 
 
 def ser_dict(data):
@@ -50,7 +51,7 @@ def ser_text(data):
 
 _SERIALIZERS = [
     (bool, ser_bool),
-    (int, ser_int),
+    (six.integer_types, ser_int),
     (dict, ser_dict),
     (list, ser_list),
     (six.text_type, ser_text),

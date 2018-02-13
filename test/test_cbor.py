@@ -1,5 +1,7 @@
 #  vim: set fileencoding=utf-8 :
 
+from __future__ import unicode_literals
+
 from ykman import cbor
 from binascii import a2b_hex, b2a_hex
 import unittest
@@ -134,13 +136,13 @@ class TestFidoCanonical(unittest.TestCase):
 
     def test_key_order(self):
         self.assertEqual(cbor2hex({
-            '3': 0,
+            u'3': 0,
             b'2': 0,
             1: 0
         }), 'a30100413200613300')
 
         self.assertEqual(cbor2hex({
-            '3': 0,
+            u'3': 0,
             b'': 0,
             256: 0
         }), 'a3190100004000613300')
