@@ -1,12 +1,10 @@
 #  vim: set fileencoding=utf-8 :
 
 from ykman import cbor
-from binascii import a2b_hex
+from binascii import a2b_hex, b2a_hex
 import unittest
 
 
-# From https://github.com/cbor/test-vectors
-# Unsupported values are commented out
 _TEST_VECTORS = [
     ('00', 0),
     ('01', 1),
@@ -93,13 +91,80 @@ _TEST_VECTORS = [
 ]
 
 
+def cbor2hex(data):
+    return b2a_hex(cbor.serialize(data)).decode()
+
+
 class TestCborTestVectors(unittest.TestCase):
+    """
+    From https://github.com/cbor/test-vectors
+    Unsupported values are commented out.
+    """
 
     def test_vectors(self):
         for (data, value) in _TEST_VECTORS:
             try:
                 self.assertEqual(cbor.deserialize(a2b_hex(data)), (value, b''))
-                self.assertEqual(cbor.serialize(value), a2b_hex(data))
+                self.assertEqual(cbor2hex(value), data)
             except Exception:
                 print('\nERROR in test vector, %s' % data)
                 raise
+
+
+class TestFidoCanonical(unittest.TestCase):
+    """
+    As defined in section 6 of:
+    https://fidoalliance.org/specs/fido-v2.0-ps-20170927/fido-client-to-authenticator-protocol-v2.0-ps-20170927.html
+    """
+
+    def test_integers(self):
+        self.assertEqual(cbor2hex(0), '00')
+        self.assertEqual(cbor2hex(0), '00')
+        self.assertEqual(cbor2hex(23), '17')
+        self.assertEqual(cbor2hex(24), '1818')
+        self.assertEqual(cbor2hex(255), '18ff')
+        self.assertEqual(cbor2hex(256), '190100')
+        self.assertEqual(cbor2hex(65535), '19ffff')
+        self.assertEqual(cbor2hex(65536), '1a00010000')
+        self.assertEqual(cbor2hex(4294967295), '1affffffff')
+        self.assertEqual(cbor2hex(4294967296), '1b0000000100000000')
+        self.assertEqual(cbor2hex(-1), '20')
+        self.assertEqual(cbor2hex(-24), '37')
+        self.assertEqual(cbor2hex(-25), '3818')
+
+    def test_key_order(self):
+        self.assertEqual(cbor2hex({
+            '3': 0,
+            b'2': 0,
+            1: 0
+        }), 'a30100413200613300')
+
+        self.assertEqual(cbor2hex({
+            '3': 0,
+            b'': 0,
+            256: 0
+        }), 'a3190100004000613300')
+
+        self.assertEqual(cbor2hex({
+            4294967296: 0,
+            255: 0,
+            256: 0,
+            0: 0
+        }), 'a4000018ff00190100001b000000010000000000')
+
+        self.assertEqual(cbor2hex({
+            b'22': 0,
+            b'3': 0,
+            b'111': 0
+        }), 'a3413300423232004331313100')
+
+        self.assertEqual(cbor2hex({
+            b'001': 0,
+            b'003': 0,
+            b'002': 0
+        }), 'a3433030310043303032004330303300')
+
+        self.assertEqual(cbor2hex({
+            True: 0,
+            False: 0
+        }), 'a2f400f500')
