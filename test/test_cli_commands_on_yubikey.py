@@ -83,6 +83,13 @@ def _no_attestation():
         return False
 
 
+def _no_fido():
+    if _one_yubikey:
+        return _get_version() < (4, 4, 0)
+    else:
+        return False
+
+
 def _is_cve201715361_vulnerable_yubikey():
     if _one_yubikey:
         return is_cve201715361_vulnerable_firmware_version(_get_version())
@@ -511,3 +518,19 @@ class TestPIV(unittest.TestCase):
     def test_piv_change_puk_prompt(self):
         ykman_cli('piv', 'change-puk', input='12345678\n87654321\n87654321\n')
         ykman_cli('piv', 'change-puk', input='87654321\n12345678\n12345678\n')
+
+
+@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(_no_fido(), 'FIDO 2 capabilities not available.')
+@unittest.skipIf(
+    not _has_mode(TRANSPORT.U2F),
+    'U2F needs to be enabled for this test.')
+class TestFIDO(unittest.TestCase):
+
+    def test_fido_change_pin(self):
+        output = ykman_cli('fido', 'info')
+        self.assertIn('PIN is not set.', output)
+        ykman_cli('fido', 'change-pin', '--new-pin', '123abc')
+        output = ykman_cli('fido', 'info')
+        self.assertIn('PIN is set', output)
