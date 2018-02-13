@@ -69,60 +69,75 @@ def info(ctx):
         click.echo('PIN is not set.')
 
 
-@fido.command('set-pin')
-@click.pass_context
-@click.option('-P', '--pin', help='New PIN code.')
-def set_pin(ctx, pin):
-    """
-    Set a PIN code.
-
-    The PIN must be at least 4 characters long, and supports any type
-    of alphanumeric characters.
-    """
-    controller = ctx.obj['controller']
-    if controller.has_pin:
-        ctx.fail('A PIN is already set, use change-pin to change it.')
-    if not pin:
-        pin = click.prompt(
-            'Enter a new PIN', default='', hide_input=True,
-            show_default=False, confirmation_prompt=True)
-    controller.set_pin(pin)
-
-
 @fido.command('change-pin')
 @click.pass_context
 @click.option('-P', '--pin', help='Current PIN code.')
 @click.option('-n', '--new-pin', help='A new PIN.')
 def change_pin(ctx, pin, new_pin):
     """
-    Change the PIN code.
+    Set or change the PIN code.
 
     The PIN must be at least 4 characters long, and supports any type
     of alphanumeric characters.
     """
+
     controller = ctx.obj['controller']
-    if not controller.has_pin:
-        ctx.fail('No PIN is set, use set-pin to set it.')
-    if not pin:
-        pin = click.prompt(
-            'Enter your current PIN', default='', hide_input=True,
-            show_default=False)
-    if not new_pin:
-        new_pin = click.prompt(
-            'Enter your new PIN', default='', hide_input=True,
-            show_default=False, confirmation_prompt=True)
-    try:
-        controller.change_pin(old_pin=pin, new_pin=new_pin)
-    except CTAP2Error as e:
-        if e.code == CTAP2_ERR.PIN_INVALID:
-            ctx.fail('Wrong PIN.')
-        if e.code == CTAP2_ERR.PIN_AUTH_BLOCKED:
+
+    def prompt_new_pin():
+        return click.prompt(
+                    'Enter your new PIN', default='', hide_input=True,
+                    show_default=False, confirmation_prompt=True)
+
+    def prompt_current_pin():
+        return click.prompt(
+                    'Enter your current PIN', default='', hide_input=True,
+                    show_default=False)
+
+    def change_pin(pin, new_pin):
+        try:
+            controller.change_pin(old_pin=pin, new_pin=new_pin)
+        except CTAP2Error as e:
+            if e.code == CTAP2_ERR.PIN_INVALID:
+                ctx.fail('Wrong PIN.')
+            if e.code == CTAP2_ERR.PIN_AUTH_BLOCKED:
+                ctx.fail(
+                    'PIN authentication is currently blocked.'
+                    'Remove and re-insert the YubiKey.')
+            if e.code == CTAP2_ERR.PIN_BLOCKED:
+                ctx.fail('PIN is blocked.')
+            ctx.fail('Failed to change PIN. {}.'.format(e.message))
+
+    def set_pin(new_pin):
+        try:
+            controller.set_pin(new_pin)
+        except Exception as e:
+            ctx.fail('Failed to set a PIN.')
+
+    if controller.has_pin:
+        if pin:
+            if new_pin:
+                change_pin(pin, new_pin)
+            else:
+                new_pin = prompt_new_pin()
+                change_pin(pin, new_pin)
+        else:
+            if new_pin:
+                pin = prompt_current_pin()
+                change_pin(pin, new_pin)
+            else:
+                pin = prompt_current_pin()
+                new_pin = prompt_new_pin()
+                change_pin(pin, new_pin)
+    else:
+        if pin:
             ctx.fail(
-                'PIN authentication is currently blocked.'
-                'Remove and re-insert the YubiKey.')
-        if e.code == CTAP2_ERR.PIN_BLOCKED:
-            ctx.fail('PIN is blocked.')
-        ctx.fail('Failed to change PIN. {}.'.format(e.message))
+                'There is no current PIN set. Use -n/--new-pin to set one.')
+        else:
+            if new_pin:
+                set_pin(new_pin)
+            else:
+                new_pin = prompt_new_pin()
+                set_pin(new_pin)
 
 
 @fido.command('reset')
@@ -132,7 +147,7 @@ def change_pin(ctx, pin, new_pin):
 @click.pass_context
 def reset(ctx):
     """
-    Reset all FIDO2 data.
+    Reset all FIDO 2 data.
 
     This action will wipe all FIDO credentials on the YubiKey
     and remove current the PIN code.
@@ -144,13 +159,17 @@ def reset(ctx):
     except CTAP2Error as e:
         if e.code == CTAP2_ERR.NOT_ALLOWED:
             ctx.fail(
-                'Failed to reset. The reset command must be triggered within'
-                ' 10 seconds after the YubiKey is inserted.')
+                'Failed to reset the YubiKey. The reset command must be '
+                'triggered within 10 seconds after the YubiKey is inserted.')
         else:
             raise
     except U2FHostError as e:
+        # Might not be needed with new libu2f-host
         logger.debug(e)
         pass
+    except Exception as e:
+        logger.error(e)
+        ctx.fail('Failed to reset the YubiKey.')
 
 
 fido.transports = TRANSPORT.U2F
