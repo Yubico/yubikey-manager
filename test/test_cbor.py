@@ -136,13 +136,13 @@ class TestFidoCanonical(unittest.TestCase):
 
     def test_key_order(self):
         self.assertEqual(cbor2hex({
-            u'3': 0,
+            '3': 0,
             b'2': 0,
             1: 0
         }), 'a30100413200613300')
 
         self.assertEqual(cbor2hex({
-            u'3': 0,
+            '3': 0,
             b'': 0,
             256: 0
         }), 'a3190100004000613300')
