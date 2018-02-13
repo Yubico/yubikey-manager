@@ -4,6 +4,8 @@ import sys
 import unittest
 import time
 import click
+from ykman.descriptor import (
+    get_descriptors, open_device, FailedOpeningDeviceException)
 from ykman.util import (
     TRANSPORT, is_cve201715361_vulnerable_firmware_version,
     Cve201715361VulnerableError)
@@ -33,8 +35,6 @@ _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
 if _test_serial is not None:
-    from ykman.descriptor import (get_descriptors, open_device,
-                                  FailedOpeningDeviceException)
     _one_yubikey = len(get_descriptors()) == 1
 
     _skip = False
