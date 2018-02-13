@@ -48,18 +48,18 @@ def ser_text(data):
     return ser_int(len(data), mt=3) + data
 
 
-_SERIALIZERS = {
-    int: ser_int,
-    bool: ser_bool,
-    dict: ser_dict,
-    list: ser_list,
-    six.text_type: ser_text,
-    six.binary_type: ser_bytes
-}
+_SERIALIZERS = [
+    (bool, ser_bool),
+    (int, ser_int),
+    (dict, ser_dict),
+    (list, ser_list),
+    (six.text_type, ser_text),
+    (six.binary_type, ser_bytes)
+]
 
 
 def serialize(data):
-    for k, v in _SERIALIZERS.items():
+    for k, v in _SERIALIZERS:
         if isinstance(data, k):
             return v(data)
     raise ValueError('Unsupported value: {}'.format(data))
