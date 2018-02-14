@@ -32,7 +32,6 @@ from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from .util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
-from binascii import b2a_hex
 from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -360,7 +359,7 @@ def _derive_key(pin, salt):
 
 
 def generate_random_management_key():
-    return b2a_hex(os.urandom(24)).decode()
+    return os.urandom(24)
 
 
 class PivmanData(object):
@@ -581,6 +580,11 @@ class PivController(object):
         self._authenticated = True
 
     def set_mgm_key(self, new_key, touch=False, store_on_device=False):
+        # If the key should be protected by PIN and no key is given,
+        # we generate a random key.
+        if store_on_device and not new_key:
+            new_key = generate_random_management_key()
+
         # Set the new management key
         self.send_cmd(
             INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,

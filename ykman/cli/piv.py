@@ -693,12 +693,7 @@ def change_management_key(
                     ' and will not be cleared if no PIN is provided. Continue?',
                     abort=True)
 
-    # If the key should be protected by PIN and no key is given,
-    # we generate a random key.
-    if protect and not new_management_key:
-        new_management_key = generate_random_management_key()
-
-    if not new_management_key:
+    if not new_management_key and not protect:
         if not force:
             new_management_key = click.prompt(
                 'Enter your new management key'
@@ -709,12 +704,15 @@ def change_management_key(
         if force or new_management_key == '':
             new_management_key = generate_random_management_key()
             click.echo(
-                'Generated management key: {}'.format(new_management_key))
+                'Generated management key: {}'.format(
+                    b2a_hex(new_management_key).decode('utf-8')))
 
-    try:
-        new_management_key = a2b_hex(new_management_key)
-    except Exception:
-        ctx.fail('New management key has the wrong format.')
+    if new_management_key and type(new_management_key) is not bytes:
+        try:
+            new_management_key = a2b_hex(new_management_key)
+        except Exception:
+            ctx.fail('New management key has the wrong format.')
+
     try:
         controller.set_mgm_key(
             new_management_key, touch=touch, store_on_device=protect)
