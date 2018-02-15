@@ -114,6 +114,8 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
+not_one_yubikey = (not _one_yubikey, 'A single YubiKey needs to be connected.')
+
 destructive_tests_not_activated = (
     _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 
@@ -126,7 +128,7 @@ skip_not_roca = (
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 class TestYkmanInfo(unittest.TestCase):
 
     def test_ykman_info(self):
@@ -138,7 +140,7 @@ class TestYkmanInfo(unittest.TestCase):
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotStatus(unittest.TestCase):
 
@@ -155,7 +157,7 @@ class TestSlotStatus(unittest.TestCase):
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
 
@@ -244,7 +246,7 @@ class TestSlotProgramming(unittest.TestCase):
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotCalculate(unittest.TestCase):
 
@@ -268,7 +270,7 @@ class TestSlotCalculate(unittest.TestCase):
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
     'CCID needs to be enabled for this test.')
@@ -286,7 +288,7 @@ class TestOpenPGP(unittest.TestCase):
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
     'CCID needs to be enabled for this test.')
@@ -365,7 +367,7 @@ class TestOATH(unittest.TestCase):
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
     'CCID needs to be enabled for this test.')
