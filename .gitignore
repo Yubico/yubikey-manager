@@ -6,6 +6,7 @@ vagrant/development/*.log
 .eggs/
 build/
 dist/
+/.python-venv/
 .ropeproject/
 ChangeLog
 MANIFEST

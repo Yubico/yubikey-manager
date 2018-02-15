@@ -9,12 +9,18 @@ Setup the repository:
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
 
+Set up a venv (second step differs between platforms, see the https://docs.python.org/3/library/venv.html#creating-virtual-environments[Python docs]):
+
+    $ python3 -m venv .python-venv
+    $ source .python-venv/bin/activate
+
 Install in editable mode with pip (from root of repository):
 
-    $ sudo pip install -e .
+    $ pip install -e .
 
 Run the app:
 
+    $ ykman --version
     $ ykman --help
 
 To update once installed, just make sure the repo is up to date:
@@ -23,7 +29,7 @@ To update once installed, just make sure the repo is up to date:
 
 To uninstall, run:
 
-    $ sudo pip uninstall yubikey-manager
+    $ pip uninstall yubikey-manager
 
 === Code Style
 
