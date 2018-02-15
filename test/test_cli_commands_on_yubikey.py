@@ -123,6 +123,8 @@ not_one_yubikey = (not _one_yubikey, 'A single YubiKey needs to be connected.')
 destructive_tests_not_activated = (
     _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 
+no_attestation = (_no_attestation(), 'Attestation not available.')
+
 skip_roca = (
     _is_cve201715361_vulnerable_yubikey(),
     'Not applicable to CVE-2017-15361 affected YubiKey.')
@@ -447,7 +449,7 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(_no_attestation(), 'Attestation not available.')
+    @unittest.skipIf(*no_attestation)
     def test_piv_attest_key(self):
         ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'ECCP256',
@@ -483,7 +485,7 @@ class TestPIV(unittest.TestCase):
             csr = x509.load_pem_x509_csr(output.encode(), default_backend())
             self.assertTrue(csr.is_signature_valid)
 
-    @unittest.skipIf(_no_attestation(), 'Attestation not available.')
+    @unittest.skipIf(*no_attestation)
     def test_piv_export_attestation_certificate(self):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
