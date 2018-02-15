@@ -156,6 +156,7 @@ def cli(ctx, device, log_level, log_file):
             dev = _run_cmd_for_single(ctx, subcmd.name, transports)
 
         ctx.obj['dev'] = dev
+        ctx.call_on_close(dev.close)
 
 
 @cli.command('list')
