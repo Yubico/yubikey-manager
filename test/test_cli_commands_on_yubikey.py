@@ -114,6 +114,9 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
+destructive_tests_not_activated = (
+    _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+
 skip_roca = (
     _is_cve201715361_vulnerable_yubikey(),
     'Not applicable to CVE-2017-15361 affected YubiKey.')
@@ -122,7 +125,7 @@ skip_not_roca = (
     'Applicable only to CVE-2017-15361 affected YubiKey.')
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 class TestYkmanInfo(unittest.TestCase):
 
@@ -134,7 +137,7 @@ class TestYkmanInfo(unittest.TestCase):
         self.assertIn('Firmware version:', info)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotStatus(unittest.TestCase):
@@ -151,7 +154,7 @@ class TestSlotStatus(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotProgramming(unittest.TestCase):
@@ -240,7 +243,7 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Slot 2: programmed', status)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
 class TestSlotCalculate(unittest.TestCase):
@@ -264,7 +267,7 @@ class TestSlotCalculate(unittest.TestCase):
         self.assertEqual(8, len(output.strip()))
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -282,7 +285,7 @@ class TestOpenPGP(unittest.TestCase):
             output)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
@@ -361,7 +364,7 @@ class TestOATH(unittest.TestCase):
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+@unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 @unittest.skipIf(
     not _has_mode(TRANSPORT.CCID),
