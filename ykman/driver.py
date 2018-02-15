@@ -24,6 +24,10 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class ModeSwitchError(Exception):
@@ -64,3 +68,6 @@ class AbstractDriver(object):
     def guess_version(self):
         # Second arg is True if the version is certain, False if not.
         return (0, 0, 0), False
+
+    def close(self):
+        logger.debug('close')
