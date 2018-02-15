@@ -114,6 +114,10 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
+def missing_mode(transport):
+    return (not _has_mode(transport), transport.name + ' needs to be enabled')
+
+
 not_one_yubikey = (not _one_yubikey, 'A single YubiKey needs to be connected.')
 
 destructive_tests_not_activated = (
@@ -141,7 +145,7 @@ class TestYkmanInfo(unittest.TestCase):
 
 @unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotStatus(unittest.TestCase):
 
     def test_ykman_slot_info(self):
@@ -158,7 +162,7 @@ class TestSlotStatus(unittest.TestCase):
 
 @unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotProgramming(unittest.TestCase):
 
     def test_ykman_program_otp_slot_2(self):
@@ -247,7 +251,7 @@ class TestSlotProgramming(unittest.TestCase):
 
 @unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotCalculate(unittest.TestCase):
 
     def test_calculate_hex(self):
@@ -271,9 +275,7 @@ class TestSlotCalculate(unittest.TestCase):
 
 @unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(
-    not _has_mode(TRANSPORT.CCID),
-    'CCID needs to be enabled for this test.')
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOpenPGP(unittest.TestCase):
 
     def test_openpgp_info(self):
@@ -289,9 +291,7 @@ class TestOpenPGP(unittest.TestCase):
 
 @unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(
-    not _has_mode(TRANSPORT.CCID),
-    'CCID needs to be enabled for this test.')
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOATH(unittest.TestCase):
 
     def test_oath_info(self):
@@ -368,9 +368,7 @@ class TestOATH(unittest.TestCase):
 
 @unittest.skipIf(*destructive_tests_not_activated)
 @unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(
-    not _has_mode(TRANSPORT.CCID),
-    'CCID needs to be enabled for this test.')
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestPIV(unittest.TestCase):
 
     def test_piv_info(self):
