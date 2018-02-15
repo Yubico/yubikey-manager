@@ -114,6 +114,14 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
+skip_roca = (
+    _is_cve201715361_vulnerable_yubikey(),
+    'Not applicable to CVE-2017-15361 affected YubiKey.')
+skip_not_roca = (
+    not _is_cve201715361_vulnerable_yubikey(),
+    'Applicable only to CVE-2017-15361 affected YubiKey.')
+
+
 @unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 @unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
 class TestYkmanInfo(unittest.TestCase):
@@ -368,59 +376,41 @@ class TestPIV(unittest.TestCase):
         output = ykman_cli('piv', 'reset', '-f')
         self.assertIn('Success!', output)
 
-    @unittest.skipIf(
-        _is_cve201715361_vulnerable_yubikey(),
-        'Not applicable to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_default(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(
-        not _is_cve201715361_vulnerable_yubikey(),
-        'Applicable only to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_not_roca)
     def test_piv_generate_key_default_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
             ykman_cli(
                 'piv', 'generate-key', '9a',
                 '-m', DEFAULT_MANAGEMENT_KEY, '-')
 
-    @unittest.skipIf(
-        _is_cve201715361_vulnerable_yubikey(),
-        'Not applicable to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_rsa1024(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(
-        _is_cve201715361_vulnerable_yubikey(),
-        'Not applicable to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_rsa2048(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA2048',
             '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(
-        not _is_cve201715361_vulnerable_yubikey(),
-        'Applicable only to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_not_roca)
     def test_piv_generate_key_rsa1024_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
             ykman_cli(
                 'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-')
 
-    @unittest.skipIf(
-        not _is_cve201715361_vulnerable_yubikey(),
-        'Applicable only to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_not_roca)
     def test_piv_generate_key_rsa2048_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
             ykman_cli(
