@@ -111,6 +111,7 @@ def change_pin(ctx, pin, new_pin):
         try:
             controller.set_pin(new_pin)
         except Exception as e:
+            logger.error('Failed to set PIN', exc_info=e)
             ctx.fail('Failed to set a PIN.')
 
     if controller.has_pin:
