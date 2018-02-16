@@ -27,7 +27,11 @@ def _verify_cert(cert, pubkey):
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
-class TestPIV(DestructiveYubikeyTestCase):
+class PivTestCase(DestructiveYubikeyTestCase):
+    pass
+
+
+class Misc(PivTestCase):
 
     def test_piv_info(self):
         output = ykman_cli('piv', 'info')
@@ -36,6 +40,9 @@ class TestPIV(DestructiveYubikeyTestCase):
     def test_piv_reset(self):
         output = ykman_cli('piv', 'reset', '-f')
         self.assertIn('Success!', output)
+
+
+class KeyManagement(PivTestCase):
 
     @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_default(self):
@@ -146,6 +153,9 @@ class TestPIV(DestructiveYubikeyTestCase):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
+
+class ManagementKey(PivTestCase):
+
     def test_piv_change_management_key_protect_random(self):
         ykman_cli(
             'piv', 'change-management-key', '-p', '-P', '123456',
@@ -166,6 +176,9 @@ class TestPIV(DestructiveYubikeyTestCase):
                   DEFAULT_MANAGEMENT_KEY +
                   '\n' + DEFAULT_MANAGEMENT_KEY + '\n')
 
+
+class Pin(PivTestCase):
+
     def test_piv_change_pin(self):
         ykman_cli('piv', 'change-pin', '-P', '123456', '-n', '654321')
         ykman_cli('piv', 'change-pin', '-P', '654321', '-n', '123456')
@@ -173,6 +186,9 @@ class TestPIV(DestructiveYubikeyTestCase):
     def test_piv_change_pin_prompt(self):
         ykman_cli('piv', 'change-pin', input='123456\n654321\n654321\n')
         ykman_cli('piv', 'change-pin', input='654321\n123456\n123456\n')
+
+
+class Puk(PivTestCase):
 
     def test_piv_change_puk(self):
         o1 = ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
