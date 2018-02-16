@@ -8,19 +8,6 @@ from ykman.util import is_cve201715361_vulnerable_firmware_version
 import test.util
 
 
-URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
-        'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
-
-URI_TOTP_EXAMPLE = (
-        'otpauth://totp/ACME%20Co:john.doe@email.com?'
-        'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
-        '&algorithm=SHA1&digits=6&period=30')
-
-URI_TOTP_EXAMPLE_B = (
-        'otpauth://totp/ACME%20Co:john.doe.b@email.com?'
-        'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
-        '&algorithm=SHA1&digits=6&period=30')
-
 _one_yubikey = False
 _the_yubikey = None
 _skip = True
