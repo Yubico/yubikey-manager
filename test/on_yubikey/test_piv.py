@@ -146,7 +146,7 @@ class TestPIV(DestructiveYubikeyTestCase):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
-    def test_piv_change_management_key_protect(self):
+    def test_piv_change_management_key_protect_random(self):
         ykman_cli(
             'piv', 'change-management-key', '-p', '-P', '123456',
             '-m', DEFAULT_MANAGEMENT_KEY)
