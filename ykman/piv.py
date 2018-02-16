@@ -733,11 +733,18 @@ class PivController(object):
         return self._raw_sign_decrypt(slot, algorithm, Tlv(0x81, message),
                                       _sign_len_conditions[algorithm])
 
+    def sign(self, slot, algorithm, message):
+        if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
+            message = _pkcs1_15_pad(algorithm, message)
+        elif algorithm in (ALGO.ECCP256, ALGO.ECCP384):
+            h = hashes.Hash(hashes.SHA256(), default_backend())
+            h.update(message)
+            message = h.finalize()
+        return self.sign_raw(slot, algorithm, message)
+
     def decrypt_raw(self, slot, algorithm, message):
         return self._raw_sign_decrypt(slot, algorithm, Tlv(0x85, message),
                                       _decrypt_len_conditions[algorithm])
-
-    # Not sure if these should go in this class or somewhere else
 
     def list_certificates(self):
         certs = OrderedDict()
@@ -780,20 +787,12 @@ class PivController(object):
     def sign_cert_builder(self, slot, algorithm, builder, touch_callback=None):
         dummy_key = _dummy_key(algorithm)
         cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
-        message = cert.tbs_certificate_bytes
-
-        if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
-            message = _pkcs1_15_pad(algorithm, message)
-        elif algorithm in (ALGO.ECCP256, ALGO.ECCP384):
-            h = hashes.Hash(hashes.SHA256(), default_backend())
-            h.update(message)
-            message = h.finalize()
 
         if touch_callback is not None:
             touch_timer = Timer(0.500, touch_callback)
             touch_timer.start()
 
-        sig = self.sign_raw(slot, algorithm, message)
+        sig = self.sign(slot, algorithm, cert.tbs_certificate_bytes)
 
         if touch_callback is not None:
             touch_timer.cancel()
@@ -809,36 +808,26 @@ class PivController(object):
     def sign_csr_builder(self, slot, public_key, builder, touch_callback=None):
         algorithm = ALGO.from_public_key(public_key)
         dummy_key = _dummy_key(algorithm)
-        cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
-        message = cert.tbs_certrequest_bytes
+        csr = builder.sign(dummy_key, hashes.SHA256(), default_backend())
+        seq = parse_tlvs(Tlv(csr.public_bytes(Encoding.DER)).value)
 
-        if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
-            message = _pkcs1_15_pad(algorithm, message)
-            dummy_bytes = dummy_key.public_key().public_bytes(
-                Encoding.DER, PublicFormat.PKCS1)
-            pub_bytes = public_key.public_bytes(
-                Encoding.DER, PublicFormat.PKCS1)
-        elif algorithm in (ALGO.ECCP256, ALGO.ECCP384):
-            h = hashes.Hash(hashes.SHA256(), default_backend())
-            h.update(message)
-            message = h.finalize()
-            dummy_bytes = dummy_key.public_key().public_bytes(
-                Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
-            pub_bytes = public_key.public_bytes(
-                Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+        # Replace public key
+        pub_format = PublicFormat.PKCS1 if algorithm.name.startswith('RSA') \
+            else PublicFormat.SubjectPublicKeyInfo
+        dummy_bytes = dummy_key.public_key().public_bytes(
+            Encoding.DER, pub_format)
+        pub_bytes = public_key.public_bytes(Encoding.DER, pub_format)
+        seq[0] = seq[0].replace(dummy_bytes, pub_bytes)
 
         if touch_callback is not None:
             touch_timer = Timer(0.500, touch_callback)
             touch_timer.start()
 
-        sig = self.sign_raw(slot, algorithm, message)
+        sig = self.sign(slot, algorithm, seq[0])
 
         if touch_callback is not None:
             touch_timer.cancel()
 
-        seq = parse_tlvs(Tlv(cert.public_bytes(Encoding.DER)).value)
-        # Replace public key
-        seq[0] = seq[0].replace(dummy_bytes, pub_bytes)
         # Replace signature, add unused bits = 0
         seq[2] = Tlv(seq[2].tag, b'\0' + sig)
         # Re-assemble sequence

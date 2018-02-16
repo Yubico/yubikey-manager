@@ -10,6 +10,9 @@ from ykman.util import (
     TRANSPORT, is_cve201715361_vulnerable_firmware_version,
     Cve201715361VulnerableError)
 import test.util
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
+from cryptography.hazmat.backends import default_backend
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
         'secret=JBSWY3DPK5XXE3DEJ5TE6QKUJA======&issuer=Example&counter=1'
@@ -102,6 +105,20 @@ def ykman_cli(*args, **kwargs):
         '--device', _test_serial,
         *args, **kwargs
     )
+
+
+def _verify_cert(cert, pubkey):
+    cert_signature = cert.signature
+    cert_bytes = cert.tbs_certificate_bytes
+
+    if isinstance(pubkey, rsa.RSAPublicKey):
+        pubkey.verify(cert_signature, cert_bytes, padding.PKCS1v15(),
+                      cert.signature_hash_algorithm)
+    elif isinstance(pubkey, ec.EllipticCurvePublicKey):
+        pubkey.verify(cert_signature, cert_bytes,
+                      ec.ECDSA(cert.signature_hash_algorithm))
+    else:
+        raise ValueError('Unsupported public key value')
 
 
 @unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
@@ -453,24 +470,32 @@ class TestPIV(unittest.TestCase):
         self.assertIn('BEGIN CERTIFICATE', output)
 
     def test_piv_generate_self_signed(self):
-        ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
-            DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
-        ykman_cli(
-            'piv', 'generate-certificate', '9a', '-m',
-            DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
-            '-s', 'test-subject', '-P', '123456')
-        output = ykman_cli('piv', 'info')
-        self.assertIn('test-subject', output)
+        for algo in ('ECCP256', 'RSA1024'):
+            ykman_cli(
+                'piv', 'generate-key', '9a', '-a', algo, '-m',
+                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+            ykman_cli(
+                'piv', 'generate-certificate', '9a', '-m',
+                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
+                '-s', 'subject-' + algo, '-P', '123456')
+            output = ykman_cli('piv', 'export-certificate', '9a', '-')
+            cert = x509.load_pem_x509_certificate(output.encode(),
+                                                  default_backend())
+            _verify_cert(cert, cert.public_key())
+
+            output = ykman_cli('piv', 'info')
+            self.assertIn('subject-' + algo, output)
 
     def test_piv_generate_csr(self):
-        ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
-            DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
-        output = ykman_cli(
-            'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
-            '-s', 'test-subject', '-P', '123456', '-')
-        self.assertIn('BEGIN CERTIFICATE REQUEST', output)
+        for algo in ('ECCP256', 'RSA1024'):
+            ykman_cli(
+                'piv', 'generate-key', '9a', '-a', algo, '-m',
+                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+            output = ykman_cli(
+                'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
+                '-s', 'test-subject', '-P', '123456', '-')
+            csr = x509.load_pem_x509_csr(output.encode(), default_backend())
+            self.assertTrue(csr.is_signature_valid)
 
     @unittest.skipIf(_no_attestation(), 'Attestation not available.')
     def test_piv_export_attestation_certificate(self):
