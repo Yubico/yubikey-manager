@@ -397,8 +397,15 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_config(cfg)
 
+    def close(self):
+        if self._dev is not None:
+            logger.debug('Close %s', self)
+            ykpers.yk_close_key(self._dev)
+            self._dev = None
+
     def __del__(self):
-        ykpers.yk_close_key(self._dev)
+        logger.debug('Destroy %s', self)
+        self.close()
 
 
 def open_devices():
