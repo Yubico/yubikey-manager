@@ -146,19 +146,3 @@ class TestSlotCalculate(unittest.TestCase):
         self.assertEqual(6, len(output.strip()))
         output = ykman_cli('slot', 'calculate', '2', '-T', '-d', '8')
         self.assertEqual(8, len(output.strip()))
-
-
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
-@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
-class TestOpenPGP(unittest.TestCase):
-
-    def test_openpgp_info(self):
-        output = ykman_cli('openpgp', 'info')
-        self.assertIn('OpenPGP version:', output)
-
-    def test_openpgp_reset(self):
-        output = ykman_cli('openpgp', 'reset', '-f')
-        self.assertIn(
-            'Success! All data has been cleared and default PINs are set.',
-            output)
