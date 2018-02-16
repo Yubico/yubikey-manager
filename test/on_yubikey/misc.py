@@ -1,8 +1,6 @@
-from __future__ import print_function
-import unittest
 import time
-from .on_yubikey.util import (
-    destructive_tests_not_activated, not_one_yubikey, ykman_cli)
+import unittest
+from .util import (destructive_tests_not_activated, not_one_yubikey, ykman_cli)
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
