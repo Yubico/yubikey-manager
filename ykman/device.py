@@ -30,7 +30,11 @@ from __future__ import absolute_import
 from .util import CAPABILITY, TRANSPORT, YUBIKEY, parse_tlvs
 from .driver import AbstractDriver
 from binascii import b2a_hex
+import logging
 import six
+
+
+logger = logging.getLogger(__name__)
 
 
 YK4_CAPA_TAG = 0x01
@@ -179,6 +183,9 @@ class YubiKey(object):
             assert dev.serial == my_serial
         assert dev.mode == my_mode
         return dev
+
+    def close(self):
+        self._driver.close()
 
     def __str__(self):
         return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}]' \

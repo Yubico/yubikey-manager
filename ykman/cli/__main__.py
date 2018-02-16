@@ -85,7 +85,7 @@ def _disabled_transport(ctx, transports, cmd_name):
 
 def _run_cmd_for_serial(ctx, cmd, transports, serial):
     try:
-        ctx.obj['dev'] = open_device(transports, serial=serial)
+        return open_device(transports, serial=serial)
     except FailedOpeningDeviceException:
         try:  # Retry, any transport
             dev = open_device(serial=serial)
@@ -114,7 +114,7 @@ def _run_cmd_for_single(ctx, cmd, transports):
     descriptor = descriptors[0]
     if descriptor.mode.transports & transports:
         try:
-            ctx.obj['dev'] = descriptor.open_device(transports)
+            return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
             ctx.fail('Failed connecting to the YubiKey.')
     else:
@@ -151,9 +151,12 @@ def cli(ctx, device, log_level, log_file):
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
         if device is not None:
-            _run_cmd_for_serial(ctx, subcmd.name, transports, device)
+            dev = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
         else:
-            _run_cmd_for_single(ctx, subcmd.name, transports)
+            dev = _run_cmd_for_single(ctx, subcmd.name, transports)
+
+        ctx.obj['dev'] = dev
+        ctx.call_on_close(dev.close)
 
 
 @cli.command('list')

@@ -114,8 +114,27 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
+def missing_mode(transport):
+    return (not _has_mode(transport), transport.name + ' needs to be enabled')
+
+
+not_one_yubikey = (not _one_yubikey, 'A single YubiKey needs to be connected.')
+
+destructive_tests_not_activated = (
+    _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
+
+no_attestation = (_no_attestation(), 'Attestation not available.')
+
+skip_roca = (
+    _is_cve201715361_vulnerable_yubikey(),
+    'Not applicable to CVE-2017-15361 affected YubiKey.')
+skip_not_roca = (
+    not _is_cve201715361_vulnerable_yubikey(),
+    'Applicable only to CVE-2017-15361 affected YubiKey.')
+
+
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
 class TestYkmanInfo(unittest.TestCase):
 
     def test_ykman_info(self):
@@ -126,9 +145,9 @@ class TestYkmanInfo(unittest.TestCase):
         self.assertIn('Firmware version:', info)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotStatus(unittest.TestCase):
 
     def test_ykman_slot_info(self):
@@ -143,9 +162,9 @@ class TestSlotStatus(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotProgramming(unittest.TestCase):
 
     def test_ykman_program_otp_slot_2(self):
@@ -232,9 +251,9 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Slot 2: programmed', status)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
-@unittest.skipIf(not _has_mode(TRANSPORT.OTP), 'OTP needs to be enabled')
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotCalculate(unittest.TestCase):
 
     def test_calculate_hex(self):
@@ -256,11 +275,9 @@ class TestSlotCalculate(unittest.TestCase):
         self.assertEqual(8, len(output.strip()))
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
-@unittest.skipIf(
-    not _has_mode(TRANSPORT.CCID),
-    'CCID needs to be enabled for this test.')
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOpenPGP(unittest.TestCase):
 
     def test_openpgp_info(self):
@@ -274,11 +291,9 @@ class TestOpenPGP(unittest.TestCase):
             output)
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
-@unittest.skipIf(
-    not _has_mode(TRANSPORT.CCID),
-    'CCID needs to be enabled for this test.')
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOATH(unittest.TestCase):
 
     def test_oath_info(self):
@@ -353,11 +368,9 @@ class TestOATH(unittest.TestCase):
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
 
-@unittest.skipIf(_skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-@unittest.skipIf(not _one_yubikey, 'A single YubiKey need to be connected.')
-@unittest.skipIf(
-    not _has_mode(TRANSPORT.CCID),
-    'CCID needs to be enabled for this test.')
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestPIV(unittest.TestCase):
 
     def test_piv_info(self):
@@ -368,59 +381,41 @@ class TestPIV(unittest.TestCase):
         output = ykman_cli('piv', 'reset', '-f')
         self.assertIn('Success!', output)
 
-    @unittest.skipIf(
-        _is_cve201715361_vulnerable_yubikey(),
-        'Not applicable to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_default(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(
-        not _is_cve201715361_vulnerable_yubikey(),
-        'Applicable only to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_not_roca)
     def test_piv_generate_key_default_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
             ykman_cli(
                 'piv', 'generate-key', '9a',
                 '-m', DEFAULT_MANAGEMENT_KEY, '-')
 
-    @unittest.skipIf(
-        _is_cve201715361_vulnerable_yubikey(),
-        'Not applicable to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_rsa1024(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
             DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(
-        _is_cve201715361_vulnerable_yubikey(),
-        'Not applicable to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_roca)
     def test_piv_generate_key_rsa2048(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA2048',
             '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(
-        not _is_cve201715361_vulnerable_yubikey(),
-        'Applicable only to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_not_roca)
     def test_piv_generate_key_rsa1024_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
             ykman_cli(
                 'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-')
 
-    @unittest.skipIf(
-        not _is_cve201715361_vulnerable_yubikey(),
-        'Applicable only to CVE-2017-15361 affected YubiKey.'
-    )
+    @unittest.skipIf(*skip_not_roca)
     def test_piv_generate_key_rsa2048_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
             ykman_cli(
@@ -454,7 +449,7 @@ class TestPIV(unittest.TestCase):
             DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
-    @unittest.skipIf(_no_attestation(), 'Attestation not available.')
+    @unittest.skipIf(*no_attestation)
     def test_piv_attest_key(self):
         ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'ECCP256',
@@ -490,7 +485,7 @@ class TestPIV(unittest.TestCase):
             csr = x509.load_pem_x509_csr(output.encode(), default_backend())
             self.assertTrue(csr.is_signature_valid)
 
-    @unittest.skipIf(_no_attestation(), 'Attestation not available.')
+    @unittest.skipIf(*no_attestation)
     def test_piv_export_attestation_certificate(self):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)

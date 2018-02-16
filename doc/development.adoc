@@ -43,9 +43,9 @@ To run unit tests:
 
 WARNING: ONLY run these on a dedicated developer key, as it will permanently delete data on the device!
 
-To run integration tests:
+To run integration tests, indicate the serial number (given by `ykman list`) of the YubiKey to test with:
 
-   $ INTEGRATION_TESTS=TRUE python setup.py test
+   $ DESTRUCTIVE_TEST_YUBIKEY_SERIAL=123456 python setup.py test
 
 == Using vagrant for development
 

@@ -185,9 +185,14 @@ class CCIDDriver(AbstractDriver):
         self.send_apdu(0, INS_SELECT, 4, 0, AID.MGR)
         self.send_apdu(0, INS_NEO_TEST, SLOT_DEVICE_CONFIG, 0, mode_data)
 
+    def close(self):
+        logger.debug('Close %s', self)
+        self._conn.disconnect()
+
     def __del__(self):
+        logger.debug('Destroy %s', self)
         try:
-            self._conn.disconnect()
+            self.close()
         except Exception as e:
             logger.debug('Exception in destructor', exc_info=e)
 
