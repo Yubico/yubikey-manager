@@ -70,4 +70,4 @@ class AbstractDriver(object):
         return (0, 0, 0), False
 
     def close(self):
-        logger.debug('close')
+        pass

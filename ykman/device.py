@@ -185,7 +185,6 @@ class YubiKey(object):
         return dev
 
     def close(self):
-        logger.debug('close')
         self._driver.close()
 
     def __str__(self):
