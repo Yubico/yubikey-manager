@@ -2,6 +2,7 @@ from __future__ import print_function
 import click
 import os
 import sys
+import unittest
 from ykman.descriptor import (
     get_descriptors, open_device, FailedOpeningDeviceException)
 from ykman.util import is_cve201715361_vulnerable_firmware_version
@@ -95,3 +96,9 @@ skip_roca = (
 skip_not_roca = (
     not _is_cve201715361_vulnerable_yubikey(),
     'Applicable only to CVE-2017-15361 affected YubiKey.')
+
+
+@unittest.skipIf(*destructive_tests_not_activated)
+@unittest.skipIf(*not_one_yubikey)
+class DestructiveYubikeyTestCase(unittest.TestCase):
+    pass

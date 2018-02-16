@@ -1,13 +1,10 @@
 import unittest
 from ykman.util import TRANSPORT
-from .util import (
-    destructive_tests_not_activated, missing_mode, not_one_yubikey, ykman_cli)
+from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
-class TestSlotStatus(unittest.TestCase):
+class TestSlotStatus(DestructiveYubikeyTestCase):
 
     def test_ykman_slot_info(self):
         info = ykman_cli('slot', 'info')
@@ -21,10 +18,8 @@ class TestSlotStatus(unittest.TestCase):
         self.assertIn('Swapping slots...', output)
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
-class TestSlotProgramming(unittest.TestCase):
+class TestSlotProgramming(DestructiveYubikeyTestCase):
 
     def test_ykman_program_otp_slot_2(self):
         ykman_cli(
@@ -110,10 +105,8 @@ class TestSlotProgramming(unittest.TestCase):
         self.assertIn('Slot 2: programmed', status)
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
-class TestSlotCalculate(unittest.TestCase):
+class TestSlotCalculate(DestructiveYubikeyTestCase):
 
     def test_calculate_hex(self):
         ykman_cli('slot', 'delete', '2', '-f')

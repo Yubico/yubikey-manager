@@ -4,8 +4,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
 from ykman.util import (TRANSPORT, Cve201715361VulnerableError)
 from .util import (
-    destructive_tests_not_activated, is_NEO, missing_mode, no_attestation,
-    not_one_yubikey, skip_not_roca, skip_roca, ykman_cli)
+    DestructiveYubikeyTestCase, is_NEO, missing_mode, no_attestation,
+    skip_not_roca, skip_roca, ykman_cli)
 
 
 DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
@@ -26,10 +26,8 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
-class TestPIV(unittest.TestCase):
+class TestPIV(DestructiveYubikeyTestCase):
 
     def test_piv_info(self):
         output = ykman_cli('piv', 'info')
