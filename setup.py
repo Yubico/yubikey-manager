@@ -26,8 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
+import os
 from setuptools import setup
-from ykman import __version__
 
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
@@ -36,9 +36,12 @@ if sys.version_info < (3, 4):
 if sys.platform == 'win32':
     install_requires.append('pypiwin32')
 
+with open(os.path.join(os.path.dirname(__file__), 'VERSION')) as version_file:
+    version = version_file.read().strip()
+
 setup(
     name='yubikey-manager',
-    version=__version__,
+    version=version,
     author='Dain Nilsson',
     author_email='dain@yubico.com',
     maintainer='Yubico Open Source Maintainers',
