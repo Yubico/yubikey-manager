@@ -27,13 +27,31 @@
 
 from __future__ import absolute_import
 
+import inspect
 import logging
+import os
+import subprocess
 import ykman
 
 
 LOG_LEVELS = [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR,
               logging.CRITICAL]
 LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
+
+ykman_dir = os.path.dirname(dict(inspect.getmembers(ykman))['__file__'])
+git_version = None
+
+try:
+    git_describe_proc = subprocess.Popen(
+        ['git', '-C', ykman_dir,
+         'describe', '--tags', '--always', '--dirty=-DIRTY'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    git_describe_proc.wait()
+    if git_describe_proc.returncode == 0:
+        git_version = git_describe_proc.stdout.read().decode('utf-8').strip()
+except Exception:
+    pass
 
 
 def setup(log_level_name, log_file=None):
@@ -57,6 +75,7 @@ def setup(log_level_name, log_file=None):
     logger = logging.getLogger(__name__)
     logger.info('Initialized logging for %s version: %s',
                 ykman.__name__, ykman.__version__)
+    logger.debug('Git version: %s', git_version)
 
 
 logging.disable(logging.CRITICAL * 2)
