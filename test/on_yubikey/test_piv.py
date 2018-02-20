@@ -16,6 +16,10 @@ DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
 NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 
+def old_new_new(old, new):
+    return '{0}\n{1}\n{1}\n'.format(old, new)
+
+
 def _verify_cert(cert, pubkey):
     cert_signature = cert.signature
     cert_bytes = cert.tbs_certificate_bytes
@@ -179,13 +183,11 @@ class ManagementKey(PivTestCase):
 
     def test_change_management_key_prompt(self):
         ykman_cli('piv', 'change-management-key',
-                  input=DEFAULT_MANAGEMENT_KEY + '\n' +
-                  NON_DEFAULT_MANAGEMENT_KEY +
-                  '\n' + NON_DEFAULT_MANAGEMENT_KEY + '\n')
+                  input=old_new_new(DEFAULT_MANAGEMENT_KEY,
+                                    NON_DEFAULT_MANAGEMENT_KEY))
         ykman_cli('piv', 'change-management-key',
-                  input=NON_DEFAULT_MANAGEMENT_KEY + '\n' +
-                  DEFAULT_MANAGEMENT_KEY +
-                  '\n' + DEFAULT_MANAGEMENT_KEY + '\n')
+                  input=old_new_new(NON_DEFAULT_MANAGEMENT_KEY,
+                                    DEFAULT_MANAGEMENT_KEY))
 
 
 class Pin(PivTestCase):
@@ -196,11 +198,9 @@ class Pin(PivTestCase):
 
     def test_change_pin_prompt(self):
         ykman_cli('piv', 'change-pin',
-                  input=DEFAULT_PIN + '\n' + NON_DEFAULT_PIN + '\n'
-                  + NON_DEFAULT_PIN + '\n')
+                  input=old_new_new(DEFAULT_PIN, NON_DEFAULT_PIN))
         ykman_cli('piv', 'change-pin',
-                  input=NON_DEFAULT_PIN + '\n' + DEFAULT_PIN + '\n'
-                  + DEFAULT_PIN + '\n')
+                  input=old_new_new(NON_DEFAULT_PIN, DEFAULT_PIN))
 
 
 class Puk(PivTestCase):
@@ -220,8 +220,6 @@ class Puk(PivTestCase):
 
     def test_change_puk_prompt(self):
         ykman_cli('piv', 'change-puk',
-                  input=DEFAULT_PUK + '\n' + NON_DEFAULT_PUK + '\n'
-                  + NON_DEFAULT_PUK + '\n')
+                  input=old_new_new(DEFAULT_PUK, NON_DEFAULT_PUK))
         ykman_cli('piv', 'change-puk',
-                  input=NON_DEFAULT_PUK + '\n' + DEFAULT_PUK + '\n'
-                  + DEFAULT_PUK + '\n')
+                  input=old_new_new(NON_DEFAULT_PUK, DEFAULT_PUK))
