@@ -1,14 +1,9 @@
-import time
-import unittest
-from .util import (destructive_tests_not_activated, not_one_yubikey, ykman_cli)
+from .util import (DestructiveYubikeyTestCase, ykman_cli)
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
-class TestYkmanInfo(unittest.TestCase):
+class TestYkmanInfo(DestructiveYubikeyTestCase):
 
     def test_ykman_info(self):
-        time.sleep(3)
         info = ykman_cli('info')
         self.assertIn('Device type:', info)
         self.assertIn('Serial number:', info)

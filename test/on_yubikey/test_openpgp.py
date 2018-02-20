@@ -1,13 +1,10 @@
 import unittest
 from ykman.util import TRANSPORT
-from .util import (
-    destructive_tests_not_activated, missing_mode, not_one_yubikey, ykman_cli)
+from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
-class TestOpenPGP(unittest.TestCase):
+class TestOpenPGP(DestructiveYubikeyTestCase):
 
     def test_openpgp_info(self):
         output = ykman_cli('openpgp', 'info')

@@ -1,7 +1,6 @@
 import unittest
 from ykman.util import TRANSPORT
-from .util import (
-    destructive_tests_not_activated, missing_mode, not_one_yubikey, ykman_cli)
+from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
 
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
@@ -18,10 +17,8 @@ URI_TOTP_EXAMPLE_B = (
         '&algorithm=SHA1&digits=6&period=30')
 
 
-@unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
-class TestOATH(unittest.TestCase):
+class TestOATH(DestructiveYubikeyTestCase):
 
     def test_oath_info(self):
         output = ykman_cli('oath', 'info')
