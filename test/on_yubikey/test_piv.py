@@ -8,6 +8,10 @@ from .util import (
     skip_not_roca, skip_roca, ykman_cli)
 
 
+DEFAULT_PIN = '123456'
+NON_DEFAULT_PIN = '654321'
+DEFAULT_PUK = '12345678'
+NON_DEFAULT_PUK = '87654321'
 DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
 NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
@@ -132,7 +136,7 @@ class KeyManagement(PivTestCase):
             ykman_cli(
                 'piv', 'generate-certificate', '9a', '-m',
                 DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
-                '-s', 'subject-' + algo, '-P', '123456')
+                '-s', 'subject-' + algo, '-P', DEFAULT_PIN)
             output = ykman_cli('piv', 'export-certificate', '9a', '-')
             cert = x509.load_pem_x509_certificate(output.encode(),
                                                   default_backend())
@@ -148,7 +152,7 @@ class KeyManagement(PivTestCase):
                 DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
             output = ykman_cli(
                 'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
-                '-s', 'test-subject', '-P', '123456', '-')
+                '-s', 'test-subject', '-P', DEFAULT_PIN, '-')
             csr = x509.load_pem_x509_csr(output.encode(), default_backend())
             self.assertTrue(csr.is_signature_valid)
 
@@ -166,7 +170,7 @@ class ManagementKey(PivTestCase):
 
     def test_change_management_key_protect_random(self):
         ykman_cli(
-            'piv', 'change-management-key', '-p', '-P', '123456',
+            'piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
             '-m', DEFAULT_MANAGEMENT_KEY)
         output = ykman_cli('piv', 'info')
         self.assertIn(
@@ -187,26 +191,37 @@ class ManagementKey(PivTestCase):
 class Pin(PivTestCase):
 
     def test_change_pin(self):
-        ykman_cli('piv', 'change-pin', '-P', '123456', '-n', '654321')
-        ykman_cli('piv', 'change-pin', '-P', '654321', '-n', '123456')
+        ykman_cli('piv', 'change-pin', '-P', DEFAULT_PIN, '-n', NON_DEFAULT_PIN)
+        ykman_cli('piv', 'change-pin', '-P', NON_DEFAULT_PIN, '-n', DEFAULT_PIN)
 
     def test_change_pin_prompt(self):
-        ykman_cli('piv', 'change-pin', input='123456\n654321\n654321\n')
-        ykman_cli('piv', 'change-pin', input='654321\n123456\n123456\n')
+        ykman_cli('piv', 'change-pin',
+                  input=DEFAULT_PIN + '\n' + NON_DEFAULT_PIN + '\n'
+                  + NON_DEFAULT_PIN + '\n')
+        ykman_cli('piv', 'change-pin',
+                  input=NON_DEFAULT_PIN + '\n' + DEFAULT_PIN + '\n'
+                  + DEFAULT_PIN + '\n')
 
 
 class Puk(PivTestCase):
 
     def test_change_puk(self):
-        o1 = ykman_cli('piv', 'change-puk', '-p', '12345678', '-n', '87654321')
+        o1 = ykman_cli('piv', 'change-puk', '-p', DEFAULT_PUK,
+                       '-n', NON_DEFAULT_PUK)
         self.assertIn('New PUK set.', o1)
 
-        o2 = ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+        o2 = ykman_cli('piv', 'change-puk', '-p', NON_DEFAULT_PUK,
+                       '-n', DEFAULT_PUK)
         self.assertIn('New PUK set.', o2)
 
         with self.assertRaises(SystemExit):
-            ykman_cli('piv', 'change-puk', '-p', '87654321', '-n', '12345678')
+            ykman_cli('piv', 'change-puk', '-p', NON_DEFAULT_PUK,
+                      '-n', DEFAULT_PUK)
 
     def test_change_puk_prompt(self):
-        ykman_cli('piv', 'change-puk', input='12345678\n87654321\n87654321\n')
-        ykman_cli('piv', 'change-puk', input='87654321\n12345678\n12345678\n')
+        ykman_cli('piv', 'change-puk',
+                  input=DEFAULT_PUK + '\n' + NON_DEFAULT_PUK + '\n'
+                  + NON_DEFAULT_PUK + '\n')
+        ykman_cli('piv', 'change-puk',
+                  input=NON_DEFAULT_PUK + '\n' + DEFAULT_PUK + '\n'
+                  + DEFAULT_PUK + '\n')
