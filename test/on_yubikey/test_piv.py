@@ -44,6 +44,10 @@ class Misc(PivTestCase):
 
 class KeyManagement(PivTestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        ykman_cli('piv', 'reset', '-f')
+
     @unittest.skipIf(*skip_roca)
     def test_generate_key_default(self):
         output = ykman_cli(
@@ -164,7 +168,6 @@ class ManagementKey(PivTestCase):
         self.assertIn(
             'Management key is stored on the YubiKey, protected by PIN',
             output)
-        ykman_cli('piv', 'reset', '-f')  # Cleanup, should maybe be done always?
 
     def test_change_management_key_prompt(self):
         ykman_cli('piv', 'change-management-key',
