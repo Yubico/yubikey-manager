@@ -160,6 +160,10 @@ class KeyManagement(PivTestCase):
 
 class ManagementKey(PivTestCase):
 
+    @classmethod
+    def setUp(cls):
+        ykman_cli('piv', 'reset', '-f')
+
     def test_change_management_key_protect_random(self):
         ykman_cli(
             'piv', 'change-management-key', '-p', '-P', '123456',
