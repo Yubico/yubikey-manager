@@ -358,6 +358,10 @@ def _derive_key(pin, salt):
     return kdf.derive(pin.encode('utf-8'))
 
 
+def generate_random_management_key():
+    return os.urandom(24)
+
+
 class PivmanData(object):
 
     def __init__(self, raw_data=Tlv(0x80)):
@@ -576,6 +580,11 @@ class PivController(object):
         self._authenticated = True
 
     def set_mgm_key(self, new_key, touch=False, store_on_device=False):
+        # If the key should be protected by PIN and no key is given,
+        # we generate a random key.
+        if store_on_device and not new_key:
+            new_key = generate_random_management_key()
+
         # Set the new management key
         self.send_cmd(
             INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
