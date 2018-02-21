@@ -69,11 +69,11 @@ def info(ctx):
         click.echo('PIN is not set.')
 
 
-@fido.command('change-pin')
+@fido.command('set-pin')
 @click.pass_context
 @click.option('-P', '--pin', help='Current PIN code.')
 @click.option('-n', '--new-pin', help='A new PIN.')
-def change_pin(ctx, pin, new_pin):
+def set_pin(ctx, pin, new_pin):
     """
     Set or change the PIN code.
 
