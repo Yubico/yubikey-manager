@@ -26,8 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
+import os
 from setuptools import setup
-from ykman import __version__
 
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
@@ -36,9 +36,14 @@ if sys.version_info < (3, 4):
 if sys.platform == 'win32':
     install_requires.append('pypiwin32')
 
+with open(
+    os.path.join(
+        os.path.dirname(__file__), 'ykman/VERSION')) as version_file:
+    version = version_file.read().strip()
+
 setup(
     name='yubikey-manager',
-    version=__version__,
+    version=version,
     author='Dain Nilsson',
     author_email='dain@yubico.com',
     maintainer='Yubico Open Source Maintainers',
@@ -52,6 +57,8 @@ setup(
     packages=[
         'ykman', 'ykman.native', 'ykman.scanmap', 'ykman.cli'],
     install_requires=install_requires,
+    package_data={'ykman': ['VERSION']},
+    include_package_data=True,
     test_suite='test',
     classifiers=[
         'License :: OSI Approved :: BSD License',

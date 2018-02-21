@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 
 import logging
+import ykman
 
 
 LOG_LEVELS = [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR,
@@ -52,6 +53,10 @@ def setup(log_level_name, log_file=None):
         format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
         level=log_level_value
     )
+
+    logger = logging.getLogger(__name__)
+    logger.info('Initialized logging for %s version: %s',
+                ykman.__name__, ykman.__version__)
 
 
 logging.disable(logging.CRITICAL * 2)

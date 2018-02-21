@@ -25,4 +25,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-__version__ = '0.6.0'
+import os
+
+
+with open(
+    os.path.join(
+        os.path.dirname(__file__), 'VERSION')) as version_file:
+    version = version_file.read().strip()
+
+
+__version__ = version
