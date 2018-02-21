@@ -39,10 +39,10 @@ if _test_serial is not None:
             sys.exit(1)
 
 
-def _has_mode(mode):
+def _missing_mode(mode):
     if not _one_yubikey:
         return False
-    return _the_yubikey.mode.has_transport(mode)
+    return not _the_yubikey.mode.has_transport(mode)
 
 
 def _get_version():
@@ -80,7 +80,7 @@ def ykman_cli(*args, **kwargs):
 
 
 def missing_mode(transport):
-    return (not _has_mode(transport), transport.name + ' needs to be enabled')
+    return (_missing_mode(transport), transport.name + ' needs to be enabled')
 
 
 not_one_yubikey = (not _one_yubikey, 'A single YubiKey needs to be connected.')
