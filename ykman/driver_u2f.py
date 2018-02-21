@@ -153,9 +153,17 @@ class U2FDriver(AbstractDriver):
         except U2FHostError:
             raise ModeSwitchError()
 
+    def close(self):
+        logger.debug('Close %s', self)
+        if self in _instances:
+            _instances.remove(self)
+            if not _instances:
+                logger.debug('Call u2fh_devs_done on %s', self._devs)
+                u2fh.u2fh_devs_done(self._devs)
+
     def __del__(self):
-        if not _instances.difference({self}):
-            u2fh.u2fh_devs_done(self._devs)
+        logger.debug('Destroy %s', self)
+        self.close()
 
 
 def open_devices():
