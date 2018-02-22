@@ -3,9 +3,10 @@ import click
 import os
 import sys
 import unittest
-from ykman.descriptor import (
-    get_descriptors, open_device, FailedOpeningDeviceException)
-from ykman.util import is_cve201715361_vulnerable_firmware_version
+import ykman.descriptor
+from ykman.descriptor import FailedOpeningDeviceException
+from ykman.util import (
+    is_cve201715361_vulnerable_firmware_version, TRANSPORT)
 import test.util
 
 
@@ -17,7 +18,7 @@ _test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 
 if _test_serial is not None:
-    _one_yubikey = len(get_descriptors()) == 1
+    _one_yubikey = len(ykman.descriptor.get_descriptors()) == 1
 
     _skip = False
 
@@ -30,7 +31,8 @@ if _test_serial is not None:
                 % _test_serial,
                 abort=True)
         try:
-            _the_yubikey = open_device(serial=int(_test_serial), attempts=2)
+            _the_yubikey = ykman.descriptor.open_device(
+                serial=int(_test_serial), attempts=2)
 
         except FailedOpeningDeviceException:
             print('Failed to open device. Please make sure you have connected'
@@ -77,6 +79,11 @@ def ykman_cli(*args, **kwargs):
         '--device', _test_serial,
         *args, **kwargs
     )
+
+
+def open_device(transports=sum(TRANSPORT)):
+    return ykman.descriptor.open_device(transports=transports,
+                                        serial=int(_test_serial))
 
 
 def missing_mode(transport):
