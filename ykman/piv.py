@@ -624,19 +624,16 @@ class PivController(object):
         0 PIN authentication blocked. Note that 15 is the highest
         value that will be returned even if remaining tries is higher.
         """
-        try:
-            # Verify without PIN gives number of tries left.
-            _, sw = self.send_cmd(INS.VERIFY, 0, PIN)
-        except APDUError as e:
-            return self._parse_tries_left(e.sw)
+        # Verify without PIN gives number of tries left.
+        _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
+        return self._parse_tries_left(sw)
 
     def _get_puk_tries(self):
-        try:
-            # A failed unblock pin will return number of PUK tries left,
-            # but also uses one try.
-            _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2)
-        except APDUError as e:
-            return self._parse_tries_left(e.sw)
+        # A failed unblock pin will return number of PUK tries left,
+        # but also uses one try.
+        _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
+                              check=None)
+        return self._parse_tries_left(sw)
 
     def _parse_tries_left(self, sw):
         # Blocked, 0 tries left.
