@@ -65,7 +65,11 @@ class YubiKey(object):
         if driver.key_type == YUBIKEY.SKY:
             try:
                 # Only new SKYs report capabilities
-                self._parse_capabilities(driver.read_capabilities())
+                resp = driver.read_capabilities()
+                if (resp):
+                    self._parse_capabilities(resp)
+                else:
+                    self.capabilities = CAPABILITY.U2F
             except Exception:
                 self.capabilities = CAPABILITY.U2F
             self._can_mode_switch = False
