@@ -70,6 +70,7 @@ class CAPABILITY(BitflagEnum):
     PIV = 0x10
     OATH = 0x20
     NFC = 0x40
+    FIDO2 = 0x100
 
     @staticmethod
     def dependent_on_ccid():
