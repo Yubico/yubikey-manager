@@ -428,6 +428,9 @@ class PivController(object):
         self._authenticated = False
         self._driver = driver
         self._version = self._read_version()
+        self._update_pivman_data()
+
+    def _update_pivman_data(self):
         try:
             self._pivman_data = PivmanData(self.get_data(OBJ.PIVMAN_DATA))
         except APDUError:
@@ -659,6 +662,7 @@ class PivController(object):
         self._block_pin()
         self._block_puk()
         self.send_cmd(INS.RESET)
+        self._update_pivman_data()
 
     def get_data(self, object_id):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')

@@ -25,11 +25,6 @@ class ManagementKey(PivTestCase):
         self.dev = open_device(transports=TRANSPORT.CCID)
         self.ctrl = PivController(self.dev.driver)
         self.ctrl.reset()
-        self.dev.driver.close()
-
-        # Need to reopen to update flags after reset
-        self.dev = open_device(transports=TRANSPORT.CCID)
-        self.ctrl = PivController(self.dev.driver)
 
     def tearDown(self):
         self.dev.driver.close()
