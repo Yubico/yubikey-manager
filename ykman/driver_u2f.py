@@ -119,7 +119,7 @@ class U2FDriver(AbstractDriver):
 
         self._version = [0, 0, 0]
         self._capa = b''
-        if self.key_type == YUBIKEY.YK4:
+        if self.key_type in [YUBIKEY.YK4, YUBIKEY.SKY]:
             self._version[0] = 4
             try:
                 self._capa = self.sendrecv(CTAPHID.YK4_CAPABILITIES, b'\x00')
