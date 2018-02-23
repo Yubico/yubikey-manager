@@ -588,6 +588,17 @@ class PivController(object):
         if store_on_device and not new_key:
             new_key = generate_random_management_key()
 
+        if store_on_device or (not store_on_device and self.has_stored_key):
+            # Ensure we have access to protected data before overwriting key
+            try:
+                self._init_pivman_protected()
+            except Exception as e:
+                logger.debug('Failed to initialize protected pivman data',
+                             exc_info=e)
+
+                if store_on_device:
+                    raise e
+
         # Set the new management key
         self.send_cmd(
             INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
@@ -601,7 +612,6 @@ class PivController(object):
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
         if store_on_device:
             # Store key in protected pivman data
-            self._init_pivman_protected()
             self._pivman_protected_data.key = new_key
             self.put_data(
                 OBJ.PIVMAN_PROTECTED_DATA,
@@ -610,7 +620,6 @@ class PivController(object):
             # If new key should not be stored and there is an old stored key,
             # try to clear it.
             try:
-                self._init_pivman_protected()
                 self._pivman_protected_data.key = None
                 self.put_data(
                     OBJ.PIVMAN_PROTECTED_DATA,
