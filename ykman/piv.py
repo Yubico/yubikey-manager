@@ -597,7 +597,7 @@ class PivController(object):
                              exc_info=e)
 
                 if store_on_device:
-                    raise e
+                    raise
 
         # Set the new management key
         self.send_cmd(
