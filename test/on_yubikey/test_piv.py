@@ -1,12 +1,9 @@
-import re
 import unittest
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
-from ykman.util import (TRANSPORT, Cve201715361VulnerableError)
-from .util import (
-    DestructiveYubikeyTestCase, is_NEO, missing_mode, no_attestation,
-    skip_not_roca, skip_roca, ykman_cli)
+from binascii import a2b_hex
+from ykman.driver_ccid import APDUError
+from ykman.piv import PivController
+from ykman.util import TRANSPORT
+from .util import (DestructiveYubikeyTestCase, missing_mode, open_device)
 
 
 DEFAULT_PIN = '123456'
@@ -17,278 +14,127 @@ DEFAULT_MANAGEMENT_KEY = '010203040506070801020304050607080102030405060708'
 NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 
 
-def old_new_new(old, new):
-    return '{0}\n{1}\n{1}\n'.format(old, new)
-
-
-def _verify_cert(cert, pubkey):
-    cert_signature = cert.signature
-    cert_bytes = cert.tbs_certificate_bytes
-
-    if isinstance(pubkey, rsa.RSAPublicKey):
-        pubkey.verify(cert_signature, cert_bytes, padding.PKCS1v15(),
-                      cert.signature_hash_algorithm)
-    elif isinstance(pubkey, ec.EllipticCurvePublicKey):
-        pubkey.verify(cert_signature, cert_bytes,
-                      ec.ECDSA(cert.signature_hash_algorithm))
-    else:
-        raise ValueError('Unsupported public key value')
-
-
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class PivTestCase(DestructiveYubikeyTestCase):
-    pass
+
+    def tearDown(self):
+        self.dev.driver.close()
+
+    def assertMgmKeyIs(self, key):
+        if type(key) is str:
+            key = a2b_hex(key)
+        self.controller.authenticate(key)
+
+    def assertMgmKeyIsNot(self, key):
+        if type(key) is str:
+            key = a2b_hex(key)
+
+        with self.assertRaises(APDUError):
+            self.controller.authenticate(key)
+
+    def assertStoredMgmKeyEquals(self, key):
+        if type(key) is str:
+            key = a2b_hex(key)
+        self.assertEqual(self.controller._pivman_protected_data.key, key)
+
+    def assertStoredMgmKeyNotEquals(self, key):
+        if type(key) is str:
+            key = a2b_hex(key)
+        self.assertNotEqual(self.controller._pivman_protected_data.key, key)
+
+    def reconnect(self):
+        self.dev.driver.close()
+        self.dev = open_device(transports=TRANSPORT.CCID)
+        self.controller = PivController(self.dev.driver)
 
 
-class Misc(PivTestCase):
-
-    def test_info(self):
-        output = ykman_cli('piv', 'info')
-        self.assertIn('PIV version:', output)
-
-    def test_reset(self):
-        output = ykman_cli('piv', 'reset', '-f')
-        self.assertIn('Success!', output)
-
-
-class KeyManagement(PivTestCase):
+class ManagementKeyReadOnly(PivTestCase):
+    """
+    Tests after which the management key is always the default management key.
+    Placing compatible tests here reduces the amount of slow reset calls needed.
+    """
 
     @classmethod
     def setUpClass(cls):
-        ykman_cli('piv', 'reset', '-f')
+        dev = open_device(transports=TRANSPORT.CCID)
+        controller = PivController(dev.driver)
+        controller.reset()
 
-    @unittest.skipIf(*skip_roca)
-    def test_generate_key_default(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+    def setUp(self):
+        self.dev = open_device(transports=TRANSPORT.CCID)
+        self.controller = PivController(self.dev.driver)
 
-    @unittest.skipIf(*skip_not_roca)
-    def test_generate_key_default_cve201715361(self):
-        with self.assertRaises(Cve201715361VulnerableError):
-            ykman_cli(
-                'piv', 'generate-key', '9a',
-                '-m', DEFAULT_MANAGEMENT_KEY, '-')
+    def test_authenticate_twice_does_not_throw(self):
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
 
-    @unittest.skipIf(*skip_roca)
-    def test_generate_key_rsa1024(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+    def test_reset_resets_has_stored_key_flag(self):
+        self.assertFalse(self.controller.has_stored_key)
 
-    @unittest.skipIf(*skip_roca)
-    def test_generate_key_rsa2048(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'RSA2048',
-            '-m', DEFAULT_MANAGEMENT_KEY, '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+        self.controller.verify(DEFAULT_PIN)
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
+        self.controller.set_mgm_key(None, store_on_device=True)
 
-    @unittest.skipIf(*skip_not_roca)
-    def test_generate_key_rsa1024_cve201715361(self):
-        with self.assertRaises(Cve201715361VulnerableError):
-            ykman_cli(
-                'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
-                DEFAULT_MANAGEMENT_KEY, '-')
+        self.assertTrue(self.controller.has_stored_key)
 
-    @unittest.skipIf(*skip_not_roca)
-    def test_generate_key_rsa2048_cve201715361(self):
-        with self.assertRaises(Cve201715361VulnerableError):
-            ykman_cli(
-                'piv', 'generate-key', '9a', '-a', 'RSA2048',
-                '-m', DEFAULT_MANAGEMENT_KEY, '-')
+        self.reconnect()
+        self.controller.reset()
 
-    def test_generate_key_eccp256(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+        self.assertFalse(self.controller.has_stored_key)
 
-    @unittest.skipIf(is_NEO(), 'ECCP384 not available.')
-    def test_generate_key_eccp384(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'ECCP384', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+    def test_reset_while_verified_throws_nice_ValueError(self):
+        self.controller.verify(DEFAULT_PIN)
+        with self.assertRaisesRegex(ValueError, '^Failed reading remaining'):
+            self.controller.reset()
 
-    @unittest.skipIf(is_NEO(), 'Pin policy not available.')
-    def test_generate_key_pin_policy_always(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '--pin-policy', 'ALWAYS', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+    def test_set_mgm_key_does_not_change_key_if_not_authenticated(self):
+        with self.assertRaises(APDUError):
+            self.controller.set_mgm_key(a2b_hex(NON_DEFAULT_MANAGEMENT_KEY))
+        self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
-    @unittest.skipIf(is_NEO(), 'Touch policy not available.')
-    def test_generate_key_touch_policy_always(self):
-        output = ykman_cli(
-            'piv', 'generate-key', '9a', '--touch-policy', 'ALWAYS', '-m',
-            DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
-        self.assertIn('BEGIN PUBLIC KEY', output)
+    def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(self):
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
+        with self.assertRaises(APDUError):
+            self.controller.set_mgm_key(None, store_on_device=True)
 
-    @unittest.skipIf(*no_attestation)
-    def test_attest_key(self):
-        ykman_cli(
-            'piv', 'generate-key', '9a', '-a', 'ECCP256',
-            '-m', DEFAULT_MANAGEMENT_KEY, '-')
-        output = ykman_cli('piv', 'attest', '9a', '-')
-        self.assertIn('BEGIN CERTIFICATE', output)
-
-    def test_generate_self_signed(self):
-        for algo in ('ECCP256', 'RSA1024'):
-            ykman_cli(
-                'piv', 'generate-key', '9a', '-a', algo, '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
-            ykman_cli(
-                'piv', 'generate-certificate', '9a', '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
-                '-s', 'subject-' + algo, '-P', DEFAULT_PIN)
-            output = ykman_cli('piv', 'export-certificate', '9a', '-')
-            cert = x509.load_pem_x509_certificate(output.encode(),
-                                                  default_backend())
-            _verify_cert(cert, cert.public_key())
-
-            output = ykman_cli('piv', 'info')
-            self.assertIn('subject-' + algo, output)
-
-    def test_generate_csr(self):
-        for algo in ('ECCP256', 'RSA1024'):
-            ykman_cli(
-                'piv', 'generate-key', '9a', '-a', algo, '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
-            output = ykman_cli(
-                'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
-                '-s', 'test-subject', '-P', DEFAULT_PIN, '-')
-            csr = x509.load_pem_x509_csr(output.encode(), default_backend())
-            self.assertTrue(csr.is_signature_valid)
-
-    @unittest.skipIf(*no_attestation)
-    def test_export_attestation_certificate(self):
-        output = ykman_cli('piv', 'export-certificate', 'f9', '-')
-        self.assertIn('BEGIN CERTIFICATE', output)
+        self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
 
-class ManagementKey(PivTestCase):
+class ManagementKeyReadWrite(PivTestCase):
+    """
+    Tests after which the management key may not be the default management key.
+    """
 
-    @classmethod
-    def setUp(cls):
-        ykman_cli('piv', 'reset', '-f')
+    def setUp(self):
+        self.dev = open_device(transports=TRANSPORT.CCID)
+        self.controller = PivController(self.dev.driver)
+        self.controller.reset()
 
-    def test_change_management_key_protect_random(self):
-        ykman_cli(
-            'piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
-            '-m', DEFAULT_MANAGEMENT_KEY)
-        output = ykman_cli('piv', 'info')
-        self.assertIn(
-            'Management key is stored on the YubiKey, protected by PIN',
-            output)
+    def test_set_mgm_key_changes_mgm_key(self):
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
+        self.controller.set_mgm_key(a2b_hex(NON_DEFAULT_MANAGEMENT_KEY))
 
-        with self.assertRaises(SystemExit):
-            # Should fail - wrong current key
-            ykman_cli(
-                'piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
-                '-m', DEFAULT_MANAGEMENT_KEY)
+        self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
+        self.assertMgmKeyIs(NON_DEFAULT_MANAGEMENT_KEY)
 
-        # Should succeed - PIN as key
-        ykman_cli('piv', 'change-management-key', '-p', '-P', DEFAULT_PIN)
+    def test_set_stored_mgm_key_succeeds_if_pin_is_verified(self):
+        self.controller.verify(DEFAULT_PIN)
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
+        self.controller.set_mgm_key(a2b_hex(NON_DEFAULT_MANAGEMENT_KEY),
+                                    store_on_device=True)
 
-    def test_change_management_key_protect_prompt(self):
-        ykman_cli('piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
-                  input=DEFAULT_MANAGEMENT_KEY)
-        output = ykman_cli('piv', 'info')
-        self.assertIn(
-            'Management key is stored on the YubiKey, protected by PIN',
-            output)
+        self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
+        self.assertMgmKeyIs(NON_DEFAULT_MANAGEMENT_KEY)
+        self.assertStoredMgmKeyEquals(NON_DEFAULT_MANAGEMENT_KEY)
+        self.assertMgmKeyIs(self.controller._pivman_protected_data.key)
 
-        with self.assertRaises(SystemExit):
-            # Should fail - wrong current key
-            ykman_cli(
-                'piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
-                '-m', DEFAULT_MANAGEMENT_KEY)
+    def test_set_stored_random_mgm_key_succeeds_if_pin_is_verified(self):
+        self.controller.verify(DEFAULT_PIN)
+        self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
+        self.controller.set_mgm_key(None, store_on_device=True)
 
-        # Should succeed - PIN as key
-        ykman_cli('piv', 'change-management-key', '-p', '-P', DEFAULT_PIN)
-
-    def test_change_management_key_no_protect_random(self):
-        output = ykman_cli(
-            'piv', 'change-management-key',
-            '-m', DEFAULT_MANAGEMENT_KEY)
-        self.assertRegex(
-            output, re.compile(
-                r'^Generated management key: [a-f0-9]{48}$', re.MULTILINE))
-
-        output = ykman_cli('piv', 'info')
-        self.assertNotIn('Management key is stored on the YubiKey', output)
-
-    def test_change_management_key_no_protect_arg(self):
-        output = ykman_cli(
-            'piv', 'change-management-key',
-            '-m', DEFAULT_MANAGEMENT_KEY,
-            '-n', NON_DEFAULT_MANAGEMENT_KEY)
-        self.assertEqual('', output)
-        output = ykman_cli('piv', 'info')
-        self.assertNotIn('Management key is stored on the YubiKey', output)
-
-        with self.assertRaises(SystemExit):
-            ykman_cli(
-                'piv', 'change-management-key',
-                '-m', DEFAULT_MANAGEMENT_KEY,
-                '-n', NON_DEFAULT_MANAGEMENT_KEY)
-
-        output = ykman_cli(
-            'piv', 'change-management-key',
-            '-m', NON_DEFAULT_MANAGEMENT_KEY,
-            '-n', DEFAULT_MANAGEMENT_KEY)
-        self.assertEqual('', output)
-
-    def test_change_management_key_no_protect_prompt(self):
-        output = ykman_cli('piv', 'change-management-key',
-                           input=old_new_new(DEFAULT_MANAGEMENT_KEY,
-                                             NON_DEFAULT_MANAGEMENT_KEY))
-        self.assertNotIn('Generated', output)
-        output = ykman_cli('piv', 'info')
-        self.assertNotIn('Management key is stored on the YubiKey', output)
-
-        with self.assertRaises(SystemExit):
-            ykman_cli('piv', 'change-management-key',
-                      input=old_new_new(DEFAULT_MANAGEMENT_KEY,
-                                        NON_DEFAULT_MANAGEMENT_KEY))
-
-        ykman_cli('piv', 'change-management-key',
-                  input=old_new_new(NON_DEFAULT_MANAGEMENT_KEY,
-                                    DEFAULT_MANAGEMENT_KEY))
-        self.assertNotIn('Generated', output)
-
-
-class Pin(PivTestCase):
-
-    def test_change_pin(self):
-        ykman_cli('piv', 'change-pin', '-P', DEFAULT_PIN, '-n', NON_DEFAULT_PIN)
-        ykman_cli('piv', 'change-pin', '-P', NON_DEFAULT_PIN, '-n', DEFAULT_PIN)
-
-    def test_change_pin_prompt(self):
-        ykman_cli('piv', 'change-pin',
-                  input=old_new_new(DEFAULT_PIN, NON_DEFAULT_PIN))
-        ykman_cli('piv', 'change-pin',
-                  input=old_new_new(NON_DEFAULT_PIN, DEFAULT_PIN))
-
-
-class Puk(PivTestCase):
-
-    def test_change_puk(self):
-        o1 = ykman_cli('piv', 'change-puk', '-p', DEFAULT_PUK,
-                       '-n', NON_DEFAULT_PUK)
-        self.assertIn('New PUK set.', o1)
-
-        o2 = ykman_cli('piv', 'change-puk', '-p', NON_DEFAULT_PUK,
-                       '-n', DEFAULT_PUK)
-        self.assertIn('New PUK set.', o2)
-
-        with self.assertRaises(SystemExit):
-            ykman_cli('piv', 'change-puk', '-p', NON_DEFAULT_PUK,
-                      '-n', DEFAULT_PUK)
-
-    def test_change_puk_prompt(self):
-        ykman_cli('piv', 'change-puk',
-                  input=old_new_new(DEFAULT_PUK, NON_DEFAULT_PUK))
-        ykman_cli('piv', 'change-puk',
-                  input=old_new_new(NON_DEFAULT_PUK, DEFAULT_PUK))
+        self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
+        self.assertMgmKeyIsNot(NON_DEFAULT_MANAGEMENT_KEY)
+        self.assertMgmKeyIs(self.controller._pivman_protected_data.key)
+        self.assertStoredMgmKeyNotEquals(DEFAULT_MANAGEMENT_KEY)
+        self.assertStoredMgmKeyNotEquals(NON_DEFAULT_MANAGEMENT_KEY)
