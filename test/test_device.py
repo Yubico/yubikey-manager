@@ -1,5 +1,9 @@
 import unittest
-from unittest.mock import Mock
+try:
+    from unittest.mock import Mock
+except ImportError:
+    from mock import Mock
+
 from ykman.device import YubiKey
 from ykman.util import TRANSPORT
 
@@ -22,7 +26,7 @@ class TestDevice(unittest.TestCase):
         descriptor, driver = make_mocks()
         with YubiKey(descriptor, driver) as dev:  # noqa: F841
             pass
-        driver.close.assert_called_once()
+        driver.close.assert_called_once_with()
 
     def test_with_as_reraises_exception(self):
         descriptor, driver = make_mocks()
@@ -31,13 +35,13 @@ class TestDevice(unittest.TestCase):
             with YubiKey(descriptor, driver) as dev:  # noqa: F841
                 raise TestSpecificError()
 
-        driver.close.assert_called_once()
+        driver.close.assert_called_once_with()
 
     def test_with_closes_driver(self):
         descriptor, driver = make_mocks()
         with YubiKey(descriptor, driver):
             pass
-        driver.close.assert_called_once()
+        driver.close.assert_called_once_with()
 
     def test_with_reraises_exception(self):
         descriptor, driver = make_mocks()
@@ -46,4 +50,4 @@ class TestDevice(unittest.TestCase):
             with YubiKey(descriptor, driver):
                 raise TestSpecificError()
 
-        driver.close.assert_called_once()
+        driver.close.assert_called_once_with()
