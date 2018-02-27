@@ -17,6 +17,10 @@ NON_DEFAULT_MANAGEMENT_KEY = '010103040506070801020304050607080102030405060708'
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class PivTestCase(DestructiveYubikeyTestCase):
 
+    def setUp(self):
+        self.dev = open_device(transports=TRANSPORT.CCID)
+        self.controller = PivController(self.dev.driver)
+
     def tearDown(self):
         self.dev.driver.close()
 
@@ -58,10 +62,6 @@ class ManagementKeyReadOnly(PivTestCase):
     def setUpClass(cls):
         with open_device(transports=TRANSPORT.CCID) as dev:
             PivController(dev.driver).reset()
-
-    def setUp(self):
-        self.dev = open_device(transports=TRANSPORT.CCID)
-        self.controller = PivController(self.dev.driver)
 
     def test_authenticate_twice_does_not_throw(self):
         self.controller.authenticate(a2b_hex(DEFAULT_MANAGEMENT_KEY))
@@ -105,8 +105,7 @@ class ManagementKeyReadWrite(PivTestCase):
     """
 
     def setUp(self):
-        self.dev = open_device(transports=TRANSPORT.CCID)
-        self.controller = PivController(self.dev.driver)
+        PivTestCase.setUp(self)
         self.controller.reset()
 
     def test_set_mgm_key_changes_mgm_key(self):
