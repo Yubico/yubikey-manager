@@ -1,7 +1,7 @@
 import unittest
 from binascii import a2b_hex
 from ykman.driver_ccid import APDUError
-from ykman.piv import PivController
+from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.util import TRANSPORT
 from .util import (DestructiveYubikeyTestCase, missing_mode, open_device)
 
@@ -50,6 +50,31 @@ class PivTestCase(DestructiveYubikeyTestCase):
         self.dev.driver.close()
         self.dev = open_device(transports=TRANSPORT.CCID)
         self.controller = PivController(self.dev.driver)
+
+
+class KeyManagement(PivTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        with open_device(transports=TRANSPORT.CCID) as dev:
+            controller = PivController(dev.driver)
+            controller.reset()
+
+    def generate_key(self):
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_key(SLOT.AUTHENTICATION, ALGO.ECCP256,
+                                     pin_policy=PIN_POLICY.NEVER,
+                                     touch_policy=TOUCH_POLICY.NEVER)
+        self.reconnect()
+
+    def test_delete_certificate_requires_authentication(self):
+        self.generate_key()
+
+        with self.assertRaises(APDUError):
+            self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.delete_certificate(SLOT.AUTHENTICATION)
 
 
 class ManagementKeyReadOnly(PivTestCase):
