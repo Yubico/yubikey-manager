@@ -56,9 +56,8 @@ class ManagementKeyReadOnly(PivTestCase):
 
     @classmethod
     def setUpClass(cls):
-        dev = open_device(transports=TRANSPORT.CCID)
-        controller = PivController(dev.driver)
-        controller.reset()
+        with open_device(transports=TRANSPORT.CCID) as dev:
+            PivController(dev.driver).reset()
 
     def setUp(self):
         self.dev = open_device(transports=TRANSPORT.CCID)
