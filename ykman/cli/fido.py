@@ -154,7 +154,7 @@ def reset(ctx):
     This action will wipe all FIDO credentials, including FIDO U2F credentials,
     on the YubiKey and remove the PIN code.
 
-    The reset must be triggered within 10 seconds from the time the YubiKey is
+    The reset must be triggered immediately after the YubiKey is
     inserted, and requires a touch on the YubiKey.
     """
     controller = ctx.obj['controller']
@@ -164,7 +164,7 @@ def reset(ctx):
         if e.code == CTAP2_ERR.NOT_ALLOWED:
             ctx.fail(
                 'Failed to reset the YubiKey. The reset command must be '
-                'triggered within 10 seconds after the YubiKey is inserted.')
+                'triggered immediately after the YubiKey is inserted.')
         else:
             raise
     except U2FHostError as e:
