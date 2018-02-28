@@ -32,9 +32,10 @@ from setuptools import setup
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
 tests_require = []
+if sys.version_info < (3, 3):
+    tests_require.append('mock')
 if sys.version_info < (3, 4):
     install_requires.append('enum34')
-    tests_require.append('mock')
 if sys.platform == 'win32':
     install_requires.append('pypiwin32')
 
