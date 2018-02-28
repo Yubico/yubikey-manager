@@ -1,12 +1,11 @@
 FROM ubuntu:xenial
-RUN apt-get -qq update -y && apt-get -qq upgrade
-RUN apt-get install -y git devscripts equivs
-COPY . yubikey-manager
-WORKDIR yubikey-manager
-RUN yes | mk-build-deps -i debian/control
-RUN debuild -us -uc
 RUN mkdir /deb
-RUN mv /yubikey-manager_* /deb
-RUN mv /python3-yubikey-manager_* /deb
-RUN mv /python-yubikey-manager_* /deb
-RUN cd / && tar czf yubikey-manager-debian-packages.tar.gz deb
+RUN apt-get -qq update && apt-get -qq upgrade && apt-get install -y git devscripts equivs
+COPY debian/control /yubikey-manager/debian/control
+RUN yes | mk-build-deps -i /yubikey-manager/debian/control
+
+COPY . /yubikey-manager
+RUN cd /yubikey-manager && debuild -us -uc
+
+RUN mv /yubikey-manager_* /python3-yubikey-manager_* /python-yubikey-manager_* /deb
+RUN tar czf /yubikey-manager-debian-packages.tar.gz /deb
