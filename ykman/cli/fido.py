@@ -144,14 +144,18 @@ def set_pin(ctx, pin, new_pin):
 @fido.command('reset')
 @click.confirmation_option(
             '-f', '--force', prompt='WARNING! This will delete '
-            'all FIDO credentials and restore factory settings. Proceed?')
+            'all FIDO credentials, including FIDO U2F credentials,'
+            ' and restore factory settings. Proceed?')
 @click.pass_context
 def reset(ctx):
     """
-    Reset all FIDO 2 data.
+    Reset all FIDO functionality.
 
-    This action will wipe all FIDO credentials on the YubiKey
-    and remove current the PIN code.
+    This action will wipe all FIDO credentials, including FIDO U2F credentials,
+    on the YubiKey and remove the PIN code.
+
+    The reset must be triggered within 10 seconds from the time the YubiKey is
+    inserted, and requires a touch on the YubiKey.
     """
     controller = ctx.obj['controller']
     try:
