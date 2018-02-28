@@ -1,7 +1,9 @@
 import re
 import unittest
+from binascii import b2a_hex
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
 from ykman.util import (TRANSPORT, Cve201715361VulnerableError)
 from .util import (
@@ -133,23 +135,6 @@ class KeyManagement(PivTestCase):
         output = ykman_cli('piv', 'attest', '9a', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
-    def test_generate_self_signed(self):
-        for algo in ('ECCP256', 'RSA1024'):
-            ykman_cli(
-                'piv', 'generate-key', '9a', '-a', algo, '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
-            ykman_cli(
-                'piv', 'generate-certificate', '9a', '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
-                '-s', 'subject-' + algo, '-P', DEFAULT_PIN)
-            output = ykman_cli('piv', 'export-certificate', '9a', '-')
-            cert = x509.load_pem_x509_certificate(output.encode(),
-                                                  default_backend())
-            _verify_cert(cert, cert.public_key())
-
-            output = ykman_cli('piv', 'info')
-            self.assertIn('subject-' + algo, output)
-
     def test_generate_csr(self):
         for algo in ('ECCP256', 'RSA1024'):
             ykman_cli(
@@ -165,6 +150,83 @@ class KeyManagement(PivTestCase):
     def test_export_attestation_certificate(self):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
+
+
+class GenerateSelfSigned_DefaultMgmKey(PivTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        ykman_cli('piv', 'reset', '-f')
+
+    def _test_generate_self_signed(self, slot):
+        for algo in ('ECCP256', 'RSA1024'):
+            ykman_cli(
+                'piv', 'generate-key', slot, '-a', algo, '-m',
+                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+            ykman_cli(
+                'piv', 'generate-certificate', slot, '-m',
+                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
+                '-s', 'subject-' + algo, '-P', DEFAULT_PIN)
+            output = ykman_cli('piv', 'export-certificate', slot, '-')
+            cert = x509.load_pem_x509_certificate(output.encode(),
+                                                  default_backend())
+            _verify_cert(cert, cert.public_key())
+            fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode(
+                'ascii')
+
+            output = ykman_cli('piv', 'info')
+            self.assertIn('Fingerprint:\t' + fingerprint, output)
+
+    def test_generate_self_signed_slot_9a(self):
+        self._test_generate_self_signed('9a')
+
+    def test_generate_self_signed_slot_9c(self):
+        self._test_generate_self_signed('9c')
+
+    def test_generate_self_signed_slot_9d(self):
+        self._test_generate_self_signed('9d')
+
+    def test_generate_self_signed_slot_9e(self):
+        self._test_generate_self_signed('9e')
+
+
+class GenerateSelfSigned_ProtectedMgmKey(PivTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        ykman_cli('piv', 'reset', '-f')
+        ykman_cli('piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
+                  '-m', DEFAULT_MANAGEMENT_KEY)
+
+    def _test_generate_self_signed(self, slot):
+        for algo in ('ECCP256', 'RSA1024'):
+            ykman_cli(
+                'piv', 'generate-key', slot, '-a', algo, '-P', DEFAULT_PIN,
+                '/tmp/test-pub-key.pem')
+            ykman_cli(
+                'piv', 'generate-certificate', slot, '-P', DEFAULT_PIN,
+                '/tmp/test-pub-key.pem', '-s', 'subject-' + algo)
+            output = ykman_cli('piv', 'export-certificate', slot, '-')
+            cert = x509.load_pem_x509_certificate(output.encode(),
+                                                  default_backend())
+            _verify_cert(cert, cert.public_key())
+            fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode(
+                'ascii')
+
+            output = ykman_cli('piv', 'info')
+            self.assertIn('Fingerprint:\t' + fingerprint, output)
+
+    def test_generate_self_signed_slot_9a(self):
+        self._test_generate_self_signed('9a')
+
+    def test_generate_self_signed_slot_9c(self):
+        self._test_generate_self_signed('9c')
+
+    def test_generate_self_signed_slot_9d(self):
+        self._test_generate_self_signed('9d')
+
+    def test_generate_self_signed_slot_9e(self):
+        self._test_generate_self_signed('9e')
 
 
 class ManagementKey(PivTestCase):
