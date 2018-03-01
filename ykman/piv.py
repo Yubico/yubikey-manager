@@ -38,12 +38,14 @@ from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
-from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
 from collections import OrderedDict
 from threading import Timer
+import datetime
 import logging
 import struct
 import six
@@ -709,6 +711,53 @@ class PivController(object):
                 resp[5:]
             ).public_key(default_backend())
         raise ValueError('Invalid algorithm!')
+
+    def generate_self_signed_certificate(
+            self, slot, public_key, common_name, valid_days,
+            touch_callback=None):
+
+        algorithm = ALGO.from_public_key(public_key)
+
+        builder = x509.CertificateBuilder()
+        builder = builder.public_key(public_key)
+        builder = builder.subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+
+        # Same as subject on self-signed certificates.
+        builder = builder.issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+
+        # x509.random_serial_number added in cryptography 1.6
+        serial = int_from_bytes(os.urandom(20), 'big') >> 1
+        builder = builder.serial_number(serial)
+
+        now = datetime.datetime.now()
+        builder = builder.not_valid_before(now)
+        builder = builder.not_valid_after(
+            now + datetime.timedelta(days=valid_days))
+
+        try:
+            cert = self.sign_cert_builder(
+                slot, algorithm, builder, touch_callback)
+        except APDUError as e:
+            logger.error('Failed to generate certificate for slot %s', slot,
+                         exc_info=e)
+            raise
+
+        # Verify that the public key used in the certificate
+        # is from the same keypair as the private key.
+        cert_signature = cert.signature
+        cert_bytes = cert.tbs_certificate_bytes
+        if isinstance(public_key, rsa.RSAPublicKey):
+            verifier = public_key.verifier(
+                cert_signature, padding.PKCS1v15(),
+                cert.signature_hash_algorithm)
+        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+            verifier = public_key.verifier(
+                cert_signature, ec.ECDSA(cert.signature_hash_algorithm))
+        verifier.update(cert_bytes)
+        verifier.verify()
+        self.import_certificate(slot, cert)
 
     def import_key(self, slot, key, pin_policy=PIN_POLICY.DEFAULT,
                    touch_policy=TOUCH_POLICY.DEFAULT):
