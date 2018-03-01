@@ -125,6 +125,17 @@ class KeyManagement(PivTestCase):
                                      pin_policy=PIN_POLICY.NEVER,
                                      touch_policy=TOUCH_POLICY.NEVER)
 
+    def test_read_certificate_does_not_require_authentication(self):
+        public_key = self.generate_key()
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_self_signed_certificate(
+            SLOT.AUTHENTICATION, public_key, 'alice', 1)
+
+        self.reconnect()
+
+        cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
+        self.assertIsNotNone(cert)
+
 
 class ManagementKeyReadOnly(PivTestCase):
     """
