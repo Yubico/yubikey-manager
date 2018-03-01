@@ -38,7 +38,6 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from cryptography.x509.oid import NameOID
 from binascii import b2a_hex, a2b_hex
 import click
 import datetime
@@ -530,18 +529,12 @@ def generate_certificate_signing_request(
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
-    builder = x509.CertificateSigningRequestBuilder()
-    builder = builder.subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
-
     try:
-        csr = controller.sign_csr_builder(
-            slot, public_key, builder, touch_callback=prompt_for_touch)
+        csr = controller.generate_certificate_signing_request(
+            slot, public_key, subject, touch_callback=prompt_for_touch)
     except APDUError as e:
-        logger.error(
-            'Failed to generate Certificate Signing Request for slot %s', slot,
-            exc_info=e)
         ctx.fail('Certificate Signing Request generation failed.')
+
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
 
 

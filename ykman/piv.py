@@ -756,6 +756,21 @@ class PivController(object):
         verifier.verify()
         self.import_certificate(slot, cert)
 
+    def generate_certificate_signing_request(self, slot, public_key, subject,
+                                             touch_callback=None):
+        builder = x509.CertificateSigningRequestBuilder()
+        builder = builder.subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
+
+        try:
+            return self.sign_csr_builder(
+                slot, public_key, builder, touch_callback=touch_callback)
+        except APDUError as e:
+            logger.error(
+                'Failed to generate Certificate Signing Request for slot %s',
+                slot, exc_info=e)
+            raise
+
     def import_key(self, slot, key, pin_policy=PIN_POLICY.DEFAULT,
                    touch_policy=TOUCH_POLICY.DEFAULT):
         algorithm, data = _get_key_data(key)
