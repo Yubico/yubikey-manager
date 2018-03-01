@@ -83,6 +83,24 @@ class KeyManagement(PivTestCase):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.delete_certificate(SLOT.AUTHENTICATION)
 
+    def test_generate_csr_works(self):
+        public_key = self.generate_key()
+        csr = self.controller.generate_certificate_signing_request(
+            SLOT.AUTHENTICATION, public_key, 'alice')
+
+        self.assertEqual(
+            csr.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo),
+            public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo),
+        )
+        self.assertEqual(
+            csr.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value,  # noqa: E501
+            'alice'
+        )
+
     def test_generate_self_signed_certificate_requires_authentication(self):
         public_key = self.generate_key()
         with self.assertRaises(APDUError):
