@@ -76,6 +76,17 @@ class KeyManagement(PivTestCase):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.delete_certificate(SLOT.AUTHENTICATION)
 
+    def test_generate_key_requires_authentication(self):
+        with self.assertRaises(APDUError):
+            self.controller.generate_key(SLOT.AUTHENTICATION, ALGO.ECCP256,
+                                         pin_policy=PIN_POLICY.NEVER,
+                                         touch_policy=TOUCH_POLICY.NEVER)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_key(SLOT.AUTHENTICATION, ALGO.ECCP256,
+                                     pin_policy=PIN_POLICY.NEVER,
+                                     touch_policy=TOUCH_POLICY.NEVER)
+
 
 class ManagementKeyReadOnly(PivTestCase):
     """
