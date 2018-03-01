@@ -93,13 +93,14 @@ class KeyManagement(PivTestCase):
         self.controller.generate_self_signed_certificate(
             SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
-    def test_generate_self_signed_certificate_works(self):
+    def _test_generate_self_signed_certificate(self, slot):
         public_key = self.generate_key()
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.verify(DEFAULT_PIN)
         self.controller.generate_self_signed_certificate(
-            SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
+            slot, public_key, 'alice', now(), now())
 
-        cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
+        cert = self.controller.read_certificate(slot)
 
         self.assertEqual(
             cert.public_key().public_bytes(
@@ -113,6 +114,12 @@ class KeyManagement(PivTestCase):
             cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value,  # noqa: E501
             'alice'
         )
+
+    def test_generate_self_signed_certificate_slot_9a_works(self):
+        self._test_generate_self_signed_certificate(SLOT.AUTHENTICATION)
+
+    def test_generate_self_signed_certificate_slot_9c_works(self):
+        self._test_generate_self_signed_certificate(SLOT.SIGNATURE)
 
     def test_generate_key_requires_authentication(self):
         with self.assertRaises(APDUError):
