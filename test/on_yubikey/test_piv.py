@@ -95,10 +95,6 @@ class KeyManagement(PivTestCase):
 
     def test_generate_self_signed_certificate_works(self):
         public_key = self.generate_key()
-        with self.assertRaises(APDUError):
-            self.controller.generate_self_signed_certificate(
-                SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
-
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.generate_self_signed_certificate(
             SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
