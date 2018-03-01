@@ -1,3 +1,4 @@
+import datetime
 import unittest
 from binascii import a2b_hex
 from cryptography import x509
@@ -14,6 +15,9 @@ DEFAULT_PUK = '12345678'
 NON_DEFAULT_PUK = '87654321'
 DEFAULT_MANAGEMENT_KEY = a2b_hex('010203040506070801020304050607080102030405060708')  # noqa: E501
 NON_DEFAULT_MANAGEMENT_KEY = a2b_hex('010103040506070801020304050607080102030405060708')  # noqa: E501
+
+
+now = datetime.datetime.now
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
@@ -83,21 +87,21 @@ class KeyManagement(PivTestCase):
         public_key = self.generate_key()
         with self.assertRaises(APDUError):
             self.controller.generate_self_signed_certificate(
-                SLOT.AUTHENTICATION, public_key, 'alice', 1)
+                SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.generate_self_signed_certificate(
-            SLOT.AUTHENTICATION, public_key, 'alice', 1)
+            SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
     def test_generate_self_signed_certificate_works(self):
         public_key = self.generate_key()
         with self.assertRaises(APDUError):
             self.controller.generate_self_signed_certificate(
-                SLOT.AUTHENTICATION, public_key, 'alice', 1)
+                SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.generate_self_signed_certificate(
-            SLOT.AUTHENTICATION, public_key, 'alice', 1)
+            SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
         cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
 
@@ -129,7 +133,7 @@ class KeyManagement(PivTestCase):
         public_key = self.generate_key()
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.generate_self_signed_certificate(
-            SLOT.AUTHENTICATION, public_key, 'alice', 1)
+            SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
         self.reconnect()
 

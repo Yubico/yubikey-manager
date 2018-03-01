@@ -41,6 +41,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from binascii import b2a_hex, a2b_hex
 import click
+import datetime
 import logging
 
 
@@ -484,9 +485,12 @@ def generate_certificate(
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
+    now = datetime.datetime.now()
+    valid_to = now + datetime.timedelta(days=valid_days)
+
     try:
         controller.generate_self_signed_certificate(
-            slot, public_key, subject, valid_days,
+            slot, public_key, subject, now, valid_to,
             touch_callback=prompt_for_touch)
 
     except APDUError as e:

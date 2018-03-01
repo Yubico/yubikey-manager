@@ -45,7 +45,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from collections import OrderedDict
 from threading import Timer
-import datetime
 import logging
 import struct
 import six
@@ -713,7 +712,7 @@ class PivController(object):
         raise ValueError('Invalid algorithm!')
 
     def generate_self_signed_certificate(
-            self, slot, public_key, common_name, valid_days,
+            self, slot, public_key, common_name, valid_from, valid_to,
             touch_callback=None):
 
         algorithm = ALGO.from_public_key(public_key)
@@ -731,10 +730,8 @@ class PivController(object):
         serial = int_from_bytes(os.urandom(20), 'big') >> 1
         builder = builder.serial_number(serial)
 
-        now = datetime.datetime.now()
-        builder = builder.not_valid_before(now)
-        builder = builder.not_valid_after(
-            now + datetime.timedelta(days=valid_days))
+        builder = builder.not_valid_before(valid_from)
+        builder = builder.not_valid_after(valid_to)
 
         try:
             cert = self.sign_cert_builder(
