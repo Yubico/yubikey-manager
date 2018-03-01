@@ -9,19 +9,20 @@ Standards-Version: 3.9.7
 Build-Depends: debhelper (>= 9),
                python-all,
                python3-all,
+               python-click,
+               python3-click,
+               python-cryptography,
+               python3-cryptography,
+               python-enum34,
+               python-mock,
+               python-openssl,
+               python3-openssl,
+               python-pyscard,
+               python3-pyscard,
                python-setuptools,
                python3-setuptools,
                python-usb,
-               python3-usb,
-               python-pyscard,
-               python3-pyscard,
-               python-enum34,
-               python-cryptography,
-               python3-cryptography,
-               python-click,
-               python3-click,
-               python-openssl,
-               python3-openssl
+               python3-usb
 Homepage: https://developers.yubico.com/yubikey-manager/
 X-Python-Version: >= 2.7
 X-Python3-Version: >= 3.4
@@ -30,15 +31,15 @@ Package: python-yubikey-manager
 Architecture: all
 Section: python
 Depends: ${misc:Depends},
+         libu2f-host0,
+         libykpers-1-1,
          python,
-         python-setuptools,
          python-cryptography,
          python-openssl,
          python-pyscard,
+         python-setuptools,
          python-six,
-         python-usb,
-         libykpers-1-1,
-         libu2f-host0
+         python-usb
 Recommends: pcscd
 Description: Python 2 library for configuring a YubiKey
  A Python library for configuring YubiKey over all transport modes.
@@ -48,15 +49,15 @@ Package: python3-yubikey-manager
 Architecture: all
 Section: python
 Depends: ${misc:Depends},
+         libu2f-host0,
+         libykpers-1-1,
          python3,
-         python3-setuptools,
          python3-cryptography,
          python3-openssl,
          python3-pyscard,
+         python3-setuptools,
          python3-six,
-         python3-usb,
-         libykpers-1-1,
-         libu2f-host0
+         python3-usb
 Recommends: pcscd
 Description: Python 3 library for configuring a YubiKey
  A Python library for configuring YubiKey over all transport modes.
@@ -66,9 +67,9 @@ Package: yubikey-manager
 Architecture: all
 Depends: ${python3:Depends}, 
          ${misc:Depends},
-         python3-yubikey-manager,
+         pcscd,
          python3-click,
-         pcscd
+         python3-yubikey-manager
 Description: Python library and command line tool for configuring a YubiKey
  YubiKey Manager (ykman) is a command line tool for configuring a YubiKey over
  all transports. It is capable of reading out device information as well as
