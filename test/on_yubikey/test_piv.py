@@ -1,5 +1,7 @@
 import unittest
 from binascii import a2b_hex
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.util import TRANSPORT
@@ -62,10 +64,11 @@ class KeyManagement(PivTestCase):
 
     def generate_key(self):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-        self.controller.generate_key(SLOT.AUTHENTICATION, ALGO.ECCP256,
-                                     pin_policy=PIN_POLICY.NEVER,
-                                     touch_policy=TOUCH_POLICY.NEVER)
+        public_key = self.controller.generate_key(
+            SLOT.AUTHENTICATION, ALGO.ECCP256, pin_policy=PIN_POLICY.NEVER,
+            touch_policy=TOUCH_POLICY.NEVER)
         self.reconnect()
+        return public_key
 
     def test_delete_certificate_requires_authentication(self):
         self.generate_key()
@@ -75,6 +78,41 @@ class KeyManagement(PivTestCase):
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+    def test_generate_self_signed_certificate_requires_authentication(self):
+        public_key = self.generate_key()
+        with self.assertRaises(APDUError):
+            self.controller.generate_self_signed_certificate(
+                SLOT.AUTHENTICATION, public_key, 'alice', 1)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_self_signed_certificate(
+            SLOT.AUTHENTICATION, public_key, 'alice', 1)
+
+    def test_generate_self_signed_certificate_works(self):
+        public_key = self.generate_key()
+        with self.assertRaises(APDUError):
+            self.controller.generate_self_signed_certificate(
+                SLOT.AUTHENTICATION, public_key, 'alice', 1)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_self_signed_certificate(
+            SLOT.AUTHENTICATION, public_key, 'alice', 1)
+
+        cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
+
+        self.assertEqual(
+            cert.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo),
+            public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo),
+        )
+        self.assertEqual(
+            cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value,  # noqa: E501
+            'alice'
+        )
 
     def test_generate_key_requires_authentication(self):
         with self.assertRaises(APDUError):
