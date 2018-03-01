@@ -105,7 +105,7 @@ class Cve201715361VulnerableError(Exception):
 class YUBIKEY(Enum):
     YKS = 'YubiKey Standard'
     NEO = 'YubiKey NEO'
-    SKY = 'FIDO U2F Security Key by Yubico'
+    SKY = 'FIDO U2F Security Key'
     YKP = 'YubiKey Plus'
     YK4 = 'YubiKey 4'
 
