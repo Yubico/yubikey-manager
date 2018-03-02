@@ -914,3 +914,20 @@ class PivController(object):
         der = Tlv(0x30, b''.join(seq))
 
         return x509.load_der_x509_csr(der, default_backend())
+
+    @property
+    def supported_pin_policies(self):
+        if self.version < (4, 0, 0):
+            return []  # Pin policy not supported on NEO.
+        else:
+            return [policy for policy in PIN_POLICY]
+
+    @property
+    def supported_touch_policies(self):
+        if self.version < (4, 0, 0):
+            return []  # Touch policy not supported on NEO.
+        elif self.version < (4, 3, 0):
+            return [TOUCH_POLICY.DEFAULT, TOUCH_POLICY.NEVER,
+                    TOUCH_POLICY.ALWAYS]  # Cached policy was added in 4.3
+        else:
+            return [policy for policy in TOUCH_POLICY]

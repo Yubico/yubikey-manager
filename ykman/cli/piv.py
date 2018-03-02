@@ -764,20 +764,21 @@ def _check_eccp384(ctx, controller, algorithm):
 
 
 def _check_pin_policy(ctx, controller, pin_policy):
-    #  Pin policy not supported on NEO.
-    if pin_policy is not None and controller.version < (4, 0, 0):
-        ctx.fail('Pin policy is not supported by this YubiKey.')
+    if pin_policy is not None:
+        if len(controller.supported_pin_policies) == 0:
+            ctx.fail('Pin policy is not supported by this YubiKey.')
+        elif pin_policy not in controller.supported_pin_policies:
+            ctx.fail('Pin policy {} not supported by this YubiKey.'.format(
+                pin_policy.name))
 
 
 def _check_touch_policy(ctx, controller, touch_policy):
-    #  Touch policy not supported on NEO.
     if touch_policy is not None:
-        if controller.version < (4, 0, 0):
+        if len(controller.supported_touch_policies) == 0:
             ctx.fail('Touch policy is not supported by this YubiKey.')
-        if touch_policy == TOUCH_POLICY.CACHED \
-                and controller.version < (4, 3, 0):
-            #  Cached policy was added in 4.3
-            ctx.fail('Touch policy "CACHED" not supported by this YubiKey.')
+        elif touch_policy not in controller.supported_touch_policies:
+            ctx.fail('Touch policy {} not supported by this YubiKey.'.format(
+                touch_policy.name))
 
 
 piv.transports = TRANSPORT.CCID
