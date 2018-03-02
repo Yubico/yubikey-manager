@@ -150,6 +150,21 @@ class KeyManagement(PivTestCase):
                                      pin_policy=PIN_POLICY.NEVER,
                                      touch_policy=TOUCH_POLICY.NEVER)
 
+    def test_import_certificate_requires_authentication(self):
+        public_key = self.generate_key()
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_self_signed_certificate(
+            SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
+        cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
+
+        self.reconnect()
+
+        with self.assertRaises(APDUError):
+            self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
     def test_read_certificate_does_not_require_authentication(self):
         public_key = self.generate_key()
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
