@@ -254,6 +254,7 @@ class SW(IntEnum):
     NOT_FOUND = 0x6a82
     ACCESS_DENIED = 0x6982
     AUTHENTICATION_BLOCKED = 0x6983
+    INCORRECT_PARAMETERS = 0x6a80
 
 
 CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
