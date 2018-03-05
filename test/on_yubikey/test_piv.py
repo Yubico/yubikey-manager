@@ -323,3 +323,77 @@ class Operations(PivTestCase):
 
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
         self.assertIsNotNone(sig)
+
+
+class UnblockPin(PivTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        with open_device(transports=TRANSPORT.CCID) as dev:
+            controller = PivController(dev.driver)
+            controller.reset()
+
+    def block_pin(self):
+        while self.controller.get_pin_tries() > 0:
+            try:
+                self.controller.verify(NON_DEFAULT_PIN)
+            except Exception:
+                pass
+
+    def test_unblock_pin_requires_no_previous_authentication(self):
+        self.controller.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
+
+    def test_unblock_pin_with_wrong_puk_throws_ValueError(self):
+        with self.assertRaises(ValueError):
+            self.controller.unblock_pin(NON_DEFAULT_PUK, NON_DEFAULT_PIN)
+
+    def test_unblock_pin_resets_pin_and_retries(self):
+        self.controller.reset()
+        self.reconnect()
+
+        self.controller.verify(DEFAULT_PIN, NON_DEFAULT_PIN)
+        self.reconnect()
+
+        self.block_pin()
+
+        with self.assertRaises(ValueError):
+            self.controller.verify(DEFAULT_PIN)
+
+        self.controller.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
+
+        self.assertEqual(self.controller.get_pin_tries(), 3)
+        self.controller.verify(NON_DEFAULT_PIN)
+
+    def test_set_pin_retries_requires_pin_and_mgm_key(self):
+        # Fails with no authentication
+        with self.assertRaises(APDUError):
+            self.controller.set_pin_retries(4, 4)
+
+        # Fails with only PIN
+        self.controller.verify(DEFAULT_PIN)
+        with self.assertRaises(APDUError):
+            self.controller.set_pin_retries(4, 4)
+
+        self.reconnect()
+
+        # Fails with only management key
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        with self.assertRaises(APDUError):
+            self.controller.set_pin_retries(4, 4)
+
+        # Succeeds with both PIN and management key
+        self.controller.verify(DEFAULT_PIN)
+        self.controller.set_pin_retries(4, 4)
+
+    def test_set_pin_retries_sets_pin_and_puk_tries(self):
+        pin_tries = 9
+        puk_tries = 7
+
+        self.controller.verify(DEFAULT_PIN)
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.set_pin_retries(pin_tries, puk_tries)
+
+        self.reconnect()
+
+        self.assertEqual(self.controller.get_pin_tries(), pin_tries)
+        self.assertEqual(self.controller._get_puk_tries(), puk_tries - 1)
