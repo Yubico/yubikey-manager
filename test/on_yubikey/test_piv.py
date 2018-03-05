@@ -261,3 +261,65 @@ class ManagementKeyReadWrite(PivTestCase):
         self.assertMgmKeyIs(self.controller._pivman_protected_data.key)
         self.assertStoredMgmKeyNotEquals(DEFAULT_MANAGEMENT_KEY)
         self.assertStoredMgmKeyNotEquals(NON_DEFAULT_MANAGEMENT_KEY)
+
+
+class Operations(PivTestCase):
+
+    def setUp(self):
+        PivTestCase.setUp(self)
+        self.controller.reset()
+
+    def generate_key(self, pin_policy=PIN_POLICY.NEVER):
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        public_key = self.controller.generate_key(
+            SLOT.AUTHENTICATION, ALGO.ECCP256, pin_policy=pin_policy,
+            touch_policy=TOUCH_POLICY.NEVER)
+        self.reconnect()
+        return public_key
+
+    def test_sign_with_pin_policy_always_requires_pin_every_time(self):
+        self.generate_key(pin_policy=PIN_POLICY.ALWAYS)
+
+        with self.assertRaises(APDUError):
+            self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+
+        self.controller.verify(DEFAULT_PIN)
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
+
+        with self.assertRaises(APDUError):
+            self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+
+        self.controller.verify(DEFAULT_PIN)
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
+
+    def test_sign_with_pin_policy_never_does_not_require_pin(self):
+        self.generate_key()
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
+
+    def test_sign_with_pin_policy_once_requires_pin_once_per_session(self):
+        self.generate_key(pin_policy=PIN_POLICY.ONCE)
+
+        with self.assertRaises(APDUError):
+            self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+
+        self.controller.verify(DEFAULT_PIN)
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
+
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
+
+        self.reconnect()
+
+        with self.assertRaises(APDUError):
+            self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+
+        self.controller.verify(DEFAULT_PIN)
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
+
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        self.assertIsNotNone(sig)
