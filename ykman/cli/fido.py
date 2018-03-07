@@ -159,7 +159,7 @@ def reset(ctx):
     """
     controller = ctx.obj['controller']
     try:
-        controller.reset()
+        controller.reset(touch_callback=prompt_for_touch)
     except CTAP2Error as e:
         if e.code == CTAP2_ERR.NOT_ALLOWED:
             ctx.fail(
@@ -174,7 +174,6 @@ def reset(ctx):
     except Exception as e:
         logger.error(e)
         ctx.fail('Failed to reset the YubiKey.')
-    prompt_for_touch()
 
 
 fido.transports = TRANSPORT.U2F

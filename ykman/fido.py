@@ -35,6 +35,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hmac, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from binascii import b2a_hex, a2b_hex
+from threading import Timer
 import struct
 import six
 
@@ -219,9 +220,16 @@ class Fido2Controller(object):
             CTAP2_PIN_ARG.PIN_AUTH: pin_auth
         })
 
-    def reset(self):
-        self.send_cbor_cmd(CTAP2_CMD.RESET)
-        self._pin = False
+    def reset(self, touch_callback=None):
+        if (touch_callback):
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+        try:
+            self.send_cbor_cmd(CTAP2_CMD.RESET)
+            self._pin = False
+        finally:
+            if (touch_callback):
+                touch_timer.cancel()
 
 
 def _pad_pin(pin):
