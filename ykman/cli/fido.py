@@ -167,10 +167,6 @@ def reset(ctx):
                 'triggered immediately after the YubiKey is inserted.')
         else:
             raise
-    except U2FHostError as e:
-        # Might not be needed with new libu2f-host
-        logger.debug(e)
-        pass
     except Exception as e:
         logger.error(e)
         ctx.fail('Failed to reset the YubiKey.')
