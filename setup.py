@@ -30,7 +30,8 @@ import os
 from setuptools import setup
 
 install_requires = [
-    'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl']
+    'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl', 'fido-host'
+]
 tests_require = []
 if sys.version_info < (3, 3):
     tests_require.append('mock')

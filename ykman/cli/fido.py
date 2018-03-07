@@ -29,7 +29,6 @@ from __future__ import absolute_import
 import click
 import logging
 from .util import click_skip_on_help, prompt_for_touch
-from ..driver_u2f import U2FHostError
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, CTAP2Error, CTAP2_ERR
 
@@ -46,7 +45,7 @@ def fido(ctx):
     """
     try:
         ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
-    except U2FHostError:
+    except Exception:  # TODO
         ctx.fail('FIDO functionality not supported.')
 
 

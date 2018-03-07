@@ -27,14 +27,11 @@
 
 from __future__ import absolute_import
 
-from .native.u2fh import U2fh, u2fh_devs
-from .driver import AbstractDriver, ModeSwitchError
-from .util import TRANSPORT, YUBIKEY, PID, MissingLibrary, parse_tlvs
-from enum import IntEnum, unique
-from ctypes import POINTER, byref, c_uint, c_size_t, create_string_buffer
+from .driver import AbstractDriver
+from .util import TRANSPORT, YUBIKEY, PID, parse_tlvs
+from fido_host.hid import CtapHidDevice, CTAPHID, hidtransport
 from binascii import b2a_hex
 import logging
-import weakref
 import struct
 import six
 
@@ -42,67 +39,10 @@ import six
 logger = logging.getLogger(__name__)
 
 U2F_VENDOR_FIRST = 0x40
-TYPE_INIT = 0x80
 
 
-@unique
-class CTAPHID(IntEnum):
-    MSG = TYPE_INIT | 0x03
-    CBOR = TYPE_INIT | 0x10
-    PING = TYPE_INIT | 0x01
-    YUBIKEY_DEVICE_CONFIG = TYPE_INIT | U2F_VENDOR_FIRST
-    YK4_CAPABILITIES = TYPE_INIT | U2F_VENDOR_FIRST + 2
-
-
-try:
-    u2fh = U2fh('u2f-host', '0')
-
-    # TODO: Allow debug output
-    if u2fh.u2fh_global_init(0) is not 0:
-        raise Exception('u2fh_global_init failed!')
-    libversion = tuple(int(x) for x in u2fh.u2fh_check_version(None)
-                       .decode('ascii').split('.'))
-except Exception as e:
-    logger.error('libu2f-host not found', exc_info=e)
-    u2fh = MissingLibrary(
-        'libu2f-host not found, U2F connectability not available!')
-    libversion = None
-
-
-class U2FHostError(Exception):
-    """Thrown if u2f-host call fails."""
-
-    def __init__(self, errno):
-        self.errno = errno
-        self.message = '{}: {}'.format(u2fh.u2fh_strerror_name(errno),
-                                       u2fh.u2fh_strerror(errno))
-
-    def __str__(self):
-        return 'u2fh error {}, {}'.format(self.errno, self.message)
-
-
-def check(status):
-    if status is not 0:
-        raise U2FHostError(status)
-
-
-def _pid_from_name(name):
-    if 'Security Key' in name:
-        return PID.SKY_U2F
-
-    if 'Plus' in name:
-        return PID.YKP_OTP_U2F
-
-    transports = 0
-    for t in TRANSPORT:
-        if t.name in name:
-            transports += t
-
-    key_type = YUBIKEY.NEO if 'NEO' in name else YUBIKEY.YK4
-    return key_type.get_pid(transports)
-
-
-_instances = weakref.WeakSet()
+YUBIKEY_DEVICE_CONFIG = CTAPHID.VENDOR_FIRST
+YK4_CAPABILITIES = CTAPHID.VENDOR_FIRST + 2
 
 
 class U2FDriver(AbstractDriver):
@@ -111,76 +51,44 @@ class U2FDriver(AbstractDriver):
     """
     transport = TRANSPORT.U2F
 
-    def __init__(self, devs, index, name):
-        self._devs = devs
-        self._index = index
-        self._pid = _pid_from_name(name)
-        _instances.add(self)
+    def __init__(self, dev, usb_desc):
+        self._dev = dev
+        self._pid = PID(usb_desc['product_id'])
+        self._version = dev.device_version
+        if self._version < (4, 0, 0):
+            if self.key_type in [YUBIKEY.NEO, YUBIKEY.YKS]:  # Applet version
+                self._version = (3, 2, 0)
 
-        self._version = [0, 0, 0]
         self._capa = b''
-        if self.key_type in [YUBIKEY.YK4, YUBIKEY.SKY]:
-            self._version[0] = 4
-            try:
-                self._capa = self.sendrecv(CTAPHID.YK4_CAPABILITIES, b'\x00')
-                data = self._capa
-                c_len, data = six.indexbytes(data, 0), data[1:]
-                data = data[:c_len]
-                for tlv in parse_tlvs(data):
-                    if tlv.tag == 0x02:
-                        self._serial = int(b2a_hex(tlv.value), 16)
-                self._version[1] = 2
-            except U2FHostError:  # Pre 4.2
-                self._version[1] = 1
-        elif self.key_type == YUBIKEY.NEO:
-            self._version = [3, 2, 0]
-        elif self.key_type == YUBIKEY.YKP:
-            self._version = [4, 0, 0]
+        if self._version >= (4, 2, 0):
+            self._capa = self._dev.call(YK4_CAPABILITIES, b'\x00')
+            data = self._capa
+            c_len, data = six.indexbytes(data, 0), data[1:]
+            data = data[:c_len]
+            for tlv in parse_tlvs(data):
+                if tlv.tag == 0x02:
+                    self._serial = int(b2a_hex(tlv.value), 16)
 
     def read_capabilities(self):
         return self._capa
 
     def guess_version(self):
-        return tuple(self._version), False
-
-    def sendrecv(self, cmd, data):
-        buf_size = c_size_t(1024)
-        resp = create_string_buffer(buf_size.value)
-        check(u2fh.u2fh_sendrecv(self._devs, self._index, cmd, data,
-                                 len(data), resp, byref(buf_size)))
-        return resp.raw[0:buf_size.value]
+        return self._version, self._version >= (4, 0, 0)
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-        try:
-            self.sendrecv(CTAPHID.YUBIKEY_DEVICE_CONFIG, data)
-        except U2FHostError:
-            raise ModeSwitchError()
+        self._dev.call(YUBIKEY_DEVICE_CONFIG, data)
 
-    def close(self):
-        logger.debug('Close %s', self)
-        if self in _instances:
-            _instances.remove(self)
-            if not _instances:
-                logger.debug('Call u2fh_devs_done on %s', self._devs)
-                u2fh.u2fh_devs_done(self._devs)
 
-    def __del__(self):
-        logger.debug('Destroy %s', self)
-        self.close()
+def descriptor_filter(desc):
+    return desc['vendor_id'] == 0x1050 \
+            and desc['usage_page'] == 0xf1d0 \
+            and desc['usage'] == 1
 
 
 def open_devices():
-    devs = POINTER(u2fh_devs)()
-    check(u2fh.u2fh_devs_init(byref(devs)))
-    max_index = c_uint()
-    u2fh.u2fh_devs_discover(devs, byref(max_index))
-    resp = create_string_buffer(1024)
-    for index in range(max_index.value + 1):
-        buf_size = c_size_t(1024)
-        if u2fh.u2fh_get_device_description(
-                devs, index, resp, byref(buf_size)) == 0:
-            name = resp.value.decode('utf8')
-            if name.startswith('Yubikey') \
-                    or name.startswith('Security Key by Yubico'):
-                yield U2FDriver(devs, index, name)
+    for desc in hidtransport.hid.Enumerate():
+        if descriptor_filter(desc):
+            dev = hidtransport.UsbHidTransport(
+                hidtransport.hid.Open(desc['path']))
+            yield(U2FDriver(CtapHidDevice(dev), desc))
