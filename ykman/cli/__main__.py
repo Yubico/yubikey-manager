@@ -27,6 +27,7 @@
 
 from __future__ import absolute_import, print_function
 
+import ykman.logging_setup
 from ykman import __version__
 from ..util import TRANSPORT, Mode, Cve201715361VulnerableError
 from ..native.pyusb import get_usb_backend_version
@@ -42,7 +43,6 @@ from .opgp import openpgp
 from .oath import oath
 from .piv import piv
 from .fido import fido
-import ykman.logging_setup
 import usb.core
 import click
 import logging

@@ -195,6 +195,12 @@ class YubiKey(object):
     def close(self):
         self._driver.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
     def __str__(self):
         return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}]' \
             'serial: {4} CAP: {5:x}' \
