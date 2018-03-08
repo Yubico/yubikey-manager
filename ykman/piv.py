@@ -38,10 +38,11 @@ from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
-from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
 from collections import OrderedDict
 from threading import Timer
 import logging
@@ -253,6 +254,7 @@ class SW(IntEnum):
     NOT_FOUND = 0x6a82
     ACCESS_DENIED = 0x6982
     AUTHENTICATION_BLOCKED = 0x6983
+    INCORRECT_PARAMETERS = 0x6a80
 
 
 CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
@@ -710,6 +712,66 @@ class PivController(object):
             ).public_key(default_backend())
         raise ValueError('Invalid algorithm!')
 
+    def generate_self_signed_certificate(
+            self, slot, public_key, common_name, valid_from, valid_to,
+            touch_callback=None):
+
+        algorithm = ALGO.from_public_key(public_key)
+
+        builder = x509.CertificateBuilder()
+        builder = builder.public_key(public_key)
+        builder = builder.subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+
+        # Same as subject on self-signed certificates.
+        builder = builder.issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+
+        # x509.random_serial_number added in cryptography 1.6
+        serial = int_from_bytes(os.urandom(20), 'big') >> 1
+        builder = builder.serial_number(serial)
+
+        builder = builder.not_valid_before(valid_from)
+        builder = builder.not_valid_after(valid_to)
+
+        try:
+            cert = self.sign_cert_builder(
+                slot, algorithm, builder, touch_callback)
+        except APDUError as e:
+            logger.error('Failed to generate certificate for slot %s', slot,
+                         exc_info=e)
+            raise
+
+        # Verify that the public key used in the certificate
+        # is from the same keypair as the private key.
+        cert_signature = cert.signature
+        cert_bytes = cert.tbs_certificate_bytes
+        if isinstance(public_key, rsa.RSAPublicKey):
+            verifier = public_key.verifier(
+                cert_signature, padding.PKCS1v15(),
+                cert.signature_hash_algorithm)
+        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+            verifier = public_key.verifier(
+                cert_signature, ec.ECDSA(cert.signature_hash_algorithm))
+        verifier.update(cert_bytes)
+        verifier.verify()
+        self.import_certificate(slot, cert)
+
+    def generate_certificate_signing_request(self, slot, public_key, subject,
+                                             touch_callback=None):
+        builder = x509.CertificateSigningRequestBuilder()
+        builder = builder.subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
+
+        try:
+            return self.sign_csr_builder(
+                slot, public_key, builder, touch_callback=touch_callback)
+        except APDUError as e:
+            logger.error(
+                'Failed to generate Certificate Signing Request for slot %s',
+                slot, exc_info=e)
+            raise
+
     def import_key(self, slot, key, pin_policy=PIN_POLICY.DEFAULT,
                    touch_policy=TOUCH_POLICY.DEFAULT):
         algorithm, data = _get_key_data(key)
@@ -853,3 +915,17 @@ class PivController(object):
         der = Tlv(0x30, b''.join(seq))
 
         return x509.load_der_x509_csr(der, default_backend())
+
+    @property
+    def supports_pin_policies(self):
+        return self.version >= (4, 0, 0)
+
+    @property
+    def supported_touch_policies(self):
+        if self.version < (4, 0, 0):
+            return []  # Touch policy not supported on NEO.
+        elif self.version < (4, 3, 0):
+            return [TOUCH_POLICY.DEFAULT, TOUCH_POLICY.NEVER,
+                    TOUCH_POLICY.ALWAYS]  # Cached policy was added in 4.3
+        else:
+            return [policy for policy in TOUCH_POLICY]
