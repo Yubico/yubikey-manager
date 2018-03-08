@@ -47,7 +47,7 @@ def _missing_mode(mode):
     return not _the_yubikey.mode.has_transport(mode)
 
 
-def _get_version():
+def get_version():
     if not _one_yubikey:
         return None
     return _the_yubikey.version
@@ -55,21 +55,21 @@ def _get_version():
 
 def is_NEO():
     if _one_yubikey:
-        return _get_version() < (4, 0, 0)
+        return get_version() < (4, 0, 0)
     else:
         return False
 
 
 def _no_attestation():
     if _one_yubikey:
-        return _get_version() < (4, 3, 0)
+        return get_version() < (4, 3, 0)
     else:
         return False
 
 
 def _is_cve201715361_vulnerable_yubikey():
     if _one_yubikey:
-        return is_cve201715361_vulnerable_firmware_version(_get_version())
+        return is_cve201715361_vulnerable_firmware_version(get_version())
     else:
         return False
 
