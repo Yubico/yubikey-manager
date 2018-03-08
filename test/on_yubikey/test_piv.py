@@ -21,7 +21,8 @@ NON_DEFAULT_MANAGEMENT_KEY = a2b_hex('010103040506070801020304050607080102030405
 
 now = datetime.datetime.now
 
-no_pin_policy = (get_version() < (4, 0, 0), 'PIN policies not supported.')
+no_pin_policy = (get_version() is not None and get_version() < (4, 0, 0),
+                 'PIN policies not supported.')
 
 
 def get_test_cert():
@@ -238,7 +239,8 @@ class ManagementKeyReadOnly(PivTestCase):
             self.controller.set_mgm_key(NON_DEFAULT_MANAGEMENT_KEY)
         self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
-    @unittest.skipIf(get_version() < (3, 5, 0), 'Known fixed bug')
+    @unittest.skipIf(get_version() is not None and get_version() < (3, 5, 0),
+                     'Known fixed bug')
     def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(self):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         with self.assertRaises(APDUError):
