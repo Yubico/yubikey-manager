@@ -45,7 +45,8 @@ def fido(ctx):
     """
     try:
         ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
-    except Exception:  # TODO
+    except Exception as e:
+        logger.debug('Failed to load Fido2Controller', exc_info=e)
         ctx.fail('FIDO functionality not supported.')
 
 
