@@ -5,10 +5,10 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
-from ykman.util import TRANSPORT, parse_certificate
+from ykman.util import TRANSPORT, parse_certificate, parse_private_key
 from .util import (
     DestructiveYubikeyTestCase, missing_mode, open_device, get_version)
-from ..data.piv import self_signed_cert_pem
+from ..data.piv import private_key_pem, self_signed_cert_pem
 
 
 DEFAULT_PIN = '123456'
@@ -161,6 +161,14 @@ class KeyManagement(PivTestCase):
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
+    def test_import_key_requires_authentication(self):
+        private_key = parse_private_key(private_key_pem, None)
+        with self.assertRaises(APDUError):
+            self.controller.import_key(SLOT.AUTHENTICATION, private_key)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.import_key(SLOT.AUTHENTICATION, private_key)
 
     def test_read_certificate_does_not_require_authentication(self):
         public_key = self.generate_key()
