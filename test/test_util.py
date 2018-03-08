@@ -4,11 +4,8 @@ from ykman.util import (b2len, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
                         parse_tlvs, parse_truncated, time_challenge, Tlv,
                         is_pkcs12)
+from .util import open_file
 import unittest
-import os
-
-
-PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 if not getattr(unittest.TestCase, 'assertRegex', None):
@@ -117,22 +114,19 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertFalse(is_pkcs12('just a string'))
         self.assertFalse(is_pkcs12(None))
 
-        def _open(filename):
-            return open(os.path.join(PKG_DIR, 'files', filename), 'rb')
-
-        with _open('rsa_2048_key.pem') as rsa_2048_key_pem:
+        with open_file('rsa_2048_key.pem') as rsa_2048_key_pem:
             self.assertFalse(is_pkcs12(rsa_2048_key_pem.read()))
 
-        with _open('rsa_2048_key_encrypted.pem') as rsa_2048_key_encrypted_pem:
-            self.assertFalse(is_pkcs12(rsa_2048_key_encrypted_pem.read()))
+        with open_file('rsa_2048_key_encrypted.pem') as f:
+            self.assertFalse(is_pkcs12(f.read()))
 
-        with _open('rsa_2048_cert.pem') as rsa_2048_cert_pem:
+        with open_file('rsa_2048_cert.pem') as rsa_2048_cert_pem:
             self.assertFalse(is_pkcs12(rsa_2048_cert_pem.read()))
 
-        with _open('rsa_2048_key_cert.pfx') as rsa_2048_key_cert_pfx:
+        with open_file('rsa_2048_key_cert.pfx') as rsa_2048_key_cert_pfx:
             self.assertTrue(is_pkcs12(rsa_2048_key_cert_pfx.read()))
 
-        with _open(
+        with open_file(
             'rsa_2048_key_cert_encrypted.pfx') as \
                 rsa_2048_key_cert_encrypted_pfx:
             self.assertTrue(is_pkcs12(rsa_2048_key_cert_encrypted_pfx.read()))
