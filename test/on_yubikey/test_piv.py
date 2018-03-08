@@ -6,7 +6,8 @@ from cryptography.hazmat.primitives import serialization
 from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.util import TRANSPORT
-from .util import (DestructiveYubikeyTestCase, missing_mode, open_device)
+from .util import (
+    DestructiveYubikeyTestCase, missing_mode, open_device, get_version)
 
 
 DEFAULT_PIN = '123456'
@@ -18,6 +19,8 @@ NON_DEFAULT_MANAGEMENT_KEY = a2b_hex('010103040506070801020304050607080102030405
 
 
 now = datetime.datetime.now
+
+no_pin_policy = (get_version() < (4, 0, 0), 'PIN policies not supported.')
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
@@ -277,6 +280,7 @@ class Operations(PivTestCase):
         self.reconnect()
         return public_key
 
+    @unittest.skipIf(*no_pin_policy)
     def test_sign_with_pin_policy_always_requires_pin_every_time(self):
         self.generate_key(pin_policy=PIN_POLICY.ALWAYS)
 
@@ -294,6 +298,7 @@ class Operations(PivTestCase):
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
         self.assertIsNotNone(sig)
 
+    @unittest.skipIf(*no_pin_policy)
     def test_sign_with_pin_policy_never_does_not_require_pin(self):
         self.generate_key()
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
