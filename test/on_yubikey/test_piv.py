@@ -219,6 +219,7 @@ class ManagementKeyReadOnly(PivTestCase):
             self.controller.set_mgm_key(NON_DEFAULT_MANAGEMENT_KEY)
         self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
+    @unittest.skipIf(get_version() < (3, 5, 0), 'Known fixed bug')
     def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(self):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         with self.assertRaises(APDUError):
