@@ -532,7 +532,7 @@ def generate_certificate_signing_request(
     try:
         csr = controller.generate_certificate_signing_request(
             slot, public_key, subject, touch_callback=prompt_for_touch)
-    except APDUError as e:
+    except APDUError:
         ctx.fail('Certificate Signing Request generation failed.')
 
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
