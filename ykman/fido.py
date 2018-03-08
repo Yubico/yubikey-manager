@@ -49,7 +49,7 @@ class Fido2Controller(object):
         self.ctap = CTAP2(driver._dev)
         self.pin = PinProtocolV1(self.ctap)
         self._info = self.ctap.get_info()
-        self._pin = self._info[4]['clientPin']
+        self._pin = self._info.options['clientPin']
 
     @property
     def has_pin(self):
