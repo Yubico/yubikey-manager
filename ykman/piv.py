@@ -917,11 +917,8 @@ class PivController(object):
         return x509.load_der_x509_csr(der, default_backend())
 
     @property
-    def supported_pin_policies(self):
-        if self.version < (4, 0, 0):
-            return []  # Pin policy not supported on NEO.
-        else:
-            return [policy for policy in PIN_POLICY]
+    def supports_pin_policies(self):
+        return self.version >= (4, 0, 0)
 
     @property
     def supported_touch_policies(self):

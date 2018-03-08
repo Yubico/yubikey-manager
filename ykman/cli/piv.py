@@ -764,12 +764,8 @@ def _check_eccp384(ctx, controller, algorithm):
 
 
 def _check_pin_policy(ctx, controller, pin_policy):
-    if pin_policy is not None:
-        if len(controller.supported_pin_policies) == 0:
-            ctx.fail('Pin policy is not supported by this YubiKey.')
-        elif pin_policy not in controller.supported_pin_policies:
-            ctx.fail('Pin policy {} not supported by this YubiKey.'.format(
-                pin_policy.name))
+    if pin_policy is not None and not controller.supports_pin_policies:
+        ctx.fail('Pin policy is not supported by this YubiKey.')
 
 
 def _check_touch_policy(ctx, controller, touch_policy):
