@@ -89,6 +89,10 @@ class KeyManagement(PivTestCase):
 
     def test_generate_csr_works(self):
         public_key = self.generate_key()
+        if get_version() < (4, 0, 0):
+            # NEO always has PIN policy "ONCE"
+            self.controller.verify(DEFAULT_PIN)
+
         csr = self.controller.generate_certificate_signing_request(
             SLOT.AUTHENTICATION, public_key, 'alice')
 
@@ -107,6 +111,10 @@ class KeyManagement(PivTestCase):
 
     def test_generate_self_signed_certificate_requires_authentication(self):
         public_key = self.generate_key()
+        if get_version() < (4, 0, 0):
+            # NEO always has PIN policy "ONCE"
+            self.controller.verify(DEFAULT_PIN)
+
         with self.assertRaises(APDUError):
             self.controller.generate_self_signed_certificate(
                 SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
