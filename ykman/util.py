@@ -84,16 +84,24 @@ class FORM_FACTOR(IntEnum):
     USB_C_KEYCHAIN = 0x03
     USB_C_NANO = 0x04
 
-    @classmethod
-    def printable(cls, form_factor):
-        if form_factor == cls.USB_A_KEYCHAIN:
+    def __str__(self):
+        if self == self.USB_A_KEYCHAIN:
             return 'Keychain (USB-A)'
-        elif form_factor == cls.USB_A_NANO:
+        elif self == self.USB_A_NANO:
             return 'Nano (USB-A)'
-        elif form_factor == cls.USB_C_KEYCHAIN:
+        elif self == self.USB_C_KEYCHAIN:
             return 'Keychain (USB-C)'
-        elif form_factor == cls.USB_C_NANO:
+        elif self == self.USB_C_NANO:
             return 'Nano (USB-C)'
+        elif self == self.UNKNOWN:
+            return 'Unknown.'
+
+    @classmethod
+    def from_code(cls, code):
+        try:
+            return FORM_FACTOR(code)
+        except ValueError:
+            return cls.UNKNOWN
 
 
 @unique

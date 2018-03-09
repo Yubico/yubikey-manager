@@ -61,7 +61,7 @@ class YubiKey(object):
         self._descriptor = descriptor
         self._driver = driver
         self.device_name = descriptor.key_type.value
-        self._form_factor = None
+        self._form_factor = FORM_FACTOR.UNKNOWN
 
         if driver.key_type == YUBIKEY.SKY:
             self.capabilities = CAPABILITY.U2F
@@ -115,7 +115,8 @@ class YubiKey(object):
             elif YK4_ENABLED_TAG == tlv.tag:
                 self.enabled = int(b2a_hex(tlv.value), 16)
             elif YK4_FORMFACTOR_TAG == tlv.tag:
-                self._form_factor = FORM_FACTOR(int(b2a_hex(tlv.value), 16))
+                self._form_factor = FORM_FACTOR.from_code(
+                    int(b2a_hex(tlv.value), 16))
 
     @property
     def version(self):
