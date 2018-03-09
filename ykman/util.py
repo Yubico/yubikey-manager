@@ -77,6 +77,26 @@ class CAPABILITY(BitflagEnum):
 
 
 @unique
+class FORM_FACTOR(IntEnum):
+    UNKNOWN = 0x00
+    USB_A_KEYCHAIN = 0x01
+    USB_A_NANO = 0x02
+    USB_C_KEYCHAIN = 0x03
+    USB_C_NANO = 0x04
+
+    @classmethod
+    def printable(cls, form_factor):
+        if form_factor == cls.USB_A_KEYCHAIN:
+            return 'Keychain (USB-A)'
+        elif form_factor == cls.USB_A_NANO:
+            return 'Nano (USB-A)'
+        elif form_factor == cls.USB_C_KEYCHAIN:
+            return 'Keychain (USB-C)'
+        elif form_factor == cls.USB_C_NANO:
+            return 'Nano (USB-C)'
+
+
+@unique
 class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
     U2F = CAPABILITY.U2F

@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import CAPABILITY, TRANSPORT, YUBIKEY, parse_tlvs
+from .util import CAPABILITY, TRANSPORT, YUBIKEY, FORM_FACTOR, parse_tlvs
 from .driver import AbstractDriver
 from binascii import b2a_hex
 import logging
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 YK4_CAPA_TAG = 0x01
 YK4_SERIAL_TAG = 0x02
 YK4_ENABLED_TAG = 0x03
-
+YK4_FORMFACTOR_TAG = 0x04
 
 _NULL_DRIVER = AbstractDriver()
 
@@ -61,6 +61,7 @@ class YubiKey(object):
         self._descriptor = descriptor
         self._driver = driver
         self.device_name = descriptor.key_type.value
+        self._form_factor = None
 
         if driver.key_type == YUBIKEY.SKY:
             self.capabilities = CAPABILITY.U2F
@@ -113,6 +114,8 @@ class YubiKey(object):
                 self._serial = int(b2a_hex(tlv.value), 16)
             elif YK4_ENABLED_TAG == tlv.tag:
                 self.enabled = int(b2a_hex(tlv.value), 16)
+            elif YK4_FORMFACTOR_TAG == tlv.tag:
+                self._form_factor = FORM_FACTOR(int(b2a_hex(tlv.value), 16))
 
     @property
     def version(self):
@@ -125,6 +128,10 @@ class YubiKey(object):
     @property
     def serial(self):
         return self._serial or self._driver.serial
+
+    @property
+    def form_factor(self):
+        return self._form_factor
 
     @property
     def driver(self):
