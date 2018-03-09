@@ -98,9 +98,9 @@ class FORM_FACTOR(IntEnum):
 
     @classmethod
     def from_code(cls, code):
-        try:
-            return FORM_FACTOR(code)
-        except ValueError:
+        if code in cls.__members__.values():
+            return cls(code)
+        else:
             return cls.UNKNOWN
 
 
