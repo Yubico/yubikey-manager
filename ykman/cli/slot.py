@@ -252,9 +252,9 @@ a random one may be generated.
                 else:
                     break
 
-        password = generate_static_pw(chars)
+        password = generate_static_pw(chars).decode()
         force or click.echo(
-            'Generated password: {}'.format(password.decode('utf-8')))
+            'Generated password: {}'.format(password))
 
     force or click.confirm(
             'Program static password in slot {}?'.format(slot), abort=True)
