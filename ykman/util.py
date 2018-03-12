@@ -98,10 +98,9 @@ class FORM_FACTOR(IntEnum):
 
     @classmethod
     def from_code(cls, code):
-        if code in cls.__members__.values():
-            return cls(code)
-        else:
-            return cls.UNKNOWN
+        if code and not isinstance(code, int):
+            raise ValueError('Invalid form factor code!')
+        return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
 
 
 @unique

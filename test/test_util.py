@@ -133,8 +133,8 @@ class TestUtilityFunctions(unittest.TestCase):
 
     def test_form_factor_from_code(self):
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(None))
-        self.assertEqual(
-            FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code('im a string'))
+        with self.assertRaises(ValueError):
+            FORM_FACTOR.from_code('im a string')
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x00))
         self.assertEqual(
             FORM_FACTOR.USB_A_KEYCHAIN, FORM_FACTOR.from_code(0x01))
