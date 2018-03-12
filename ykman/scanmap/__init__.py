@@ -8,16 +8,10 @@ class KEYBOARD_LAYOUT(Enum):
 
 def get_scan_codes(data, keyboard_layout=KEYBOARD_LAYOUT.US):
     if keyboard_layout == KEYBOARD_LAYOUT.US:
-        return _get_us_scan_codes(data)
+        scancodes = us.scancodes
     else:
         raise ValueError('Keyboard layout not supported!')
-
-
-def _get_us_scan_codes(data):
-    scancodes = b''
-    for char in data:
-        if char in us.scancodes.keys():
-            scancodes += us.scancodes[char]
-        else:
-            raise ValueError('Character not available in US keyboard layout!')
-    return scancodes
+    try:
+        return bytes(bytearray(scancodes[c] for c in data))
+    except KeyError:
+        raise ValueError('Character not available in keyboard layout!')
