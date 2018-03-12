@@ -1,3 +1,5 @@
+#  vim: set fileencoding=utf-8 :
+
 import unittest
 from ykman.scanmap import get_scan_codes
 
