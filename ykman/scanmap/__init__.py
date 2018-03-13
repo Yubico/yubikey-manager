@@ -13,5 +13,5 @@ def get_scan_codes(data, keyboard_layout=KEYBOARD_LAYOUT.US):
         raise ValueError('Keyboard layout not supported!')
     try:
         return bytes(bytearray(scancodes[c] for c in data))
-    except KeyError:
-        raise ValueError('Character not available in keyboard layout!')
+    except KeyError as e:
+            raise ValueError('Unsupported character: %s' % e.args[0])
