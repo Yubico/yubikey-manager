@@ -109,4 +109,4 @@ class TestScanMap(unittest.TestCase):
 
         self.assertEqual(b'\x04\x05\x06', get_scan_codes('abc'))
         with self.assertRaises(ValueError):
-            get_scan_codes('ööööö')
+            get_scan_codes('ö')
