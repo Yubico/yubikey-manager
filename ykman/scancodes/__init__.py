@@ -25,21 +25,30 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
 from enum import Enum
-from . import us
+from . import us, de, modhex
 
 
-class KEYBOARD_LAYOUT(Enum):
-    US = 'US Keyboard Layout'
+class SCANCODE_MAP(Enum):
+    MODHEX = 'Modhex based scancode map'
+    US = 'US Keyboard based scancode map'
+    DE = 'DE German Kayboard based scancode map'
+
+    @property
+    def scancodes(self):
+        if self == self.MODHEX:
+            return modhex.scancodes
+        elif self == self.US:
+            return us.scancodes
+        elif self == self.DE:
+            return de.scancodes
+        else:
+            raise ValueError('No scancodes added for this layout!')
 
 
-def get_scan_codes(data, keyboard_layout=KEYBOARD_LAYOUT.US):
-    if keyboard_layout == KEYBOARD_LAYOUT.US:
-        scancodes = us.scancodes
-    else:
-        raise ValueError('Keyboard layout not supported!')
+def encode(data, scancode_map=SCANCODE_MAP.MODHEX):
+    scancodes = scancode_map.scancodes
     try:
         return bytes(bytearray(scancodes[c] for c in data))
     except KeyError as e:
-            raise ValueError('Unsupported character: %s' % e.args[0])
+        raise ValueError('Unsupported character: %s' % e.args[0])
