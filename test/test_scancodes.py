@@ -243,6 +243,6 @@ class TestScanMap(unittest.TestCase):
         self.assertEqual(b'\xaf', encode(u'Ü', SCANCODE_MAP.DE))
 
         self.assertEqual(
-            b'\xb4\xb3\xaf', encode('ÄÖÜ', SCANCODE_MAP.DE))
+            b'\xb4\xb3\xaf', encode(u'ÄÖÜ', SCANCODE_MAP.DE))
         with self.assertRaises(ValueError):
             encode('@', SCANCODE_MAP.DE)
