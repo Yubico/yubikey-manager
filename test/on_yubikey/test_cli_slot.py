@@ -19,7 +19,71 @@ class TestSlotStatus(DestructiveYubikeyTestCase):
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
+class TestSlotStaticPassword(DestructiveYubikeyTestCase):
+
+    def setUp(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+
+    def tearDown(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+
+    def test_provide_pw(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'slot', 'static', '2',
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+        with self.assertRaises(ValueError):
+            ykman_cli('slot', 'static', '2', 'ö')
+        with self.assertRaises(ValueError):
+            ykman_cli('slot', 'static', '2', '@')
+
+        ykman_cli(
+            'slot', 'static', '2',
+            'higngdukgerjktbbikrhirngtlkkttkb')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+    def test_provide_pw_prompt(self):
+        ykman_cli(
+            'slot', 'static', '2',
+            input='higngdukgerjktbbikrhirngtlkkttkb\ny\n')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+    def test_generate_pw(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length', '39')
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length')
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length', '0')
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate')
+        ykman_cli('slot', 'static', '2', '--generate', '--length', '38')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+    def test_us_scancodes(self):
+        ykman_cli('slot', 'static', '2', 'abcABC123', '--scancodes', 'US')
+        ykman_cli('slot', 'static', '2', '@!)', '-f', '--scancodes', 'US')
+
+    def test_de_scancodes(self):
+        ykman_cli('slot', 'static', '2', 'abcABC123', '--scancodes', 'DE')
+        ykman_cli('slot', 'static', '2', 'Üßö', '-f', '--scancodes', 'DE')
+
+    def test_overwrite_prompt(self):
+        ykman_cli('slot', 'static', '2', 'bbb')
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', 'ccc')
+        ykman_cli('slot', 'static', '2', 'ddd', '-f')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotProgramming(DestructiveYubikeyTestCase):
+
+    def setUp(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+
+    def tearDown(self):
+        ykman_cli('slot', 'delete', '2', '-f')
 
     def test_ykman_program_otp_slot_2(self):
         ykman_cli(
@@ -69,18 +133,6 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('slot', 'hotp', '2', input='abba\ny\n')
         self._check_slot_2_programmed()
 
-    def test_ykman_program_static_slot_2(self):
-        ykman_cli(
-            'slot', 'static', '2',
-            'higngdukgerjktbbikrhirngtlkkttkb', '-f')
-        self._check_slot_2_programmed()
-
-    def test_ykman_program_static_slot_2_prompt(self):
-        ykman_cli(
-            'slot', 'static', '2',
-            input='higngdukgerjktbbikrhirngtlkkttkb\ny\n')
-        self._check_slot_2_programmed()
-
     def test_update_settings_enter_slot_2(self):
         ykman_cli('slot', 'otp', '2', '-f')
         output = ykman_cli('slot', 'settings', '2', '-f', '--no-enter')
@@ -94,7 +146,9 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self.assertIn('Slot 2: empty', status)
 
     def test_access_code_slot_2(self):
-        ykman_cli('slot', '--access-code', '111111111111', 'static', '2', '-f')
+        ykman_cli(
+            'slot', '--access-code', '111111111111', 'static', '2',
+            '--generate', '--length', '10')
         self._check_slot_2_programmed()
         ykman_cli('slot', '--access-code', '111111111111', 'delete', '2', '-f')
         status = ykman_cli('slot', 'info')
