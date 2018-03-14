@@ -1,3 +1,5 @@
+#  vim: set fileencoding=utf-8 :
+
 # Copyright (c) 2018 Yubico AB
 # All rights reserved.
 #
