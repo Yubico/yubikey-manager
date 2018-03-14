@@ -27,36 +27,45 @@ class TestSlotStaticPassword(DestructiveYubikeyTestCase):
     def tearDown(self):
         ykman_cli('slot', 'delete', '2', '-f')
 
-    def test_provide_pw(self):
+    def test_too_long(self):
         with self.assertRaises(SystemExit):
             ykman_cli(
                 'slot', 'static', '2',
                 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+
+    def test_unsupported_chars(self):
         with self.assertRaises(ValueError):
             ykman_cli('slot', 'static', '2', 'ö')
         with self.assertRaises(ValueError):
             ykman_cli('slot', 'static', '2', '@')
 
+    def test_provide_valid_pw(self):
         ykman_cli(
             'slot', 'static', '2',
             'higngdukgerjktbbikrhirngtlkkttkb')
         self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
 
-    def test_provide_pw_prompt(self):
+    def test_provide_valid_pw_prompt(self):
         ykman_cli(
             'slot', 'static', '2',
             input='higngdukgerjktbbikrhirngtlkkttkb\ny\n')
         self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
 
-    def test_generate_pw(self):
+    def test_generate_pw_too_long(self):
         with self.assertRaises(SystemExit):
             ykman_cli('slot', 'static', '2', '--generate', '--length', '39')
+
+    def test_generate_pw_no_length(self):
         with self.assertRaises(SystemExit):
             ykman_cli('slot', 'static', '2', '--generate', '--length')
         with self.assertRaises(SystemExit):
-            ykman_cli('slot', 'static', '2', '--generate', '--length', '0')
-        with self.assertRaises(SystemExit):
             ykman_cli('slot', 'static', '2', '--generate')
+
+    def test_generate_zero_length(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length', '0')
+
+    def test_generate_pw(self):
         ykman_cli('slot', 'static', '2', '--generate', '--length', '38')
         self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
 
