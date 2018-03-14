@@ -38,6 +38,7 @@ from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
+from .scancodes import SCANCODE_MAP
 
 
 class BitflagEnum(IntEnum):
@@ -277,7 +278,6 @@ _HEX = b'0123456789abcdef'
 _MODHEX = b'cbdefghijklnrtuv'
 _MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
 _HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i:i+1]) for i in range(16))
-_PW_CHARS = _MODHEX + _MODHEX.upper()
 
 
 def ensure_not_cve201715361_vulnerable_firmware_version(f_version):
@@ -299,10 +299,13 @@ def modhex_encode(value):
     return b''.join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode('ascii')
 
 
-def generate_static_pw(length):
+def generate_static_pw(length, scancode_map=SCANCODE_MAP.MODHEX):
     data = os.urandom(length)
-    return bytes(bytearray(six.indexbytes(_PW_CHARS, d % len(_PW_CHARS))
-                           for d in six.iterbytes(data)))
+    scancodes = scancode_map.scancodes
+    keys = ''.join(scancodes.keys()).encode()
+    return bytes(
+            bytearray(six.indexbytes(
+                keys, d % len(keys)) for d in six.iterbytes(data)))
 
 
 def format_code(code, digits=6, steam=False):
