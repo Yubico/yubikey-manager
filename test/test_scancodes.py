@@ -237,7 +237,7 @@ class TestScanMap(unittest.TestCase):
         self.assertEqual(b'\xad', encode('?', SCANCODE_MAP.DE))
         self.assertEqual(b'\xb8', encode('_', SCANCODE_MAP.DE))
         self.assertEqual(b'\xad', encode('`', SCANCODE_MAP.DE))
-        self.assertEqual(b'\xa0', encode('§', SCANCODE_MAP.DE))
+        self.assertEqual(b'\xa0', encode(u'§', SCANCODE_MAP.DE))
         self.assertEqual(b'\xb4', encode(u'Ä', SCANCODE_MAP.DE))
         self.assertEqual(b'\xb3', encode(u'Ö', SCANCODE_MAP.DE))
         self.assertEqual(b'\xaf', encode(u'Ü', SCANCODE_MAP.DE))

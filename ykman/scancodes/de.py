@@ -121,7 +121,7 @@ scancodes = {
     '_': 0x38 | SHIFT,
     ' ': 0x2c,
     '`': 0x2d | SHIFT,
-    '§': 0x20 | SHIFT,
+    u'§': 0x20 | SHIFT,
     u'´': 0x2e,
     u'Ä': 0x34 | SHIFT,
     u'Ö': 0x33 | SHIFT,
