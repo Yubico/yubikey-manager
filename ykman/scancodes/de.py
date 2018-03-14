@@ -122,12 +122,12 @@ scancodes = {
     ' ': 0x2c,
     '`': 0x2d | SHIFT,
     '§': 0x20 | SHIFT,
-    '´': 0x2e,
-    'Ä': 0x34 | SHIFT,
-    'Ö': 0x33 | SHIFT,
-    'Ü': 0x2f | SHIFT,
-    'ß': 0x2d,
-    'ä': 0x34,
-    'ö': 0x33,
-    'ü': 0x2f
+    u'´': 0x2e,
+    u'Ä': 0x34 | SHIFT,
+    u'Ö': 0x33 | SHIFT,
+    u'Ü': 0x2f | SHIFT,
+    u'ß': 0x2d,
+    u'ä': 0x34,
+    u'ö': 0x33,
+    u'ü': 0x2f
 }
