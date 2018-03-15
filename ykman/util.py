@@ -78,6 +78,33 @@ class CAPABILITY(BitflagEnum):
 
 
 @unique
+class FORM_FACTOR(IntEnum):
+    UNKNOWN = 0x00
+    USB_A_KEYCHAIN = 0x01
+    USB_A_NANO = 0x02
+    USB_C_KEYCHAIN = 0x03
+    USB_C_NANO = 0x04
+
+    def __str__(self):
+        if self == self.USB_A_KEYCHAIN:
+            return 'Keychain (USB-A)'
+        elif self == self.USB_A_NANO:
+            return 'Nano (USB-A)'
+        elif self == self.USB_C_KEYCHAIN:
+            return 'Keychain (USB-C)'
+        elif self == self.USB_C_NANO:
+            return 'Nano (USB-C)'
+        elif self == self.UNKNOWN:
+            return 'Unknown.'
+
+    @classmethod
+    def from_code(cls, code):
+        if code and not isinstance(code, int):
+            raise ValueError('Invalid form factor code: {}'.format(code))
+        return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
+
+
+@unique
 class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
     U2F = CAPABILITY.U2F

@@ -3,7 +3,7 @@
 from ykman.util import (b2len, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
                         parse_tlvs, parse_truncated, time_challenge, Tlv,
-                        is_pkcs12)
+                        is_pkcs12, FORM_FACTOR)
 from .util import open_file
 import unittest
 
@@ -130,3 +130,16 @@ class TestUtilityFunctions(unittest.TestCase):
             'rsa_2048_key_cert_encrypted.pfx') as \
                 rsa_2048_key_cert_encrypted_pfx:
             self.assertTrue(is_pkcs12(rsa_2048_key_cert_encrypted_pfx.read()))
+
+    def test_form_factor_from_code(self):
+        self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(None))
+        with self.assertRaises(ValueError):
+            FORM_FACTOR.from_code('im a string')
+        self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x00))
+        self.assertEqual(
+            FORM_FACTOR.USB_A_KEYCHAIN, FORM_FACTOR.from_code(0x01))
+        self.assertEqual(FORM_FACTOR.USB_A_NANO, FORM_FACTOR.from_code(0x02))
+        self.assertEqual(
+            FORM_FACTOR.USB_C_KEYCHAIN, FORM_FACTOR.from_code(0x03))
+        self.assertEqual(FORM_FACTOR.USB_C_NANO, FORM_FACTOR.from_code(0x04))
+        self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x05))

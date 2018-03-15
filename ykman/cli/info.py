@@ -50,6 +50,8 @@ def info(ctx):
     else:
         click.echo('Firmware version: Uncertain, re-run with only one '
                    'YubiKey connected')
+    if dev.form_factor:
+        click.echo('Form factor: {}'.format(str(dev.form_factor)))
     click.echo('Enabled connection(s): {}'.format(dev.mode))
     click.echo()
 
