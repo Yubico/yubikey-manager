@@ -301,8 +301,7 @@ def modhex_encode(value):
 
 def generate_static_pw(length, scancode_map=SCANCODE_MAP.MODHEX):
     data = os.urandom(length)
-    scancodes = scancode_map.scancodes
-    keys = ''.join(scancodes.keys()).encode()
+    keys = ''.join(scancode_map.value.keys()).encode()
     return bytes(
             bytearray(six.indexbytes(
                 keys, d % len(keys)) for d in six.iterbytes(data)))

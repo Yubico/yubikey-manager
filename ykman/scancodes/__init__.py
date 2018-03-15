@@ -25,30 +25,19 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import absolute_import
 from enum import Enum
 from . import us, de, modhex
 
 
 class SCANCODE_MAP(Enum):
-    MODHEX = 'Modhex based scancode map'
-    US = 'US Keyboard based scancode map'
-    DE = 'DE German Kayboard based scancode map'
-
-    @property
-    def scancodes(self):
-        if self == SCANCODE_MAP.MODHEX:
-            return modhex.scancodes
-        elif self == SCANCODE_MAP.US:
-            return us.scancodes
-        elif self == SCANCODE_MAP.DE:
-            return de.scancodes
-        else:
-            raise ValueError('No scancodes added for this layout!')
+    MODHEX = modhex.scancodes
+    US = us.scancodes
+    DE = de.scancodes
 
 
 def encode(data, scancode_map=SCANCODE_MAP.MODHEX):
-    scancodes = scancode_map.scancodes
     try:
-        return bytes(bytearray(scancodes[c] for c in data))
+        return bytes(bytearray(scancode_map.value[c] for c in data))
     except KeyError as e:
         raise ValueError('Unsupported character: %s' % e.args[0])
