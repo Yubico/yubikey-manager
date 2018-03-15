@@ -35,7 +35,7 @@ from ..util import (
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
-from ..scancodes import SCANCODE_MAP
+from ..scancodes import KEYBOARD_LAYOUT
 import logging
 import os
 import struct
@@ -240,27 +240,28 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
     '-l', '--length', type=click.IntRange(1, 38),
     help='Length of generated password.')
 @click.option(
-    '-s', '--scancodes', type=click.Choice(['MODHEX', 'US', 'DE']),
+    '-k', '--keyboard-layout', type=click.Choice(
+            [l.name for l in KEYBOARD_LAYOUT]),
     default='MODHEX', show_default=True,
-    help='Scancodes to use for the static password.')
+    help='Keyboard layout to use for the static password.')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting the password.')
 @click_force_option
 @click.pass_context
 def static(
         ctx, slot, password, generate, length,
-        scancodes, no_enter, force):
+        keyboard_layout, no_enter, force):
     """
     Configure a static password.
 
     To avoid problems with different keyboard layouts, the following characters
     are allowed by default: cbdefghijklnrtuv
 
-    Use the --scancodes option to allow more characters based on
+    Use the --keyboard-layout option to allow more characters based on
     preferred keyboard layout.
     """
 
-    scancode_map = SCANCODE_MAP[scancodes]
+    keyboard_layout = KEYBOARD_LAYOUT[keyboard_layout]
 
     if password and len(password) > 38:
         ctx.fail('Password too long (maximum length is 38 characters).')
@@ -270,7 +271,7 @@ def static(
     if not password and not generate:
         password = click.prompt('Enter a static password')
     elif not password and generate:
-        password = generate_static_pw(length, scancode_map).decode()
+        password = generate_static_pw(length, keyboard_layout).decode()
 
     dev = ctx.obj['dev']
 
@@ -278,7 +279,7 @@ def static(
         _confirm_slot_overwrite(dev, slot)
     try:
         dev.driver.program_static(
-            slot, password, not no_enter, scancode_map=scancode_map)
+            slot, password, not no_enter, keyboard_layout=keyboard_layout)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 

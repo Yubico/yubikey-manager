@@ -99,12 +99,12 @@ class TestSlotStaticPassword(DestructiveYubikeyTestCase):
         self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
 
     def test_us_scancodes(self):
-        ykman_cli('slot', 'static', '2', 'abcABC123', '--scancodes', 'US')
-        ykman_cli('slot', 'static', '2', '@!)', '-f', '--scancodes', 'US')
+        ykman_cli('slot', 'static', '2', 'abcABC123', '--keyboard-layout', 'US')
+        ykman_cli('slot', 'static', '2', '@!)', '-f', '--keyboard-layout', 'US')
 
     def test_de_scancodes(self):
-        ykman_cli('slot', 'static', '2', 'abcABC123', '--scancodes', 'DE')
-        ykman_cli('slot', 'static', '2', 'Üßö', '-f', '--scancodes', 'DE')
+        ykman_cli('slot', 'static', '2', 'abcABC123', '--keyboard-layout', 'DE')
+        ykman_cli('slot', 'static', '2', 'Üßö', '-f', '--keyboard-layout', 'DE')
 
     def test_overwrite_prompt(self):
         ykman_cli('slot', 'static', '2', 'bbb')

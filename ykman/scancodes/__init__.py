@@ -30,14 +30,14 @@ from enum import Enum
 from . import us, de, modhex
 
 
-class SCANCODE_MAP(Enum):
+class KEYBOARD_LAYOUT(Enum):
     MODHEX = modhex.scancodes
     US = us.scancodes
     DE = de.scancodes
 
 
-def encode(data, scancode_map=SCANCODE_MAP.MODHEX):
+def encode(data, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
     try:
-        return bytes(bytearray(scancode_map.value[c] for c in data))
+        return bytes(bytearray(keyboard_layout.value[c] for c in data))
     except KeyError as e:
         raise ValueError('Unsupported character: %s' % e.args[0])

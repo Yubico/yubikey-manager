@@ -38,7 +38,7 @@ from enum import Enum, IntEnum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
-from .scancodes import SCANCODE_MAP
+from .scancodes import KEYBOARD_LAYOUT
 
 
 class BitflagEnum(IntEnum):
@@ -299,9 +299,9 @@ def modhex_encode(value):
     return b''.join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode('ascii')
 
 
-def generate_static_pw(length, scancode_map=SCANCODE_MAP.MODHEX):
+def generate_static_pw(length, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
     data = os.urandom(length)
-    keys = ''.join(scancode_map.value.keys()).encode()
+    keys = ''.join(keyboard_layout.value.keys()).encode()
     return bytes(
             bytearray(six.indexbytes(
                 keys, d % len(keys)) for d in six.iterbytes(data)))

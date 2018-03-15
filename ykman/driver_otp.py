@@ -34,7 +34,7 @@ from ctypes import sizeof, byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
 from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
                    parse_totp_hash, format_code, hmac_shorten_key)
-from .scancodes import encode, SCANCODE_MAP
+from .scancodes import encode, KEYBOARD_LAYOUT
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)
@@ -214,7 +214,7 @@ class OTPDriver(AbstractDriver):
 
     def program_static(
         self, slot, password, append_cr=True,
-            scancode_map=SCANCODE_MAP.MODHEX):
+            keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
         pw_len = len(password)
         if self._version < (2, 0, 0):
             raise ValueError('static password requires YubiKey 2.0.0 or later')
@@ -234,7 +234,7 @@ class OTPDriver(AbstractDriver):
             if append_cr:
                 check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
 
-            pw_bytes = encode(password, scancode_map=scancode_map)
+            pw_bytes = encode(password, keyboard_layout=keyboard_layout)
             if pw_len <= 16:  # All in fixed
                 check(ykpers.ykp_set_fixed(cfg, pw_bytes, pw_len))
             elif pw_len <= 16 + 6:  # All in fixed and uid
