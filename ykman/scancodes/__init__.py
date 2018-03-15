@@ -36,11 +36,11 @@ class SCANCODE_MAP(Enum):
 
     @property
     def scancodes(self):
-        if self == self.MODHEX:
+        if self == SCANCODE_MAP.MODHEX:
             return modhex.scancodes
-        elif self == self.US:
+        elif self == SCANCODE_MAP.US:
             return us.scancodes
-        elif self == self.DE:
+        elif self == SCANCODE_MAP.DE:
             return de.scancodes
         else:
             raise ValueError('No scancodes added for this layout!')
