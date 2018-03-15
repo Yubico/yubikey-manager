@@ -59,7 +59,7 @@ setup(
         'console_scripts': ['ykman=ykman.cli.__main__:main'],
     },
     packages=[
-        'ykman', 'ykman.native', 'ykman.scanmap', 'ykman.cli'],
+        'ykman', 'ykman.native', 'ykman.scancodes', 'ykman.cli'],
     install_requires=install_requires,
     package_data={'ykman': ['VERSION']},
     include_package_data=True,

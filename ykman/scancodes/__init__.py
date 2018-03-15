@@ -1,4 +1,4 @@
-# Copyright (c) 2016 Yubico AB
+# Copyright (c) 2018 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -26,44 +26,18 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from __future__ import absolute_import
+from enum import Enum
+from . import us, de, modhex
 
-from ..util import CAPABILITY
-import click
+
+class KEYBOARD_LAYOUT(Enum):
+    MODHEX = modhex.scancodes
+    US = us.scancodes
+    DE = de.scancodes
 
 
-@click.command()
-@click.pass_context
-def info(ctx):
-    """
-    Show general information.
-
-    Displays information about the attached YubiKey such as serial number,
-    firmware version, capabilities, etc.
-    """
-    dev = ctx.obj['dev']
-    click.echo('Device type: {}'.format(dev.device_name))
-    click.echo('Serial number: {}'.format(
-        dev.serial or 'Not set or unreadable'))
-    if dev.version_certain:
-        f_version = '.'.join(str(x) for x in dev.version)
-        click.echo('Firmware version: {}'.format(f_version))
-    else:
-        click.echo('Firmware version: Uncertain, re-run with only one '
-                   'YubiKey connected')
-    if dev.form_factor:
-        click.echo('Form factor: {}'.format(str(dev.form_factor)))
-    click.echo('Enabled connection(s): {}'.format(dev.mode))
-    click.echo()
-
-    click.echo('Device capabilities:')
-    for c in CAPABILITY:
-        if c != CAPABILITY.NFC:  # For now, don't expose NFC Capability
-            if c & dev.capabilities:
-                if c & dev.enabled:
-                    status = 'Enabled'
-                else:
-                    status = 'Disabled'
-            else:
-                status = 'Not available'
-
-            click.echo('    {0.name}:\t{1}'.format(c, status))
+def encode(data, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
+    try:
+        return bytes(bytearray(keyboard_layout.value[c] for c in data))
+    except KeyError as e:
+        raise ValueError('Unsupported character: %s' % e.args[0])
