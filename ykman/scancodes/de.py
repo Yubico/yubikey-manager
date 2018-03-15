@@ -27,6 +27,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import unicode_literals
+
+
 """Scancode map for DE German keyboard layout"""
 
 SHIFT = 0x80
@@ -121,13 +124,13 @@ scancodes = {
     '_': 0x38 | SHIFT,
     ' ': 0x2c,
     '`': 0x2d | SHIFT,
-    u'§': 0x20 | SHIFT,
-    u'´': 0x2e,
-    u'Ä': 0x34 | SHIFT,
-    u'Ö': 0x33 | SHIFT,
-    u'Ü': 0x2f | SHIFT,
-    u'ß': 0x2d,
-    u'ä': 0x34,
-    u'ö': 0x33,
-    u'ü': 0x2f
+    '§': 0x20 | SHIFT,
+    '´': 0x2e,
+    'Ä': 0x34 | SHIFT,
+    'Ö': 0x33 | SHIFT,
+    'Ü': 0x2f | SHIFT,
+    'ß': 0x2d,
+    'ä': 0x34,
+    'ö': 0x33,
+    'ü': 0x2f
 }

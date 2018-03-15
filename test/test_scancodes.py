@@ -27,6 +27,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import unicode_literals
+
 import unittest
 from ykman.scancodes import encode, SCANCODE_MAP
 
@@ -214,11 +216,11 @@ class TestScanMap(unittest.TestCase):
         self.assertEqual(b'\x64', encode('<', SCANCODE_MAP.DE))
         self.assertEqual(b'\x35', encode('^', SCANCODE_MAP.DE))
         self.assertEqual(b'\x2c', encode(' ', SCANCODE_MAP.DE))
-        self.assertEqual(b'\x2e', encode(u'´', SCANCODE_MAP.DE))
-        self.assertEqual(b'\x2d', encode(u'ß', SCANCODE_MAP.DE))
-        self.assertEqual(b'\x34', encode(u'ä', SCANCODE_MAP.DE))
-        self.assertEqual(b'\x33', encode(u'ö', SCANCODE_MAP.DE))
-        self.assertEqual(b'\x2f', encode(u'ü', SCANCODE_MAP.DE))
+        self.assertEqual(b'\x2e', encode('´', SCANCODE_MAP.DE))
+        self.assertEqual(b'\x2d', encode('ß', SCANCODE_MAP.DE))
+        self.assertEqual(b'\x34', encode('ä', SCANCODE_MAP.DE))
+        self.assertEqual(b'\x33', encode('ö', SCANCODE_MAP.DE))
+        self.assertEqual(b'\x2f', encode('ü', SCANCODE_MAP.DE))
 
         self.assertEqual(b'\x9e', encode('!', SCANCODE_MAP.DE))
         self.assertEqual(b'\x9f', encode('"', SCANCODE_MAP.DE))
@@ -237,12 +239,12 @@ class TestScanMap(unittest.TestCase):
         self.assertEqual(b'\xad', encode('?', SCANCODE_MAP.DE))
         self.assertEqual(b'\xb8', encode('_', SCANCODE_MAP.DE))
         self.assertEqual(b'\xad', encode('`', SCANCODE_MAP.DE))
-        self.assertEqual(b'\xa0', encode(u'§', SCANCODE_MAP.DE))
-        self.assertEqual(b'\xb4', encode(u'Ä', SCANCODE_MAP.DE))
-        self.assertEqual(b'\xb3', encode(u'Ö', SCANCODE_MAP.DE))
-        self.assertEqual(b'\xaf', encode(u'Ü', SCANCODE_MAP.DE))
+        self.assertEqual(b'\xa0', encode('§', SCANCODE_MAP.DE))
+        self.assertEqual(b'\xb4', encode('Ä', SCANCODE_MAP.DE))
+        self.assertEqual(b'\xb3', encode('Ö', SCANCODE_MAP.DE))
+        self.assertEqual(b'\xaf', encode('Ü', SCANCODE_MAP.DE))
 
         self.assertEqual(
-            b'\xb4\xb3\xaf', encode(u'ÄÖÜ', SCANCODE_MAP.DE))
+            b'\xb4\xb3\xaf', encode('ÄÖÜ', SCANCODE_MAP.DE))
         with self.assertRaises(ValueError):
             encode('@', SCANCODE_MAP.DE)
