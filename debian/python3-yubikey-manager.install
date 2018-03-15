@@ -1,4 +1,4 @@
 debian/tmp/usr/lib/python3*/*-packages/ykman/*.py
-debian/tmp/usr/lib/python3*/*-packages/ykman/scanmap/*.py
+debian/tmp/usr/lib/python3*/*-packages/ykman/scancodes/*.py
 debian/tmp/usr/lib/python3*/*-packages/ykman/native/*.py
 debian/tmp/usr/lib/python3*/*-packages/*.egg-info
