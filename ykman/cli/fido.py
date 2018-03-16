@@ -28,9 +28,10 @@
 from __future__ import absolute_import
 import click
 import logging
+from fido_host.hid import CtapError
 from .util import click_skip_on_help, prompt_for_touch
 from ..util import TRANSPORT
-from ..fido import Fido2Controller, CTAP2Error, CTAP2_ERR
+from ..fido import Fido2Controller
 
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,8 @@ def info(ctx):
             click.echo(
                 'PIN is set, with {} tries left.'.format(
                     controller.get_pin_retries()))
-        except CTAP2Error as e:
-            if e.code == CTAP2_ERR.PIN_BLOCKED:
+        except CtapError as e:
+            if e.code == CtapError.ERR.PIN_BLOCKED:
                 click.echo('PIN is blocked.')
     else:
         click.echo('PIN is not set.')
@@ -96,14 +97,14 @@ def set_pin(ctx, pin, new_pin):
     def change_pin(pin, new_pin):
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
-        except CTAP2Error as e:
-            if e.code == CTAP2_ERR.PIN_INVALID:
+        except CtapError as e:
+            if e.code == CtapError.ERR.PIN_INVALID:
                 ctx.fail('Wrong PIN.')
-            if e.code == CTAP2_ERR.PIN_AUTH_BLOCKED:
+            if e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
                 ctx.fail(
                     'PIN authentication is currently blocked.'
                     'Remove and re-insert the YubiKey.')
-            if e.code == CTAP2_ERR.PIN_BLOCKED:
+            if e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail('PIN is blocked.')
             ctx.fail('Failed to change PIN. {}.'.format(e.message))
 
@@ -160,8 +161,8 @@ def reset(ctx):
     controller = ctx.obj['controller']
     try:
         controller.reset(touch_callback=prompt_for_touch)
-    except CTAP2Error as e:
-        if e.code == CTAP2_ERR.NOT_ALLOWED:
+    except CtapError as e:
+        if e.code == CtapError.ERR.NOT_ALLOWED:
             ctx.fail(
                 'Failed to reset the YubiKey. The reset command must be '
                 'triggered immediately after the YubiKey is inserted.')

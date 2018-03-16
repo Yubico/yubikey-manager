@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .driver import AbstractDriver
 from .util import TRANSPORT, YUBIKEY, PID, parse_tlvs
-from fido_host.hid import CtapHidDevice, CTAPHID, hidtransport
+from fido_host.hid import CtapHidDevice, CTAPHID
 from binascii import b2a_hex
 import logging
 import struct
@@ -51,9 +51,9 @@ class U2FDriver(AbstractDriver):
     """
     transport = TRANSPORT.U2F
 
-    def __init__(self, dev, usb_desc):
+    def __init__(self, dev):
         self._dev = dev
-        self._pid = PID(usb_desc['product_id'])
+        self._pid = PID(dev.descriptor['product_id'])
         self._version = dev.device_version
         if self._version < (4, 0, 0):
             if self.key_type in [YUBIKEY.NEO, YUBIKEY.YKS]:  # Applet version
@@ -87,8 +87,5 @@ def descriptor_filter(desc):
 
 
 def open_devices():
-    for desc in hidtransport.hid.Enumerate():
-        if descriptor_filter(desc):
-            dev = hidtransport.UsbHidTransport(
-                hidtransport.hid.Open(desc['path']))
-            yield(U2FDriver(CtapHidDevice(dev), desc))
+    for dev in CtapHidDevice.list_devices(descriptor_filter):
+        yield U2FDriver(dev)

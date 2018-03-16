@@ -27,20 +27,8 @@
 
 from __future__ import absolute_import
 
-from fido_host.fido2 import CTAP2, PinProtocolV1, CborError
-from enum import IntEnum, unique
+from fido_host.fido2 import CTAP2, PinProtocolV1
 from threading import Timer
-
-
-CTAP2Error = CborError
-
-
-@unique
-class CTAP2_ERR(IntEnum):
-    NOT_ALLOWED = 0x30
-    PIN_INVALID = 0x31
-    PIN_BLOCKED = 0x32
-    PIN_AUTH_BLOCKED = 0x34
 
 
 class Fido2Controller(object):
