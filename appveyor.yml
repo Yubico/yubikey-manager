@@ -36,7 +36,6 @@ install:
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libusb\MS32\dll
 
 build_script:
-  - pip install git+https://github.com/Yubico/python-fido-host.git
   - pip install -e .
   - ykman -v
 
