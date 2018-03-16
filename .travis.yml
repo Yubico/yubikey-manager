@@ -25,6 +25,7 @@ before_install:
 
 install:
   - pip install pre-commit
+  - pip install git+https://github.com/Yubico/python-fido-host.git
   - pip install -e .
 
 script:
