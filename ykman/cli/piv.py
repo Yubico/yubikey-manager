@@ -626,7 +626,8 @@ def change_puk(ctx, puk, new_puk):
          ' A random key will be used if no key is provided.')
 @click.option(
     '-g', '--generate', is_flag=True, help='Generate a random management key. '
-    'Implied by --protect unless --new-management-key is also given.')
+    'Implied by --protect unless --new-management-key is also given. '
+    'Conflicts with --new-management-key.')
 @click_force_option
 def change_management_key(
         ctx, management_key, pin, new_management_key, touch, protect, generate,
@@ -646,6 +647,10 @@ def change_management_key(
         mgm_key_prompt='Enter your current management key '
                        '[blank to use default key]',
         no_prompt=force)
+
+    if new_management_key and generate:
+        ctx.fail('Invalid options: --new-management-key conflicts with '
+                 '--generate')
 
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):

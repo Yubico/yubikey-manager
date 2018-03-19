@@ -275,6 +275,13 @@ class ManagementKey(PivTestCase):
                                     DEFAULT_MANAGEMENT_KEY))
         self.assertNotIn('Generated', output)
 
+    def test_change_management_key_new_key_conflicts_with_generate(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('piv', 'change-management-key',
+                      '-m', DEFAULT_MANAGEMENT_KEY,
+                      '-n', NON_DEFAULT_MANAGEMENT_KEY,
+                      '-g')
+
 
 class Pin(PivTestCase):
 
