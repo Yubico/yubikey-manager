@@ -152,20 +152,23 @@ class KeyManagement(PivTestCase):
         self.assertIn('BEGIN CERTIFICATE', output)
 
 
-class GenerateSelfSigned_DefaultMgmKey(PivTestCase):
+class GenerateSelfSigned_NonDefaultMgmKey(PivTestCase):
 
     @classmethod
     def setUpClass(cls):
         ykman_cli('piv', 'reset', '-f')
+        ykman_cli('piv', 'change-management-key', '-P', DEFAULT_PIN,
+                  '-m', DEFAULT_MANAGEMENT_KEY,
+                  '-n', NON_DEFAULT_MANAGEMENT_KEY)
 
     def _test_generate_self_signed(self, slot):
         for algo in ('ECCP256', 'RSA1024'):
             ykman_cli(
                 'piv', 'generate-key', slot, '-a', algo, '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+                NON_DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
             ykman_cli(
                 'piv', 'generate-certificate', slot, '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
+                NON_DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
                 '-s', 'subject-' + algo, '-P', DEFAULT_PIN)
             output = ykman_cli('piv', 'export-certificate', slot, '-')
             cert = x509.load_pem_x509_certificate(output.encode(),
