@@ -1,7 +1,7 @@
 FROM ubuntu:xenial
 RUN mkdir /deb
-RUN sudo apt-get install -qq software-properties-common
-RUN sudo add-apt-repository -y ppa:yubico/stable
+RUN apt-get install -qq software-properties-common
+RUN add-apt-repository -y ppa:yubico/stable
 RUN apt-get -qq update && apt-get -qq upgrade && apt-get install -y git devscripts equivs
 COPY debian/control /yubikey-manager/debian/control
 RUN yes | mk-build-deps -i /yubikey-manager/debian/control
