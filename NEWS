@@ -1,8 +1,8 @@
 * Version 0.7.0 (unreleased)
  ** Breaking changes:
-  *** `piv` commands called with `-f|--force` will now crash instead of interactively prompting for PIN or management key.
+  *** `piv` commands called with `-f|--force` will now fail instead of interactively prompting for PIN or management key.
   *** `-g|--generate` flag added to command `piv change-management-key`.
-   **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now crash instead of generating a random management key.
+   **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now fail instead of generating a random management key.
    **** Interactive prompt variants still generate a random management key on blank input, even without `-g|--generate`.
 
 * Version 0.6.0 (released 2018-02-09)
