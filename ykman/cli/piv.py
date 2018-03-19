@@ -436,7 +436,8 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     """
     controller = ctx.obj['controller']
     _ensure_authenticated(
-        ctx, controller, pin, management_key, require_pin_and_key=True)
+        ctx, controller, pin, management_key, require_pin_and_key=True,
+        no_prompt=force)
     click.echo('WARNING: This will reset the PIN and PUK to the factory '
                'defaults!')
     force or click.confirm('Set PIN and PUK retry counters to: {} {}?'.format(
@@ -639,7 +640,8 @@ def change_management_key(
         ctx, controller, pin, management_key,
         require_pin_and_key=protect,
         mgm_key_prompt='Enter your current management key '
-                       '[blank to use default key]')
+                       '[blank to use default key]',
+        no_prompt=force)
 
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):
@@ -648,7 +650,7 @@ def change_management_key(
     # If an old stored key needs to be cleared, the PIN is needed.
     if not protect and controller.has_stored_key:
         if pin:
-            _verify_pin(ctx, controller, pin)
+            _verify_pin(ctx, controller, pin, no_prompt=force)
         else:
             force or click.confirm(
                     'The current management key is stored on the YubiKey'
@@ -723,34 +725,45 @@ def _prompt_pin(ctx, prompt='Enter PIN'):
 def _ensure_authenticated(
         ctx, controller, pin=None, management_key=None,
         require_pin_and_key=False,
-        mgm_key_prompt=None):
+        mgm_key_prompt=None,
+        no_prompt=False):
 
     if controller.has_protected_key:
         if not management_key:
-            _verify_pin(ctx, controller, pin)
+            _verify_pin(ctx, controller, pin, no_prompt=no_prompt)
         else:
-            _authenticate(ctx, controller, management_key, mgm_key_prompt)
+            _authenticate(ctx, controller, management_key, mgm_key_prompt,
+                          no_prompt=no_prompt)
     else:
         if require_pin_and_key:
-            _verify_pin(ctx, controller, pin)
-        _authenticate(ctx, controller, management_key, mgm_key_prompt)
+            _verify_pin(ctx, controller, pin, no_prompt=no_prompt)
+        _authenticate(ctx, controller, management_key, mgm_key_prompt,
+                      no_prompt=no_prompt)
 
 
-def _verify_pin(ctx, controller, pin):
+def _verify_pin(ctx, controller, pin, no_prompt=False):
     if not pin:
-        pin = _prompt_pin(ctx)
+        if no_prompt:
+            ctx.fail('PIN required.')
+        else:
+            pin = _prompt_pin(ctx)
+
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
     except APDUError:
         ctx.fail('PIN verification failed.')
 
 
-def _authenticate(ctx, controller, management_key, mgm_key_prompt):
+def _authenticate(ctx, controller, management_key, mgm_key_prompt,
+                  no_prompt=False):
     if not management_key:
-        if mgm_key_prompt is None:
-            management_key = _prompt_management_key(ctx)
+        if no_prompt:
+            ctx.fail('Management key required.')
         else:
-            management_key = _prompt_management_key(ctx, mgm_key_prompt)
+            if mgm_key_prompt is None:
+                management_key = _prompt_management_key(ctx)
+            else:
+                management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
     except APDUError:
