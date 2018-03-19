@@ -678,9 +678,13 @@ def change_management_key(
     try:
         controller.set_mgm_key(
             new_management_key, touch=touch, store_on_device=protect)
-    except APDUError as e:
-        logger.error('Failed to change management key', exc_info=e)
-        ctx.fail('Changing the management key failed.')
+    except Exception as e:
+        if new_management_key and len(new_management_key) != 24:
+            ctx.fail('Management key must be exactly 24 bytes long '
+                     '(48 hexadecimal digits).')
+        else:
+            logger.error('Failed to change management key', exc_info=e)
+            ctx.fail('Changing the management key failed.')
 
 
 @piv.command('unblock-pin')

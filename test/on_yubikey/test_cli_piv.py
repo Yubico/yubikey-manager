@@ -240,6 +240,14 @@ class ManagementKey(PivTestCase):
             '-n', DEFAULT_MANAGEMENT_KEY)
         self.assertEqual('', output)
 
+    def test_change_management_key_no_protect_arg_bad_length(self):
+        with self.assertRaises(SystemExit, msg='Management key must be exactly '
+                               '24 bytes long (48 hexadecimal digits).'):
+            ykman_cli(
+                'piv', 'change-management-key',
+                '-m', DEFAULT_MANAGEMENT_KEY,
+                '-n', '10020304050607080102030405060708')
+
     def test_change_management_key_no_protect_prompt(self):
         output = ykman_cli('piv', 'change-management-key',
                            input=old_new_new(DEFAULT_MANAGEMENT_KEY,
