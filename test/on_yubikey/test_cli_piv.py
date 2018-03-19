@@ -163,13 +163,14 @@ class GenerateSelfSigned_NonDefaultMgmKey(PivTestCase):
 
     def _test_generate_self_signed(self, slot):
         for algo in ('ECCP256', 'RSA1024'):
-            ykman_cli(
+            pubkey_output = ykman_cli(
                 'piv', 'generate-key', slot, '-a', algo, '-m',
-                NON_DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+                NON_DEFAULT_MANAGEMENT_KEY, '-')
             ykman_cli(
                 'piv', 'generate-certificate', slot, '-m',
-                NON_DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem',
-                '-s', 'subject-' + algo, '-P', DEFAULT_PIN)
+                NON_DEFAULT_MANAGEMENT_KEY,
+                '-s', 'subject-' + algo, '-P', DEFAULT_PIN,
+                '-', input=pubkey_output)
             output = ykman_cli('piv', 'export-certificate', slot, '-')
             cert = x509.load_pem_x509_certificate(output.encode(),
                                                   default_backend())
@@ -203,12 +204,13 @@ class GenerateSelfSigned_ProtectedMgmKey(PivTestCase):
 
     def _test_generate_self_signed(self, slot):
         for algo in ('ECCP256', 'RSA1024'):
-            ykman_cli(
+            pubkey_output = ykman_cli(
                 'piv', 'generate-key', slot, '-a', algo, '-P', DEFAULT_PIN,
-                '/tmp/test-pub-key.pem')
+                '-')
             ykman_cli(
                 'piv', 'generate-certificate', slot, '-P', DEFAULT_PIN,
-                '/tmp/test-pub-key.pem', '-s', 'subject-' + algo)
+                '-s', 'subject-' + algo,
+                '-', input=pubkey_output)
             output = ykman_cli('piv', 'export-certificate', slot, '-')
             cert = x509.load_pem_x509_certificate(output.encode(),
                                                   default_backend())
