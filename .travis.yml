@@ -21,7 +21,6 @@ before_install:
   - sudo apt-get update
   - sudo apt-get install -qq libykpers-1-1 python-pyscard swig libpcsclite-dev
   - pip install --disable-pip-version-check --upgrade pip
-  - pip install fido-host-0.0.0.tar.gz
 
 install:
   - pip install pre-commit
