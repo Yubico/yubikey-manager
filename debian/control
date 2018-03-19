@@ -22,7 +22,9 @@ Build-Depends: debhelper (>= 9),
                python-setuptools,
                python3-setuptools,
                python-usb,
-               python3-usb
+               python3-usb,
+               python-fido-host,
+               python3-fido-host
 Homepage: https://developers.yubico.com/yubikey-manager/
 X-Python-Version: >= 2.7
 X-Python3-Version: >= 3.4
@@ -39,7 +41,8 @@ Depends: ${misc:Depends},
          python-pyscard,
          python-setuptools,
          python-six,
-         python-usb
+         python-usb,
+         python-fido-host
 Recommends: pcscd
 Description: Python 2 library for configuring a YubiKey
  A Python library for configuring YubiKey over all transport modes.
@@ -57,7 +60,8 @@ Depends: ${misc:Depends},
          python3-pyscard,
          python3-setuptools,
          python3-six,
-         python3-usb
+         python3-usb,
+         python3-fido-host
 Recommends: pcscd
 Description: Python 3 library for configuring a YubiKey
  A Python library for configuring YubiKey over all transport modes.
