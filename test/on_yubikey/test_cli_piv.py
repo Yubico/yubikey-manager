@@ -193,6 +193,34 @@ class GenerateSelfSigned_NonDefaultMgmKey(PivTestCase):
     def test_generate_self_signed_slot_9e(self):
         self._test_generate_self_signed('9e')
 
+    def _test_generate_csr(self, slot):
+        for algo in ('ECCP256', 'RSA1024'):
+            subject_input = 'subject-' + algo
+            pubkey_output = ykman_cli(
+                'piv', 'generate-key', slot, '-a', algo,
+                '-m', NON_DEFAULT_MANAGEMENT_KEY, '-')
+            csr_output = ykman_cli(
+                'piv', 'generate-csr', slot, '-P', DEFAULT_PIN,
+                '-', '-', '-s', subject_input, input=pubkey_output)
+            csr = x509.load_pem_x509_csr(csr_output.encode('utf-8'),
+                                         default_backend())
+            subject_output = csr.subject.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME)[0].value
+
+            self.assertEqual(subject_input, subject_output)
+
+    def test_generate_csr_slot_9a(self):
+        self._test_generate_csr('9a')
+
+    def test_generate_csr_slot_9c(self):
+        self._test_generate_csr('9c')
+
+    def test_generate_csr_slot_9d(self):
+        self._test_generate_csr('9d')
+
+    def test_generate_csr_slot_9e(self):
+        self._test_generate_csr('9e')
+
 
 class GenerateSelfSigned_ProtectedMgmKey(PivTestCase):
 
@@ -232,6 +260,34 @@ class GenerateSelfSigned_ProtectedMgmKey(PivTestCase):
 
     def test_generate_self_signed_slot_9e(self):
         self._test_generate_self_signed('9e')
+
+    def _test_generate_csr(self, slot):
+        for algo in ('ECCP256', 'RSA1024'):
+            subject_input = 'subject-' + algo
+            pubkey_output = ykman_cli(
+                'piv', 'generate-key', slot, '-a', algo, '-P', DEFAULT_PIN,
+                '-')
+            csr_output = ykman_cli(
+                'piv', 'generate-csr', slot, '-P', DEFAULT_PIN,
+                '-', '-', '-s', subject_input, input=pubkey_output)
+            csr = x509.load_pem_x509_csr(csr_output.encode('utf-8'),
+                                         default_backend())
+            subject_output = csr.subject.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME)[0].value
+
+            self.assertEqual(subject_input, subject_output)
+
+    def test_generate_csr_slot_9a(self):
+        self._test_generate_csr('9a')
+
+    def test_generate_csr_slot_9c(self):
+        self._test_generate_csr('9c')
+
+    def test_generate_csr_slot_9d(self):
+        self._test_generate_csr('9d')
+
+    def test_generate_csr_slot_9e(self):
+        self._test_generate_csr('9e')
 
 
 class ManagementKey(PivTestCase):
