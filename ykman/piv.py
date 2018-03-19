@@ -587,8 +587,12 @@ class PivController(object):
     def set_mgm_key(self, new_key, touch=False, store_on_device=False):
         # If the key should be protected by PIN and no key is given,
         # we generate a random key.
-        if store_on_device and not new_key:
-            new_key = generate_random_management_key()
+        if not new_key:
+            if store_on_device:
+                new_key = generate_random_management_key()
+            else:
+                raise ValueError('new_key was not given and '
+                                 'store_on_device was not True')
 
         if store_on_device or (not store_on_device and self.has_stored_key):
             # Ensure we have access to protected data before overwriting key
