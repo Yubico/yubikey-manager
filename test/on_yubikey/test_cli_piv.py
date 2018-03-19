@@ -173,6 +173,12 @@ class ManagementKey(PivTestCase):
     def setUp(cls):
         ykman_cli('piv', 'reset', '-f')
 
+    def test_change_management_key_force_fails_without_generate(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'piv', 'change-management-key', '-P', DEFAULT_PIN,
+                '-m', DEFAULT_MANAGEMENT_KEY, '-f')
+
     def test_change_management_key_protect_random(self):
         ykman_cli(
             'piv', 'change-management-key', '-p', '-P', DEFAULT_PIN,
@@ -208,10 +214,21 @@ class ManagementKey(PivTestCase):
         # Should succeed - PIN as key
         ykman_cli('piv', 'change-management-key', '-p', '-P', DEFAULT_PIN)
 
-    def test_change_management_key_no_protect_random(self):
+    def test_change_management_key_no_protect_prompt_blank(self):
         output = ykman_cli(
             'piv', 'change-management-key',
-            '-m', DEFAULT_MANAGEMENT_KEY)
+            '-m', DEFAULT_MANAGEMENT_KEY, input='\n')
+        self.assertRegex(
+            output, re.compile(
+                r'^Generated management key: [a-f0-9]{48}$', re.MULTILINE))
+
+        output = ykman_cli('piv', 'info')
+        self.assertNotIn('Management key is stored on the YubiKey', output)
+
+    def test_change_management_key_no_protect_generate(self):
+        output = ykman_cli(
+            'piv', 'change-management-key',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-g')
         self.assertRegex(
             output, re.compile(
                 r'^Generated management key: [a-f0-9]{48}$', re.MULTILINE))

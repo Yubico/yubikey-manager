@@ -624,9 +624,13 @@ def change_puk(ctx, puk, new_puk):
     '-p', '--protect', is_flag=True,
     help='Store new management key on your YubiKey, protected by PIN.'
          ' A random key will be used if no key is provided.')
+@click.option(
+    '-g', '--generate', is_flag=True, help='Generate a random management key. '
+    'Implied by --protect unless --new-management-key is also given.')
 @click_force_option
 def change_management_key(
-        ctx, management_key, pin, new_management_key, touch, protect, force):
+        ctx, management_key, pin, new_management_key, touch, protect, generate,
+        force):
     """
     Change the management key.
 
@@ -658,18 +662,33 @@ def change_management_key(
                     abort=True)
 
     if not new_management_key and not protect:
-        if not force:
+        if generate:
+            new_management_key = generate_random_management_key()
+
+            if not protect:
+                click.echo(
+                    'Generated management key: {}'.format(
+                        b2a_hex(new_management_key).decode('utf-8')))
+
+        elif force:
+            ctx.fail('New management key not given. Please remove the --force '
+                     'flag, or set the --generate flag or the '
+                     '--new-management-key option.')
+
+        else:
             new_management_key = click.prompt(
                 'Enter your new management key'
                 ' [blank to randomly generate]',
                 default='', show_default=False,
                 hide_input=True, confirmation_prompt=True)
 
-        if force or new_management_key == '':
-            new_management_key = generate_random_management_key()
-            click.echo(
-                'Generated management key: {}'.format(
-                    b2a_hex(new_management_key).decode('utf-8')))
+            if new_management_key == '':
+                new_management_key = generate_random_management_key()
+
+                if not protect:
+                    click.echo(
+                        'Generated management key: {}'.format(
+                            b2a_hex(new_management_key).decode('utf-8')))
 
     if new_management_key and type(new_management_key) is not bytes:
         try:
