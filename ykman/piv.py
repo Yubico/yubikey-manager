@@ -752,14 +752,27 @@ class PivController(object):
         return self._raw_sign_decrypt(slot, algorithm, Tlv(0x81, message),
                                       _sign_len_conditions[algorithm])
 
-    def sign(self, slot, algorithm, message):
+    def sign(self, slot, algorithm, message, pin=None, touch_callback=None):
+        message_hash = None
+
         if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
-            message = _pkcs1_15_pad(algorithm, message)
+            message_hash = _pkcs1_15_pad(algorithm, message)
         elif algorithm in (ALGO.ECCP256, ALGO.ECCP384):
             h = hashes.Hash(hashes.SHA256(), default_backend())
             h.update(message)
-            message = h.finalize()
-        return self.sign_raw(slot, algorithm, message)
+            message_hash = h.finalize()
+        try:
+            return self.sign_raw(slot, algorithm, message_hash)
+        except APDUError as e:
+            if e.sw == SW.ACCESS_DENIED:
+                if pin:
+                    self.verify(pin, touch_callback=touch_callback)
+                    return self.sign(slot, algorithm, message, pin=pin)
+                else:
+                    raise
+            else:
+                logger.error('sign_raw failed', exc_info=e)
+                raise
 
     def decrypt_raw(self, slot, algorithm, message):
         return self._raw_sign_decrypt(slot, algorithm, Tlv(0x85, message),
@@ -803,7 +816,8 @@ class PivController(object):
             Tlv(TAG.LRC)
         )
 
-    def sign_cert_builder(self, slot, algorithm, builder, touch_callback=None):
+    def sign_cert_builder(self, slot, algorithm, builder, touch_callback=None,
+                          pin=None):
         dummy_key = _dummy_key(algorithm)
         cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
 
@@ -811,7 +825,8 @@ class PivController(object):
             touch_timer = Timer(0.500, touch_callback)
             touch_timer.start()
 
-        sig = self.sign(slot, algorithm, cert.tbs_certificate_bytes)
+        sig = self.sign(slot, algorithm, cert.tbs_certificate_bytes, pin=pin,
+                        touch_callback=touch_callback)
 
         if touch_callback is not None:
             touch_timer.cancel()
@@ -824,7 +839,8 @@ class PivController(object):
 
         return x509.load_der_x509_certificate(der, default_backend())
 
-    def sign_csr_builder(self, slot, public_key, builder, touch_callback=None):
+    def sign_csr_builder(self, slot, public_key, builder, touch_callback=None,
+                         pin=None):
         algorithm = ALGO.from_public_key(public_key)
         dummy_key = _dummy_key(algorithm)
         csr = builder.sign(dummy_key, hashes.SHA256(), default_backend())
@@ -842,7 +858,8 @@ class PivController(object):
             touch_timer = Timer(0.500, touch_callback)
             touch_timer.start()
 
-        sig = self.sign(slot, algorithm, seq[0])
+        sig = self.sign(slot, algorithm, seq[0], pin=pin,
+                        touch_callback=touch_callback)
 
         if touch_callback is not None:
             touch_timer.cancel()
