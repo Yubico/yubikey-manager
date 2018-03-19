@@ -37,15 +37,11 @@ from .util import (
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 from cryptography.hazmat.backends import default_backend
-from cryptography.x509.oid import NameOID
-from cryptography import utils
 from binascii import b2a_hex, a2b_hex
 import click
-import logging
-import os
 import datetime
+import logging
 
 
 logger = logging.getLogger(__name__)
@@ -488,49 +484,21 @@ def generate_certificate(
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
-    algorithm = ALGO.from_public_key(public_key)
-
-    builder = x509.CertificateBuilder()
-    builder = builder.public_key(public_key)
-    builder = builder.subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
-
-    # Same as subject on self-signed certificates.
-    builder = builder.issuer_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
-
-    # x509.random_serial_number added in cryptography 1.6
-    serial = utils.int_from_bytes(os.urandom(20), 'big') >> 1
-    builder = builder.serial_number(serial)
-
     now = datetime.datetime.now()
-    builder = builder.not_valid_before(now)
-    builder = builder.not_valid_after(now + datetime.timedelta(days=valid_days))
+    valid_to = now + datetime.timedelta(days=valid_days)
 
     try:
-        cert = controller.sign_cert_builder(
-            slot, algorithm, builder, touch_callback=prompt_for_touch, pin=pin)
+        controller.generate_self_signed_certificate(
+            slot, public_key, subject, now, valid_to,
+            touch_callback=prompt_for_touch, pin=pin)
+
     except APDUError as e:
         logger.error('Failed to generate certificate for slot %s', slot,
                      exc_info=e)
         ctx.fail('Certificate generation failed.')
 
-    # Verify that the public key used in the certificate
-    # is from the same keypair as the private key.
-    cert_signature = cert.signature
-    cert_bytes = cert.tbs_certificate_bytes
-    if isinstance(public_key, rsa.RSAPublicKey):
-        verifier = public_key.verifier(
-            cert_signature, padding.PKCS1v15(), cert.signature_hash_algorithm)
-    elif isinstance(public_key, ec.EllipticCurvePublicKey):
-        verifier = public_key.verifier(
-            cert_signature, ec.ECDSA(cert.signature_hash_algorithm))
-    verifier.update(cert_bytes)
-    try:
-        verifier.verify()
     except InvalidSignature:
         ctx.fail('Invalid signature, certificate not imported.')
-    controller.import_certificate(slot, cert)
 
 
 @piv.command('generate-csr')
@@ -560,18 +528,12 @@ def generate_certificate_signing_request(
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
-    builder = x509.CertificateSigningRequestBuilder()
-    builder = builder.subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
-
     try:
-        csr = controller.sign_csr_builder(
-            slot, public_key, builder, touch_callback=prompt_for_touch, pin=pin)
-    except APDUError as e:
-        logger.error(
-            'Failed to generate Certificate Signing Request for slot %s', slot,
-            exc_info=e)
+        csr = controller.generate_certificate_signing_request(
+            slot, public_key, subject, touch_callback=prompt_for_touch, pin=pin)
+    except APDUError:
         ctx.fail('Certificate Signing Request generation failed.')
+
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
 
 
@@ -801,20 +763,17 @@ def _check_eccp384(ctx, controller, algorithm):
 
 
 def _check_pin_policy(ctx, controller, pin_policy):
-    #  Pin policy not supported on NEO.
-    if pin_policy is not None and controller.version < (4, 0, 0):
+    if pin_policy is not None and not controller.supports_pin_policies:
         ctx.fail('Pin policy is not supported by this YubiKey.')
 
 
 def _check_touch_policy(ctx, controller, touch_policy):
-    #  Touch policy not supported on NEO.
     if touch_policy is not None:
-        if controller.version < (4, 0, 0):
+        if len(controller.supported_touch_policies) == 0:
             ctx.fail('Touch policy is not supported by this YubiKey.')
-        if touch_policy == TOUCH_POLICY.CACHED \
-                and controller.version < (4, 3, 0):
-            #  Cached policy was added in 4.3
-            ctx.fail('Touch policy "CACHED" not supported by this YubiKey.')
+        elif touch_policy not in controller.supported_touch_policies:
+            ctx.fail('Touch policy {} not supported by this YubiKey.'.format(
+                touch_policy.name))
 
 
 piv.transports = TRANSPORT.CCID

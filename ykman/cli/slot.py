@@ -35,6 +35,7 @@ from ..util import (
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
+from ..scancodes import KEYBOARD_LAYOUT
 import logging
 import os
 import struct
@@ -62,6 +63,18 @@ def _failed_to_write_msg(ctx, exc_info):
     logger.error('Failed to write to device', exc_info=exc_info)
     ctx.fail('Failed to write to the YubiKey. Make sure the device does not '
              'have restricted access.')
+
+
+def _confirm_slot_overwrite(dev, slot):
+    slot1, slot2 = dev.driver.slot_status
+    if slot == 1 and slot1:
+        click.confirm(
+            'Slot 1 is already configured. Overwrite configuration?',
+            abort=True)
+    if slot == 2 and slot2:
+        click.confirm(
+            'Slot 2 is already configured. Overwrite configuration?',
+            abort=True)
 
 
 @click.group()
@@ -221,48 +234,52 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
 @slot.command()
 @click_slot_argument
 @click.argument('password', required=False)
+@click.option(
+    '-g', '--generate', is_flag=True, help='Generate a random password.')
+@click.option(
+    '-l', '--length', type=click.IntRange(1, 38),
+    help='Length of generated password.')
+@click.option(
+    '-k', '--keyboard-layout', type=click.Choice(
+            [l.name for l in KEYBOARD_LAYOUT]),
+    default='MODHEX', show_default=True,
+    help='Keyboard layout to use for the static password.')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting the password.')
 @click_force_option
 @click.pass_context
-def static(ctx, slot, password, no_enter, force):
+def static(
+        ctx, slot, password, generate, length,
+        keyboard_layout, no_enter, force):
     """
-    Program a static password. If no password is provided, \
-a random one may be generated.
+    Configure a static password.
+
+    To avoid problems with different keyboard layouts, the following characters
+    are allowed by default: cbdefghijklnrtuv
+
+    Use the --keyboard-layout option to allow more characters based on
+    preferred keyboard layout.
     """
 
-    if not password:
-        if not force:
-            password = click.prompt(
-                'Enter a static password [blank to randomly generate]',
-                default='',
-                show_default=False)
+    keyboard_layout = KEYBOARD_LAYOUT[keyboard_layout]
 
-    if force or password == '':
-        chars = 38
-        if not force:
-            while True:
-                chars = click.prompt(
-                    'Enter number of characters in generated password',
-                    type=int,
-                    default=38)
-                if chars > 38:
-                    click.echo(
-                        'Password too long (maximum length is 38 characters)')
-                else:
-                    break
+    if password and len(password) > 38:
+        ctx.fail('Password too long (maximum length is 38 characters).')
+    if generate and not length:
+        ctx.fail('Provide a length for the generated password.')
 
-        password = generate_static_pw(chars)
-        force or click.echo(
-            'Generated password: {}'.format(password.decode('utf-8')))
-
-    force or click.confirm(
-            'Program static password in slot {}?'.format(slot), abort=True)
+    if not password and not generate:
+        password = click.prompt('Enter a static password')
+    elif not password and generate:
+        password = generate_static_pw(length, keyboard_layout).decode()
 
     dev = ctx.obj['dev']
 
+    if not force:
+        _confirm_slot_overwrite(dev, slot)
     try:
-        dev.driver.program_static(slot, password, not no_enter)
+        dev.driver.program_static(
+            slot, password, not no_enter, keyboard_layout=keyboard_layout)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 

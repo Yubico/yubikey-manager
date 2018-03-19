@@ -1,3 +1,32 @@
+#  vim: set fileencoding=utf-8 :
+
+# Copyright (c) 2018 Yubico AB
+# All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or
+#   without modification, are permitted provided that the following
+#   conditions are met:
+#
+#    1. Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#    2. Redistributions in binary form must reproduce the above
+#       copyright notice, this list of conditions and the following
+#       disclaimer in the documentation and/or other materials provided
+#       with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
 import unittest
 from ykman.util import TRANSPORT
 from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
@@ -19,7 +48,80 @@ class TestSlotStatus(DestructiveYubikeyTestCase):
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
+class TestSlotStaticPassword(DestructiveYubikeyTestCase):
+
+    def setUp(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+
+    def tearDown(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+
+    def test_too_long(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'slot', 'static', '2',
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+
+    def test_unsupported_chars(self):
+        with self.assertRaises(ValueError):
+            ykman_cli('slot', 'static', '2', 'ö')
+        with self.assertRaises(ValueError):
+            ykman_cli('slot', 'static', '2', '@')
+
+    def test_provide_valid_pw(self):
+        ykman_cli(
+            'slot', 'static', '2',
+            'higngdukgerjktbbikrhirngtlkkttkb')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+    def test_provide_valid_pw_prompt(self):
+        ykman_cli(
+            'slot', 'static', '2',
+            input='higngdukgerjktbbikrhirngtlkkttkb\ny\n')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+    def test_generate_pw_too_long(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length', '39')
+
+    def test_generate_pw_no_length(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length')
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate')
+
+    def test_generate_zero_length(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', '--generate', '--length', '0')
+
+    def test_generate_pw(self):
+        ykman_cli('slot', 'static', '2', '--generate', '--length', '38')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+    def test_us_scancodes(self):
+        ykman_cli('slot', 'static', '2', 'abcABC123', '--keyboard-layout', 'US')
+        ykman_cli('slot', 'static', '2', '@!)', '-f', '--keyboard-layout', 'US')
+
+    def test_de_scancodes(self):
+        ykman_cli('slot', 'static', '2', 'abcABC123', '--keyboard-layout', 'DE')
+        ykman_cli('slot', 'static', '2', 'Üßö', '-f', '--keyboard-layout', 'DE')
+
+    def test_overwrite_prompt(self):
+        ykman_cli('slot', 'static', '2', 'bbb')
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'static', '2', 'ccc')
+        ykman_cli('slot', 'static', '2', 'ddd', '-f')
+        self.assertIn('Slot 2: programmed', ykman_cli('slot', 'info'))
+
+
+@unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotProgramming(DestructiveYubikeyTestCase):
+
+    def setUp(self):
+        ykman_cli('slot', 'delete', '2', '-f')
+
+    def tearDown(self):
+        ykman_cli('slot', 'delete', '2', '-f')
 
     def test_ykman_program_otp_slot_2(self):
         ykman_cli(
@@ -69,18 +171,6 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('slot', 'hotp', '2', input='abba\ny\n')
         self._check_slot_2_programmed()
 
-    def test_ykman_program_static_slot_2(self):
-        ykman_cli(
-            'slot', 'static', '2',
-            'higngdukgerjktbbikrhirngtlkkttkb', '-f')
-        self._check_slot_2_programmed()
-
-    def test_ykman_program_static_slot_2_prompt(self):
-        ykman_cli(
-            'slot', 'static', '2',
-            input='higngdukgerjktbbikrhirngtlkkttkb\ny\n')
-        self._check_slot_2_programmed()
-
     def test_update_settings_enter_slot_2(self):
         ykman_cli('slot', 'otp', '2', '-f')
         output = ykman_cli('slot', 'settings', '2', '-f', '--no-enter')
@@ -94,7 +184,9 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self.assertIn('Slot 2: empty', status)
 
     def test_access_code_slot_2(self):
-        ykman_cli('slot', '--access-code', '111111111111', 'static', '2', '-f')
+        ykman_cli(
+            'slot', '--access-code', '111111111111', 'static', '2',
+            '--generate', '--length', '10')
         self._check_slot_2_programmed()
         ykman_cli('slot', '--access-code', '111111111111', 'delete', '2', '-f')
         status = ykman_cli('slot', 'info')

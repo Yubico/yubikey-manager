@@ -27,7 +27,6 @@
 
 from __future__ import absolute_import
 
-import six
 import time
 import logging
 from .native.ykpers import Ykpers
@@ -35,7 +34,7 @@ from ctypes import sizeof, byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
 from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
                    parse_totp_hash, format_code, hmac_shorten_key)
-from .scanmap import us
+from .scancodes import encode, KEYBOARD_LAYOUT
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)
@@ -89,12 +88,6 @@ def slot_to_cmd(slot, update=False):
         return SLOT_UPDATE2 if update else SLOT_CONFIG2
     else:
         raise ValueError('slot must be 1 or 2')
-
-
-def get_scan_codes(ascii):
-    if isinstance(ascii, six.text_type):
-        ascii = ascii.encode('ascii')
-    return bytes(bytearray(us.scancodes[c] for c in six.iterbytes(ascii)))
 
 
 class OTPDriver(AbstractDriver):
@@ -219,7 +212,9 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def program_static(self, slot, password, append_cr=True):
+    def program_static(
+        self, slot, password, append_cr=True,
+            keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
         pw_len = len(password)
         if self._version < (2, 0, 0):
             raise ValueError('static password requires YubiKey 2.0.0 or later')
@@ -239,7 +234,7 @@ class OTPDriver(AbstractDriver):
             if append_cr:
                 check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
 
-            pw_bytes = get_scan_codes(password)
+            pw_bytes = encode(password, keyboard_layout=keyboard_layout)
             if pw_len <= 16:  # All in fixed
                 check(ykpers.ykp_set_fixed(cfg, pw_bytes, pw_len))
             elif pw_len <= 16 + 6:  # All in fixed and uid
