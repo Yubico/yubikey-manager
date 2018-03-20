@@ -23,7 +23,7 @@ def _verify_cert(cert, pubkey):
         raise ValueError('Unsupported public key value')
 
 
-class GenerateSelfSigned_NonDefaultMgmKey(PivTestCase):
+class NonDefaultMgmKey(PivTestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -93,7 +93,7 @@ class GenerateSelfSigned_NonDefaultMgmKey(PivTestCase):
         self._test_generate_csr('9e')
 
 
-class GenerateSelfSigned_ProtectedMgmKey(PivTestCase):
+class ProtectedMgmKey(PivTestCase):
 
     @classmethod
     def setUpClass(cls):
