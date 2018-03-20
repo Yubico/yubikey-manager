@@ -6,7 +6,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
 from ykman.util import (TRANSPORT, Cve201715361VulnerableError)
-from .util import (
+from ..util import (
     DestructiveYubikeyTestCase, is_NEO, missing_mode, no_attestation,
     skip_not_roca, skip_roca, ykman_cli)
 
