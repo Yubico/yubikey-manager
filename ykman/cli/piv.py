@@ -490,7 +490,7 @@ def generate_certificate(
     try:
         controller.generate_self_signed_certificate(
             slot, public_key, subject, now, valid_to,
-            touch_callback=prompt_for_touch)
+            touch_callback=prompt_for_touch, pin=pin)
 
     except APDUError as e:
         logger.error('Failed to generate certificate for slot %s', slot,
@@ -523,7 +523,6 @@ def generate_certificate_signing_request(
     CSR         File to write CSR to. Use '-' to use stdout.
     """
     controller = ctx.obj['controller']
-    _verify_pin(ctx, controller, pin)
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(
@@ -531,7 +530,7 @@ def generate_certificate_signing_request(
 
     try:
         csr = controller.generate_certificate_signing_request(
-            slot, public_key, subject, touch_callback=prompt_for_touch)
+            slot, public_key, subject, touch_callback=prompt_for_touch, pin=pin)
     except APDUError:
         ctx.fail('Certificate Signing Request generation failed.')
 

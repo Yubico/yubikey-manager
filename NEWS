@@ -1,3 +1,11 @@
+* Version 0.6.1 (unreleased)
+ ** PIV: The methods `PivController.sign` now accepts an optional `pin` argument, defaulting to `None`. If a `pin` argument is given, `sign` will recursively attempt to verify the PIN and retry the signing operation if it fails with the `6a82` (Access denied) status.
+ ** PIV: The following methods of `PivController` now accept an optional `pin` argument, defaulting to `None`, which is forwarded to the `sign` method:
+  *** `generate_certificate_signing_request`
+  *** `generate_self_signed_certificate`
+  *** `sign_cert_builder`
+  *** `sign_csr_builder`
+
 * Version 0.6.0 (released 2018-02-09)
  ** OpenPGP: Expose remaining PIN retries in info command and API.
  ** CCID: Only try YubiKey smart card readers by default.
