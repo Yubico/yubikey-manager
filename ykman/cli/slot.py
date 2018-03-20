@@ -295,7 +295,7 @@ def static(
         help='Use a base32 encoded key for TOTP credentials.')
 @click.option(
         '-g', '--generate', is_flag=True, required=False,
-        help='Generate a random secret key.')
+        help='Generate a random secret key. Conflicts with KEY argument.')
 @click_force_option
 @click.pass_context
 def chalresp(ctx, slot, key, totp, touch, force, generate):
@@ -307,7 +307,9 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     dev = ctx.obj['dev']
 
     if key:
-        if totp:
+        if generate:
+            ctx.fail('Invalid options: --generate conflicts with KEY argument.')
+        elif totp:
             key = parse_b32_key(key)
         else:
             key = parse_key(key)

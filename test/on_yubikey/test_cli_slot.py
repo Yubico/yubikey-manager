@@ -163,6 +163,10 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
                          'Using a randomly generated key: [0-9a-f]{40}$')
         self._check_slot_2_programmed()
 
+    def test_ykman_program_chalresp_slot_2_generated_fails_if_also_given(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'chalresp', '2', '-f', '-g', 'abababab')
+
     def test_ykman_program_chalresp_slot_2_prompt(self):
         ykman_cli('slot', 'chalresp', '2', input='abba\ny\n')
         self._check_slot_2_programmed()
