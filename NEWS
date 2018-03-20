@@ -3,7 +3,7 @@
   *** `piv` commands called with `-f|--force` will now fail instead of interactively prompting for PIN or management key.
   *** `-g|--generate` flag added to command `piv change-management-key`.
    **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now fail instead of generating a random management key.
-   **** Interactive prompt variants still generate a random management key on blank input, even without `-g|--generate`.
+   **** Interactive prompt variants no longer generate a random management key on blank input.
 
 * Version 0.6.0 (released 2018-02-09)
  ** OpenPGP: Expose remaining PIN retries in info command and API.
