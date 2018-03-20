@@ -293,18 +293,24 @@ def static(
 @click.option(
         '-T', '--totp', is_flag=True, required=False,
         help='Use a base32 encoded key for TOTP credentials.')
+@click.option(
+        '-g', '--generate', is_flag=True, required=False,
+        help='Generate a random secret key.')
 @click_force_option
 @click.pass_context
-def chalresp(ctx, slot, key, totp, touch, force):
+def chalresp(ctx, slot, key, totp, touch, force, generate):
     """
     Program a challenge-response credential.
 
-    If key is not given, a randomly generated key will be used.
+    If KEY is not given, an interactive prompt will ask for it.
     """
     dev = ctx.obj['dev']
 
     if not key:
-        if totp:
+        if force and not generate:
+            ctx.fail('No secret key given. Please remove the --force flag, '
+                     'set the KEY argument or set the --generate flag.')
+        elif totp:
             while True:
                 key = click.prompt('Enter a secret key (base32)')
                 try:
@@ -314,14 +320,12 @@ def chalresp(ctx, slot, key, totp, touch, force):
                     click.echo(e)
                     pass
         else:
-            key = click.prompt(
-                'Enter a secret key [blank to randomly generate]',
-                default='', show_default=False)
-            if force or key == '':
+            if generate:
                 key = os.urandom(20)
                 click.echo('Using a randomly generated key: {}'.format(
                     b2a_hex(key).decode('ascii')))
             else:
+                key = click.prompt('Enter a secret key')
                 key = parse_key(key)
     else:
         if totp:

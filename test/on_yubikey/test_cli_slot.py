@@ -152,9 +152,15 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('slot', 'chalresp', '2', '--touch', 'abba', '-f')
         self._check_slot_2_programmed()
 
+    def test_ykman_program_chalresp_slot_2_force_fails_without_key(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'chalresp', '2', '-f')
+        self._check_slot_2_not_programmed()
+
     def test_ykman_program_chalresp_slot_2_generated(self):
-        output = ykman_cli('slot', 'chalresp', '2', '-f')
-        self.assertIn('Using a randomly generated key', output)
+        output = ykman_cli('slot', 'chalresp', '2', '-f', '-g')
+        self.assertRegex(output,
+                         'Using a randomly generated key: [0-9a-f]{40}$')
         self._check_slot_2_programmed()
 
     def test_ykman_program_chalresp_slot_2_prompt(self):
@@ -195,6 +201,10 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
     def _check_slot_2_programmed(self):
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: programmed', status)
+
+    def _check_slot_2_not_programmed(self):
+        status = ykman_cli('slot', 'info')
+        self.assertIn('Slot 2: empty', status)
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))

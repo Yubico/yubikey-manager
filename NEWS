@@ -1,5 +1,7 @@
 * Version 0.6.1 (unreleased)
  ** Breaking changes:
+  *** `-g|--generate` flag added to command `slot chalresp`
+   **** `slot chalresp` called with `-f|--force` without `KEY` argument or `-g|--generate` will now fail instead of interactively prompting for a secret key.
   *** `piv` commands called with `-f|--force` will now fail instead of interactively prompting for PIN or management key.
   *** `-g|--generate` flag added to command `piv change-management-key`.
    **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now fail instead of generating a random management key.
