@@ -118,9 +118,6 @@ class KeyManagement(PivTestCase):
 
     def test_generate_self_signed_certificate_requires_authentication(self):
         public_key = self.generate_key(SLOT.AUTHENTICATION)
-        if get_version() < (4, 0, 0):
-            # NEO always has PIN policy "ONCE"
-            self.controller.verify(DEFAULT_PIN)
 
         with self.assertRaises(APDUError):
             self.controller.generate_self_signed_certificate(
@@ -304,15 +301,15 @@ class Operations(PivTestCase):
         with self.assertRaises(APDUError):
             self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
 
-        self.controller.verify(DEFAULT_PIN)
-        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo',
+                                   pin=DEFAULT_PIN)
         self.assertIsNotNone(sig)
 
         with self.assertRaises(APDUError):
             self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
 
-        self.controller.verify(DEFAULT_PIN)
-        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo',
+                                   pin=DEFAULT_PIN)
         self.assertIsNotNone(sig)
 
     @unittest.skipIf(*no_pin_policy)
@@ -327,8 +324,8 @@ class Operations(PivTestCase):
         with self.assertRaises(APDUError):
             self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
 
-        self.controller.verify(DEFAULT_PIN)
-        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo',
+                                   pin=DEFAULT_PIN)
         self.assertIsNotNone(sig)
 
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
@@ -339,8 +336,8 @@ class Operations(PivTestCase):
         with self.assertRaises(APDUError):
             self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
 
-        self.controller.verify(DEFAULT_PIN)
-        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
+        sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo',
+                                   pin=DEFAULT_PIN)
         self.assertIsNotNone(sig)
 
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
