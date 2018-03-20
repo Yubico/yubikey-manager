@@ -683,7 +683,6 @@ def change_management_key(
         else:
             new_management_key = click.prompt(
                 'Enter your new management key',
-                default=None, show_default=False,
                 hide_input=True, confirmation_prompt=True)
 
     if new_management_key and type(new_management_key) is not bytes:
