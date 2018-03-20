@@ -682,18 +682,9 @@ def change_management_key(
 
         else:
             new_management_key = click.prompt(
-                'Enter your new management key'
-                ' [blank to randomly generate]',
-                default='', show_default=False,
+                'Enter your new management key',
+                default=None, show_default=False,
                 hide_input=True, confirmation_prompt=True)
-
-            if new_management_key == '':
-                new_management_key = generate_random_management_key()
-
-                if not protect:
-                    click.echo(
-                        'Generated management key: {}'.format(
-                            b2a_hex(new_management_key).decode('utf-8')))
 
     if new_management_key and type(new_management_key) is not bytes:
         try:
