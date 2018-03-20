@@ -1,6 +1,6 @@
 import re
 from ..util import ykman_cli
-from .test_cli_piv import (
+from .util import (
     PivTestCase, old_new_new, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY,
     NON_DEFAULT_MANAGEMENT_KEY)
 

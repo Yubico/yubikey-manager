@@ -4,8 +4,7 @@ from cryptography.hazmat.backends import default_backend
 from ykman.util import (Cve201715361VulnerableError)
 from ..util import (
     is_NEO, no_attestation, skip_not_roca, skip_roca, ykman_cli)
-from .test_cli_piv import (
-    PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
+from .util import (PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
 class KeyManagement(PivTestCase):

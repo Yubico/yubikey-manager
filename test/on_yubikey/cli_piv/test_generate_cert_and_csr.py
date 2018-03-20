@@ -4,7 +4,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
 from ..util import ykman_cli
-from .test_cli_piv import (
+from .util import (
     PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY,
     NON_DEFAULT_MANAGEMENT_KEY)
 

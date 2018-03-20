@@ -1,5 +1,5 @@
 from ..util import ykman_cli
-from .test_cli_piv import (
+from .util import (
     PivTestCase, old_new_new, DEFAULT_PIN, NON_DEFAULT_PIN, DEFAULT_PUK,
     NON_DEFAULT_PUK)
 

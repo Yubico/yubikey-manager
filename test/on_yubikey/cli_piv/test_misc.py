@@ -1,5 +1,5 @@
 from ..util import ykman_cli
-from .test_cli_piv import PivTestCase
+from .util import PivTestCase
 
 
 class Misc(PivTestCase):
