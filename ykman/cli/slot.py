@@ -306,7 +306,12 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     """
     dev = ctx.obj['dev']
 
-    if not key:
+    if key:
+        if totp:
+            key = parse_b32_key(key)
+        else:
+            key = parse_key(key)
+    else:
         if force and not generate:
             ctx.fail('No secret key given. Please remove the --force flag, '
                      'set the KEY argument or set the --generate flag.')
@@ -327,11 +332,6 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             else:
                 key = click.prompt('Enter a secret key')
                 key = parse_key(key)
-    else:
-        if totp:
-            key = parse_b32_key(key)
-        else:
-            key = parse_key(key)
 
     cred_type = 'TOTP' if totp else 'challenge-response'
     force or click.confirm('Program a {} credential in slot {}?'
