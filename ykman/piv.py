@@ -501,10 +501,12 @@ class PivController(object):
         if self.has_derived_key and not self._authenticated:
             self.authenticate(
                 _derive_key(pin, self._pivman_data.salt), touch_callback)
+            self.verify(pin, touch_callback)
 
         if self.has_stored_key and not self._authenticated:
             self._init_pivman_protected()
             self.authenticate(self._pivman_protected_data.key, touch_callback)
+            self.verify(pin, touch_callback)
 
     def change_pin(self, old_pin, new_pin):
         self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,

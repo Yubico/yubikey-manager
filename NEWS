@@ -12,6 +12,8 @@
   *** `-g|--generate` flag added to command `piv change-management-key`.
    **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now fail instead of generating a random management key.
    **** Interactive prompt variants no longer generate a random management key on blank input.
+ ** Bug fixes:
+  *** PIV: Signing operations with PIN policy ALWAYS now require only one preceding call to `PivController.verify()`, instead of two. As a consequence, signing CLI operations with PIN policy ALWAYS no longer fail if the YubiKey has a management key protected by PIN.
 
 * Version 0.6.0 (released 2018-02-09)
  ** OpenPGP: Expose remaining PIN retries in info command and API.
