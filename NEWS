@@ -2,6 +2,12 @@
  ** Breaking changes:
   *** `-g|--generate` flag added to command `slot chalresp`
    **** `slot chalresp` called with `-f|--force` without `KEY` argument or `-g|--generate` will now fail instead of interactively prompting for a secret key.
+  *** CLI options to command `slot otp` changed:
+   **** Interactive prompts no longer accept defaults by inputing blank values.
+   **** `-f|--force` now fails if public ID, private ID or secret key is not given, instead of using serial number as public ID and generating private ID and secret key.
+   **** New flag `--serial-public-id` replaces blank prompt for public ID.
+   **** New flag `--generate-private-id` replaces blank prompt for private ID.
+   **** New flag `--generate-key` replaces blank prompt for secret key.
   *** `piv` commands called with `-f|--force` will now fail instead of interactively prompting for PIN or management key.
   *** `-g|--generate` flag added to command `piv change-management-key`.
    **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now fail instead of generating a random management key.
