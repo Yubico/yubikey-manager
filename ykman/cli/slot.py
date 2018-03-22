@@ -193,15 +193,14 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force,
 
     if public_id and serial_public_id:
         ctx.fail('Invalid options: --public-id conflicts with '
-                 '--serial-public-id and --generate.')
+                 '--serial-public-id.')
 
     if private_id and generate_private_id:
         ctx.fail('Invalid options: --private-id conflicts with '
-                 '--generate-public-id and --generate.')
+                 '--generate-public-id.')
 
     if key and generate_key:
-        ctx.fail('Invalid options: --key conflicts with --generate-key and '
-                 '--generate.')
+        ctx.fail('Invalid options: --key conflicts with --generate-key.')
 
     if not public_id:
         if serial_public_id:
