@@ -242,12 +242,12 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self._check_slot_2_programmed()
 
     def test_update_settings_enter_slot_2(self):
-        ykman_cli('slot', 'otp', '2', '-f', '-g')
+        ykman_cli('slot', 'static', '2', '-f', '-g', '-l', '20')
         output = ykman_cli('slot', 'settings', '2', '-f', '--no-enter')
         self.assertIn('Updating settings for slot', output)
 
     def test_delete_slot_2(self):
-        ykman_cli('slot', 'otp', '2', '-f', '-g')
+        ykman_cli('slot', 'static', '2', '-f', '-g', '-l', '20')
         output = ykman_cli('slot', 'delete', '2', '-f')
         self.assertIn('Deleting the configuration', output)
         status = ykman_cli('slot', 'info')
