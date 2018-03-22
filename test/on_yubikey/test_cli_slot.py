@@ -147,7 +147,8 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self._check_slot_2_programmed()
 
     def test_ykman_program_otp_slot_2_generated_all(self):
-        output = ykman_cli('slot', 'otp', '2', '-f', '-g')
+        output = ykman_cli('slot', 'otp', '2', '-f', '--serial-public-id',
+                           '--generate-private-id', '--generate-key')
         self.assertIn('Using YubiKey serial as public ID', output)
         self.assertIn('Using a randomly generated private ID', output)
         self.assertIn('Using a randomly generated secret key', output)

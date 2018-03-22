@@ -171,10 +171,6 @@ def delete(ctx, slot, force):
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting an OTP.')
 @click.option(
-        '-g', '--generate', is_flag=True, required=False,
-        help='Alias of --serial-public-id --generate-private-id '
-        '--generate-key.')
-@click.option(
         '--serial-public-id', is_flag=True, required=False,
         help='Use YubiKey serial number as public ID. Conflicts with '
         '--public-id.')
@@ -186,7 +182,7 @@ def delete(ctx, slot, force):
         help='Generate a random secret key. Conflicts with --key.')
 @click_force_option
 @click.pass_context
-def otp(ctx, slot, public_id, private_id, key, no_enter, force, generate,
+def otp(ctx, slot, public_id, private_id, key, no_enter, force,
         serial_public_id, generate_private_id, generate_key):
     """
     Program a Yubico OTP credential.
@@ -194,11 +190,6 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force, generate,
     """
 
     dev = ctx.obj['dev']
-
-    if generate:
-        serial_public_id = True
-        generate_private_id = True
-        generate_key = True
 
     if public_id and serial_public_id:
         ctx.fail('Invalid options: --public-id conflicts with '
