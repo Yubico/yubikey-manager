@@ -171,13 +171,13 @@ def delete(ctx, slot, force):
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting an OTP.')
 @click.option(
-    '--serial-public-id', is_flag=True, required=False,
+    '-S', '--serial-public-id', is_flag=True, required=False,
     help='Use YubiKey serial number as public ID. Conflicts with --public-id.')
 @click.option(
-    '--generate-private-id', is_flag=True, required=False,
+    '-g', '--generate-private-id', is_flag=True, required=False,
     help='Generate a random private ID. Conflicts with --private-id.')
 @click.option(
-    '--generate-key', is_flag=True, required=False,
+    '-G', '--generate-key', is_flag=True, required=False,
     help='Generate a random secret key. Conflicts with --key.')
 @click_force_option
 @click.pass_context
