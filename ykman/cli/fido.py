@@ -173,23 +173,27 @@ def reset(ctx, force):
             if removed and n_keys == 1:
                 return
 
-    if not force:
-        prompt_re_insert_key()
-        try:
+    try:
+        if not force:
+            prompt_re_insert_key()
             dev = list(get_descriptors())[0].open_device(TRANSPORT.U2F)
             controller = Fido2Controller(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
-        except Exception as e:
-            logger.error(e)
-            ctx.fail('Failed to reset the YubiKey.')
-    else:
-        controller = ctx.obj['controller']
-        try:
+        else:
+            controller = ctx.obj['controller']
             controller.reset(touch_callback=prompt_for_touch)
-        except Exception as e:
-            logger.debug(e)
-            ctx.fail('Failed to reset the YubiKey. A reset must be triggered '
-                     'within 5 seconds after the YubiKey is inserted.')
+    except CtapError as e:
+        if e.code == CtapError.ERR.ACTION_TIMEOUT:
+            ctx.fail(
+                'Reset failed. You need to touch your'
+                ' YubiKey to confirm the reset.')
+        elif e.code == CtapError.ERR.NOT_ALLOWED:
+            ctx.fail(
+                'Reset failed. Reset must be triggered within 5 seconds'
+                ' after the YubiKey is inserted.')
+    except Exception as e:
+        logger.error(e)
+        ctx.fail('Reset failed.')
 
 
 fido.transports = TRANSPORT.U2F
