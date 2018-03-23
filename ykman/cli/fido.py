@@ -29,6 +29,7 @@ from __future__ import absolute_import
 import click
 import logging
 from fido_host.hid import CtapError
+from time import sleep
 from .util import click_skip_on_help, prompt_for_touch
 from ..util import TRANSPORT
 from ..fido import Fido2Controller
@@ -163,6 +164,7 @@ def reset(ctx):
 
     removed = False
     while True:
+        sleep(0.1)
         descriptors = list(get_descriptors())
         n_keys = len(descriptors)
         if not n_keys:
