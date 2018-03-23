@@ -30,7 +30,7 @@ import click
 import logging
 from fido_host.hid import CtapError
 from time import sleep
-from .util import click_skip_on_help, prompt_for_touch
+from .util import click_skip_on_help, prompt_for_touch, click_force_option
 from ..util import TRANSPORT
 from ..fido import Fido2Controller
 from ..descriptor import get_descriptors
@@ -144,13 +144,14 @@ def set_pin(ctx, pin, new_pin):
                 set_pin(new_pin)
 
 
+@click_force_option
 @fido.command('reset')
 @click.confirmation_option(
             '-f', '--force', prompt='WARNING! This will delete '
             'all FIDO credentials, including FIDO U2F credentials,'
             ' and restore factory settings. Proceed?')
 @click.pass_context
-def reset(ctx):
+def reset(ctx, force):
     """
     Reset all FIDO functionality.
 
@@ -162,22 +163,33 @@ def reset(ctx):
     """
     click.echo('Remove and re-insert your YubiKey to perform the reset...')
 
-    removed = False
-    while True:
-        sleep(0.1)
-        descriptors = list(get_descriptors())
-        n_keys = len(descriptors)
-        if not n_keys:
-            removed = True
-        if removed and n_keys == 1:
-            break
-    try:
-        dev = descriptors[0].open_device(TRANSPORT.U2F)
-        controller = Fido2Controller(dev.driver)
-        controller.reset(touch_callback=prompt_for_touch)
-    except Exception as e:
-        logger.error(e)
-        ctx.fail('Failed to reset the YubiKey.')
+    def prompt_re_insert_key():
+        removed = False
+        while True:
+            sleep(0.1)
+            n_keys = len(list(get_descriptors()))
+            if not n_keys:
+                removed = True
+            if removed and n_keys == 1:
+                return
+
+    if not force:
+        prompt_re_insert_key()
+        try:
+            dev = list(get_descriptors())[0].open_device(TRANSPORT.U2F)
+            controller = Fido2Controller(dev.driver)
+            controller.reset(touch_callback=prompt_for_touch)
+        except Exception as e:
+            logger.error(e)
+            ctx.fail('Failed to reset the YubiKey.')
+    else:
+        controller = ctx.obj['controller']
+        try:
+            controller.reset(touch_callback=prompt_for_touch)
+        except Exception as e:
+            logger.debug(e)
+            ctx.fail('Failed to reset the YubiKey. A reset must be triggered '
+                     'within 5 seconds after the YubiKey is inserted.')
 
 
 fido.transports = TRANSPORT.U2F
