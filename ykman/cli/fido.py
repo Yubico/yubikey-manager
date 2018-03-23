@@ -32,6 +32,7 @@ from fido_host.hid import CtapError
 from .util import click_skip_on_help, prompt_for_touch
 from ..util import TRANSPORT
 from ..fido import Fido2Controller
+from ..descriptor import get_descriptors
 
 
 logger = logging.getLogger(__name__)
@@ -158,16 +159,20 @@ def reset(ctx):
     The reset must be triggered immediately after the YubiKey is
     inserted, and requires a touch on the YubiKey.
     """
-    controller = ctx.obj['controller']
+    click.echo('Remove and re-insert your YubiKey to perform the reset...')
+
+    removed = False
+    while True:
+        descriptors = list(get_descriptors())
+        n_keys = len(descriptors)
+        if not n_keys:
+            removed = True
+        if removed and n_keys == 1:
+            break
     try:
+        dev = descriptors[0].open_device(TRANSPORT.U2F)
+        controller = Fido2Controller(dev.driver)
         controller.reset(touch_callback=prompt_for_touch)
-    except CtapError as e:
-        if e.code == CtapError.ERR.NOT_ALLOWED:
-            ctx.fail(
-                'Failed to reset the YubiKey. The reset command must be '
-                'triggered immediately after the YubiKey is inserted.')
-        else:
-            raise
     except Exception as e:
         logger.error(e)
         ctx.fail('Failed to reset the YubiKey.')
