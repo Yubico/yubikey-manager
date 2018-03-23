@@ -68,7 +68,11 @@ def click_parse_format(ctx, param, val):
 @click_callback()
 def click_parse_management_key(ctx, param, val):
     try:
-        return a2b_hex(val)
+        key = a2b_hex(val)
+        if key and len(key) != 24:
+            return ValueError('Management key must be exactly 24 bytes '
+                              '(48 hexadecimal digits) long.')
+        return key
     except Exception:
         return ValueError(val)
 
@@ -616,7 +620,9 @@ def change_puk(ctx, puk, new_puk):
 @click.option(
     '-t', '--touch', is_flag=True,
     help='Require touch on YubiKey when prompted for management key.')
-@click.option('-n', '--new-management-key', help='A new management key.')
+@click.option(
+    '-n', '--new-management-key', help='A new management key.',
+    callback=click_parse_management_key)
 @click.option(
     '-m', '--management-key', help='Current management key.',
     callback=click_parse_management_key)

@@ -596,6 +596,10 @@ class PivController(object):
                 raise ValueError('new_key was not given and '
                                  'store_on_device was not True')
 
+        if len(new_key) != 24:
+            raise ValueError('Management key must be exactly 24 bytes long, '
+                             'was: {}'.format(len(new_key)))
+
         if store_on_device or (not store_on_device and self.has_stored_key):
             # Ensure we have access to protected data before overwriting key
             try:
