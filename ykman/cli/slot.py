@@ -170,9 +170,19 @@ def delete(ctx, slot, force):
               callback=parse_hex(16), help='16 byte secret key, in hex.')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
               'keystroke after outputting an OTP.')
+@click.option(
+    '-S', '--serial-public-id', is_flag=True, required=False,
+    help='Use YubiKey serial number as public ID. Conflicts with --public-id.')
+@click.option(
+    '-g', '--generate-private-id', is_flag=True, required=False,
+    help='Generate a random private ID. Conflicts with --private-id.')
+@click.option(
+    '-G', '--generate-key', is_flag=True, required=False,
+    help='Generate a random secret key. Conflicts with --key.')
 @click_force_option
 @click.pass_context
-def otp(ctx, slot, public_id, private_id, key, no_enter, force):
+def otp(ctx, slot, public_id, private_id, key, no_enter, force,
+        serial_public_id, generate_private_id, generate_key):
     """
     Program a Yubico OTP credential.
 
@@ -180,47 +190,59 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force):
 
     dev = ctx.obj['dev']
 
+    if public_id and serial_public_id:
+        ctx.fail('Invalid options: --public-id conflicts with '
+                 '--serial-public-id.')
+
+    if private_id and generate_private_id:
+        ctx.fail('Invalid options: --private-id conflicts with '
+                 '--generate-public-id.')
+
+    if key and generate_key:
+        ctx.fail('Invalid options: --key conflicts with --generate-key.')
+
     if not public_id:
-        if not force:
-            public_id = click.prompt(
-                'Enter public ID [blank to use YubiKey serial number]',
-                default='',
-                show_default=False)
-        if force or public_id == '':
+        if serial_public_id:
             if dev.serial is None:
                 ctx.fail('Serial number not set, public ID must be provided')
             public_id = modhex_encode(
                 b'\xff\x00' + struct.pack(b'>I', dev.serial))
             click.echo(
                 'Using YubiKey serial as public ID: {}'.format(public_id))
+        elif force:
+            ctx.fail(
+                'Public ID not given. Please remove the --force flag, or '
+                'add the --serial-public-id flag or --public-id option.')
+        else:
+            public_id = click.prompt('Enter public ID')
 
     public_id = modhex_decode(public_id)
 
     if not private_id:
-        if not force:
-            private_id = click.prompt(
-                'Enter private ID [blank to randomly generate]',
-                default='',
-                show_default=False)
-        if force or private_id == '':
+        if generate_private_id:
             private_id = os.urandom(6)
             click.echo(
                 'Using a randomly generated private ID: {}'.format(
                     b2a_hex(private_id).decode('ascii')))
+        elif force:
+            ctx.fail(
+                'Private ID not given. Please remove the --force flag, or '
+                'add the --generate-private-id flag or --private-id option.')
         else:
+            private_id = click.prompt('Enter private ID')
             private_id = a2b_hex(private_id)
 
     if not key:
-        if not force:
-            key = click.prompt(
-                'Enter secret key [blank to randomly generate]',
-                default='', show_default=False)
-        if force or key == '':
+        if generate_key:
             key = os.urandom(16)
             click.echo(
                 'Using a randomly generated secret key: {}'.format(
                     b2a_hex(key).decode('ascii')))
+        elif force:
+            ctx.fail('Secret key not given. Please remove the --force flag, or '
+                     'add the --generate-key flag or --key option.')
         else:
+            key = click.prompt('Enter secret key')
             key = a2b_hex(key)
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
@@ -293,18 +315,31 @@ def static(
 @click.option(
         '-T', '--totp', is_flag=True, required=False,
         help='Use a base32 encoded key for TOTP credentials.')
+@click.option(
+        '-g', '--generate', is_flag=True, required=False,
+        help='Generate a random secret key. Conflicts with KEY argument.')
 @click_force_option
 @click.pass_context
-def chalresp(ctx, slot, key, totp, touch, force):
+def chalresp(ctx, slot, key, totp, touch, force, generate):
     """
     Program a challenge-response credential.
 
-    If key is not given, a randomly generated key will be used.
+    If KEY is not given, an interactive prompt will ask for it.
     """
     dev = ctx.obj['dev']
 
-    if not key:
-        if totp:
+    if key:
+        if generate:
+            ctx.fail('Invalid options: --generate conflicts with KEY argument.')
+        elif totp:
+            key = parse_b32_key(key)
+        else:
+            key = parse_key(key)
+    else:
+        if force and not generate:
+            ctx.fail('No secret key given. Please remove the --force flag, '
+                     'set the KEY argument or set the --generate flag.')
+        elif totp:
             while True:
                 key = click.prompt('Enter a secret key (base32)')
                 try:
@@ -314,20 +349,13 @@ def chalresp(ctx, slot, key, totp, touch, force):
                     click.echo(e)
                     pass
         else:
-            key = click.prompt(
-                'Enter a secret key [blank to randomly generate]',
-                default='', show_default=False)
-            if force or key == '':
+            if generate:
                 key = os.urandom(20)
                 click.echo('Using a randomly generated key: {}'.format(
                     b2a_hex(key).decode('ascii')))
             else:
+                key = click.prompt('Enter a secret key')
                 key = parse_key(key)
-    else:
-        if totp:
-            key = parse_b32_key(key)
-        else:
-            key = parse_key(key)
 
     cred_type = 'TOTP' if totp else 'challenge-response'
     force or click.confirm('Program a {} credential in slot {}?'

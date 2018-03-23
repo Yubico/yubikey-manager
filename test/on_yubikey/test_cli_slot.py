@@ -130,19 +130,80 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
             '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4', '-f')
         self._check_slot_2_programmed()
 
-    def test_ykman_program_otp_slot_2_generated(self):
-        output = ykman_cli('slot', 'otp', '2', '-f')
+    def test_ykman_program_otp_slot_2_prompt(self):
+        ykman_cli(
+            'slot', 'otp', '2', input='vvccccfiluij\n'
+                                      '267e0a88949b\n'
+                                      'b8e31ab90bb8830e3c1fe1b483a8e0d4\n'
+                                      'y\n')
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_options(self):
+        output = ykman_cli(
+            'slot', 'otp', '2', '--public-id', 'vvccccfiluij',
+            '--private-id', '267e0a88949b',
+            '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4', '-f')
+        self.assertEqual('', output)
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_generated_all(self):
+        output = ykman_cli('slot', 'otp', '2', '-f', '--serial-public-id',
+                           '--generate-private-id', '--generate-key')
         self.assertIn('Using YubiKey serial as public ID', output)
         self.assertIn('Using a randomly generated private ID', output)
         self.assertIn('Using a randomly generated secret key', output)
         self._check_slot_2_programmed()
 
-    def test_ykman_program_otp_slot_2_prompt(self):
-        ykman_cli(
-            'slot', 'otp', '2',
-            input='vvccccfiluij\n'
-            '267e0a88949b\nb8e31ab90bb8830e3c1fe1b483a8e0d4\ny\n')
+    def test_ykman_program_otp_slot_2_serial_public_id(self):
+        output = ykman_cli(
+            'slot', 'otp', '2', '--serial-public-id',
+            '--private-id', '267e0a88949b',
+            '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4', '-f')
+        self.assertIn('Using YubiKey serial as public ID', output)
+        self.assertNotIn('generated private ID', output)
+        self.assertNotIn('generated secret key', output)
         self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_generated_private_id(self):
+        output = ykman_cli(
+            'slot', 'otp', '2', '--public-id', 'vvccccfiluij',
+            '--generate-private-id',
+            '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4', '-f')
+        self.assertNotIn('serial as public ID', output)
+        self.assertIn('Using a randomly generated private ID', output)
+        self.assertNotIn('generated secret key', output)
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_generated_secret_key(self):
+        output = ykman_cli(
+            'slot', 'otp', '2', '--public-id', 'vvccccfiluij',
+            '--private-id', '267e0a88949b', '--generate-key', '-f')
+        self.assertNotIn('serial as public ID', output)
+        self.assertNotIn('generated private ID', output)
+        self.assertIn('Using a randomly generated secret key', output)
+        self._check_slot_2_programmed()
+
+    def test_ykman_program_otp_slot_2_serial_id_conflicts_public_id(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'otp', '2', '-f', '--serial-public-id',
+                      '--public-id', 'vvccccfiluij',
+                      '--generate-private-id', '--generate-key')
+        self._check_slot_2_not_programmed()
+
+    def test_ykman_program_otp_slot_2_generate_id_conflicts_private_id(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'otp', '2', '-f', '--serial-public-id',
+                      '--generate-private-id', '--private-id', '267e0a88949b',
+                      '--generate-key')
+        self._check_slot_2_not_programmed()
+
+    def test_ykman_program_otp_slot_2_generate_key_conflicts_key(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'otp', '2', '-f', '--serial-public-id',
+                      '--generate-private-id',
+                      '--generate-key',
+                      '--key', 'b8e31ab90bb8830e3c1fe1b483a8e0d4')
+        self._check_slot_2_not_programmed()
 
     def test_ykman_program_chalresp_slot_2(self):
         ykman_cli('slot', 'chalresp', '2', 'abba', '-f')
@@ -152,10 +213,20 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('slot', 'chalresp', '2', '--touch', 'abba', '-f')
         self._check_slot_2_programmed()
 
+    def test_ykman_program_chalresp_slot_2_force_fails_without_key(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'chalresp', '2', '-f')
+        self._check_slot_2_not_programmed()
+
     def test_ykman_program_chalresp_slot_2_generated(self):
-        output = ykman_cli('slot', 'chalresp', '2', '-f')
-        self.assertIn('Using a randomly generated key', output)
+        output = ykman_cli('slot', 'chalresp', '2', '-f', '-g')
+        self.assertRegex(output,
+                         'Using a randomly generated key: [0-9a-f]{40}$')
         self._check_slot_2_programmed()
+
+    def test_ykman_program_chalresp_slot_2_generated_fails_if_also_given(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('slot', 'chalresp', '2', '-f', '-g', 'abababab')
 
     def test_ykman_program_chalresp_slot_2_prompt(self):
         ykman_cli('slot', 'chalresp', '2', input='abba\ny\n')
@@ -172,12 +243,12 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self._check_slot_2_programmed()
 
     def test_update_settings_enter_slot_2(self):
-        ykman_cli('slot', 'otp', '2', '-f')
+        ykman_cli('slot', 'static', '2', '-f', '-g', '-l', '20')
         output = ykman_cli('slot', 'settings', '2', '-f', '--no-enter')
         self.assertIn('Updating settings for slot', output)
 
     def test_delete_slot_2(self):
-        ykman_cli('slot', 'otp', '2', '-f')
+        ykman_cli('slot', 'static', '2', '-f', '-g', '-l', '20')
         output = ykman_cli('slot', 'delete', '2', '-f')
         self.assertIn('Deleting the configuration', output)
         status = ykman_cli('slot', 'info')
@@ -195,6 +266,10 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
     def _check_slot_2_programmed(self):
         status = ykman_cli('slot', 'info')
         self.assertIn('Slot 2: programmed', status)
+
+    def _check_slot_2_not_programmed(self):
+        status = ykman_cli('slot', 'info')
+        self.assertIn('Slot 2: empty', status)
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
