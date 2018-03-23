@@ -32,7 +32,6 @@ from ykman import __version__
 from ..util import TRANSPORT, Mode, Cve201715361VulnerableError
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
-from ..driver_u2f import libversion as u2fhost_version
 from ..descriptor import (get_descriptors, list_drivers, open_device,
                           FailedOpeningDeviceException)
 from .util import click_skip_on_help
@@ -42,6 +41,7 @@ from .slot import slot
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
+from .fido import fido
 import usb.core
 import click
 import logging
@@ -65,9 +65,6 @@ def print_version(ctx, param, value):
     libs.append('libykpers ' + ('.'.join('%d' % d for d in ykpers_version)
                                 if ykpers_version is not None
                                 else 'not found!'))
-    libs.append('libu2f-host ' + ('.'.join('%d' % d for d in u2fhost_version)
-                                  if u2fhost_version is not None
-                                  else 'not found!'))
     usb_lib = get_usb_backend_version()
     libs.append(usb_lib or '<pyusb backend missing>')
     click.echo('Libraries:')
@@ -188,7 +185,7 @@ def list_keys(ctx, serials):
         del drv
 
 
-COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv)
+COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv, fido)
 
 
 for cmd in COMMANDS:

@@ -19,7 +19,7 @@ before_install:
   - docker build -t xenial -f docker/xenial/Dockerfile .
   - sudo apt-add-repository -y ppa:yubico/stable
   - sudo apt-get update
-  - sudo apt-get install -qq libu2f-host0 libykpers-1-1 python-pyscard swig libpcsclite-dev
+  - sudo apt-get install -qq libykpers-1-1 python-pyscard swig libpcsclite-dev
   - pip install --disable-pip-version-check --upgrade pip
 
 install:
