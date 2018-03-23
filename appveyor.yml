@@ -27,10 +27,6 @@ install:
   - choco install swig -y
   - choco upgrade swig
 
-  - ps: wget "https://developers.yubico.com/libu2f-host/Releases/libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip" -OutFile "libu2f-host-$env:LIBU2F_HOST_VERSION-win32.zip"
-  - 7z x libu2f-host-%LIBU2F_HOST_VERSION%-win32.zip -o".\libu2f-host" 
-  - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\libu2f-host\bin
-
   - ps: wget "https://developers.yubico.com/yubikey-personalization/Releases/ykpers-$env:YKPERS_VERSION-win32.zip" -OutFile "ykpers-$env:YKPERS_VERSION-win32.zip"
   - 7z x ykpers-%YKPERS_VERSION%-win32.zip -o".\ykpers"
   - set PATH=%PATH%;%APPVEYOR_BUILD_FOLDER%\ykpers\bin

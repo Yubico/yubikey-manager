@@ -64,7 +64,15 @@ class YubiKey(object):
         self._form_factor = FORM_FACTOR.UNKNOWN
 
         if driver.key_type == YUBIKEY.SKY:
-            self.capabilities = CAPABILITY.U2F
+            try:
+                # Only new SKYs report capabilities
+                resp = driver.read_capabilities()
+                if (resp):
+                    self._parse_capabilities(resp)
+                else:
+                    self.capabilities = CAPABILITY.U2F
+            except Exception:
+                self.capabilities = CAPABILITY.U2F
             self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
             if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.

@@ -81,16 +81,15 @@ class KeyManagement(PivTestCase):
             controller = PivController(dev.driver)
             controller.reset()
 
-    def generate_key(self):
+    def generate_key(self, slot):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         public_key = self.controller.generate_key(
-            SLOT.AUTHENTICATION, ALGO.ECCP256, pin_policy=PIN_POLICY.NEVER,
-            touch_policy=TOUCH_POLICY.NEVER)
+            slot, ALGO.ECCP256, touch_policy=TOUCH_POLICY.NEVER)
         self.reconnect()
         return public_key
 
     def test_delete_certificate_requires_authentication(self):
-        self.generate_key()
+        self.generate_key(SLOT.AUTHENTICATION)
 
         with self.assertRaises(APDUError):
             self.controller.delete_certificate(SLOT.AUTHENTICATION)
@@ -99,11 +98,12 @@ class KeyManagement(PivTestCase):
         self.controller.delete_certificate(SLOT.AUTHENTICATION)
 
     def test_generate_csr_works(self):
-        public_key = self.generate_key()
+        public_key = self.generate_key(SLOT.AUTHENTICATION)
         if get_version() < (4, 0, 0):
             # NEO always has PIN policy "ONCE"
             self.controller.verify(DEFAULT_PIN)
 
+        self.controller.verify(DEFAULT_PIN)
         csr = self.controller.generate_certificate_signing_request(
             SLOT.AUTHENTICATION, public_key, 'alice')
 
@@ -121,7 +121,7 @@ class KeyManagement(PivTestCase):
         )
 
     def test_generate_self_signed_certificate_requires_authentication(self):
-        public_key = self.generate_key()
+        public_key = self.generate_key(SLOT.AUTHENTICATION)
         if get_version() < (4, 0, 0):
             # NEO always has PIN policy "ONCE"
             self.controller.verify(DEFAULT_PIN)
@@ -131,11 +131,12 @@ class KeyManagement(PivTestCase):
                 SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.verify(DEFAULT_PIN)
         self.controller.generate_self_signed_certificate(
             SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
     def _test_generate_self_signed_certificate(self, slot):
-        public_key = self.generate_key()
+        public_key = self.generate_key(slot)
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.verify(DEFAULT_PIN)
         self.controller.generate_self_signed_certificate(
@@ -165,12 +166,10 @@ class KeyManagement(PivTestCase):
     def test_generate_key_requires_authentication(self):
         with self.assertRaises(APDUError):
             self.controller.generate_key(SLOT.AUTHENTICATION, ALGO.ECCP256,
-                                         pin_policy=PIN_POLICY.NEVER,
                                          touch_policy=TOUCH_POLICY.NEVER)
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.generate_key(SLOT.AUTHENTICATION, ALGO.ECCP256,
-                                     pin_policy=PIN_POLICY.NEVER,
                                      touch_policy=TOUCH_POLICY.NEVER)
 
     def test_import_certificate_requires_authentication(self):
@@ -294,7 +293,7 @@ class Operations(PivTestCase):
         PivTestCase.setUp(self)
         self.controller.reset()
 
-    def generate_key(self, pin_policy=PIN_POLICY.NEVER):
+    def generate_key(self, pin_policy=None):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         public_key = self.controller.generate_key(
             SLOT.AUTHENTICATION, ALGO.ECCP256, pin_policy=pin_policy,
@@ -322,7 +321,7 @@ class Operations(PivTestCase):
 
     @unittest.skipIf(*no_pin_policy)
     def test_sign_with_pin_policy_never_does_not_require_pin(self):
-        self.generate_key()
+        self.generate_key(pin_policy=PIN_POLICY.NEVER)
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
         self.assertIsNotNone(sig)
 
