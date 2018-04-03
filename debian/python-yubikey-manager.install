@@ -1,4 +1,5 @@
 debian/tmp/usr/lib/python2*/*-packages/ykman/*.py
+debian/tmp/usr/lib/python2*/*-packages/ykman/VERSION
 debian/tmp/usr/lib/python2*/*-packages/ykman/scancodes/*.py
 debian/tmp/usr/lib/python2*/*-packages/ykman/native/*.py
 debian/tmp/usr/lib/python2*/*-packages/*.egg-info
