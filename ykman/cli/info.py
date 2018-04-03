@@ -57,13 +57,12 @@ def info(ctx):
 
     click.echo('Device capabilities:')
     for c in CAPABILITY:
-        if c != CAPABILITY.NFC:  # For now, don't expose NFC Capability
-            if c & dev.capabilities:
-                if c & dev.enabled:
-                    status = 'Enabled'
-                else:
-                    status = 'Disabled'
+        if c & dev.capabilities:
+            if c & dev.enabled:
+                status = 'Enabled'
             else:
-                status = 'Not available'
+                status = 'Disabled'
+        else:
+            status = 'Not available'
 
-            click.echo('    {0.name}:\t{1}'.format(c, status))
+        click.echo('    {0.name}:\t{1}'.format(c, status))
