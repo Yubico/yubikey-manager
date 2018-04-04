@@ -84,7 +84,7 @@ def click_parse_uri(ctx, param, val):
               'YubiKey.')
 def oath(ctx, password):
     """
-    Manage YubiKey OATH credentials.
+    Manage OATH application.
     """
     try:
         controller = OathController(ctx.obj['dev'].driver)
@@ -92,7 +92,7 @@ def oath(ctx, password):
         ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
-            ctx.fail("The OATH functionality can't be found on this YubiKey.")
+            ctx.fail("The OATH application can't be found on this YubiKey.")
         raise
 
     if password:
@@ -103,7 +103,7 @@ def oath(ctx, password):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OATH functionality.
+    Display status of OATH application.
     """
     controller = ctx.obj['controller']
     version = controller.version
@@ -127,7 +127,7 @@ def reset(ctx):
     Reset all OATH data.
 
     This action will wipe all credentials and reset factory settings for
-    the OATH functionality on the YubiKey.
+    the OATH application on the YubiKey.
     """
 
     click.echo('Resetting OATH data...')

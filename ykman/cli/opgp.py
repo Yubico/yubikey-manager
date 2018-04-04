@@ -77,14 +77,14 @@ def int_in_range(minval, maxval):
 @click_skip_on_help
 def openpgp(ctx):
     """
-    Manage YubiKey OpenPGP functionality.
+    Manage OpenPGP application.
     """
     try:
         controller = OpgpController(ctx.obj['dev'].driver)
         ctx.obj['controller'] = controller
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
-            ctx.fail("The OpenPGP functionality can't be found on this "
+            ctx.fail("The OpenPGP application can't be found on this "
                      'YubiKey.')
         raise
 
@@ -93,7 +93,7 @@ def openpgp(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OpenPGP functionality.
+    Display status of OpenPGP application.
     """
     controller = ctx.obj['controller']
     click.echo('OpenPGP version: %d.%d.%d' % controller.version)
@@ -110,7 +110,7 @@ def info(ctx):
 @click.pass_context
 def reset(ctx):
     """
-    Resets OpenPGP functionality.
+    Reset OpenPGP application.
 
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.

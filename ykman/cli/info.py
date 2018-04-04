@@ -38,7 +38,7 @@ def info(ctx):
     Show general information.
 
     Displays information about the attached YubiKey such as serial number,
-    firmware version, capabilities, etc.
+    firmware version, applications, etc.
     """
     dev = ctx.obj['dev']
     click.echo('Device type: {}'.format(dev.device_name))
@@ -52,10 +52,10 @@ def info(ctx):
                    'YubiKey connected')
     if dev.form_factor:
         click.echo('Form factor: {}'.format(str(dev.form_factor)))
-    click.echo('Enabled connection(s): {}'.format(dev.mode))
+    click.echo('Enabled USB interfaces: {}'.format(dev.mode))
     click.echo()
 
-    click.echo('Device capabilities:')
+    click.echo('Applications:')
     for c in CAPABILITY:
         if c & dev.capabilities:
             if c & dev.enabled:
