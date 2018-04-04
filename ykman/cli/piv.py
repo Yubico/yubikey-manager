@@ -102,14 +102,14 @@ click_touch_policy_option = click.option(
 @click_skip_on_help
 def piv(ctx):
     """
-    Manage YubiKey PIV functionality.
+    Manage PIV application.
     """
     try:
         controller = PivController(ctx.obj['dev'].driver)
         ctx.obj['controller'] = controller
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
-            ctx.fail("The PIV functionality can't be found on this YubiKey.")
+            ctx.fail("The PIV application can't be found on this YubiKey.")
         raise
 
 
@@ -117,7 +117,7 @@ def piv(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of PIV functionality.
+    Display status of PIV application.
     """
     controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
@@ -171,8 +171,8 @@ def reset(ctx):
     """
     Reset all PIV data.
 
-    This action will wipe all data and reset factory settings for
-    the PIV functionality on your YubiKey.
+    This action will wipe all data and restore factory settings for
+    the PIV application on your YubiKey.
     """
 
     click.echo('Resetting PIV data...')

@@ -93,7 +93,7 @@ def _parse_mode_string(ctx, param, mode):
 @click.pass_context
 def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
-    Manage connection modes.
+    Manage connection modes (USB Interfaces).
 
     Get the current connection mode of the YubiKey, or set it to MODE.
 
@@ -136,4 +136,4 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
         click.echo('Current connection mode is: {}'.format(dev.mode))
         supported = ', '.join(t.name for t in TRANSPORT
                               .split(dev.capabilities))
-        click.echo('Supported connections are: {}'.format(supported))
+        click.echo('Supported USB interfaces are: {}'.format(supported))

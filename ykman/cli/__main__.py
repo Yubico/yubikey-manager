@@ -75,9 +75,9 @@ def print_version(ctx, param, value):
 
 def _disabled_transport(ctx, transports, cmd_name):
     req = ', '.join((t.name for t in TRANSPORT if t & transports))
-    click.echo("Command '{}' requires one of the following transports "
+    click.echo("Command '{}' requires one of the following USB interfaces "
                "to be enabled: '{}'.".format(cmd_name, req))
-    ctx.fail("Use 'ykman mode' to set the enabled connections.")
+    ctx.fail("Use 'ykman mode' to set the enabled USB interfaces.")
 
 
 def _run_cmd_for_serial(ctx, cmd, transports, serial):

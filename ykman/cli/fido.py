@@ -44,20 +44,20 @@ logger = logging.getLogger(__name__)
 @click_skip_on_help
 def fido(ctx):
     """
-    Manage YubiKey FIDO 2 credentials.
+    Manage FIDO applications.
     """
     try:
         ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
     except Exception as e:
         logger.debug('Failed to load Fido2Controller', exc_info=e)
-        ctx.fail('FIDO functionality not supported.')
+        ctx.fail('Failed to load FIDO 2 Application.')
 
 
 @fido.command()
 @click.pass_context
 def info(ctx):
     """
-    Display status of FIDO 2 functionality.
+    Display status of FIDO 2 application.
     """
     controller = ctx.obj['controller']
     if controller.has_pin:
@@ -153,7 +153,7 @@ def set_pin(ctx, pin, new_pin):
 @click.pass_context
 def reset(ctx, force):
     """
-    Reset all FIDO functionality.
+    Reset all FIDO applications.
 
     This action will wipe all FIDO credentials, including FIDO U2F credentials,
     on the YubiKey and remove the PIN code.
