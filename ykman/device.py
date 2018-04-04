@@ -73,8 +73,8 @@ class YubiKey(object):
                     self.capabilities = CAPABILITY.U2F
             except Exception:
                 self.capabilities = CAPABILITY.U2F
-            if CAPABILITY.has(self.enabled, CAPABILITY.FIDO2):
-                self.device_name = 'FIDO Security Key'  # SKY 2
+            if self.version >= (5, 0, 0):
+                self.device_name = 'Security Key by Yubico'  # SKY 2
             self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
             if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
