@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .driver import AbstractDriver
 from .util import TRANSPORT, YUBIKEY, PID, parse_tlvs
-from fido_host.hid import CtapHidDevice, CTAPHID
+from fido2.hid import CtapHidDevice, CTAPHID
 from binascii import b2a_hex
 import logging
 import struct

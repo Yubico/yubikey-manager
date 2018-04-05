@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from fido_host.fido2 import CTAP2, PinProtocolV1
+from fido2.ctap2 import CTAP2, PinProtocolV1
 from threading import Timer
 
 

@@ -30,7 +30,7 @@ import os
 from setuptools import setup
 
 install_requires = [
-    'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl', 'fido-host'
+    'six', 'pyscard', 'pyusb', 'click', 'cryptography', 'pyopenssl', 'fido2'
 ]
 tests_require = []
 if sys.version_info < (3, 3):

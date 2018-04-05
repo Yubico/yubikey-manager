@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 import click
 import logging
-from fido_host.hid import CtapError
+from fido2.ctap import CtapError
 from time import sleep
 from .util import click_skip_on_help, prompt_for_touch, click_force_option
 from ..util import TRANSPORT
