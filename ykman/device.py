@@ -77,6 +77,9 @@ class YubiKey(object):
                 self.device_name = 'Security Key by Yubico'  # SKY 2
             self._can_mode_switch = False
         elif self.version >= (4, 1, 0):
+            if (5, 1, 0) > self.version >= (5, 0, 0) and (
+                        driver.key_type == YUBIKEY.YK4):
+                self.device_name = 'YubiKey Preview'
             if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
                 capabilities = b'\x03\x01\x01\x3f'
             else:
