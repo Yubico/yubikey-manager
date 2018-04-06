@@ -86,6 +86,10 @@ def set_pin(ctx, pin, new_pin):
 
     controller = ctx.obj['controller']
 
+    def fail_if_not_valid(pin=None):
+        if pin and not 4 > len(pin) > 255:
+            ctx.fail('PIN must be between 4 and 255 characters long.')
+
     def prompt_new_pin():
         return click.prompt(
                     'Enter your new PIN', default='', hide_input=True,
@@ -97,6 +101,8 @@ def set_pin(ctx, pin, new_pin):
                     show_default=False)
 
     def change_pin(pin, new_pin):
+        fail_if_not_valid(pin)
+        fail_if_not_valid(new_pin)
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
         except CtapError as e:
@@ -108,10 +114,12 @@ def set_pin(ctx, pin, new_pin):
                     'Remove and re-insert the YubiKey.')
             if e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail('PIN is blocked.')
-            ctx.fail('Failed to change PIN. {}.'.format(e.message))
+            logger.error('Failed to change PIN', exc_info=e)
+            ctx.fail('Failed to change PIN.')
 
     def set_pin(new_pin):
         try:
+            fail_if_not_valid(new_pin)
             controller.set_pin(new_pin)
         except Exception as e:
             logger.error('Failed to set PIN', exc_info=e)
