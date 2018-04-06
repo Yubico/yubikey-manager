@@ -97,7 +97,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     Get the current connection mode of the YubiKey, or set it to MODE.
 
-    MODE can be a string, such as "OTP+U2F+CCID", or a shortened form: "o+u+c".
+    MODE can be a string, such as "OTP+FIDO+CCID", or a shortened form: "o+f+c".
     It can also be a mode number.
     """
     dev = ctx.obj['dev']

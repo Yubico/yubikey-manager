@@ -107,12 +107,12 @@ class FORM_FACTOR(IntEnum):
 @unique
 class TRANSPORT(BitflagEnum):
     OTP = CAPABILITY.OTP
-    U2F = CAPABILITY.U2F
+    FIDO = CAPABILITY.U2F
     CCID = CAPABILITY.CCID
 
     @staticmethod
     def usb_transports():
-        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.U2F
+        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.FIDO
 
 
 class Cve201715361VulnerableError(Exception):
@@ -148,19 +148,19 @@ class PID(IntEnum):
     NEO_OTP = 0x0110
     NEO_OTP_CCID = 0x0111
     NEO_CCID = 0x0112
-    NEO_U2F = 0x0113
-    NEO_OTP_U2F = 0x0114
-    NEO_U2F_CCID = 0x0115
-    NEO_OTP_U2F_CCID = 0x0116
-    SKY_U2F = 0x0120
+    NEO_FIDO = 0x0113
+    NEO_OTP_FIDO = 0x0114
+    NEO_FIDO_CCID = 0x0115
+    NEO_OTP_FIDO_CCID = 0x0116
+    SKY_FIDO = 0x0120
     YK4_OTP = 0x0401
-    YK4_U2F = 0x0402
-    YK4_OTP_U2F = 0x0403
+    YK4_FIDO = 0x0402
+    YK4_OTP_FIDO = 0x0403
     YK4_CCID = 0x0404
     YK4_OTP_CCID = 0x0405
-    YK4_U2F_CCID = 0x0406
-    YK4_OTP_U2F_CCID = 0x0407
-    YKP_OTP_U2F = 0x0410
+    YK4_FIDO_CCID = 0x0406
+    YK4_OTP_FIDO_CCID = 0x0407
+    YKP_OTP_FIDO = 0x0410
 
     def get_type(self):
         return YUBIKEY[self.name.split('_', 1)[0]]
@@ -174,10 +174,10 @@ class Mode(object):
         TRANSPORT.OTP,  # 0x00
         TRANSPORT.CCID,  # 0x01
         TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
-        TRANSPORT.U2F,  # 0x03
-        TRANSPORT.OTP | TRANSPORT.U2F,  # 0x04
-        TRANSPORT.U2F | TRANSPORT.CCID,  # 0x05
-        TRANSPORT.OTP | TRANSPORT.U2F | TRANSPORT.CCID  # 0x06
+        TRANSPORT.FIDO,  # 0x03
+        TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
+        TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
+        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID  # 0x06
     ]
 
     def __init__(self, transports):

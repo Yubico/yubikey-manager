@@ -184,7 +184,7 @@ def reset(ctx, force):
     try:
         if not force:
             prompt_re_insert_key()
-            dev = list(get_descriptors())[0].open_device(TRANSPORT.U2F)
+            dev = list(get_descriptors())[0].open_device(TRANSPORT.FIDO)
             controller = Fido2Controller(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
         else:
@@ -204,4 +204,4 @@ def reset(ctx, force):
         ctx.fail('Reset failed.')
 
 
-fido.transports = TRANSPORT.U2F
+fido.transports = TRANSPORT.FIDO

@@ -131,7 +131,7 @@ def list_drivers(transports=sum(TRANSPORT)):
         for dev in open_otp():
             if dev:
                 yield dev
-    if TRANSPORT.U2F & transports:
+    if TRANSPORT.FIDO & transports:
         for dev in open_u2f():
             if dev:
                 yield dev

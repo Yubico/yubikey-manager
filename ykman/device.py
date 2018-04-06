@@ -101,7 +101,7 @@ class YubiKey(object):
                 # Assume base capabilities for NEO
                 self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID | \
                     CAPABILITY.OPGP | CAPABILITY.PIV | CAPABILITY.OATH
-            if TRANSPORT.has(self.mode.transports, TRANSPORT.U2F) \
+            if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
                     or self.version >= (3, 3, 0):
                     self.capabilities |= CAPABILITY.U2F
         else:  # Standard

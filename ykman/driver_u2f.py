@@ -49,7 +49,7 @@ class U2FDriver(AbstractDriver):
     """
     libu2f-host based U2F driver
     """
-    transport = TRANSPORT.U2F
+    transport = TRANSPORT.FIDO
 
     def __init__(self, dev):
         self._dev = dev
