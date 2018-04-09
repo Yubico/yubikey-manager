@@ -37,7 +37,7 @@ from ..descriptor import (get_descriptors, list_drivers, open_device,
 from .util import click_skip_on_help
 from .info import info
 from .mode import mode
-from .slot import slot
+from .otp import otp
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
@@ -185,7 +185,7 @@ def list_keys(ctx, serials):
         del drv
 
 
-COMMANDS = (list_keys, info, mode, slot, openpgp, oath, piv, fido)
+COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido)
 
 
 for cmd in COMMANDS:

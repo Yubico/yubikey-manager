@@ -83,9 +83,9 @@ def _confirm_slot_overwrite(dev, slot):
 @click.option(
     '--access-code', required=False, metavar='HEX',
     help='A 6 byte access code. Set to empty to use a prompt for input.')
-def slot(ctx, access_code):
+def otp(ctx, access_code):
     """
-    Manage YubiKey Slots.
+    Manage OTP Application.
 
     The YubiKey provides two keyboard-based slots which can each be configured
     with a credential. Several credential types are supported.
@@ -108,7 +108,7 @@ def slot(ctx, access_code):
     ctx.obj['dev'].driver.access_code = access_code
 
 
-@slot.command()
+@otp.command()
 @click.pass_context
 def info(ctx):
     """
@@ -121,7 +121,7 @@ def info(ctx):
     click.echo('Slot 2: {}'.format(slot2 and 'programmed' or 'empty'))
 
 
-@slot.command()
+@otp.command()
 @click.confirmation_option('-f', '--force', prompt='Swap the two slots of the '
                            'YubiKey?')
 @click.pass_context
@@ -137,7 +137,7 @@ def swap(ctx):
         _failed_to_write_msg(ctx, e)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click_force_option
 @click.pass_context
@@ -158,7 +158,7 @@ def delete(ctx, slot, force):
         _failed_to_write_msg(ctx, e)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click.option('-P', '--public-id', required=False,
               help='Static part of the OTP, defaults to the YubiKey serial '
@@ -181,8 +181,8 @@ def delete(ctx, slot, force):
     help='Generate a random secret key. Conflicts with --key.')
 @click_force_option
 @click.pass_context
-def otp(ctx, slot, public_id, private_id, key, no_enter, force,
-        serial_public_id, generate_private_id, generate_key):
+def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
+            serial_public_id, generate_private_id, generate_key):
     """
     Program a Yubico OTP credential.
 
@@ -253,7 +253,7 @@ def otp(ctx, slot, public_id, private_id, key, no_enter, force,
         _failed_to_write_msg(ctx, e)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click.argument('password', required=False)
 @click.option(
@@ -306,7 +306,7 @@ def static(
         _failed_to_write_msg(ctx, e)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click.argument('key', required=False)
 @click.option(
@@ -366,7 +366,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
         _failed_to_write_msg(ctx, e)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click.argument('challenge', required=False)
 @click.option(
@@ -422,7 +422,7 @@ credential, and read the response. Supports output as a OATH-TOTP code.
     click.echo(res)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click.argument('key', callback=click_parse_b32_key, required=False)
 @click.option('-d', '--digits', type=click.Choice(['6', '8']), default='6',
@@ -458,7 +458,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
         _failed_to_write_msg(ctx, e)
 
 
-@slot.command()
+@otp.command()
 @click_slot_argument
 @click_force_option
 @click.pass_context
@@ -493,4 +493,4 @@ def settings(ctx, slot, enter, pacing, force):
         _failed_to_write_msg(ctx, e)
 
 
-slot.transports = TRANSPORT.OTP
+otp.transports = TRANSPORT.OTP
