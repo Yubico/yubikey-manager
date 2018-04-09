@@ -65,4 +65,4 @@ def info(ctx):
         else:
             status = 'Not available'
 
-        click.echo('    {0.name}:\t{1}'.format(c, status))
+        click.echo('    {0}:\t{1}'.format(str(c), status))

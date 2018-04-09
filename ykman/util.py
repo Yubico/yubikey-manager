@@ -76,6 +76,16 @@ class CAPABILITY(BitflagEnum):
     def dependent_on_ccid():
         return CAPABILITY.OPGP | CAPABILITY.OATH | CAPABILITY.PIV
 
+    def __str__(self):
+        if self == self.U2F:
+            return 'FIDO U2F'
+        elif self == self.FIDO2:
+            return 'FIDO 2'
+        elif self == self.OPGP:
+            return 'OpenPGP'
+        else:
+            return self.name
+
 
 @unique
 class FORM_FACTOR(IntEnum):
