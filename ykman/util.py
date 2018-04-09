@@ -70,7 +70,7 @@ class CAPABILITY(BitflagEnum):
     OPGP = 0x08
     PIV = 0x10
     OATH = 0x20
-    FIDO2 = 0x80
+    FIDO2 = 0x200
 
     @staticmethod
     def dependent_on_ccid():
