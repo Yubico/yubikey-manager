@@ -80,7 +80,7 @@ class CAPABILITY(BitflagEnum):
         if self == self.U2F:
             return 'FIDO U2F'
         elif self == self.FIDO2:
-            return 'FIDO 2'
+            return 'FIDO2'
         elif self == self.OPGP:
             return 'OpenPGP'
         else:
