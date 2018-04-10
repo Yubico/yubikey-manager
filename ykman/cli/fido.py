@@ -199,6 +199,9 @@ def reset(ctx, force):
             ctx.fail(
                 'Reset failed. Reset must be triggered within 5 seconds'
                 ' after the YubiKey is inserted.')
+        else:
+            logger.error(e)
+            ctx.fail('Reset failed.')
     except Exception as e:
         logger.error(e)
         ctx.fail('Reset failed.')
