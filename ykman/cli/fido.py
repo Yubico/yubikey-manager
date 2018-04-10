@@ -57,7 +57,7 @@ def fido(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of FIDO 2 application.
+    Display status of FIDO2 application.
     """
     controller = ctx.obj['controller']
     if controller.has_pin:
