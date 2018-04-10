@@ -88,4 +88,7 @@ def descriptor_filter(desc):
 
 def open_devices():
     for dev in CtapHidDevice.list_devices(descriptor_filter):
-        yield U2FDriver(dev)
+        try:
+            yield U2FDriver(dev)
+        except Exception as e:
+            logger.debug('Failed opening FIDO device', exc_info=e)
