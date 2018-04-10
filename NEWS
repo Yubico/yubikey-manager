@@ -1,19 +1,12 @@
 * Version 0.6.1 (unreleased)
- ** Breaking changes:
-  *** `-g|--generate` flag added to command `slot chalresp`
-   **** `slot chalresp` called with `-f|--force` without `KEY` argument or `-g|--generate` will now fail instead of interactively prompting for a secret key.
-  *** CLI options to command `slot otp` changed:
-   **** Interactive prompts no longer accept defaults by inputing blank values.
-   **** `-f|--force` now fails if public ID, private ID or secret key is not given, instead of using serial number as public ID and generating private ID and secret key.
-   **** New flag `--serial-public-id` replaces blank prompt for public ID.
-   **** New flag `--generate-private-id` replaces blank prompt for private ID.
-   **** New flag `--generate-key` replaces blank prompt for secret key.
-  *** `piv` commands called with `-f|--force` will now fail instead of interactively prompting for PIN or management key.
-  *** `-g|--generate` flag added to command `piv change-management-key`.
-   **** `-f|--force` variants without `-p|--protect` or `-g|--generate` will now fail instead of generating a random management key.
-   **** Interactive prompt variants no longer generate a random management key on blank input.
- ** Bug fixes:
-  *** PIV: Signing operations with PIN policy ALWAYS now require only one preceding call to `PivController.verify()`, instead of two. As a consequence, signing CLI operations with PIN policy ALWAYS no longer fail if the YubiKey has a management key protected by PIN.
+ ** Support for YubiKeys with FIDO2. See ykman fido -h
+ ** Report the form factor for YubiKeys that support it.
+ ** OTP: slot command is now called otp. See ykman otp -h for all changes.
+ ** Static password: Add support for different keyboard layouts. See ykman otp static -h
+ ** PIV: Signatures for CSRs are now correct.
+ ** PIV: Commands on slots with PIN policy ALWAYS no longer fail if the YubiKey has a management key protected by PIN.
+ ** Mode: The U2F mode is now called FIDO.
+ ** Dependencies: libu2f-host is no longer used for FIDO communication over USB, instead the python library fido2 is used.
 
 * Version 0.6.0 (released 2018-02-09)
  ** OpenPGP: Expose remaining PIN retries in info command and API.
