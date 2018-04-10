@@ -16,15 +16,22 @@ Usage: ykman [OPTIONS] COMMAND [ARGS]...
 
 Options:
   -v, --version
-  -h, --help     Show this message and exit.
+  -d, --device SERIAL
+  -l, --log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
+                                  Enable logging at given verbosity level
+  --log-file FILE                 Write logs to the given FILE instead of standard error;
+                                  ignored unless --log-level is also set
+  -h, --help                      Show this message and exit.
 
 Commands:
+  fido     Manage FIDO applications.
   info     Show general information.
-  mode     Manage connection modes.
-  oath     Manage YubiKey OATH credentials.
-  openpgp  Manage YubiKey OpenPGP functionality.
-  piv      Manage YubiKey PIV functionality.
-  slot     Manage YubiKey Slots.
+  list     List connected YubiKeys.
+  mode     Manage connection modes (USB Interfaces).
+  oath     Manage OATH application.
+  openpgp  Manage OpenPGP application.
+  otp      Manage OTP Application.
+  piv      Manage PIV application.
 ....
 
 === Installation
@@ -41,7 +48,7 @@ Commands:
 
 Or from source:
 
-    $ brew install swig ykpers libu2f-host libusb
+    $ brew install swig ykpers libusb
     $ pip install --user yubikey-manager
 
 ==== Windows
@@ -52,7 +59,7 @@ The command line tool is installed together with the GUI version of https://deve
 
     $ pip install yubikey-manager
 
-In order for the pip package to work https://developers.yubico.com/libu2f-host/[libu2f-host], https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
+In order for the pip package to work, https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
 https://pyscard.sourceforge.io/[Pyscard] is also needed in some form, and if it's not installed pip builds it using http://www.swig.org/[swig] and potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
 
 === Bash completion
