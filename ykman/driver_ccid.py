@@ -87,6 +87,9 @@ def _pid_from_name(name):
         if t.name in name:
             transports += t
 
+    if 'U2F' in name:
+        transports += TRANSPORT.FIDO
+
     key_type = YUBIKEY.NEO if 'NEO' in name else YUBIKEY.YK4
     return key_type.get_pid(transports)
 
