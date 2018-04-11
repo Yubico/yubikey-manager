@@ -110,7 +110,7 @@ def set_pin(ctx, pin, new_pin):
                 ctx.fail('Wrong PIN.')
             if e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
                 ctx.fail(
-                    'PIN authentication is currently blocked.'
+                    'PIN authentication is currently blocked. '
                     'Remove and re-insert the YubiKey.')
             if e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail('PIN is blocked.')
