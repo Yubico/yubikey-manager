@@ -107,7 +107,10 @@ class CCIDDriver(AbstractDriver):
             self._read_version()
         except APDUError as e:
             logger.error('Failed to read firmware version', exc_info=e)
-            self._version = (5, 0, 0)
+            # Failure here likely indicates YK preview, in which case we'll
+            # later read the version via capabilities. This might be wrong and
+            # should be fixed later.
+            self._version = (5, 0, 0)  # TODO:Properly detect version
         try:
             self._read_serial()
         except APDUError as e:
