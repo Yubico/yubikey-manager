@@ -1,4 +1,4 @@
-* Version 0.6.1 (unreleased)
+* Version 0.6.1 (released 2018-02-12)
  ** Support for YubiKeys with FIDO2. See ykman fido -h
  ** Report the form factor for YubiKeys that support it.
  ** OTP: slot command is now called otp. See ykman otp -h for all changes.
