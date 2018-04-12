@@ -35,7 +35,7 @@ from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
 class TestSlotStatus(DestructiveYubikeyTestCase):
 
-    def test_ykman_slot_info(self):
+    def test_ykman_otp_info(self):
         info = ykman_cli('otp', 'info')
         self.assertIn('Slot 1:', info)
         self.assertIn('Slot 2:', info)
