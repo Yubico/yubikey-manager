@@ -46,9 +46,7 @@ YK4_CAPABILITIES = CTAPHID.VENDOR_FIRST + 2
 
 
 class U2FDriver(AbstractDriver):
-    """
-    libu2f-host based U2F driver
-    """
+
     transport = TRANSPORT.FIDO
 
     def __init__(self, dev):
