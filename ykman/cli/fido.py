@@ -87,7 +87,7 @@ def set_pin(ctx, pin, new_pin):
     controller = ctx.obj['controller']
 
     def fail_if_not_valid(pin=None):
-        if pin and not 4 > len(pin) > 255:
+        if pin and not 4 <= len(pin) <= 255:
             ctx.fail('PIN must be between 4 and 255 characters long.')
 
     def prompt_new_pin():
