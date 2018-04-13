@@ -86,9 +86,9 @@ def set_pin(ctx, pin, new_pin):
 
     controller = ctx.obj['controller']
 
-    def fail_if_not_valid(pin=None):
-        if pin and not 4 <= len(pin) <= 255:
-            ctx.fail('PIN must be between 4 and 255 characters long.')
+    def fail_if_not_valid(ctx, pin=None):
+        if not pin or len(pin) < 4 or len(pin.encode('utf-8')) > 128:
+            ctx.fail('PIN must be over 4 characters long and under 128 bytes.')
 
     def prompt_new_pin():
         return click.prompt(
@@ -101,8 +101,8 @@ def set_pin(ctx, pin, new_pin):
                     show_default=False)
 
     def change_pin(pin, new_pin):
-        fail_if_not_valid(pin)
-        fail_if_not_valid(new_pin)
+        fail_if_not_valid(ctx, pin)
+        fail_if_not_valid(ctx, new_pin)
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
         except CtapError as e:
@@ -118,12 +118,8 @@ def set_pin(ctx, pin, new_pin):
             ctx.fail('Failed to change PIN.')
 
     def set_pin(new_pin):
-        try:
-            fail_if_not_valid(new_pin)
-            controller.set_pin(new_pin)
-        except Exception as e:
-            logger.error('Failed to set PIN', exc_info=e)
-            ctx.fail('Failed to set a PIN.')
+        fail_if_not_valid(ctx, new_pin)
+        controller.set_pin(new_pin)
 
     if controller.has_pin:
         if pin:
