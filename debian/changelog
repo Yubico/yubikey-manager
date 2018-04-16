@@ -2,4 +2,4 @@ yubikey-manager (0.6.1) xenial; urgency=low
 
   * Build for ppa
 
- -- Dag Heyman <dag@yubico.com>  Fri, 09 Feb 2018 11:59:28 +0100
+ -- Dag Heyman <dag@yubico.com>  Fri, 16 Apr 2018 09:59:28 +0100
