@@ -28,17 +28,13 @@
 from __future__ import absolute_import
 
 from .driver import AbstractDriver
-from .util import TRANSPORT, YUBIKEY, PID, parse_tlvs
+from .util import TRANSPORT, YUBIKEY, PID
 from fido2.hid import CtapHidDevice, CTAPHID
-from binascii import b2a_hex
 import logging
 import struct
-import six
 
 
 logger = logging.getLogger(__name__)
-
-U2F_VENDOR_FIRST = 0x40
 
 
 YUBIKEY_DEVICE_CONFIG = CTAPHID.VENDOR_FIRST
@@ -50,28 +46,16 @@ class U2FDriver(AbstractDriver):
     transport = TRANSPORT.FIDO
 
     def __init__(self, dev):
+        super(U2FDriver, self).__init__(PID(dev.descriptor['product_id']))
         self._dev = dev
-        self._pid = PID(dev.descriptor['product_id'])
-        self._version = dev.device_version
-        if self._version < (4, 0, 0):
-            if self.key_type in [YUBIKEY.NEO, YUBIKEY.YKS]:  # Applet version
-                self._version = (3, 2, 0)
 
-        self._capa = b''
-        if self._version >= (4, 2, 0):
-            self._capa = self._dev.call(YK4_CAPABILITIES, b'\x00')
-            data = self._capa
-            c_len, data = six.indexbytes(data, 0), data[1:]
-            data = data[:c_len]
-            for tlv in parse_tlvs(data):
-                if tlv.tag == 0x02:
-                    self._serial = int(b2a_hex(tlv.value), 16)
-
-    def read_capabilities(self):
-        return self._capa
+    def read_config(self):
+        return self._dev.call(YK4_CAPABILITIES, b'\x00')
 
     def guess_version(self):
-        return self._version, self._version >= (4, 0, 0)
+        if self.key_type == YUBIKEY.NEO:  # Applet version
+            return (3, 2, 0)
+        return self._dev.device_version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)

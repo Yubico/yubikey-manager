@@ -27,9 +27,10 @@
 
 from __future__ import absolute_import
 
-from .util import CAPABILITY, TRANSPORT, YUBIKEY, FORM_FACTOR, parse_tlvs
+from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Mode,
+                   parse_tlvs, parse_int)
 from .driver import AbstractDriver
-from binascii import b2a_hex
+from enum import IntEnum, unique
 import logging
 import six
 
@@ -37,12 +38,83 @@ import six
 logger = logging.getLogger(__name__)
 
 
-YK4_CAPA_TAG = 0x01
-YK4_SERIAL_TAG = 0x02
-YK4_ENABLED_TAG = 0x03
-YK4_FORMFACTOR_TAG = 0x04
+@unique
+class TAG(IntEnum):
+    USB_CAPA = 0x01
+    SERIAL = 0x02
+    USB_ENABLED = 0x03
+    FORMFACTOR = 0x04
+    VERSION = 0x05
+    AUTO_EJECT_TIMEOUT = 0x06
+    CHALRESP_TIMEOUT = 0x07
+    DEVICE_FLAGS = 0x08
+    APP_VERSIONS = 0x09
+    CONF_LOCKED = 0x0a
+    NFC_CAPA = 0x0d
+    NFC_ENABLED = 0x0e
 
-_NULL_DRIVER = AbstractDriver()
+
+class DeviceConfig(object):
+
+    def __init__(self, data=None):
+        self.serial = None
+        self.version = None
+        self.form_factor = FORM_FACTOR.UNKNOWN
+        self.usb_supported = 0
+        self.usb_enabled = 0
+        self.nfc_supported = 0
+        self.nfc_enabled = 0
+        self.app_versions = None
+        self.configuration_locked = False
+        self.device_flags = 0
+
+        if not data:
+            logger.debug('Config data empty/missing')
+            return
+
+        c_len, data = six.indexbytes(data, 0), data[1:]
+        data = data[:c_len]
+
+        for tlv in parse_tlvs(data):
+            if TAG.SERIAL == tlv.tag:
+                self.serial = parse_int(tlv.value)
+                logger.debug('Config serial: %d', self.serial)
+            elif TAG.VERSION == tlv.tag:
+                self.version = tuple(c for c in six.iterbytes(tlv.value))
+                logger.debug('Config version: %r', self.version)
+            elif TAG.FORMFACTOR == tlv.tag:
+                self.form_factor = FORM_FACTOR.from_code(parse_int(tlv.value))
+                logger.debug('Config form factor: %s', self.form_factor)
+            elif TAG.DEVICE_FLAGS == tlv.tag:
+                self.device_flags = parse_int(tlv.value)
+                logger.debug('Config device flags: %s', bin(self.device_flags))
+            elif TAG.APP_VERSIONS == tlv.tag:
+                self.app_versions = tlv.value
+                logger.debug('Config app versions: %s', self.app_versions)
+            elif TAG.CONF_LOCKED == tlv.tag:
+                self.configuration_locked = bool(six.indexbytes(tlv.value, 0))
+                logger.debug('Config locked: %s', self.configuration_locked)
+            elif TAG.USB_CAPA == tlv.tag:
+                self.usb_supported = parse_int(tlv.value)
+                logger.debug('Config usb capabilities: %s',
+                             bin(self.usb_supported))
+            elif TAG.USB_ENABLED == tlv.tag:
+                self.usb_enabled = parse_int(tlv.value)
+                logger.debug('Config usb enabled: %s',
+                             bin(self.usb_enabled))
+            elif TAG.NFC_CAPA == tlv.tag:
+                self.nfc_supported = parse_int(tlv.value)
+                logger.debug('Config nfc capabilities: %s',
+                             bin(self.nfc_supported))
+            elif TAG.NFC_ENABLED == tlv.tag:
+                self.nfc_enabled = parse_int(tlv.value)
+                logger.debug('Config nfc enabled: %s',
+                             bin(self.nfc_enabled))
+
+
+_NULL_DRIVER = AbstractDriver(0)
+_NEO_BASE_CAPABILITIES = TRANSPORT.CCID | APPLICATION.OTP | APPLICATION.OATH \
+    | APPLICATION.OPGP | APPLICATION.PIV
 
 
 class YubiKey(object):
@@ -50,114 +122,130 @@ class YubiKey(object):
     YubiKey device handle
     """
     device_name = 'YubiKey'
-    capabilities = 0
-    enabled = 0
-    _serial = None
     _can_mode_switch = True
 
     def __init__(self, descriptor, driver):
-        if not driver:
-            raise ValueError('No driver given!')
+        self._key_type = driver.pid.get_type()
+        self.device_name = self._key_type.value
         self._descriptor = descriptor
         self._driver = driver
-        self.device_name = descriptor.key_type.value
-        self._form_factor = FORM_FACTOR.UNKNOWN
 
-        if driver.key_type == YUBIKEY.SKY:
-            try:
-                # Only new SKYs report capabilities
-                resp = driver.read_capabilities()
-                if (resp):
-                    self._parse_capabilities(resp)
-                else:
-                    self.capabilities = CAPABILITY.U2F
-            except Exception:
-                self.capabilities = CAPABILITY.U2F
-            if self.version >= (5, 0, 0):
-                self.device_name = 'Security Key by Yubico'  # SKY 2
-            self._can_mode_switch = False
-        elif self.version >= (4, 1, 0):
-            if (5, 1, 0) > self.version >= (5, 0, 0) and (
-                        driver.key_type == YUBIKEY.YK4):
-                self.device_name = 'YubiKey Preview'
-            if self.version == (4, 2, 4):  # 4.2.4 doesn't report correctly.
-                capabilities = b'\x03\x01\x01\x3f'
-            else:
-                capabilities = driver.read_capabilities()
-            self._parse_capabilities(capabilities)
-            if self.capabilities == \
-                    (CAPABILITY.OTP | CAPABILITY.CCID | CAPABILITY.U2F):
+        try:
+            logger.debug('Read config from device...')
+            config = DeviceConfig(driver.read_config())
+            logger.debug('Success!')
+            self._version_certain = True
+            if not config.version:
+                config.version = driver.guess_version()
+            if config.version >= (5, 0, 0):
+                self._can_mode_switch = False  # New capabilities
+            elif config.version == (4, 2, 4):  # Doesn't report correctly
+                config.usb_supported = 0x3f
+            if config.usb_supported ==\
+                    (APPLICATION.OTP | APPLICATION.U2F | TRANSPORT.CCID):
                 self.device_name = 'YubiKey Edge'
-                # YK Edge has no use for CCID.
-                self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
-        elif self.version >= (4, 0, 0):  # YK Plus
-            self.capabilities = CAPABILITY.OTP | CAPABILITY.U2F
-            self._can_mode_switch = False
-        elif self.version >= (3, 0, 0):
-            # NEO
-            if driver.transport == TRANSPORT.CCID:
-                self.capabilities = driver.probe_capabilities_support()
+                config.usb_supported ^= TRANSPORT.CCID
+        except Exception:  # TODO Proper exception
+            logger.debug('Failed to read config from device')
+            config = DeviceConfig()
+            config.version = descriptor.version
+            if config.version is not None:
+                self._version_certain = True
             else:
-                # Assume base capabilities for NEO
-                self.capabilities = CAPABILITY.OTP | CAPABILITY.CCID | \
-                    CAPABILITY.OPGP | CAPABILITY.PIV | CAPABILITY.OATH
-            if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
-                    or self.version >= (3, 3, 0):
-                    self.capabilities |= CAPABILITY.U2F
-        else:  # Standard
-            self.capabilities = CAPABILITY.OTP
-            self._can_mode_switch = False
-        if not self.enabled:
-            # Assume everything supported is enabled, except USB transports
-            self.enabled = self.capabilities & ~TRANSPORT.usb_transports()
-            self.enabled |= self.mode.transports  # ...unless they are enabled.
-        # If no CCID, disable dependent capabilities
-        if not CAPABILITY.has(self.enabled, CAPABILITY.CCID):
-            self.enabled = self.enabled & ~CAPABILITY.dependent_on_ccid()
+                config.version = driver.guess_version()
+                self._version_certain = self._key_type != YUBIKEY.NEO
 
-    def _parse_capabilities(self, data):
-        if not data:
-            return
-        c_len, data = six.indexbytes(data, 0), data[1:]
-        data = data[:c_len]
-        for tlv in parse_tlvs(data):
-            if YK4_CAPA_TAG == tlv.tag:
-                self.capabilities = int(b2a_hex(tlv.value), 16)
-            elif YK4_SERIAL_TAG == tlv.tag:
-                self._serial = int(b2a_hex(tlv.value), 16)
-            elif YK4_ENABLED_TAG == tlv.tag:
-                self.enabled = int(b2a_hex(tlv.value), 16)
-            elif YK4_FORMFACTOR_TAG == tlv.tag:
-                self._form_factor = FORM_FACTOR.from_code(
-                    int(b2a_hex(tlv.value), 16))
+            try:
+                config.serial = driver.read_serial()
+            except Exception:
+                config.serial = None
 
-    @property
-    def version(self):
-        return self._descriptor.version
+            if self._key_type == YUBIKEY.SKY:
+                logger.debug('Identified SKY 1')
+                config.usb_supported = APPLICATION.U2F
+            elif self._key_type == YUBIKEY.NEO:
+                logger.debug('Identified NEO')
+                if driver.transport == TRANSPORT.CCID:
+                    logger.debug('CCID available, probe capabilities...')
+                    config.usb_supported = driver.probe_capabilities()
+                else:  # Assume base capabilities
+                    logger.debug('CCID not available, guess capabilities')
+                    config.usb_supported = _NEO_BASE_CAPABILITIES
+                    if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
+                            or config.version >= (3, 3, 0):
+                        config.usb_supported |= APPLICATION.U2F
+            elif self._key_type == YUBIKEY.YKP:
+                logger.debug('YK Plus identified')
+                config.usb_supported = APPLICATION.OTP | APPLICATION.U2F
+                self._can_mode_switch = False
+            elif self._key_type == YUBIKEY.YKS:
+                logger.debug('YK Standard identified')
+                config.usb_supported = APPLICATION.OTP
+                self._can_mode_switch = False
 
-    @property
-    def version_certain(self):
-        return self._descriptor.version_certain
+        if not config.usb_enabled:
+            # This is wrong, but gets fixed below
+            config.usb_enabled = config.usb_supported
 
-    @property
-    def serial(self):
-        return self._serial or self._driver.serial
+        # Fix USB enabled
+        if not TRANSPORT.has(self.mode.transports, TRANSPORT.OTP):
+            config.usb_enabled &= ~APPLICATION.OTP
+        if not TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO):
+            config.usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
+        if not TRANSPORT.has(self.mode.transports, TRANSPORT.CCID):
+            config.usb_enabled &= ~(TRANSPORT.CCID | APPLICATION.OATH |
+                                    APPLICATION.OPGP | APPLICATION.PIV)
 
-    @property
-    def form_factor(self):
-        return self._form_factor
+        self._config = config
+
+        if self._key_type == YUBIKEY.SKY:
+            self._can_mode_switch = False  # New capabilities
+            if not APPLICATION.has(config.usb_supported, APPLICATION.FIDO2):
+                logger.debug('SKY has no FIDO2, SKY 1')
+                self.device_name = 'FIDO U2F Security Key'  # SKY 1
+        elif self._key_type == YUBIKEY.YK4:
+            if self.version >= (5, 0, 0):
+                self.device_name = 'YubiKey Preview'
 
     @property
     def driver(self):
         return self._driver
 
     @property
+    def config(self):
+        return self._config
+
+    @property
+    def version_certain(self):
+        return self._version_certain
+
+    @property
+    def can_mode_switch(self):
+        return self._can_mode_switch
+
+    @property
+    def version(self):
+        return self._config.version
+
+    @property
+    def serial(self):
+        return self._config.serial
+
+    @property
+    def form_factor(self):
+        return self._config.form_factor
+
+    @property
+    def key_type(self):
+        return self._key_type
+
+    @property
     def transport(self):
-        return self._driver.transport
+        return self._driver.pid.get_transports()
 
     @property
     def mode(self):
-        return self._descriptor.mode
+        return Mode.from_pid(self._driver.pid)
 
     @mode.setter
     def mode(self, mode):
@@ -165,14 +253,10 @@ class YubiKey(object):
             raise ValueError('Mode not supported: %s' % mode)
         self.set_mode(mode)
 
-    @property
-    def can_mode_switch(self):
-        return self._can_mode_switch
-
     def has_mode(self, mode):
         return self.mode == mode or \
             (self.can_mode_switch and
-             TRANSPORT.has(self.capabilities, mode.transports))
+             TRANSPORT.has(self._config.usb_supported, mode.transports))
 
     def set_mode(self, mode, cr_timeout=0, autoeject_time=None):
         flags = 0
@@ -193,17 +277,11 @@ class YubiKey(object):
             return self
         if not TRANSPORT.has(self.mode.transports, transport):
             raise ValueError('%s transport not enabled!' % transport)
-        my_mode = self.mode
-        my_serial = self.serial
 
         del self._driver
         self._driver = _NULL_DRIVER
 
-        dev = self._descriptor.open_device(transport)
-        if dev.serial and my_serial:
-            assert dev.serial == my_serial
-        assert dev.mode == my_mode
-        return dev
+        return self._descriptor.open_device(transport, self.serial)
 
     def close(self):
         self._driver.close()
@@ -216,12 +294,11 @@ class YubiKey(object):
 
     def __str__(self):
         return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}]' \
-            'serial: {4} CAP: {5:x}' \
+            'serial: {4}' \
             .format(
                 self.device_name,
                 self.version,
                 self.mode,
                 self.transport,
-                self.serial,
-                self.capabilities
+                self.serial
             )

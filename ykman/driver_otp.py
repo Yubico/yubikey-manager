@@ -97,14 +97,12 @@ class OTPDriver(AbstractDriver):
     transport = TRANSPORT.OTP
 
     def __init__(self, dev):
-
         self._dev = dev
+        super(OTPDriver, self).__init__(self._read_pid())
+
         self._access_code = None
-        self._serial = self._read_serial()
-        self._pid = self._read_pid()
         self._slot1_valid = False
         self._slot2_valid = False
-        self._status = (0, 0, 0)
         self._read_status()
 
     @property
@@ -120,14 +118,13 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
         return PID(pid.value)
 
-    def _read_serial(self):
+    def read_serial(self):
         serial = c_uint()
         if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
             return serial.value
         else:
-            logger.debug(
-                'Failed to read serial from device.')
-        return None  # Serial not visible
+            logger.debug('Failed to read serial from device.')
+            return None  # Serial not visible
 
     def _read_status(self):
         status = ykpers.ykds_alloc()
@@ -144,7 +141,10 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykds_free(status)
 
-    def read_capabilities(self):
+    def read_config(self):
+        if self._version < (4, 1, 0):
+            raise NotImplementedError()
+
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
         check(ykpers.yk_get_capabilities(
@@ -152,7 +152,7 @@ class OTPDriver(AbstractDriver):
         return resp.raw[:buf_size.value]
 
     def guess_version(self):
-        return self._version, True
+        return self._version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()
@@ -303,7 +303,7 @@ class OTPDriver(AbstractDriver):
                     logger.debug('Got %s as expected.', e)
                     # NEOs and very old YK4s might still be blinking,
                     # lets try to read the serial to cancel it.
-                    self._read_serial()
+                    self.read_serial()
                     raise
                 else:
                     logger.debug('YkpersError: %s', e)
