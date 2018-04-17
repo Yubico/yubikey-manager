@@ -139,6 +139,22 @@ def swap(ctx):
 
 @otp.command()
 @click_slot_argument
+@click.pass_context
+def ndef(ctx, slot):
+    """
+    Select slot configuration to use for NDEF.
+    """
+    dev = ctx.obj['dev']
+    if not dev.driver.slot_status[slot - 1]:
+        ctx.fail('Slot {} is empty.'.format(slot))
+    try:
+        dev.driver.configure_ndef_slot(slot)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
+
+
+@otp.command()
+@click_slot_argument
 @click_force_option
 @click.pass_context
 def delete(ctx, slot, force):

@@ -354,6 +354,14 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_config(cfg)
 
+    def configure_ndef_slot(self, slot, uri='https://my.yubico.com/neo/'):
+        ndef = ykpers.ykp_alloc_ndef()
+        try:
+            check(ykpers.ykp_construct_ndef_uri(ndef, bytes(uri.encode())))
+            check(ykpers.yk_write_ndef2(self._dev, ndef, slot))
+        finally:
+            ykpers.ykp_free_ndef(ndef)
+
     def set_access_code(self, slot, new_code=None, update=True):
         if update and self._version < (2, 3, 0):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
