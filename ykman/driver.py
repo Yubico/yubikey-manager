@@ -59,10 +59,13 @@ class AbstractDriver(object):
     def set_mode(self, mode_code):
         raise NotImplementedError()
 
+    def guess_version(self):
+        raise NotImplementedError()
+
     def read_config(self):
         raise NotImplementedError()
 
-    def guess_version(self):
+    def write_config(self, data):
         raise NotImplementedError()
 
     def close(self):
