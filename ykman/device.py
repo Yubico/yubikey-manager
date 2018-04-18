@@ -50,11 +50,34 @@ class TAG(IntEnum):
     CHALRESP_TIMEOUT = 0x07
     DEVICE_FLAGS = 0x08
     APP_VERSIONS = 0x09
-    CONF_LOCKED = 0x0a
+    CONFIG_LOCK = 0x0a
     USE_LOCK_KEY = 0x0b
     REBOOT = 0x0c
     NFC_CAPA = 0x0d
     NFC_ENABLED = 0x0e
+
+
+def device_config(usb_enabled=None, nfc_enabled=None, flags=None,
+                  auto_eject_timeout=None, chalresp_timeout=None,
+                  config_lock=None):
+    payload = b''
+    if config_lock is not None:
+        if len(payload) != 16:
+            raise ValueError('Config lock key must be 16 bytes')
+        payload += Tlv(TAG.CONFIG_LOCK, payload)
+    if usb_enabled is not None:
+        payload += Tlv(TAG.USB_ENABLED, int2bytes(usb_enabled))
+    if nfc_enabled is not None:
+        payload += Tlv(TAG.NFC_ENABLED, int2bytes(nfc_enabled))
+    if flags is not None:
+        payload += Tlv(TAG.DEVICE_FLAGS, struct.pack('>B', flags))
+    if auto_eject_timeout is not None:
+        payload += Tlv(TAG.AUTO_EJECT_TIMEOUT,
+                       struct.pack('>H', auto_eject_timeout))
+    if chalresp_timeout is not None:
+        payload += Tlv(TAG.CHALRESP_TIMEOUT,
+                       struct.pack('>B', chalresp_timeout))
+    return payload
 
 
 class DeviceConfig(object):
@@ -94,7 +117,7 @@ class DeviceConfig(object):
             elif TAG.APP_VERSIONS == tlv.tag:
                 self.app_versions = tlv.value
                 logger.debug('Config app versions: %s', self.app_versions)
-            elif TAG.CONF_LOCKED == tlv.tag:
+            elif TAG.CONFIG_LOCK == tlv.tag:
                 self.configuration_locked = bool(six.indexbytes(tlv.value, 0))
                 logger.debug('Config locked: %s', self.configuration_locked)
             elif TAG.USB_CAPA == tlv.tag:
@@ -272,7 +295,7 @@ class YubiKey(object):
             (self.can_mode_switch and
              TRANSPORT.has(self._config.usb_supported, mode.transports))
 
-    def set_mode(self, mode, cr_timeout=0, autoeject_time=None):
+    def set_mode(self, mode, cr_timeout=None, autoeject_time=None):
         flags = 0
 
         # If autoeject_time is set, then set the touch eject flag.
@@ -285,23 +308,21 @@ class YubiKey(object):
         if self.version <= (3, 3, 1) and mode.code == 2:
             flags = 0x80
         if not self._can_write_config:
-            self._driver.set_mode(flags | mode.code, cr_timeout, autoeject_time)
+            self._driver.set_mode(flags | mode.code, cr_timeout or 0,
+                                  autoeject_time)
         else:
-            usb_enabled = self.config.usb_supported & (
-                ((APPLICATION.U2F | APPLICATION.FIDO2) *
-                 mode.has_transport(TRANSPORT.FIDO)) |
-                ((APPLICATION.OATH | APPLICATION.OPGP | APPLICATION.PIV) *
-                 mode.has_transport(TRANSPORT.CCID)) |
-                ((APPLICATION.OTP) * mode.has_transport(TRANSPORT.OTP))
-            )
-            payload = Tlv(TAG.USB_ENABLED, int2bytes(usb_enabled))
-            if cr_timeout:
-                payload += Tlv(TAG.CHALRESP_TIMEOUT, int2bytes(cr_timeout))
-            if autoeject_time is not None:
-                payload += Tlv(TAG.AUTO_EJECT_TIMEOUT,
-                               struct.pack('>H', autoeject_time))
-            payload += Tlv(TAG.DEVICE_FLAGS, struct.pack('>B', flags))
-            self.write_config(payload, reboot=True)
+            self.write_config(device_config(
+                usb_enabled=self.config.usb_supported & (
+                    ((APPLICATION.U2F | APPLICATION.FIDO2) *
+                     mode.has_transport(TRANSPORT.FIDO)) |
+                    ((APPLICATION.OATH | APPLICATION.OPGP | APPLICATION.PIV) *
+                     mode.has_transport(TRANSPORT.CCID)) |
+                    ((APPLICATION.OTP) * mode.has_transport(TRANSPORT.OTP))
+                ),
+                flags=flags,
+                chalresp_timeout=cr_timeout,
+                auto_eject_timeout=autoeject_time
+            ), reboot=True)
 
     def use_transport(self, transport):
         if self.transport == transport:
