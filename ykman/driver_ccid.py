@@ -32,7 +32,7 @@ import struct
 import subprocess
 import time
 import six
-from enum import IntEnum
+from enum import IntEnum, unique
 from binascii import b2a_hex
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
@@ -47,6 +47,7 @@ SW_NO_INPUT_DATA = 0x6285
 SW_CONDITIONS_NOT_SATISFIED = 0x6985
 
 
+@unique
 class INS(IntEnum):
     SELECT = 0xa4
     READ_CONFIG = 0x1d
@@ -123,8 +124,7 @@ class CCIDDriver(AbstractDriver):
         if self.pid.get_type() == YUBIKEY.NEO:
             raise NotImplementedError()
         self.send_apdu(0, INS.SELECT, 4, 0, AID.MGR)
-        capa = self.send_apdu(0, INS.READ_CONFIG, 0, 0)
-        return capa
+        return self.send_apdu(0, INS.READ_CONFIG, 0, 0)
 
     def write_config(self, data):
         if self.pid.get_type() == YUBIKEY.NEO:

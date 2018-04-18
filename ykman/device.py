@@ -27,11 +27,12 @@
 
 from __future__ import absolute_import
 
-from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Mode,
-                   parse_tlvs, parse_int)
+from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Mode, Tlv,
+                   parse_tlvs, bytes2int, int2bytes)
 from .driver import AbstractDriver
 from enum import IntEnum, unique
 import logging
+import struct
 import six
 
 
@@ -50,6 +51,8 @@ class TAG(IntEnum):
     DEVICE_FLAGS = 0x08
     APP_VERSIONS = 0x09
     CONF_LOCKED = 0x0a
+    USE_LOCK_KEY = 0x0b
+    REBOOT = 0x0c
     NFC_CAPA = 0x0d
     NFC_ENABLED = 0x0e
 
@@ -77,16 +80,16 @@ class DeviceConfig(object):
 
         for tlv in parse_tlvs(data):
             if TAG.SERIAL == tlv.tag:
-                self.serial = parse_int(tlv.value)
+                self.serial = bytes2int(tlv.value)
                 logger.debug('Config serial: %d', self.serial)
             elif TAG.VERSION == tlv.tag:
                 self.version = tuple(c for c in six.iterbytes(tlv.value))
                 logger.debug('Config version: %r', self.version)
             elif TAG.FORMFACTOR == tlv.tag:
-                self.form_factor = FORM_FACTOR.from_code(parse_int(tlv.value))
+                self.form_factor = FORM_FACTOR.from_code(bytes2int(tlv.value))
                 logger.debug('Config form factor: %s', self.form_factor)
             elif TAG.DEVICE_FLAGS == tlv.tag:
-                self.device_flags = parse_int(tlv.value)
+                self.device_flags = bytes2int(tlv.value)
                 logger.debug('Config device flags: %s', bin(self.device_flags))
             elif TAG.APP_VERSIONS == tlv.tag:
                 self.app_versions = tlv.value
@@ -95,19 +98,19 @@ class DeviceConfig(object):
                 self.configuration_locked = bool(six.indexbytes(tlv.value, 0))
                 logger.debug('Config locked: %s', self.configuration_locked)
             elif TAG.USB_CAPA == tlv.tag:
-                self.usb_supported = parse_int(tlv.value)
+                self.usb_supported = bytes2int(tlv.value)
                 logger.debug('Config usb capabilities: %s',
                              bin(self.usb_supported))
             elif TAG.USB_ENABLED == tlv.tag:
-                self.usb_enabled = parse_int(tlv.value)
+                self.usb_enabled = bytes2int(tlv.value)
                 logger.debug('Config usb enabled: %s',
                              bin(self.usb_enabled))
             elif TAG.NFC_CAPA == tlv.tag:
-                self.nfc_supported = parse_int(tlv.value)
+                self.nfc_supported = bytes2int(tlv.value)
                 logger.debug('Config nfc capabilities: %s',
                              bin(self.nfc_supported))
             elif TAG.NFC_ENABLED == tlv.tag:
-                self.nfc_enabled = parse_int(tlv.value)
+                self.nfc_enabled = bytes2int(tlv.value)
                 logger.debug('Config nfc enabled: %s',
                              bin(self.nfc_enabled))
 
@@ -123,6 +126,7 @@ class YubiKey(object):
     """
     device_name = 'YubiKey'
     _can_mode_switch = True
+    _can_write_config = False
 
     def __init__(self, descriptor, driver):
         self._key_type = driver.pid.get_type()
@@ -137,8 +141,8 @@ class YubiKey(object):
             self._version_certain = True
             if not config.version:
                 config.version = driver.guess_version()
-            if config.version >= (5, 0, 0):
-                self._can_mode_switch = False  # New capabilities
+            if config.version >= (5, 0, 0):  # New capabilities
+                self._can_write_config = True
             elif config.version == (4, 2, 4):  # Doesn't report correctly
                 config.usb_supported = 0x3f
             if config.usb_supported ==\
@@ -253,6 +257,16 @@ class YubiKey(object):
             raise ValueError('Mode not supported: %s' % mode)
         self.set_mode(mode)
 
+    def write_config(self, payload, reboot=False, lock_key=None):
+        if lock_key:
+            payload += Tlv(TAG.USE_LOCK_KEY, lock_key)
+        elif self.config.configuration_locked:
+            raise ValueError('Configuration locked!')
+        if reboot:
+            payload += Tlv(TAG.REBOOT)
+        payload = struct.pack('>B', len(payload)) + payload
+        self._driver.write_config(payload)
+
     def has_mode(self, mode):
         return self.mode == mode or \
             (self.can_mode_switch and
@@ -270,7 +284,24 @@ class YubiKey(object):
         # NEO < 3.3.1 (?) should always set 82 instead of 2.
         if self.version <= (3, 3, 1) and mode.code == 2:
             flags = 0x80
-        self._driver.set_mode(flags | mode.code, cr_timeout, autoeject_time)
+        if not self._can_write_config:
+            self._driver.set_mode(flags | mode.code, cr_timeout, autoeject_time)
+        else:
+            usb_enabled = self.config.usb_supported & (
+                ((APPLICATION.U2F | APPLICATION.FIDO2) *
+                 mode.has_transport(TRANSPORT.FIDO)) |
+                ((APPLICATION.OATH | APPLICATION.OPGP | APPLICATION.PIV) *
+                 mode.has_transport(TRANSPORT.CCID)) |
+                ((APPLICATION.OTP) * mode.has_transport(TRANSPORT.OTP))
+            )
+            payload = Tlv(TAG.USB_ENABLED, int2bytes(usb_enabled))
+            if cr_timeout:
+                payload += Tlv(TAG.CHALRESP_TIMEOUT, int2bytes(cr_timeout))
+            if autoeject_time is not None:
+                payload += Tlv(TAG.AUTO_EJECT_TIMEOUT,
+                               struct.pack('>H', autoeject_time))
+            payload += Tlv(TAG.DEVICE_FLAGS, struct.pack('>B', flags))
+            self.write_config(payload, reboot=True)
 
     def use_transport(self, transport):
         if self.transport == transport:

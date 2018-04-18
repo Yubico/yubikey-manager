@@ -302,7 +302,16 @@ def parse_tlvs(data):
     return res
 
 
-def parse_int(data):
+def int2bytes(value):
+    buf = []
+    while value > 0xff:
+        buf.append(value & 0xff)
+        value >>= 8
+    buf.append(value)
+    return bytes(bytearray(reversed(buf)))
+
+
+def bytes2int(data):
     return int(b2a_hex(data), 16)
 
 

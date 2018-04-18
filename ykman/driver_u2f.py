@@ -30,6 +30,7 @@ from __future__ import absolute_import
 from .driver import AbstractDriver
 from .util import TRANSPORT, YUBIKEY, PID
 from fido2.hid import CtapHidDevice, CTAPHID
+from enum import IntEnum, unique
 import logging
 import struct
 
@@ -37,8 +38,11 @@ import struct
 logger = logging.getLogger(__name__)
 
 
-YUBIKEY_DEVICE_CONFIG = CTAPHID.VENDOR_FIRST
-YK4_CAPABILITIES = CTAPHID.VENDOR_FIRST + 2
+@unique
+class CMD(IntEnum):
+    YUBIKEY_DEVICE_CONFIG = CTAPHID.VENDOR_FIRST
+    READ_CONFIG = CTAPHID.VENDOR_FIRST + 2
+    WRITE_CONFIG = CTAPHID.VENDOR_FIRST + 3
 
 
 class U2FDriver(AbstractDriver):
@@ -50,7 +54,10 @@ class U2FDriver(AbstractDriver):
         self._dev = dev
 
     def read_config(self):
-        return self._dev.call(YK4_CAPABILITIES, b'\x00')
+        return self._dev.call(CMD.READ_CONFIG)
+
+    def write_config(self, data):
+        self._dev.call(CMD.WRITE_CONFIG, data)
 
     def guess_version(self):
         if self.key_type == YUBIKEY.NEO:  # Applet version
@@ -59,7 +66,7 @@ class U2FDriver(AbstractDriver):
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
-        self._dev.call(YUBIKEY_DEVICE_CONFIG, data)
+        self._dev.call(CMD.YUBIKEY_DEVICE_CONFIG, data)
 
 
 def descriptor_filter(desc):
