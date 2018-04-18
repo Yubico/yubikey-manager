@@ -201,6 +201,8 @@ class YubiKey(object):
                     if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
                             or config.version >= (3, 3, 0):
                         config.usb_supported |= APPLICATION.U2F
+                config.nfc_supported = config.usb_supported
+                config.nfc_enabled = config.nfc_supported
             elif self._key_type == YUBIKEY.YKP:
                 logger.debug('YK Plus identified')
                 config.usb_supported = APPLICATION.OTP | APPLICATION.U2F
@@ -268,7 +270,7 @@ class YubiKey(object):
 
     @property
     def transport(self):
-        return self._driver.pid.get_transports()
+        return self._driver.transport
 
     @property
     def mode(self):
@@ -281,6 +283,9 @@ class YubiKey(object):
         self.set_mode(mode)
 
     def write_config(self, payload, reboot=False, lock_key=None):
+        if not self._can_write_config:
+            raise NotImplementedError()
+
         if lock_key:
             payload += Tlv(TAG.USE_LOCK_KEY, lock_key)
         elif self.config.configuration_locked:
@@ -289,6 +294,10 @@ class YubiKey(object):
             payload += Tlv(TAG.REBOOT)
         payload = struct.pack('>B', len(payload)) + payload
         self._driver.write_config(payload)
+        if reboot:
+            self.close()
+        else:
+            self.config = DeviceConfig(self._driver.read_config())
 
     def has_mode(self, mode):
         return self.mode == mode or \
