@@ -57,13 +57,13 @@ def info(ctx):
     click.echo()
 
     click.echo('Applications:')
-    for c in APPLICATION:
-        if c & config.usb_supported:
-            if c & config.usb_enabled:
+    for app in APPLICATION:
+        if app & config.usb_supported:
+            if app & config.usb_enabled:
                 status = 'Enabled'
             else:
                 status = 'Disabled'
         else:
             status = 'Not available'
 
-        click.echo('    {0!s}:\t{1}'.format(c, status))
+        click.echo('    {0!s}:\t{1}'.format(app, status))
