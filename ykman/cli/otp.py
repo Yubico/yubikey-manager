@@ -35,6 +35,7 @@ from ..util import (
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
+from ..otp import OtpController
 from ..scancodes import KEYBOARD_LAYOUT
 import logging
 import os
@@ -65,8 +66,8 @@ def _failed_to_write_msg(ctx, exc_info):
              'have restricted access.')
 
 
-def _confirm_slot_overwrite(dev, slot):
-    slot1, slot2 = dev.driver.slot_status
+def _confirm_slot_overwrite(controller, slot):
+    slot1, slot2 = controller.slot_status
     if slot == 1 and slot1:
         click.confirm(
             'Slot 1 is already configured. Overwrite configuration?',
@@ -96,6 +97,7 @@ def otp(ctx, access_code):
     configured with an access code.
     """
 
+    ctx.obj['controller'] = OtpController(ctx.obj['dev'].driver)
     if access_code is not None:
         if access_code == '':
             access_code = click.prompt('Enter access code', show_default=False)
@@ -105,7 +107,7 @@ def otp(ctx, access_code):
             raise ValueError(e)
         if len(access_code) != 6:
             raise ValueError('Must be exactly 6 bytes.')
-    ctx.obj['dev'].driver.access_code = access_code
+    ctx.obj['controller'].access_code = access_code
 
 
 @otp.command()
@@ -115,8 +117,9 @@ def info(ctx):
     Display status of YubiKey Slots.
     """
     dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     click.echo(dev.device_name)
-    slot1, slot2 = dev.driver.slot_status
+    slot1, slot2 = controller.slot_status
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
     click.echo('Slot 2: {}'.format(slot2 and 'programmed' or 'empty'))
 
@@ -129,10 +132,10 @@ def swap(ctx):
     """
     Swaps the two slot configurations.
     """
-    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     click.echo('Swapping slots...')
     try:
-        dev.driver.swap_slots()
+        controller.swap_slots()
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -145,15 +148,15 @@ def delete(ctx, slot, force):
     """
     Deletes the configuration of a slot.
     """
-    dev = ctx.obj['dev']
-    if not force and not dev.driver.slot_status[slot - 1]:
+    controller = ctx.obj['controller']
+    if not force and not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to delete an empty slot.')
     force or click.confirm(
         'Do you really want to delete'
         ' the configuration of slot {}?'.format(slot), abort=True)
     click.echo('Deleting the configuration of slot {}...'.format(slot))
     try:
-        dev.driver.zap_slot(slot)
+        controller.zap_slot(slot)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -189,6 +192,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     """
 
     dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
 
     if public_id and serial_public_id:
         ctx.fail('Invalid options: --public-id conflicts with '
@@ -248,7 +252,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True)
     try:
-        dev.driver.program_otp(slot, key, public_id, private_id, not no_enter)
+        controller.program_otp(slot, key, public_id, private_id, not no_enter)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -295,12 +299,12 @@ def static(
     elif not password and generate:
         password = generate_static_pw(length, keyboard_layout).decode()
 
-    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
 
     if not force:
-        _confirm_slot_overwrite(dev, slot)
+        _confirm_slot_overwrite(controller, slot)
     try:
-        dev.driver.program_static(
+        controller.program_static(
             slot, password, not no_enter, keyboard_layout=keyboard_layout)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
@@ -326,7 +330,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     If KEY is not given, an interactive prompt will ask for it.
     """
-    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
 
     if key:
         if generate:
@@ -361,7 +365,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     force or click.confirm('Program a {} credential in slot {}?'
                            .format(cred_type, slot), abort=True)
     try:
-        dev.driver.program_chalresp(slot, key, touch)
+        controller.program_chalresp(slot, key, touch)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -383,12 +387,12 @@ def calculate(ctx, slot, challenge, totp, digits):
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
 credential, and read the response. Supports output as a OATH-TOTP code.
     """
-    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     if not challenge and not totp:
         ctx.fail('No challenge provided.')
 
     # Check that slot is not empty
-    slot1, slot2 = dev.driver.slot_status
+    slot1, slot2 = controller.slot_status
     if (slot == 1 and not slot1) or (slot == 2 and not slot2):
         ctx.fail('Cannot perform challenge-response on an empty slot.')
 
@@ -400,7 +404,7 @@ credential, and read the response. Supports output as a OATH-TOTP code.
             logger.error('Error', exc_info=e)
             ctx.fail('Timestamp challenge for TOTP must be an integer.')
     try:
-        res = dev.driver.calculate(
+        res = controller.calculate(
             slot, challenge, totp=totp,
             digits=int(digits), wait_for_touch=False)
     except YkpersError as e:
@@ -408,7 +412,7 @@ credential, and read the response. Supports output as a OATH-TOTP code.
         if e.errno == 11:
             prompt_for_touch()
             try:
-                res = dev.driver.calculate(
+                res = controller.calculate(
                     slot, challenge, totp=totp,
                     digits=int(digits), wait_for_touch=True)
             except YkpersError as e:
@@ -438,7 +442,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     Program an HMAC-SHA1 OATH-HOTP credential.
 
     """
-    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     if not key:
         while True:
             key = click.prompt('Enter a secret key (base32)')
@@ -452,7 +456,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     force or click.confirm(
         'Program a HOTP credential in slot {}?'.format(slot), abort=True)
     try:
-        dev.driver.program_hotp(
+        controller.program_hotp(
             slot, key, counter, int(digits) == 8, not no_enter)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
@@ -476,8 +480,8 @@ def settings(ctx, slot, enter, pacing, force):
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
     """
-    dev = ctx.obj['dev']
-    if not dev.driver.slot_status[slot - 1]:
+    controller = ctx.obj['controller']
+    if not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to update settings on an empty slot.')
     force or click.confirm(
         'Update the settings for slot {}? '
@@ -488,7 +492,7 @@ def settings(ctx, slot, enter, pacing, force):
         pacing = int(pacing)
 
     try:
-        dev.driver.update_settings(slot, enter=enter, pacing=pacing)
+        controller.update_settings(slot, enter=enter, pacing=pacing)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
