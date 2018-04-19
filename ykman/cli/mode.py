@@ -135,5 +135,5 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     else:
         click.echo('Current connection mode is: {}'.format(dev.mode))
         supported = ', '.join(t.name for t in TRANSPORT
-                              .split(dev.capabilities))
+                              .split(dev.config.usb_supported))
         click.echo('Supported USB interfaces are: {}'.format(supported))

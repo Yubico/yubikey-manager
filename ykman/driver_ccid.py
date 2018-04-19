@@ -32,35 +32,49 @@ import struct
 import subprocess
 import time
 import six
+from enum import IntEnum, unique
+from binascii import b2a_hex
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError
-from .util import AID, CAPABILITY, TRANSPORT, YUBIKEY
+from .util import AID, APPLICATION, TRANSPORT, YUBIKEY
 
 SW_OK = 0x9000
 SW_APPLICATION_NOT_FOUND = 0x6a82
 SW_NO_INPUT_DATA = 0x6285
 SW_CONDITIONS_NOT_SATISFIED = 0x6985
 
-INS_SELECT = 0xa4
-INS_YK4_CAPABILITIES = 0x1d
 
-INS_YK2_REQ = 0x01
-SLOT_DEVICE_SERIAL = 0x10
-SLOT_DEVICE_CONFIG = 0x11
+GP_INS_SELECT = 0xa4
 
-INS_NEO_TEST = 0x16
+
+@unique
+class MGR_INS(IntEnum):
+    READ_CONFIG = 0x1d
+    WRITE_CONFIG = 0x1c
+    SET_MODE = 0x16
+
+
+@unique
+class OTP_INS(IntEnum):
+    YK2_REQ = 0x01
+
+
+@unique
+class SLOT(IntEnum):
+    DEVICE_SERIAL = 0x10
+    DEVICE_CONFIG = 0x11
 
 
 KNOWN_APPLETS = {
-    AID.OTP: CAPABILITY.OTP,
-    AID.U2F: CAPABILITY.U2F,
-    AID.U2F_YUBICO: CAPABILITY.U2F,
-    AID.PIV: CAPABILITY.PIV,
-    AID.OPGP: CAPABILITY.OPGP,
-    AID.OATH: CAPABILITY.OATH
+    AID.OTP: APPLICATION.OTP,
+    AID.U2F: APPLICATION.U2F,
+    AID.U2F_YUBICO: APPLICATION.U2F,
+    AID.PIV: APPLICATION.PIV,
+    AID.OPGP: APPLICATION.OPGP,
+    AID.OATH: APPLICATION.OATH
 }
 
 logger = logging.getLogger(__name__)
@@ -101,61 +115,56 @@ class CCIDDriver(AbstractDriver):
     transport = TRANSPORT.CCID
 
     def __init__(self, connection, name):
+        super(CCIDDriver, self).__init__(_pid_from_name(name))
         self._conn = connection
-        self._pid = _pid_from_name(name)
-        try:
-            self._read_version()
-        except APDUError as e:
-            logger.error('Failed to read firmware version', exc_info=e)
-            # Failure here likely indicates YK preview, in which case we'll
-            # later read the version via capabilities. This might be wrong and
-            # should be fixed later.
-            self._version = (5, 0, 0)  # TODO:Properly detect version
-        try:
-            self._read_serial()
-        except APDUError as e:
-            logger.error('Failed to read serial number', exc_info=e)
 
-    def _read_version(self):
-        s = self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
-        self._version = tuple(c for c in six.iterbytes(s[:3]))
-
-    def _read_serial(self):
-        serial = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_SERIAL, 0)
+    def read_serial(self):
+        self.select(AID.OTP)
+        serial = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_SERIAL, 0)
         if len(serial) == 4:
-            self._serial = struct.unpack('>I', serial)[0]
+            return struct.unpack('>I', serial)[0]
 
-    def guess_version(self):
-        return self._version, self.key_type != YUBIKEY.NEO
+    def read_version(self):
+        if self.pid.get_type() == YUBIKEY.YK4:
+            try:  # Attempt to read OTP applet version which should match
+                s = self.select(AID.OTP)
+                return tuple(c for c in six.iterbytes(s[:3]))
+            except APDUError:
+                pass
+        return None
 
-    def read_capabilities(self):
-        try:
-            self.send_apdu(0, INS_SELECT, 4, 0, AID.MGR)
-            capa = self.send_apdu(0, INS_YK4_CAPABILITIES, 0, 0)
-            return capa
-        except APDUError as e:
-            logger.error('Failed to read capabilities', exc_info=e)
-            return b''
+    def read_config(self):
+        if self.pid.get_type() == YUBIKEY.NEO:
+            raise NotImplementedError()
+        self.select(AID.MGR)
+        return self.send_apdu(0, MGR_INS.READ_CONFIG, 0, 0)
 
-    def probe_capabilities_support(self):
-        capa = CAPABILITY.CCID
+    def write_config(self, data):
+        if self.pid.get_type() == YUBIKEY.NEO:
+            raise NotImplementedError()
+        self.select(AID.MGR)
+        self.send_apdu(0, MGR_INS.WRITE_CONFIG, 0, 0, data)
+
+    def probe_capabilities(self):
+        capa = TRANSPORT.CCID
         for aid, code in KNOWN_APPLETS.items():
             try:
-                self.send_apdu(0, INS_SELECT, 4, 0, aid)
+                self.select(aid)
                 capa |= code
                 logger.debug(
                     'Found applet: aid: %s , capability: %s', aid, code)
             except APDUError:
                 logger.debug(
                     'Missing applet: aid: %s , capability: %s', aid, code)
-                pass
         return capa
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
         header = [cl, ins, p1, p2, len(data)]
         body = list(six.iterbytes(data))
         try:
+            logger.debug('SEND: %s', b2a_hex(bytearray(header + body)))
             resp, sw1, sw2 = self._conn.transmit(header + body)
+            logger.debug('RECV: %s', b2a_hex(bytearray(resp + [sw1, sw2])))
         except CardConnectionException as e:
             raise CCIDError(e)
         sw = sw1 << 8 | sw2
@@ -168,29 +177,30 @@ class CCIDDriver(AbstractDriver):
             raise APDUError(resp, sw)
 
     def select(self, aid):
-        return self.send_apdu(0, INS_SELECT, 0x04, 0, aid)
+        return self.send_apdu(0, GP_INS_SELECT, 0x04, 0, aid)
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         mode_data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
         try:
-            try:
+            if self.pid.get_type() == YUBIKEY.NEO:
                 self._set_mode_otp(mode_data)
-            except APDUError:
+            else:
                 self._set_mode_mgr(mode_data)
         except CCIDError:
             raise ModeSwitchError()
 
     def _set_mode_otp(self, mode_data):
-        resp = self.send_apdu(0, INS_SELECT, 4, 0, AID.OTP)
+        resp = self.select(AID.OTP)
         pgm_seq_old = six.indexbytes(resp, 3)
-        resp = self.send_apdu(0, INS_YK2_REQ, SLOT_DEVICE_CONFIG, 0, mode_data)
+        resp = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_CONFIG, 0,
+                              mode_data)
         pgm_seq_new = six.indexbytes(resp, 3)
         if not _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
             raise ModeSwitchError()
 
     def _set_mode_mgr(self, mode_data):
-        self.send_apdu(0, INS_SELECT, 4, 0, AID.MGR)
-        self.send_apdu(0, INS_NEO_TEST, SLOT_DEVICE_CONFIG, 0, mode_data)
+        self.select(AID.MGR)
+        self.send_apdu(0, MGR_INS.NEO_TEST, SLOT.DEVICE_CONFIG, 0, mode_data)
 
     def close(self):
         logger.debug('Close %s', self)

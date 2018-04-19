@@ -94,6 +94,11 @@ class Ykpers(CLibrary):
     ykp_HMAC_key_from_raw = [POINTER(YKP_CONFIG), c_char_p], bool
     ykp_set_oath_imf = [POINTER(YKP_CONFIG), c_ulong], bool
 
+    ykp_alloc_ndef = [], POINTER(YK_NDEF)
+    ykp_free_ndef = [POINTER(YK_NDEF)], bool
+    yk_write_ndef2 = [POINTER(YK_KEY), POINTER(YK_NDEF), c_uint], bool
+    ykp_construct_ndef_uri = [POINTER(YK_NDEF), c_char_p], bool
+
     def yk_get_errno(self):
         return self._yk_errno_location().contents.value
 

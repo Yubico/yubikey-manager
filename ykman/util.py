@@ -63,10 +63,20 @@ class AID(bytes, Enum):
 
 
 @unique
-class CAPABILITY(BitflagEnum):
+class TRANSPORT(BitflagEnum):
+    OTP = 0x01
+    FIDO = 0x02
+    CCID = 0x04
+
+    @staticmethod
+    def usb_transports():
+        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.FIDO
+
+
+@unique
+class APPLICATION(BitflagEnum):
     OTP = 0x01
     U2F = 0x02
-    CCID = 0x04
     OPGP = 0x08
     PIV = 0x10
     OATH = 0x20
@@ -74,7 +84,7 @@ class CAPABILITY(BitflagEnum):
 
     @staticmethod
     def dependent_on_ccid():
-        return CAPABILITY.OPGP | CAPABILITY.OATH | CAPABILITY.PIV
+        return APPLICATION.OPGP | APPLICATION.OATH | APPLICATION.PIV
 
     def __str__(self):
         if self == self.U2F:
@@ -114,17 +124,6 @@ class FORM_FACTOR(IntEnum):
         return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
 
 
-@unique
-class TRANSPORT(BitflagEnum):
-    OTP = CAPABILITY.OTP
-    FIDO = CAPABILITY.U2F
-    CCID = CAPABILITY.CCID
-
-    @staticmethod
-    def usb_transports():
-        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.FIDO
-
-
 class Cve201715361VulnerableError(Exception):
     """Thrown if on-chip RSA key generation is attempted on a YubiKey vulnerable
     to CVE-2017-15361."""
@@ -143,7 +142,7 @@ class Cve201715361VulnerableError(Exception):
 class YUBIKEY(Enum):
     YKS = 'YubiKey Standard'
     NEO = 'YubiKey NEO'
-    SKY = 'FIDO U2F Security Key'
+    SKY = 'Security Key by Yubico'
     YKP = 'YubiKey Plus'
     YK4 = 'YubiKey 4'
 
@@ -235,7 +234,7 @@ class Tlv(bytes):
         offs = 2
         if ln > 0x80:
             n_bytes = ln - 0x80
-            ln = b2len(self[offs:offs + n_bytes])
+            ln = bytes2int(self[offs:offs + n_bytes])
         return ln
 
     @property
@@ -264,7 +263,7 @@ class Tlv(bytes):
                 offs = 2
                 if ln > 0x80:
                     n_bytes = ln - 0x80
-                    ln = b2len(data[offs:offs + n_bytes])
+                    ln = bytes2int(data[offs:offs + n_bytes])
                     offs = offs + n_bytes
                 value = data[offs:offs+ln]
         elif len(args) == 2:  # Called with tag and value.
@@ -303,12 +302,17 @@ def parse_tlvs(data):
     return res
 
 
-def b2len(bs):
-    ln = 0
-    for b in six.iterbytes(bs):
-        ln *= 256
-        ln += b
-    return ln
+def int2bytes(value):
+    buf = []
+    while value > 0xff:
+        buf.append(value & 0xff)
+        value >>= 8
+    buf.append(value)
+    return bytes(bytearray(reversed(buf)))
+
+
+def bytes2int(data):
+    return int(b2a_hex(data), 16)
 
 
 _HEX = b'0123456789abcdef'

@@ -40,34 +40,39 @@ class AbstractDriver(object):
     """Abstract driver class for communicating with a YubiKey"""
 
     transport = None
-    _serial = None
-    _pid = None
 
-    @property
-    def serial(self):
-        return self._serial
+    def __init__(self, pid):
+        self._pid = pid
 
     @property
     def pid(self):
         return self._pid
 
-    @property
-    def key_type(self):
-        return self._pid.get_type()
+    def read_serial(self):
+        """
+        Attempt to read the serial number from the YubiKey, if available.
 
-    @property
-    def transports(self):
-        return self._pid.get_transports()
+        This will only be called if read_config() fails to provide the serial.
+        """
+        return None
 
     def set_mode(self, mode_code):
         raise NotImplementedError()
 
-    def read_capabilities(self):
+    def read_version(self):
+        """
+        Attempt to read the firmware version from the YubiKey, if possible.
+
+        If we cannot determine the firmware version with certainty this way,
+        return None.
+        """
+        return None
+
+    def read_config(self):
         raise NotImplementedError()
 
-    def guess_version(self):
-        # Second arg is True if the version is certain, False if not.
-        return (0, 0, 0), False
+    def write_config(self, data):
+        raise NotImplementedError()
 
     def close(self):
         pass

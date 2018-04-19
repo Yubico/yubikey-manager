@@ -29,12 +29,11 @@ from __future__ import absolute_import, print_function
 
 import ykman.logging_setup
 from ykman import __version__
-from ..util import TRANSPORT, Mode, Cve201715361VulnerableError, YUBIKEY
+from ..util import TRANSPORT, Cve201715361VulnerableError, YUBIKEY
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
-from ..descriptor import (get_descriptors, list_drivers, open_device,
-                          FailedOpeningDeviceException, Descriptor)
-from ..device import YubiKey
+from ..descriptor import (get_descriptors, list_devices, open_device,
+                          FailedOpeningDeviceException)
 from .util import click_skip_on_help
 from .info import info
 from .mode import mode
@@ -89,7 +88,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
         try:  # Retry, any transport
             dev = open_device(serial=serial)
             if not dev.mode.transports & transports:
-                if dev.capabilities & transports:
+                if dev.config.usb_supported & transports:
                     _disabled_transport(ctx, transports, cmd)
                 else:
                     ctx.fail("Command '{}' is not supported by this device."
@@ -170,19 +169,17 @@ def list_keys(ctx, serials):
     descriptors = [d for d in all_descriptors if d.key_type != YUBIKEY.SKY]
     skys = len(all_descriptors) - len(descriptors)
     handled_serials = set()
-    for drv in list_drivers():
+    for dev in list_devices():
         handled = False
-        if skys > 0 and drv.key_type == YUBIKEY.SKY:
-            dev = YubiKey(Descriptor.from_driver(drv), drv)
+        if skys > 0 and dev.key_type == YUBIKEY.SKY:
             skys -= 1
             serial = None
             handled = True
         else:
-            dev = YubiKey(Descriptor.from_driver(drv), drv)
             serial = dev.serial
             if serial not in handled_serials:
                 handled_serials.add(serial)
-                matches = [d for d in descriptors if d.pid == drv.pid]
+                matches = [d for d in descriptors if d.pid == dev.driver.pid]
                 if len(matches) > 0:
                     d = matches[0]
                     descriptors.remove(d)
@@ -194,7 +191,7 @@ def list_keys(ctx, serials):
             else:
                 click.echo('{} [{}]{}'.format(
                     dev.device_name,
-                    Mode(drv.transports),
+                    dev.mode,
                     ' Serial: {}'.format(serial) if serial else '')
                 )
         dev.close()
