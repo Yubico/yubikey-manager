@@ -59,8 +59,14 @@ class AbstractDriver(object):
     def set_mode(self, mode_code):
         raise NotImplementedError()
 
-    def guess_version(self):
-        raise NotImplementedError()
+    def read_version(self):
+        """
+        Attempt to read the firmware version from the YubiKey, if possible.
+
+        If we cannot determine the firmware version with certainty this way,
+        return None.
+        """
+        return None
 
     def read_config(self):
         raise NotImplementedError()

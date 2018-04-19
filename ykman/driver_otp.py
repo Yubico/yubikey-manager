@@ -35,18 +35,21 @@ from .driver import AbstractDriver, ModeSwitchError
 from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
                    parse_totp_hash, format_code, hmac_shorten_key)
 from .scancodes import encode, KEYBOARD_LAYOUT
+from enum import IntEnum, unique
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)
 
-INS_SELECT = 0xa4
-INS_YK4_CAPABILITIES = 0x1d
 
-SLOT_CONFIG = 0x01
-SLOT_CONFIG2 = 0x03
-SLOT_UPDATE1 = 0x04
-SLOT_UPDATE2 = 0x05
-SLOT_SWAP = 0x06
+@unique
+class SLOT(IntEnum):
+    CONFIG = 0x01
+    CONFIG2 = 0x03
+    UPDATE1 = 0x04
+    UPDATE2 = 0x05
+    SWAP = 0x06
+
+
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
@@ -83,9 +86,9 @@ def check(status):
 
 def slot_to_cmd(slot, update=False):
     if slot == 1:
-        return SLOT_UPDATE1 if update else SLOT_CONFIG
+        return SLOT.UPDATE1 if update else SLOT.CONFIG
     elif slot == 2:
-        return SLOT_UPDATE2 if update else SLOT_CONFIG2
+        return SLOT.UPDATE2 if update else SLOT.CONFIG2
     else:
         raise ValueError('slot must be 1 or 2')
 
@@ -151,7 +154,13 @@ class OTPDriver(AbstractDriver):
             self._dev, 0, 0, resp, byref(buf_size)))
         return resp.raw[:buf_size.value]
 
-    def guess_version(self):
+    def write_config(self, data):
+        if self._version < (5, 0, 0):
+            raise NotImplementedError()
+
+    def read_version(self):
+        if self._version[0] == 3:  # This is the OTP applet version.
+            return None
         return self._version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
@@ -347,10 +356,10 @@ class OTPDriver(AbstractDriver):
     def swap_slots(self):
         if self._version < (2, 3, 0):
             raise ValueError('swapping slots requires YubiKey 2.3.0 or later')
-        cfg = self._create_cfg(SLOT_SWAP)
+        cfg = self._create_cfg(SLOT.SWAP)
         try:
             ycfg = ykpers.ykp_core_config(cfg)
-            check(ykpers.yk_write_command(self._dev, ycfg, SLOT_SWAP, None))
+            check(ykpers.yk_write_command(self._dev, ycfg, SLOT.SWAP, None))
         finally:
             ykpers.ykp_free_config(cfg)
 

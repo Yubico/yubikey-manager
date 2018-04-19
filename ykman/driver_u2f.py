@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from .driver import AbstractDriver
-from .util import TRANSPORT, YUBIKEY, PID
+from .util import TRANSPORT, PID
 from fido2.hid import CtapHidDevice, CTAPHID
 from enum import IntEnum, unique
 import logging
@@ -59,10 +59,11 @@ class U2FDriver(AbstractDriver):
     def write_config(self, data):
         self._dev.call(CMD.WRITE_CONFIG, data)
 
-    def guess_version(self):
-        if self.key_type == YUBIKEY.NEO:  # Applet version
-            return (3, 2, 0)
-        return self._dev.device_version
+    def read_version(self):
+        version = self._dev.device_version
+        if version[0] < 4:  # Before yK 4 this wasn't the fw version
+            return None
+        return version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)

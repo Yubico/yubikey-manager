@@ -44,7 +44,7 @@ def info(ctx):
     click.echo('Device type: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))
-    if dev.version_certain:
+    if dev.version:
         f_version = '.'.join(str(x) for x in dev.version)
         click.echo('Firmware version: {}'.format(f_version))
     else:

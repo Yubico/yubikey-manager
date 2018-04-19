@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 @unique
 class TAG(IntEnum):
-    USB_CAPA = 0x01
+    USB_SUPPORTED = 0x01
     SERIAL = 0x02
     USB_ENABLED = 0x03
     FORMFACTOR = 0x04
@@ -53,89 +53,118 @@ class TAG(IntEnum):
     CONFIG_LOCK = 0x0a
     USE_LOCK_KEY = 0x0b
     REBOOT = 0x0c
-    NFC_CAPA = 0x0d
+    NFC_SUPPORTED = 0x0d
     NFC_ENABLED = 0x0e
+
+
+def _struct_pair(fmt):
+    return (lambda v: struct.unpack(fmt, v)[0], lambda v: struct.pack(fmt, v))
+
+
+_parse_config = {
+    TAG.USB_SUPPORTED: (bytes2int, int2bytes),
+    TAG.SERIAL: (bytes2int, int2bytes),
+    TAG.USB_ENABLED: (bytes2int, int2bytes),
+    TAG.FORMFACTOR: (lambda v: FORM_FACTOR.from_code(bytes2int(v)), int2bytes),
+    TAG.VERSION: (lambda v: struct.unpack('>BBB', v),
+                  lambda v: struct.pack('>BBB', *v)),
+    TAG.AUTO_EJECT_TIMEOUT: _struct_pair('>H'),
+    TAG.CHALRESP_TIMEOUT: _struct_pair('>B'),
+    TAG.DEVICE_FLAGS: _struct_pair('>B'),
+    TAG.APP_VERSIONS: (lambda v: v, lambda v: v),
+    TAG.CONFIG_LOCK: (_struct_pair('>?')[0], lambda v: v),
+    TAG.USE_LOCK_KEY: (None, lambda v: v),
+    TAG.NFC_SUPPORTED: (bytes2int, int2bytes),
+    TAG.NFC_ENABLED: (bytes2int, int2bytes)
+}
+
+
+def _set_value(data, tag, value):
+    data[tag] = _parse_config[tag][1](value) if tag in _parse_config else value
 
 
 def device_config(usb_enabled=None, nfc_enabled=None, flags=None,
                   auto_eject_timeout=None, chalresp_timeout=None,
                   config_lock=None):
-    payload = b''
+    values = {}
     if config_lock is not None:
-        if len(payload) != 16:
+        if len(config_lock) != 16:
             raise ValueError('Config lock key must be 16 bytes')
-        payload += Tlv(TAG.CONFIG_LOCK, payload)
+        _set_value(values, TAG.CONFIG_LOCK, config_lock)
     if usb_enabled is not None:
-        payload += Tlv(TAG.USB_ENABLED, int2bytes(usb_enabled))
+        _set_value(values, TAG.USB_ENABLED, usb_enabled)
     if nfc_enabled is not None:
-        payload += Tlv(TAG.NFC_ENABLED, int2bytes(nfc_enabled))
+        _set_value(values, TAG.NFC_ENABLED, nfc_enabled)
     if flags is not None:
-        payload += Tlv(TAG.DEVICE_FLAGS, struct.pack('>B', flags))
+        _set_value(values, TAG.DEVICE_FLAGS, flags)
     if auto_eject_timeout is not None:
-        payload += Tlv(TAG.AUTO_EJECT_TIMEOUT,
-                       struct.pack('>H', auto_eject_timeout))
+        _set_value(values, TAG.AUTO_EJECT_TIMEOUT, auto_eject_timeout)
     if chalresp_timeout is not None:
-        payload += Tlv(TAG.CHALRESP_TIMEOUT,
-                       struct.pack('>B', chalresp_timeout))
-    return payload
+        _set_value(values, TAG.CHALRESP_TIMEOUT, chalresp_timeout)
+    return values
 
 
 class DeviceConfig(object):
 
     def __init__(self, data=None):
-        self.serial = None
-        self.version = None
-        self.form_factor = FORM_FACTOR.UNKNOWN
-        self.usb_supported = 0
-        self.usb_enabled = 0
-        self.nfc_supported = 0
-        self.nfc_enabled = 0
-        self.app_versions = None
-        self.configuration_locked = False
-        self.device_flags = 0
-
         if not data:
             logger.debug('Config data empty/missing')
+            self._tags = {}
             return
 
         c_len, data = six.indexbytes(data, 0), data[1:]
         data = data[:c_len]
 
-        for tlv in parse_tlvs(data):
-            if TAG.SERIAL == tlv.tag:
-                self.serial = bytes2int(tlv.value)
-                logger.debug('Config serial: %d', self.serial)
-            elif TAG.VERSION == tlv.tag:
-                self.version = tuple(c for c in six.iterbytes(tlv.value))
-                logger.debug('Config version: %r', self.version)
-            elif TAG.FORMFACTOR == tlv.tag:
-                self.form_factor = FORM_FACTOR.from_code(bytes2int(tlv.value))
-                logger.debug('Config form factor: %s', self.form_factor)
-            elif TAG.DEVICE_FLAGS == tlv.tag:
-                self.device_flags = bytes2int(tlv.value)
-                logger.debug('Config device flags: %s', bin(self.device_flags))
-            elif TAG.APP_VERSIONS == tlv.tag:
-                self.app_versions = tlv.value
-                logger.debug('Config app versions: %s', self.app_versions)
-            elif TAG.CONFIG_LOCK == tlv.tag:
-                self.configuration_locked = bool(six.indexbytes(tlv.value, 0))
-                logger.debug('Config locked: %s', self.configuration_locked)
-            elif TAG.USB_CAPA == tlv.tag:
-                self.usb_supported = bytes2int(tlv.value)
-                logger.debug('Config usb capabilities: %s',
-                             bin(self.usb_supported))
-            elif TAG.USB_ENABLED == tlv.tag:
-                self.usb_enabled = bytes2int(tlv.value)
-                logger.debug('Config usb enabled: %s',
-                             bin(self.usb_enabled))
-            elif TAG.NFC_CAPA == tlv.tag:
-                self.nfc_supported = bytes2int(tlv.value)
-                logger.debug('Config nfc capabilities: %s',
-                             bin(self.nfc_supported))
-            elif TAG.NFC_ENABLED == tlv.tag:
-                self.nfc_enabled = bytes2int(tlv.value)
-                logger.debug('Config nfc enabled: %s',
-                             bin(self.nfc_enabled))
+        self._tags = dict((x.tag, x.value) for x in parse_tlvs(data))
+
+    def _get(self, tag, default=None):
+        if tag not in self._tags:
+            return default
+        val = self._tags[tag]
+        return _parse_config[tag][0](val) if tag in _parse_config else val
+
+    def _set(self, tag, value):
+        _set_value(self._tags, tag, value)
+
+    @property
+    def serial(self):
+        return self._get(TAG.SERIAL)
+
+    @property
+    def version(self):
+        return self._get(TAG.VERSION)
+
+    @property
+    def form_factor(self):
+        return self._get(TAG.FORMFACTOR, FORM_FACTOR.UNKNOWN)
+
+    @property
+    def usb_supported(self):
+        return self._get(TAG.USB_SUPPORTED, 0)
+
+    @property
+    def usb_enabled(self):
+        return self._get(TAG.USB_ENABLED, 0)
+
+    @property
+    def nfc_supported(self):
+        return self._get(TAG.NFC_SUPPORTED, 0)
+
+    @property
+    def nfc_enabled(self):
+        return self._get(TAG.NFC_ENABLED, 0)
+
+    @property
+    def app_versions(self):
+        return self._get(TAG.APP_VERSIONS)
+
+    @property
+    def configuration_locked(self):
+        return self._get(TAG.CONFIG_LOCK)
+
+    @property
+    def device_flags(self):
+        return self._get(TAG.DEVICE_FLAGS, 0)
 
 
 _NULL_DRIVER = AbstractDriver(0)
@@ -161,69 +190,67 @@ class YubiKey(object):
             logger.debug('Read config from device...')
             config = DeviceConfig(driver.read_config())
             logger.debug('Success!')
-            self._version_certain = True
-            if not config.version:
-                config.version = driver.guess_version()
+            if not config.version:  # This will succeed, 4.2 <= fw < 5
+                config._set(TAG.VERSION, driver.read_version())
             if config.version >= (5, 0, 0):  # New capabilities
                 self._can_write_config = True
             elif config.version == (4, 2, 4):  # Doesn't report correctly
-                config.usb_supported = 0x3f
+                config._set(TAG.USB_SUPPORTED, 0x3f)
             if config.usb_supported ==\
                     (APPLICATION.OTP | APPLICATION.U2F | TRANSPORT.CCID):
                 self.device_name = 'YubiKey Edge'
-                config.usb_supported ^= TRANSPORT.CCID
+                config._set(TAG.USB_SUPPORTED,
+                            config.usb_supported ^ TRANSPORT.CCID)
         except Exception:  # TODO Proper exception
             logger.debug('Failed to read config from device')
             config = DeviceConfig()
-            config.version = descriptor.version
-            if config.version is not None:
-                self._version_certain = True
-            else:
-                config.version = driver.guess_version()
-                self._version_certain = self._key_type != YUBIKEY.NEO
+            version = descriptor.version or driver.read_version()
+            if version is not None:
+                config._set(TAG.VERSION, version)
 
             try:
-                config.serial = driver.read_serial()
+                config._set(TAG.SERIAL, driver.read_serial())
             except Exception:
-                config.serial = None
+                pass
 
             if self._key_type == YUBIKEY.SKY:
                 logger.debug('Identified SKY 1')
-                config.usb_supported = APPLICATION.U2F
+                config._set(TAG.USB_SUPPORTED, APPLICATION.U2F)
             elif self._key_type == YUBIKEY.NEO:
                 logger.debug('Identified NEO')
                 if driver.transport == TRANSPORT.CCID:
                     logger.debug('CCID available, probe capabilities...')
-                    config.usb_supported = driver.probe_capabilities()
+                    usb_supported = driver.probe_capabilities()
                 else:  # Assume base capabilities
                     logger.debug('CCID not available, guess capabilities')
-                    config.usb_supported = _NEO_BASE_CAPABILITIES
+                    usb_supported = _NEO_BASE_CAPABILITIES
                     if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
-                            or config.version >= (3, 3, 0):
-                        config.usb_supported |= APPLICATION.U2F
-                config.nfc_supported = config.usb_supported
-                config.nfc_enabled = config.nfc_supported
+                            or (version and version >= (3, 3, 0)):
+                        usb_supported |= APPLICATION.U2F
+
+                config._set(TAG.USB_SUPPORTED, usb_supported)
+                config._set(TAG.NFC_SUPPORTED, usb_supported)
+                config._set(TAG.NFC_ENABLED, usb_supported)
             elif self._key_type == YUBIKEY.YKP:
                 logger.debug('YK Plus identified')
-                config.usb_supported = APPLICATION.OTP | APPLICATION.U2F
+                config._set(TAG.USB_SUPPORTED,
+                            APPLICATION.OTP | APPLICATION.U2F)
                 self._can_mode_switch = False
             elif self._key_type == YUBIKEY.YKS:
                 logger.debug('YK Standard identified')
-                config.usb_supported = APPLICATION.OTP
+                config._set(TAG.USB_SUPPORTED, APPLICATION.OTP)
                 self._can_mode_switch = False
 
-        if not config.usb_enabled:
-            # This is wrong, but gets fixed below
-            config.usb_enabled = config.usb_supported
-
-        # Fix USB enabled
+        # Fix usb_enabled
+        usb_enabled = config.usb_enabled or config.usb_supported
         if not TRANSPORT.has(self.mode.transports, TRANSPORT.OTP):
-            config.usb_enabled &= ~APPLICATION.OTP
+            usb_enabled &= ~APPLICATION.OTP
         if not TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO):
-            config.usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
+            usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
         if not TRANSPORT.has(self.mode.transports, TRANSPORT.CCID):
-            config.usb_enabled &= ~(TRANSPORT.CCID | APPLICATION.OATH |
-                                    APPLICATION.OPGP | APPLICATION.PIV)
+            usb_enabled &= ~(TRANSPORT.CCID | APPLICATION.OATH |
+                             APPLICATION.OPGP | APPLICATION.PIV)
+        config._set(TAG.USB_ENABLED, usb_enabled)
 
         self._config = config
 
@@ -243,10 +270,6 @@ class YubiKey(object):
     @property
     def config(self):
         return self._config
-
-    @property
-    def version_certain(self):
-        return self._version_certain
 
     @property
     def can_mode_switch(self):
@@ -282,9 +305,11 @@ class YubiKey(object):
             raise ValueError('Mode not supported: %s' % mode)
         self.set_mode(mode)
 
-    def write_config(self, payload, reboot=False, lock_key=None):
+    def write_config(self, values, reboot=False, lock_key=None):
         if not self._can_write_config:
             raise NotImplementedError()
+
+        payload = b''.join(Tlv(k, v) for (k, v) in values.items())
 
         if lock_key:
             payload += Tlv(TAG.USE_LOCK_KEY, lock_key)
