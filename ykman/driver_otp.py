@@ -35,18 +35,21 @@ from .driver import AbstractDriver, ModeSwitchError
 from .util import (PID, TRANSPORT, MissingLibrary, time_challenge,
                    parse_totp_hash, format_code, hmac_shorten_key)
 from .scancodes import encode, KEYBOARD_LAYOUT
+from enum import IntEnum, unique
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)
 
-INS_SELECT = 0xa4
-INS_YK4_CAPABILITIES = 0x1d
 
-SLOT_CONFIG = 0x01
-SLOT_CONFIG2 = 0x03
-SLOT_UPDATE1 = 0x04
-SLOT_UPDATE2 = 0x05
-SLOT_SWAP = 0x06
+@unique
+class SLOT(IntEnum):
+    CONFIG = 0x01
+    CONFIG2 = 0x03
+    UPDATE1 = 0x04
+    UPDATE2 = 0x05
+    SWAP = 0x06
+
+
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
@@ -83,9 +86,9 @@ def check(status):
 
 def slot_to_cmd(slot, update=False):
     if slot == 1:
-        return SLOT_UPDATE1 if update else SLOT_CONFIG
+        return SLOT.UPDATE1 if update else SLOT.CONFIG
     elif slot == 2:
-        return SLOT_UPDATE2 if update else SLOT_CONFIG2
+        return SLOT.UPDATE2 if update else SLOT.CONFIG2
     else:
         raise ValueError('slot must be 1 or 2')
 
@@ -97,14 +100,12 @@ class OTPDriver(AbstractDriver):
     transport = TRANSPORT.OTP
 
     def __init__(self, dev):
-
         self._dev = dev
+        super(OTPDriver, self).__init__(self._read_pid())
+
         self._access_code = None
-        self._serial = self._read_serial()
-        self._pid = self._read_pid()
         self._slot1_valid = False
         self._slot2_valid = False
-        self._status = (0, 0, 0)
         self._read_status()
 
     @property
@@ -120,14 +121,13 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
         return PID(pid.value)
 
-    def _read_serial(self):
+    def read_serial(self):
         serial = c_uint()
         if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
             return serial.value
         else:
-            logger.debug(
-                'Failed to read serial from device.')
-        return None  # Serial not visible
+            logger.debug('Failed to read serial from device.')
+            return None  # Serial not visible
 
     def _read_status(self):
         status = ykpers.ykds_alloc()
@@ -144,15 +144,24 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykds_free(status)
 
-    def read_capabilities(self):
+    def read_config(self):
+        if self._version < (4, 1, 0):
+            raise NotImplementedError()
+
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
         check(ykpers.yk_get_capabilities(
             self._dev, 0, 0, resp, byref(buf_size)))
         return resp.raw[:buf_size.value]
 
-    def guess_version(self):
-        return self._version, True
+    def write_config(self, data):
+        if self._version < (5, 0, 0):
+            raise NotImplementedError()
+
+    def read_version(self):
+        if self._version[0] == 3:  # This is the OTP applet version.
+            return None
+        return self._version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()
@@ -303,7 +312,7 @@ class OTPDriver(AbstractDriver):
                     logger.debug('Got %s as expected.', e)
                     # NEOs and very old YK4s might still be blinking,
                     # lets try to read the serial to cancel it.
-                    self._read_serial()
+                    self.read_serial()
                     raise
                 else:
                     logger.debug('YkpersError: %s', e)
@@ -347,10 +356,10 @@ class OTPDriver(AbstractDriver):
     def swap_slots(self):
         if self._version < (2, 3, 0):
             raise ValueError('swapping slots requires YubiKey 2.3.0 or later')
-        cfg = self._create_cfg(SLOT_SWAP)
+        cfg = self._create_cfg(SLOT.SWAP)
         try:
             ycfg = ykpers.ykp_core_config(cfg)
-            check(ykpers.yk_write_command(self._dev, ycfg, SLOT_SWAP, None))
+            check(ykpers.yk_write_command(self._dev, ycfg, SLOT.SWAP, None))
         finally:
             ykpers.ykp_free_config(cfg)
 
