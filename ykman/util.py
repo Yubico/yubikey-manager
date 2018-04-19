@@ -234,7 +234,7 @@ class Tlv(bytes):
         offs = 2
         if ln > 0x80:
             n_bytes = ln - 0x80
-            ln = b2len(self[offs:offs + n_bytes])
+            ln = bytes2int(self[offs:offs + n_bytes])
         return ln
 
     @property
@@ -263,7 +263,7 @@ class Tlv(bytes):
                 offs = 2
                 if ln > 0x80:
                     n_bytes = ln - 0x80
-                    ln = b2len(data[offs:offs + n_bytes])
+                    ln = bytes2int(data[offs:offs + n_bytes])
                     offs = offs + n_bytes
                 value = data[offs:offs+ln]
         elif len(args) == 2:  # Called with tag and value.
@@ -313,14 +313,6 @@ def int2bytes(value):
 
 def bytes2int(data):
     return int(b2a_hex(data), 16)
-
-
-def b2len(bs):
-    ln = 0
-    for b in six.iterbytes(bs):
-        ln *= 256
-        ln += b
-    return ln
 
 
 _HEX = b'0123456789abcdef'

@@ -32,24 +32,12 @@ from .native.ykpers import Ykpers
 from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError
 from .util import PID, TRANSPORT, MissingLibrary
-from enum import IntEnum, unique
 
 logger = logging.getLogger(__name__)
 
 
-@unique
-class SLOT(IntEnum):
-    CONFIG = 0x01
-    CONFIG2 = 0x03
-    UPDATE1 = 0x04
-    UPDATE2 = 0x05
-    SWAP = 0x06
-
-
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
-
-SLOTS = [-1, 0x30, 0x38]
 
 try:
     ykpers = Ykpers('ykpers-1', '1')
@@ -78,15 +66,6 @@ class YkpersError(Exception):
 def check(status):
     if not status:
         raise YkpersError(ykpers.yk_get_errno())
-
-
-def slot_to_cmd(slot, update=False):
-    if slot == 1:
-        return SLOT.UPDATE1 if update else SLOT.CONFIG
-    elif slot == 2:
-        return SLOT.UPDATE2 if update else SLOT.CONFIG2
-    else:
-        raise ValueError('slot must be 1 or 2')
 
 
 class OTPDriver(AbstractDriver):
@@ -121,14 +100,6 @@ class OTPDriver(AbstractDriver):
         check(ykpers.yk_get_key_vid_pid(self._dev, byref(vid), byref(pid)))
         return PID(pid.value)
 
-    def read_serial(self):
-        serial = c_uint()
-        if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
-            return serial.value
-        else:
-            logger.debug('Failed to read serial from device.')
-            return None  # Serial not visible
-
     def _read_status(self):
         status = ykpers.ykds_alloc()
         try:
@@ -144,6 +115,19 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykds_free(status)
 
+    def read_version(self):
+        if self._version[0] == 3:  # This is the OTP applet version.
+            return None
+        return self._version
+
+    def read_serial(self):
+        serial = c_uint()
+        if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
+            return serial.value
+        else:
+            logger.debug('Failed to read serial from device.')
+            return None  # Serial not visible
+
     def read_config(self):
         if self._version < (4, 1, 0):
             raise NotImplementedError()
@@ -157,11 +141,6 @@ class OTPDriver(AbstractDriver):
     def write_config(self, data):
         if self._version < (5, 0, 0):
             raise NotImplementedError()
-
-    def read_version(self):
-        if self._version[0] == 3:  # This is the OTP applet version.
-            return None
-        return self._version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()

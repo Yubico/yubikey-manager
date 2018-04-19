@@ -1,6 +1,6 @@
 #  vim: set fileencoding=utf-8 :
 
-from ykman.util import (b2len, format_code, generate_static_pw,
+from ykman.util import (bytes2int, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
                         parse_tlvs, parse_truncated, time_challenge, Tlv,
                         is_pkcs12, FORM_FACTOR)
@@ -15,10 +15,10 @@ if not getattr(unittest.TestCase, 'assertRegex', None):
 
 class TestUtilityFunctions(unittest.TestCase):
 
-    def test_b2len(self):
-        self.assertEqual(0x57, b2len(b'\x57'))
-        self.assertEqual(0x1234, b2len(b'\x12\x34'))
-        self.assertEqual(0xcafed00d, b2len(b'\xca\xfe\xd0\x0d'))
+    def test_bytes2int(self):
+        self.assertEqual(0x57, bytes2int(b'\x57'))
+        self.assertEqual(0x1234, bytes2int(b'\x12\x34'))
+        self.assertEqual(0xcafed00d, bytes2int(b'\xca\xfe\xd0\x0d'))
 
     def test_format_code(self):
         self.assertEqual('000000', format_code(0))

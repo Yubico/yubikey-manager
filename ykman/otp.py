@@ -48,9 +48,6 @@ class SLOT(IntEnum):
     SWAP = 0x06
 
 
-CONFIG1_VALID = 0x01
-CONFIG2_VALID = 0x02
-
 SLOTS = [-1, 0x30, 0x38]
 
 
