@@ -201,7 +201,7 @@ class YubiKey(object):
                 self.device_name = 'YubiKey Edge'
                 config._set(TAG.USB_SUPPORTED,
                             config.usb_supported ^ TRANSPORT.CCID)
-        except Exception:  # TODO Proper exception
+        except Exception:
             logger.debug('Failed to read config from device')
             config = DeviceConfig()
             version = descriptor.version or driver.read_version()
