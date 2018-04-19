@@ -366,7 +366,7 @@ class OTPDriver(AbstractDriver):
     def configure_ndef_slot(self, slot, uri='https://my.yubico.com/neo/'):
         ndef = ykpers.ykp_alloc_ndef()
         try:
-            check(ykpers.ykp_construct_ndef_uri(ndef, bytes(uri.encode())))
+            check(ykpers.ykp_construct_ndef_uri(ndef, uri.encode()))
             check(ykpers.yk_write_ndef2(self._dev, ndef, slot))
         finally:
             ykpers.ykp_free_ndef(ndef)
