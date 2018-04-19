@@ -29,8 +29,8 @@ from __future__ import absolute_import
 
 import six
 from .util import AID
-from .driver_ccid import (
-    APDUError, SW_OK, SW_NO_INPUT_DATA, SW_CONDITIONS_NOT_SATISFIED, INS_SELECT)
+from .driver_ccid import (APDUError, SW_OK, SW_NO_INPUT_DATA,
+                          SW_CONDITIONS_NOT_SATISFIED)
 from enum import IntEnum, unique
 from binascii import b2a_hex
 from collections import namedtuple
@@ -73,8 +73,8 @@ TOUCH_METHOD_BUTTON = 0x20
 class OpgpController(object):
 
     def __init__(self, driver):
+        driver.select(AID.OPGP)
         self._driver = driver
-        self.send_apdu(0, INS_SELECT, 0x04, 0, AID.OPGP)
         self._version = self._read_version()
 
     @property

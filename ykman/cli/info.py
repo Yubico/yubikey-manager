@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from ..util import CAPABILITY
+from ..util import APPLICATION
 import click
 
 
@@ -44,25 +44,26 @@ def info(ctx):
     click.echo('Device type: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))
-    if dev.version_certain:
+    if dev.version:
         f_version = '.'.join(str(x) for x in dev.version)
         click.echo('Firmware version: {}'.format(f_version))
     else:
         click.echo('Firmware version: Uncertain, re-run with only one '
                    'YubiKey connected')
-    if dev.form_factor:
-        click.echo('Form factor: {}'.format(str(dev.form_factor)))
+    config = dev.config
+    if config.form_factor:
+        click.echo('Form factor: {!s}'.format(config.form_factor))
     click.echo('Enabled USB interfaces: {}'.format(dev.mode))
     click.echo()
 
     click.echo('Applications:')
-    for c in CAPABILITY:
-        if c & dev.capabilities:
-            if c & dev.enabled:
+    for app in APPLICATION:
+        if app & config.usb_supported:
+            if app & config.usb_enabled:
                 status = 'Enabled'
             else:
                 status = 'Disabled'
         else:
             status = 'Not available'
 
-        click.echo('    {0!s}:\t{1}'.format(c, status))
+        click.echo('    {0!s}:\t{1}'.format(app, status))
