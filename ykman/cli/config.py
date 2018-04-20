@@ -37,21 +37,24 @@ import click
 logger = logging.getLogger(__name__)
 
 
-APPLICATIONS = ['otp', 'fido2', 'u2f', 'opgp', 'oath', 'piv']
+APPLICATIONS = ['OTP', 'FIDO2', 'U2F', 'OPGP', 'OATH', 'PIV']
 
 
 @click.group()
 @click.pass_context
 @click_skip_on_help
-def apps(ctx):
+def config(ctx):
     """
-    Manage enabled applications over USB and NFC.
+    Enable/Disable applications.
 
+    The applications may be enabled and disabled independently
+    over different interfaces (USB and NFC). The configuration may
+    also be protected by a lock code.
     """
     pass
 
 
-@apps.command('set-lock-code')
+@config.command('set-lock-code')
 @click.pass_context
 def set_lock_code(ctx):
     """
@@ -60,7 +63,7 @@ def set_lock_code(ctx):
     pass
 
 
-@apps.command()
+@config.command()
 @click.pass_context
 @click.option(
     '-e', '--enable', multiple=True, type=click.Choice(APPLICATIONS),
@@ -93,16 +96,16 @@ def usb(
     new_config = dev.config.usb_enabled
     logger.debug('Current config: {}'.format(bin(new_config)))
     for app in enable:
-        new_config |= APPLICATION[app.upper()]
+        new_config |= APPLICATION[app]
 
     for app in disable:
-        new_config &= ~APPLICATION[app.upper()]
+        new_config &= ~APPLICATION[app]
 
     logger.debug('New config: {}'.format(bin(new_config)))
     dev.write_config(device_config(usb_enabled=new_config), reboot=True)
 
 
-@apps.command()
+@config.command()
 @click.pass_context
 @click.option(
     '-e', '--enable', multiple=True, type=click.Choice(APPLICATIONS),

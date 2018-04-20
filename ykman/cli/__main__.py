@@ -42,7 +42,7 @@ from .opgp import openpgp
 from .oath import oath
 from .piv import piv
 from .fido import fido
-from .apps import apps
+from .config import config
 import usb.core
 import click
 import logging
@@ -199,7 +199,7 @@ def list_keys(ctx, serials):
             break
 
 
-COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, apps)
+COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
 
 
 for cmd in COMMANDS:
