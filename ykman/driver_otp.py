@@ -141,9 +141,9 @@ class OTPDriver(AbstractDriver):
     def write_config(self, data):
         if self._version < (5, 0, 0):
             raise NotSupportedError()
-        if self._version < (1, 19, 0):
+        if libversion < (1, 19, 0):
             raise NotSupportedError('This action requires libykpers >= 1.19')
-        check(ykpers.yk_write_device_info(self.dev, data, len(data)))
+        check(ykpers.yk_write_device_info(self._dev, data, len(data)))
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()
