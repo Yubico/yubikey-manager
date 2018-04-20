@@ -203,7 +203,7 @@ class CCIDDriver(AbstractDriver):
 
     def _set_mode_mgr(self, mode_data):
         self.select(AID.MGR)
-        self.send_apdu(0, MGR_INS.NEO_TEST, SLOT.DEVICE_CONFIG, 0, mode_data)
+        self.send_apdu(0, MGR_INS.SET_MODE, SLOT.DEVICE_CONFIG, 0, mode_data)
 
     def close(self):
         logger.debug('Close %s', self)
