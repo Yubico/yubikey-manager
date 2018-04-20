@@ -30,7 +30,7 @@ from __future__ import absolute_import
 import logging
 from .native.ykpers import Ykpers
 from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
-from .driver import AbstractDriver, ModeSwitchError
+from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
 from .util import PID, TRANSPORT, MissingLibrary
 
 logger = logging.getLogger(__name__)
@@ -130,7 +130,7 @@ class OTPDriver(AbstractDriver):
 
     def read_config(self):
         if self._version < (4, 1, 0):
-            raise NotImplementedError()
+            raise NotSupportedError()
 
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
@@ -140,7 +140,10 @@ class OTPDriver(AbstractDriver):
 
     def write_config(self, data):
         if self._version < (5, 0, 0):
-            raise NotImplementedError()
+            raise NotSupportedError()
+        if self._version < (1, 19, 0):
+            raise NotSupportedError('This action requires libykpers >= 1.19')
+        check(ykpers.yk_write_device_info(self.dev, data, len(data)))
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         config = ykpers.ykp_alloc_device_config()
