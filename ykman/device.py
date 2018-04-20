@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Mode, Tlv,
                    parse_tlvs, bytes2int, int2bytes)
-from .driver import AbstractDriver
+from .driver import AbstractDriver, NotSupportedError
 from enum import IntEnum, unique
 import logging
 import struct
@@ -201,17 +201,16 @@ class YubiKey(object):
                 self.device_name = 'YubiKey Edge'
                 config._set(TAG.USB_SUPPORTED,
                             config.usb_supported ^ TRANSPORT.CCID)
-        except Exception:
-            logger.debug('Failed to read config from device')
+        except NotSupportedError as e:
+            logger.debug('Failed to read config from device', exc_info=e)
             config = DeviceConfig()
             version = descriptor.version or driver.read_version()
             if version is not None:
                 config._set(TAG.VERSION, version)
 
-            try:
-                config._set(TAG.SERIAL, driver.read_serial())
-            except Exception:
-                pass
+            serial = driver.read_serial()
+            if serial is not None:
+                config._set(TAG.SERIAL, serial)
 
             if self._key_type == YUBIKEY.SKY:
                 logger.debug('Identified SKY 1')
@@ -307,7 +306,7 @@ class YubiKey(object):
 
     def write_config(self, values, reboot=False, lock_key=None):
         if not self._can_write_config:
-            raise NotImplementedError()
+            raise NotSupportedError()
 
         payload = b''.join(Tlv(k, v) for (k, v) in values.items())
 

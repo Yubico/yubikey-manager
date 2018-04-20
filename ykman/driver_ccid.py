@@ -38,7 +38,7 @@ from smartcard import System
 from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
-from .driver import AbstractDriver, ModeSwitchError
+from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
 from .util import AID, APPLICATION, TRANSPORT, YUBIKEY
 
 SW_OK = 0x9000
@@ -119,10 +119,13 @@ class CCIDDriver(AbstractDriver):
         self._conn = connection
 
     def read_serial(self):
-        self.select(AID.OTP)
-        serial = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_SERIAL, 0)
-        if len(serial) == 4:
+        try:
+            self.select(AID.OTP)
+            serial = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_SERIAL, 0)
             return struct.unpack('>I', serial)[0]
+        except APDUError:
+            pass
+        return None
 
     def read_version(self):
         if self.pid.get_type() == YUBIKEY.YK4:
@@ -135,13 +138,13 @@ class CCIDDriver(AbstractDriver):
 
     def read_config(self):
         if self.pid.get_type() == YUBIKEY.NEO:
-            raise NotImplementedError()
+            raise NotSupportedError()
         self.select(AID.MGR)
         return self.send_apdu(0, MGR_INS.READ_CONFIG, 0, 0)
 
     def write_config(self, data):
         if self.pid.get_type() == YUBIKEY.NEO:
-            raise NotImplementedError()
+            raise NotSupportedError()
         self.select(AID.MGR)
         self.send_apdu(0, MGR_INS.WRITE_CONFIG, 0, 0, data)
 

@@ -36,6 +36,10 @@ class ModeSwitchError(Exception):
         super(ModeSwitchError, self).__init__('Failed to switch mode.')
 
 
+class NotSupportedError(Exception):
+    pass
+
+
 class AbstractDriver(object):
     """Abstract driver class for communicating with a YubiKey"""
 

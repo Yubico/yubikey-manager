@@ -99,6 +99,8 @@ class Ykpers(CLibrary):
     yk_write_ndef2 = [POINTER(YK_KEY), POINTER(YK_NDEF), c_uint], bool
     ykp_construct_ndef_uri = [POINTER(YK_NDEF), c_char_p], bool
 
+    yk_write_device_info = [POINTER(YK_KEY), c_char_p, c_uint], bool
+
     def yk_get_errno(self):
         return self._yk_errno_location().contents.value
 
