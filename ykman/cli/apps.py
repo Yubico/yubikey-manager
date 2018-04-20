@@ -28,6 +28,8 @@
 from __future__ import absolute_import
 
 from .util import click_skip_on_help
+from ..device import device_config
+from ..util import APPLICATION
 import logging
 import click
 
@@ -35,7 +37,7 @@ import click
 logger = logging.getLogger(__name__)
 
 
-APPLICATIONS = ['otp', 'fido2', 'u2f', 'openpgp', 'oath', 'piv']
+APPLICATIONS = ['otp', 'fido2', 'u2f', 'opgp', 'oath', 'piv']
 
 
 @click.group()
@@ -71,7 +73,7 @@ def set_lock_code(ctx):
     help='Lock code used to protect the application configuration.')
 @click.option(
     '--touch-eject', is_flag=True, help='When set, the button toggles the state'
-    ' of the smartcard between  ejected and inserted. '
+    ' of the smartcard between ejected and inserted. '
     '(CCID only).')
 @click.option(
     '--autoeject-timeout', required=False, type=int, default=0,
@@ -81,11 +83,23 @@ def set_lock_code(ctx):
     '--chalresp-timeout', required=False, type=int, default=0,
     metavar='SECONDS', help='Sets the timeout when waiting for touch'
     ' for challenge response in the OTP application.')
-def usb(ctx, enable, disable, touch_eject, autoeject_timeout, chalresp_timeout):
+def usb(
+        ctx, enable, disable, touch_eject, autoeject_timeout, chalresp_timeout,
+        lock_code):
     """
     Enable or disable applications over USB.
     """
-    pass
+    dev = ctx.obj['dev']
+    new_config = dev.config.usb_enabled
+    logger.debug('Current config: {}'.format(bin(new_config)))
+    for app in enable:
+        new_config |= APPLICATION[app.upper()]
+
+    for app in disable:
+        new_config &= ~APPLICATION[app.upper()]
+
+    logger.debug('New config: {}'.format(bin(new_config)))
+    dev.write_config(device_config(usb_enabled=new_config), reboot=True)
 
 
 @apps.command()
