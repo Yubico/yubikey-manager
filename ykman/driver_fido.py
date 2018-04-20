@@ -45,12 +45,12 @@ class CMD(IntEnum):
     WRITE_CONFIG = CTAPHID.VENDOR_FIRST + 3
 
 
-class U2FDriver(AbstractDriver):
+class FidoDriver(AbstractDriver):
 
     transport = TRANSPORT.FIDO
 
     def __init__(self, dev):
-        super(U2FDriver, self).__init__(PID(dev.descriptor['product_id']))
+        super(FidoDriver, self).__init__(PID(dev.descriptor['product_id']))
         self._dev = dev
 
     def read_config(self):
@@ -79,6 +79,6 @@ def descriptor_filter(desc):
 def open_devices():
     for dev in CtapHidDevice.list_devices(descriptor_filter):
         try:
-            yield U2FDriver(dev)
+            yield FidoDriver(dev)
         except Exception as e:
             logger.debug('Failed opening FIDO device', exc_info=e)

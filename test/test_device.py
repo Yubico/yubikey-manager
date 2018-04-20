@@ -18,6 +18,7 @@ def make_mocks():
     descriptor.mode.transports = TRANSPORT.CCID
     driver = Mock()
     driver.pid = PID.YK4_CCID
+    driver.read_config.return_value = b'\5\5\3\0\0\0'
     return descriptor, driver
 
 

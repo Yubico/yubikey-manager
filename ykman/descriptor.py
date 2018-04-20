@@ -30,7 +30,7 @@ from __future__ import absolute_import
 from .util import PID, TRANSPORT, Mode
 from .device import YubiKey
 from .driver_ccid import open_devices as open_ccid
-from .driver_u2f import open_devices as open_u2f
+from .driver_fido import open_devices as open_fido
 from .driver_otp import open_devices as open_otp
 from .native.pyusb import get_usb_backend
 
@@ -145,7 +145,7 @@ def _list_drivers(transports):
             if dev:
                 yield dev
     if TRANSPORT.FIDO & transports:
-        for dev in open_u2f():
+        for dev in open_fido():
             if dev:
                 yield dev
 
