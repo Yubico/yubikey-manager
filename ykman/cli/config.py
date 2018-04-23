@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import click_skip_on_help
+from .util import click_skip_on_help, click_force_option
 from ..device import device_config
 from ..util import APPLICATION
 import logging
@@ -65,6 +65,7 @@ def set_lock_code(ctx):
 
 @config.command()
 @click.pass_context
+@click_force_option
 @click.option(
     '-e', '--enable', multiple=True, type=click.Choice(APPLICATIONS),
     help='Enable applications.')
@@ -88,25 +89,34 @@ def set_lock_code(ctx):
     ' for challenge response in the OTP application.')
 def usb(
         ctx, enable, disable, touch_eject, autoeject_timeout, chalresp_timeout,
-        lock_code):
+        lock_code, force):
     """
     Enable or disable applications over USB.
     """
     dev = ctx.obj['dev']
-    new_config = dev.config.usb_enabled
-    logger.debug('Current config: {}'.format(bin(new_config)))
+    usb_enabled = dev.config.usb_enabled
+
     for app in enable:
-        new_config |= APPLICATION[app]
-
+        usb_enabled |= APPLICATION[app]
     for app in disable:
-        new_config &= ~APPLICATION[app]
+        usb_enabled &= ~APPLICATION[app]
 
-    logger.debug('New config: {}'.format(bin(new_config)))
-    dev.write_config(device_config(usb_enabled=new_config), reboot=True)
+    f_confirm = '{}{}Configure USB interface?'.format(
+        'Enable {}.\n'.format(
+            ', '.join(
+                [str(APPLICATION[app]) for app in enable])) if enable else '',
+        'Disable {}.\n'.format(
+            ', '.join(
+                [str(APPLICATION[app]) for app in disable])) if disable else '')
+
+    force or click.confirm(f_confirm, abort=True)
+
+    dev.write_config(device_config(usb_enabled=usb_enabled), reboot=True)
 
 
 @config.command()
 @click.pass_context
+@click_force_option
 @click.option(
     '-e', '--enable', multiple=True, type=click.Choice(APPLICATIONS),
     help='Enable applications.')
@@ -116,18 +126,26 @@ def usb(
 @click.option(
     '-l', '--lock-code',
     help='Lock code used to protect the application configuration.')
-def nfc(ctx, enable, disable, lock_code):
+def nfc(ctx, enable, disable, lock_code, force):
     """
     Enable or disable applications over NFC.
     """
     dev = ctx.obj['dev']
-    new_config = dev.config.nfc_enabled
-    logger.debug('Current config: {}'.format(bin(new_config)))
+    nfc_enabled = dev.config.nfc_enabled
     for app in enable:
-        new_config |= APPLICATION[app]
+        nfc_enabled |= APPLICATION[app]
 
     for app in disable:
-        new_config &= ~APPLICATION[app]
+        nfc_enabled &= ~APPLICATION[app]
 
-    logger.debug('New config: {}'.format(bin(new_config)))
-    dev.write_config(device_config(nfc_enabled=new_config), reboot=True)
+    f_confirm = '{}{}Configure NFC interface?'.format(
+        'Enable {}.\n'.format(
+            ', '.join(
+                [str(APPLICATION[app]) for app in enable])) if enable else '',
+        'Disable {}.\n'.format(
+            ', '.join(
+                [str(APPLICATION[app]) for app in disable])) if disable else '')
+
+    force or click.confirm(f_confirm, abort=True)
+
+    dev.write_config(device_config(nfc_enabled=nfc_enabled), reboot=True)
