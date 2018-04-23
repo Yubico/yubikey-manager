@@ -57,8 +57,9 @@ def info(ctx):
     if config.nfc_supported:
         f_nfc = 'enabled' if config.nfc_enabled else 'disabled'
         click.echo('NFC interface is {}.'.format(f_nfc))
+    if config.configuration_locked:
+        click.echo('Configured applications are protected by a lock code.')
     click.echo()
-
     rows = []
     for app in APPLICATION:
         if app & config.usb_supported:

@@ -74,7 +74,7 @@ def set_lock_code(ctx):
     help='Disable applications.')
 @click.option(
     '-l', '--lock-code',
-    help='Lock code used to protect the application configuration.')
+    help='A 16 byte lock code used to protect the application configuration.')
 @click.option(
     '--touch-eject', is_flag=True, help='When set, the button toggles the state'
     ' of the smartcard between ejected and inserted. '
@@ -95,6 +95,10 @@ def usb(
     """
     dev = ctx.obj['dev']
     usb_enabled = dev.config.usb_enabled
+    if lock_code:
+        lock_code = lock_code.encode()
+        if len(lock_code) != 16:
+            ctx.fail('Lock code must be 16 bytes.')
 
     for app in enable:
         usb_enabled |= APPLICATION[app]
@@ -110,8 +114,8 @@ def usb(
                 [str(APPLICATION[app]) for app in disable])) if disable else '')
 
     force or click.confirm(f_confirm, abort=True)
-
-    dev.write_config(device_config(usb_enabled=usb_enabled), reboot=True)
+    dev.write_config(
+        device_config(usb_enabled=usb_enabled), reboot=True, lock_key=lock_code)
 
 
 @config.command()
@@ -125,11 +129,16 @@ def usb(
     help='Disable applications.')
 @click.option(
     '-l', '--lock-code',
-    help='Lock code used to protect the application configuration.')
+    help='A 16 byte lock code used to protect the application configuration.')
 def nfc(ctx, enable, disable, lock_code, force):
     """
     Enable or disable applications over NFC.
     """
+    if lock_code:
+        lock_code = lock_code.encode()
+        if len(lock_code) != 16:
+            ctx.fail('Lock code must be 16 bytes.')
+
     dev = ctx.obj['dev']
     nfc_enabled = dev.config.nfc_enabled
     for app in enable:
@@ -148,4 +157,5 @@ def nfc(ctx, enable, disable, lock_code, force):
 
     force or click.confirm(f_confirm, abort=True)
 
-    dev.write_config(device_config(nfc_enabled=nfc_enabled), reboot=True)
+    dev.write_config(
+        device_config(nfc_enabled=nfc_enabled), reboot=True, lock_key=lock_code)
