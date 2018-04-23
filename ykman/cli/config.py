@@ -116,8 +116,18 @@ def usb(
 @click.option(
     '-l', '--lock-code',
     help='Lock code used to protect the application configuration.')
-def nfc(ctx, enable, disable):
+def nfc(ctx, enable, disable, lock_code):
     """
     Enable or disable applications over NFC.
     """
-    pass
+    dev = ctx.obj['dev']
+    new_config = dev.config.nfc_enabled
+    logger.debug('Current config: {}'.format(bin(new_config)))
+    for app in enable:
+        new_config |= APPLICATION[app]
+
+    for app in disable:
+        new_config &= ~APPLICATION[app]
+
+    logger.debug('New config: {}'.format(bin(new_config)))
+    dev.write_config(device_config(nfc_enabled=new_config), reboot=True)
