@@ -27,8 +27,8 @@
 
 from __future__ import absolute_import
 
-from .driver import AbstractDriver
-from .util import TRANSPORT, PID
+from .driver import AbstractDriver, NotSupportedError
+from .util import TRANSPORT, PID, YUBIKEY
 from fido2.hid import CtapHidDevice, CTAPHID
 from enum import IntEnum, unique
 import logging
@@ -54,6 +54,11 @@ class FidoDriver(AbstractDriver):
         self._dev = dev
 
     def read_config(self):
+        if self.pid.get_type() == YUBIKEY.NEO:
+            raise NotSupportedError()
+        if self.pid.get_type() == YUBIKEY.SKY:
+            if self._dev.device_version < (4, 0, 0):  # Old SKY 1
+                raise NotSupportedError()
         return self._dev.call(CMD.READ_CONFIG)
 
     def write_config(self, data):
