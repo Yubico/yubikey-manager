@@ -54,16 +54,54 @@ def info(ctx):
     if config.form_factor:
         click.echo('Form factor: {!s}'.format(config.form_factor))
     click.echo('Enabled USB interfaces: {}'.format(dev.mode))
+    if config.nfc_supported:
+        f_nfc = 'enabled' if config.nfc_enabled else 'disabled'
+        click.echo('NFC interface is {}.'.format(f_nfc))
     click.echo()
 
-    click.echo('Applications:')
+    rows = []
     for app in APPLICATION:
         if app & config.usb_supported:
             if app & config.usb_enabled:
-                status = 'Enabled'
+                usb_status = 'Enabled'
             else:
-                status = 'Disabled'
+                usb_status = 'Disabled'
         else:
-            status = 'Not available'
+            usb_status = 'Not available'
+        if config.nfc_supported:
+            if app & config.nfc_supported:
+                if app & config.nfc_enabled:
+                    nfc_status = 'Enabled'
+                else:
+                    nfc_status = 'Disabled'
+            else:
+                nfc_status = 'Not available'
+            rows.append([str(app), usb_status, nfc_status])
+        else:
+            rows.append([str(app), usb_status])
 
-        click.echo('    {0!s}:\t{1}'.format(app, status))
+    column_l = []
+    for row in rows:
+        for idx, c in enumerate(row):
+            if len(column_l) > idx:
+                if len(c) > column_l[idx]:
+                    column_l[idx] = len(c)
+            else:
+                column_l.append(len(c))
+
+    f_apps = 'Applications'.ljust(column_l[0])
+    if config.nfc_supported:
+        f_USB = 'USB'.ljust(column_l[1])
+        f_NFC = 'NFC'.ljust(column_l[2])
+    f_table = ''
+
+    for row in rows:
+        for idx, c in enumerate(row):
+            f_table += '{}\t'.format(c.ljust(column_l[idx]))
+        f_table += '\n'
+
+    if config.nfc_supported:
+        click.echo('{}\t{}\t{}'.format(f_apps, f_USB, f_NFC))
+    else:
+        click.echo('{}'.format(f_apps))
+    click.echo(f_table, nl=False)
