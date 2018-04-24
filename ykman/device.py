@@ -57,6 +57,12 @@ class TAG(IntEnum):
     NFC_ENABLED = 0x0e
 
 
+@unique
+class FLAGS(IntEnum):
+    MODE_FLAG_EJECT = 0x80
+    MODE_REMOTE_WAKEUP = 0x40
+
+
 def _struct_pair(fmt):
     return (lambda v: struct.unpack(fmt, v)[0], lambda v: struct.pack(fmt, v))
 

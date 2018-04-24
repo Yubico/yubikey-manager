@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from .util import click_skip_on_help, click_force_option
-from ..device import device_config
+from ..device import device_config, FLAGS
 from ..util import APPLICATION
 import logging
 import click
@@ -105,7 +105,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 @click.option(
     '--chalresp-timeout', required=False, type=int, default=0,
     metavar='SECONDS', help='Sets the timeout when waiting for touch'
-    ' for challenge response in the OTP application.')
+    ' for challenge-response in the OTP application.')
 def usb(
         ctx, enable, disable, touch_eject, autoeject_timeout, chalresp_timeout,
         lock_code, force):
@@ -114,6 +114,11 @@ def usb(
     """
     dev = ctx.obj['dev']
     usb_enabled = dev.config.usb_enabled
+    flags = dev.config.device_flags
+
+    if touch_eject:
+        flags |= FLAGS.MODE_FLAG_EJECT
+
     if lock_code:
         lock_code = lock_code.encode()
         if len(lock_code) != 16:
@@ -124,17 +129,28 @@ def usb(
     for app in disable:
         usb_enabled &= ~APPLICATION[app]
 
-    f_confirm = '{}{}Configure USB interface?'.format(
+    f_confirm = '{}{}{}{}{}Configure USB interface?'.format(
         'Enable {}.\n'.format(
             ', '.join(
                 [str(APPLICATION[app]) for app in enable])) if enable else '',
         'Disable {}.\n'.format(
             ', '.join(
-                [str(APPLICATION[app]) for app in disable])) if disable else '')
+                [str(APPLICATION[app]) for app in disable])) if disable else '',
+        'Set touch eject.\n' if touch_eject else '',
+        'Set autoeject timeout to {}.\n'.format(
+            autoeject_timeout) if autoeject_timeout else '',
+        'Set challenge-response timeout to {}.\n'.format(
+            chalresp_timeout) if chalresp_timeout else '')
 
     force or click.confirm(f_confirm, abort=True)
     dev.write_config(
-        device_config(usb_enabled=usb_enabled), reboot=True, lock_key=lock_code)
+        device_config(
+            usb_enabled=usb_enabled,
+            flags=flags,
+            auto_eject_timeout=autoeject_timeout,
+            chalresp_timeout=chalresp_timeout),
+        reboot=True,
+        lock_key=lock_code)
 
 
 @config.command()
