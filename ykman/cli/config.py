@@ -118,6 +118,9 @@ def usb(
 
     if touch_eject:
         flags |= FLAGS.MODE_FLAG_EJECT
+    else:
+        #  Disable if flag not provided.
+        flags &= ~FLAGS.MODE_FLAG_EJECT
 
     if lock_code:
         lock_code = lock_code.encode()
