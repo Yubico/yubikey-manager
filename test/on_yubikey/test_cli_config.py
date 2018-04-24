@@ -77,3 +77,8 @@ class TestConfigNFC(DestructiveYubikeyTestCase):
         ykman_cli('config', 'nfc', '--disable', 'FIDO2', '-f')
         output = ykman_cli('config', 'nfc', '--list')
         self.assertNotIn('FIDO2', output)
+
+    def test_disable_all(self):
+        ykman_cli('config', 'nfc', '--disable-all', '-f')
+        output = ykman_cli('config', 'nfc', '--list')
+        self.assertFalse(output)
