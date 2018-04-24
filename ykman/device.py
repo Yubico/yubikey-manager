@@ -275,6 +275,10 @@ class YubiKey(object):
         return self._can_mode_switch
 
     @property
+    def can_write_config(self):
+        return self._can_write_config
+
+    @property
     def version(self):
         return self._config.version
 

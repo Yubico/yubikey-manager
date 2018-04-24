@@ -125,8 +125,10 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
         try:
             dev.set_mode(mode, chalresp_timeout, autoeject)
-            click.echo('Mode set! You must remove and re-insert your YubiKey '
-                       'for this change to take effect.')
+            if not dev.can_write_config:
+                click.echo(
+                    'Mode set! You must remove and re-insert your YubiKey '
+                    'for this change to take effect.')
         except ModeSwitchError as e:
             logger.debug('Failed to switch mode', exc_info=e)
             click.echo('Failed to switch mode on the YubiKey. Make sure your '
