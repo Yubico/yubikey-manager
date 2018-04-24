@@ -37,7 +37,6 @@ import click
 logger = logging.getLogger(__name__)
 
 
-APPLICATIONS = ['OTP', 'FIDO2', 'U2F', 'OPGP', 'OATH', 'PIV']
 CLEAR_LOCK_CODE = (
     b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
 
@@ -86,12 +85,14 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 @click.pass_context
 @click_force_option
 @click.option(
-    '-e', '--enable', multiple=True, type=click.Choice(APPLICATIONS),
-    help='Enable applications.')
+    '-e', '--enable', multiple=True, type=click.Choice(
+        APPLICATION.__members__.keys()), help='Enable applications.')
 @click.option(
-    '-d', '--disable', multiple=True, type=click.Choice(APPLICATIONS),
-    help='Disable applications.')
+    '-d', '--disable', multiple=True, type=click.Choice(
+        APPLICATION.__members__.keys()), help='Disable applications.')
 @click.option('-l', '--list', is_flag=True, help='List enabled applications.')
+@click.option(
+    '-a', '--enable-all', is_flag=True, help='Enable all applications.')
 @click.option(
     '-L', '--lock-code',
     help='A 16 byte lock code used to protect the application configuration.')
@@ -108,13 +109,14 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
     metavar='SECONDS', help='Sets the timeout when waiting for touch'
     ' for challenge-response in the OTP application.')
 def usb(
-        ctx, enable, disable, list, touch_eject, autoeject_timeout,
+        ctx, enable, disable, list, enable_all, touch_eject, autoeject_timeout,
         chalresp_timeout, lock_code, force):
     """
     Enable or disable applications over USB.
     """
 
     if not (list or
+            enable_all or
             enable or
             disable or
             touch_eject or
@@ -142,6 +144,8 @@ def usb(
         if len(lock_code) != 16:
             ctx.fail('Lock code must be 16 bytes.')
 
+    if enable_all:
+        enable = APPLICATION.__members__.keys()
     for app in enable:
         usb_enabled |= APPLICATION[app]
     for app in disable:
@@ -175,11 +179,11 @@ def usb(
 @click.pass_context
 @click_force_option
 @click.option(
-    '-e', '--enable', multiple=True, type=click.Choice(APPLICATIONS),
-    help='Enable applications.')
+    '-e', '--enable', multiple=True, type=click.Choice(
+        APPLICATION.__members__.keys()), help='Enable applications.')
 @click.option(
-    '-d', '--disable', multiple=True, type=click.Choice(APPLICATIONS),
-    help='Disable applications.')
+    '-d', '--disable', multiple=True, type=click.Choice(
+        APPLICATION.__members__.keys()), help='Disable applications.')
 @click.option('-l', '--list', is_flag=True, help='List enabled applications')
 @click.option(
     '-L', '--lock-code',
