@@ -39,6 +39,15 @@ class TestConfigUSB(DestructiveYubikeyTestCase):
         output = ykman_cli('config', 'usb', '--list')
         self.assertNotIn('FIDO2', output)
 
+    def test_disable_and_enable(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'usb', '--disable', 'FIDO2', '--enable',
+                'FIDO2', '-f')
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'usb', '--enable-all', '--disable', 'FIDO2', '-f')
+
 
 class TestConfigNFC(DestructiveYubikeyTestCase):
 
@@ -82,3 +91,18 @@ class TestConfigNFC(DestructiveYubikeyTestCase):
         ykman_cli('config', 'nfc', '--disable-all', '-f')
         output = ykman_cli('config', 'nfc', '--list')
         self.assertFalse(output)
+
+    def test_disable_and_enable(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'nfc', '--disable', 'FIDO2',
+                '--enable', 'FIDO2', '-f')
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'nfc', '--disable-all', '--enable', 'FIDO2', '-f')
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'nfc', '--enable-all', '--disable', 'FIDO2', '-f')
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'nfc', '--enable-all', '--disable-all', 'FIDO2', '-f')

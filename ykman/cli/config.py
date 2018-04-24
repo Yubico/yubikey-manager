@@ -124,6 +124,12 @@ def usb(
             chalresp_timeout):
         ctx.fail('No configuration options chosen.')
 
+    if enable_all:
+        enable = APPLICATION.__members__.keys()
+
+    if any(a in enable for a in disable):
+        ctx.fail('Invalid options.')
+
     dev = ctx.obj['dev']
     usb_enabled = dev.config.usb_enabled
     flags = dev.config.device_flags
@@ -143,9 +149,6 @@ def usb(
         lock_code = lock_code.encode()
         if len(lock_code) != 16:
             ctx.fail('Lock code must be 16 bytes.')
-
-    if enable_all:
-        enable = APPLICATION.__members__.keys()
     for app in enable:
         usb_enabled |= APPLICATION[app]
     for app in disable:
@@ -199,6 +202,15 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
     if not (list or enable_all or enable or disable_all or disable):
         ctx.fail('No configuration options chosen.')
 
+    if enable_all:
+        enable = APPLICATION.__members__.keys()
+
+    if disable_all:
+        disable = APPLICATION.__members__.keys()
+
+    if any(a in enable for a in disable):
+        ctx.fail('Invalid options.')
+
     if lock_code:
         lock_code = lock_code.encode()
         if len(lock_code) != 16:
@@ -213,12 +225,8 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
                 click.echo(str(app))
         ctx.exit()
 
-    if enable_all:
-        enable = APPLICATION.__members__.keys()
     for app in enable:
         nfc_enabled |= APPLICATION[app]
-    if disable_all:
-        disable = APPLICATION.__members__.keys()
     for app in disable:
         nfc_enabled &= ~APPLICATION[app]
 
