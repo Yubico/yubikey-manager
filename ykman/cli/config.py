@@ -184,15 +184,17 @@ def usb(
 @click.option(
     '-d', '--disable', multiple=True, type=click.Choice(
         APPLICATION.__members__.keys()), help='Disable applications.')
+@click.option(
+    '-a', '--enable-all', is_flag=True, help='Enable all applications.')
 @click.option('-l', '--list', is_flag=True, help='List enabled applications')
 @click.option(
     '-L', '--lock-code',
     help='A 16 byte lock code used to protect the application configuration.')
-def nfc(ctx, enable, disable, list, lock_code, force):
+def nfc(ctx, enable, disable, enable_all, list, lock_code, force):
     """
     Enable or disable applications over NFC.
     """
-    if not (list or enable or disable):
+    if not (list or enable_all or enable or disable):
         ctx.fail('No configuration options chosen.')
 
     if lock_code:
@@ -209,9 +211,10 @@ def nfc(ctx, enable, disable, list, lock_code, force):
                 click.echo(str(app))
         ctx.exit()
 
+    if enable_all:
+        enable = APPLICATION.__members__.keys()
     for app in enable:
         nfc_enabled |= APPLICATION[app]
-
     for app in disable:
         nfc_enabled &= ~APPLICATION[app]
 
