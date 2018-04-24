@@ -112,6 +112,15 @@ def usb(
     """
     Enable or disable applications over USB.
     """
+
+    if not (
+            enable or
+            disable or
+            touch_eject or
+            autoeject_timeout or
+            chalresp_timeout):
+        ctx.fail('No configuration options chosen.')
+
     dev = ctx.obj['dev']
     usb_enabled = dev.config.usb_enabled
     flags = dev.config.device_flags
@@ -172,6 +181,9 @@ def nfc(ctx, enable, disable, lock_code, force):
     """
     Enable or disable applications over NFC.
     """
+    if not (enable or disable):
+        ctx.fail('No configuration options chosen.')
+
     if lock_code:
         lock_code = lock_code.encode()
         if len(lock_code) != 16:
