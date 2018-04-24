@@ -91,8 +91,9 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 @click.option(
     '-d', '--disable', multiple=True, type=click.Choice(APPLICATIONS),
     help='Disable applications.')
+@click.option('-l', '--list', is_flag=True, help='List enabled applications.')
 @click.option(
-    '-l', '--lock-code',
+    '-L', '--lock-code',
     help='A 16 byte lock code used to protect the application configuration.')
 @click.option(
     '--touch-eject', is_flag=True, help='When set, the button toggles the state'
@@ -107,13 +108,13 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
     metavar='SECONDS', help='Sets the timeout when waiting for touch'
     ' for challenge-response in the OTP application.')
 def usb(
-        ctx, enable, disable, touch_eject, autoeject_timeout, chalresp_timeout,
-        lock_code, force):
+        ctx, enable, disable, list, touch_eject, autoeject_timeout,
+        chalresp_timeout, lock_code, force):
     """
     Enable or disable applications over USB.
     """
 
-    if not (
+    if not (list or
             enable or
             disable or
             touch_eject or
@@ -124,6 +125,11 @@ def usb(
     dev = ctx.obj['dev']
     usb_enabled = dev.config.usb_enabled
     flags = dev.config.device_flags
+    if list:
+        for app in APPLICATION:
+            if app & usb_enabled:
+                click.echo(str(app))
+        ctx.exit()
 
     if touch_eject:
         flags |= FLAGS.MODE_FLAG_EJECT
@@ -174,14 +180,15 @@ def usb(
 @click.option(
     '-d', '--disable', multiple=True, type=click.Choice(APPLICATIONS),
     help='Disable applications.')
+@click.option('-l', '--list', is_flag=True, help='List enabled applications')
 @click.option(
-    '-l', '--lock-code',
+    '-L', '--lock-code',
     help='A 16 byte lock code used to protect the application configuration.')
-def nfc(ctx, enable, disable, lock_code, force):
+def nfc(ctx, enable, disable, list, lock_code, force):
     """
     Enable or disable applications over NFC.
     """
-    if not (enable or disable):
+    if not (list or enable or disable):
         ctx.fail('No configuration options chosen.')
 
     if lock_code:
@@ -191,6 +198,13 @@ def nfc(ctx, enable, disable, lock_code, force):
 
     dev = ctx.obj['dev']
     nfc_enabled = dev.config.nfc_enabled
+
+    if list:
+        for app in APPLICATION:
+            if app & nfc_enabled:
+                click.echo(str(app))
+        ctx.exit()
+
     for app in enable:
         nfc_enabled |= APPLICATION[app]
 
