@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 
 APPLICATIONS = ['OTP', 'FIDO2', 'U2F', 'OPGP', 'OATH', 'PIV']
+CLEAR_LOCK_CODE = (
+    b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
 
 
 @click.group()
@@ -56,11 +58,25 @@ def config(ctx):
 
 @config.command('set-lock-code')
 @click.pass_context
-def set_lock_code(ctx):
+@click.option('-l', '--lock-code', help='Current lock code.')
+@click.option('-n', '--new-lock-code', help='New lock code.')
+@click.option('-c', '--clear', is_flag=True, help='Clear the lock code.')
+def set_lock_code(ctx, lock_code, new_lock_code, clear):
     """
-    Protect the configuration with a lock code.
+    Set or change the configuration lock code.
+
+    A 16 byte lock code may be used to protect the application configuration.
     """
-    pass
+    dev = ctx.obj['dev']
+    if lock_code:
+        lock_code = lock_code.encode()
+    if new_lock_code:
+        new_lock_code = new_lock_code.encode()
+    if clear:
+        new_lock_code = CLEAR_LOCK_CODE
+    dev.write_config(
+        device_config(
+            config_lock=new_lock_code), reboot=True, lock_key=lock_code)
 
 
 @config.command()
