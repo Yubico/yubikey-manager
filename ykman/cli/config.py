@@ -53,7 +53,10 @@ def config(ctx):
     over different interfaces (USB and NFC). The configuration may
     also be protected by a lock code.
     """
-    pass
+    dev = ctx.obj['dev']
+    if not dev.can_write_config:
+        ctx.fail('Configuring applications is not supported on this YubiKey. '
+                 'Use the `mode` command to configure USB interfaces.')
 
 
 @config.command('set-lock-code')
