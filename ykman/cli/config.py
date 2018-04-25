@@ -158,8 +158,9 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
     help='A 16 byte lock code used to protect the application configuration.')
 @click.option(
     '--touch-eject', is_flag=True, help='When set, the button toggles the state'
-    ' of the smartcard between ejected and inserted. '
-    '(CCID only).')
+    ' of the smartcard between ejected and inserted. (CCID only).')
+@click.option(
+    '--no-touch-eject', is_flag=True, help='Disable touch eject (CCID only).')
 @click.option(
     '--autoeject-timeout', required=False, type=int, default=0,
     metavar='SECONDS', help='When set, the smartcard will automatically eject'
@@ -169,8 +170,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
     metavar='SECONDS', help='Sets the timeout when waiting for touch'
     ' for challenge-response in the OTP application.')
 def usb(
-        ctx, enable, disable, list, enable_all, touch_eject, autoeject_timeout,
-        chalresp_timeout, lock_code, force):
+        ctx, enable, disable, list, enable_all, touch_eject, no_touch_eject,
+        autoeject_timeout, chalresp_timeout, lock_code, force):
     """
     Enable or disable applications over USB.
     """
@@ -203,8 +204,7 @@ def usb(
 
     if touch_eject:
         flags |= FLAGS.MODE_FLAG_EJECT
-    else:
-        #  Disable if flag not provided.
+    if no_touch_eject:
         flags &= ~FLAGS.MODE_FLAG_EJECT
 
     if lock_code:
@@ -218,7 +218,7 @@ def usb(
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
-    f_confirm = '{}{}{}{}{}Configure USB interface?'.format(
+    f_confirm = '{}{}{}{}{}{}Configure USB interface?'.format(
         'Enable {}.\n'.format(
             ', '.join(
                 [str(APPLICATION[app]) for app in enable])) if enable else '',
@@ -226,6 +226,7 @@ def usb(
             ', '.join(
                 [str(APPLICATION[app]) for app in disable])) if disable else '',
         'Set touch eject.\n' if touch_eject else '',
+        'Disable touch eject.\n' if no_touch_eject else '',
         'Set autoeject timeout to {}.\n'.format(
             autoeject_timeout) if autoeject_timeout else '',
         'Set challenge-response timeout to {}.\n'.format(
