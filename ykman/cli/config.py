@@ -187,6 +187,7 @@ def usb(
             enable or
             disable or
             touch_eject or
+            no_touch_eject or
             autoeject_timeout or
             chalresp_timeout):
         ctx.fail('No configuration options chosen.')
@@ -194,6 +195,9 @@ def usb(
     enable = APPLICATION.__members__.keys() if enable_all else enable
 
     _ensure_not_invalid_options(ctx, enable, disable)
+
+    if touch_eject and no_touch_eject:
+        ctx.fail('Invalid options.')
 
     dev = ctx.obj['dev']
     usb_enabled = dev.config.usb_enabled
