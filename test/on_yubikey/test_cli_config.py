@@ -48,6 +48,12 @@ class TestConfigUSB(DestructiveYubikeyTestCase):
             ykman_cli(
                 'config', 'usb', '--enable-all', '--disable', 'FIDO2', '-f')
 
+    def test_disable_all(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'usb', '-d', 'FIDO2', '-d', 'U2F', '-d',
+                'OATH', '-d', 'OPGP', 'PIV', '-d', 'OTP')
+
 
 class TestConfigNFC(DestructiveYubikeyTestCase):
 
