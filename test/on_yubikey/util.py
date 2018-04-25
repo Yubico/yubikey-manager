@@ -53,6 +53,13 @@ def get_version():
     return _the_yubikey.version
 
 
+def can_write_config():
+    if _one_yubikey:
+        return _the_yubikey.can_write_config
+    else:
+        return False
+
+
 def is_NEO():
     if _one_yubikey:
         return get_version() < (4, 0, 0)

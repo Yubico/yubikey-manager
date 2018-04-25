@@ -1,6 +1,8 @@
-from .util import (DestructiveYubikeyTestCase, ykman_cli)
+import unittest
+from .util import (DestructiveYubikeyTestCase, ykman_cli, can_write_config)
 
 
+@unittest.skipIf(not can_write_config(), 'Device can not write config')
 class TestConfigUSB(DestructiveYubikeyTestCase):
 
     def setUp(self):
@@ -77,6 +79,7 @@ class TestConfigUSB(DestructiveYubikeyTestCase):
         self.assertNotIn('OpenPGP', output)
 
 
+@unittest.skipIf(not can_write_config(), 'Device can not write config')
 class TestConfigNFC(DestructiveYubikeyTestCase):
 
     def setUp(self):
