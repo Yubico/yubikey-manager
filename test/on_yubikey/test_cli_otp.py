@@ -164,6 +164,10 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self.assertNotIn('generated secret key', output)
         self._check_slot_2_programmed()
 
+    def test_invalid_public_id(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'yubiotp', '-P', 'imnotmodhex!')
+
     def test_ykman_program_otp_slot_2_generated_private_id(self):
         output = ykman_cli(
             'otp', 'yubiotp', '2', '--public-id', 'vvccccfiluij',
