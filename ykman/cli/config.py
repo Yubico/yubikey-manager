@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 CLEAR_LOCK_CODE = (
-    b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
+    '\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
 
 
 @click.group()
@@ -69,16 +69,76 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 
     A 16 byte lock code may be used to protect the application configuration.
     """
+
     dev = ctx.obj['dev']
-    if lock_code:
-        lock_code = lock_code.encode()
-    if new_lock_code:
-        new_lock_code = new_lock_code.encode()
+
+    def fail_if_not_valid(ctx, lock_code):
+        if len(lock_code.encode()) != 16:
+            ctx.fail('The lock code must be 16 bytes.')
+
+    def prompt_new_lock_code():
+        return click.prompt(
+                    'Enter your new lock code', default='', hide_input=True,
+                    show_default=False, confirmation_prompt=True)
+
+    def prompt_current_lock_code():
+        return click.prompt(
+                    'Enter your current lock code', default='', hide_input=True,
+                    show_default=False)
+
+    def change_lock_code(lock_code, new_lock_code):
+        fail_if_not_valid(ctx, lock_code)
+        fail_if_not_valid(ctx, new_lock_code)
+        try:
+            dev.write_config(
+                device_config(
+                    config_lock=new_lock_code.encode()),
+                reboot=True,
+                lock_key=lock_code.encode())
+        except Exception as e:
+            logger.error('Changing the lock code failed', exc_info=e)
+            ctx.fail('Failed to change the lock code.')
+
+    def set_lock_code(new_lock_code):
+        fail_if_not_valid(ctx, new_lock_code)
+        try:
+            dev.write_config(
+                device_config(
+                    config_lock=new_lock_code.encode()),
+                reboot=True)
+        except Exception as e:
+            logger.error('Setting the lock code failed', exc_info=e)
+            ctx.fail('Failed to set the lock code.')
+
     if clear:
         new_lock_code = CLEAR_LOCK_CODE
-    dev.write_config(
-        device_config(
-            config_lock=new_lock_code), reboot=True, lock_key=lock_code)
+
+    if dev.config.configuration_locked:
+        if lock_code:
+            if new_lock_code:
+                change_lock_code(lock_code, new_lock_code)
+            else:
+                new_lock_code = prompt_new_lock_code()
+                change_lock_code(lock_code, new_lock_code)
+        else:
+            if new_lock_code:
+                lock_code = prompt_current_lock_code()
+                change_lock_code(lock_code, new_lock_code)
+            else:
+                lock_code = prompt_current_lock_code()
+                new_lock_code = prompt_new_lock_code()
+                change_lock_code(lock_code, new_lock_code)
+    else:
+        if lock_code:
+            ctx.fail(
+                'There is no current lock code set. '
+                'Use -n/--new-lock-code to set one.')
+        else:
+            if new_lock_code:
+                set_lock_code(new_lock_code)
+            else:
+                new_lock_code = prompt_new_lock_code()
+                set_lock_code(new_lock_code)
 
 
 @config.command()
