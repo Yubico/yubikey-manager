@@ -8,7 +8,7 @@ from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.util import TRANSPORT, parse_certificate, parse_private_key
 from .util import (
     DestructiveYubikeyTestCase, missing_mode, open_device, get_version)
-from ..util import open_file
+from ..util import a2b_hex_if_text, open_file
 
 
 DEFAULT_PIN = '123456'
@@ -46,25 +46,21 @@ class PivTestCase(DestructiveYubikeyTestCase):
         self.dev.driver.close()
 
     def assertMgmKeyIs(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
+        key = a2b_hex_if_text(key)
         self.controller.authenticate(key)
 
     def assertMgmKeyIsNot(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
+        key = a2b_hex_if_text(key)
 
         with self.assertRaises(APDUError):
             self.controller.authenticate(key)
 
     def assertStoredMgmKeyEquals(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
+        key = a2b_hex_if_text(key)
         self.assertEqual(self.controller._pivman_protected_data.key, key)
 
     def assertStoredMgmKeyNotEquals(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
+        key = a2b_hex_if_text(key)
         self.assertNotEqual(self.controller._pivman_protected_data.key, key)
 
     def reconnect(self):
