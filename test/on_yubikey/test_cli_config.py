@@ -54,6 +54,28 @@ class TestConfigUSB(DestructiveYubikeyTestCase):
                 'config', 'usb', '-d', 'FIDO2', '-d', 'U2F', '-d',
                 'OATH', '-d', 'OPGP', 'PIV', '-d', 'OTP')
 
+    def test_mode_command(self):
+        ykman_cli('mode', 'ccid', '-f')
+        output = ykman_cli('config', 'usb', '--list')
+        self.assertNotIn('FIDO U2F', output)
+        self.assertNotIn('FIDO2', output)
+        self.assertNotIn('OTP', output)
+
+        ykman_cli('mode', 'otp', '-f')
+        output = ykman_cli('config', 'usb', '--list')
+        self.assertNotIn('FIDO U2F', output)
+        self.assertNotIn('FIDO2', output)
+        self.assertNotIn('OpenPGP', output)
+        self.assertNotIn('PIV', output)
+        self.assertNotIn('OATH', output)
+
+        ykman_cli('mode', 'fido', '-f')
+        output = ykman_cli('config', 'usb', '--list')
+        self.assertNotIn('OTP', output)
+        self.assertNotIn('OATH', output)
+        self.assertNotIn('PIV', output)
+        self.assertNotIn('OpenPGP', output)
+
 
 class TestConfigNFC(DestructiveYubikeyTestCase):
 
