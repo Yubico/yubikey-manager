@@ -236,7 +236,10 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
         else:
             public_id = click.prompt('Enter public ID')
 
-    public_id = modhex_decode(public_id)
+    try:
+        public_id = modhex_decode(public_id)
+    except KeyError:
+        ctx.fail('Invalid public ID, must be modhex.')
 
     if not private_id:
         if generate_private_id:
