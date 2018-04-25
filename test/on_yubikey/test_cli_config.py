@@ -137,3 +137,19 @@ class TestConfigNFC(DestructiveYubikeyTestCase):
         with self.assertRaises(SystemExit):
             ykman_cli(
                 'config', 'nfc', '--enable-all', '--disable-all', 'FIDO2', '-f')
+
+
+@unittest.skipIf(not can_write_config(), 'Device can not write config')
+class TestConfigLockCode(DestructiveYubikeyTestCase):
+
+    def test_set_lock_code(self):
+        ykman_cli(
+            'config', 'set-lock-code', '--new-lock-code', '7HRd9YHFjKFQnih1')
+        output = ykman_cli('info')
+        self.assertIn(
+            'Configured applications are protected by a lock code', output)
+        ykman_cli(
+            'config', 'set-lock-code', '-l', '7HRd9YHFjKFQnih1', '--clear')
+        output = ykman_cli('info')
+        self.assertNotIn(
+            'Configured applications are protected by a lock code', output)

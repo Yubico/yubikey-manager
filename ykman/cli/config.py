@@ -97,7 +97,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
                 lock_key=lock_code.encode())
         except Exception as e:
             logger.error('Changing the lock code failed', exc_info=e)
-            ctx.fail('Failed to change the lock code.')
+            ctx.fail('Failed to change the lock code. Wrong current code?')
 
     def set_lock_code(new_lock_code):
         fail_if_not_valid(ctx, new_lock_code)
@@ -232,14 +232,18 @@ def usb(
             chalresp_timeout) if chalresp_timeout else '')
 
     force or click.confirm(f_confirm, abort=True)
-    dev.write_config(
-        device_config(
-            usb_enabled=usb_enabled,
-            flags=flags,
-            auto_eject_timeout=autoeject_timeout,
-            chalresp_timeout=chalresp_timeout),
-        reboot=True,
-        lock_key=lock_code)
+    try:
+        dev.write_config(
+            device_config(
+                usb_enabled=usb_enabled,
+                flags=flags,
+                auto_eject_timeout=autoeject_timeout,
+                chalresp_timeout=chalresp_timeout),
+            reboot=True,
+            lock_key=lock_code)
+    except Exception as e:
+        logger.error('Failed to write config', exc_info=e)
+        ctx.fail('Failed to configure USB applications.')
 
 
 @config.command()
@@ -298,8 +302,14 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
                 [str(APPLICATION[app]) for app in disable])) if disable else '')
 
     force or click.confirm(f_confirm, abort=True)
-    dev.write_config(
-        device_config(nfc_enabled=nfc_enabled), reboot=True, lock_key=lock_code)
+    try:
+        dev.write_config(
+            device_config(
+                nfc_enabled=nfc_enabled),
+            reboot=True, lock_key=lock_code)
+    except Exception as e:
+        logger.error('Failed to write config', exc_info=e)
+        ctx.fail('Failed to configure NFC applications.')
 
 
 def _list_apps(ctx, enabled):
