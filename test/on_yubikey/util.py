@@ -4,7 +4,6 @@ import os
 import sys
 import unittest
 import ykman.descriptor
-from ykman.descriptor import FailedOpeningDeviceException
 from ykman.util import (
     is_cve201715361_vulnerable_firmware_version, TRANSPORT)
 import test.util
@@ -34,7 +33,7 @@ if _test_serial is not None:
             _the_yubikey = ykman.descriptor.open_device(
                 serial=int(_test_serial), attempts=2)
 
-        except FailedOpeningDeviceException:
+        except Exception:
             print('Failed to open device. Please make sure you have connected'
                   ' the YubiKey with serial number: {}'.format(_test_serial),
                   file=sys.stderr)
