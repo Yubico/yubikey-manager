@@ -156,7 +156,8 @@ def list_devices(transports=sum(TRANSPORT)):
 
 
 def _open_driver(transports, serial, pid, attempts):
-    logger.debug('Opening driver for serial: %s, pid: %s', serial, pid)
+    logger.debug('Opening driver for transports: %s, serial: %s, pid: %s',
+                 transports, serial, pid)
     for attempt in range(1, attempts + 1):
         logger.debug('Attempt %d of %d', attempt, attempts)
         sleep_time = attempt * 0.1
