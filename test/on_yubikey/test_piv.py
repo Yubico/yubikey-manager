@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 import datetime
 import unittest
 from binascii import a2b_hex
@@ -96,7 +98,7 @@ class KeyManagement(PivTestCase):
 
         self.controller.verify(DEFAULT_PIN)
         csr = self.controller.generate_certificate_signing_request(
-            SLOT.AUTHENTICATION, public_key, u'alice')
+            SLOT.AUTHENTICATION, public_key, 'alice')
 
         self.assertEqual(
             csr.public_key().public_bytes(
@@ -119,19 +121,19 @@ class KeyManagement(PivTestCase):
 
         with self.assertRaises(APDUError):
             self.controller.generate_self_signed_certificate(
-                SLOT.AUTHENTICATION, public_key, u'alice', now(), now())
+                SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.verify(DEFAULT_PIN)
         self.controller.generate_self_signed_certificate(
-            SLOT.AUTHENTICATION, public_key, u'alice', now(), now())
+            SLOT.AUTHENTICATION, public_key, 'alice', now(), now())
 
     def _test_generate_self_signed_certificate(self, slot):
         public_key = self.generate_key(slot)
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.verify(DEFAULT_PIN)
         self.controller.generate_self_signed_certificate(
-            slot, public_key, u'alice', now(), now())
+            slot, public_key, 'alice', now(), now())
 
         cert = self.controller.read_certificate(slot)
 
