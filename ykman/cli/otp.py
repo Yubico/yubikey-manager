@@ -180,15 +180,13 @@ def delete(ctx, slot, force):
 @otp.command()
 @click_slot_argument
 @click.option('-P', '--public-id', required=False,
-              help='Static part of the OTP, defaults to the YubiKey serial '
-              'number converted to modhex.', metavar='MODHEX')
+              help='Public identifier prefix.', metavar='MODHEX')
 @click.option('-p', '--private-id', required=False, metavar='HEX',
-              callback=parse_hex(6), help='6 byte private identifier of the '
-              'credential.')
+              callback=parse_hex(6), help='6 byte private identifier.')
 @click.option('-k', '--key', required=False, metavar='HEX',
-              callback=parse_hex(16), help='16 byte secret key, in hex.')
+              callback=parse_hex(16), help='16 byte secret key.')
 @click.option('--no-enter', is_flag=True, help="Don't send an Enter "
-              'keystroke after outputting an OTP.')
+              'keystroke after emitting the OTP.')
 @click.option(
     '-S', '--serial-public-id', is_flag=True, required=False,
     help='Use YubiKey serial number as public ID. Conflicts with --public-id.')
