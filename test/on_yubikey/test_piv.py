@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 import datetime
 import unittest
 from binascii import a2b_hex
@@ -46,25 +48,16 @@ class PivTestCase(DestructiveYubikeyTestCase):
         self.dev.driver.close()
 
     def assertMgmKeyIs(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
         self.controller.authenticate(key)
 
     def assertMgmKeyIsNot(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
-
         with self.assertRaises(APDUError):
             self.controller.authenticate(key)
 
     def assertStoredMgmKeyEquals(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
         self.assertEqual(self.controller._pivman_protected_data.key, key)
 
     def assertStoredMgmKeyNotEquals(self, key):
-        if type(key) is str:
-            key = a2b_hex(key)
         self.assertNotEqual(self.controller._pivman_protected_data.key, key)
 
     def reconnect(self):
@@ -230,8 +223,10 @@ class ManagementKeyReadOnly(PivTestCase):
 
     def test_reset_while_verified_throws_nice_ValueError(self):
         self.controller.verify(DEFAULT_PIN)
-        with self.assertRaisesRegex(ValueError, '^Failed reading remaining'):
+        with self.assertRaises(ValueError) as cm:
             self.controller.reset()
+        self.assertRegexpMatches(str(cm.exception),
+                                 '^Failed reading remaining')
 
     def test_set_mgm_key_does_not_change_key_if_not_authenticated(self):
         with self.assertRaises(APDUError):
