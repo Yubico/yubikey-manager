@@ -52,9 +52,15 @@ import sys
 logger = logging.getLogger(__name__)
 
 
+def _normalize_token(val):
+    #  Non short options should be case insensitive.
+    return val.upper() if len(val) > 1 else val
+
+
 CLICK_CONTEXT_SETTINGS = dict(
     help_option_names=['-h', '--help'],
-    max_content_width=999
+    max_content_width=999,
+    token_normalize_func=_normalize_token,
 )
 
 
