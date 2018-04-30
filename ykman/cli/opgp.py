@@ -27,11 +27,16 @@
 
 from __future__ import absolute_import
 
+import logging
+import click
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import click_force_option, click_skip_on_help
-import click
+
+
+logger = logging.getLogger(__name__)
+
 
 KEY_NAMES = dict(
     sig=KEY_SLOT.SIGN,
@@ -86,7 +91,8 @@ def openpgp(ctx):
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this "
                      'YubiKey.')
-        raise
+        logger.debug('Failed to load OpenPGP Application', exc_info=e)
+        ctx.fail('Failed to load OpenPGP Application')
 
 
 @openpgp.command()
