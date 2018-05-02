@@ -138,6 +138,11 @@ class TestConfigNFC(DestructiveYubikeyTestCase):
             ykman_cli(
                 'config', 'nfc', '--enable-all', '--disable-all', 'FIDO2', '-f')
 
+    def test_case_insensitive(self):
+        ykman_cli('config', 'nfc', '--LIST')  # Assume no exception
+        with self.assertRaises(SystemExit):
+            ykman_cli('config', 'nfc', '-L')  # -l is sensitive
+
 
 @unittest.skipIf(not can_write_config(), 'Device can not write config')
 class TestConfigLockCode(DestructiveYubikeyTestCase):
