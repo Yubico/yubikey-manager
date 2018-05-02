@@ -200,8 +200,13 @@ def usb(
         ctx.fail('Invalid options.')
 
     dev = ctx.obj['dev']
+
+    usb_supported = dev.config.usb_supported
     usb_enabled = dev.config.usb_enabled
     flags = dev.config.device_flags
+
+    if not usb_supported:
+        ctx.fail('USB interface not supported.')
 
     if list:
         _list_apps(ctx, usb_enabled)
@@ -216,9 +221,15 @@ def usb(
         _ensure_valid_lock_code(ctx, lock_code)
 
     for app in enable:
-        usb_enabled |= APPLICATION[app]
+        if APPLICATION[app] & usb_supported:
+            usb_enabled |= APPLICATION[app]
+        else:
+            ctx.fail('{} not supported over USB.'.format(app))
     for app in disable:
-        usb_enabled &= ~APPLICATION[app]
+        if APPLICATION[app] & usb_supported:
+            usb_enabled &= ~APPLICATION[app]
+        else:
+            ctx.fail('{} not supported over USB.'.format(app))
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
@@ -272,6 +283,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
     """
     Enable or disable applications over NFC.
     """
+
     if not (list or enable_all or enable or disable_all or disable):
         ctx.fail('No configuration options chosen.')
 
@@ -288,15 +300,25 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
         _ensure_valid_lock_code(ctx, lock_code)
 
     dev = ctx.obj['dev']
+    nfc_supported = dev.config.nfc_supported
     nfc_enabled = dev.config.nfc_enabled
+
+    if not nfc_supported:
+        ctx.fail('NFC interface not available.')
 
     if list:
         _list_apps(ctx, nfc_enabled)
 
     for app in enable:
-        nfc_enabled |= APPLICATION[app]
+        if APPLICATION[app] & nfc_supported:
+            nfc_enabled |= APPLICATION[app]
+        else:
+            ctx.fail('{} not supported over NFC.'.format(app))
     for app in disable:
-        nfc_enabled &= ~APPLICATION[app]
+        if APPLICATION[app] & nfc_supported:
+            nfc_enabled &= ~APPLICATION[app]
+        else:
+            ctx.fail('{} not supported over NFC.'.format(app))
 
     f_confirm = '{}{}Configure NFC interface?'.format(
         'Enable {}.\n'.format(
