@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import click_skip_on_help, click_force_option
+from .util import click_skip_on_help, click_force_option, UpperCaseChoice
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
 import logging
@@ -145,10 +145,10 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 @click.pass_context
 @click_force_option
 @click.option(
-    '-e', '--enable', multiple=True, type=click.Choice(
+    '-e', '--enable', multiple=True, type=UpperCaseChoice(
         APPLICATION.__members__.keys()), help='Enable applications.')
 @click.option(
-    '-d', '--disable', multiple=True, type=click.Choice(
+    '-d', '--disable', multiple=True, type=UpperCaseChoice(
         APPLICATION.__members__.keys()), help='Disable applications.')
 @click.option('-l', '--list', is_flag=True, help='List enabled applications.')
 @click.option(
@@ -266,10 +266,10 @@ def usb(
 @click.pass_context
 @click_force_option
 @click.option(
-    '-e', '--enable', multiple=True, type=click.Choice(
+    '-e', '--enable', multiple=True, type=UpperCaseChoice(
         APPLICATION.__members__.keys()), help='Enable applications.')
 @click.option(
-    '-d', '--disable', multiple=True, type=click.Choice(
+    '-d', '--disable', multiple=True, type=UpperCaseChoice(
         APPLICATION.__members__.keys()), help='Disable applications.')
 @click.option(
     '-a', '--enable-all', is_flag=True, help='Enable all applications.')

@@ -33,7 +33,8 @@ from ..piv import (
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import (
-    click_force_option, click_skip_on_help, click_callback, prompt_for_touch)
+    click_force_option, click_skip_on_help, click_callback, prompt_for_touch,
+    UpperCaseChoice)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -86,13 +87,14 @@ click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
 click_format_option = click.option(
     '-F', '--format',
-    type=click.Choice(['PEM', 'DER']), default='PEM', show_default=True,
+    type=UpperCaseChoice(['PEM', 'DER']), default='PEM', show_default=True,
     help='Encoding format.', callback=click_parse_format)
 click_pin_policy_option = click.option(
-    '--pin-policy', type=click.Choice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
+    '--pin-policy',
+    type=UpperCaseChoice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
     help='PIN policy for slot.')
 click_touch_policy_option = click.option(
-    '--touch-policy', type=click.Choice(
+    '--touch-policy', type=UpperCaseChoice(
         ['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
     help='Touch policy for slot.')
 
@@ -193,7 +195,7 @@ def reset(ctx):
 @click_pin_option
 @click.option(
     '-a', '--algorithm', help='Algorithm to use in key generation.',
-    type=click.Choice(
+    type=UpperCaseChoice(
         ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048',
     show_default=True)
 @click_format_option

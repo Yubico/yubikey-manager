@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_b32_key,
-    click_skip_on_help, prompt_for_touch)
+    click_skip_on_help, prompt_for_touch, UpperCaseChoice)
 from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
     modhex_encode, parse_key, parse_b32_key)
@@ -283,7 +283,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     '-l', '--length', type=click.IntRange(1, 38),
     help='Length of generated password.')
 @click.option(
-    '-k', '--keyboard-layout', type=click.Choice(
+    '-k', '--keyboard-layout', type=UpperCaseChoice(
             [l.name for l in KEYBOARD_LAYOUT]),
     default='MODHEX', show_default=True,
     help='Keyboard layout to use for the static password.')

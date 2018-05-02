@@ -36,6 +36,22 @@ click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
 
 
+class UpperCaseChoice(click.Choice):
+    """
+    Support lowercase option values for uppercase options.
+    Does not support token normalization.
+    """
+    def __init__(self, choices):
+        click.Choice.__init__(self, choices)
+
+    def convert(self, value, param, ctx):
+        if value.upper() in self.choices:
+            return value.upper()
+        self.fail(
+            'invalid choice: %s. (choose from %s)' % (
+                value, ', '.join(self.choices)), param, ctx)
+
+
 def click_callback(invoke_on_missing=False):
     def wrap(f):
         @functools.wraps(f)

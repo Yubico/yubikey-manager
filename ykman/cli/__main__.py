@@ -34,7 +34,7 @@ from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException)
-from .util import click_skip_on_help
+from .util import click_skip_on_help, UpperCaseChoice
 from .info import info
 from .mode import mode
 from .otp import otp
@@ -124,7 +124,7 @@ def _run_cmd_for_single(ctx, cmd, transports):
               expose_value=False, is_eager=True)
 @click.option('-d', '--device', type=int, metavar='SERIAL')
 @click.option('-l', '--log-level', default=None,
-              type=click.Choice(ykman.logging_setup.LOG_LEVEL_NAMES),
+              type=UpperCaseChoice(ykman.logging_setup.LOG_LEVEL_NAMES),
               help='Enable logging at given verbosity level',
               )
 @click.option('--log-file', default=None,

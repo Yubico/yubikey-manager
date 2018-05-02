@@ -33,7 +33,7 @@ from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_b32_key,
-    prompt_for_touch)
+    prompt_for_touch, UpperCaseChoice)
 from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
@@ -147,14 +147,14 @@ def reset(ctx):
 @click.argument('name')
 @click.argument('secret', callback=click_parse_b32_key, required=False)
 @click.option(
-    '-o', '--oath-type', type=click.Choice(['TOTP', 'HOTP']), default='TOTP',
+    '-o', '--oath-type', type=UpperCaseChoice(['TOTP', 'HOTP']), default='TOTP',
     help='Time-based (TOTP) or counter-based'
     ' (HOTP) credential.', show_default=True)
 @click.option(
     '-d', '--digits', type=click.Choice(['6', '7', '8']), default='6',
     help='Number of digits in generated code.', show_default=True)
 @click.option(
-    '-a', '--algorithm', type=click.Choice(['SHA1', 'SHA256', 'SHA512']),
+    '-a', '--algorithm', type=UpperCaseChoice(['SHA1', 'SHA256', 'SHA512']),
     default='SHA1', help='Algorithm to use for '
     'code generation.', show_default=True)
 @click.option(
