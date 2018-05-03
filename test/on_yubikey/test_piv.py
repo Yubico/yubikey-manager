@@ -225,8 +225,7 @@ class ManagementKeyReadOnly(PivTestCase):
         self.controller.verify(DEFAULT_PIN)
         with self.assertRaises(ValueError) as cm:
             self.controller.reset()
-        self.assertRegexpMatches(str(cm.exception),
-                                 '^Failed reading remaining')
+        self.assertTrue('Failed reading remaining' in str(cm.exception))
 
     def test_set_mgm_key_does_not_change_key_if_not_authenticated(self):
         with self.assertRaises(APDUError):
