@@ -757,14 +757,13 @@ class PivController(object):
         cert_signature = cert.signature
         cert_bytes = cert.tbs_certificate_bytes
         if isinstance(public_key, rsa.RSAPublicKey):
-            verifier = public_key.verifier(
-                cert_signature, padding.PKCS1v15(),
+            public_key.verify(
+                cert_signature, cert_bytes, padding.PKCS1v15(),
                 cert.signature_hash_algorithm)
         elif isinstance(public_key, ec.EllipticCurvePublicKey):
-            verifier = public_key.verifier(
-                cert_signature, ec.ECDSA(cert.signature_hash_algorithm))
-        verifier.update(cert_bytes)
-        verifier.verify()
+            public_key.verify(
+                cert_signature, cert_bytes,
+                ec.ECDSA(cert.signature_hash_algorithm))
         self.import_certificate(slot, cert)
 
     def generate_certificate_signing_request(self, slot, public_key, subject,
