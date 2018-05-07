@@ -1,9 +1,9 @@
-* Version 0.7.0 (unreleased)
- ** Support for YubiKey Preview
- ** Add command to configure enabled and disabled applications over USB and NFC. See ykman config -h.
+* Version 0.7.0 (2018-05-07)
+ ** Support for YubiKey Preview.
+ ** Add command to configure enabled applications over USB and NFC. See ykman config -h.
  ** Add command for selecting which slot to use for NDEF. See ykman otp ndef -h.
 
-* Version 0.6.1 (released 2018-02-12)
+* Version 0.6.1 (released 2018-04-16)
  ** Support for YubiKeys with FIDO2. See ykman fido -h
  ** Report the form factor for YubiKeys that support it.
  ** OTP: slot command is now called otp. See ykman otp -h for all changes.
