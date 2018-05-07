@@ -279,7 +279,9 @@ def _add_cred(ctx, data, force):
 @click.pass_context
 @click.option('-o', '--oath-type', is_flag=True, help='Display the OATH type.')
 @click.option('-p', '--period', is_flag=True, help='Display the period.')
-def list(ctx, show_hidden, oath_type, period):
+@click.option('-j', '--json', is_flag=True,
+              help='Display the output in JSON list.')
+def list(ctx, show_hidden, oath_type, period, json):
     """
     List all credentials.
 
@@ -292,13 +294,23 @@ def list(ctx, show_hidden, oath_type, period):
              if show_hidden or not cred.is_hidden
              ]
     creds.sort()
-    for cred in creds:
-        click.echo(cred.printable_key, nl=False)
-        if oath_type:
-            click.echo(', {}'.format(cred.oath_type.name), nl=False)
-        if period:
-            click.echo(', {}'.format(cred.period), nl=False)
-        click.echo()
+    if json:
+        json_creds = []
+        for cred in creds:
+            json_creds.append({
+                'key': cred.printable_key,
+                'oath_type': cred.oath_type.name,
+                'period': cred.period
+            })
+        click.echo(json.dumps(json_creds))
+    else:
+        for cred in creds:
+            click.echo(cred.printable_key, nl=False)
+            if oath_type:
+                click.echo(', {}'.format(cred.oath_type.name), nl=False)
+            if period:
+                click.echo(', {}'.format(cred.period), nl=False)
+            click.echo()
 
 
 @oath.command()
@@ -307,7 +319,7 @@ def list(ctx, show_hidden, oath_type, period):
 @click.argument('query', required=False, default='')
 @click.option('-s', '--single', is_flag=True, help='Ensure only a single '
               'match, and output only the code.')
-def code(ctx, show_hidden, query, single):
+def code(ctx, show_hidden, query, single, json):
     """
     Generate codes.
 
@@ -346,7 +358,6 @@ def code(ctx, show_hidden, query, single):
         click.echo(creds[0][1].value)
     else:
         creds.sort()
-
         outputs = [
             (
                 cr.printable_key,
@@ -356,13 +367,17 @@ def code(ctx, show_hidden, query, single):
                 else ''
             ) for (cr, c) in creds
         ]
-
         longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
         longest_code = max(len(c) for (n, c) in outputs) if outputs else 0
         format_str = '{:<%d}  {:>%d}' % (longest_name, longest_code)
-
         for name, result in outputs:
-            click.echo(format_str.format(name, result))
+            if json:
+                click.echo(json.dumps({
+                    'name': name,
+                    'credential': result
+                }))
+            else:
+                click.echo(format_str.format(name, result))
 
 
 @oath.command()
