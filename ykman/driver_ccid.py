@@ -39,7 +39,7 @@ from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
-from .util import AID, APPLICATION, TRANSPORT, YUBIKEY
+from .util import AID, APPLICATION, TRANSPORT, YUBIKEY, Mode
 
 SW_OK = 0x9000
 SW_APPLICATION_NOT_FOUND = 0x6a82
@@ -115,7 +115,8 @@ class CCIDDriver(AbstractDriver):
     transport = TRANSPORT.CCID
 
     def __init__(self, connection, name):
-        super(CCIDDriver, self).__init__(_pid_from_name(name))
+        pid = _pid_from_name(name)
+        super(CCIDDriver, self).__init__(pid.get_type(), Mode.from_pid(pid))
         self._conn = connection
 
     def read_serial(self):
@@ -128,7 +129,7 @@ class CCIDDriver(AbstractDriver):
         return None
 
     def read_version(self):
-        if self.pid.get_type() == YUBIKEY.YK4:
+        if self.key_type == YUBIKEY.YK4:
             try:  # Attempt to read OTP applet version which should match
                 s = self.select(AID.OTP)
                 return tuple(c for c in six.iterbytes(s[:3]))
@@ -137,13 +138,13 @@ class CCIDDriver(AbstractDriver):
         return None
 
     def read_config(self):
-        if self.pid.get_type() == YUBIKEY.NEO:
+        if self.key_type == YUBIKEY.NEO:
             raise NotSupportedError()
         self.select(AID.MGR)
         return self.send_apdu(0, MGR_INS.READ_CONFIG, 0, 0)
 
     def write_config(self, data):
-        if self.pid.get_type() == YUBIKEY.NEO:
+        if self.key_type == YUBIKEY.NEO:
             raise NotSupportedError()
         self.select(AID.MGR)
         self.send_apdu(0, MGR_INS.WRITE_CONFIG, 0, 0, data)
@@ -185,7 +186,7 @@ class CCIDDriver(AbstractDriver):
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         mode_data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
         try:
-            if self.pid.get_type() == YUBIKEY.NEO:
+            if self.key_type == YUBIKEY.NEO:
                 self._set_mode_otp(mode_data)
             else:
                 self._set_mode_mgr(mode_data)

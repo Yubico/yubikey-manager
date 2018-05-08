@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Mode, Tlv,
+from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Tlv,
                    parse_tlvs, bytes2int, int2bytes)
 from .driver import AbstractDriver, NotSupportedError
 from enum import IntEnum, unique
@@ -187,7 +187,7 @@ class YubiKey(object):
     _can_write_config = False
 
     def __init__(self, descriptor, driver):
-        self._key_type = driver.pid.get_type()
+        self._key_type = driver.key_type
         self.device_name = self._key_type.value
         self._descriptor = descriptor
         self._driver = driver
@@ -306,7 +306,7 @@ class YubiKey(object):
 
     @property
     def mode(self):
-        return Mode.from_pid(self._driver.pid)
+        return self._driver.mode
 
     @mode.setter
     def mode(self, mode):

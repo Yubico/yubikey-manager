@@ -31,7 +31,7 @@ import logging
 from .native.ykpers import Ykpers
 from ctypes import byref, c_int, c_uint, c_size_t, create_string_buffer
 from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
-from .util import PID, TRANSPORT, MissingLibrary
+from .util import PID, TRANSPORT, Mode, MissingLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,8 @@ class OTPDriver(AbstractDriver):
 
     def __init__(self, dev):
         self._dev = dev
-        super(OTPDriver, self).__init__(self._read_pid())
+        pid = self._read_pid()
+        super(OTPDriver, self).__init__(pid.get_type(), Mode.from_pid(pid))
 
         self._access_code = None
         self._slot1_valid = False

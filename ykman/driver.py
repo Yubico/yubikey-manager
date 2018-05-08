@@ -45,12 +45,17 @@ class AbstractDriver(object):
 
     transport = None
 
-    def __init__(self, pid):
-        self._pid = pid
+    def __init__(self, keytype, mode):
+        self._keytype = keytype
+        self._mode = mode
 
     @property
-    def pid(self):
-        return self._pid
+    def keytype(self):
+        return self._keytype
+
+    @property
+    def mode(self):
+        return self._mode
 
     def read_serial(self):
         """
