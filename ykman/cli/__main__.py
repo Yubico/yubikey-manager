@@ -179,7 +179,8 @@ def list_keys(ctx, serials):
             serial = dev.serial
             if serial not in handled_serials:
                 handled_serials.add(serial)
-                matches = [d for d in descriptors if d.pid == dev.driver.pid]
+                matches = [d for d in descriptors if (d.key_type, d.mode)
+                           == (dev.driver.key_type, dev.driver.mode)]
                 if len(matches) > 0:
                     d = matches[0]
                     descriptors.remove(d)

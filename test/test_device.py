@@ -17,7 +17,7 @@ def make_mocks():
     descriptor.version = (4, 0, 0)
     descriptor.mode.transports = TRANSPORT.CCID
     driver = Mock()
-    driver.keytype = YUBIKEY.YK4
+    driver.key_type = YUBIKEY.YK4
     driver.mode = Mode.from_code(1)
     driver.read_config.return_value = b'\5\5\3\0\0\0'
     return descriptor, driver

@@ -45,13 +45,13 @@ class AbstractDriver(object):
 
     transport = None
 
-    def __init__(self, keytype, mode):
-        self._keytype = keytype
+    def __init__(self, key_type, mode):
+        self._key_type = key_type
         self._mode = mode
 
     @property
-    def keytype(self):
-        return self._keytype
+    def key_type(self):
+        return self._key_type
 
     @property
     def mode(self):
