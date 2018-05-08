@@ -173,7 +173,7 @@ class DeviceConfig(object):
         return self._get(TAG.DEVICE_FLAGS, 0)
 
 
-_NULL_DRIVER = AbstractDriver(0)
+_NULL_DRIVER = AbstractDriver(0, 0)
 _NEO_BASE_CAPABILITIES = TRANSPORT.CCID | APPLICATION.OTP | APPLICATION.OATH \
     | APPLICATION.OPGP | APPLICATION.PIV
 
