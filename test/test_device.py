@@ -5,7 +5,7 @@ except ImportError:
     from mock import Mock
 
 from ykman.device import YubiKey
-from ykman.util import TRANSPORT, PID
+from ykman.util import TRANSPORT, YUBIKEY, Mode
 
 
 class TestSpecificError(Exception):
@@ -17,7 +17,8 @@ def make_mocks():
     descriptor.version = (4, 0, 0)
     descriptor.mode.transports = TRANSPORT.CCID
     driver = Mock()
-    driver.pid = PID.YK4_CCID
+    driver.keytype = YUBIKEY.YK4
+    driver.mode = Mode.from_code(1)
     driver.read_config.return_value = b'\5\5\3\0\0\0'
     return descriptor, driver
 
