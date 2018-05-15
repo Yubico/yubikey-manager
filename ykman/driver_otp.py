@@ -135,9 +135,19 @@ class OTPDriver(AbstractDriver):
 
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
-        check(ykpers.yk_get_capabilities(
-            self._dev, 0, 0, resp, byref(buf_size)))
-        return resp.raw[:buf_size.value]
+        try:
+            check(ykpers.yk_get_capabilities(
+                self._dev, 0, 0, resp, byref(buf_size)))
+            return resp.raw[:buf_size.value]
+        except YkpersError:
+            logger.debug(
+                'Failed reading config.'
+                'OTP interface might be locked, try waiting 3 seconds...')
+            import time
+            time.sleep(3)
+            check(ykpers.yk_get_capabilities(
+                self._dev, 0, 0, resp, byref(buf_size)))
+            return resp.raw[:buf_size.value]
 
     def write_config(self, data):
         if self._version < (5, 0, 0):
