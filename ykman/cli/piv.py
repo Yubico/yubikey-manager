@@ -788,7 +788,7 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
-    except APDUError:
+    except (APDUError, TypeError):
         ctx.fail('Authentication with management key failed.')
 
 
