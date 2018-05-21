@@ -3,6 +3,7 @@ include NEWS
 include ChangeLog
 include resources/*
 include doc/*.adoc
-include test/*/*
+include test/**
+
 include README.adoc
 include ykman/VERSION
