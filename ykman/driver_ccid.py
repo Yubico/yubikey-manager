@@ -123,7 +123,8 @@ class CCIDDriver(AbstractDriver):
         try:
             self.select(AID.OTP)
             serial = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_SERIAL, 0)
-            return struct.unpack('>I', serial)[0]
+            if serial:
+                return struct.unpack('>I', serial)[0]
         except APDUError:
             pass
         return None
