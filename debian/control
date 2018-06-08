@@ -7,6 +7,7 @@ Section: utils
 Priority: optional
 Standards-Version: 3.9.7
 Build-Depends: debhelper (>= 9),
+               dh-python,
                python-all,
                python3-all,
                python-click,
@@ -33,15 +34,8 @@ Package: python-yubikey-manager
 Architecture: all
 Section: python
 Depends: ${misc:Depends},
-         libykpers-1-1,
-         python,
-         python-cryptography,
-         python-openssl,
-         python-pyscard,
-         python-setuptools,
-         python-six,
-         python-usb,
-         python-fido2
+         ${python:Depends},
+         libykpers-1-1
 Recommends: pcscd
 Description: Python 2 library for configuring a YubiKey
  A Python library for configuring YubiKey over all transport modes.
@@ -51,15 +45,8 @@ Package: python3-yubikey-manager
 Architecture: all
 Section: python
 Depends: ${misc:Depends},
-         libykpers-1-1,
-         python3,
-         python3-cryptography,
-         python3-openssl,
-         python3-pyscard,
-         python3-setuptools,
-         python3-six,
-         python3-usb,
-         python3-fido2
+         ${python3:Depends},
+         libykpers-1-1
 Recommends: pcscd
 Description: Python 3 library for configuring a YubiKey
  A Python library for configuring YubiKey over all transport modes.
