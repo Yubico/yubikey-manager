@@ -32,7 +32,7 @@ from fido2.ctap import CtapError
 from time import sleep
 from .util import click_skip_on_help, prompt_for_touch, click_force_option
 from ..util import TRANSPORT
-from ..fido import Fido2Controller
+from ..fido import Fido2Controller, FipsU2fController
 from ..descriptor import get_descriptors
 
 
@@ -46,11 +46,14 @@ def fido(ctx):
     """
     Manage FIDO applications.
     """
-    try:
-        ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
-    except Exception as e:
-        logger.debug('Failed to load Fido2Controller', exc_info=e)
-        ctx.fail('Failed to load FIDO 2 Application.')
+    if ctx.obj['dev'].is_fips:
+        ctx.obj['controller'] = FipsU2fController(ctx.obj['dev'].driver)
+    else:
+        try:
+            ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
+        except Exception as e:
+            logger.debug('Failed to load Fido2Controller', exc_info=e)
+            ctx.fail('Failed to load FIDO 2 Application.')
 
 
 @fido.command()
@@ -60,16 +63,26 @@ def info(ctx):
     Display status of FIDO2 application.
     """
     controller = ctx.obj['controller']
-    if controller.has_pin:
-        try:
-            click.echo(
-                'PIN is set, with {} tries left.'.format(
-                    controller.get_pin_retries()))
-        except CtapError as e:
-            if e.code == CtapError.ERR.PIN_BLOCKED:
-                click.echo('PIN is blocked.')
+
+    if controller.is_fips:
+        if controller.is_in_fips_mode:
+            click.echo('FIPS mode active: Yes')
+        else:
+            click.echo('FIPS mode active: No')
+            click.echo('This could mean that a PIN is not set, or that the '
+                       'FIDO U2F module has been reset and is no longer '
+                       'capable of FIPS mode.')
     else:
-        click.echo('PIN is not set.')
+        if controller.has_pin:
+            try:
+                click.echo(
+                    'PIN is set, with {} tries left.'.format(
+                        controller.get_pin_retries()))
+            except CtapError as e:
+                if e.code == CtapError.ERR.PIN_BLOCKED:
+                    click.echo('PIN is blocked.')
+        else:
+            click.echo('PIN is not set.')
 
 
 @fido.command('set-pin')

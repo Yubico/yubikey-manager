@@ -29,6 +29,7 @@ from __future__ import absolute_import
 
 from .driver import AbstractDriver, NotSupportedError
 from .util import TRANSPORT, PID, YUBIKEY, Mode
+from fido2.ctap import CtapError
 from fido2.hid import CtapHidDevice, CTAPHID
 from enum import IntEnum, unique
 import logging
@@ -85,6 +86,18 @@ class FidoDriver(AbstractDriver):
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
         self._dev.call(CMD.YUBIKEY_DEVICE_CONFIG, data)
+
+    @property
+    def is_in_fips_mode(self):
+        try:
+            sw = self._dev.call(
+                CTAPHID.MSG, [*[0, FIPS_U2F_CMD.VERIFY_FIPS_MODE], 0, 0])
+            return sw == b'\x90\x00'
+        except CtapError as e:
+            if e.code == CtapError.ERR.INVALID_COMMAND:
+                return False
+            else:
+                raise e
 
 
 def descriptor_filter(desc):

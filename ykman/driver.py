@@ -77,6 +77,10 @@ class AbstractDriver(object):
         """
         return None
 
+    @property
+    def is_in_fips_mode(self):
+        raise NotImplementedError()
+
     def read_config(self):
         raise NotImplementedError()
 

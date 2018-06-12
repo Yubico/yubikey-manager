@@ -63,3 +63,40 @@ class Fido2Controller(object):
         finally:
             if (touch_callback):
                 touch_timer.cancel()
+
+    @property
+    def is_fips(self):
+        return False
+
+
+class FipsU2fController(object):
+
+    def __init__(self, driver):
+        self.driver = driver
+
+    def set_pin(self, pin):
+        raise NotImplementedError()
+
+    def change_pin(self, old_pin, new_pin):
+        raise NotImplementedError()
+
+    def reset(self, touch_callback=None):
+        raise NotImplementedError()
+
+        if (touch_callback):
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+        try:
+            self.ctap.reset()
+            self._pin = False
+        finally:
+            if (touch_callback):
+                touch_timer.cancel()
+
+    @property
+    def is_fips(self):
+        return True
+
+    @property
+    def is_in_fips_mode(self):
+        return self.driver.is_in_fips_mode
