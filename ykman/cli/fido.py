@@ -165,15 +165,18 @@ def reset(ctx, force):
             if removed and n_keys == 1:
                 return
 
-    try:
+    def try_reset(controller_type):
         if not force:
             prompt_re_insert_key()
             dev = list(get_descriptors())[0].open_device(TRANSPORT.FIDO)
-            controller = Fido2Controller(dev.driver)
+            controller = controller_type(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
         else:
             controller = ctx.obj['controller']
             controller.reset(touch_callback=prompt_for_touch)
+
+    try:
+        try_reset(Fido2Controller)
     except CtapError as e:
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
             ctx.fail(
