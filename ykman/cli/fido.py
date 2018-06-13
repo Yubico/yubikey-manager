@@ -31,6 +31,7 @@ import logging
 from fido2.ctap import CtapError
 from time import sleep
 from .util import click_skip_on_help, prompt_for_touch, click_force_option
+from ..driver_ccid import APDUError, SW_COMMAND_NOT_ALLOWED
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..descriptor import get_descriptors
@@ -167,6 +168,7 @@ def reset(ctx, force):
     The reset must be triggered immediately after the YubiKey is
     inserted, and requires a touch on the YubiKey.
     """
+
     def prompt_re_insert_key():
         click.echo('Remove and re-insert your YubiKey to perform the reset...')
 
@@ -189,23 +191,54 @@ def reset(ctx, force):
             controller = ctx.obj['controller']
             controller.reset(touch_callback=prompt_for_touch)
 
-    try:
-        try_reset(Fido2Controller)
-    except CtapError as e:
-        if e.code == CtapError.ERR.ACTION_TIMEOUT:
-            ctx.fail(
-                'Reset failed. You need to touch your'
-                ' YubiKey to confirm the reset.')
-        elif e.code == CtapError.ERR.NOT_ALLOWED:
-            ctx.fail(
-                'Reset failed. Reset must be triggered within 5 seconds'
-                ' after the YubiKey is inserted.')
-        else:
+    if ctx.obj['dev'].is_fips:
+        if not force:
+            click.echo(
+                '\nWARNING: This will destroy the FIPS attestation key, making '
+                'this YubiKey permanently incapable of FIPS mode.'
+            )
+            destroy_input = click.prompt(
+                'To confirm, please enter the text "DESTROY PERMANENTLY"',
+                default='',
+                show_default=False
+            )
+            if destroy_input != 'DESTROY PERMANENTLY':
+                ctx.fail('Reset aborted by user.')
+
+        try:
+            try_reset(FipsU2fController)
+
+        except APDUError as e:
+            if e.sw == SW_COMMAND_NOT_ALLOWED:
+                ctx.fail(
+                    'Reset failed. Reset must be triggered within 5 seconds'
+                    ' after the YubiKey is inserted.')
+            else:
+                logger.error('Reset failed', exc_info=e)
+                ctx.fail('Reset failed.')
+
+        except Exception as e:
+            logger.error('Reset failed', exc_info=e)
+            ctx.fail('Reset failed.')
+
+    else:
+        try:
+            try_reset(Fido2Controller)
+        except CtapError as e:
+            if e.code == CtapError.ERR.ACTION_TIMEOUT:
+                ctx.fail(
+                    'Reset failed. You need to touch your'
+                    ' YubiKey to confirm the reset.')
+            elif e.code == CtapError.ERR.NOT_ALLOWED:
+                ctx.fail(
+                    'Reset failed. Reset must be triggered within 5 seconds'
+                    ' after the YubiKey is inserted.')
+            else:
+                logger.error(e)
+                ctx.fail('Reset failed.')
+        except Exception as e:
             logger.error(e)
             ctx.fail('Reset failed.')
-    except Exception as e:
-        logger.error(e)
-        ctx.fail('Reset failed.')
 
 
 fido.transports = TRANSPORT.FIDO

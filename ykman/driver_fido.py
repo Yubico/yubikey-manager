@@ -30,6 +30,7 @@ from __future__ import absolute_import
 from .driver import AbstractDriver, NotSupportedError
 from .util import TRANSPORT, PID, YUBIKEY, Mode
 from fido2.ctap import CtapError
+from .driver_ccid import APDUError, SW_OK
 from fido2.hid import CtapHidDevice, CTAPHID
 from enum import IntEnum, unique
 import logging
@@ -98,6 +99,14 @@ class FidoDriver(AbstractDriver):
                 return False
             else:
                 raise e
+
+    def fips_reset(self):
+        res = self._dev.call(CTAPHID.MSG, [*[0, FIPS_U2F_CMD.RESET], 0, 0])
+        (sw, ) = struct.unpack('>H', res)
+        if sw == SW_OK:
+            return sw
+        else:
+            raise APDUError(b'', sw)
 
 
 def descriptor_filter(desc):
