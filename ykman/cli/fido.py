@@ -31,7 +31,9 @@ import logging
 from fido2.ctap import CtapError
 from time import sleep
 from .util import click_skip_on_help, prompt_for_touch, click_force_option
-from ..driver_ccid import APDUError, SW_COMMAND_NOT_ALLOWED
+from ..driver_ccid import (
+    APDUError, SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
+    SW_AUTH_METHOD_BLOCKED, SW_DATA_INVALID)
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..descriptor import get_descriptors
@@ -90,7 +92,9 @@ def info(ctx):
 @click.pass_context
 @click.option('-P', '--pin', help='Current PIN code.')
 @click.option('-n', '--new-pin', help='A new PIN.')
-def set_pin(ctx, pin, new_pin):
+@click.option('--u2f', is_flag=True,
+              help='Set FIPS U2F PIN instead of FIDO2 PIN')
+def set_pin(ctx, pin, new_pin, u2f):
     """
     Set or change the PIN code.
 
@@ -99,6 +103,14 @@ def set_pin(ctx, pin, new_pin):
     """
 
     controller = ctx.obj['controller']
+
+    if controller.is_fips and not u2f:
+        ctx.fail('This is a FIPS YubiKey. To set the U2F PIN, pass the --u2f '
+                 'option.')
+
+    if u2f and not controller.is_fips:
+        ctx.fail('This is not a FIPS YubiKey, and therefore does not support a '
+                 'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
     def fail_if_not_valid(ctx, pin=None):
         if not pin or len(pin) < 4 or len(pin.encode('utf-8')) > 128:
@@ -120,6 +132,7 @@ def set_pin(ctx, pin, new_pin):
         fail_if_not_valid(ctx, new_pin)
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
+
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_INVALID:
                 ctx.fail('Wrong PIN.')
@@ -132,6 +145,20 @@ def set_pin(ctx, pin, new_pin):
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
 
+        except APDUError as e:
+            if e.sw == SW_DATA_INVALID:
+                ctx.fail('No PIN is set.')
+
+            if e.sw == SW_VERIFY_FAIL_NO_RETRY:
+                ctx.fail('Wrong PIN.')
+
+            if e.sw == SW_AUTH_METHOD_BLOCKED:
+                ctx.fail('Too many incorrect PIN attempts - PIN is blocked.\n'
+                         'Use the "fido reset" command to reset.')
+
+            logger.error('Failed to change PIN', exc_info=e)
+            ctx.fail('Failed to change PIN.')
+
     def set_pin(new_pin):
         fail_if_not_valid(ctx, new_pin)
         controller.set_pin(new_pin)
@@ -139,14 +166,14 @@ def set_pin(ctx, pin, new_pin):
     if pin and not controller.has_pin:
         ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
 
-    if controller.has_pin and not pin:
+    if controller.has_pin and pin is None:
         pin = prompt_current_pin()
 
     if not new_pin:
         new_pin = prompt_new_pin()
 
     if controller.has_pin:
-        change_pin(pin, new_pin)
+        change_pin(pin, new_pin, accept_empty_current_pin=controller.is_fips)
     else:
         set_pin(new_pin)
 

@@ -76,11 +76,16 @@ class FipsU2fController(object):
     def __init__(self, driver):
         self.driver = driver
 
+    @property
+    def has_pin(self):
+        # We don't know, but the change and set commands are the same here.
+        return True
+
     def set_pin(self, pin):
-        raise NotImplementedError()
+        raise NotImplementedError('Use the change_pin method instead.')
 
     def change_pin(self, old_pin, new_pin):
-        raise NotImplementedError()
+        return self.driver.fips_change_pin(old_pin, new_pin)
 
     def reset(self, touch_callback=None):
         if (touch_callback):

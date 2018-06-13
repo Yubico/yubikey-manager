@@ -108,6 +108,27 @@ class FidoDriver(AbstractDriver):
         else:
             raise APDUError(b'', sw)
 
+    def fips_change_pin(self, old_pin, new_pin):
+        new_length = len(new_pin)
+        packet_length = 1 + len(old_pin) + new_length
+
+        old_pin = old_pin.encode('utf-8')
+        new_pin = new_pin.encode('utf-8')
+
+        res = self._dev.call(
+            CTAPHID.MSG,
+            [
+              *[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
+              0, *struct.pack('>H', packet_length), new_length,
+              *old_pin, *new_pin
+            ]
+        )
+        (sw, ) = struct.unpack('>H', res)
+        if sw == SW_OK:
+            return sw
+        else:
+            raise APDUError(b'', sw)
+
 
 def descriptor_filter(desc):
     return desc['vendor_id'] == 0x1050 \
