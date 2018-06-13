@@ -101,7 +101,6 @@ def set_pin(ctx, pin, new_pin):
                     show_default=False)
 
     def change_pin(pin, new_pin):
-        fail_if_not_valid(ctx, pin)
         fail_if_not_valid(ctx, new_pin)
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
