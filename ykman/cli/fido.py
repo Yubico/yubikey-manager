@@ -165,9 +165,9 @@ def reset(ctx, force):
     The reset must be triggered immediately after the YubiKey is
     inserted, and requires a touch on the YubiKey.
     """
-    click.echo('Remove and re-insert your YubiKey to perform the reset...')
-
     def prompt_re_insert_key():
+        click.echo('Remove and re-insert your YubiKey to perform the reset...')
+
         removed = False
         while True:
             sleep(0.1)
