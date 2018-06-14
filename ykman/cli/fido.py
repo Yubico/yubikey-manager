@@ -100,8 +100,9 @@ def set_pin(ctx, pin, new_pin):
                     'Enter your current PIN', default='', hide_input=True,
                     show_default=False)
 
-    def change_pin(pin, new_pin):
-        fail_if_not_valid(ctx, pin)
+    def change_pin(pin, new_pin, accept_empty_current_pin=False):
+        if not (accept_empty_current_pin and pin == ''):
+            fail_if_not_valid(ctx, pin)
         fail_if_not_valid(ctx, new_pin)
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
