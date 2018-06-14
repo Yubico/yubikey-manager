@@ -121,31 +121,19 @@ def set_pin(ctx, pin, new_pin):
         fail_if_not_valid(ctx, new_pin)
         controller.set_pin(new_pin)
 
+    if pin and not controller.has_pin:
+        ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
+
+    if controller.has_pin and not pin:
+        pin = prompt_current_pin()
+
+    if not new_pin:
+        new_pin = prompt_new_pin()
+
     if controller.has_pin:
-        if pin:
-            if new_pin:
-                change_pin(pin, new_pin)
-            else:
-                new_pin = prompt_new_pin()
-                change_pin(pin, new_pin)
-        else:
-            if new_pin:
-                pin = prompt_current_pin()
-                change_pin(pin, new_pin)
-            else:
-                pin = prompt_current_pin()
-                new_pin = prompt_new_pin()
-                change_pin(pin, new_pin)
+        change_pin(pin, new_pin)
     else:
-        if pin:
-            ctx.fail(
-                'There is no current PIN set. Use -n/--new-pin to set one.')
-        else:
-            if new_pin:
-                set_pin(new_pin)
-            else:
-                new_pin = prompt_new_pin()
-                set_pin(new_pin)
+        set_pin(new_pin)
 
 
 @click_force_option
