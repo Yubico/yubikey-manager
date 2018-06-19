@@ -56,6 +56,17 @@ def parse_hex(length):
     return inner
 
 
+def parse_access_code_hex(access_code_hex):
+    try:
+        access_code = a2b_hex(access_code_hex)
+    except TypeError as e:
+        raise ValueError(e)
+    if len(access_code) != 6:
+        raise ValueError('Must be exactly 6 bytes.')
+
+    return access_code
+
+
 click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
                                      callback=lambda c, p, v: int(v))
 
@@ -101,12 +112,12 @@ def otp(ctx, access_code):
     if access_code is not None:
         if access_code == '':
             access_code = click.prompt('Enter access code', show_default=False)
+
         try:
-            access_code = a2b_hex(access_code)
-        except TypeError as e:
-            raise ValueError(e)
-        if len(access_code) != 6:
-            raise ValueError('Must be exactly 6 bytes.')
+            access_code = parse_access_code_hex(access_code)
+        except Exception as e:
+            ctx.fail('Failed to parse access code: ' + str(e))
+
     ctx.obj['controller'].access_code = access_code
 
 
