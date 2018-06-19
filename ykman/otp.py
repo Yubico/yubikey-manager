@@ -49,7 +49,7 @@ class SLOT(IntEnum):
 
 
 SLOTS = [-1, 0x30, 0x38]
-MAGIC_RESET_ACCESS_CODE = bytes([0, 0, 0, 0, 0, 0])
+RESET_ACCESS_CODE = bytes([0, 0, 0, 0, 0, 0])
 
 
 def slot_to_cmd(slot, update=False):
@@ -277,7 +277,7 @@ class OtpController(object):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
             raise ValueError('Cannot set new access code unless updating slot')
-        if new_code == MAGIC_RESET_ACCESS_CODE and not allow_zero:
+        if new_code == RESET_ACCESS_CODE and not allow_zero:
             raise ValueError('Cannot set access code to special value zero.')
 
         cmd = slot_to_cmd(slot, update)
@@ -293,8 +293,7 @@ class OtpController(object):
             ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
-        return self.set_access_code(slot, MAGIC_RESET_ACCESS_CODE,
-                                    allow_zero=True)
+        return self.set_access_code(slot, RESET_ACCESS_CODE, allow_zero=True)
 
     def update_settings(self, slot, enter=True, pacing=None):
         cmd = slot_to_cmd(slot, update=True)
