@@ -263,9 +263,26 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
             'otp', '--access-code', '111111111111', 'static', '2',
             '--generate', '--length', '10')
         self._check_slot_2_programmed()
+        self._check_slot_2_has_access_code()
         ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
         status = ykman_cli('otp', 'info')
         self.assertIn('Slot 2: empty', status)
+
+    def test_set_access_code_slot_2(self):
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        self._check_slot_2_programmed()
+        self._check_slot_2_does_not_have_access_code()
+
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
+                  '-f')
+        self._check_slot_2_has_access_code()
+
+        ykman_cli('otp', '--access-code', '111111111111', 'settings',
+                  '--new-access-code', '000000000000', '2', '-f')
+        self._check_slot_2_does_not_have_access_code()
+
+        ykman_cli('otp', 'delete', '2', '-f')
 
     def _check_slot_2_programmed(self):
         status = ykman_cli('otp', 'info')
@@ -274,6 +291,20 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
     def _check_slot_2_not_programmed(self):
         status = ykman_cli('otp', 'info')
         self.assertIn('Slot 2: empty', status)
+
+    def _check_slot_2_has_access_code(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'settings', '--new-access-code', '111111111111',
+                      '2', '-f')
+
+        ykman_cli('otp', '--access-code', '111111111111', 'settings',
+                  '--new-access-code', '111111111111', '2', '-f')
+
+    def _check_slot_2_does_not_have_access_code(self):
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
+                  '-f')
+        ykman_cli('otp', '--access-code', '111111111111', 'settings',
+                  '--new-access-code', '000000000000', '2', '-f')
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))

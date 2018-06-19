@@ -495,13 +495,16 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
 @click_force_option
 @click.pass_context
 @click.option(
+    '-A', '--new-access-code', metavar='HEX',
+    help='Set a new access code for the slot.')
+@click.option(
     '--enter/--no-enter', default=True, show_default=True,
     help="Should send 'Enter' keystroke after slot output.")
 @click.option(
     '-p', '--pacing', type=click.Choice(['0', '20', '40', '60']),
     default='0', show_default=True, help='Throttle output speed by '
     'adding a delay (in ms) between characters emitted.')
-def settings(ctx, slot, enter, pacing, force):
+def settings(ctx, slot, new_access_code, enter, pacing, force):
     """
     Update the settings for a slot.
 
@@ -511,6 +514,13 @@ def settings(ctx, slot, enter, pacing, force):
     controller = ctx.obj['controller']
     if not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to update settings on an empty slot.')
+
+    if new_access_code is not None:
+        try:
+            new_access_code = parse_access_code_hex(new_access_code)
+        except Exception as e:
+            ctx.fail('Failed to parse access code: ' + str(e))
+
     force or click.confirm(
         'Update the settings for slot {}? '
         'All existing settings will be overwritten.'.format(slot), abort=True)
@@ -523,6 +533,9 @@ def settings(ctx, slot, enter, pacing, force):
         controller.update_settings(slot, enter=enter, pacing=pacing)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
+
+    if new_access_code is not None:
+        controller.set_access_code(slot, new_access_code)
 
 
 otp.transports = TRANSPORT.OTP
