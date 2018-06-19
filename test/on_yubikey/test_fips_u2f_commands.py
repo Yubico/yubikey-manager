@@ -22,7 +22,8 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
         self.assertEqual(res, b'012345\x90\x00')
 
     def test_pin_commands(self):
-        # Assumes no PIN is set at beginning of test
+        # Assumes PIN is 012345 or not set at beginning of test
+        # Sets PIN to 012345
 
         dev = open_device(transports=TRANSPORT.FIDO)
 
@@ -30,9 +31,16 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
             CTAPHID.MSG,
             [*[0, FIPS_U2F_CMD.VERIFY_PIN], 0, 0, *[0, 0, 6], *b'012345'])
 
-        res = dev.driver._dev.call(
-            CTAPHID.MSG,
-            [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0, *[0, 0, 7], *[6, *b'012345']])
+        if verify_res1 == b'\x90\x90':
+            res = dev.driver._dev.call(
+                CTAPHID.MSG,
+                [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
+                 *[0, 0, 7], *[6, *b'012345']])
+        else:
+            res = dev.driver._dev.call(
+                CTAPHID.MSG,
+                [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
+                 *[0, 0, 13], *[6, *b'012345', *b'012345']])
 
         verify_res2 = dev.driver._dev.call(
             CTAPHID.MSG,
@@ -42,7 +50,7 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
             CTAPHID.MSG,
             [*[0, FIPS_U2F_CMD.VERIFY_PIN], 0, 0, *[0, 0, 6], *b'012345'])
 
-        self.assertEqual(verify_res1, b'\x69\x86')  # PIN not set
+        self.assertIn(verify_res1, [b'\x90\x00', b'\x69\x86'])  # OK / not set
         self.assertEqual(res,         b'\x90\x00')  # Success
         self.assertEqual(verify_res2, b'\x63\xc0')  # Incorrect PIN
         self.assertEqual(verify_res3, b'\x90\x00')  # Success
