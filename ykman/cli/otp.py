@@ -515,7 +515,7 @@ def settings(ctx, slot, new_access_code, enter, pacing, force):
     if not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to update settings on an empty slot.')
 
-    if new_access_code is not None:
+    if new_access_code:
         try:
             new_access_code = parse_access_code_hex(new_access_code)
         except Exception as e:
@@ -534,7 +534,7 @@ def settings(ctx, slot, new_access_code, enter, pacing, force):
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
-    if new_access_code is not None:
+    if new_access_code:
         controller.set_access_code(slot, new_access_code)
 
 
