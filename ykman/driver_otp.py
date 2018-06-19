@@ -189,7 +189,8 @@ class OTPDriver(AbstractDriver):
                 result[0:bytes_read.value],
                 result)
 
-    def verify_fips_mode(self):
+    @property
+    def is_in_fips_mode(self):
         (result, _, _) = self.write_to_and_read_from_key(
             0x14, expected_output_length=1)
         return result == b'\x01'

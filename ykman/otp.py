@@ -316,5 +316,6 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_config(cfg)
 
+    @property
     def is_in_fips_mode(self):
-        return self._driver.verify_fips_mode()
+        return self._driver.is_in_fips_mode

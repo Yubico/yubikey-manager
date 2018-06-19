@@ -133,7 +133,7 @@ def info(ctx):
     slot1, slot2 = controller.slot_status
 
     if dev.is_fips:
-        fips_mode = controller.is_in_fips_mode()
+        fips_mode = controller.is_in_fips_mode
         summary = fips_mode and 'Yes' or 'No'
         explanation = ''
         if not fips_mode:
