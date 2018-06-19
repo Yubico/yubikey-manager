@@ -498,13 +498,17 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     '-A', '--new-access-code', metavar='HEX',
     help='Set a new access code for the slot.')
 @click.option(
+    '--delete-access-code', is_flag=True,
+    help='Remove access code from the slot.')
+@click.option(
     '--enter/--no-enter', default=True, show_default=True,
     help="Should send 'Enter' keystroke after slot output.")
 @click.option(
     '-p', '--pacing', type=click.Choice(['0', '20', '40', '60']),
     default='0', show_default=True, help='Throttle output speed by '
     'adding a delay (in ms) between characters emitted.')
-def settings(ctx, slot, new_access_code, enter, pacing, force):
+def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
+             force):
     """
     Update the settings for a slot.
 
@@ -512,6 +516,10 @@ def settings(ctx, slot, new_access_code, enter, pacing, force):
     All settings not specified will be written with default values.
     """
     controller = ctx.obj['controller']
+
+    if new_access_code and delete_access_code:
+        ctx.fail('-A/--new-access-code conflicts with --delete-access-code.')
+
     if not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to update settings on an empty slot.')
 
@@ -536,6 +544,9 @@ def settings(ctx, slot, new_access_code, enter, pacing, force):
 
     if new_access_code:
         controller.set_access_code(slot, new_access_code)
+
+    if delete_access_code:
+        controller.delete_access_code(slot)
 
 
 otp.transports = TRANSPORT.OTP

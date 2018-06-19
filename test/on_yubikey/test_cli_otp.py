@@ -279,10 +279,31 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         self._check_slot_2_has_access_code()
 
         ykman_cli('otp', '--access-code', '111111111111', 'settings',
-                  '--new-access-code', '000000000000', '2', '-f')
+                  '--delete-access-code', '2', '-f')
         self._check_slot_2_does_not_have_access_code()
 
         ykman_cli('otp', 'delete', '2', '-f')
+
+    def test_new_access_code_conflicts_with_delete_access_code(self):
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        self._check_slot_2_programmed()
+        self._check_slot_2_does_not_have_access_code()
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'settings', '--delete-access-code',
+                      '--new-access-code', '111111111111', '2', '-f')
+        self._check_slot_2_does_not_have_access_code()
+
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
+                  '-f')
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'settings', '--delete-access-code',
+                      '--new-access-code', '111111111111', '2', '-f')
+        self._check_slot_2_has_access_code()
+
+        ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
 
     def _check_slot_2_programmed(self):
         status = ykman_cli('otp', 'info')
@@ -304,7 +325,7 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
                   '-f')
         ykman_cli('otp', '--access-code', '111111111111', 'settings',
-                  '--new-access-code', '000000000000', '2', '-f')
+                  '--delete-access-code', '2', '-f')
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
