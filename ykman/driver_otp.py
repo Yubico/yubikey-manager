@@ -168,6 +168,32 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_device_config(config)
 
+    def write_to_and_read_from_key(self, cmd, expected_output_length,
+                                   input_bytes=None, read_flags=0,
+                                   result_bufsize=16):
+
+        input_bufcount = 0 if input_bytes is None else len(input_bytes)
+
+        result_buf = create_string_buffer(result_bufsize)
+        bytes_read = c_uint()
+
+        check(ykpers.yk_write_to_key(self._dev, cmd, input_bytes,
+                                     input_bufcount))
+        check(ykpers.yk_read_response_from_key(
+          self._dev, cmd, read_flags, result_buf, result_bufsize,
+          expected_output_length, byref(bytes_read)))
+
+        result = bytes(result_buf)
+
+        return (result[0:expected_output_length],
+                result[0:bytes_read.value],
+                result)
+
+    def verify_fips_mode(self):
+        (result, _, _) = self.write_to_and_read_from_key(
+            0x14, expected_output_length=1)
+        return result == b'\x01'
+
     def close(self):
         if self._dev is not None:
             logger.debug('Close %s', self)
