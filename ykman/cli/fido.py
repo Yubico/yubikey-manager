@@ -28,11 +28,12 @@
 from __future__ import absolute_import
 import click
 import logging
+from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
 from .util import click_skip_on_help, prompt_for_touch, click_force_option
 from ..driver_ccid import (
-    APDUError, SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
+    SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
     SW_AUTH_METHOD_BLOCKED, SW_DATA_INVALID)
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
@@ -145,14 +146,14 @@ def set_pin(ctx, pin, new_pin, u2f):
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
 
-        except APDUError as e:
-            if e.sw == SW_DATA_INVALID:
+        except ApduError as e:
+            if e.code == SW_DATA_INVALID:
                 ctx.fail('No PIN is set.')
 
-            if e.sw == SW_VERIFY_FAIL_NO_RETRY:
+            if e.code == SW_VERIFY_FAIL_NO_RETRY:
                 ctx.fail('Wrong PIN.')
 
-            if e.sw == SW_AUTH_METHOD_BLOCKED:
+            if e.code == SW_AUTH_METHOD_BLOCKED:
                 ctx.fail('Too many incorrect PIN attempts - PIN is blocked.\n'
                          'Use the "fido reset" command to reset.')
 
@@ -235,8 +236,8 @@ def reset(ctx, force):
         try:
             try_reset(FipsU2fController)
 
-        except APDUError as e:
-            if e.sw == SW_COMMAND_NOT_ALLOWED:
+        except ApduError as e:
+            if e.code == SW_COMMAND_NOT_ALLOWED:
                 ctx.fail(
                     'Reset failed. Reset must be triggered within 5 seconds'
                     ' after the YubiKey is inserted.')

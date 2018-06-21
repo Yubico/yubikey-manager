@@ -29,8 +29,6 @@ from __future__ import absolute_import
 
 from .driver import AbstractDriver, NotSupportedError
 from .util import TRANSPORT, PID, YUBIKEY, Mode
-from fido2.ctap import CtapError
-from .driver_ccid import APDUError, SW_OK
 from fido2.hid import CtapHidDevice, CTAPHID
 from enum import IntEnum, unique
 import logging
@@ -87,47 +85,6 @@ class FidoDriver(AbstractDriver):
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
         data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
         self._dev.call(CMD.YUBIKEY_DEVICE_CONFIG, data)
-
-    @property
-    def is_in_fips_mode(self):
-        try:
-            sw = self._dev.call(
-                CTAPHID.MSG, [*[0, FIPS_U2F_CMD.VERIFY_FIPS_MODE], 0, 0])
-            return sw == b'\x90\x00'
-        except CtapError as e:
-            if e.code == CtapError.ERR.INVALID_COMMAND:
-                return False
-            else:
-                raise e
-
-    def fips_reset(self):
-        res = self._dev.call(CTAPHID.MSG, [*[0, FIPS_U2F_CMD.RESET], 0, 0])
-        (sw, ) = struct.unpack('>H', res)
-        if sw == SW_OK:
-            return sw
-        else:
-            raise APDUError(b'', sw)
-
-    def fips_change_pin(self, old_pin, new_pin):
-        new_length = len(new_pin)
-        packet_length = 1 + len(old_pin) + new_length
-
-        old_pin = old_pin.encode('utf-8')
-        new_pin = new_pin.encode('utf-8')
-
-        res = self._dev.call(
-            CTAPHID.MSG,
-            [
-              *[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
-              0, *struct.pack('>H', packet_length), new_length,
-              *old_pin, *new_pin
-            ]
-        )
-        (sw, ) = struct.unpack('>H', res)
-        if sw == SW_OK:
-            return sw
-        else:
-            raise APDUError(b'', sw)
 
 
 def descriptor_filter(desc):
