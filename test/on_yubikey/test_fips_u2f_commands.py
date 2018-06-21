@@ -35,12 +35,12 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
             res = dev.driver._dev.call(
                 CTAPHID.MSG,
                 [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
-                 *[0, 0, 7], *[6, *b'012345']])
+                 *[0, 0, 13], *[6, *b'012345', *b'012345']])
         else:
             res = dev.driver._dev.call(
                 CTAPHID.MSG,
                 [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
-                 *[0, 0, 13], *[6, *b'012345', *b'012345']])
+                 *[0, 0, 7], *[6, *b'012345']])
 
         verify_res2 = dev.driver._dev.call(
             CTAPHID.MSG,
