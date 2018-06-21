@@ -100,8 +100,9 @@ def set_pin(ctx, pin, new_pin):
                     'Enter your current PIN', default='', hide_input=True,
                     show_default=False)
 
-    def change_pin(pin, new_pin):
-        fail_if_not_valid(ctx, pin)
+    def change_pin(pin, new_pin, accept_empty_current_pin=False):
+        if not (accept_empty_current_pin and pin == ''):
+            fail_if_not_valid(ctx, pin)
         fail_if_not_valid(ctx, new_pin)
         try:
             controller.change_pin(old_pin=pin, new_pin=new_pin)
@@ -165,15 +166,18 @@ def reset(ctx, force):
             if removed and n_keys == 1:
                 return
 
-    try:
+    def try_reset(controller_type):
         if not force:
             prompt_re_insert_key()
             dev = list(get_descriptors())[0].open_device(TRANSPORT.FIDO)
-            controller = Fido2Controller(dev.driver)
+            controller = controller_type(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
         else:
             controller = ctx.obj['controller']
             controller.reset(touch_callback=prompt_for_touch)
+
+    try:
+        try_reset(Fido2Controller)
     except CtapError as e:
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
             ctx.fail(
