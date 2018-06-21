@@ -60,6 +60,9 @@ class Ykpers(CLibrary):
     yk_write_command = [POINTER(YK_KEY), POINTER(YK_CONFIG), c_uint8, c_char_p
                         ], bool
     yk_write_device_config = [POINTER(YK_KEY), POINTER(YK_DEVICE_CONFIG)], bool
+    yk_write_to_key = [POINTER(YK_KEY), c_uint8, c_char_p, c_int], bool
+    yk_read_response_from_key = [POINTER(YK_KEY), c_uint8, c_uint, c_char_p,
+                                 c_uint, c_uint, POINTER(c_uint)], bool
 
     yk_get_key_vid_pid = [POINTER(YK_KEY), POINTER(c_int), POINTER(c_int)], bool
 

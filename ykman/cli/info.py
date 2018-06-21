@@ -50,6 +50,10 @@ def info(ctx):
     else:
         click.echo('Firmware version: Uncertain, re-run with only one '
                    'YubiKey connected')
+
+    if dev.is_fips:
+        click.echo('FIPS capable: Yes')
+
     config = dev.config
     if config.form_factor:
         click.echo('Form factor: {!s}'.format(config.form_factor))

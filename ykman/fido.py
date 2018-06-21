@@ -27,8 +27,10 @@
 
 from __future__ import absolute_import
 
+import time
 from fido2.ctap2 import CTAP2, PinProtocolV1
 from threading import Timer
+from .driver_ccid import APDUError, SW_CONDITIONS_NOT_SATISFIED
 
 
 class Fido2Controller(object):
@@ -63,3 +65,53 @@ class Fido2Controller(object):
         finally:
             if (touch_callback):
                 touch_timer.cancel()
+
+    @property
+    def is_fips(self):
+        return False
+
+
+class FipsU2fController(object):
+
+    def __init__(self, driver):
+        self.driver = driver
+
+    @property
+    def has_pin(self):
+        # We don't know, but the change and set commands are the same here.
+        return True
+
+    def set_pin(self, pin):
+        raise NotImplementedError('Use the change_pin method instead.')
+
+    def change_pin(self, old_pin, new_pin):
+        return self.driver.fips_change_pin(old_pin, new_pin)
+
+    def reset(self, touch_callback=None):
+        if (touch_callback):
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+
+        try:
+            while True:
+                try:
+                    self.driver.fips_reset()
+                    self._pin = False
+                    return True
+                except APDUError as e:
+                    if e.sw == SW_CONDITIONS_NOT_SATISFIED:
+                        time.sleep(0.5)
+                    else:
+                        raise e
+
+        finally:
+            if (touch_callback):
+                touch_timer.cancel()
+
+    @property
+    def is_fips(self):
+        return True
+
+    @property
+    def is_in_fips_mode(self):
+        return self.driver.is_in_fips_mode

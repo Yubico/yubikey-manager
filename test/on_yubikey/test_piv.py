@@ -9,7 +9,7 @@ from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.util import TRANSPORT, parse_certificate, parse_private_key
 from .util import (
-    DestructiveYubikeyTestCase, missing_mode, open_device, get_version)
+    DestructiveYubikeyTestCase, missing_mode, open_device, get_version, is_fips)
 from ..util import open_file
 
 
@@ -313,6 +313,7 @@ class Operations(PivTestCase):
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
         self.assertIsNotNone(sig)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     @unittest.skipIf(*no_pin_policy)
     def test_sign_with_pin_policy_never_does_not_require_pin(self):
         self.generate_key(pin_policy=PIN_POLICY.NEVER)

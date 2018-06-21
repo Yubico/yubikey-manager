@@ -131,6 +131,24 @@ def info(ctx):
     controller = ctx.obj['controller']
     click.echo(dev.device_name)
     slot1, slot2 = controller.slot_status
+
+    if dev.is_fips:
+        fips_mode = controller.is_in_fips_mode
+        summary = fips_mode and 'Yes' or 'No'
+        explanation = ''
+        if not fips_mode:
+            if not slot1 and not slot2:
+                explanation = ' - No slot programmed'
+            elif not slot1:
+                explanation = ' - Slot 1 not programmed'
+            elif not slot2:
+                explanation = ' - Slot 2 not programmed'
+            else:
+                explanation = (' - Access code needs to be set on both slots; '
+                               'see otp settings command')
+
+        click.echo('FIPS mode active: {}{}'.format(summary, explanation))
+
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
     click.echo('Slot 2: {}'.format(slot2 and 'programmed' or 'empty'))
 
