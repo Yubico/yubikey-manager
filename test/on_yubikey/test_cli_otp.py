@@ -284,6 +284,22 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
 
         ykman_cli('otp', 'delete', '2', '-f')
 
+    def test_set_access_code_prompt_slot_2(self):
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        self._check_slot_2_programmed()
+        self._check_slot_2_does_not_have_access_code()
+
+        ykman_cli('otp', 'settings', '--new-access-code', '', '2',
+                  '-f', input='111111111111')
+        self._check_slot_2_has_access_code()
+
+        ykman_cli('otp', '--access-code', '', 'settings',
+                  '--delete-access-code', '2', '-f', input='111111111111')
+        self._check_slot_2_does_not_have_access_code()
+
+        ykman_cli('otp', 'delete', '2', '-f')
+
     def test_new_access_code_conflicts_with_delete_access_code(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 

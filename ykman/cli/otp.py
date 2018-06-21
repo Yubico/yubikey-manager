@@ -495,8 +495,9 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
 @click_force_option
 @click.pass_context
 @click.option(
-    '-A', '--new-access-code', metavar='HEX',
-    help='Set a new access code for the slot.')
+    '-A', '--new-access-code', metavar='HEX', required=False,
+    help='Set a new 6 byte access code for the slot. Set to empty to use a '
+         'prompt for input.')
 @click.option(
     '--delete-access-code', is_flag=True,
     help='Remove access code from the slot.')
@@ -524,6 +525,10 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
         ctx.fail('Not possible to update settings on an empty slot.')
 
     if new_access_code is not None:
+        if new_access_code == '':
+            new_access_code = click.prompt(
+                'Enter new access code', show_default=False)
+
         try:
             new_access_code = parse_access_code_hex(new_access_code)
         except Exception as e:
