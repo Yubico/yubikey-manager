@@ -56,6 +56,17 @@ def parse_hex(length):
     return inner
 
 
+def parse_access_code_hex(access_code_hex):
+    try:
+        access_code = a2b_hex(access_code_hex)
+    except TypeError as e:
+        raise ValueError(e)
+    if len(access_code) != 6:
+        raise ValueError('Must be exactly 6 bytes.')
+
+    return access_code
+
+
 click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
                                      callback=lambda c, p, v: int(v))
 
@@ -101,12 +112,12 @@ def otp(ctx, access_code):
     if access_code is not None:
         if access_code == '':
             access_code = click.prompt('Enter access code', show_default=False)
+
         try:
-            access_code = a2b_hex(access_code)
-        except TypeError as e:
-            raise ValueError(e)
-        if len(access_code) != 6:
-            raise ValueError('Must be exactly 6 bytes.')
+            access_code = parse_access_code_hex(access_code)
+        except Exception as e:
+            ctx.fail('Failed to parse access code: ' + str(e))
+
     ctx.obj['controller'].access_code = access_code
 
 
@@ -484,13 +495,21 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
 @click_force_option
 @click.pass_context
 @click.option(
+    '-A', '--new-access-code', metavar='HEX', required=False,
+    help='Set a new 6 byte access code for the slot. Set to empty to use a '
+         'prompt for input.')
+@click.option(
+    '--delete-access-code', is_flag=True,
+    help='Remove access code from the slot.')
+@click.option(
     '--enter/--no-enter', default=True, show_default=True,
     help="Should send 'Enter' keystroke after slot output.")
 @click.option(
     '-p', '--pacing', type=click.Choice(['0', '20', '40', '60']),
     default='0', show_default=True, help='Throttle output speed by '
     'adding a delay (in ms) between characters emitted.')
-def settings(ctx, slot, enter, pacing, force):
+def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
+             force):
     """
     Update the settings for a slot.
 
@@ -498,8 +517,23 @@ def settings(ctx, slot, enter, pacing, force):
     All settings not specified will be written with default values.
     """
     controller = ctx.obj['controller']
+
+    if (new_access_code is not None) and delete_access_code:
+        ctx.fail('-A/--new-access-code conflicts with --delete-access-code.')
+
     if not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to update settings on an empty slot.')
+
+    if new_access_code is not None:
+        if new_access_code == '':
+            new_access_code = click.prompt(
+                'Enter new access code', show_default=False)
+
+        try:
+            new_access_code = parse_access_code_hex(new_access_code)
+        except Exception as e:
+            ctx.fail('Failed to parse access code: ' + str(e))
+
     force or click.confirm(
         'Update the settings for slot {}? '
         'All existing settings will be overwritten.'.format(slot), abort=True)
@@ -512,6 +546,12 @@ def settings(ctx, slot, enter, pacing, force):
         controller.update_settings(slot, enter=enter, pacing=pacing)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
+
+    if new_access_code:
+        controller.set_access_code(slot, new_access_code)
+
+    if delete_access_code:
+        controller.delete_access_code(slot)
 
 
 otp.transports = TRANSPORT.OTP
