@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
+CMD_VERIFY_FIPS_MODE = 0x14
+
+
 try:
     ykpers = Ykpers('ykpers-1', '1')
     if not ykpers.yk_init():
@@ -192,7 +195,7 @@ class OTPDriver(AbstractDriver):
     @property
     def is_in_fips_mode(self):
         (result, _, _) = self.write_to_and_read_from_key(
-            0x14, expected_output_length=1)
+            CMD_VERIFY_FIPS_MODE, expected_output_length=1)
         return result == b'\x01'
 
     def close(self):
