@@ -186,7 +186,7 @@ class OTPDriver(AbstractDriver):
           self._dev, cmd, read_flags, result_buf, result_bufsize,
           expected_output_length, byref(bytes_read)))
 
-        result = bytes(result_buf)
+        result = bytearray(result_buf)
 
         return (result[0:expected_output_length],
                 result[0:bytes_read.value],
