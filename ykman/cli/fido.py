@@ -226,7 +226,7 @@ def reset(ctx, force):
     if ctx.obj['dev'].is_fips:
         if not force:
             destroy_input = click.prompt(
-                '\nWARNING: This will destroy the FIPS attestation key, making '
+                '\nWARNING: This will destroy the U2F attestation key, making '
                 'this YubiKey permanently incapable of FIPS mode.\n'
                 'To confirm, please enter the text "DESTROY PERMANENTLY"',
                 default='',
