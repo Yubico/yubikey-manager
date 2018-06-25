@@ -49,7 +49,7 @@ class SLOT(IntEnum):
 
 
 SLOTS = [-1, 0x30, 0x38]
-RESET_ACCESS_CODE = b'\x00' * 6
+_RESET_ACCESS_CODE = b'\x00' * 6
 
 
 def slot_to_cmd(slot, update=False):
@@ -276,14 +276,14 @@ class OtpController(object):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
             raise ValueError('Cannot set new access code unless updating slot')
-        if new_code == RESET_ACCESS_CODE:
+        if new_code == _RESET_ACCESS_CODE:
             raise ValueError('Cannot set access code to special value zero.')
 
         cmd = slot_to_cmd(slot, update)
         cfg = self._create_cfg(cmd)
         try:
             if new_code is None:
-                new_code = RESET_ACCESS_CODE
+                new_code = _RESET_ACCESS_CODE
             check(ykpers.ykp_set_access_code(cfg, new_code, len(new_code)))
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, cmd,
