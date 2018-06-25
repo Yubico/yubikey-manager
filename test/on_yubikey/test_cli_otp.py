@@ -374,8 +374,6 @@ class TestSlotCalculate(DestructiveYubikeyTestCase):
 @unittest.skipIf(not is_fips(), 'Only applicable to YubiKey FIPS.')
 class TestFipsMode(DestructiveYubikeyTestCase):
 
-    access_code = b'123456'
-
     def tearDown(self):
         ykman_cli('otp', '--access-code', '111111111111', 'delete', '1', '-f')
         ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
