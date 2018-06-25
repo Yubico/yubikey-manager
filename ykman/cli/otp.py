@@ -548,10 +548,18 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
         _failed_to_write_msg(ctx, e)
 
     if new_access_code:
-        controller.set_access_code(slot, new_access_code)
+        try:
+            controller.set_access_code(slot, new_access_code)
+        except Exception as e:
+            logger.error('Failed to set access code', exc_info=e)
+            ctx.fail('Failed to set access code: ' + str(e))
 
     if delete_access_code:
-        controller.delete_access_code(slot)
+        try:
+            controller.delete_access_code(slot)
+        except Exception as e:
+            logger.error('Failed to delete access code', exc_info=e)
+            ctx.fail('Failed to delete access code: ' + str(e))
 
 
 otp.transports = TRANSPORT.OTP

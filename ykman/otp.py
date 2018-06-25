@@ -271,7 +271,70 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_ndef(ndef)
 
-    def set_access_code(self, slot, new_code=None, update=True):
+    def _verify_access_code_is_set(self, slot, access_code_to_test):
+        '''
+        Some YubiKey firmware versions after 4.3.1 but before 4.3.6 incorrectly
+        report success after performing the set_access_code command, even though
+        the new access code was not set on the slot.
+
+        This method will attempt to call set_access_code with
+        access_code_to_test as the new access code argument, but without the
+        current access code argument.
+
+        If this fails, then there must have been an access code set on the slot,
+        and all is well.
+
+        If this succeeds, then there must not have been an access code set on
+        the slot. The method then cleans up after itself and deletes the access
+        code it just set on the slot.
+        '''
+
+        prev_access_code = self.access_code
+        self.access_code = None
+        try:
+            # If this suceeds, then an access code IS NOT set.
+            # If this fails, then an access code IS set.
+            self._set_access_code(slot, access_code_to_test)
+
+        except YkpersError:
+            # This means that an access code WAS set. Now check that
+            # access_code_to_test is that access code.
+            self.access_code = access_code_to_test
+
+            try:
+                # If this suceeds, then the current access code is
+                # access_code_to_test.
+                # If this fails, then the current access code is something else.
+                self._set_access_code(slot, access_code_to_test)
+            except YkpersError:
+                # The current access code is something else - reset the access
+                # code field back to what it was when we started.
+                self.access_code = prev_access_code
+                return False
+
+            # access_code_to_test is the current access code. No cleanup
+            # needed.
+            return True
+
+        # If we reach this code, then the previous set command
+        # succeeded, which means the access code was NOT set on the
+        # device. Therefore we have to remove it again.
+        self._delete_access_code(slot)
+        return False
+
+    def set_access_code(self, slot, new_code=None, update=True,
+                        allow_zero=False):
+        self._set_access_code(slot, new_code, update, allow_zero)
+
+        if new_code is not None:
+            if not self._verify_access_code_is_set(slot, new_code):
+                raise ValueError(
+                    'This YubiKey firmware does not support setting the access '
+                    'code after programming the slot. Please set the access '
+                    'code when initially programming the slot instead.')
+
+    def _set_access_code(self, slot, new_code=None, update=True,
+                         allow_zero=False):
         if update and self._driver.version < (2, 3, 0):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
@@ -288,11 +351,27 @@ class OtpController(object):
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, cmd,
                                           self.access_code))
+
+            if new_code == _RESET_ACCESS_CODE:
+                self.access_code = None
+            else:
+                self.access_code = new_code
+
         finally:
             ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
-        return self.set_access_code(slot, None)
+        current_access_code = self.access_code
+        self._delete_access_code(slot)
+
+        if self._verify_access_code_is_set(slot, current_access_code):
+            raise ValueError(
+                'This YubiKey firmware does not support deleting the access '
+                'code after programming the slot. Please delete and re-program '
+                'the slot instead.')
+
+    def _delete_access_code(self, slot):
+        self.set_access_code(slot, None)
 
     def update_settings(self, slot, enter=True, pacing=None):
         cmd = slot_to_cmd(slot, update=True)

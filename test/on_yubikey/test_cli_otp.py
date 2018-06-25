@@ -29,7 +29,8 @@
 
 import unittest
 from ykman.util import TRANSPORT
-from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
+from .util import (DestructiveYubikeyTestCase, get_version, missing_mode,
+                   ykman_cli)
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
@@ -268,6 +269,48 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         status = ykman_cli('otp', 'info')
         self.assertIn('Slot 2: empty', status)
 
+    @unittest.skipIf(get_version() not in [(4, 3, 4), (4, 3, 5)],
+                     'Applicable only to YubiKey 4.3.4 and 4.3.5')
+    def test_set_access_code_fails_on_yk_434_and_435(self):
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        self._check_slot_2_programmed()
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'settings', '--new-access-code', '111111111111',
+                      '2', '-f')
+
+        ykman_cli('otp', '--access-code', '111111111111', 'static', '2', '-f',
+                  '--generate', '--length', '10')
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'delete', '2', '-f')
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', '--access-code', '111111111111', 'settings',
+                      '--new-access-code', '222222222222', '2', '-f')
+
+        ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
+
+    @unittest.skipIf(get_version() not in [(4, 3, 4), (4, 3, 5)],
+                     'Applicable only to YubiKey 4.3.4 and 4.3.5')
+    def test_delete_access_code_fails_on_yk_434_and_435(self):
+        ykman_cli('otp', '--access-code', '111111111111', 'static', '2',
+                  '--generate', '--length', '10')
+
+        self._check_slot_2_programmed()
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', '--access-code', '111111111111', 'settings',
+                      '--delete-access-code', '2', '-f')
+
+        with self.assertRaises(SystemExit):
+            ykman_cli('otp', 'delete', '2', '-f')
+
+        ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
+
+    @unittest.skipIf(get_version() in [(4, 3, 4), (4, 3, 5)],
+                     'Set access code does not work on YubiKey 4.3.4 and 4.3.5')
     def test_set_access_code_slot_2(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
@@ -284,6 +327,8 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
 
         ykman_cli('otp', 'delete', '2', '-f')
 
+    @unittest.skipIf(get_version() in [(4, 3, 4), (4, 3, 5)],
+                     'Set access code does not work on YubiKey 4.3.4 and 4.3.5')
     def test_set_access_code_prompt_slot_2(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
@@ -300,6 +345,8 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
 
         ykman_cli('otp', 'delete', '2', '-f')
 
+    @unittest.skipIf(get_version() in [(4, 3, 4), (4, 3, 5)],
+                     'Set access code does not work on YubiKey 4.3.4 and 4.3.5')
     def test_new_access_code_conflicts_with_delete_access_code(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
