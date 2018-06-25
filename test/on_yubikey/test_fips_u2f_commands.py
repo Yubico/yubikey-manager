@@ -40,7 +40,7 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
               FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b'012345'
             ))
 
-        if verify_res1 == b'\x90\x90':
+        if verify_res1 == b'\x90\x00':
             res = dev.driver._dev.call(
                 CTAPHID.MSG,
                 struct.pack(
