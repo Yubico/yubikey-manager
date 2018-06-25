@@ -1,3 +1,4 @@
+import struct
 import unittest
 
 from fido2.hid import (CTAPHID)
@@ -7,6 +8,8 @@ from .util import (DestructiveYubikeyTestCase, is_fips, open_device)
 
 
 HID_CMD = 0x03
+P1 = 0
+P2 = 0
 
 
 @unittest.skipIf(not is_fips(), 'FIPS YubiKey required.')
@@ -17,7 +20,10 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
 
         res = dev.driver._dev.call(
             CTAPHID.MSG,
-            [*[0, FIPS_U2F_CMD.ECHO], 0, 0, *[0, 0, 6], *b'012345'])
+            struct.pack(
+              '>HBBBH6s',
+              FIPS_U2F_CMD.ECHO, P1, P2, 0, 6, b'012345'
+            ))
 
         self.assertEqual(res, b'012345\x90\x00')
 
@@ -29,26 +35,39 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
 
         verify_res1 = dev.driver._dev.call(
             CTAPHID.MSG,
-            [*[0, FIPS_U2F_CMD.VERIFY_PIN], 0, 0, *[0, 0, 6], *b'012345'])
+            struct.pack(
+              '>HBBBH6s',
+              FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b'012345'
+            ))
 
         if verify_res1 == b'\x90\x90':
             res = dev.driver._dev.call(
                 CTAPHID.MSG,
-                [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
-                 *[0, 0, 13], *[6, *b'012345', *b'012345']])
+                struct.pack(
+                  '>HBBBHB6s6s',
+                  FIPS_U2F_CMD.SET_PIN, P1, P2, 0, 13, 6, b'012345', b'012345'
+                ))
         else:
             res = dev.driver._dev.call(
                 CTAPHID.MSG,
-                [*[0, FIPS_U2F_CMD.SET_PIN], 0, 0,
-                 *[0, 0, 7], *[6, *b'012345']])
+                struct.pack(
+                  '>HBBBHB6s',
+                  FIPS_U2F_CMD.SET_PIN, P1, P2, 0, 7, 6, b'012345'
+                ))
 
         verify_res2 = dev.driver._dev.call(
             CTAPHID.MSG,
-            [*[0, FIPS_U2F_CMD.VERIFY_PIN], 0, 0, *[0, 0, 6], *b'543210'])
+            struct.pack(
+              '>HBBBH6s',
+              FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b'543210'
+            ))
 
         verify_res3 = dev.driver._dev.call(
             CTAPHID.MSG,
-            [*[0, FIPS_U2F_CMD.VERIFY_PIN], 0, 0, *[0, 0, 6], *b'012345'])
+            struct.pack(
+              '>HBBBH6s',
+              FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b'012345'
+            ))
 
         self.assertIn(verify_res1, [b'\x90\x00', b'\x69\x86'])  # OK / not set
         self.assertEqual(res,         b'\x90\x00')  # Success
@@ -59,7 +78,11 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
         dev = open_device(transports=TRANSPORT.FIDO)
 
         res = dev.driver._dev.call(
-            CTAPHID.MSG, [*[0, FIPS_U2F_CMD.RESET], 0, 0])
+            CTAPHID.MSG,
+            struct.pack(
+              '>HBB',
+              FIPS_U2F_CMD.RESET, P1, P2
+            ))
 
         # 0x6985: Touch required
         # 0x6986: Power cycle required
@@ -70,7 +93,11 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
         dev = open_device(transports=TRANSPORT.FIDO)
 
         res = dev.driver._dev.call(
-            CTAPHID.MSG, [*[0, FIPS_U2F_CMD.VERIFY_FIPS_MODE], 0, 0])
+            CTAPHID.MSG,
+            struct.pack(
+              '>HBB',
+              FIPS_U2F_CMD.VERIFY_FIPS_MODE, P1, P2
+            ))
 
         # 0x6a81: Function not supported (PIN not set - not FIPS mode)
         # 0x9000: Success (PIN set - FIPS mode)
