@@ -89,6 +89,25 @@ def _confirm_slot_overwrite(controller, slot):
             abort=True)
 
 
+def explain_fips_status(is_fips_mode, slot1_programmed, slot2_programmed):
+    if is_fips_mode:
+        return 'Yes'
+    else:
+        explanation = ''
+        if not is_fips_mode:
+            if not slot1_programmed and not slot2_programmed:
+                explanation = 'No slot programmed'
+            elif not slot1_programmed:
+                explanation = 'Slot 1 not programmed'
+            elif not slot2_programmed:
+                explanation = 'Slot 2 not programmed'
+            else:
+                explanation = ('Access code needs to be set on both slots; see '
+                               'otp settings command')
+
+        return 'No - ' + explanation
+
+
 @click.group()
 @click.pass_context
 @click_skip_on_help
@@ -133,21 +152,8 @@ def info(ctx):
     slot1, slot2 = controller.slot_status
 
     if dev.is_fips:
-        fips_mode = controller.is_in_fips_mode
-        summary = fips_mode and 'Yes' or 'No'
-        explanation = ''
-        if not fips_mode:
-            if not slot1 and not slot2:
-                explanation = ' - No slot programmed'
-            elif not slot1:
-                explanation = ' - Slot 1 not programmed'
-            elif not slot2:
-                explanation = ' - Slot 2 not programmed'
-            else:
-                explanation = (' - Access code needs to be set on both slots; '
-                               'see otp settings command')
-
-        click.echo('FIPS mode active: {}{}'.format(summary, explanation))
+        click.echo('FIPS mode active: {}'.format(
+            explain_fips_status(controller.is_in_fips_mode, slot1, slot2)))
 
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
     click.echo('Slot 2: {}'.format(slot2 and 'programmed' or 'empty'))
