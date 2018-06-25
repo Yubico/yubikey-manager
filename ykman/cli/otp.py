@@ -89,7 +89,7 @@ def _confirm_slot_overwrite(controller, slot):
             abort=True)
 
 
-def explain_fips_status(is_fips_mode, slot1_programmed, slot2_programmed):
+def _explain_fips_status(is_fips_mode, slot1_programmed, slot2_programmed):
     if is_fips_mode:
         return 'Yes'
     else:
@@ -153,7 +153,7 @@ def info(ctx):
 
     if dev.is_fips:
         click.echo('FIPS mode active: {}'.format(
-            explain_fips_status(controller.is_in_fips_mode, slot1, slot2)))
+            _explain_fips_status(controller.is_in_fips_mode, slot1, slot2)))
 
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
     click.echo('Slot 2: {}'.format(slot2 and 'programmed' or 'empty'))
