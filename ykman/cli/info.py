@@ -52,7 +52,7 @@ def info(ctx):
                    'YubiKey connected')
 
     if dev.is_fips:
-        click.echo('FIPS capable: Yes')
+        click.echo('This YubiKey is capable of FIPS mode.')
 
     config = dev.config
     if config.form_factor:

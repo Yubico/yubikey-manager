@@ -51,7 +51,11 @@ def fido(ctx):
     Manage FIDO applications.
     """
     if ctx.obj['dev'].is_fips:
-        ctx.obj['controller'] = FipsU2fController(ctx.obj['dev'].driver)
+        try:
+            ctx.obj['controller'] = FipsU2fController(ctx.obj['dev'].driver)
+        except Exception as e:
+            logger.debug('Failed to load FipsU2fController', exc_info=e)
+            ctx.fail('Failed to load FIDO Application.')
     else:
         try:
             ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
@@ -221,11 +225,9 @@ def reset(ctx, force):
 
     if ctx.obj['dev'].is_fips:
         if not force:
-            click.echo(
-                '\nWARNING: This will destroy the FIPS attestation key, making '
-                'this YubiKey permanently incapable of FIPS mode.'
-            )
             destroy_input = click.prompt(
+                '\nWARNING: This will destroy the FIPS attestation key, making '
+                'this YubiKey permanently incapable of FIPS mode.\n'
                 'To confirm, please enter the text "DESTROY PERMANENTLY"',
                 default='',
                 show_default=False
