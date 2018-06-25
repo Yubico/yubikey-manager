@@ -271,20 +271,19 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_ndef(ndef)
 
-    def set_access_code(self, slot, new_code=None, update=True,
-                        allow_zero=False):
+    def set_access_code(self, slot, new_code=None, update=True):
         if update and self._driver.version < (2, 3, 0):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
             raise ValueError('Cannot set new access code unless updating slot')
-        if new_code == RESET_ACCESS_CODE and not allow_zero:
+        if new_code == RESET_ACCESS_CODE:
             raise ValueError('Cannot set access code to special value zero.')
 
         cmd = slot_to_cmd(slot, update)
         cfg = self._create_cfg(cmd)
         try:
             if new_code is None:
-                new_code = b'\0' * 6
+                new_code = RESET_ACCESS_CODE
             check(ykpers.ykp_set_access_code(cfg, new_code, len(new_code)))
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, cmd,
@@ -293,7 +292,7 @@ class OtpController(object):
             ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
-        return self.set_access_code(slot, RESET_ACCESS_CODE, allow_zero=True)
+        return self.set_access_code(slot, None)
 
     def update_settings(self, slot, enter=True, pacing=None):
         cmd = slot_to_cmd(slot, update=True)
