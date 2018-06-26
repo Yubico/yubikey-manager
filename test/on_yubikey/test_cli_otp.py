@@ -378,17 +378,13 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
 
     def _check_slot_2_has_access_code(self):
         with self.assertRaises(SystemExit):
-            ykman_cli('otp', 'settings', '--new-access-code', '111111111111',
-                      '2', '-f')
+            ykman_cli('otp', 'settings', '--pacing', '0', '2', '-f')
 
         ykman_cli('otp', '--access-code', '111111111111', 'settings',
-                  '--new-access-code', '111111111111', '2', '-f')
+                  '--pacing', '0', '2', '-f')
 
     def _check_slot_2_does_not_have_access_code(self):
-        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
-                  '-f')
-        ykman_cli('otp', '--access-code', '111111111111', 'settings',
-                  '--delete-access-code', '2', '-f')
+        ykman_cli('otp', 'settings', '--pacing', '0', '2', '-f')
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
