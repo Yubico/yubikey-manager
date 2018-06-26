@@ -331,7 +331,7 @@ class OtpController(object):
             if (4, 3, 4) <= self._driver.version <= (4, 3, 5):
                 return _HasSetAccessCodeBug(True, True)
             else:
-                return _HasSetAccessCodeBug(False, None)
+                return _HasSetAccessCodeBug(False, True)
         else:
             return _HasSetAccessCodeBug(True, False)
 
