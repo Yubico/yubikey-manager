@@ -29,6 +29,7 @@ from __future__ import absolute_import
 
 import time
 import logging
+from collections import namedtuple
 from ctypes import sizeof, byref, c_uint, create_string_buffer
 from .driver_otp import ykpers, check, YkpersError
 from .util import time_challenge, parse_totp_hash, format_code, hmac_shorten_key
@@ -50,6 +51,8 @@ class SLOT(IntEnum):
 
 SLOTS = [-1, 0x30, 0x38]
 _RESET_ACCESS_CODE = b'\x00' * 6
+
+_HasSetAccessCodeBug = namedtuple('HasAccessCodeBug', ['certain', 'has_bug'])
 
 
 def slot_to_cmd(slot, update=False):
@@ -322,12 +325,36 @@ class OtpController(object):
         self._delete_access_code(slot)
         return False
 
+    @property
+    def _has_set_access_code_bug(self):
+        return _HasSetAccessCodeBug(False, None)
+
+        v = self._driver.version
+        if v <= (4, 3, 1) or v >= (4, 3, 6):
+            return _HasSetAccessCodeBug(True, False)
+        elif v >= (4, 3, 4) and v < (4, 3, 6):
+            return _HasSetAccessCodeBug(True, True)
+        else:
+            return _HasSetAccessCodeBug(False, None)
+
+    def _verify_set_access_code_supported(self, slot, new_code):
+        if self._has_set_access_code_bug.certain:
+            return not self._has_set_access_code_bug.has_bug
+        else:
+            return self._verify_access_code_is_set(slot, new_code)
+
+    def _verify_delete_access_code_supported(self, slot, current_code):
+        if self._has_set_access_code_bug.certain:
+            return not self._has_set_access_code_bug.has_bug
+        else:
+            return not self._verify_access_code_is_set(slot, current_code)
+
     def set_access_code(self, slot, new_code=None, update=True,
                         allow_zero=False):
         self._set_access_code(slot, new_code, update, allow_zero)
 
         if new_code is not None:
-            if not self._verify_access_code_is_set(slot, new_code):
+            if not self._verify_set_access_code_supported(slot, new_code):
                 raise ValueError(
                     'This YubiKey firmware does not support setting the access '
                     'code after programming the slot. Please set the access '
@@ -361,10 +388,10 @@ class OtpController(object):
             ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
-        current_access_code = self.access_code
+        current_code = self.access_code
         self._delete_access_code(slot)
 
-        if self._verify_access_code_is_set(slot, current_access_code):
+        if not self._verify_delete_access_code_supported(slot, current_code):
             raise ValueError(
                 'This YubiKey firmware does not support deleting the access '
                 'code after programming the slot. Please delete and re-program '
