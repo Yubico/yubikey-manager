@@ -327,13 +327,13 @@ class OtpController(object):
 
     @property
     def _has_set_access_code_bug(self):
-        v = self._driver.version
-        if v <= (4, 3, 1) or v >= (4, 3, 6):
-            return _HasSetAccessCodeBug(True, False)
-        elif v >= (4, 3, 4) and v < (4, 3, 6):
-            return _HasSetAccessCodeBug(True, True)
+        if (4, 3, 1) < self._driver.version < (4, 3, 6):
+            if (4, 3, 4) <= self._driver.version <= (4, 3, 5):
+                return _HasSetAccessCodeBug(True, True)
+            else:
+                return _HasSetAccessCodeBug(False, None)
         else:
-            return _HasSetAccessCodeBug(False, None)
+            return _HasSetAccessCodeBug(True, False)
 
     def _verify_set_access_code_supported(self, slot, new_code):
         if self._has_set_access_code_bug.certain:
