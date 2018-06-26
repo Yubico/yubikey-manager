@@ -327,8 +327,6 @@ class OtpController(object):
 
     @property
     def _has_set_access_code_bug(self):
-        return _HasSetAccessCodeBug(False, None)
-
         v = self._driver.version
         if v <= (4, 3, 1) or v >= (4, 3, 6):
             return _HasSetAccessCodeBug(True, False)
