@@ -1,6 +1,6 @@
 import unittest
 from ykman.util import TRANSPORT
-from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
+from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli, is_fips)
 
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
@@ -16,6 +16,8 @@ URI_TOTP_EXAMPLE_B = (
         'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
         '&algorithm=SHA1&digits=6&period=30')
 
+PASSWORD = 'aaaa'
+
 
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOATH(DestructiveYubikeyTestCase):
@@ -23,6 +25,11 @@ class TestOATH(DestructiveYubikeyTestCase):
     def test_oath_info(self):
         output = ykman_cli('oath', 'info')
         self.assertIn('version:', output)
+
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
+    def test_info_does_not_indicate_fips_mode_for_non_fips_key(self):
+        info = ykman_cli('oath', 'info')
+        self.assertNotIn('FIPS:', info)
 
     def test_oath_add_credential(self):
         ykman_cli('oath', 'add', 'test-name', 'abba')
@@ -90,3 +97,24 @@ class TestOATH(DestructiveYubikeyTestCase):
         ykman_cli('oath', 'add', 'delete-me', 'abba')
         ykman_cli('oath', 'delete', 'delete-me', '-f')
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
+
+
+@unittest.skipIf(not is_fips(), 'Only applicable to YubiKey FIPS.')
+@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
+class TestOathFips(DestructiveYubikeyTestCase):
+
+    def setUp(self):
+        ykman_cli('oath', 'reset', '-f')
+
+    @classmethod
+    def tearDownClass(cls):
+        ykman_cli('oath', 'reset', '-f')
+
+    def test_no_fips_mode_without_password(self):
+        output = ykman_cli('oath', 'info')
+        self.assertIn('FIPS mode active: No', output)
+
+    def test_fips_mode_with_password(self):
+        ykman_cli('oath', 'set-password', '-n', PASSWORD)
+        output = ykman_cli('oath', 'info')
+        self.assertIn('FIPS mode active: Yes', output)
