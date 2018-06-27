@@ -293,18 +293,13 @@ class OtpController(object):
         cmd = slot_to_cmd(slot, update)
         cfg = self._create_cfg(cmd)
         try:
-            if new_code is None:
-                new_code = _RESET_ACCESS_CODE
             check(ykpers.ykp_set_access_code(
-                cfg, new_code, _ACCESS_CODE_LENGTH))
+                cfg, new_code or _RESET_ACCESS_CODE, _ACCESS_CODE_LENGTH))
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, cmd,
                                           self.access_code))
 
-            if new_code == _RESET_ACCESS_CODE:
-                self.access_code = None
-            else:
-                self.access_code = new_code
+            self.access_code = new_code
 
         finally:
             ykpers.ykp_free_config(cfg)
