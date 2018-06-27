@@ -433,8 +433,8 @@ class TestFipsMode(DestructiveYubikeyTestCase):
         self.assertIn('Access code needs to be set', info)
 
     def test_fips_mode_if_both_slots_have_access_code(self):
-        ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
-        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+        ykman_cli('otp', 'static', '1', '--generate', '--length', '10', '-f')
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10', '-f')
 
         ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '1',
                   '-f')
