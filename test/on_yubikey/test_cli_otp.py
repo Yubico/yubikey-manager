@@ -271,7 +271,7 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
 
     @unittest.skipIf(get_version() not in [(4, 3, 4), (4, 3, 5)],
                      'Applicable only to YubiKey 4.3.4 and 4.3.5')
-    def test_set_access_code_fails_on_yk_434_and_435(self):
+    def test_update_access_code_fails_on_yk_434_and_435(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
         self._check_slot_2_programmed()
@@ -310,8 +310,8 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
 
     @unittest.skipIf(get_version() in [(4, 3, 4), (4, 3, 5)],
-                     'Set access code does not work on YubiKey 4.3.4 and 4.3.5')
-    def test_set_access_code_slot_2(self):
+                     'Update access code fails on YubiKey 4.3.4 and 4.3.5')
+    def test_update_access_code_slot_2(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
         self._check_slot_2_programmed()
@@ -328,8 +328,8 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'delete', '2', '-f')
 
     @unittest.skipIf(get_version() in [(4, 3, 4), (4, 3, 5)],
-                     'Set access code does not work on YubiKey 4.3.4 and 4.3.5')
-    def test_set_access_code_prompt_slot_2(self):
+                     'Update access code fails on YubiKey 4.3.4 and 4.3.5')
+    def test_update_access_code_prompt_slot_2(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
         self._check_slot_2_programmed()
@@ -346,7 +346,7 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'delete', '2', '-f')
 
     @unittest.skipIf(get_version() in [(4, 3, 4), (4, 3, 5)],
-                     'Set access code does not work on YubiKey 4.3.4 and 4.3.5')
+                     'Update access code fails on YubiKey 4.3.4 and 4.3.5')
     def test_new_access_code_conflicts_with_delete_access_code(self):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 

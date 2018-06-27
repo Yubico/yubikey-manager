@@ -273,7 +273,7 @@ class OtpController(object):
             ykpers.ykp_free_ndef(ndef)
 
     @property
-    def _has_set_access_code_bug(self):
+    def _has_update_access_code_bug(self):
         return (4, 3, 1) < self._driver.version < (4, 3, 6)
 
     def set_access_code(self, slot, new_code=None, update=True,
@@ -284,9 +284,9 @@ class OtpController(object):
             raise ValueError('Cannot set new access code unless updating slot')
         if new_code == _RESET_ACCESS_CODE:
             raise ValueError('Cannot set access code to special value zero.')
-        if new_code is not None and self._has_set_access_code_bug:
+        if new_code is not None and self._has_update_access_code_bug:
             raise ValueError(
-                'This YubiKey firmware does not support setting the access '
+                'This YubiKey firmware does not support updating the access '
                 'code after programming the slot. Please set the access '
                 'code when initially programming the slot instead.')
 
@@ -305,7 +305,7 @@ class OtpController(object):
             ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
-        if self._has_set_access_code_bug:
+        if self._has_update_access_code_bug:
             raise ValueError(
                 'This YubiKey firmware does not support deleting the access '
                 'code after programming the slot. Please delete and re-program '
