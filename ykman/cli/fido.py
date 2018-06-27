@@ -226,13 +226,15 @@ def reset(ctx, force):
     if ctx.obj['dev'].is_fips:
         if not force:
             destroy_input = click.prompt(
-                '\nWARNING: This will destroy the U2F attestation key, making '
-                'this YubiKey permanently incapable of FIPS mode.\n'
-                'To confirm, please enter the text "DESTROY PERMANENTLY"',
+                'WARNING! This is a YubiKey FIPS device. This command will '
+                'also overwrite the U2F attestation key; this action cannot be '
+                'undone and this YubiKey will no longer be a FIPS compliant '
+                'device.\n'
+                'To proceed, please enter the text "OVERWRITE"',
                 default='',
                 show_default=False
             )
-            if destroy_input != 'DESTROY PERMANENTLY':
+            if destroy_input != 'OVERWRITE':
                 ctx.fail('Reset aborted by user.')
 
         try:
