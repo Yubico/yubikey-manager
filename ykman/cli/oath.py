@@ -112,6 +112,10 @@ def info(ctx):
     click.echo('Password protection ' +
                ('enabled' if controller.locked else 'disabled'))
 
+    if ctx.obj['dev'].is_fips:
+        click.echo('FIPS mode active: ' +
+                   ('Yes' if controller.locked else 'No - Password not set.'))
+
     keys = ctx.obj['settings'].get('keys', {})
     if controller.locked and controller.id in keys:
         click.echo('The password for this YubiKey is remembered by ykman.')
