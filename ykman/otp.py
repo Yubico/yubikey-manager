@@ -50,6 +50,7 @@ class SLOT(IntEnum):
 
 SLOTS = [-1, 0x30, 0x38]
 _RESET_ACCESS_CODE = b'\x00' * 6
+_ACCESS_CODE_LENGTH = 6
 
 
 def slot_to_cmd(slot, update=False):
@@ -87,7 +88,7 @@ class OtpController(object):
             check(ykpers.ykp_set_extflag(cfg, 'ALLOW_UPDATE'))
             if self.access_code is not None:
                 check(ykpers.ykp_set_access_code(
-                    cfg, self.access_code, len(self.access_code)))
+                    cfg, self.access_code, _ACCESS_CODE_LENGTH))
             return cfg
         except YkpersError:
             ykpers.ykp_free_config(cfg)
@@ -294,7 +295,8 @@ class OtpController(object):
         try:
             if new_code is None:
                 new_code = _RESET_ACCESS_CODE
-            check(ykpers.ykp_set_access_code(cfg, new_code, len(new_code)))
+            check(ykpers.ykp_set_access_code(
+                cfg, new_code, _ACCESS_CODE_LENGTH))
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, cmd,
                                           self.access_code))
