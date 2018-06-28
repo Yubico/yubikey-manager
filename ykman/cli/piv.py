@@ -216,6 +216,10 @@ def generate_key(
     SLOT        PIV slot where private key should be stored.
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
+
+    if ctx.obj['dev'].is_fips and algorithm == 'RSA1024':
+        ctx.fail('RSA1024 is not a supoported algorithm on YubiKey FIPS.')
+
     controller = ctx.obj['controller']
 
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -340,6 +344,9 @@ def import_key(
 
     _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
+
+    if ctx.obj['dev'].is_fips and private_key.key_size == 1024:
+        ctx.fail('RSA1024 is not a supoported algorithm on YubiKey FIPS.')
 
     controller.import_key(
             slot,
