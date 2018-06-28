@@ -49,8 +49,8 @@ class SLOT(IntEnum):
 
 
 SLOTS = [-1, 0x30, 0x38]
-_RESET_ACCESS_CODE = b'\x00' * 6
 _ACCESS_CODE_LENGTH = 6
+_RESET_ACCESS_CODE = b'\x00' * _ACCESS_CODE_LENGTH
 
 
 def slot_to_cmd(slot, update=False):
