@@ -244,6 +244,10 @@ class OathController(object):
         return self._challenge is not None
 
     @property
+    def is_in_fips_mode(self):
+        return self.locked
+
+    @property
     def _426device(self):
         return (4, 2, 0) <= self.version <= (4, 2, 6)
 

@@ -114,7 +114,8 @@ def info(ctx):
 
     if ctx.obj['dev'].is_fips:
         click.echo('FIPS mode active: ' +
-                   ('Yes' if controller.locked else 'No - Password not set.'))
+                   ('Yes' if controller.is_in_fips_mode
+                    else 'No - Password not set.'))
 
     keys = ctx.obj['settings'].get('keys', {})
     if controller.locked and controller.id in keys:

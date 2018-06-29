@@ -22,6 +22,10 @@ PASSWORD = 'aaaa'
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOATH(DestructiveYubikeyTestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        ykman_cli('oath', 'reset', '-f')
+
     def test_oath_info(self):
         output = ykman_cli('oath', 'info')
         self.assertIn('version:', output)

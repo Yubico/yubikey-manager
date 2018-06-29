@@ -27,8 +27,27 @@
 
 from __future__ import absolute_import
 
-from ..util import APPLICATION
+from ..descriptor import open_device
+from ..fido import FipsU2fController
+from ..oath import OathController
+from ..otp import OtpController
+from ..util import APPLICATION, TRANSPORT
 import click
+
+
+def get_overall_fips_status(serial):
+    statuses = {}
+
+    with open_device(transports=TRANSPORT.OTP, serial=serial) as dev:
+        statuses['OTP'] = OtpController(dev._driver).is_in_fips_mode
+
+    with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
+        statuses['OATH'] = OathController(dev._driver).is_in_fips_mode
+
+    with open_device(transports=TRANSPORT.FIDO, serial=serial) as dev:
+        statuses['FIDO U2F'] = FipsU2fController(dev._driver).is_in_fips_mode
+
+    return statuses
 
 
 @click.command()
@@ -51,9 +70,6 @@ def info(ctx):
         click.echo('Firmware version: Uncertain, re-run with only one '
                    'YubiKey connected')
 
-    if dev.is_fips:
-        click.echo('This YubiKey is capable of FIPS mode.')
-
     config = dev.config
     if config.form_factor:
         click.echo('Form factor: {!s}'.format(config.form_factor))
@@ -64,6 +80,23 @@ def info(ctx):
     if config.configuration_locked:
         click.echo('Configured applications are protected by a lock code.')
     click.echo()
+
+    if dev.is_fips:
+        click.echo('This YubiKey is capable of FIPS mode.')
+
+        fips_status = get_overall_fips_status(dev.serial)
+
+        click.echo('FIPS mode active: {}'.format(
+            'Yes' if all(fips_status.values()) else 'No'))
+
+        status_keys = list(fips_status.keys())
+        status_keys.sort()
+        for status_key in status_keys:
+            click.echo('  {}: {}'.format(
+                status_key, 'Yes' if fips_status[status_key] else 'No'))
+
+        click.echo()
+
     rows = []
     for app in APPLICATION:
         if app & config.usb_supported:
