@@ -799,12 +799,12 @@ def _check_algorithm(ctx, controller, algorithm):
     if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
         ctx.fail('ECCP384 is not supported by this YubiKey.')
     if algorithm == ALGO.RSA1024 and ctx.obj['dev'].is_fips:
-        ctx.fail('RSA1024 is not supoported by this YubiKey.')
+        ctx.fail('RSA1024 is not supported by this YubiKey.')
 
 
 def _check_key_size(ctx, private_key):
     if ctx.obj['dev'].is_fips and private_key.key_size == 1024:
-        ctx.fail('1024 is not a supoported key size on this YubiKey.')
+        ctx.fail('1024 is not a supported key size on this YubiKey.')
 
 
 def _check_pin_policy(ctx, controller, pin_policy):
