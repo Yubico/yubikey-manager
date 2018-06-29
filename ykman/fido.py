@@ -129,5 +129,5 @@ class FipsU2fController(object):
         try:
             self.ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
             return True
-        except ApduError as e:
+        except ApduError:
             return False
