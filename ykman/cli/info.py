@@ -36,18 +36,18 @@ import click
 
 
 def get_overall_fips_status(serial):
-    stati = {}
+    statuses = {}
 
     with open_device(transports=TRANSPORT.OTP, serial=serial) as dev:
-        stati['OTP'] = OtpController(dev._driver).is_in_fips_mode
+        statuses['OTP'] = OtpController(dev._driver).is_in_fips_mode
 
     with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
-        stati['OATH'] = OathController(dev._driver).is_in_fips_mode
+        statuses['OATH'] = OathController(dev._driver).is_in_fips_mode
 
     with open_device(transports=TRANSPORT.FIDO, serial=serial) as dev:
-        stati['FIDO U2F'] = FipsU2fController(dev._driver).is_in_fips_mode
+        statuses['FIDO U2F'] = FipsU2fController(dev._driver).is_in_fips_mode
 
-    return stati
+    return statuses
 
 
 @click.command()
