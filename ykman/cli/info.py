@@ -95,7 +95,7 @@ def info(ctx):
             click.echo('  - {}: {}'.format(
                 status_key, 'Yes' if fips_status[status_key] else 'No'))
 
-    click.echo()
+        click.echo()
 
     rows = []
     for app in APPLICATION:
