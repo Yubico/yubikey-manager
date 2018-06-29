@@ -49,7 +49,8 @@ class SLOT(IntEnum):
 
 
 SLOTS = [-1, 0x30, 0x38]
-RESET_ACCESS_CODE = b'\x00' * 6
+_ACCESS_CODE_LENGTH = 6
+_RESET_ACCESS_CODE = b'\x00' * _ACCESS_CODE_LENGTH
 
 
 def slot_to_cmd(slot, update=False):
@@ -87,7 +88,7 @@ class OtpController(object):
             check(ykpers.ykp_set_extflag(cfg, 'ALLOW_UPDATE'))
             if self.access_code is not None:
                 check(ykpers.ykp_set_access_code(
-                    cfg, self.access_code, len(self.access_code)))
+                    cfg, self.access_code, _ACCESS_CODE_LENGTH))
             return cfg
         except YkpersError:
             ykpers.ykp_free_config(cfg)
@@ -271,29 +272,46 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_ndef(ndef)
 
+    @property
+    def _has_update_access_code_bug(self):
+        return (4, 3, 1) < self._driver.version < (4, 3, 6)
+
     def set_access_code(self, slot, new_code=None, update=True,
                         allow_zero=False):
         if update and self._driver.version < (2, 3, 0):
             raise ValueError('Update requires YubiKey 2.3.0 or later')
         if not update and new_code is not None:
             raise ValueError('Cannot set new access code unless updating slot')
-        if new_code == RESET_ACCESS_CODE and not allow_zero:
+        if new_code == _RESET_ACCESS_CODE:
             raise ValueError('Cannot set access code to special value zero.')
+        if new_code is not None and self._has_update_access_code_bug:
+            raise ValueError(
+                'This YubiKey firmware does not support updating the access '
+                'code after programming the slot. Please set the access '
+                'code when initially programming the slot instead.')
 
         cmd = slot_to_cmd(slot, update)
         cfg = self._create_cfg(cmd)
         try:
-            if new_code is None:
-                new_code = b'\0' * 6
-            check(ykpers.ykp_set_access_code(cfg, new_code, len(new_code)))
+            check(ykpers.ykp_set_access_code(
+                cfg, new_code or _RESET_ACCESS_CODE, _ACCESS_CODE_LENGTH))
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, cmd,
                                           self.access_code))
+
+            self.access_code = new_code
+
         finally:
             ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
-        return self.set_access_code(slot, RESET_ACCESS_CODE, allow_zero=True)
+        if self._has_update_access_code_bug:
+            raise ValueError(
+                'This YubiKey firmware does not support deleting the access '
+                'code after programming the slot. Please delete and re-program '
+                'the slot instead.')
+
+        self.set_access_code(slot, None)
 
     def update_settings(self, slot, enter=True, pacing=None):
         cmd = slot_to_cmd(slot, update=True)
