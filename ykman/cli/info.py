@@ -92,7 +92,7 @@ def info(ctx):
         status_keys = list(fips_status.keys())
         status_keys.sort()
         for status_key in status_keys:
-            click.echo('  - {}: {}'.format(
+            click.echo('  {}: {}'.format(
                 status_key, 'Yes' if fips_status[status_key] else 'No'))
 
         click.echo()

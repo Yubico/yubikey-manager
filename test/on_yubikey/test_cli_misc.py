@@ -25,6 +25,6 @@ class TestYkmanInfo(DestructiveYubikeyTestCase):
     def test_ykman_info_reports_fips_status(self):
         info = ykman_cli('info')
         self.assertIn('FIPS mode active:', info)
-        self.assertIn('  - FIDO U2F:', info)
-        self.assertIn('  - OATH:', info)
-        self.assertIn('  - OTP:', info)
+        self.assertIn('  FIDO U2F:', info)
+        self.assertIn('  OATH:', info)
+        self.assertIn('  OTP:', info)
