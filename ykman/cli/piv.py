@@ -809,7 +809,9 @@ def _check_key_size(ctx, private_key):
 
 def _check_pin_policy(ctx, controller, pin_policy):
     if pin_policy is not None and not controller.supports_pin_policies:
-        ctx.fail('Pin policy is not supported by this YubiKey.')
+        ctx.fail('PIN policy is not supported by this YubiKey.')
+    if ctx.obj['dev'].is_fips and pin_policy == PIN_POLICY.NEVER:
+        ctx.fail('PIN policy NEVER is not supported by this YubiKey.')
 
 
 def _check_touch_policy(ctx, controller, touch_policy):
