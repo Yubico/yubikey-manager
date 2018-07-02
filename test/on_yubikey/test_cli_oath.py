@@ -1,6 +1,7 @@
 import unittest
 from ykman.util import TRANSPORT
-from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli, is_fips)
+from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli,
+                   get_version, is_fips)
 
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \
@@ -102,6 +103,14 @@ class TestOATH(DestructiveYubikeyTestCase):
         ykman_cli('oath', 'delete', 'delete-me', '-f')
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
+    def test_oath_sha512(self):
+        if get_version() < (4, 3, 1):
+            self.skipTest('Not applicable to YubiKey versions before 4.3.1')
+
+        ykman_cli('oath', 'add', 'abba', 'abba', '--algorithm', 'SHA512')
+        ykman_cli('oath', 'delete', 'abba', '-f')
+
 
 @unittest.skipIf(not is_fips(), 'Only applicable to YubiKey FIPS.')
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
@@ -122,3 +131,7 @@ class TestOathFips(DestructiveYubikeyTestCase):
         ykman_cli('oath', 'set-password', '-n', PASSWORD)
         output = ykman_cli('oath', 'info')
         self.assertIn('FIPS Approved Mode: Yes', output)
+
+    def test_sha512_not_supported(self):
+        with self.assertRaises(SystemExit):
+            ykman_cli('oath', 'add', 'abba', 'abba', '--algorithm', 'SHA512')
