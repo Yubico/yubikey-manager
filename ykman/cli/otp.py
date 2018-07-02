@@ -152,7 +152,7 @@ def info(ctx):
     slot1, slot2 = controller.slot_status
 
     if dev.is_fips:
-        click.echo('FIPS mode active: {}'.format(
+        click.echo('FIPS Approved Mode: {}'.format(
             _explain_fips_status(controller.is_in_fips_mode, slot1, slot2)))
 
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))

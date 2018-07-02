@@ -50,7 +50,7 @@ class TestSlotStatus(DestructiveYubikeyTestCase):
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_ykman_otp_info_does_not_indicate_fips_mode_for_non_fips_key(self):
         info = ykman_cli('otp', 'info')
-        self.assertNotIn('FIPS mode active:', info)
+        self.assertNotIn('FIPS Approved Mode:', info)
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
@@ -436,7 +436,7 @@ class TestFipsMode(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'delete', '2', '-f')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: No', info)
+        self.assertIn('FIPS Approved Mode: No', info)
         self.assertIn('No slot programmed', info)
 
     def test_not_fips_mode_if_slot_1_not_programmed(self):
@@ -444,7 +444,7 @@ class TestFipsMode(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: No', info)
+        self.assertIn('FIPS Approved Mode: No', info)
         self.assertIn('Slot 1 not programmed', info)
 
     def test_not_fips_mode_if_slot_2_not_programmed(self):
@@ -452,7 +452,7 @@ class TestFipsMode(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'delete', '2', '-f')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: No', info)
+        self.assertIn('FIPS Approved Mode: No', info)
         self.assertIn('Slot 2 not programmed', info)
 
     def test_not_fips_mode_if_no_slot_has_access_code(self):
@@ -460,7 +460,7 @@ class TestFipsMode(DestructiveYubikeyTestCase):
         ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: No', info)
+        self.assertIn('FIPS Approved Mode: No', info)
         self.assertIn('Access code needs to be set', info)
 
     def test_not_fips_mode_if_only_slot_1_has_access_code(self):
@@ -471,7 +471,7 @@ class TestFipsMode(DestructiveYubikeyTestCase):
                   '-f')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: No', info)
+        self.assertIn('FIPS Approved Mode: No', info)
         self.assertIn('Access code needs to be set', info)
 
     def test_not_fips_mode_if_only_slot_2_has_access_code(self):
@@ -482,7 +482,7 @@ class TestFipsMode(DestructiveYubikeyTestCase):
                   '-f')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: No', info)
+        self.assertIn('FIPS Approved Mode: No', info)
         self.assertIn('Access code needs to be set', info)
 
     def test_fips_mode_if_both_slots_have_access_code(self):
@@ -495,4 +495,4 @@ class TestFipsMode(DestructiveYubikeyTestCase):
                   '-f')
 
         info = ykman_cli('otp', 'info')
-        self.assertIn('FIPS mode active: Yes', info)
+        self.assertIn('FIPS Approved Mode: Yes', info)

@@ -82,11 +82,11 @@ def info(ctx):
     click.echo()
 
     if dev.is_fips:
-        click.echo('This YubiKey is capable of FIPS mode.')
+        click.echo('This YubiKey is capable of FIPS Approved Mode.')
 
         fips_status = get_overall_fips_status(dev.serial)
 
-        click.echo('FIPS mode active: {}'.format(
+        click.echo('FIPS Approved Mode: {}'.format(
             'Yes' if all(fips_status.values()) else 'No'))
 
         status_keys = list(fips_status.keys())

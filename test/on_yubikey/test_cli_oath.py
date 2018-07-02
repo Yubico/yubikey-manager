@@ -116,9 +116,9 @@ class TestOathFips(DestructiveYubikeyTestCase):
 
     def test_no_fips_mode_without_password(self):
         output = ykman_cli('oath', 'info')
-        self.assertIn('FIPS mode active: No', output)
+        self.assertIn('FIPS Approved Mode: No', output)
 
     def test_fips_mode_with_password(self):
         ykman_cli('oath', 'set-password', '-n', PASSWORD)
         output = ykman_cli('oath', 'info')
-        self.assertIn('FIPS mode active: Yes', output)
+        self.assertIn('FIPS Approved Mode: Yes', output)

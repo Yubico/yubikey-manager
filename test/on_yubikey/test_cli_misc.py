@@ -14,7 +14,7 @@ class TestYkmanInfo(DestructiveYubikeyTestCase):
     @unittest.skipIf(not is_fips(), 'YubiKey FIPS required.')
     def test_ykman_info_reports_fips_device(self):
         info = ykman_cli('info')
-        self.assertIn('This YubiKey is capable of FIPS mode.', info)
+        self.assertIn('This YubiKey is capable of FIPS Approved Mode.', info)
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_ykman_info_does_not_report_fips_for_non_fips_device(self):
@@ -24,7 +24,7 @@ class TestYkmanInfo(DestructiveYubikeyTestCase):
     @unittest.skipIf(not is_fips(), 'YubiKey FIPS required.')
     def test_ykman_info_reports_fips_status(self):
         info = ykman_cli('info')
-        self.assertIn('FIPS mode active:', info)
+        self.assertIn('FIPS Approved Mode:', info)
         self.assertIn('  FIDO U2F:', info)
         self.assertIn('  OATH:', info)
         self.assertIn('  OTP:', info)

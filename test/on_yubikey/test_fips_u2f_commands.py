@@ -99,6 +99,6 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
               FIPS_U2F_CMD.VERIFY_FIPS_MODE, P1, P2
             ))
 
-        # 0x6a81: Function not supported (PIN not set - not FIPS mode)
-        # 0x9000: Success (PIN set - FIPS mode)
+        # 0x6a81: Function not supported (PIN not set - not FIPS Approved Mode)
+        # 0x9000: Success (PIN set - FIPS Approved Mode)
         self.assertIn(res, [b'\x6a\x81', b'\x90\x00'])

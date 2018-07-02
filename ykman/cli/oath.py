@@ -113,7 +113,7 @@ def info(ctx):
                ('enabled' if controller.locked else 'disabled'))
 
     if ctx.obj['dev'].is_fips:
-        click.echo('FIPS mode active: ' +
+        click.echo('FIPS Approved Mode: ' +
                    ('Yes' if controller.is_in_fips_mode
                     else 'No - Password not set.'))
 

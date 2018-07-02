@@ -74,12 +74,12 @@ def info(ctx):
 
     if controller.is_fips:
         if controller.is_in_fips_mode:
-            click.echo('FIPS mode active: Yes')
+            click.echo('FIPS Approved Mode: Yes')
         else:
-            click.echo('FIPS mode active: No')
+            click.echo('FIPS Approved Mode: No')
             click.echo('This could mean that a PIN is not set, or that the '
                        'FIDO U2F module has been reset and is no longer '
-                       'capable of FIPS mode.')
+                       'capable of FIPS Approved Mode.')
     else:
         if controller.has_pin:
             try:
