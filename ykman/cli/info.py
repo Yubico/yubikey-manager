@@ -27,11 +27,7 @@
 
 from __future__ import absolute_import
 
-from ..descriptor import open_device
-from ..fido import FipsU2fController
-from ..oath import OathController
-from ..otp import OtpController
-from ..util import APPLICATION, TRANSPORT
+from ..util import APPLICATION
 import click
 
 
