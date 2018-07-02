@@ -35,21 +35,6 @@ from ..util import APPLICATION, TRANSPORT
 import click
 
 
-def get_overall_fips_status(serial):
-    statuses = {}
-
-    with open_device(transports=TRANSPORT.OTP, serial=serial) as dev:
-        statuses['OTP'] = OtpController(dev._driver).is_in_fips_mode
-
-    with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
-        statuses['OATH'] = OathController(dev._driver).is_in_fips_mode
-
-    with open_device(transports=TRANSPORT.FIDO, serial=serial) as dev:
-        statuses['FIDO U2F'] = FipsU2fController(dev._driver).is_in_fips_mode
-
-    return statuses
-
-
 @click.command()
 @click.pass_context
 def info(ctx):
@@ -79,23 +64,9 @@ def info(ctx):
         click.echo('NFC interface is {}.'.format(f_nfc))
     if config.configuration_locked:
         click.echo('Configured applications are protected by a lock code.')
-    click.echo()
-
     if dev.is_fips:
         click.echo('This YubiKey is capable of FIPS Approved Mode.')
-
-        fips_status = get_overall_fips_status(dev.serial)
-
-        click.echo('FIPS Approved Mode: {}'.format(
-            'Yes' if all(fips_status.values()) else 'No'))
-
-        status_keys = list(fips_status.keys())
-        status_keys.sort()
-        for status_key in status_keys:
-            click.echo('  {}: {}'.format(
-                status_key, 'Yes' if fips_status[status_key] else 'No'))
-
-        click.echo()
+    click.echo()
 
     rows = []
     for app in APPLICATION:
