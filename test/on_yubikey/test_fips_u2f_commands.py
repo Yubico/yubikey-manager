@@ -43,6 +43,9 @@ class TestFipsU2fCommands(DestructiveYubikeyTestCase):
         if verify_res1 == b'\x63\xc0':
             self.skipTest('PIN set to something other than 012345')
 
+        if verify_res1 == b'\x69\x83':
+            self.skipTest('PIN blocked')
+
         if verify_res1 == b'\x90\x00':
             res = dev.driver._dev.call(
                 CTAPHID.MSG,
