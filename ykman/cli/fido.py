@@ -34,7 +34,7 @@ from time import sleep
 from .util import click_skip_on_help, prompt_for_touch, click_force_option
 from ..driver_ccid import (
     SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
-    SW_AUTH_METHOD_BLOCKED, SW_DATA_INVALID)
+    SW_AUTH_METHOD_BLOCKED, SW_WRONG_LENGTH)
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..descriptor import get_descriptors
@@ -118,8 +118,10 @@ def set_pin(ctx, pin, new_pin, u2f):
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
     def fail_if_not_valid(ctx, pin=None):
-        if not pin or len(pin) < 4 or len(pin.encode('utf-8')) > 128:
-            ctx.fail('PIN must be over 4 characters long and under 128 bytes.')
+        min_length = 6 if controller.is_fips else 4
+        if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
+            ctx.fail('PIN must be over {} characters long and under 128 bytes.'
+                     .format(min_length))
 
     def prompt_new_pin():
         return click.prompt(
@@ -131,12 +133,25 @@ def set_pin(ctx, pin, new_pin, u2f):
                     'Enter your current PIN', default='', hide_input=True,
                     show_default=False)
 
-    def change_pin(pin, new_pin, accept_empty_current_pin=False):
-        if not (accept_empty_current_pin and pin == ''):
+    def change_pin(pin, new_pin):
+        if pin is not None:
             fail_if_not_valid(ctx, pin)
         fail_if_not_valid(ctx, new_pin)
         try:
-            controller.change_pin(old_pin=pin, new_pin=new_pin)
+            if controller.is_fips:
+                try:
+                    # Failing this with empty current PIN does not cost a retry
+                    controller.change_pin(old_pin=pin or '', new_pin=new_pin)
+                except ApduError as e:
+                    if e.code == SW_WRONG_LENGTH:
+                        pin = prompt_current_pin()
+                        fail_if_not_valid(ctx, pin)
+                        controller.change_pin(old_pin=pin, new_pin=new_pin)
+                    else:
+                        raise
+
+            else:
+                controller.change_pin(old_pin=pin, new_pin=new_pin)
 
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_INVALID:
@@ -151,9 +166,6 @@ def set_pin(ctx, pin, new_pin, u2f):
             ctx.fail('Failed to change PIN.')
 
         except ApduError as e:
-            if e.code == SW_DATA_INVALID:
-                ctx.fail('No PIN is set.')
-
             if e.code == SW_VERIFY_FAIL_NO_RETRY:
                 ctx.fail('Wrong PIN.')
 
@@ -171,14 +183,14 @@ def set_pin(ctx, pin, new_pin, u2f):
     if pin and not controller.has_pin:
         ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
 
-    if controller.has_pin and pin is None:
+    if controller.has_pin and pin is None and not controller.is_fips:
         pin = prompt_current_pin()
 
     if not new_pin:
         new_pin = prompt_new_pin()
 
     if controller.has_pin:
-        change_pin(pin, new_pin, accept_empty_current_pin=controller.is_fips)
+        change_pin(pin, new_pin)
     else:
         set_pin(new_pin)
 
