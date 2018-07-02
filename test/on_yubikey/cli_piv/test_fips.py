@@ -4,7 +4,7 @@ from ..util import ykman_cli, is_fips
 from .util import PivTestCase
 
 
-@unittest.skipIf(not is_fips(), 'FIPS YubiKey required.')
+@unittest.skipIf(not is_fips(), 'YubiKey FIPS required.')
 class TestFIPS(PivTestCase):
 
     def test_rsa1024_generate_blocked(self):

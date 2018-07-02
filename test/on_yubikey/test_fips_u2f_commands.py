@@ -12,7 +12,7 @@ P1 = 0
 P2 = 0
 
 
-@unittest.skipIf(not is_fips(), 'FIPS YubiKey required.')
+@unittest.skipIf(not is_fips(), 'YubiKey FIPS required.')
 class TestFipsU2fCommands(DestructiveYubikeyTestCase):
 
     def test_echo_command(self):

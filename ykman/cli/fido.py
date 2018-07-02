@@ -110,11 +110,11 @@ def set_pin(ctx, pin, new_pin, u2f):
     controller = ctx.obj['controller']
 
     if controller.is_fips and not u2f:
-        ctx.fail('This is a FIPS YubiKey. To set the U2F PIN, pass the --u2f '
+        ctx.fail('This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f '
                  'option.')
 
     if u2f and not controller.is_fips:
-        ctx.fail('This is not a FIPS YubiKey, and therefore does not support a '
+        ctx.fail('This is not a YubiKey FIPS, and therefore does not support a '
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
     def fail_if_not_valid(ctx, pin=None):

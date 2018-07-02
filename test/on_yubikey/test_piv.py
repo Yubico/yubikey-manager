@@ -320,7 +320,7 @@ class Operations(PivTestCase):
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
         self.assertIsNotNone(sig)
 
-    @unittest.skipIf(not is_fips(), 'FIPS YubiKey required.')
+    @unittest.skipIf(not is_fips(), 'YubiKey FIPS required.')
     def test_pin_policy_never_blocked_on_fips(self):
         with self.assertRaises(APDUError):
             self.generate_key(pin_policy=PIN_POLICY.NEVER)
