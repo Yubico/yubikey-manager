@@ -118,8 +118,10 @@ def set_pin(ctx, pin, new_pin, u2f):
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
     def fail_if_not_valid(ctx, pin=None):
-        if not pin or len(pin) < 4 or len(pin.encode('utf-8')) > 128:
-            ctx.fail('PIN must be over 4 characters long and under 128 bytes.')
+        min_length = 6 if controller.is_fips else 4
+        if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
+            ctx.fail('PIN must be over {} characters long and under 128 bytes.'
+                     .format(min_length))
 
     def prompt_new_pin():
         return click.prompt(
