@@ -112,14 +112,13 @@ def info(ctx):
     click.echo('Password protection ' +
                ('enabled' if controller.locked else 'disabled'))
 
-    if ctx.obj['dev'].is_fips:
-        click.echo('FIPS Approved Mode: ' +
-                   ('Yes' if controller.is_in_fips_mode
-                    else 'No - Password not set.'))
-
     keys = ctx.obj['settings'].get('keys', {})
     if controller.locked and controller.id in keys:
         click.echo('The password for this YubiKey is remembered by ykman.')
+
+    if ctx.obj['dev'].is_fips:
+        click.echo('FIPS Approved Mode: {}'.format(
+            'Yes' if controller.is_in_fips_mode else 'No'))
 
 
 @oath.command()
