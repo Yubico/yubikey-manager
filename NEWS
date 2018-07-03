@@ -1,3 +1,8 @@
+* Version 0.7.1 (unreleased)
+ ** Support for YubiKey FIPS.
+ ** OTP: Allow setting and removing access codes on the slots.
+ ** Bugfix: Don't fail to open the YubiKey when the serial is not visible.
+
 * Version 0.7.0 (released 2018-05-07)
  ** Support for YubiKey Preview.
  ** Add command to configure enabled applications over USB and NFC. See ykman config -h.
