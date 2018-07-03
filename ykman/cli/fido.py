@@ -43,6 +43,10 @@ from ..descriptor import get_descriptors
 logger = logging.getLogger(__name__)
 
 
+FIPS_PIN_MIN_LENGTH = 6
+PIN_MIN_LENGTH = 4
+
+
 @click.group()
 @click.pass_context
 @click_skip_on_help
@@ -113,7 +117,8 @@ def set_pin(ctx, pin, new_pin, u2f):
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
     def fail_if_not_valid(ctx, pin=None):
-        min_length = 6 if controller.is_fips else 4
+        min_length = FIPS_PIN_MIN_LENGTH \
+            if controller.is_fips else PIN_MIN_LENGTH
         if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
             ctx.fail('PIN must be over {} characters long and under 128 bytes.'
                      .format(min_length))
