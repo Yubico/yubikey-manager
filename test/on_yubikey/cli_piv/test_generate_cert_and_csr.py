@@ -1,9 +1,10 @@
+import unittest
 from binascii import b2a_hex
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
-from ..util import ykman_cli
+from ..util import ykman_cli, is_fips
 from .util import (
     PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY,
     NON_DEFAULT_MANAGEMENT_KEY)
@@ -52,15 +53,19 @@ class NonDefaultMgmKey(PivTestCase):
             output = ykman_cli('piv', 'info')
             self.assertIn('Fingerprint:\t' + fingerprint, output)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9a(self):
         self._test_generate_self_signed('9a')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9c(self):
         self._test_generate_self_signed('9c')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9d(self):
         self._test_generate_self_signed('9d')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9e(self):
         self._test_generate_self_signed('9e')
 
@@ -80,15 +85,19 @@ class NonDefaultMgmKey(PivTestCase):
 
             self.assertEqual(subject_input, subject_output)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9a(self):
         self._test_generate_csr('9a')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9c(self):
         self._test_generate_csr('9c')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9d(self):
         self._test_generate_csr('9d')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9e(self):
         self._test_generate_csr('9e')
 
@@ -120,18 +129,23 @@ class ProtectedMgmKey(PivTestCase):
             output = ykman_cli('piv', 'info')
             self.assertIn('Fingerprint:\t' + fingerprint, output)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9a(self):
         self._test_generate_self_signed('9a')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9c(self):
         self._test_generate_self_signed('9c')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9d(self):
         self._test_generate_self_signed('9d')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_self_signed_slot_9e(self):
         self._test_generate_self_signed('9e')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def _test_generate_csr(self, slot):
         for algo in ('ECCP256', 'RSA1024'):
             subject_input = 'subject-' + algo
@@ -148,14 +162,18 @@ class ProtectedMgmKey(PivTestCase):
 
             self.assertEqual(subject_input, subject_output)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9a(self):
         self._test_generate_csr('9a')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9c(self):
         self._test_generate_csr('9c')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9d(self):
         self._test_generate_csr('9d')
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr_slot_9e(self):
         self._test_generate_csr('9e')
