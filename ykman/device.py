@@ -312,7 +312,7 @@ class YubiKey(object):
 
     @property
     def is_fips(self):
-        return self.version >= (4, 4, 0) and self.version < (4, 5, 0)
+        return (4, 4, 0) <= self.version < (4, 5, 0)
 
     @mode.setter
     def mode(self, mode):
