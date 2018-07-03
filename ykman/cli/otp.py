@@ -129,7 +129,6 @@ def info(ctx):
     """
     dev = ctx.obj['dev']
     controller = ctx.obj['controller']
-    click.echo(dev.device_name)
     slot1, slot2 = controller.slot_status
 
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
