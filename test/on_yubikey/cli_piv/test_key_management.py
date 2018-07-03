@@ -13,6 +13,10 @@ class KeyManagement(PivTestCase):
     def setUpClass(cls):
         ykman_cli('piv', 'reset', '-f')
 
+    @classmethod
+    def tearDownClass(cls):
+        ykman_cli('piv', 'reset', '-f')
+
     @unittest.skipIf(*skip_roca)
     def test_generate_key_default(self):
         output = ykman_cli(
