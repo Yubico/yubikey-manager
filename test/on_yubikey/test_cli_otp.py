@@ -437,7 +437,6 @@ class TestFipsMode(DestructiveYubikeyTestCase):
 
         info = ykman_cli('otp', 'info')
         self.assertIn('FIPS Approved Mode: No', info)
-        self.assertIn('No slot programmed', info)
 
     def test_not_fips_mode_if_slot_1_not_programmed(self):
         ykman_cli('otp', 'delete', '1', '-f')
@@ -445,7 +444,6 @@ class TestFipsMode(DestructiveYubikeyTestCase):
 
         info = ykman_cli('otp', 'info')
         self.assertIn('FIPS Approved Mode: No', info)
-        self.assertIn('Slot 1 not programmed', info)
 
     def test_not_fips_mode_if_slot_2_not_programmed(self):
         ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
@@ -453,7 +451,6 @@ class TestFipsMode(DestructiveYubikeyTestCase):
 
         info = ykman_cli('otp', 'info')
         self.assertIn('FIPS Approved Mode: No', info)
-        self.assertIn('Slot 2 not programmed', info)
 
     def test_not_fips_mode_if_no_slot_has_access_code(self):
         ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
@@ -461,7 +458,6 @@ class TestFipsMode(DestructiveYubikeyTestCase):
 
         info = ykman_cli('otp', 'info')
         self.assertIn('FIPS Approved Mode: No', info)
-        self.assertIn('Access code needs to be set', info)
 
     def test_not_fips_mode_if_only_slot_1_has_access_code(self):
         ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
@@ -472,7 +468,6 @@ class TestFipsMode(DestructiveYubikeyTestCase):
 
         info = ykman_cli('otp', 'info')
         self.assertIn('FIPS Approved Mode: No', info)
-        self.assertIn('Access code needs to be set', info)
 
     def test_not_fips_mode_if_only_slot_2_has_access_code(self):
         ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
@@ -483,7 +478,6 @@ class TestFipsMode(DestructiveYubikeyTestCase):
 
         info = ykman_cli('otp', 'info')
         self.assertIn('FIPS Approved Mode: No', info)
-        self.assertIn('Access code needs to be set', info)
 
     def test_fips_mode_if_both_slots_have_access_code(self):
         ykman_cli('otp', 'static', '1', '--generate', '--length', '10', '-f')
