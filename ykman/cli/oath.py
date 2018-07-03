@@ -116,6 +116,10 @@ def info(ctx):
     if controller.locked and controller.id in keys:
         click.echo('The password for this YubiKey is remembered by ykman.')
 
+    if ctx.obj['dev'].is_fips:
+        click.echo('FIPS Approved Mode: {}'.format(
+            'Yes' if controller.is_in_fips_mode else 'No'))
+
 
 @oath.command()
 @click.pass_context
@@ -245,6 +249,10 @@ def _add_cred(ctx, data, force):
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
         ctx.fail('Counter only supported for HOTP credentials.')
+
+    if data.algorithm == ALGO.SHA512 and (
+            controller.version < (4, 3, 1) or ctx.obj['dev'].is_fips):
+                ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
 
     key = data.make_key()
     if not force and any(cred.key == key for cred in controller.list()):

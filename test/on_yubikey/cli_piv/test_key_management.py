@@ -3,7 +3,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from ykman.util import (Cve201715361VulnerableError)
 from ..util import (
-    is_NEO, no_attestation, skip_not_roca, skip_roca, ykman_cli)
+    is_NEO, no_attestation, skip_not_roca, skip_roca, ykman_cli, is_fips)
 from .util import (PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
@@ -11,6 +11,10 @@ class KeyManagement(PivTestCase):
 
     @classmethod
     def setUpClass(cls):
+        ykman_cli('piv', 'reset', '-f')
+
+    @classmethod
+    def tearDownClass(cls):
         ykman_cli('piv', 'reset', '-f')
 
     @unittest.skipIf(*skip_roca)
@@ -27,6 +31,7 @@ class KeyManagement(PivTestCase):
                 '-m', DEFAULT_MANAGEMENT_KEY, '-')
 
     @unittest.skipIf(*skip_roca)
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_key_rsa1024(self):
         output = ykman_cli(
             'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
@@ -40,6 +45,7 @@ class KeyManagement(PivTestCase):
             '-m', DEFAULT_MANAGEMENT_KEY, '-')
         self.assertIn('BEGIN PUBLIC KEY', output)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     @unittest.skipIf(*skip_not_roca)
     def test_generate_key_rsa1024_cve201715361(self):
         with self.assertRaises(Cve201715361VulnerableError):
@@ -89,6 +95,7 @@ class KeyManagement(PivTestCase):
         output = ykman_cli('piv', 'attest', '9a', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_generate_csr(self):
         for algo in ('ECCP256', 'RSA1024'):
             ykman_cli(

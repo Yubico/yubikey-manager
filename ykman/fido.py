@@ -27,8 +27,13 @@
 
 from __future__ import absolute_import
 
+import six
+import time
+from fido2.ctap1 import CTAP1, ApduError
 from fido2.ctap2 import CTAP2, PinProtocolV1
 from threading import Timer
+from .driver_ccid import SW_CONDITIONS_NOT_SATISFIED
+from .driver_fido import FIPS_U2F_CMD
 
 
 class Fido2Controller(object):
@@ -63,3 +68,66 @@ class Fido2Controller(object):
         finally:
             if (touch_callback):
                 touch_timer.cancel()
+
+    @property
+    def is_fips(self):
+        return False
+
+
+class FipsU2fController(object):
+
+    def __init__(self, driver):
+        self.driver = driver
+        self.ctap = CTAP1(driver._dev)
+
+    @property
+    def has_pin(self):
+        # We don't know, but the change and set commands are the same here.
+        return True
+
+    def set_pin(self, pin):
+        raise NotImplementedError('Use the change_pin method instead.')
+
+    def change_pin(self, old_pin, new_pin):
+        new_length = len(new_pin)
+
+        old_pin = old_pin.encode('utf-8')
+        new_pin = new_pin.encode('utf-8')
+
+        data = six.int2byte(new_length) + old_pin + new_pin
+
+        self.ctap.send_apdu(ins=FIPS_U2F_CMD.SET_PIN, data=data)
+        return True
+
+    def reset(self, touch_callback=None):
+        if (touch_callback):
+            touch_timer = Timer(0.500, touch_callback)
+            touch_timer.start()
+
+        try:
+            while True:
+                try:
+                    self.ctap.send_apdu(ins=FIPS_U2F_CMD.RESET)
+                    self._pin = False
+                    return True
+                except ApduError as e:
+                    if e.code == SW_CONDITIONS_NOT_SATISFIED:
+                        time.sleep(0.5)
+                    else:
+                        raise e
+
+        finally:
+            if (touch_callback):
+                touch_timer.cancel()
+
+    @property
+    def is_fips(self):
+        return True
+
+    @property
+    def is_in_fips_mode(self):
+        try:
+            self.ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
+            return True
+        except ApduError:
+            return False

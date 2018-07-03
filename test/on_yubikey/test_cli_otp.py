@@ -29,8 +29,8 @@
 
 import unittest
 from ykman.util import TRANSPORT
-from .util import (DestructiveYubikeyTestCase, get_version, missing_mode,
-                   ykman_cli)
+from .util import (DestructiveYubikeyTestCase, get_version, is_fips,
+                   missing_mode, ykman_cli)
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
@@ -46,6 +46,11 @@ class TestSlotStatus(DestructiveYubikeyTestCase):
         self.assertIn('Swapping slots...', output)
         output = ykman_cli('otp', 'swap', '-f')
         self.assertIn('Swapping slots...', output)
+
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
+    def test_ykman_otp_info_does_not_indicate_fips_mode_for_non_fips_key(self):
+        info = ykman_cli('otp', 'info')
+        self.assertNotIn('FIPS Approved Mode:', info)
 
 
 @unittest.skipIf(*missing_mode(TRANSPORT.OTP))
@@ -417,3 +422,71 @@ class TestSlotCalculate(DestructiveYubikeyTestCase):
         self.assertEqual(6, len(output.strip()))
         output = ykman_cli('otp', 'calculate', '2', '-T', '-d', '8')
         self.assertEqual(8, len(output.strip()))
+
+
+@unittest.skipIf(not is_fips(), 'Only applicable to YubiKey FIPS.')
+class TestFipsMode(DestructiveYubikeyTestCase):
+
+    def tearDown(self):
+        ykman_cli('otp', '--access-code', '111111111111', 'delete', '1', '-f')
+        ykman_cli('otp', '--access-code', '111111111111', 'delete', '2', '-f')
+
+    def test_not_fips_mode_if_no_slot_programmed(self):
+        ykman_cli('otp', 'delete', '1', '-f')
+        ykman_cli('otp', 'delete', '2', '-f')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: No', info)
+
+    def test_not_fips_mode_if_slot_1_not_programmed(self):
+        ykman_cli('otp', 'delete', '1', '-f')
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: No', info)
+
+    def test_not_fips_mode_if_slot_2_not_programmed(self):
+        ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
+        ykman_cli('otp', 'delete', '2', '-f')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: No', info)
+
+    def test_not_fips_mode_if_no_slot_has_access_code(self):
+        ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: No', info)
+
+    def test_not_fips_mode_if_only_slot_1_has_access_code(self):
+        ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '1',
+                  '-f')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: No', info)
+
+    def test_not_fips_mode_if_only_slot_2_has_access_code(self):
+        ykman_cli('otp', 'static', '1', '--generate', '--length', '10')
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10')
+
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
+                  '-f')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: No', info)
+
+    def test_fips_mode_if_both_slots_have_access_code(self):
+        ykman_cli('otp', 'static', '1', '--generate', '--length', '10', '-f')
+        ykman_cli('otp', 'static', '2', '--generate', '--length', '10', '-f')
+
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '1',
+                  '-f')
+        ykman_cli('otp', 'settings', '--new-access-code', '111111111111', '2',
+                  '-f')
+
+        info = ykman_cli('otp', 'info')
+        self.assertIn('FIPS Approved Mode: Yes', info)

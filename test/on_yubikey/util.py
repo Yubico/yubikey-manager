@@ -66,6 +66,13 @@ def is_NEO():
         return False
 
 
+def is_fips():
+    if _one_yubikey:
+        return _the_yubikey.is_fips
+    else:
+        return False
+
+
 def _no_attestation():
     if _one_yubikey:
         return get_version() < (4, 3, 0)

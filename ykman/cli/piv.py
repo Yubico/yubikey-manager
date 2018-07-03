@@ -216,6 +216,7 @@ def generate_key(
     SLOT        PIV slot where private key should be stored.
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
+
     controller = ctx.obj['controller']
 
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -227,7 +228,7 @@ def generate_key(
     if touch_policy:
         touch_policy = TOUCH_POLICY.from_string(touch_policy)
 
-    _check_eccp384(ctx, controller, algorithm)
+    _check_algorithm(ctx, controller, algorithm)
     _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
 
@@ -340,6 +341,7 @@ def import_key(
 
     _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
+    _check_key_size(ctx, private_key)
 
     controller.import_key(
             slot,
@@ -792,15 +794,24 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
         ctx.fail('Authentication with management key failed.')
 
 
-def _check_eccp384(ctx, controller, algorithm):
+def _check_algorithm(ctx, controller, algorithm):
     #  ECCP384 not supported on NEO.
     if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
         ctx.fail('ECCP384 is not supported by this YubiKey.')
+    if algorithm == ALGO.RSA1024 and ctx.obj['dev'].is_fips:
+        ctx.fail('RSA1024 is not supported by this YubiKey.')
+
+
+def _check_key_size(ctx, private_key):
+    if ctx.obj['dev'].is_fips and private_key.key_size == 1024:
+        ctx.fail('1024 is not a supported key size on this YubiKey.')
 
 
 def _check_pin_policy(ctx, controller, pin_policy):
     if pin_policy is not None and not controller.supports_pin_policies:
-        ctx.fail('Pin policy is not supported by this YubiKey.')
+        ctx.fail('PIN policy is not supported by this YubiKey.')
+    if ctx.obj['dev'].is_fips and pin_policy == PIN_POLICY.NEVER:
+        ctx.fail('PIN policy NEVER is not supported by this YubiKey.')
 
 
 def _check_touch_policy(ctx, controller, touch_policy):

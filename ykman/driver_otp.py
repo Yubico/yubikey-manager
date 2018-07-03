@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 CONFIG1_VALID = 0x01
 CONFIG2_VALID = 0x02
 
+CMD_VERIFY_FIPS_MODE = 0x14
+
+
 try:
     ykpers = Ykpers('ykpers-1', '1')
     if not ykpers.yk_init():
@@ -167,6 +170,33 @@ class OTPDriver(AbstractDriver):
             raise ModeSwitchError()
         finally:
             ykpers.ykp_free_device_config(config)
+
+    def write_to_and_read_from_key(self, cmd, expected_output_length,
+                                   input_bytes=None, read_flags=0,
+                                   result_bufsize=16):
+
+        input_bufcount = 0 if input_bytes is None else len(input_bytes)
+
+        result_buf = create_string_buffer(result_bufsize)
+        bytes_read = c_uint()
+
+        check(ykpers.yk_write_to_key(self._dev, cmd, input_bytes,
+                                     input_bufcount))
+        check(ykpers.yk_read_response_from_key(
+          self._dev, cmd, read_flags, result_buf, result_bufsize,
+          expected_output_length, byref(bytes_read)))
+
+        result = bytearray(result_buf)
+
+        return (result[0:expected_output_length],
+                result[0:bytes_read.value],
+                result)
+
+    @property
+    def is_in_fips_mode(self):
+        (result, _, _) = self.write_to_and_read_from_key(
+            CMD_VERIFY_FIPS_MODE, expected_output_length=1)
+        return result == b'\x01'
 
     def close(self):
         if self._dev is not None:

@@ -267,6 +267,8 @@ class YubiKey(object):
         elif self._key_type == YUBIKEY.YK4:
             if self.version >= (5, 0, 0):
                 self.device_name = 'YubiKey Preview'
+            elif self.is_fips:
+                self.device_name = 'YubiKey FIPS'
 
     @property
     def driver(self):
@@ -307,6 +309,10 @@ class YubiKey(object):
     @property
     def mode(self):
         return self._driver.mode
+
+    @property
+    def is_fips(self):
+        return (4, 4, 0) <= self.version < (4, 5, 0)
 
     @mode.setter
     def mode(self, mode):
