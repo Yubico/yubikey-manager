@@ -2,6 +2,9 @@ import unittest
 from .util import (DestructiveYubikeyTestCase, ykman_cli, can_write_config)
 
 
+VALID_LOCK_CODE = 'a' * 32
+INVALID_LOCK_CODE_NON_HEX = 'z' * 32
+
 @unittest.skipIf(not can_write_config(), 'Device can not write config')
 class TestConfigUSB(DestructiveYubikeyTestCase):
 
@@ -144,12 +147,24 @@ class TestConfigLockCode(DestructiveYubikeyTestCase):
 
     def test_set_lock_code(self):
         ykman_cli(
-            'config', 'set-lock-code', '--new-lock-code', '7HRd9YHFjKFQnih1')
+            'config', 'set-lock-code', '--new-lock-code', VALID_LOCK_CODE)
         output = ykman_cli('info')
         self.assertIn(
             'Configured applications are protected by a lock code', output)
         ykman_cli(
-            'config', 'set-lock-code', '-l', '7HRd9YHFjKFQnih1', '--clear')
+            'config', 'set-lock-code', '-l', VALID_LOCK_CODE, '--clear')
         output = ykman_cli('info')
         self.assertNotIn(
             'Configured applications are protected by a lock code', output)
+
+    def test_set_invalid_lock_code(self):
+
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'set-lock-code',
+                '--new-lock-code', 'aaaa')
+
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'config', 'set-lock-code',
+                '--new-lock-code', INVALID_LOCK_CODE_NON_HEX)

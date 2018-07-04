@@ -30,6 +30,7 @@ from __future__ import absolute_import
 from .util import click_skip_on_help, click_force_option, UpperCaseChoice
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
+from binascii import a2b_hex
 import logging
 import click
 
@@ -37,8 +38,7 @@ import click
 logger = logging.getLogger(__name__)
 
 
-CLEAR_LOCK_CODE = (
-    '\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
+CLEAR_LOCK_CODE = '0' * 32
 
 
 @click.group()
@@ -72,9 +72,15 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 
     dev = ctx.obj['dev']
 
-    def fail_if_not_valid(ctx, lock_code):
-        if len(lock_code.encode()) != 16:
-            ctx.fail('The lock code must be 16 bytes.')
+    def parse_lock_code(ctx, lock_code):
+        try:
+            lock_code = a2b_hex(lock_code)
+            if lock_code and len(lock_code) != 16:
+                ctx.fail('Lock code must be exactly 16 bytes '
+                         '(32 hexadecimal digits) long.')
+            return lock_code
+        except Exception:
+            ctx.fail('Lock code have the wrong format.')
 
     def prompt_new_lock_code():
         return click.prompt(
@@ -87,24 +93,24 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
                     show_default=False)
 
     def change_lock_code(lock_code, new_lock_code):
-        fail_if_not_valid(ctx, lock_code)
-        fail_if_not_valid(ctx, new_lock_code)
+        lock_code = parse_lock_code(ctx, lock_code)
+        new_lock_code = parse_lock_code(ctx, new_lock_code)
         try:
             dev.write_config(
                 device_config(
-                    config_lock=new_lock_code.encode()),
+                    config_lock=new_lock_code),
                 reboot=True,
-                lock_key=lock_code.encode())
+                lock_key=lock_code)
         except Exception as e:
             logger.error('Changing the lock code failed', exc_info=e)
             ctx.fail('Failed to change the lock code. Wrong current code?')
 
     def set_lock_code(new_lock_code):
-        fail_if_not_valid(ctx, new_lock_code)
+        new_lock_code = parse_lock_code(ctx, new_lock_code)
         try:
             dev.write_config(
                 device_config(
-                    config_lock=new_lock_code.encode()),
+                    config_lock=new_lock_code),
                 reboot=True)
         except Exception as e:
             logger.error('Setting the lock code failed', exc_info=e)
