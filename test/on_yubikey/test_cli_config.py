@@ -5,6 +5,7 @@ from .util import (DestructiveYubikeyTestCase, ykman_cli, can_write_config)
 VALID_LOCK_CODE = 'a' * 32
 INVALID_LOCK_CODE_NON_HEX = 'z' * 32
 
+
 @unittest.skipIf(not can_write_config(), 'Device can not write config')
 class TestConfigUSB(DestructiveYubikeyTestCase):
 
