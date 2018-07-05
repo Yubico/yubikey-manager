@@ -107,12 +107,13 @@ def set_pin(ctx, pin, new_pin, u2f):
     """
 
     controller = ctx.obj['controller']
+    is_fips = controller.is_fips
 
-    if controller.is_fips and not u2f:
+    if is_fips and not u2f:
         ctx.fail('This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f '
                  'option.')
 
-    if u2f and not controller.is_fips:
+    if u2f and not is_fips:
         ctx.fail('This is not a YubiKey FIPS, and therefore does not support a '
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
@@ -128,17 +129,17 @@ def set_pin(ctx, pin, new_pin, u2f):
 
     def change_pin(pin, new_pin):
         if pin is not None:
-            _fail_if_not_valid_pin(ctx, pin, controller.is_fips)
-        _fail_if_not_valid_pin(ctx, new_pin, controller.is_fips)
+            _fail_if_not_valid_pin(ctx, pin, is_fips)
+        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         try:
-            if controller.is_fips:
+            if is_fips:
                 try:
                     # Failing this with empty current PIN does not cost a retry
                     controller.change_pin(old_pin=pin or '', new_pin=new_pin)
                 except ApduError as e:
                     if e.code == SW_WRONG_LENGTH:
                         pin = prompt_current_pin()
-                        _fail_if_not_valid_pin(ctx, pin, controller.is_fips)
+                        _fail_if_not_valid_pin(ctx, pin, is_fips)
                         controller.change_pin(old_pin=pin, new_pin=new_pin)
                     else:
                         raise
@@ -169,13 +170,13 @@ def set_pin(ctx, pin, new_pin, u2f):
             ctx.fail('Failed to change PIN.')
 
     def set_pin(new_pin):
-        _fail_if_not_valid_pin(ctx, new_pin, controller.is_fips)
+        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         controller.set_pin(new_pin)
 
     if pin and not controller.has_pin:
         ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
 
-    if controller.has_pin and pin is None and not controller.is_fips:
+    if controller.has_pin and pin is None and not is_fips:
         pin = prompt_current_pin()
 
     if not new_pin:
