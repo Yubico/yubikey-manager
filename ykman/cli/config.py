@@ -80,7 +80,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
                          '(32 hexadecimal digits) long.')
             return lock_code
         except Exception:
-            ctx.fail('Lock code have the wrong format.')
+            ctx.fail('Lock code has the wrong format.')
 
     def prompt_new_lock_code():
         return click.prompt(
