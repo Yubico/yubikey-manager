@@ -302,6 +302,9 @@ def unlock(ctx, pin):
         if e.code == SW_COMMAND_NOT_ALLOWED:
             ctx.fail('PIN is not set.')
 
+        logger.error('PIN verification failed', exc_info=e)
+        ctx.fail('PIN verification failed for an unknown reason.')
+
 
 def _prompt_current_pin(prompt='Enter your current PIN'):
     return click.prompt(prompt, default='', hide_input=True, show_default=False)
