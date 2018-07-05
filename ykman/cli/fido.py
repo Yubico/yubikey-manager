@@ -163,8 +163,7 @@ def set_pin(ctx, pin, new_pin, u2f):
                 ctx.fail('Wrong PIN.')
 
             if e.code == SW_AUTH_METHOD_BLOCKED:
-                ctx.fail('Too many incorrect PIN attempts - PIN is blocked.\n'
-                         'Use the "fido reset" command to reset.')
+                ctx.fail('PIN is blocked.')
 
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
