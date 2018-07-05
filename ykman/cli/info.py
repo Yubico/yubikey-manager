@@ -31,37 +31,7 @@ from ..util import APPLICATION
 import click
 
 
-@click.command()
-@click.pass_context
-def info(ctx):
-    """
-    Show general information.
-
-    Displays information about the attached YubiKey such as serial number,
-    firmware version, applications, etc.
-    """
-    dev = ctx.obj['dev']
-    click.echo('Device type: {}'.format(dev.device_name))
-    click.echo('Serial number: {}'.format(
-        dev.serial or 'Not set or unreadable'))
-    if dev.version:
-        f_version = '.'.join(str(x) for x in dev.version)
-        click.echo('Firmware version: {}'.format(f_version))
-    else:
-        click.echo('Firmware version: Uncertain, re-run with only one '
-                   'YubiKey connected')
-
-    config = dev.config
-    if config.form_factor:
-        click.echo('Form factor: {!s}'.format(config.form_factor))
-    click.echo('Enabled USB interfaces: {}'.format(dev.mode))
-    if config.nfc_supported:
-        f_nfc = 'enabled' if config.nfc_enabled else 'disabled'
-        click.echo('NFC interface is {}.'.format(f_nfc))
-    if config.configuration_locked:
-        click.echo('Configured applications are protected by a lock code.')
-    click.echo()
-
+def print_app_status_table(config):
     rows = []
     for app in APPLICATION:
         if app & config.usb_supported:
@@ -108,3 +78,37 @@ def info(ctx):
     else:
         click.echo('{}'.format(f_apps))
     click.echo(f_table, nl=False)
+
+
+@click.command()
+@click.pass_context
+def info(ctx):
+    """
+    Show general information.
+
+    Displays information about the attached YubiKey such as serial number,
+    firmware version, applications, etc.
+    """
+    dev = ctx.obj['dev']
+    click.echo('Device type: {}'.format(dev.device_name))
+    click.echo('Serial number: {}'.format(
+        dev.serial or 'Not set or unreadable'))
+    if dev.version:
+        f_version = '.'.join(str(x) for x in dev.version)
+        click.echo('Firmware version: {}'.format(f_version))
+    else:
+        click.echo('Firmware version: Uncertain, re-run with only one '
+                   'YubiKey connected')
+
+    config = dev.config
+    if config.form_factor:
+        click.echo('Form factor: {!s}'.format(config.form_factor))
+    click.echo('Enabled USB interfaces: {}'.format(dev.mode))
+    if config.nfc_supported:
+        f_nfc = 'enabled' if config.nfc_enabled else 'disabled'
+        click.echo('NFC interface is {}.'.format(f_nfc))
+    if config.configuration_locked:
+        click.echo('Configured applications are protected by a lock code.')
+    click.echo()
+
+    print_app_status_table(config)
