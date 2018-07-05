@@ -109,6 +109,10 @@ def info(ctx):
     firmware version, applications, etc.
     """
     dev = ctx.obj['dev']
+
+    if dev.is_fips:
+        fips_status = get_overall_fips_status(dev.serial)
+
     click.echo('Device type: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
         dev.serial or 'Not set or unreadable'))
@@ -134,8 +138,6 @@ def info(ctx):
 
     if dev.is_fips:
         click.echo()
-
-        fips_status = get_overall_fips_status(dev.serial)
 
         click.echo('FIPS Approved Mode: {}'.format(
             'Yes' if all(fips_status.values()) else 'No'))
