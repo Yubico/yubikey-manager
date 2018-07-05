@@ -122,11 +122,6 @@ def set_pin(ctx, pin, new_pin, u2f):
                     'Enter your new PIN', default='', hide_input=True,
                     show_default=False, confirmation_prompt=True)
 
-    def prompt_current_pin():
-        return click.prompt(
-                    'Enter your current PIN', default='', hide_input=True,
-                    show_default=False)
-
     def change_pin(pin, new_pin):
         if pin is not None:
             _fail_if_not_valid_pin(ctx, pin, is_fips)
@@ -138,7 +133,7 @@ def set_pin(ctx, pin, new_pin, u2f):
                     controller.change_pin(old_pin=pin or '', new_pin=new_pin)
                 except ApduError as e:
                     if e.code == SW_WRONG_LENGTH:
-                        pin = prompt_current_pin()
+                        pin = _prompt_current_pin()
                         _fail_if_not_valid_pin(ctx, pin, is_fips)
                         controller.change_pin(old_pin=pin, new_pin=new_pin)
                     else:
@@ -177,7 +172,7 @@ def set_pin(ctx, pin, new_pin, u2f):
         ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
 
     if controller.has_pin and pin is None and not is_fips:
-        pin = prompt_current_pin()
+        pin = _prompt_current_pin()
 
     if not new_pin:
         new_pin = prompt_new_pin()
@@ -300,6 +295,10 @@ def unlock(ctx, pin):
             ctx.fail('Wrong PIN.')
         if e.code == SW_AUTH_METHOD_BLOCKED:
             ctx.fail('PIN is blocked.')
+
+
+def _prompt_current_pin(prompt='Enter your current PIN'):
+    return click.prompt(prompt, default='', hide_input=True, show_default=False)
 
 
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
