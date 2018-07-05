@@ -97,17 +97,26 @@ def get_fips_status_over_transport(serial, transport, controller_constructor):
         return False
 
 
-def get_overall_fips_status(serial):
+def get_overall_fips_status(serial, config):
     statuses = {}
 
-    statuses['OTP'] = get_fips_status_over_transport(
-        serial, TRANSPORT.OTP, OtpController)
+    if config.usb_enabled & APPLICATION.OTP:
+        statuses['OTP'] = get_fips_status_over_transport(
+            serial, TRANSPORT.OTP, OtpController)
+    else:
+        statuses['OTP'] = False
 
-    statuses['OATH'] = get_fips_status_over_transport(
-        serial, TRANSPORT.CCID, OathController)
+    if config.usb_enabled & APPLICATION.OATH:
+        statuses['OATH'] = get_fips_status_over_transport(
+            serial, TRANSPORT.CCID, OathController)
+    else:
+        statuses['OATH'] = False
 
-    statuses['FIDO U2F'] = get_fips_status_over_transport(
-        serial, TRANSPORT.FIDO, FipsU2fController)
+    if config.usb_enabled & APPLICATION.U2F:
+        statuses['FIDO U2F'] = get_fips_status_over_transport(
+            serial, TRANSPORT.FIDO, FipsU2fController)
+    else:
+        statuses['FIDO U2F'] = False
 
     return statuses
 
@@ -124,7 +133,7 @@ def info(ctx):
     dev = ctx.obj['dev']
 
     if dev.is_fips:
-        fips_status = get_overall_fips_status(dev.serial)
+        fips_status = get_overall_fips_status(dev.serial, dev.config)
 
     click.echo('Device type: {}'.format(dev.device_name))
     click.echo('Serial number: {}'.format(
