@@ -96,14 +96,17 @@ def info(ctx):
 @click.pass_context
 @click.option('-P', '--pin', help='Current PIN code.')
 @click.option('-n', '--new-pin', help='A new PIN.')
-@click.option('--u2f', is_flag=True,
-              help='Set FIPS U2F PIN instead of FIDO2 PIN')
+@click.option('-u', '--u2f', is_flag=True,
+              help='Set FIDO U2F PIN instead of FIDO2 PIN.')
 def set_pin(ctx, pin, new_pin, u2f):
     """
     Set or change the PIN code.
 
-    The PIN must be at least 4 characters long, and supports any type
+    The FIDO2 PIN must be at least 4 characters long, and supports any type
     of alphanumeric characters.
+
+    On YubiKey FIPS, a PIN can be set for FIDO U2F. That PIN must be at least
+    6 characters long.
     """
 
     controller = ctx.obj['controller']
