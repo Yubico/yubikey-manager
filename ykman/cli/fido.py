@@ -128,8 +128,8 @@ def set_pin(ctx, pin, new_pin, u2f):
 
     def change_pin(pin, new_pin):
         if pin is not None:
-            fail_if_not_valid(ctx, pin, controller.is_fips)
-        fail_if_not_valid(ctx, new_pin, controller.is_fips)
+            _fail_if_not_valid_pin(ctx, pin, controller.is_fips)
+        _fail_if_not_valid_pin(ctx, new_pin, controller.is_fips)
         try:
             if controller.is_fips:
                 try:
@@ -138,7 +138,7 @@ def set_pin(ctx, pin, new_pin, u2f):
                 except ApduError as e:
                     if e.code == SW_WRONG_LENGTH:
                         pin = prompt_current_pin()
-                        fail_if_not_valid(ctx, pin, controller.is_fips)
+                        _fail_if_not_valid_pin(ctx, pin, controller.is_fips)
                         controller.change_pin(old_pin=pin, new_pin=new_pin)
                     else:
                         raise
@@ -169,7 +169,7 @@ def set_pin(ctx, pin, new_pin, u2f):
             ctx.fail('Failed to change PIN.')
 
     def set_pin(new_pin):
-        fail_if_not_valid(ctx, new_pin, controller.is_fips)
+        _fail_if_not_valid_pin(ctx, new_pin, controller.is_fips)
         controller.set_pin(new_pin)
 
     if pin and not controller.has_pin:
@@ -291,7 +291,7 @@ def unlock(ctx, pin):
     if not controller.is_fips:
         ctx.fail('This is not a YubiKey FIPS, and therefore'
                  'does not support a U2F PIN.')
-    fail_if_not_valid(ctx, pin, True)
+    _fail_if_not_valid_pin(ctx, pin, True)
     try:
         controller.verify_pin(pin)
     except ApduError as e:
@@ -301,7 +301,7 @@ def unlock(ctx, pin):
             ctx.fail('PIN is blocked.')
 
 
-def fail_if_not_valid(ctx, pin=None, is_fips=False):
+def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
     min_length = FIPS_PIN_MIN_LENGTH \
         if is_fips else PIN_MIN_LENGTH
     if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
