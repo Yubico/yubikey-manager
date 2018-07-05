@@ -60,8 +60,6 @@ def info(ctx):
         click.echo('NFC interface is {}.'.format(f_nfc))
     if config.configuration_locked:
         click.echo('Configured applications are protected by a lock code.')
-    if dev.is_fips:
-        click.echo('This YubiKey is capable of FIPS Approved Mode.')
     click.echo()
 
     rows = []
