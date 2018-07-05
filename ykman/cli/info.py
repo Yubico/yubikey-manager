@@ -27,12 +27,16 @@
 
 from __future__ import absolute_import
 
-from ..descriptor import open_device
+from ..descriptor import open_device, FailedOpeningDeviceException
 from ..fido import FipsU2fController
 from ..oath import OathController
 from ..otp import OtpController
 from ..util import APPLICATION, TRANSPORT
 import click
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def print_app_status_table(config):
@@ -85,8 +89,12 @@ def print_app_status_table(config):
 
 
 def get_fips_status_over_transport(serial, transport, controller_constructor):
-    with open_device(transports=transport, serial=serial) as dev:
-        return controller_constructor(dev._driver).is_in_fips_mode
+    try:
+        with open_device(transports=transport, serial=serial) as dev:
+            return controller_constructor(dev._driver).is_in_fips_mode
+    except FailedOpeningDeviceException as e:
+        logger.debug('Failed to open device', exc_info=e)
+        return False
 
 
 def get_overall_fips_status(serial):
