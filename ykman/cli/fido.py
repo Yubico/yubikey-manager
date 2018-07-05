@@ -299,6 +299,8 @@ def unlock(ctx, pin):
             ctx.fail('Wrong PIN.')
         if e.code == SW_AUTH_METHOD_BLOCKED:
             ctx.fail('PIN is blocked.')
+        if e.code == SW_COMMAND_NOT_ALLOWED:
+            ctx.fail('PIN is not set.')
 
 
 def _prompt_current_pin(prompt='Enter your current PIN'):
