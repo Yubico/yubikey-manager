@@ -84,17 +84,22 @@ def print_app_status_table(config):
     click.echo(f_table, nl=False)
 
 
+def get_fips_status_over_transport(serial, transport, controller_constructor):
+    with open_device(transports=transport, serial=serial) as dev:
+        return controller_constructor(dev._driver).is_in_fips_mode
+
+
 def get_overall_fips_status(serial):
     statuses = {}
 
-    with open_device(transports=TRANSPORT.OTP, serial=serial) as dev:
-        statuses['OTP'] = OtpController(dev._driver).is_in_fips_mode
+    statuses['OTP'] = get_fips_status_over_transport(
+        serial, TRANSPORT.OTP, OtpController)
 
-    with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
-        statuses['OATH'] = OathController(dev._driver).is_in_fips_mode
+    statuses['OATH'] = get_fips_status_over_transport(
+        serial, TRANSPORT.CCID, OathController)
 
-    with open_device(transports=TRANSPORT.FIDO, serial=serial) as dev:
-        statuses['FIDO U2F'] = FipsU2fController(dev._driver).is_in_fips_mode
+    statuses['FIDO U2F'] = get_fips_status_over_transport(
+        serial, TRANSPORT.FIDO, FipsU2fController)
 
     return statuses
 
