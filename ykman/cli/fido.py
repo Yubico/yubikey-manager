@@ -116,13 +116,6 @@ def set_pin(ctx, pin, new_pin, u2f):
         ctx.fail('This is not a YubiKey FIPS, and therefore does not support a '
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
 
-    def fail_if_not_valid(ctx, pin=None):
-        min_length = FIPS_PIN_MIN_LENGTH \
-            if controller.is_fips else PIN_MIN_LENGTH
-        if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
-            ctx.fail('PIN must be over {} characters long and under 128 bytes.'
-                     .format(min_length))
-
     def prompt_new_pin():
         return click.prompt(
                     'Enter your new PIN', default='', hide_input=True,
@@ -135,8 +128,8 @@ def set_pin(ctx, pin, new_pin, u2f):
 
     def change_pin(pin, new_pin):
         if pin is not None:
-            fail_if_not_valid(ctx, pin)
-        fail_if_not_valid(ctx, new_pin)
+            fail_if_not_valid(ctx, pin, controller.is_fips)
+        fail_if_not_valid(ctx, new_pin, controller.is_fips)
         try:
             if controller.is_fips:
                 try:
@@ -145,7 +138,7 @@ def set_pin(ctx, pin, new_pin, u2f):
                 except ApduError as e:
                     if e.code == SW_WRONG_LENGTH:
                         pin = prompt_current_pin()
-                        fail_if_not_valid(ctx, pin)
+                        fail_if_not_valid(ctx, pin, controller.is_fips)
                         controller.change_pin(old_pin=pin, new_pin=new_pin)
                     else:
                         raise
@@ -177,7 +170,7 @@ def set_pin(ctx, pin, new_pin, u2f):
             ctx.fail('Failed to change PIN.')
 
     def set_pin(new_pin):
-        fail_if_not_valid(ctx, new_pin)
+        fail_if_not_valid(ctx, new_pin, controller.is_fips)
         controller.set_pin(new_pin)
 
     if pin and not controller.has_pin:
@@ -283,6 +276,38 @@ def reset(ctx, force):
         except Exception as e:
             logger.error(e)
             ctx.fail('Reset failed.')
+
+
+@fido.command('unlock')
+@click.pass_context
+@click.option('-P', '--pin', help='Current PIN code.')
+def unlock(ctx, pin):
+    """
+    Verify U2F PIN for YubiKey FIPS.
+
+    Unlock the YubiKey FIPS and allow U2F registration.
+    """
+
+    controller = ctx.obj['controller']
+    if not controller.is_fips:
+        ctx.fail('This is not a YubiKey FIPS, and therefore'
+                 'does not support a U2F PIN.')
+    fail_if_not_valid(ctx, pin, True)
+    try:
+        controller.verify_pin(pin)
+    except ApduError as e:
+        if e.code == SW_VERIFY_FAIL_NO_RETRY:
+            ctx.fail('Wrong PIN.')
+        if e.code == SW_AUTH_METHOD_BLOCKED:
+            ctx.fail('PIN is blocked.')
+
+
+def fail_if_not_valid(ctx, pin=None, is_fips=False):
+    min_length = FIPS_PIN_MIN_LENGTH \
+        if is_fips else PIN_MIN_LENGTH
+    if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
+        ctx.fail('PIN must be over {} characters long and under 128 bytes.'
+                 .format(min_length))
 
 
 fido.transports = TRANSPORT.FIDO
