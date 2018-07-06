@@ -303,7 +303,7 @@ def unlock(ctx, pin):
             ctx.fail('PIN is not set.')
 
         logger.error('PIN verification failed', exc_info=e)
-        ctx.fail('PIN verification failed for an unknown reason.')
+        ctx.fail('PIN verification failed.')
 
 
 def _prompt_current_pin(prompt='Enter your current PIN'):
