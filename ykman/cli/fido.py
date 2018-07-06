@@ -110,45 +110,34 @@ def set_pin(ctx, pin, new_pin, u2f):
     """
 
     controller = ctx.obj['controller']
+    is_fips = controller.is_fips
 
-    if controller.is_fips and not u2f:
+    if is_fips and not u2f:
         ctx.fail('This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f '
                  'option.')
 
-    if u2f and not controller.is_fips:
+    if u2f and not is_fips:
         ctx.fail('This is not a YubiKey FIPS, and therefore does not support a '
                  'U2F PIN. To set the FIDO2 PIN, remove the --u2f option.')
-
-    def fail_if_not_valid(ctx, pin=None):
-        min_length = FIPS_PIN_MIN_LENGTH \
-            if controller.is_fips else PIN_MIN_LENGTH
-        if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
-            ctx.fail('PIN must be over {} characters long and under 128 bytes.'
-                     .format(min_length))
 
     def prompt_new_pin():
         return click.prompt(
                     'Enter your new PIN', default='', hide_input=True,
                     show_default=False, confirmation_prompt=True)
 
-    def prompt_current_pin():
-        return click.prompt(
-                    'Enter your current PIN', default='', hide_input=True,
-                    show_default=False)
-
     def change_pin(pin, new_pin):
         if pin is not None:
-            fail_if_not_valid(ctx, pin)
-        fail_if_not_valid(ctx, new_pin)
+            _fail_if_not_valid_pin(ctx, pin, is_fips)
+        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         try:
-            if controller.is_fips:
+            if is_fips:
                 try:
                     # Failing this with empty current PIN does not cost a retry
                     controller.change_pin(old_pin=pin or '', new_pin=new_pin)
                 except ApduError as e:
                     if e.code == SW_WRONG_LENGTH:
-                        pin = prompt_current_pin()
-                        fail_if_not_valid(ctx, pin)
+                        pin = _prompt_current_pin()
+                        _fail_if_not_valid_pin(ctx, pin, is_fips)
                         controller.change_pin(old_pin=pin, new_pin=new_pin)
                     else:
                         raise
@@ -173,21 +162,20 @@ def set_pin(ctx, pin, new_pin, u2f):
                 ctx.fail('Wrong PIN.')
 
             if e.code == SW_AUTH_METHOD_BLOCKED:
-                ctx.fail('Too many incorrect PIN attempts - PIN is blocked.\n'
-                         'Use the "fido reset" command to reset.')
+                ctx.fail('PIN is blocked.')
 
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
 
     def set_pin(new_pin):
-        fail_if_not_valid(ctx, new_pin)
+        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         controller.set_pin(new_pin)
 
     if pin and not controller.has_pin:
         ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
 
-    if controller.has_pin and pin is None and not controller.is_fips:
-        pin = prompt_current_pin()
+    if controller.has_pin and pin is None and not is_fips:
+        pin = _prompt_current_pin()
 
     if not new_pin:
         new_pin = prompt_new_pin()
@@ -286,6 +274,51 @@ def reset(ctx, force):
         except Exception as e:
             logger.error(e)
             ctx.fail('Reset failed.')
+
+
+@fido.command('unlock')
+@click.pass_context
+@click.option('-P', '--pin', help='Current PIN code.')
+def unlock(ctx, pin):
+    """
+    Verify U2F PIN for YubiKey FIPS.
+
+    Unlock the YubiKey FIPS and allow U2F registration.
+    """
+
+    controller = ctx.obj['controller']
+    if not controller.is_fips:
+        ctx.fail('This is not a YubiKey FIPS, and therefore'
+                 'does not support a U2F PIN.')
+
+    if pin is None:
+        pin = _prompt_current_pin('Enter your PIN')
+
+    _fail_if_not_valid_pin(ctx, pin, True)
+    try:
+        controller.verify_pin(pin)
+    except ApduError as e:
+        if e.code == SW_VERIFY_FAIL_NO_RETRY:
+            ctx.fail('Wrong PIN.')
+        if e.code == SW_AUTH_METHOD_BLOCKED:
+            ctx.fail('PIN is blocked.')
+        if e.code == SW_COMMAND_NOT_ALLOWED:
+            ctx.fail('PIN is not set.')
+
+        logger.error('PIN verification failed', exc_info=e)
+        ctx.fail('PIN verification failed.')
+
+
+def _prompt_current_pin(prompt='Enter your current PIN'):
+    return click.prompt(prompt, default='', hide_input=True, show_default=False)
+
+
+def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
+    min_length = FIPS_PIN_MIN_LENGTH \
+        if is_fips else PIN_MIN_LENGTH
+    if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
+        ctx.fail('PIN must be over {} characters long and under 128 bytes.'
+                 .format(min_length))
 
 
 fido.transports = TRANSPORT.FIDO

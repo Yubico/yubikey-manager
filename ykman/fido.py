@@ -99,6 +99,10 @@ class FipsU2fController(object):
         self.ctap.send_apdu(ins=FIPS_U2F_CMD.SET_PIN, data=data)
         return True
 
+    def verify_pin(self, pin):
+        self.ctap.send_apdu(
+            ins=FIPS_U2F_CMD.VERIFY_PIN, data=pin.encode('utf-8'))
+
     def reset(self, touch_callback=None):
         if (touch_callback):
             touch_timer = Timer(0.500, touch_callback)
