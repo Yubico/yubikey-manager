@@ -72,16 +72,6 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 
     dev = ctx.obj['dev']
 
-    def parse_lock_code(ctx, lock_code):
-        try:
-            lock_code = a2b_hex(lock_code)
-            if lock_code and len(lock_code) != 16:
-                ctx.fail('Lock code must be exactly 16 bytes '
-                         '(32 hexadecimal digits) long.')
-            return lock_code
-        except Exception:
-            ctx.fail('Lock code has the wrong format.')
-
     def prompt_new_lock_code():
         return click.prompt(
                     'Enter your new lock code', default='', hide_input=True,
@@ -93,8 +83,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
                     show_default=False)
 
     def change_lock_code(lock_code, new_lock_code):
-        lock_code = parse_lock_code(ctx, lock_code)
-        new_lock_code = parse_lock_code(ctx, new_lock_code)
+        lock_code = _parse_lock_code(ctx, lock_code)
+        new_lock_code = _parse_lock_code(ctx, new_lock_code)
         try:
             dev.write_config(
                 device_config(
@@ -106,7 +96,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
             ctx.fail('Failed to change the lock code. Wrong current code?')
 
     def set_lock_code(new_lock_code):
-        new_lock_code = parse_lock_code(ctx, new_lock_code)
+        new_lock_code = _parse_lock_code(ctx, new_lock_code)
         try:
             dev.write_config(
                 device_config(
@@ -223,8 +213,7 @@ def usb(
         flags &= ~FLAGS.MODE_FLAG_EJECT
 
     if lock_code:
-        lock_code = lock_code.encode()
-        _ensure_valid_lock_code(ctx, lock_code)
+        lock_code = _parse_lock_code(ctx, lock_code)
 
     for app in enable:
         if APPLICATION[app] & usb_supported:
@@ -302,8 +291,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
     _ensure_not_invalid_options(ctx, enable, disable)
 
     if lock_code:
-        lock_code = lock_code.encode()
-        _ensure_valid_lock_code(ctx, lock_code)
+        lock_code = _parse_lock_code(ctx, lock_code)
 
     dev = ctx.obj['dev']
     nfc_supported = dev.config.nfc_supported
@@ -357,6 +345,12 @@ def _ensure_not_invalid_options(ctx, enable, disable):
         ctx.fail('Invalid options.')
 
 
-def _ensure_valid_lock_code(ctx, lock_code):
-    if len(lock_code) != 16:
-        ctx.fail('Lock code must be 16 bytes.')
+def _parse_lock_code(ctx, lock_code):
+    try:
+        lock_code = a2b_hex(lock_code)
+        if lock_code and len(lock_code) != 16:
+            ctx.fail('Lock code must be exactly 16 bytes '
+                     '(32 hexadecimal digits) long.')
+        return lock_code
+    except Exception:
+        ctx.fail('Lock code has the wrong format.')
