@@ -1,10 +1,12 @@
 == Working with the code
 
-=== Installing dependencies
+=== Install dependencies
+
+It's assumed a Python environment with pip is installed.
 
 ==== Windows
-Make sure the [swig](http://www.swig.org/) executable is in your PATH. Add [libusb](http://libusb.info/)
-and [ykpers](https://developers.yubico.com/yubikey-personalization/) DLLs to the root of the repository.
+Make sure the http://www.swig.org/[swig] executable is in your PATH. Add http://libusb.info/[libusb]
+and https://developers.yubico.com/yubikey-personalization/[ykpers] DLLs to the root of the repository.
 
 ==== macOS
 

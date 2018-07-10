@@ -54,7 +54,7 @@ In order for the pip package to work, https://developers.yubico.com/yubikey-pers
 https://pyscard.sourceforge.io/[Pyscard] is also needed in some form, and if it's not installed pip builds it using http://www.swig.org/[swig] and potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
 
 ==== From source
-To install from source, see the [development](doc/development.adoc) document.
+To install from source, see the doc/development.adoc[development] document.
 
 === Bash completion
 
