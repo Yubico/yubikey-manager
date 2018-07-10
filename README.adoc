@@ -53,8 +53,8 @@ The command line tool is installed together with the GUI version of https://deve
 In order for the pip package to work, https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
 https://pyscard.sourceforge.io/[Pyscard] is also needed in some form, and if it's not installed pip builds it using http://www.swig.org/[swig] and potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
 
-==== From source
-To install from source, see the doc/development.adoc[development] document.
+==== Source
+To install from source, see the https://github.com/Yubico/yubikey-manager/blob/master/doc/development.adoc[development] instructions.
 
 === Bash completion
 
