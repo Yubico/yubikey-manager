@@ -1,29 +1,45 @@
-== Setting up a development environment on Ubuntu 16.04 (Xenial)
+== Working with the code
 
-Install development dependencies:
+=== Installing dependencies
 
-    $ sudo apt-get install python-pip python-pyscard libykpers-1-1 libu2f-host0 
+==== Windows
+Make sure the [swig](http://www.swig.org/) executable is in your PATH. Add [libusb](http://libusb.info/)
+and [ykpers](https://developers.yubico.com/yubikey-personalization/) DLLs to the root of the repository.
 
-Setup the repository:
+==== macOS
+
+    $ brew install swig ykpers libusb
+
+==== Linux (Debian-based distributions)
+
+    $ sudo apt install swig libykpers-1-1 libu2f-udev libpcsclite-dev
+
+=== Install yubikey-manager from source
+
+Clone the repository:
 
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
 
-Install in editable mode with pip (from root of repository):
+Install in editable mode with pip:
 
-    $ sudo pip install -e .
+    $ pip install -e .
 
-Run the app:
+Show available commands:
 
     $ ykman --help
 
-To update once installed, just make sure the repo is up to date:
+Show information about inserted YubiKey:
 
-    $ git pull
+    $ ykman info
+
+Run ykman in DEBUG mode:
+
+    $ ykman --log-level DEBUG info
 
 To uninstall, run:
 
-    $ sudo pip uninstall yubikey-manager
+    $ pip uninstall yubikey-manager
 
 === Code Style
 
@@ -46,27 +62,3 @@ WARNING: ONLY run these on a dedicated developer key, as it will permanently del
 To run integration tests, indicate the serial number (given by `ykman list`) of the YubiKey to test with:
 
    $ DESTRUCTIVE_TEST_YUBIKEY_SERIAL=123456 python setup.py test
-
-== Using vagrant for development
-
-A Vagrantfile with a development environment based on Ubuntu 16.04 is included in the repository.
-Modify the Vagrantfile to set up a USB filter to capture the device with VirtualBox.
-
-
-== Publishing to Ubuntu PPA
-
- 1. Update version number and signoff in `debian/changelog`.
- 2. Build and upload package.
-
-For (2) you can use the Vagrant VM in `vagrant/ppa`. You'll need to set up the
-VM to capture the YubiKey containing your signing key. If you use VirtualBox,
-you can do this by uncommenting the USB filter included in the `Vagrantfile`.
-Then:
-
-    alice@work $ cd yubikey-manager/vagrant/ppa
-    alice@work $ vagrant up
-    alice@work $ vagrant ssh
-    ubuntu@ubuntu-xenial $ gpg2 --recv-keys ABCDEF78
-    ubuntu@ubuntu-xenial $ gpg2 --card-status
-    ubuntu@ubuntu-xenial $ cd yubikey-manager
-    ubuntu@ubuntu-xenial $ ~/scripts/make-ppa -k ABCDEF78 -p gpg2
