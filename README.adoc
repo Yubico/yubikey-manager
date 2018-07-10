@@ -42,11 +42,6 @@ Commands:
 
     $ brew install ykman
 
-Or from source:
-
-    $ brew install swig ykpers libusb
-    $ pip install --user yubikey-manager
-
 ==== Windows
 
 The command line tool is installed together with the GUI version of https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager].
@@ -57,6 +52,9 @@ The command line tool is installed together with the GUI version of https://deve
 
 In order for the pip package to work, https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
 https://pyscard.sourceforge.io/[Pyscard] is also needed in some form, and if it's not installed pip builds it using http://www.swig.org/[swig] and potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
+
+==== From source
+To install from source, see the [development](doc/development.adoc) document.
 
 === Bash completion
 
