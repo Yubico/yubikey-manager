@@ -14,7 +14,7 @@ and https://developers.yubico.com/yubikey-personalization/[ykpers] DLLs to the r
 
 ==== Linux (Debian-based distributions)
 
-    $ sudo apt install swig libykpers-1-1 libu2f-udev libpcsclite-dev
+    $ sudo apt install swig libykpers-1-1 libu2f-udev pcscd libpcsclite-dev
 
 === Install yubikey-manager from source
 
