@@ -31,7 +31,7 @@ import logging
 from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
-from .util import click_skip_on_help, prompt_for_touch, click_force_option
+from .util import click_skip_on_help, prompt_for_touch
 from ..driver_ccid import (
     SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
     SW_AUTH_METHOD_BLOCKED, SW_WRONG_LENGTH)
@@ -186,12 +186,9 @@ def set_pin(ctx, pin, new_pin, u2f):
         set_pin(new_pin)
 
 
-@click_force_option
 @fido.command('reset')
-@click.confirmation_option(
-            '-f', '--force', prompt='WARNING! This will delete '
-            'all FIDO credentials, including FIDO U2F credentials,'
-            ' and restore factory settings. Proceed?')
+@click.option('-f', '--force', is_flag=True,
+              help='Confirm the action without prompting.')
 @click.pass_context
 def reset(ctx, force):
     """
@@ -203,6 +200,12 @@ def reset(ctx, force):
     The reset must be triggered immediately after the YubiKey is
     inserted, and requires a touch on the YubiKey.
     """
+
+    if not force:
+        if not click.confirm('WARNING! This will delete all FIDO credentials, '
+                             'including FIDO U2F credentials, and restore '
+                             'factory settings. Proceed?'):
+            ctx.abort()
 
     def prompt_re_insert_key():
         click.echo('Remove and re-insert your YubiKey to perform the reset...')
