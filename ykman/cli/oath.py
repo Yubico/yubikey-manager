@@ -275,7 +275,8 @@ def _add_cred(ctx, data, force):
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
             ctx.fail('No space left on your YubiKey for OATH credentials.')
-        elif e.sw == SW.COMMAND_ABORTED:  # Some NEOs do not use the NO_SPACE error.
+        elif e.sw == SW.COMMAND_ABORTED:
+            # Some NEOs do not use the NO_SPACE error.
             ctx.fail(
                 'The command failed. Is there enough space on your YubiKey?')
         else:
