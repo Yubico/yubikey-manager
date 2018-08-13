@@ -16,6 +16,9 @@ and https://developers.yubico.com/yubikey-personalization/[ykpers] DLLs to the r
 
     $ sudo apt install swig libykpers-1-1 libu2f-udev pcscd libpcsclite-dev
 
+==== FreeBSD
+    $ sudo pkg-install security/py-yubikey-manager
+
 === Install yubikey-manager from source
 
 Clone the repository:
