@@ -186,12 +186,8 @@ def set_pin(ctx, pin, new_pin, u2f):
         set_pin(new_pin)
 
 
-@click_force_option
 @fido.command('reset')
-@click.confirmation_option(
-            '-f', '--force', prompt='WARNING! This will delete '
-            'all FIDO credentials, including FIDO U2F credentials,'
-            ' and restore factory settings. Proceed?')
+@click_force_option
 @click.pass_context
 def reset(ctx, force):
     """
@@ -203,6 +199,12 @@ def reset(ctx, force):
     The reset must be triggered immediately after the YubiKey is
     inserted, and requires a touch on the YubiKey.
     """
+
+    if not force:
+        if not click.confirm('WARNING! This will delete all FIDO credentials, '
+                             'including FIDO U2F credentials, and restore '
+                             'factory settings. Proceed?'):
+            ctx.abort()
 
     def prompt_re_insert_key():
         click.echo('Remove and re-insert your YubiKey to perform the reset...')
