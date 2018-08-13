@@ -31,7 +31,7 @@ import logging
 from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
-from .util import click_skip_on_help, prompt_for_touch
+from .util import click_skip_on_help, prompt_for_touch, click_force_option
 from ..driver_ccid import (
     SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
     SW_AUTH_METHOD_BLOCKED, SW_WRONG_LENGTH)
@@ -187,8 +187,7 @@ def set_pin(ctx, pin, new_pin, u2f):
 
 
 @fido.command('reset')
-@click.option('-f', '--force', is_flag=True,
-              help='Confirm the action without prompting.')
+@click_force_option
 @click.pass_context
 def reset(ctx, force):
     """
