@@ -212,12 +212,12 @@ def main():
         cli(obj={})
     except ValueError as e:
         logger.error('Error', exc_info=e)
-        print('Error:', e)
+        click.echo('Error: ' + str(e))
         return 1
 
     except Cve201715361VulnerableError as err:
         logger.error('Error', exc_info=err)
-        print('Error:', err)
+        click.echo('Error: ' + str(err))
         return 2
 
 
