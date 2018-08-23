@@ -30,7 +30,8 @@ from __future__ import absolute_import
 from .util import click_skip_on_help, click_force_option, UpperCaseChoice
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
-from binascii import a2b_hex
+from binascii import a2b_hex, b2a_hex
+import os
 import logging
 import click
 
@@ -60,10 +61,12 @@ def config(ctx):
 
 @config.command('set-lock-code')
 @click.pass_context
+@click_force_option
 @click.option('-l', '--lock-code', metavar='HEX', help='Current lock code.')
 @click.option('-n', '--new-lock-code', metavar='HEX', help='New lock code.')
 @click.option('-c', '--clear', is_flag=True, help='Clear the lock code.')
-def set_lock_code(ctx, lock_code, new_lock_code, clear):
+@click.option('-g', '--generate', is_flag=True, help='Generate a random lock code.')
+def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     """
     Set or change the configuration lock code.
 
@@ -109,6 +112,11 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear):
 
     if clear:
         new_lock_code = CLEAR_LOCK_CODE
+
+    if generate:
+        new_lock_code = b2a_hex(os.urandom(16)).decode('utf-8')
+        click.echo('Generated lock code: {}'.format(new_lock_code))
+        force or click.confirm('Set this lock code?', abort=True)
 
     if dev.config.configuration_locked:
         if lock_code:
