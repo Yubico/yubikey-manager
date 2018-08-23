@@ -264,10 +264,10 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def configure_ndef_slot(self, slot, uri='https://my.yubico.com/neo/'):
+    def configure_ndef_slot(self, slot, prefix='https://my.yubico.com/yk/#'):
         ndef = ykpers.ykp_alloc_ndef()
         try:
-            check(ykpers.ykp_construct_ndef_uri(ndef, uri.encode()))
+            check(ykpers.ykp_construct_ndef_uri(ndef, prefix.encode()))
             check(ykpers.yk_write_ndef2(self._dev, ndef, slot))
         finally:
             ykpers.ykp_free_ndef(ndef)
