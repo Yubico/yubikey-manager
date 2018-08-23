@@ -60,14 +60,15 @@ def config(ctx):
 
 @config.command('set-lock-code')
 @click.pass_context
-@click.option('-l', '--lock-code', help='Current lock code.')
-@click.option('-n', '--new-lock-code', help='New lock code.')
+@click.option('-l', '--lock-code', metavar='HEX', help='Current lock code.')
+@click.option('-n', '--new-lock-code', metavar='HEX', help='New lock code.')
 @click.option('-c', '--clear', is_flag=True, help='Clear the lock code.')
 def set_lock_code(ctx, lock_code, new_lock_code, clear):
     """
     Set or change the configuration lock code.
 
-    A 16 byte lock code may be used to protect the application configuration.
+    A lock code may be used to protect the application configuration.
+    The lock code must be a 32 characters (16 bytes) hex value.
     """
 
     dev = ctx.obj['dev']
