@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 CLEAR_LOCK_CODE = '0' * 32
 
 
+def prompt_lock_code(prompt='Enter your lock code'):
+    return click.prompt(prompt, default='', hide_input=True, show_default=False)
+
+
 @click.group()
 @click.pass_context
 @click_skip_on_help
@@ -81,14 +85,10 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     dev = ctx.obj['dev']
 
     def prompt_new_lock_code():
-        return click.prompt(
-                    'Enter your new lock code', default='', hide_input=True,
-                    show_default=False, confirmation_prompt=True)
+        return prompt_lock_code(prompt='Enter your new lock code')
 
     def prompt_current_lock_code():
-        return click.prompt(
-                    'Enter your current lock code', default='', hide_input=True,
-                    show_default=False)
+        return prompt_lock_code(prompt='Enter your current lock code')
 
     def change_lock_code(lock_code, new_lock_code):
         lock_code = _parse_lock_code(ctx, lock_code)
@@ -168,8 +168,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
 @click.option(
     '-a', '--enable-all', is_flag=True, help='Enable all applications.')
 @click.option(
-    '-L', '--lock-code',
-    help='A 16 byte lock code used to protect the application configuration.')
+    '-L', '--lock-code', metavar='HEX',
+    help='Current application configuration lock code.')
 @click.option(
     '--touch-eject', is_flag=True, help='When set, the button toggles the state'
     ' of the smartcard between ejected and inserted. (CCID only).')
@@ -230,9 +230,6 @@ def usb(
     if no_touch_eject:
         flags &= ~FLAGS.MODE_FLAG_EJECT
 
-    if lock_code:
-        lock_code = _parse_lock_code(ctx, lock_code)
-
     for app in enable:
         if APPLICATION[app] & usb_supported:
             usb_enabled |= APPLICATION[app]
@@ -260,7 +257,21 @@ def usb(
         'Set challenge-response timeout to {}.\n'.format(
             chalresp_timeout) if chalresp_timeout else '')
 
+    if force and dev.config.configuration_locked and not lock_code:
+        ctx.fail('Configuration is locked - please supply the -L/--lock-code '
+                 'option.')
+    if lock_code and not dev.config.configuration_locked:
+        ctx.fail('Configuration is not locked - please remove the '
+                 '-L/--lock-code option.')
+
     force or click.confirm(f_confirm, abort=True)
+
+    if dev.config.configuration_locked and not lock_code:
+        lock_code = prompt_lock_code()
+
+    if lock_code:
+        lock_code = _parse_lock_code(ctx, lock_code)
+
     try:
         dev.write_config(
             device_config(
@@ -290,8 +301,8 @@ def usb(
     '-D', '--disable-all', is_flag=True, help='Disable all applications')
 @click.option('-l', '--list', is_flag=True, help='List enabled applications')
 @click.option(
-    '-L', '--lock-code',
-    help='A 16 byte lock code used to protect the application configuration.')
+    '-L', '--lock-code', metavar='HEX',
+    help='Current application configuration lock code.')
 def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
     """
     Enable or disable applications over NFC.
@@ -307,9 +318,6 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
         disable = APPLICATION.__members__.keys()
 
     _ensure_not_invalid_options(ctx, enable, disable)
-
-    if lock_code:
-        lock_code = _parse_lock_code(ctx, lock_code)
 
     dev = ctx.obj['dev']
     nfc_supported = dev.config.nfc_supported
@@ -340,7 +348,21 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
             ', '.join(
                 [str(APPLICATION[app]) for app in disable])) if disable else '')
 
+    if force and dev.config.configuration_locked and not lock_code:
+        ctx.fail('Configuration is locked - please supply the -L/--lock-code '
+                 'option.')
+    if lock_code and not dev.config.configuration_locked:
+        ctx.fail('Configuration is not locked - please remove the '
+                 '-L/--lock-code option.')
+
     force or click.confirm(f_confirm, abort=True)
+
+    if dev.config.configuration_locked and not lock_code:
+        lock_code = prompt_lock_code()
+
+    if lock_code:
+        lock_code = _parse_lock_code(ctx, lock_code)
+
     try:
         dev.write_config(
             device_config(
