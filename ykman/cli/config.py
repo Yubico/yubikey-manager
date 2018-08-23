@@ -63,10 +63,12 @@ def config(ctx):
 @click.pass_context
 @click_force_option
 @click.option('-l', '--lock-code', metavar='HEX', help='Current lock code.')
-@click.option('-n', '--new-lock-code', metavar='HEX',
+@click.option(
+    '-n', '--new-lock-code', metavar='HEX',
     help='New lock code. Conflicts with --generate.')
 @click.option('-c', '--clear', is_flag=True, help='Clear the lock code.')
-@click.option('-g', '--generate', is_flag=True,
+@click.option(
+    '-g', '--generate', is_flag=True,
     help='Generate a random lock code. Conflicts with --new-lock-code.')
 def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     """
@@ -120,8 +122,10 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
 
     if generate:
         new_lock_code = b2a_hex(os.urandom(16)).decode('utf-8')
-        click.echo('Using a randomly generated lock code: {}'.format(new_lock_code))
-        force or click.confirm('Lock configuration with this lock code?', abort=True)
+        click.echo(
+            'Using a randomly generated lock code: {}'.format(new_lock_code))
+        force or click.confirm(
+            'Lock configuration with this lock code?', abort=True)
 
     if dev.config.configuration_locked:
         if lock_code:
