@@ -257,16 +257,18 @@ def usb(
         'Set challenge-response timeout to {}.\n'.format(
             chalresp_timeout) if chalresp_timeout else '')
 
-    if force and dev.config.configuration_locked and not lock_code:
+    is_locked = dev.config.configuration_locked
+
+    if force and is_locked and not lock_code:
         ctx.fail('Configuration is locked - please supply the -L/--lock-code '
                  'option.')
-    if lock_code and not dev.config.configuration_locked:
+    if lock_code and not is_locked:
         ctx.fail('Configuration is not locked - please remove the '
                  '-L/--lock-code option.')
 
     force or click.confirm(f_confirm, abort=True)
 
-    if dev.config.configuration_locked and not lock_code:
+    if is_locked and not lock_code:
         lock_code = prompt_lock_code()
 
     if lock_code:
@@ -348,16 +350,18 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
             ', '.join(
                 [str(APPLICATION[app]) for app in disable])) if disable else '')
 
-    if force and dev.config.configuration_locked and not lock_code:
+    is_locked = dev.config.configuration_locked
+
+    if force and is_locked and not lock_code:
         ctx.fail('Configuration is locked - please supply the -L/--lock-code '
                  'option.')
-    if lock_code and not dev.config.configuration_locked:
+    if lock_code and not is_locked:
         ctx.fail('Configuration is not locked - please remove the '
                  '-L/--lock-code option.')
 
     force or click.confirm(f_confirm, abort=True)
 
-    if dev.config.configuration_locked and not lock_code:
+    if is_locked and not lock_code:
         lock_code = prompt_lock_code()
 
     if lock_code:
