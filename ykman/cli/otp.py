@@ -159,7 +159,7 @@ def swap(ctx):
 @click_slot_argument
 @click.pass_context
 @click.option(
-    '-p', '--prefix', help='Added before the NDEF payload. Typically an URI.')
+    '-p', '--prefix', help='Added before the NDEF payload. Typically a URI.')
 def ndef(ctx, slot, prefix):
     """
     Select slot configuration to use for NDEF.
