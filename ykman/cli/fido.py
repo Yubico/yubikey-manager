@@ -172,7 +172,7 @@ def set_pin(ctx, pin, new_pin, u2f):
         controller.set_pin(new_pin)
 
     if pin and not controller.has_pin:
-        ctx.fail('There is no current PIN set. Use -n/--new-pin to set one.')
+        ctx.fail('There is no current PIN set. Use --new-pin to set one.')
 
     if controller.has_pin and pin is None and not is_fips:
         pin = _prompt_current_pin()
