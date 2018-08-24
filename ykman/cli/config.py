@@ -146,7 +146,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         if lock_code:
             ctx.fail(
                 'There is no current lock code set. '
-                'Use -n/--new-lock-code to set one.')
+                'Use --new-lock-code to set one.')
         else:
             if new_lock_code:
                 set_lock_code(new_lock_code)
@@ -260,11 +260,11 @@ def usb(
     is_locked = dev.config.configuration_locked
 
     if force and is_locked and not lock_code:
-        ctx.fail('Configuration is locked - please supply the -L/--lock-code '
+        ctx.fail('Configuration is locked - please supply the --lock-code '
                  'option.')
     if lock_code and not is_locked:
         ctx.fail('Configuration is not locked - please remove the '
-                 '-L/--lock-code option.')
+                 '--lock-code option.')
 
     force or click.confirm(f_confirm, abort=True)
 
@@ -353,11 +353,11 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
     is_locked = dev.config.configuration_locked
 
     if force and is_locked and not lock_code:
-        ctx.fail('Configuration is locked - please supply the -L/--lock-code '
+        ctx.fail('Configuration is locked - please supply the --lock-code '
                  'option.')
     if lock_code and not is_locked:
         ctx.fail('Configuration is not locked - please remove the '
-                 '-L/--lock-code option.')
+                 '--lock-code option.')
 
     force or click.confirm(f_confirm, abort=True)
 

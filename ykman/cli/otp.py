@@ -523,7 +523,7 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
     controller = ctx.obj['controller']
 
     if (new_access_code is not None) and delete_access_code:
-        ctx.fail('-A/--new-access-code conflicts with --delete-access-code.')
+        ctx.fail('--new-access-code conflicts with --delete-access-code.')
 
     if not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to update settings on an empty slot.')
