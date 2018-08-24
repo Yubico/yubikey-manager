@@ -158,15 +158,27 @@ def swap(ctx):
 @otp.command()
 @click_slot_argument
 @click.pass_context
-def ndef(ctx, slot):
+@click.option(
+    '-p', '--prefix', help='Added before the NDEF payload. Typically a URI.')
+def ndef(ctx, slot, prefix):
     """
     Select slot configuration to use for NDEF.
+
+    The default prefix will be used if no prefix is specified.
     """
+    dev = ctx.obj['dev']
     controller = ctx.obj['controller']
+    if not dev.config.nfc_supported:
+        ctx.fail('NFC interface not available.')
+
     if not controller.slot_status[slot - 1]:
         ctx.fail('Slot {} is empty.'.format(slot))
+
     try:
-        controller.configure_ndef_slot(slot)
+        if prefix:
+            controller.configure_ndef_slot(slot, prefix)
+        else:
+            controller.configure_ndef_slot(slot)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
