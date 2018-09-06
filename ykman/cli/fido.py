@@ -291,7 +291,7 @@ def unlock(ctx, pin):
     controller = ctx.obj['controller']
     if not controller.is_fips:
         ctx.fail('This is not a YubiKey FIPS, and therefore'
-                 'does not support a U2F PIN.')
+                 ' does not support a U2F PIN.')
 
     if pin is None:
         pin = _prompt_current_pin('Enter your PIN')
