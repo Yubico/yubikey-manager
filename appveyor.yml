@@ -16,12 +16,20 @@ environment:
       PYTHON: C:\Python36
       WIN_ARCH: win32
       LIBUSB_DLL_FOLDER: MS32
+      DEPLOY: true
 
     - platform: x64
       APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
       PYTHON: C:\Python36-x64
       WIN_ARCH: win64
       LIBUSB_DLL_FOLDER: MS64
+      DEPLOY: true
+
+    - platform: x86
+      PYTHON: C:\Python27
+      WIN_ARCH: win32
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
+      LIBUSB_DLL_FOLDER: MS32
 
 init:
   - set PATH=%PYTHON%;%PYTHON%\Scripts;%PATH%
@@ -42,10 +50,13 @@ install:
 
 build_script:
   - pip install .
+
+test_script:
+  - python setup.py test
+
+before_deploy:
   - pip install pyinstaller
   - pyinstaller --console --onefile --clean ykman.spec
-
-after_build:
   - set ARTIFACT_NAME=%APPVEYOR_REPO_BRANCH%-%WIN_ARCH%
   - if defined APPVEYOR_REPO_TAG_NAME set ARTIFACT_NAME=%APPVEYOR_REPO_TAG_NAME%-%WIN_ARCH%
   - 7z a yubikey-manager-%ARTIFACT_NAME%.zip .\dist\*
@@ -61,3 +72,5 @@ deploy:
     folder: "yubikey-manager"
     region: eu-west-1
     set_public: true
+    on:
+      DEPLOY: true
