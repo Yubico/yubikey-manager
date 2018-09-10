@@ -223,17 +223,11 @@ def delete(ctx, slot, force):
 @click.option(
     '-G', '--generate-key', is_flag=True, required=False,
     help='Generate a random secret key. Conflicts with --key.')
-@click.option(
-    '-u', '--upload', is_flag=True,
-    help='Upload credential to YubiCloud, using a web browser.')
-@click.option(
-    '-l', '--upload-link', is_flag=True,
-    help='Generate a link for uploading to YubiCloud.')
 @click_force_option
 @click.pass_context
 def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             serial_public_id, generate_private_id,
-            generate_key, upload, upload_link):
+            generate_key):
     """
     Program a Yubico OTP credential.
 
@@ -313,12 +307,6 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             b2a_hex(private_id).decode('ascii'),
             b2a_hex(key).decode('ascii'),
             dev.serial)
-
-    if upload_link:
-        click.echo('Upload link: {}'.format(link))
-
-    if upload:
-        click.launch(link)
 
 
 @otp.command()
