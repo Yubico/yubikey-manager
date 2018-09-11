@@ -200,6 +200,10 @@ def reset(ctx, force):
     inserted, and requires a touch on the YubiKey.
     """
 
+    n_keys = len(list(get_descriptors()))
+    if n_keys > 1:
+        ctx.fail('Only one YubiKey can be connected to perform a reset.')
+
     if not force:
         if not click.confirm('WARNING! This will delete all FIDO credentials, '
                              'including FIDO U2F credentials, and restore '
