@@ -1,39 +1,78 @@
 language: python
-dist: trusty
-sudo: required
 
-services:
-  - docker
-
-python:
-  - "2.7"
-  - "3.4"
-  - "3.5"
-  - "3.6"
-
-cache:
-  directories:
-    - $HOME/.cache/pip
+matrix:
+    include:
+        - os: linux
+          sudo: required
+          python: 3.6
+          services: docker
+          env: DEPLOY=true
+        - os: linux
+          sudo: required
+          python: 2.7
+        - os: osx
+          sudo: required
+          language: generic
+          env: PY_VERSION="3.6.6" DEPLOY=true
+          osx_image: xcode7.3
 
 before_install:
-  - docker build -t xenial -f docker/xenial/Dockerfile .
-  - sudo apt-add-repository -y ppa:yubico/stable
-  - sudo apt-get update
-  - sudo apt-get install -qq libykpers-1-1 python-pyscard swig libpcsclite-dev
-  - pip install --disable-pip-version-check --upgrade pip
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
+    then
+      brew update
+      brew install ykpers libyubikey libusb swig
+      brew upgrade pyenv
+      eval "$(pyenv init -)"
+      env PYTHON_CONFIGURE_OPTS="--enable-framework CC=clang" pyenv install $PY_VERSION
+      pyenv global $PY_VERSION
+    fi
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]]
+    then
+      docker build -t xenial -f docker/xenial/Dockerfile .
+      sudo apt-add-repository -y ppa:yubico/stable
+      sudo apt-get update
+      sudo apt-get install -qq libykpers-1-1 python-pyscard swig libpcsclite-dev
+      pip install --disable-pip-version-check --upgrade pip
+    fi
 
 install:
-  - pip install pre-commit
-  - pip install -e .
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]]
+    then
+      pip install pre-commit
+      pre-commit run --all-files
+      pip install -e .
+      python setup.py test
+    fi
 
 script:
-  - pre-commit run --all-files
-  - python setup.py test
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
+    then
+      find /usr/local/Cellar/json-c/ -name '*.dylib' -exec sudo cp '{}' . ';'
+      find /usr/local/Cellar/ykpers/ -name '*.dylib' -exec sudo cp '{}' . ';'
+      find /usr/local/Cellar/libyubikey/ -name '*.dylib' -exec sudo cp '{}' . ';'
+      pip3 install .
+      pip3 install pyinstaller
+      pyinstaller --console --onefile --clean ykman.spec
+    fi
 
 after_success:
   - mkdir deploy
-  - id=$(docker create xenial)
-  - docker cp $id:/yubikey-manager-debian-packages.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-deb.tar.gz
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
+    then
+      cd dist && zip yubikey-manager-$TRAVIS_BRANCH-mac.zip ykman && cd ..
+      cp dist/yubikey-manager-$TRAVIS_BRANCH-mac.zip deploy/
+    fi
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]]
+    then
+      id=$(docker create xenial)
+      docker cp $id:/yubikey-manager-debian-packages.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-deb.tar.gz
+    fi
 
 deploy:
   provider: s3
@@ -47,3 +86,4 @@ deploy:
   upload-dir: "yubikey-manager"
   on:
     all_branches: true
+    condition: $DEPLOY = true
