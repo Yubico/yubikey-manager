@@ -301,13 +301,6 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
-    link = ('https://upload.yubico.com/'
-            '#prefix={};uid={};aeskey={};serial={}').format(
-            modhex_encode(public_id),
-            b2a_hex(private_id).decode('ascii'),
-            b2a_hex(key).decode('ascii'),
-            dev.serial)
-
 
 @otp.command()
 @click_slot_argument
