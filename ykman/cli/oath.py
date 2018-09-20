@@ -34,7 +34,8 @@ from .util import (
     click_force_option, click_skip_on_help,
     click_callback, click_parse_b32_key,
     prompt_for_touch, UpperCaseChoice)
-from ..driver_ccid import APDUError,  SW_APPLICATION_NOT_FOUND
+from ..driver_ccid import (
+    APDUError,  SW_APPLICATION_NOT_FOUND, SW_SECURITY_CONDITION_NOT_SATISFIED)
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
 from ..settings import Settings
@@ -339,15 +340,20 @@ def code(ctx, show_hidden, query, single):
         cred, code = creds[0]
         if cred.touch:
             prompt_for_touch()
-        if cred.oath_type == OATH_TYPE.HOTP:
-            # HOTP might require touch, we don't know.
-            # Assume yes after 500ms.
-            hotp_touch_timer = Timer(0.500, prompt_for_touch)
-            hotp_touch_timer.start()
-            creds = [(cred, controller.calculate(cred))]
-            hotp_touch_timer.cancel()
-        elif code is None:
-            creds = [(cred, controller.calculate(cred))]
+        try:
+            if cred.oath_type == OATH_TYPE.HOTP:
+                # HOTP might require touch, we don't know.
+                # Assume yes after 500ms.
+                hotp_touch_timer = Timer(0.500, prompt_for_touch)
+                hotp_touch_timer.start()
+                creds = [(cred, controller.calculate(cred))]
+                hotp_touch_timer.cancel()
+            elif code is None:
+                creds = [(cred, controller.calculate(cred))]
+        except APDUError as e:
+            if e.sw == SW_SECURITY_CONDITION_NOT_SATISFIED:
+                ctx.fail('Touch credential timed out!')
+
     elif single:
         _error_multiple_hits(ctx, [cr for cr, c in creds])
 
