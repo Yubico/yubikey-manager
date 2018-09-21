@@ -1,5 +1,6 @@
 * Version 1.0.0 (unreleased)
- 
+  OATH: Give a proper error message when a touch credential times out.
+
 * Version 0.7.1 (released 2018-07-09)
  ** Support for YubiKey FIPS.
  ** OTP: Allow setting and removing access codes on the slots.
