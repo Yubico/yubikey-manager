@@ -98,6 +98,8 @@ def device_config(usb_enabled=None, nfc_enabled=None, flags=None,
             raise ValueError('Config lock key must be 16 bytes')
         _set_value(values, TAG.CONFIG_LOCK, config_lock)
     if usb_enabled is not None:
+        # Always add the unused CCID transport
+        usb_enabled |= TRANSPORT.CCID
         _set_value(values, TAG.USB_ENABLED, usb_enabled)
     if nfc_enabled is not None:
         _set_value(values, TAG.NFC_ENABLED, nfc_enabled)
