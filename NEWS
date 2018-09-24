@@ -1,5 +1,9 @@
-* Version 1.0.0 (unreleased)
-  OATH: Give a proper error message when a touch credential times out.
+* Version 1.0.0 (released 2018-09-24)
+ ** Add support for YubiKey 5 Series
+ ** Config: Add flag to generate a random configuration lock
+ ** OATH: Give a proper error message when a touch credential times out
+ ** NDEF: Allow setting the NDEF prefix from the CLI
+ ** FIDO: Block reset when multiple YubiKeys are connected
 
 * Version 0.7.1 (released 2018-07-09)
  ** Support for YubiKey FIPS.
