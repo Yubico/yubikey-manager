@@ -69,6 +69,7 @@ Description: Python 3 library for configuring a YubiKey
 Package: yubikey-manager
 Architecture: all
 Depends: ${misc:Depends},
+         ${python3:Depends},
          pcscd,
          python3-click,
          python3-yubikey-manager
