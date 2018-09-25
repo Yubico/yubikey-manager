@@ -5,6 +5,7 @@ image:https://ci.appveyor.com/api/projects/status/fp7nb97m8372axq8?svg=true["App
 Python library and command line tool for configuring a YubiKey. If you're looking for the full graphical application, which also includes the command line tool, it's https://developers.yubico.com/yubikey-manager-qt/[here].
 
 === Usage
+For more usage information and examples, see the https://support.yubico.com/support/solutions/articles/15000012643-yubikey-manager-cli-ykman-user-guide[YubiKey Manager CLI User Manual].
 ....
 Usage: ykman [OPTIONS] COMMAND [ARGS]...
 
