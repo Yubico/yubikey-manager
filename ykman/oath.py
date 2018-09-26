@@ -137,14 +137,15 @@ class CredentialData(object):
             issuer, name = name.split(':', 1)
 
         return cls(
-                secret=parse_b32_key(params['secret']),
-                issuer=params.get('issuer', issuer),
-                name=name,
-                oath_type=OATH_TYPE[parsed.hostname.upper()],
-                algorithm=ALGO[params.get('algorithm', 'SHA1').upper()],
-                digits=int(params.get('digits', 6)),
-                period=int(params.get('period', 30)),
-                counter=int(params.get('counter', 0)))
+            secret=parse_b32_key(params['secret']),
+            issuer=params.get('issuer', issuer),
+            name=name,
+            oath_type=OATH_TYPE[parsed.hostname.upper()],
+            algorithm=ALGO[params.get('algorithm', 'SHA1').upper()],
+            digits=int(params.get('digits', 6)),
+            period=int(params.get('period', 30)),
+            counter=int(params.get('counter', 0))
+        )
 
     def make_key(self):
         key = self.name
