@@ -131,19 +131,20 @@ class CredentialData(object):
             raise ValueError('Invalid URI scheme')
 
         params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
-        params['secret'] = parse_b32_key(params['secret'])
-        params['algorithm'] = ALGO[params.get('algorithm', 'SHA1').upper()]
         issuer = None
         name = unquote(parsed.path)[1:]  # Unquote and strip leading /
         if ':' in name:
             issuer, name = name.split(':', 1)
-        params['issuer'] = params.get('issuer', issuer)
-        params['name'] = name
-        params['oath_type'] = OATH_TYPE[parsed.hostname.upper()]
-        params['digits'] = int(params.get('digits', 6))
-        params['period'] = int(params.get('period', 30))
-        params['counter'] = int(params.get('counter', 0))
-        return cls(**params)
+
+        return cls(
+                secret=parse_b32_key(params['secret']),
+                issuer=params.get('issuer', issuer),
+                name=name,
+                oath_type=OATH_TYPE[parsed.hostname.upper()],
+                algorithm=ALGO[params.get('algorithm', 'SHA1').upper()],
+                digits=int(params.get('digits', 6)),
+                period=int(params.get('period', 30)),
+                counter=int(params.get('counter', 0)))
 
     def make_key(self):
         key = self.name
