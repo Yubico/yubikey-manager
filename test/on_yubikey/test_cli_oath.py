@@ -17,6 +17,11 @@ URI_TOTP_EXAMPLE_B = (
         'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
         '&algorithm=SHA1&digits=6&period=30')
 
+URI_TOTP_EXAMPLE_EXTRA_PARAMETER = (
+        'otpauth://totp/ACME%20Co:john.doe.extra@email.com?'
+        'secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=ACME%20Co'
+        '&algorithm=SHA1&digits=6&period=30&skid=JKS3424d')
+
 PASSWORD = 'aaaa'
 
 
@@ -67,6 +72,11 @@ class TestOATH(DestructiveYubikeyTestCase):
         ykman_cli('oath', 'uri', URI_TOTP_EXAMPLE)
         creds = ykman_cli('oath', 'list')
         self.assertIn('john.doe', creds)
+
+    def test_oath_add_uri_totp_extra_parameter(self):
+        ykman_cli('oath', 'uri', URI_TOTP_EXAMPLE_EXTRA_PARAMETER)
+        creds = ykman_cli('oath', 'list')
+        self.assertIn('john.doe.extra', creds)
 
     def test_oath_add_uri_totp_prompt(self):
         ykman_cli('oath', 'uri', input=URI_TOTP_EXAMPLE_B)
