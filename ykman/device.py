@@ -271,14 +271,18 @@ class YubiKey(object):
                 self.device_name = 'YubiKey Preview'
             elif self.version >= (5, 1, 0):
                 logger.debug('Identified YubiKey 5')
-                if config.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
-                    self.device_name = 'YubiKey 5 NFC'
+                self.device_name = 'YubiKey 5'
+                if config.form_factor == FORM_FACTOR.USB_A_KEYCHAIN \
+                    and not config.nfc_supported:
+                    self.device_name += 'A'
+                elif config.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
+                    self.device_name += ' NFC'
                 elif config.form_factor == FORM_FACTOR.USB_A_NANO:
-                    self.device_name = 'YubiKey 5 Nano'
+                    self.device_name += ' Nano'
                 elif config.form_factor == FORM_FACTOR.USB_C_KEYCHAIN:
-                    self.device_name = 'YubiKey 5C'
+                    self.device_name += 'C'
                 elif config.form_factor == FORM_FACTOR.USB_C_NANO:
-                    self.device_name = 'YubiKey 5C Nano'
+                    self.device_name += 'C Nano'
             elif self.is_fips:
                 self.device_name = 'YubiKey FIPS'
 
