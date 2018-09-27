@@ -85,7 +85,7 @@ def click_parse_uri(ctx, param, val):
               'YubiKey.')
 def oath(ctx, password):
     """
-    Manage OATH application.
+    Manage OATH Application.
     """
     try:
         controller = OathController(ctx.obj['dev'].driver)

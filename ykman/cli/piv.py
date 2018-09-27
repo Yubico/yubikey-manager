@@ -104,7 +104,7 @@ click_touch_policy_option = click.option(
 @click_skip_on_help
 def piv(ctx):
     """
-    Manage PIV application.
+    Manage PIV Application.
     """
     try:
         controller = PivController(ctx.obj['dev'].driver)

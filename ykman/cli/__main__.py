@@ -125,12 +125,12 @@ def _run_cmd_for_single(ctx, cmd, transports):
 @click.option('-d', '--device', type=int, metavar='SERIAL')
 @click.option('-l', '--log-level', default=None,
               type=UpperCaseChoice(ykman.logging_setup.LOG_LEVEL_NAMES),
-              help='Enable logging at given verbosity level',
+              help='Enable logging at given verbosity level.',
               )
 @click.option('--log-file', default=None,
               type=str, metavar='FILE',
               help='Write logs to the given FILE instead of standard error; '
-                   'ignored unless --log-level is also set',
+                   'ignored unless --log-level is also set.',
               )
 @click.pass_context
 @click_skip_on_help

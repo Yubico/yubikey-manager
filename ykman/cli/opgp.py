@@ -82,7 +82,7 @@ def int_in_range(minval, maxval):
 @click_skip_on_help
 def openpgp(ctx):
     """
-    Manage OpenPGP application.
+    Manage OpenPGP Application.
     """
     try:
         controller = OpgpController(ctx.obj['dev'].driver)
