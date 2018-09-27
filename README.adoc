@@ -15,20 +15,20 @@ Options:
   -v, --version
   -d, --device SERIAL
   -l, --log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
-                                  Enable logging at given verbosity level
-  --log-file FILE                 Write logs to the given FILE instead of standard error;
-                                  ignored unless --log-level is also set
+                                  Enable logging at given verbosity level.
+  --log-file FILE                 Write logs to the given FILE instead of standard error; ignored unless --log-level is also set.
   -h, --help                      Show this message and exit.
 
 Commands:
+  config   Enable/Disable applications.
   fido     Manage FIDO applications.
   info     Show general information.
   list     List connected YubiKeys.
   mode     Manage connection modes (USB Interfaces).
-  oath     Manage OATH application.
-  openpgp  Manage OpenPGP application.
+  oath     Manage OATH Application.
+  openpgp  Manage OpenPGP Application.
   otp      Manage OTP Application.
-  piv      Manage PIV application.
+  piv      Manage PIV Application.
 ....
 
 === Installation
