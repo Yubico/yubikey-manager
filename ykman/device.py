@@ -259,6 +259,17 @@ class YubiKey(object):
                              APPLICATION.OPGP | APPLICATION.PIV)
         config._set(TAG.USB_ENABLED, usb_enabled)
 
+        # Workaround for invalid configurations.
+        # Assume all form factors except USB_A_KEYCHAIN
+        # does not support NFC.
+        if config.form_factor in (
+                FORM_FACTOR.USB_A_NANO,
+                FORM_FACTOR.USB_C_KEYCHAIN,
+                FORM_FACTOR.USB_C_NANO,
+                ):
+            config._set(TAG.NFC_SUPPORTED, 0)
+            config._set(TAG.NFC_ENABLED, 0)
+
         self._config = config
 
         if self._key_type == YUBIKEY.SKY:
