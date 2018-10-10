@@ -1,4 +1,4 @@
-* Version 1.0.1 (unreleased)
+* Version 1.0.1 (released 2018-10-10)
  ** Support for YubiKey 5A
  ** OATH: Ignore extra parameters in URI parsing
  ** Bugfix: Never say that NFC is supported for YubiKeys without NFC
