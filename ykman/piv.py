@@ -256,6 +256,16 @@ class SW(IntEnum):
     AUTHENTICATION_BLOCKED = 0x6983
     INCORRECT_PARAMETERS = 0x6a80
 
+    @classmethod
+    def is_verify_fail(cls, sw):
+        return 0x63c0 <= sw <= 0x63c3
+
+    @classmethod
+    def tries_left(cls, sw):
+        if not cls.is_verify_fail(sw):
+            raise ValueError('Not a verify fail status word: %x' % sw)
+        return sw - 0x63c0
+
 
 CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
 
