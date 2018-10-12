@@ -25,6 +25,23 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from .util import SW
+
+
+class AuthenticationFailed(Exception):
+    def __init__(self, message, sw, applet_version):
+        super().__init__(message)
+        self.tries_left = (
+            SW.tries_left(sw, applet_version)
+            if SW.is_verify_fail(sw, applet_version)
+            else None)
+
+
+class AuthenticationBlocked(AuthenticationFailed):
+    def __init__(self, message, sw):
+        # Dummy applet_version since sw will always be "authentication blocked"
+        super().__init__(message, sw, ())
+
 
 class UnsupportedAlgorithm(Exception):
     def __init__(self, message, algorithm_id=None, key=None, ):
@@ -49,3 +66,13 @@ class UnknownTouchPolicy(Exception):
         super().__init__(
             'Unsupported touch policy: %s' % policy_name)
         self.policy_name = policy_name
+
+
+class WrongPin(AuthenticationFailed):
+    def __init__(self, sw, applet_version):
+        super().__init__('Incorrect PIN', sw, applet_version)
+
+
+class WrongPuk(AuthenticationFailed):
+    def __init__(self, sw, applet_version):
+        super().__init__('Incorrect PUK', sw, applet_version)

@@ -33,7 +33,8 @@ from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from .errors import (
-    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy)
+    AuthenticationBlocked, AuthenticationFailed, UnsupportedAlgorithm,
+    UnknownPinPolicy, UnknownTouchPolicy, WrongPin)
 from .util import SW
 from collections import namedtuple
 from cryptography import x509
@@ -493,10 +494,15 @@ class PivController(object):
     def verify(self, pin, touch_callback=None):
         try:
             self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
-        except APDUError:
-            raise ValueError(
-                'Pin verification failed. {} tries left.'.format(
-                        self.get_pin_tries()))
+        except APDUError as e:
+            if SW.is_verify_fail(e.sw, self.version):
+                raise WrongPin(e.sw, self.version)
+            else:
+                raise AuthenticationFailed(
+                    'Pin verification failed. {} tries left.'.format(
+                        self.get_pin_tries()),
+                    e.sw,
+                    self.version)
 
         if self.has_derived_key and not self._authenticated:
             self.authenticate(
@@ -535,8 +541,12 @@ class PivController(object):
         except APDUError as e:
             tries = SW.tries_left(e.sw, self.version)
             if tries == 0:
-                raise ValueError('PUK is blocked.')
-            raise ValueError('Unblock PIN failed, {} tries left.'.format(tries))
+                raise AuthenticationBlocked('PUK is blocked.', e.sw)
+
+            raise AuthenticationFailed(
+                'Unblock PIN failed, {} tries left.'.format(tries),
+                e.sw,
+                self.version)
 
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
