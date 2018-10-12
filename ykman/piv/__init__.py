@@ -28,8 +28,8 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
-from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
-from .util import (
+from ..driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
+from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from collections import namedtuple
