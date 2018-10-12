@@ -32,7 +32,8 @@ from ..driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
-from .errors import UnsupportedAlgorithm
+from .errors import (
+    UnsupportedAlgorithm, UnknownPinPolicy)
 from .util import SW
 from collections import namedtuple
 from cryptography import x509
@@ -227,7 +228,7 @@ class PIN_POLICY(IntEnum):
             return cls.ONCE
         if pin_policy == 'ALWAYS':
             return cls.ALWAYS
-        raise ValueError('Unsupported pin policy!')
+        raise UnknownPinPolicy(pin_policy)
 
 
 @unique

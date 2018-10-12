@@ -35,3 +35,10 @@ class UnsupportedAlgorithm(Exception):
 
         self.algorithm_id = algorithm_id
         self.key = key
+
+
+class UnknownPinPolicy(Exception):
+    def __init__(self, policy_name):
+        super().__init__(
+            'Unsupported pin policy: %s' % policy_name)
+        self.policy_name = policy_name
