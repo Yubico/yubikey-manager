@@ -42,3 +42,10 @@ class UnknownPinPolicy(Exception):
         super().__init__(
             'Unsupported pin policy: %s' % policy_name)
         self.policy_name = policy_name
+
+
+class UnknownTouchPolicy(Exception):
+    def __init__(self, policy_name):
+        super().__init__(
+            'Unsupported touch policy: %s' % policy_name)
+        self.policy_name = policy_name

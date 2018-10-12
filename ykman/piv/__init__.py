@@ -33,7 +33,7 @@ from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from .errors import (
-    UnsupportedAlgorithm, UnknownPinPolicy)
+    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy)
 from .util import SW
 from collections import namedtuple
 from cryptography import x509
@@ -248,7 +248,7 @@ class TOUCH_POLICY(IntEnum):
             return cls.ALWAYS
         if touch_policy == 'CACHED':
             return cls.CACHED
-        raise ValueError('Unsupported touch policy!')
+        raise UnknownTouchPolicy(touch_policy)
 
 
 CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
