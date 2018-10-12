@@ -32,6 +32,7 @@ from ..driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
+from .util import SW
 from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -243,40 +244,6 @@ class TOUCH_POLICY(IntEnum):
         if touch_policy == 'CACHED':
             return cls.CACHED
         raise ValueError('Unsupported touch policy!')
-
-
-@unique
-class SW(IntEnum):
-    NO_SPACE = 0x6a84
-    COMMAND_ABORTED = 0x6f00
-    MORE_DATA = 0x61
-    INVALID_INSTRUCTION = 0x6d00
-    NOT_FOUND = 0x6a82
-    ACCESS_DENIED = 0x6982
-    AUTHENTICATION_BLOCKED = 0x6983
-    INCORRECT_PARAMETERS = 0x6a80
-
-    @staticmethod
-    def is_verify_fail(sw, applet_version):
-        if applet_version < (1, 0, 4):
-            return 0x6300 <= sw <= 0x63ff
-        else:
-            return 0x63c0 <= sw <= 0x63cf
-
-    @classmethod
-    def tries_left(cls, sw, applet_version):
-        # Blocked, 0 tries left.
-        if sw == SW.AUTHENTICATION_BLOCKED:
-            return 0
-
-        if not cls.is_verify_fail(sw, applet_version):
-            raise ValueError(
-                'Cannot read remaining tries from status word: %x' % sw)
-
-        if applet_version < (1, 0, 4):
-            return sw & 0xff
-        else:
-            return sw & 0xf
 
 
 CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
