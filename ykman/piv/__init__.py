@@ -32,6 +32,7 @@ from ..driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
 from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
+from .errors import UnsupportedAlgorithm
 from .util import SW
 from collections import namedtuple
 from cryptography import x509
@@ -91,7 +92,8 @@ class ALGO(IntEnum):
                 return cls.ECCP256
             elif curve_name == 'secp384r1':
                 return cls.ECCP384
-        raise ValueError('Unsupported key type!')
+        raise UnsupportedAlgorithm(
+            'Unsupported key type: %s' % type(key), key=key)
 
     @classmethod
     def from_string(cls, algorithm):
@@ -103,7 +105,9 @@ class ALGO(IntEnum):
             return cls.ECCP256
         if algorithm == 'ECCP384':
             return cls.ECCP384
-        raise ValueError('Unsupported algorithm!')
+        raise UnsupportedAlgorithm(
+            'Unsupported algorithm name: %s' % algorithm,
+            algorithm_id=algorithm)
 
     @classmethod
     def is_rsa(cls, algorithm_int):
@@ -273,7 +277,10 @@ def _pack_pin(pin):
 def _get_key_data(key):
     if isinstance(key, rsa.RSAPrivateKey):
         if key.public_key().public_numbers().e != 65537:
-            raise ValueError('Unsupported RSA exponent!')
+            raise UnsupportedAlgorithm(
+                'Unsupported RSA exponent: %d'
+                % key.public_key().public_numbers().e,
+                key=key)
 
         if key.key_size == 1024:
             algo = ALGO.RSA1024
@@ -282,7 +289,8 @@ def _get_key_data(key):
             algo = ALGO.RSA2048
             ln = 128
         else:
-            raise ValueError('Unsupported RSA key size!')
+            raise UnsupportedAlgorithm(
+                'Unsupported RSA key size: %d' % key.key_size, key=key)
 
         priv = key.private_numbers()
         data = Tlv(0x01, int_to_bytes(priv.p, ln)) + \
@@ -298,11 +306,12 @@ def _get_key_data(key):
             algo = ALGO.ECCP384
             ln = 48
         else:
-            raise ValueError('Unsupported elliptic curve!')
+            raise UnsupportedAlgorithm(
+                    'Unsupported elliptic curve: %s', key.curve, key=key)
         priv = key.private_numbers()
         data = Tlv(0x06, int_to_bytes(priv.private_value, ln))
     else:
-        raise ValueError('Unsupported key type!')
+        raise UnsupportedAlgorithm('Unsupported key type!', key=key)
     return algo, data
 
 
@@ -315,7 +324,8 @@ def _dummy_key(algorithm):
         return ec.generate_private_key(ec.SECP256R1(), default_backend())
     if algorithm == ALGO.ECCP384:
         return ec.generate_private_key(ec.SECP384R1(), default_backend())
-    raise ValueError('Unsupported algorithm!')
+    raise UnsupportedAlgorithm(
+        'Unsupported algorithm: %s' % algorithm, algorithm_id=algorithm)
 
 
 def _pkcs1_15_pad(algorithm, message):
@@ -698,7 +708,10 @@ class PivController(object):
                 curve(),
                 resp[5:]
             ).public_key(default_backend())
-        raise ValueError('Invalid algorithm!')
+
+        raise UnsupportedAlgorithm(
+            'Invalid algorithm: %s'.format(algorithm),
+            algorithm_id=algorithm)
 
     def generate_self_signed_certificate(
             self, slot, public_key, common_name, valid_from, valid_to,

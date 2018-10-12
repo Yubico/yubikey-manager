@@ -24,3 +24,14 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+
+
+class UnsupportedAlgorithm(Exception):
+    def __init__(self, message, algorithm_id=None, key=None, ):
+        super().__init__(message)
+        if algorithm_id is None and key is None:
+            raise ValueError(
+                'At least one of algorithm_id and key must be given.')
+
+        self.algorithm_id = algorithm_id
+        self.key = key
