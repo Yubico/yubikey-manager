@@ -33,8 +33,8 @@ from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from .errors import (
-    AuthenticationBlocked, AuthenticationFailed, UnsupportedAlgorithm,
-    UnknownPinPolicy, UnknownTouchPolicy, WrongPin)
+    AuthenticationBlocked, AuthenticationFailed, BadFormat,
+    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin)
 from .util import SW
 from collections import namedtuple
 from cryptography import x509
@@ -272,7 +272,8 @@ def _pack_pin(pin):
     if isinstance(pin, six.text_type):
         pin = pin.encode('utf8')
     if len(pin) > 8:
-        raise ValueError('PIN/PUK too large (max 8 bytes, was %d)' % len(pin))
+        raise BadFormat(
+            'PIN/PUK too large (max 8 bytes, was %d)' % len(pin), pin)
     return pin.ljust(8, b'\xff')
 
 
@@ -608,8 +609,10 @@ class PivController(object):
                                  'store_on_device was not True')
 
         if len(new_key) != 24:
-            raise ValueError('Management key must be exactly 24 bytes long, '
-                             'was: {}'.format(len(new_key)))
+            raise BadFormat(
+                'Management key must be exactly 24 bytes long, was: {}'.format(
+                    len(new_key)),
+                new_key)
 
         if store_on_device or (not store_on_device and self.has_stored_key):
             # Ensure we have access to protected data before overwriting key
@@ -815,7 +818,9 @@ class PivController(object):
 
     def _raw_sign_decrypt(self, slot, algorithm, payload, condition):
         if not condition(len(payload.value)):
-            raise ValueError('Input has invalid length!')
+            raise BadFormat(
+                'Input has invalid length for algorithm %s' % algorithm,
+                len(payload.value))
 
         data = Tlv(TAG.DYN_AUTH, Tlv(0x82) + payload)
         resp = self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data)

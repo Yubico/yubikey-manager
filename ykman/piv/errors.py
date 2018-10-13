@@ -43,6 +43,12 @@ class AuthenticationBlocked(AuthenticationFailed):
         super().__init__(message, sw, ())
 
 
+class BadFormat(Exception):
+    def __init__(self, message, bad_value):
+        super().__init__(message)
+        self.bad_value = bad_value
+
+
 class UnsupportedAlgorithm(Exception):
     def __init__(self, message, algorithm_id=None, key=None, ):
         super().__init__(message)
