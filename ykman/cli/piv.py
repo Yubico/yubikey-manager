@@ -31,6 +31,8 @@ from ..util import TRANSPORT, parse_private_key, parse_certificate
 from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
+from ..piv.errors import (
+    AuthenticationBlocked, WrongPuk)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
@@ -613,13 +615,18 @@ def change_puk(ctx, puk, new_puk):
             show_default=False, confirmation_prompt=True,
             err=True)
 
-    (success, retries) = controller.change_puk(puk, new_puk)
-
-    if success:
+    try:
+        controller.change_puk(puk, new_puk)
         click.echo('New PUK set.')
-    else:
-        logger.debug('Failed to change PUK, %d tries left', retries)
-        ctx.fail('PUK change failed - %d tries left.' % retries)
+
+    except AuthenticationBlocked as e:
+        logger.debug('PUK is blocked.', exc_info=e)
+        ctx.fail('PUK is blocked.')
+
+    except WrongPuk as e:
+        logger.debug(
+            'Failed to change PUK, %d tries left', e.tries_left, exc_info=e)
+        ctx.fail('PUK change failed - %d tries left.' % e.tries_left)
 
 
 @piv.command('change-management-key')

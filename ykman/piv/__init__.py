@@ -34,9 +34,9 @@ from ..util import (
     ensure_not_cve201715361_vulnerable_firmware_version)
 from .errors import (
     AuthenticationBlocked, AuthenticationFailed, BadFormat,
-    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin)
+    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin,
+    WrongPuk)
 from .util import SW
-from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
@@ -250,9 +250,6 @@ class TOUCH_POLICY(IntEnum):
         if touch_policy == 'CACHED':
             return cls.CACHED
         raise UnknownTouchPolicy(touch_policy)
-
-
-CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
 
 
 PIN = 0x80
@@ -527,13 +524,14 @@ class PivController(object):
         try:
             self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
                           _pack_pin(old_puk) + _pack_pin(new_puk))
-            return CodeChangeResult(True, None)
         except APDUError as e:
-            retries = (SW.tries_left(e.sw, self.version)
-                       if SW.is_verify_fail(e.sw, self.version) else None)
-            logger.debug('PUK change failed, %d tries remaining', retries,
-                         exc_info=e)
-            return CodeChangeResult(False, retries)
+            if e.sw == SW.AUTHENTICATION_BLOCKED:
+                raise AuthenticationBlocked('PUK is blocked.', e.sw)
+
+            elif SW.is_verify_fail(e.sw, self.version):
+                raise WrongPuk(e.sw, self.version)
+
+            raise
 
     def unblock_pin(self, puk, new_pin):
         try:
