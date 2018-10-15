@@ -33,9 +33,8 @@ from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from .errors import (
-    AuthenticationBlocked, AuthenticationFailed, BadFormat,
-    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin,
-    WrongPuk)
+    AuthenticationBlocked, BadFormat, UnsupportedAlgorithm, UnknownPinPolicy,
+    UnknownTouchPolicy, WrongPin, WrongPuk)
 from .util import SW
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -547,14 +546,13 @@ class PivController(object):
             self.send_cmd(
                 INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
         except APDUError as e:
-            tries = SW.tries_left(e.sw, self.version)
-            if tries == 0:
+            if e.sw == SW.AUTHENTICATION_BLOCKED:
                 raise AuthenticationBlocked('PUK is blocked.', e.sw)
 
-            raise AuthenticationFailed(
-                'Unblock PIN failed, {} tries left.'.format(tries),
-                e.sw,
-                self.version)
+            elif SW.is_verify_fail(e.sw, self.version):
+                raise WrongPuk(e.sw, self.version)
+
+            raise
 
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
