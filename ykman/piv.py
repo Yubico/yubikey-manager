@@ -256,12 +256,12 @@ class SW(IntEnum):
     AUTHENTICATION_BLOCKED = 0x6983
     INCORRECT_PARAMETERS = 0x6a80
 
-    @classmethod
-    def is_verify_fail(cls, sw):
+    @staticmethod
+    def is_verify_fail(sw):
         return 0x63c0 <= sw <= 0x63c3
 
-    @classmethod
-    def tries_left(cls, sw):
+    @staticmethod
+    def tries_left(sw):
         # Blocked, 0 tries left.
         if sw == SW.AUTHENTICATION_BLOCKED:
             return 0
