@@ -793,7 +793,11 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
 
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
-    except APDUError:
+    except WrongPin as e:
+        ctx.fail('PIN verification failed, {} tries left.'.format(e.tries_left))
+    except AuthenticationBlocked as e:
+        ctx.fail('PIN is blocked.')
+    except Exception:
         ctx.fail('PIN verification failed.')
 
 
