@@ -73,11 +73,11 @@ def click_parse_management_key(ctx, param, val):
     try:
         key = a2b_hex(val)
         if key and len(key) != 24:
-            return ValueError('Management key must be exactly 24 bytes '
-                              '(48 hexadecimal digits) long.')
+            raise ValueError('Management key must be exactly 24 bytes '
+                             '(48 hexadecimal digits) long.')
         return key
     except Exception:
-        return ValueError(val)
+        raise ValueError(val)
 
 
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
