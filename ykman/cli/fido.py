@@ -31,7 +31,7 @@ import logging
 from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
-from .util import click_skip_on_help, prompt_for_touch, click_force_option
+from .util import click_postpone_exection, prompt_for_touch, click_force_option
 from ..driver_ccid import (
     SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
     SW_AUTH_METHOD_BLOCKED, SW_WRONG_LENGTH)
@@ -49,20 +49,21 @@ PIN_MIN_LENGTH = 4
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_exection
 def fido(ctx):
     """
     Manage FIDO applications.
     """
-    if ctx.obj['dev'].is_fips:
+    dev = ctx.obj['dev'].get()
+    if dev.is_fips:
         try:
-            ctx.obj['controller'] = FipsU2fController(ctx.obj['dev'].driver)
+            ctx.obj['controller'] = FipsU2fController(dev.driver)
         except Exception as e:
             logger.debug('Failed to load FipsU2fController', exc_info=e)
             ctx.fail('Failed to load FIDO Application.')
     else:
         try:
-            ctx.obj['controller'] = Fido2Controller(ctx.obj['dev'].driver)
+            ctx.obj['controller'] = Fido2Controller(dev.driver)
         except Exception as e:
             logger.debug('Failed to load Fido2Controller', exc_info=e)
             ctx.fail('Failed to load FIDO 2 Application.')
@@ -74,6 +75,7 @@ def info(ctx):
     """
     Display status of FIDO2 application.
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
 
     if controller.is_fips:
@@ -109,6 +111,7 @@ def set_pin(ctx, pin, new_pin, u2f):
     6 characters long.
     """
 
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     is_fips = controller.is_fips
 
@@ -229,10 +232,12 @@ def reset(ctx, force):
             controller = controller_type(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
         else:
+            ctx.obj['dev'].get()
             controller = ctx.obj['controller']
             controller.reset(touch_callback=prompt_for_touch)
 
-    if ctx.obj['dev'].is_fips:
+    dev = ctx.obj['dev'].get()
+    if dev.is_fips:
         if not force:
             destroy_input = click.prompt(
                 'WARNING! This is a YubiKey FIPS device. This command will '
@@ -292,6 +297,7 @@ def unlock(ctx, pin):
     Unlock the YubiKey FIPS and allow U2F registration.
     """
 
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     if not controller.is_fips:
         ctx.fail('This is not a YubiKey FIPS, and therefore'

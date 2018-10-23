@@ -34,7 +34,7 @@ from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException)
-from .util import click_skip_on_help, UpperCaseChoice
+from .util import UpperCaseChoice
 from .info import info
 from .mode import mode
 from .otp import otp
@@ -119,6 +119,37 @@ def _run_cmd_for_single(ctx, cmd, transports):
         _disabled_transport(ctx, transports, cmd)
 
 
+class _DeviceResolver(object):
+
+    def __init__(self, ctx, subcmd, transports, serial):
+        self.ctx = ctx
+        self.subcmd = subcmd
+        self.transports = transports
+        self.serial = serial
+        self._dev = None
+        self.on_resolves = []
+
+    def get(self):
+        if self._dev is None:
+            if self.serial is not None:
+                self._dev = _run_cmd_for_serial(
+                    self.ctx,
+                    self.subcmd,
+                    self.transports,
+                    self.serial
+                )
+            else:
+                self._dev = _run_cmd_for_single(
+                    self.ctx,
+                    self.subcmd,
+                    self.transports
+                )
+            self.ctx.call_on_close(self._dev.close)
+            for f in self.on_resolves:
+                f()
+        return self._dev
+
+
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option('-v', '--version', is_flag=True, callback=print_version,
               expose_value=False, is_eager=True)
@@ -133,7 +164,6 @@ def _run_cmd_for_single(ctx, cmd, transports):
                    'ignored unless --log-level is also set.',
               )
 @click.pass_context
-@click_skip_on_help
 def cli(ctx, device, log_level, log_file):
     """
     Configure your YubiKey via the command line.
@@ -148,13 +178,7 @@ def cli(ctx, device, log_level, log_file):
 
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
-        if device is not None:
-            dev = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
-        else:
-            dev = _run_cmd_for_single(ctx, subcmd.name, transports)
-
-        ctx.obj['dev'] = dev
-        ctx.call_on_close(dev.close)
+        ctx.obj['dev'] = _DeviceResolver(ctx, subcmd.name, transports, device)
 
 
 @cli.command('list')

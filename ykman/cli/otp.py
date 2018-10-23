@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_b32_key,
-    click_skip_on_help, prompt_for_touch, UpperCaseChoice)
+    click_postpone_exection, prompt_for_touch, UpperCaseChoice)
 from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
     modhex_encode, parse_key, parse_b32_key)
@@ -91,7 +91,7 @@ def _confirm_slot_overwrite(controller, slot):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_exection
 @click.option(
     '--access-code', required=False, metavar='HEX',
     help='A 6 byte access code. Set to empty to use a prompt for input.')
@@ -108,7 +108,7 @@ def otp(ctx, access_code):
     configured with an access code.
     """
 
-    ctx.obj['controller'] = OtpController(ctx.obj['dev'].driver)
+    ctx.obj['controller'] = OtpController(ctx.obj['dev'].get().driver)
     if access_code is not None:
         if access_code == '':
             access_code = click.prompt('Enter access code', show_default=False)
@@ -127,7 +127,7 @@ def info(ctx):
     """
     Display status of YubiKey Slots.
     """
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     slot1, slot2 = controller.slot_status
 
@@ -166,7 +166,7 @@ def ndef(ctx, slot, prefix):
 
     The default prefix will be used if no prefix is specified.
     """
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     if not dev.config.nfc_supported:
         ctx.fail('NFC interface not available.')
@@ -191,6 +191,7 @@ def delete(ctx, slot, force):
     """
     Deletes the configuration of a slot.
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     if not force and not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to delete an empty slot.')
@@ -233,7 +234,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
 
     """
 
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
     controller = ctx.obj['controller']
 
     if public_id and serial_public_id:
@@ -430,8 +431,9 @@ def calculate(ctx, slot, challenge, totp, digits):
     Perform a challenge-response operation.
 
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
-credential, and read the response. Supports output as a OATH-TOTP code.
+    credential, and read the response. Supports output as a OATH-TOTP code.
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     if not challenge and not totp:
         ctx.fail('No challenge provided.')
@@ -487,6 +489,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     Program an HMAC-SHA1 OATH-HOTP credential.
 
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     if not key:
         while True:
@@ -533,6 +536,7 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
 
     if (new_access_code is not None) and delete_access_code:

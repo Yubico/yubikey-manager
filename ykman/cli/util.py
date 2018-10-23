@@ -67,14 +67,11 @@ def click_callback(invoke_on_missing=False):
     return wrap
 
 
-def click_skip_on_help(f):
+def click_postpone_exection(f):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         ctx = click.get_current_context()
-        for arg in ctx.help_option_names:
-            if arg in sys.argv:
-                return
-        f(*args, **kwargs)
+        ctx.obj['dev'].on_resolves.append(lambda: f(*args, **kwargs))
     return inner
 
 

@@ -31,7 +31,7 @@ import logging
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
-    click_force_option, click_skip_on_help,
+    click_force_option, click_postpone_exection,
     click_callback, click_parse_b32_key,
     prompt_for_touch, UpperCaseChoice)
 from ..driver_ccid import (
@@ -80,7 +80,7 @@ def click_parse_uri(ctx, param, val):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_exection
 @click.option('-p', '--password', help='Provide a password to unlock the '
               'YubiKey.')
 def oath(ctx, password):
@@ -88,7 +88,7 @@ def oath(ctx, password):
     Manage OATH Application.
     """
     try:
-        controller = OathController(ctx.obj['dev'].driver)
+        controller = OathController(ctx.obj['dev'].get().driver)
         ctx.obj['controller'] = controller
         ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
@@ -106,6 +106,7 @@ def info(ctx):
     """
     Display status of OATH application.
     """
+    dev = ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     version = controller.version
     click.echo(
@@ -117,7 +118,7 @@ def info(ctx):
     if controller.locked and controller.id in keys:
         click.echo('The password for this YubiKey is remembered by ykman.')
 
-    if ctx.obj['dev'].is_fips:
+    if dev.is_fips:
         click.echo('FIPS Approved Mode: {}'.format(
             'Yes' if controller.is_in_fips_mode else 'No'))
 
@@ -135,6 +136,7 @@ def reset(ctx):
     the OATH application on the YubiKey.
     """
 
+    ctx.obj['dev'].get()
     click.echo('Resetting OATH data...')
     old_id = ctx.obj['controller'].id
     ctx.obj['controller'].reset()
@@ -481,6 +483,7 @@ def remember_password(ctx, forget, clear_all):
 
 
 def ensure_validated(ctx, prompt='Enter your password', remember=False):
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     if controller.locked:
         # If password given as arg, use it

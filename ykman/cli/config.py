@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import click_skip_on_help, click_force_option, UpperCaseChoice
+from .util import click_postpone_exection, click_force_option, UpperCaseChoice
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
 from binascii import a2b_hex, b2a_hex
@@ -48,7 +48,7 @@ def prompt_lock_code(prompt='Enter your lock code'):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_exection
 def config(ctx):
     """
     Enable/Disable applications.
@@ -57,7 +57,7 @@ def config(ctx):
     over different interfaces (USB and NFC). The configuration may
     also be protected by a lock code.
     """
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
     if not dev.can_write_config:
         ctx.fail('Configuring applications is not supported on this YubiKey. '
                  'Use the `mode` command to configure USB interfaces.')
@@ -82,7 +82,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     The lock code must be a 32 characters (16 bytes) hex value.
     """
 
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
 
     def prompt_new_lock_code():
         return prompt_lock_code(prompt='Enter your new lock code')
@@ -213,7 +213,7 @@ def usb(
     if touch_eject and no_touch_eject:
         ctx.fail('Invalid options.')
 
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
 
     usb_supported = dev.config.usb_supported
     usb_enabled = dev.config.usb_enabled
@@ -321,7 +321,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
 
     _ensure_not_invalid_options(ctx, enable, disable)
 
-    dev = ctx.obj['dev']
+    dev = ctx.obj['dev'].get()
     nfc_supported = dev.config.nfc_supported
     nfc_enabled = dev.config.nfc_enabled
 

@@ -32,7 +32,7 @@ import click
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
-from .util import click_force_option, click_skip_on_help
+from .util import click_force_option, click_postpone_exection
 
 
 logger = logging.getLogger(__name__)
@@ -79,13 +79,13 @@ def int_in_range(minval, maxval):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_exection
 def openpgp(ctx):
     """
     Manage OpenPGP Application.
     """
     try:
-        controller = OpgpController(ctx.obj['dev'].driver)
+        controller = OpgpController(ctx.obj['dev'].get().driver)
         ctx.obj['controller'] = controller
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
@@ -101,6 +101,7 @@ def info(ctx):
     """
     Display status of OpenPGP application.
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     click.echo('OpenPGP version: %d.%d.%d' % controller.version)
     retries = controller.get_remaining_pin_tries()
@@ -121,6 +122,7 @@ def reset(ctx):
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
     """
+    ctx.obj['dev'].get()
     click.echo("Resetting OpenPGP data, don't remove your YubiKey...")
     ctx.obj['controller'].reset()
     click.echo('Success! All data has been cleared and default PINs are set.')
@@ -150,6 +152,7 @@ def touch(ctx, key, policy, admin_pin, force):
     KEY     Key slot to get/set (sig, enc or aut).
     POLICY  Touch policy to set (on, off or fixed).
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     old_policy = controller.get_touch(key)
     click.echo('Current touch policy of {.name} key is {.name}.'.format(
@@ -183,6 +186,7 @@ def set_pin_retries(ctx, pw_attempts, admin_pin, force):
     PW_ATTEMPTS should be three integer values corresponding to the number of
     attempts for the PIN, Reset Code, and Admin PIN, respectively.
     """
+    ctx.obj['dev'].get()
     controller = ctx.obj['controller']
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
