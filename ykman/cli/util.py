@@ -72,7 +72,7 @@ def click_skip_on_help(f):
     def inner(*args, **kwargs):
         ctx = click.get_current_context()
         for arg in ctx.help_option_names:
-            if arg in sys.argv:
+            if arg in ctx.args:
                 return
         f(*args, **kwargs)
     return inner
