@@ -32,6 +32,7 @@ from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option, click_skip_on_help,
+    click_cleanup_help,
     click_callback, click_parse_b32_key,
     prompt_for_touch, UpperCaseChoice)
 from ..driver_ccid import (
@@ -165,7 +166,7 @@ def reset(ctx):
 @click.option(
     '-c', '--counter', type=click.INT, default=0,
     help='Initial counter value for HOTP credentials.')
-@click.option('-i', '--issuer', help='Issuer of the credential.')
+@click.option('-i', '--issuer', help='Issuer of the credential.', callback=click_cleanup_help)
 @click.option(
     '-p', '--period', help='Number of seconds a TOTP code is valid.',
     default=30, show_default=True)

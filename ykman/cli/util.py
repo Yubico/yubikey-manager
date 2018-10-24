@@ -83,6 +83,17 @@ def click_parse_b32_key(ctx, param, val):
     return parse_b32_key(val)
 
 
+def click_cleanup_help(ctx, param, val):
+    """
+    Add this as a callback for options on
+    leafs that take a text argument, to not
+    accept help flags as input data.
+    """
+    if val in ctx.help_option_names:
+        click.echo(ctx.get_help())
+        ctx.exit()
+
+
 def prompt_for_touch():
     try:
         click.echo('Touch your YubiKey...', err=True)

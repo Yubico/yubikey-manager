@@ -27,7 +27,9 @@
 
 from __future__ import absolute_import
 
-from .util import click_skip_on_help, click_force_option, UpperCaseChoice
+from .util import (
+    click_skip_on_help, click_force_option, click_cleanup_help, UpperCaseChoice
+    )
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
 from binascii import a2b_hex, b2a_hex
@@ -69,7 +71,7 @@ def config(ctx):
 @click.option('-l', '--lock-code', metavar='HEX', help='Current lock code.')
 @click.option(
     '-n', '--new-lock-code', metavar='HEX',
-    help='New lock code. Conflicts with --generate.')
+    help='New lock code. Conflicts with --generate.', callback=click_cleanup_help)
 @click.option('-c', '--clear', is_flag=True, help='Clear the lock code.')
 @click.option(
     '-g', '--generate', is_flag=True,
