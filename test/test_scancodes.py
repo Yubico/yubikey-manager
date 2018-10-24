@@ -115,6 +115,7 @@ class TestScanMap(unittest.TestCase):
         self.assertEqual(b'\xa7', encode(')', KEYBOARD_LAYOUT.US))
         self.assertEqual(b'\xa5', encode('*', KEYBOARD_LAYOUT.US))
         self.assertEqual(b'\xae', encode('+', KEYBOARD_LAYOUT.US))
+        self.assertEqual(b'\x35', encode('`', KEYBOARD_LAYOUT.US))
         self.assertEqual(b'\x36', encode(',', KEYBOARD_LAYOUT.US))
         self.assertEqual(b'\x2d', encode('-', KEYBOARD_LAYOUT.US))
         self.assertEqual(b'\x37', encode('.', KEYBOARD_LAYOUT.US))
