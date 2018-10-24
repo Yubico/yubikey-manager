@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import unittest
 from ykman.util import TRANSPORT
 from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli,
@@ -112,6 +114,12 @@ class TestOATH(DestructiveYubikeyTestCase):
         ykman_cli('oath', 'add', 'delete-me', 'abba')
         ykman_cli('oath', 'delete', 'delete-me', '-f')
         self.assertNotIn('delete-me', ykman_cli('oath', 'list'))
+
+    def test_oath_unicode(self):
+        ykman_cli('oath', 'add', '😃', 'abba')
+        ykman_cli('oath', 'code')
+        ykman_cli('oath', 'list')
+        ykman_cli('oath', 'delete', '😃', '-f')
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_oath_sha512(self):
