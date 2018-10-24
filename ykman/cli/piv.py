@@ -33,7 +33,7 @@ from ..piv import (
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import (
-    YkmanContext, click_force_option, click_postpone_execution, click_callback,
+    click_force_option, click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -107,8 +107,7 @@ def piv(ctx):
     Manage PIV Application.
     """
     try:
-        ykctx = YkmanContext.get(ctx)
-        ykctx['controller'] = PivController(ykctx['dev'].driver)
+        ctx.obj['controller'] = PivController(ctx.obj['dev'].driver)
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The PIV application can't be found on this YubiKey.")
@@ -121,7 +120,7 @@ def info(ctx):
     """
     Display status of PIV application.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     click.echo('PIV version: %d.%d.%d' % controller.version)
 
     # Largest possible number of PIN tries to get back is 15
@@ -178,7 +177,7 @@ def reset(ctx):
     """
 
     click.echo('Resetting PIV data...')
-    YkmanContext.get(ctx)['controller'].reset()
+    ctx.obj['controller'].reset()
     click.echo(
         'Success! All PIV data have been cleared from your YubiKey.')
     click.echo('Your YubiKey now has the default PIN, PUK and Management Key:')
@@ -217,8 +216,8 @@ def generate_key(
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
 
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
 
     _ensure_authenticated(ctx, controller, pin, management_key)
 
@@ -264,7 +263,7 @@ def import_certificate(
     SLOT            PIV slot to import the certificate to.
     CERTIFICATE     File containing the certificate. Use '-' to use stdin.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
 
     data = cert.read()
@@ -312,8 +311,8 @@ def import_key(
     SLOT        PIV slot to import the private key to.
     PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
 
     data = private_key.read()
@@ -368,7 +367,7 @@ def attest(ctx, slot, certificate, format):
     SLOT        PIV slot with a private key to attest.
     CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     try:
         cert = controller.attest(slot)
     except APDUError as e:
@@ -392,7 +391,7 @@ def export_certificate(ctx, slot, format, certificate):
     SLOT        PIV slot to read certificate from.
     CERTIFICATE File to write certificate to. Use '-' to use stdout.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     try:
         cert = controller.read_certificate(slot)
     except APDUError as e:
@@ -412,7 +411,7 @@ def set_chuid(ctx, management_key, pin):
     """
     Generate and set a CHUID on the YubiKey.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
     controller.update_chuid()
 
@@ -425,7 +424,7 @@ def set_ccc(ctx, management_key, pin):
     """
     Generate and set a CCC on the YubiKey.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
     controller.update_ccc()
 
@@ -444,7 +443,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     Set the number of PIN and PUK retries.
     NOTE: This will reset the PIN and PUK to their factory defaults.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _ensure_authenticated(
         ctx, controller, pin, management_key, require_pin_and_key=True,
         no_prompt=force)
@@ -487,7 +486,7 @@ def generate_certificate(
     SLOT            PIV slot where private key is stored.
     PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _ensure_authenticated(
         ctx, controller, pin, management_key, require_pin_and_key=True)
 
@@ -533,7 +532,7 @@ def generate_certificate_signing_request(
     PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
     CSR         File to write CSR to. Use '-' to use stdout.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _verify_pin(ctx, controller, pin)
 
     data = public_key.read()
@@ -560,7 +559,7 @@ def delete_certificate(ctx, slot, management_key, pin):
 
     Delete a certificate from a slot on the YubiKey.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     _ensure_authenticated(ctx, controller, pin, management_key)
     controller.delete_certificate(slot)
 
@@ -578,7 +577,7 @@ def change_pin(ctx, pin, new_pin):
     alphanumeric characters. For cross-platform compatibility,
     a PIN of 6 - 8 numeric digits is recommended.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not pin:
         pin = _prompt_pin(ctx, prompt='Enter your current PIN')
     if not new_pin:
@@ -603,7 +602,7 @@ def change_puk(ctx, puk, new_puk):
 
     If the PIN is lost or blocked it can be reset using a PUK.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not puk:
         puk = _prompt_pin(ctx, prompt='Enter your current PUK')
     if not new_puk:
@@ -651,7 +650,7 @@ def change_management_key(
     This key is required for administrative tasks, such as generating key pairs.
     A random key may be generated and stored on the YubiKey, protected by PIN.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
 
     _ensure_authenticated(
         ctx, controller, pin, management_key,
@@ -721,7 +720,7 @@ def unblock_pin(ctx, puk, new_pin):
 
     Reset the PIN using the PUK code.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not puk:
         puk = click.prompt(
             'Enter PUK', default='', show_default=False, hide_input=True)

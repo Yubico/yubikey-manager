@@ -31,9 +31,7 @@ import logging
 from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
-from .util import (
-    YkmanContext, click_postpone_execution, prompt_for_touch, click_force_option
-)
+from .util import click_postpone_execution, prompt_for_touch, click_force_option
 from ..driver_ccid import (
     SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
     SW_AUTH_METHOD_BLOCKED, SW_WRONG_LENGTH)
@@ -56,17 +54,16 @@ def fido(ctx):
     """
     Manage FIDO applications.
     """
-    ykctx = YkmanContext.get(ctx)
-    dev = ykctx['dev']
+    dev = ctx.obj['dev']
     if dev.is_fips:
         try:
-            ykctx['controller'] = FipsU2fController(dev.driver)
+            ctx.obj['controller'] = FipsU2fController(dev.driver)
         except Exception as e:
             logger.debug('Failed to load FipsU2fController', exc_info=e)
             ctx.fail('Failed to load FIDO Application.')
     else:
         try:
-            ykctx['controller'] = Fido2Controller(dev.driver)
+            ctx.obj['controller'] = Fido2Controller(dev.driver)
         except Exception as e:
             logger.debug('Failed to load Fido2Controller', exc_info=e)
             ctx.fail('Failed to load FIDO 2 Application.')
@@ -78,7 +75,7 @@ def info(ctx):
     """
     Display status of FIDO2 application.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
 
     if controller.is_fips:
         click.echo('FIPS Approved Mode: {}'.format(
@@ -113,7 +110,7 @@ def set_pin(ctx, pin, new_pin, u2f):
     6 characters long.
     """
 
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     is_fips = controller.is_fips
 
     if is_fips and not u2f:
@@ -233,11 +230,10 @@ def reset(ctx, force):
             controller = controller_type(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
         else:
-            controller = YkmanContext.get(ctx)['controller']
+            controller = ctx.obj['controller']
             controller.reset(touch_callback=prompt_for_touch)
 
-    dev = YkmanContext.get(ctx)['dev']
-    if dev.is_fips:
+    if ctx.obj['dev'].is_fips:
         if not force:
             destroy_input = click.prompt(
                 'WARNING! This is a YubiKey FIPS device. This command will '
@@ -297,7 +293,7 @@ def unlock(ctx, pin):
     Unlock the YubiKey FIPS and allow U2F registration.
     """
 
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not controller.is_fips:
         ctx.fail('This is not a YubiKey FIPS, and therefore'
                  ' does not support a U2F PIN.')

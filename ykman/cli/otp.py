@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from .util import (
-    YkmanContext, click_force_option, click_callback, click_parse_b32_key,
+    click_force_option, click_callback, click_parse_b32_key,
     click_postpone_execution, prompt_for_touch, UpperCaseChoice)
 from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
@@ -108,8 +108,7 @@ def otp(ctx, access_code):
     configured with an access code.
     """
 
-    ykctx = YkmanContext.get(ctx)
-    ykctx['controller'] = OtpController(ykctx['dev'].driver)
+    ctx.obj['controller'] = OtpController(ctx.obj['dev'].driver)
     if access_code is not None:
         if access_code == '':
             access_code = click.prompt('Enter access code', show_default=False)
@@ -119,7 +118,7 @@ def otp(ctx, access_code):
         except Exception as e:
             ctx.fail('Failed to parse access code: ' + str(e))
 
-    ykctx['controller'].access_code = access_code
+    ctx.obj['controller'].access_code = access_code
 
 
 @otp.command()
@@ -128,8 +127,8 @@ def info(ctx):
     """
     Display status of YubiKey Slots.
     """
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     slot1, slot2 = controller.slot_status
 
     click.echo('Slot 1: {}'.format(slot1 and 'programmed' or 'empty'))
@@ -148,7 +147,7 @@ def swap(ctx):
     """
     Swaps the two slot configurations.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     click.echo('Swapping slots...')
     try:
         controller.swap_slots()
@@ -167,8 +166,8 @@ def ndef(ctx, slot, prefix):
 
     The default prefix will be used if no prefix is specified.
     """
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
     if not dev.config.nfc_supported:
         ctx.fail('NFC interface not available.')
 
@@ -192,7 +191,7 @@ def delete(ctx, slot, force):
     """
     Deletes the configuration of a slot.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not force and not controller.slot_status[slot - 1]:
         ctx.fail('Not possible to delete an empty slot.')
     force or click.confirm(
@@ -234,8 +233,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
 
     """
 
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    dev = ctx.obj['dev']
+    controller = ctx.obj['controller']
 
     if public_id and serial_public_id:
         ctx.fail('Invalid options: --public-id conflicts with '
@@ -333,6 +332,7 @@ def static(
     preferred keyboard layout.
     """
 
+    controller = ctx.obj['controller']
     keyboard_layout = KEYBOARD_LAYOUT[keyboard_layout]
 
     if password and len(password) > 38:
@@ -344,8 +344,6 @@ def static(
         password = click.prompt('Enter a static password')
     elif not password and generate:
         password = generate_static_pw(length, keyboard_layout).decode()
-
-    controller = YkmanContext.get(ctx)['controller']
 
     if not force:
         _confirm_slot_overwrite(controller, slot)
@@ -376,7 +374,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     If KEY is not given, an interactive prompt will ask for it.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
 
     if key:
         if generate:
@@ -433,7 +431,7 @@ def calculate(ctx, slot, challenge, totp, digits):
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
     credential, and read the response. Supports output as a OATH-TOTP code.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not challenge and not totp:
         ctx.fail('No challenge provided.')
 
@@ -488,7 +486,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     Program an HMAC-SHA1 OATH-HOTP credential.
 
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if not key:
         while True:
             key = click.prompt('Enter a secret key (base32)')
@@ -534,7 +532,7 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
 
     if (new_access_code is not None) and delete_access_code:
         ctx.fail('--new-access-code conflicts with --delete-access-code.')

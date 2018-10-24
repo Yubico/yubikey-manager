@@ -32,7 +32,6 @@ from ..fido import FipsU2fController
 from ..oath import OathController
 from ..otp import OtpController
 from ..util import APPLICATION, TRANSPORT
-from .util import YkmanContext
 import click
 import logging
 
@@ -131,7 +130,7 @@ def info(ctx):
     Displays information about the attached YubiKey such as serial number,
     firmware version, applications, etc.
     """
-    dev = YkmanContext.get(ctx)['dev']
+    dev = ctx.obj['dev']
 
     if dev.is_fips:
         fips_status = get_overall_fips_status(dev.serial, dev.config)

@@ -31,11 +31,12 @@ import logging
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
-    YkmanContext, click_force_option, click_postpone_execution,
-    click_callback, click_parse_b32_key, prompt_for_touch, UpperCaseChoice
+    click_force_option, click_postpone_execution, click_callback,
+    click_parse_b32_key, prompt_for_touch, UpperCaseChoice
 )
 from ..driver_ccid import (
-    APDUError,  SW_APPLICATION_NOT_FOUND, SW_SECURITY_CONDITION_NOT_SATISFIED)
+    APDUError,  SW_APPLICATION_NOT_FOUND, SW_SECURITY_CONDITION_NOT_SATISFIED
+)
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
 from ..settings import Settings
@@ -57,8 +58,8 @@ click_show_hidden_option = click.option(
 def _clear_callback(ctx, param, clear):
     if clear:
         ensure_validated(ctx)
-        controller = YkmanContext.get(ctx)['controller']
-        settings = YkmanContext.get(ctx)['settings']
+        controller = ctx.obj['controller']
+        settings = ctx.obj['settings']
 
         controller.clear_password()
         keys = settings.setdefault('keys', {})
@@ -87,18 +88,17 @@ def oath(ctx, password):
     """
     Manage OATH Application.
     """
-    ykctx = YkmanContext.get(ctx)
     try:
-        dev = ykctx['dev']
-        controller = OathController(dev.driver)
-        ykctx['controller'] = controller
-        ykctx['settings'] = Settings('oath')
+        controller = OathController(ctx.obj['dev'].driver)
+        ctx.obj['controller'] = controller
+        ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The OATH application can't be found on this YubiKey.")
         raise
 
-    ykctx['key'] = controller.derive_key(password) if password else None
+    if password:
+        ctx.obj['key'] = controller.derive_key(password)
 
 
 @oath.command()
@@ -107,19 +107,18 @@ def info(ctx):
     """
     Display status of OATH application.
     """
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     version = controller.version
     click.echo(
         'OATH version: {}.{}.{}'.format(version[0], version[1], version[2]))
     click.echo('Password protection ' +
                ('enabled' if controller.locked else 'disabled'))
 
-    keys = YkmanContext.get(ctx)['settings'].get('keys', {})
+    keys = ctx.obj['settings'].get('keys', {})
     if controller.locked and controller.id in keys:
         click.echo('The password for this YubiKey is remembered by ykman.')
 
-    if dev.is_fips:
+    if ctx.obj['dev'].is_fips:
         click.echo('FIPS Approved Mode: {}'.format(
             'Yes' if controller.is_in_fips_mode else 'No'))
 
@@ -137,12 +136,12 @@ def reset(ctx):
     the OATH application on the YubiKey.
     """
 
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     click.echo('Resetting OATH data...')
     old_id = controller.id
     controller.reset()
 
-    settings = YkmanContext.get(ctx)['settings']
+    settings = ctx.obj['settings']
     keys = settings.setdefault('keys', {})
     if old_id in keys:
         del keys[old_id]
@@ -240,8 +239,7 @@ def uri(ctx, uri, touch, force):
 
 
 def _add_cred(ctx, data, force):
-    dev = YkmanContext.get(ctx)['dev']
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
 
     if not (0 < len(data.name) <= 64):
         ctx.fail('Name must be between 1 and 64 bytes.')
@@ -256,7 +254,7 @@ def _add_cred(ctx, data, force):
         ctx.fail('Counter only supported for HOTP credentials.')
 
     if data.algorithm == ALGO.SHA512 and (
-            controller.version < (4, 3, 1) or dev.is_fips):
+            controller.version < (4, 3, 1) or ctx.obj['dev'].is_fips):
                 ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
 
     key = data.make_key()
@@ -300,7 +298,7 @@ def list(ctx, show_hidden, oath_type, period):
     List all credentials stored on your YubiKey.
     """
     ensure_validated(ctx)
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     creds = [cred
              for cred in controller.list()
              if show_hidden or not cred.is_hidden
@@ -332,7 +330,7 @@ def code(ctx, show_hidden, query, single):
 
     ensure_validated(ctx)
 
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     creds = [(cr, c)
              for (cr, c) in controller.calculate_all()
              if show_hidden or not cr.is_hidden
@@ -398,7 +396,7 @@ def delete(ctx, query, force):
     """
 
     ensure_validated(ctx)
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     creds = controller.list()
     hits = _search(creds, query)
     if len(hits) == 0:
@@ -442,8 +440,8 @@ def set_password(ctx, new_password, remember):
             hide_input=True,
             confirmation_prompt=True)
 
-    controller = YkmanContext.get(ctx)['controller']
-    settings = YkmanContext.get(ctx)['settings']
+    controller = ctx.obj['controller']
+    settings = ctx.obj['settings']
     keys = settings.setdefault('keys', {})
     key = controller.set_password(new_password)
     click.echo('Password updated.')
@@ -468,8 +466,8 @@ def remember_password(ctx, forget, clear_all):
     Store your YubiKeys password on this computer to avoid having to enter it
     on each use, or delete stored passwords.
     """
-    controller = YkmanContext.get(ctx)['controller']
-    settings = YkmanContext.get(ctx)['settings']
+    controller = ctx.obj['controller']
+    settings = ctx.obj['settings']
     keys = settings.setdefault('keys', {})
     if clear_all:
         del settings['keys']
@@ -485,15 +483,14 @@ def remember_password(ctx, forget, clear_all):
 
 
 def ensure_validated(ctx, prompt='Enter your password', remember=False):
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     if controller.locked:
         # If password given as arg, use it
-        key = YkmanContext.get(ctx)['key']
-        if key:
-            _validate(ctx, key, remember)
+        if 'key' in ctx.obj:
+            _validate(ctx, ctx.obj['key'], remember)
 
         # Use stored key if available
-        keys = YkmanContext.get(ctx)['settings'].setdefault('keys', {})
+        keys = ctx.obj['settings'].setdefault('keys', {})
         if controller.id in keys:
             try:
                 controller.validate(a2b_hex(keys[controller.id]))
@@ -510,10 +507,10 @@ def ensure_validated(ctx, prompt='Enter your password', remember=False):
 
 def _validate(ctx, key, remember):
     try:
-        controller = YkmanContext.get(ctx)['controller']
+        controller = ctx.obj['controller']
         controller.validate(key)
         if remember:
-            settings = YkmanContext.get(ctx)['settings']
+            settings = ctx.obj['settings']
             keys = settings.setdefault('keys', {})
             keys[controller.id] = b2a_hex(key).decode()
             settings.write()

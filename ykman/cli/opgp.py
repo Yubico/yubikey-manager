@@ -32,7 +32,7 @@ import click
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
-from .util import YkmanContext, click_force_option, click_postpone_execution
+from .util import click_force_option, click_postpone_execution
 
 
 logger = logging.getLogger(__name__)
@@ -85,8 +85,7 @@ def openpgp(ctx):
     Manage OpenPGP Application.
     """
     try:
-        ykctx = YkmanContext.get(ctx)
-        ykctx['controller'] = OpgpController(ykctx['dev'].driver)
+        ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this "
@@ -101,7 +100,7 @@ def info(ctx):
     """
     Display status of OpenPGP application.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     click.echo('OpenPGP version: %d.%d.%d' % controller.version)
     retries = controller.get_remaining_pin_tries()
     click.echo('PIN tries remaining: {}'.format(retries.pin))
@@ -122,7 +121,7 @@ def reset(ctx):
     values.
     """
     click.echo("Resetting OpenPGP data, don't remove your YubiKey...")
-    YkmanContext.get(ctx)['controller'].reset()
+    ctx.obj['controller'].reset()
     click.echo('Success! All data has been cleared and default PINs are set.')
     echo_default_pins()
 
@@ -150,7 +149,7 @@ def touch(ctx, key, policy, admin_pin, force):
     KEY     Key slot to get/set (sig, enc or aut).
     POLICY  Touch policy to set (on, off or fixed).
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     old_policy = controller.get_touch(key)
     click.echo('Current touch policy of {.name} key is {.name}.'.format(
         key, old_policy))
@@ -183,7 +182,7 @@ def set_pin_retries(ctx, pw_attempts, admin_pin, force):
     PW_ATTEMPTS should be three integer values corresponding to the number of
     attempts for the PIN, Reset Code, and Admin PIN, respectively.
     """
-    controller = YkmanContext.get(ctx)['controller']
+    controller = ctx.obj['controller']
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
         click.echo('WARNING: Setting PIN retries will reset the values for all '

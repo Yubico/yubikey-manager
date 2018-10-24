@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import YkmanContext, click_force_option
+from .util import click_force_option
 from ..util import Mode, TRANSPORT
 from ..driver import ModeSwitchError
 import logging
@@ -59,8 +59,7 @@ def _parse_mode_string(ctx, param, mode):
     try:
         transports = set()
         if mode[0] in ['+', '-']:
-            dev = YkmanContext.get(ctx)['dev']
-            transports.update(TRANSPORT.split(dev.mode.transports))
+            transports.update(TRANSPORT.split(ctx.obj['dev'].mode.transports))
             for mod in re.findall(r'[+-][A-Z]+', mode.upper()):
                 transport = _parse_transport_string(mod[1:])
                 if mod.startswith('+'):
@@ -101,7 +100,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     MODE can be a string, such as "OTP+FIDO+CCID", or a shortened form: "o+f+c".
     It can also be a mode number.
     """
-    dev = YkmanContext.get(ctx)['dev']
+    dev = ctx.obj['dev']
     if autoeject_timeout:
         touch_eject = True
     autoeject = autoeject_timeout if touch_eject else None

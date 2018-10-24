@@ -34,7 +34,7 @@ from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException)
-from .util import UpperCaseChoice, YkmanContext
+from .util import UpperCaseChoice, YkmanContextObject
 from .info import info
 from .mode import mode
 from .otp import otp
@@ -137,6 +137,7 @@ def cli(ctx, device, log_level, log_file):
     """
     Configure your YubiKey via the command line.
     """
+    ctx.obj = YkmanContextObject()
 
     if log_level:
         ykman.logging_setup.setup(log_level, log_file=log_file)
@@ -154,7 +155,7 @@ def cli(ctx, device, log_level, log_file):
                 dev = _run_cmd_for_single(ctx, subcmd.name, transports)
             ctx.call_on_close(dev.close)
             return dev
-        YkmanContext.get(ctx).add_resolver('dev', resolve_device)
+        ctx.obj.add_resolver('dev', resolve_device)
 
 
 @cli.command('list')

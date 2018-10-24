@@ -31,7 +31,7 @@ import functools
 import click
 import sys
 from ..util import parse_b32_key
-from collections import OrderedDict
+from collections import OrderedDict, MutableMapping
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
@@ -68,16 +68,10 @@ def click_callback(invoke_on_missing=False):
     return wrap
 
 
-class YkmanContext(object):
+class YkmanContextObject(MutableMapping):
     def __init__(self):
-        self._resolved = False
         self._objects = OrderedDict()
-
-    @classmethod
-    def get(cls, ctx):
-        if not ctx.obj.get('_resolver'):
-            ctx.obj['_resolver'] = cls()
-        return ctx.obj['_resolver']
+        self._resolved = False
 
     def add_resolver(self, key, f):
         if self._resolved:
@@ -99,11 +93,20 @@ class YkmanContext(object):
             raise ValueError('BUG: Attempted to set item when unresolved.')
         self._objects[key] = value
 
+    def __delitem__(self, key):
+        del self._objects[key]
+
+    def __len__(self):
+        return len(self._objects)
+
+    def __iter__(self):
+        return iter(self._objects)
+
 
 def click_postpone_execution(f):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        YkmanContext.get(click.get_current_context()).add_resolver(
+        click.get_current_context().obj.add_resolver(
             str(f),
             lambda: f(*args, **kwargs)
         )
