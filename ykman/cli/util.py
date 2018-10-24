@@ -31,6 +31,7 @@ import functools
 import click
 import sys
 from ..util import parse_b32_key
+from collections import OrderedDict
 
 click_force_option = click.option('-f', '--force', is_flag=True,
                                   help='Confirm the action without prompting.')
@@ -67,11 +68,45 @@ def click_callback(invoke_on_missing=False):
     return wrap
 
 
-def click_postpone_exection(f):
+class YkmanContext(object):
+    def __init__(self):
+        self._resolved = False
+        self._objects = OrderedDict()
+
+    @classmethod
+    def get(cls, ctx):
+        if not ctx.obj.get('_resolver'):
+            ctx.obj['_resolver'] = cls()
+        return ctx.obj['_resolver']
+
+    def add_resolver(self, key, f):
+        if self._resolved:
+            f = f()
+        self._objects[key] = f
+
+    def resolve(self):
+        if not self._resolved:
+            self._resolved = True
+            for k, f in self._objects.items():
+                self._objects[k] = f()
+
+    def __getitem__(self, key):
+        self.resolve()
+        return self._objects[key]
+
+    def __setitem__(self, key, value):
+        if not self._resolved:
+            raise ValueError('BUG: Attempted to set item when unresolved.')
+        self._objects[key] = value
+
+
+def click_postpone_execution(f):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        ctx = click.get_current_context()
-        ctx.obj['dev'].on_resolves.append(lambda: f(*args, **kwargs))
+        YkmanContext.get(click.get_current_context()).add_resolver(
+            str(f),
+            lambda: f(*args, **kwargs)
+        )
     return inner
 
 
