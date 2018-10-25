@@ -32,7 +32,7 @@ import click
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
-from .util import click_force_option, click_skip_on_help
+from .util import click_force_option, click_postpone_execution
 
 
 logger = logging.getLogger(__name__)
@@ -79,14 +79,13 @@ def int_in_range(minval, maxval):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_execution
 def openpgp(ctx):
     """
     Manage OpenPGP Application.
     """
     try:
-        controller = OpgpController(ctx.obj['dev'].driver)
-        ctx.obj['controller'] = controller
+        ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
     except APDUError as e:
         if e.sw == SW_APPLICATION_NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this "

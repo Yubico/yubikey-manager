@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_b32_key,
-    click_skip_on_help, prompt_for_touch, UpperCaseChoice)
+    click_postpone_execution, prompt_for_touch, UpperCaseChoice)
 from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
     modhex_encode, parse_key, parse_b32_key)
@@ -91,7 +91,7 @@ def _confirm_slot_overwrite(controller, slot):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_execution
 @click.option(
     '--access-code', required=False, metavar='HEX',
     help='A 6 byte access code. Set to empty to use a prompt for input.')
@@ -332,6 +332,7 @@ def static(
     preferred keyboard layout.
     """
 
+    controller = ctx.obj['controller']
     keyboard_layout = KEYBOARD_LAYOUT[keyboard_layout]
 
     if password and len(password) > 38:
@@ -343,8 +344,6 @@ def static(
         password = click.prompt('Enter a static password')
     elif not password and generate:
         password = generate_static_pw(length, keyboard_layout).decode()
-
-    controller = ctx.obj['controller']
 
     if not force:
         _confirm_slot_overwrite(controller, slot)
@@ -430,7 +429,7 @@ def calculate(ctx, slot, challenge, totp, digits):
     Perform a challenge-response operation.
 
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
-credential, and read the response. Supports output as a OATH-TOTP code.
+    credential, and read the response. Supports output as a OATH-TOTP code.
     """
     controller = ctx.obj['controller']
     if not challenge and not totp:

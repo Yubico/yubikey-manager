@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import click_skip_on_help, click_force_option, UpperCaseChoice
+from .util import click_postpone_execution, click_force_option, UpperCaseChoice
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
 from binascii import a2b_hex, b2a_hex
@@ -48,7 +48,7 @@ def prompt_lock_code(prompt='Enter your lock code'):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_execution
 def config(ctx):
     """
     Enable/Disable applications.

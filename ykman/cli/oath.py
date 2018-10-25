@@ -31,11 +31,12 @@ import logging
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
-    click_force_option, click_skip_on_help,
-    click_callback, click_parse_b32_key,
-    prompt_for_touch, UpperCaseChoice)
+    click_force_option, click_postpone_execution, click_callback,
+    click_parse_b32_key, prompt_for_touch, UpperCaseChoice
+)
 from ..driver_ccid import (
-    APDUError,  SW_APPLICATION_NOT_FOUND, SW_SECURITY_CONDITION_NOT_SATISFIED)
+    APDUError,  SW_APPLICATION_NOT_FOUND, SW_SECURITY_CONDITION_NOT_SATISFIED
+)
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
 from ..settings import Settings
@@ -80,7 +81,7 @@ def click_parse_uri(ctx, param, val):
 
 @click.group()
 @click.pass_context
-@click_skip_on_help
+@click_postpone_execution
 @click.option('-p', '--password', help='Provide a password to unlock the '
               'YubiKey.')
 def oath(ctx, password):
@@ -135,14 +136,16 @@ def reset(ctx):
     the OATH application on the YubiKey.
     """
 
+    controller = ctx.obj['controller']
     click.echo('Resetting OATH data...')
-    old_id = ctx.obj['controller'].id
-    ctx.obj['controller'].reset()
+    old_id = controller.id
+    controller.reset()
 
-    keys = ctx.obj['settings'].setdefault('keys', {})
+    settings = ctx.obj['settings']
+    keys = settings.setdefault('keys', {})
     if old_id in keys:
         del keys[old_id]
-        ctx.obj['settings'].write()
+        settings.write()
 
     click.echo(
         'Success! All OATH credentials have been cleared from your YubiKey.')
@@ -236,7 +239,6 @@ def uri(ctx, uri, touch, force):
 
 
 def _add_cred(ctx, data, force):
-
     controller = ctx.obj['controller']
 
     if not (0 < len(data.name) <= 64):

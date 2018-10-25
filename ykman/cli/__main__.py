@@ -34,7 +34,7 @@ from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException)
-from .util import click_skip_on_help, UpperCaseChoice
+from .util import UpperCaseChoice, YkmanContextObject
 from .info import info
 from .mode import mode
 from .otp import otp
@@ -133,11 +133,11 @@ def _run_cmd_for_single(ctx, cmd, transports):
                    'ignored unless --log-level is also set.',
               )
 @click.pass_context
-@click_skip_on_help
 def cli(ctx, device, log_level, log_file):
     """
     Configure your YubiKey via the command line.
     """
+    ctx.obj = YkmanContextObject()
 
     if log_level:
         ykman.logging_setup.setup(log_level, log_file=log_file)
@@ -148,13 +148,14 @@ def cli(ctx, device, log_level, log_file):
 
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
     if transports:
-        if device is not None:
-            dev = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
-        else:
-            dev = _run_cmd_for_single(ctx, subcmd.name, transports)
-
-        ctx.obj['dev'] = dev
-        ctx.call_on_close(dev.close)
+        def resolve_device():
+            if device is not None:
+                dev = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
+            else:
+                dev = _run_cmd_for_single(ctx, subcmd.name, transports)
+            ctx.call_on_close(dev.close)
+            return dev
+        ctx.obj.add_resolver('dev', resolve_device)
 
 
 @cli.command('list')
