@@ -305,7 +305,7 @@ def list(ctx, show_hidden, oath_type, period):
     for cred in creds:
         click.echo(cred.printable_key, nl=False)
         if oath_type:
-            click.echo(', {}'.format(cred.oath_type.name), nl=False)
+            click.echo(u', {}'.format(cred.oath_type.name), nl=False)
         if period:
             click.echo(', {}'.format(cred.period), nl=False)
         click.echo()
@@ -374,7 +374,7 @@ def code(ctx, show_hidden, query, single):
 
         longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
         longest_code = max(len(c) for (n, c) in outputs) if outputs else 0
-        format_str = '{:<%d}  {:>%d}' % (longest_name, longest_code)
+        format_str = u'{:<%d}  {:>%d}' % (longest_name, longest_code)
 
         for name, result in outputs:
             click.echo(format_str.format(name, result))
@@ -402,11 +402,11 @@ def delete(ctx, query, force):
     elif len(hits) == 1:
         cred = hits[0]
         if force or (click.confirm(
-                'Delete credential: {} ?'.format(cred.printable_key),
+                u'Delete credential: {} ?'.format(cred.printable_key),
                 default=False
         )):
             controller.delete(cred)
-            click.echo('Deleted {}.'.format(cred.printable_key))
+            click.echo(u'Deleted {}.'.format(cred.printable_key))
         else:
             click.echo('Deletion aborted by user.')
 
