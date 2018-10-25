@@ -278,7 +278,8 @@ def import_certificate(
                 password = click.prompt(
                     'Enter password to decrypt certificate',
                     default='', hide_input=True,
-                    show_default=False)
+                    show_default=False,
+                    err=True)
                 continue
             else:
                 password = None
@@ -327,7 +328,8 @@ def import_key(
                 password = click.prompt(
                     'Enter password to decrypt key',
                     default='', hide_input=True,
-                    show_default=False)
+                    show_default=False,
+                    err=True)
                 continue
             else:
                 password = None
@@ -583,7 +585,7 @@ def change_pin(ctx, pin, new_pin):
     if not new_pin:
         new_pin = click.prompt(
             'Enter your new PIN', default='', hide_input=True,
-            show_default=False, confirmation_prompt=True)
+            show_default=False, confirmation_prompt=True, err=True)
     try:
         controller.change_pin(pin, new_pin)
     except APDUError as e:
@@ -608,7 +610,8 @@ def change_puk(ctx, puk, new_puk):
     if not new_puk:
         new_puk = click.prompt(
             'Enter your new PUK', default='', hide_input=True,
-            show_default=False, confirmation_prompt=True)
+            show_default=False, confirmation_prompt=True,
+            err=True)
 
     (success, retries) = controller.change_puk(puk, new_puk)
 
@@ -723,17 +726,19 @@ def unblock_pin(ctx, puk, new_pin):
     controller = ctx.obj['controller']
     if not puk:
         puk = click.prompt(
-            'Enter PUK', default='', show_default=False, hide_input=True)
+            'Enter PUK', default='', show_default=False,
+            hide_input=True, err=True)
     if not new_pin:
         new_pin = click.prompt(
-            'Enter a new PIN', default='', show_default=False, hide_input=True)
+            'Enter a new PIN', default='',
+            show_default=False, hide_input=True, err=True)
     controller.unblock_pin(puk, new_pin)
 
 
 def _prompt_management_key(
         ctx, prompt='Enter a management key [blank to use default key]'):
     management_key = click.prompt(
-        prompt, default='', hide_input=True, show_default=False)
+        prompt, default='', hide_input=True, show_default=False, err=True)
     if management_key == '':
         return DEFAULT_MANAGEMENT_KEY
     try:
@@ -744,7 +749,7 @@ def _prompt_management_key(
 
 def _prompt_pin(ctx, prompt='Enter PIN'):
     return click.prompt(
-        prompt, default='', hide_input=True, show_default=False)
+        prompt, default='', hide_input=True, show_default=False, err=True)
 
 
 def _ensure_authenticated(

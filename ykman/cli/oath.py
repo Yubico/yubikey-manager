@@ -189,7 +189,7 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
 
     if not secret:
         while True:
-            secret = click.prompt('Enter a secret key (base32)')
+            secret = click.prompt('Enter a secret key (base32)', err=True)
             try:
                 secret = parse_b32_key(secret)
                 break
@@ -217,7 +217,7 @@ def uri(ctx, uri, touch, force):
 
     if not uri:
         while True:
-            uri = click.prompt('Enter an OATH URI')
+            uri = click.prompt('Enter an OATH URI', err=True)
             try:
                 uri = CredentialData.from_uri(uri)
                 break
@@ -438,7 +438,8 @@ def set_password(ctx, new_password, remember):
         new_password = click.prompt(
             'Enter your new password',
             hide_input=True,
-            confirmation_prompt=True)
+            confirmation_prompt=True,
+            err=True)
 
     controller = ctx.obj['controller']
     settings = ctx.obj['settings']
@@ -500,7 +501,7 @@ def ensure_validated(ctx, prompt='Enter your password', remember=False):
                 del keys[controller.id]
 
         # Prompt for password
-        password = click.prompt(prompt, hide_input=True)
+        password = click.prompt(prompt, hide_input=True, err=True)
         key = controller.derive_key(password)
         _validate(ctx, key, remember)
 

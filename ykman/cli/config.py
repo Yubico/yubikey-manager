@@ -43,7 +43,7 @@ CLEAR_LOCK_CODE = '0' * 32
 
 
 def prompt_lock_code(prompt='Enter your lock code'):
-    return click.prompt(prompt, default='', hide_input=True, show_default=False)
+    return click.prompt(prompt, default='', hide_input=True, show_default=False, err=True)
 
 
 @click.group()

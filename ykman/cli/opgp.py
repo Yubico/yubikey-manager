@@ -162,7 +162,7 @@ def touch(ctx, key, policy, admin_pin, force):
     force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
         key, policy), abort=True)
     if admin_pin is None:
-        admin_pin = click.prompt('Enter admin PIN', hide_input=True)
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
     controller.set_touch(key, policy, admin_pin.encode('utf8'))
     click.echo('Touch policy successfully set.')
 
