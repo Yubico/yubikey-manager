@@ -54,7 +54,7 @@ build_script:
 test_script:
   - python setup.py test
 
-before_deploy:
+after_build:
   - pip install pyinstaller
   - pyinstaller --console --onefile --clean ykman.spec
   - set ARTIFACT_NAME=%APPVEYOR_REPO_BRANCH%-%WIN_ARCH%
