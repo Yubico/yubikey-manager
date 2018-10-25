@@ -54,6 +54,7 @@ SW_COMMAND_NOT_ALLOWED = 0x6986
 
 GP_INS_SELECT = 0xa4
 
+YK_READER_NAME = 'yubico yubikey'
 
 @unique
 class MGR_INS(IntEnum):
@@ -120,9 +121,32 @@ class CCIDDriver(AbstractDriver):
     transport = TRANSPORT.CCID
 
     def __init__(self, connection, name):
-        pid = _pid_from_name(name)
-        super(CCIDDriver, self).__init__(pid.get_type(), Mode.from_pid(pid))
         self._conn = connection
+
+        if name.lower().startswith(YK_READER_NAME):
+            pid = _pid_from_name(name)
+            key_type = pid.get_type()
+            mode = Mode.from_pid(pid)
+        else:
+            key_type, mode = self._probe_type_and_mode()
+        super(CCIDDriver, self).__init__(key_type, mode)
+
+    def _probe_type_and_mode(self):
+        try:
+            s = self.select(AID.OTP)
+            version = tuple(c for c in six.iterbytes(s[:3]))
+            if version < (4, 0, 0):
+                return YUBIKEY.NEO, Mode(TRANSPORT.CCID)
+        except APDUError:
+            pass
+
+        try:
+            self.select(AID.MGR)
+            return YUBIKEY.YK4, Mode(TRANSPORT.CCID)
+        except APDUError:
+            pass
+
+        raise ValueError('Couldn\'t select OTP nor MGR applet!')
 
     def read_serial(self):
         try:
@@ -269,12 +293,12 @@ def _list_readers():
         return System.readers()
 
 
-def open_devices(name_filter='yubico yubikey'):
+def open_devices(name_filter=YK_READER_NAME):
     readers = _list_readers()
     while readers:
         try_again = []
         for reader in readers:
-            if reader.name.lower().startswith(name_filter):
+            if reader.name.lower().startswith(name_filter.lower()):
                 try:
                     conn = reader.createConnection()
                     conn.connect()

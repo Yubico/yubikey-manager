@@ -249,15 +249,16 @@ class YubiKey(object):
                 self._can_mode_switch = False
 
         # Fix usb_enabled
-        usb_enabled = config.usb_enabled or config.usb_supported
-        if not TRANSPORT.has(self.mode.transports, TRANSPORT.OTP):
-            usb_enabled &= ~APPLICATION.OTP
-        if not TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO):
-            usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
-        if not TRANSPORT.has(self.mode.transports, TRANSPORT.CCID):
-            usb_enabled &= ~(TRANSPORT.CCID | APPLICATION.OATH |
+        if not config.usb_enabled:
+            usb_enabled = config.usb_supported
+            if not TRANSPORT.has(self.mode.transports, TRANSPORT.OTP):
+                usb_enabled &= ~APPLICATION.OTP
+            if not TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO):
+               usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
+            if not TRANSPORT.has(self.mode.transports, TRANSPORT.CCID):
+                usb_enabled &= ~(TRANSPORT.CCID | APPLICATION.OATH |
                              APPLICATION.OPGP | APPLICATION.PIV)
-        config._set(TAG.USB_ENABLED, usb_enabled)
+            config._set(TAG.USB_ENABLED, usb_enabled)
 
         # Workaround for invalid configurations.
         # Assume all form factors except USB_A_KEYCHAIN

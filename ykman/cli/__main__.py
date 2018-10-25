@@ -32,8 +32,10 @@ from ykman import __version__
 from ..util import TRANSPORT, Cve201715361VulnerableError, YUBIKEY
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
+from ..driver_ccid import open_devices as open_ccid
+from ..device import YubiKey
 from ..descriptor import (get_descriptors, list_devices, open_device,
-                          FailedOpeningDeviceException)
+                          FailedOpeningDeviceException, Descriptor)
 from .util import UpperCaseChoice, YkmanContextObject
 from .info import info
 from .mode import mode
@@ -98,7 +100,18 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                      .format(serial))
 
 
-def _run_cmd_for_single(ctx, cmd, transports):
+def _run_cmd_for_single(ctx, cmd, transports, reader=None):
+    if reader:
+        if TRANSPORT.has(transports, TRANSPORT.CCID):
+            readers = list(open_ccid(reader))
+            if len(readers) == 1:
+                return YubiKey(Descriptor.from_driver(readers[0]), readers[0])
+            elif len(readers) > 1:
+                ctx.fail('Multiple YubiKeys on external readers detected.')
+            else:
+                ctx.fail('No YubiKey found on external reader.')
+        else:
+            ctx.fail('Not a CCID command.')
     try:
         descriptors = get_descriptors()
     except usb.core.NoBackendError:
@@ -132,8 +145,12 @@ def _run_cmd_for_single(ctx, cmd, transports):
               help='Write logs to the given FILE instead of standard error; '
                    'ignored unless --log-level is also set.',
               )
+@click.option(
+        '-r', '--reader',
+        help='Use an external smart card reader.',
+        metavar='NAME', default=None)
 @click.pass_context
-def cli(ctx, device, log_level, log_file):
+def cli(ctx, device, log_level, log_file, reader):
     """
     Configure your YubiKey via the command line.
     """
@@ -152,7 +169,7 @@ def cli(ctx, device, log_level, log_file):
             if device is not None:
                 dev = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
             else:
-                dev = _run_cmd_for_single(ctx, subcmd.name, transports)
+                dev = _run_cmd_for_single(ctx, subcmd.name, transports, reader)
             ctx.call_on_close(dev.close)
             return dev
         ctx.obj.add_resolver('dev', resolve_device)
