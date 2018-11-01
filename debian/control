@@ -25,7 +25,9 @@ Build-Depends: debhelper (>= 9),
                python-usb,
                python3-usb,
                python-fido2,
-               python3-fido2
+               python3-fido2,
+               libykpers-1-1,
+               pcscd
 Homepage: https://developers.yubico.com/yubikey-manager/
 X-Python-Version: >= 2.7
 X-Python3-Version: >= 3.4
