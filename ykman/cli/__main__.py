@@ -147,7 +147,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
               )
 @click.option(
         '-r', '--reader',
-        help='Use an external smart card reader.',
+        help='Use an external smart card reader. Conflicts with --device and list.',
         metavar='NAME', default=None)
 @click.pass_context
 def cli(ctx, device, log_level, log_file, reader):
@@ -159,8 +159,13 @@ def cli(ctx, device, log_level, log_file, reader):
     if log_level:
         ykman.logging_setup.setup(log_level, log_file=log_file)
 
+    if reader and device:
+        ctx.fail('--reader and --device options can\'t be combined.')
+
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     if subcmd == list_keys:
+        if reader:
+            ctx.fail('--reader and list command can\'t be combined.')
         return
 
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
