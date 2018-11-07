@@ -53,6 +53,17 @@ PIN_MIN_LENGTH = 4
 def fido(ctx):
     """
     Manage FIDO applications.
+
+    Examples:
+
+    \b
+      Reset the FIDO (FIDO2 and U2F) applications:
+      $ ykman fido reset
+
+    \b
+      Change the FIDO2 PIN from 123456 to 654321:
+      $ ykman fido set-pin --pin 123456 --new-pin 654321
+
     """
     dev = ctx.obj['dev']
     if dev.is_fips:
