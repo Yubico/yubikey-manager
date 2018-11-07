@@ -7,6 +7,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
+from ykman.piv.errors import (
+    AuthenticationBlocked, AuthenticationFailed, WrongPuk)
 from ykman.util import TRANSPORT, parse_certificate, parse_private_key
 from .util import (
     DestructiveYubikeyTestCase, missing_mode, open_device, get_version, is_fips)
@@ -51,7 +53,7 @@ class PivTestCase(DestructiveYubikeyTestCase):
         self.controller.authenticate(key)
 
     def assertMgmKeyIsNot(self, key):
-        with self.assertRaises(APDUError):
+        with self.assertRaises(AuthenticationFailed):
             self.controller.authenticate(key)
 
     def assertStoredMgmKeyEquals(self, key):
@@ -225,7 +227,9 @@ class ManagementKeyReadOnly(PivTestCase):
         self.controller.verify(DEFAULT_PIN)
         with self.assertRaises(ValueError) as cm:
             self.controller.reset()
-        self.assertTrue('Failed reading remaining' in str(cm.exception))
+        self.assertTrue(
+            'Cannot read remaining tries from status word: 9000'
+            in str(cm.exception))
 
     def test_set_mgm_key_does_not_change_key_if_not_authenticated(self):
         with self.assertRaises(APDUError):
@@ -369,8 +373,8 @@ class UnblockPin(PivTestCase):
     def test_unblock_pin_requires_no_previous_authentication(self):
         self.controller.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
 
-    def test_unblock_pin_with_wrong_puk_throws_ValueError(self):
-        with self.assertRaises(ValueError):
+    def test_unblock_pin_with_wrong_puk_throws_WrongPuk(self):
+        with self.assertRaises(WrongPuk):
             self.controller.unblock_pin(NON_DEFAULT_PUK, NON_DEFAULT_PIN)
 
     def test_unblock_pin_resets_pin_and_retries(self):
@@ -382,7 +386,7 @@ class UnblockPin(PivTestCase):
 
         self.block_pin()
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AuthenticationBlocked):
             self.controller.verify(DEFAULT_PIN)
 
         self.controller.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
