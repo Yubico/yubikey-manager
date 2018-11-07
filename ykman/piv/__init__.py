@@ -33,8 +33,9 @@ from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from .errors import (
-    AuthenticationBlocked, BadFormat, UnsupportedAlgorithm, UnknownPinPolicy,
-    UnknownTouchPolicy, WrongPin, WrongPuk)
+    AuthenticationBlocked, AuthenticationFailed, BadFormat,
+    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin,
+    WrongPuk)
 from .util import SW
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -579,7 +580,12 @@ class PivController(object):
         ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                             Tlv(TAG.DYN_AUTH, Tlv(0x80)))[4:12]
         backend = default_backend()
-        cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
+        try:
+            cipher_key = algorithms.TripleDES(key)
+        except ValueError:
+            raise BadFormat('Management key must be exactly 24 bytes long, '
+                            'was: {}'.format(len(key)), None)
+        cipher = Cipher(cipher_key, modes.ECB(), backend)
         decryptor = cipher.decryptor()
         pt1 = decryptor.update(ct1) + decryptor.finalize()
         ct2 = os.urandom(8)
@@ -593,6 +599,19 @@ class PivController(object):
                 INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                 Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
                 )[4:12]
+
+        except APDUError as e:
+            if e.sw == SW.ACCESS_DENIED:
+                raise AuthenticationFailed(
+                    'Incorrect management key', e.sw, self.version)
+
+            logger.error('Failed to authenticate management key.', exc_info=e)
+            raise
+
+        except Exception as e:
+            logger.error('Failed to authenticate management key.', exc_info=e)
+            raise
+
         finally:
             if touch_callback is not None:
                 touch_timer.cancel()

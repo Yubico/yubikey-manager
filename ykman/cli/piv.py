@@ -32,7 +32,7 @@ from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..piv.errors import (
-    AuthenticationBlocked, WrongPin, WrongPuk)
+    AuthenticationBlocked, AuthenticationFailed, WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
@@ -813,7 +813,10 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
-    except (APDUError, TypeError):
+    except AuthenticationFailed:
+        ctx.fail('Incorrect management key.')
+    except Exception as e:
+        logger.error('Authentication with management key failed.', exc_info=e)
         ctx.fail('Authentication with management key failed.')
 
 
