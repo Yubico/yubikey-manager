@@ -263,11 +263,15 @@ class SW(IntEnum):
         else:
             return 0x63c0 <= sw <= 0x63cf
 
-    @staticmethod
-    def tries_left(sw, applet_version):
+    @classmethod
+    def tries_left(cls, sw, applet_version):
         # Blocked, 0 tries left.
         if sw == SW.AUTHENTICATION_BLOCKED:
             return 0
+
+        if not cls.is_verify_fail(sw, applet_version):
+            raise ValueError(
+                'Cannot read remaining tries from status word: %x' % sw)
 
         if applet_version < (1, 0, 4):
             return sw & 0xff
