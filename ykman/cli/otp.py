@@ -106,6 +106,24 @@ def otp(ctx, access_code):
     prevents the configuration to be overwritten without the access code
     provided. Mode switching the YubiKey is not possible when a slot is
     configured with an access code.
+
+    Examples:
+
+    \b
+      Swap the configurations between the two slots:
+      $ ykman otp swap
+
+    \b
+      Program a random challenge-response credential to slot 2:
+      $ ykman otp chalresp --generate 2
+
+    \b
+      Program a Yubico OTP credential to slot 2, using the serial as public id:
+      $ ykman otp yubiotp 1 --serial-public-id
+
+    \b
+      Program a random 38 characters long static password to slot 2:
+      $ ykman otp static --generate 2 --length 38
     """
 
     ctx.obj['controller'] = OtpController(ctx.obj['dev'].driver)
