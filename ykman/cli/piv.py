@@ -32,7 +32,7 @@ from ..piv import (
     PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..piv.errors import (
-    AuthenticationBlocked, WrongPuk)
+    AuthenticationBlocked, WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
@@ -590,10 +590,16 @@ def change_pin(ctx, pin, new_pin):
             show_default=False, confirmation_prompt=True, err=True)
     try:
         controller.change_pin(pin, new_pin)
-    except APDUError as e:
-        logger.error('Failed to change PIN', exc_info=e)
-        ctx.fail('Changing the PIN failed.')
-    click.echo('New PIN set.')
+        click.echo('New PIN set.')
+
+    except AuthenticationBlocked as e:
+        logger.debug('PIN is blocked.', exc_info=e)
+        ctx.fail('PIN is blocked.')
+
+    except WrongPin as e:
+        logger.debug(
+            'Failed to change PIN, %d tries left', e.tries_left, exc_info=e)
+        ctx.fail('PIN change failed - %d tries left.' % e.tries_left)
 
 
 @piv.command('change-puk')

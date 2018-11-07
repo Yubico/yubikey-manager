@@ -493,14 +493,13 @@ class PivController(object):
         try:
             self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
         except APDUError as e:
-            if SW.is_verify_fail(e.sw, self.version):
+            if e.sw == SW.AUTHENTICATION_BLOCKED:
+                raise AuthenticationBlocked('PIN is blocked.', e.sw)
+
+            elif SW.is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
-            else:
-                raise AuthenticationFailed(
-                    'Pin verification failed. {} tries left.'.format(
-                        self.get_pin_tries()),
-                    e.sw,
-                    self.version)
+
+            raise
 
         if self.has_derived_key and not self._authenticated:
             self.authenticate(
@@ -513,8 +512,18 @@ class PivController(object):
             self.verify(pin, touch_callback)
 
     def change_pin(self, old_pin, new_pin):
-        self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
-                      _pack_pin(old_pin) + _pack_pin(new_pin))
+        try:
+            self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
+                          _pack_pin(old_pin) + _pack_pin(new_pin))
+        except APDUError as e:
+            if e.sw == SW.AUTHENTICATION_BLOCKED:
+                raise AuthenticationBlocked('PIN is blocked.', e.sw)
+
+            elif SW.is_verify_fail(e.sw, self.version):
+                raise WrongPin(e.sw, self.version)
+
+            raise
+
         if self.has_derived_key:
             if not self._authenticated:
                 self.authenticate(_derive_key(old_pin, self._pivman_data.salt))
