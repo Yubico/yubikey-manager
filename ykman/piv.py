@@ -257,23 +257,22 @@ class SW(IntEnum):
     INCORRECT_PARAMETERS = 0x6a80
 
     @staticmethod
-    def is_verify_fail(sw):
-        return 0x63c0 <= sw <= 0x63cf
+    def is_verify_fail(sw, applet_version):
+        if applet_version < (1, 0, 4):
+            return 0x6300 <= sw <= 0x63ff
+        else:
+            return 0x63c0 <= sw <= 0x63cf
 
     @staticmethod
-    def tries_left(sw):
+    def tries_left(sw, applet_version):
         # Blocked, 0 tries left.
         if sw == SW.AUTHENTICATION_BLOCKED:
             return 0
-        # YK4, NEO with PIV >= 1.0.4
-        if 0x63c0 <= sw <= 0x63cf:
-            return sw & 0xf
-        # PIV applet < 1.04
-        if 0x6300 <= sw & 0x63ff:
-            return sw & 0xff
 
-        raise ValueError('Failed reading remaining PIN/PUK tries from status '
-                         'word: %x' % sw)
+        if applet_version < (1, 0, 4):
+            return sw & 0xff
+        else:
+            return sw & 0xf
 
 
 CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
@@ -541,7 +540,8 @@ class PivController(object):
                           _pack_pin(old_puk) + _pack_pin(new_puk))
             return CodeChangeResult(True, None)
         except APDUError as e:
-            retries = SW.tries_left(e.sw) if SW.is_verify_fail(e.sw) else None
+            retries = (SW.tries_left(e.sw, self.version)
+                       if SW.is_verify_fail(e.sw, self.version) else None)
             logger.debug('PUK change failed, %d tries remaining', retries,
                          exc_info=e)
             return CodeChangeResult(False, retries)
@@ -551,7 +551,7 @@ class PivController(object):
             self.send_cmd(
                 INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
         except APDUError as e:
-            tries = SW.tries_left(e.sw)
+            tries = SW.tries_left(e.sw, self.version)
             if tries == 0:
                 raise ValueError('PUK is blocked.')
             raise ValueError('Unblock PIN failed, {} tries left.'.format(tries))
@@ -666,14 +666,14 @@ class PivController(object):
         """
         # Verify without PIN gives number of tries left.
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
-        return SW.tries_left(sw)
+        return SW.tries_left(sw, self.version)
 
     def _get_puk_tries(self):
         # A failed unblock pin will return number of PUK tries left,
         # but also uses one try.
         _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
                               check=None)
-        return SW.tries_left(sw)
+        return SW.tries_left(sw, self.version)
 
     def _block_pin(self):
         while self.get_pin_tries() > 0:
