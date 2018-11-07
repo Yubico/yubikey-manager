@@ -258,7 +258,7 @@ class SW(IntEnum):
 
     @staticmethod
     def is_verify_fail(sw):
-        return 0x63c0 <= sw <= 0x63c3
+        return 0x63c0 <= sw <= 0x63cf
 
     @staticmethod
     def tries_left(sw):
