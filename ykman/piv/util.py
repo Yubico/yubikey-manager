@@ -48,7 +48,6 @@ class SW(IntEnum):
 
     @classmethod
     def tries_left(cls, sw, applet_version):
-        # Blocked, 0 tries left.
         if sw == SW.AUTHENTICATION_BLOCKED:
             return 0
 
