@@ -56,6 +56,7 @@ GP_INS_SELECT = 0xa4
 
 YK_READER_NAME = 'yubico yubikey'
 
+
 @unique
 class MGR_INS(IntEnum):
     READ_CONFIG = 0x1d
