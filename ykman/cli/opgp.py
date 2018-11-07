@@ -83,6 +83,16 @@ def int_in_range(minval, maxval):
 def openpgp(ctx):
     """
     Manage OpenPGP Application.
+
+    Examples:
+
+    \b
+      Set the retries for PIN, Reset Code and Admin PIN to 10:
+      $ ykman openpgp set-retries 10 10 10
+
+    \b
+      Require touch to use the authentication key:
+      $ ykman openpgp touch aut on
     """
     try:
         ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
