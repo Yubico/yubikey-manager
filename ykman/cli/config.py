@@ -57,6 +57,20 @@ def config(ctx):
     The applications may be enabled and disabled independently
     over different interfaces (USB and NFC). The configuration may
     also be protected by a lock code.
+
+    Examples:
+
+    \b
+      Disable PIV over the NFC interface:
+      $ ykman config nfc --disable PIV
+
+    \b
+      Enable all applications over USB:
+      $ ykman config usb --enable-all
+
+    \b
+      Generate and set a random application lock code:
+      $ ykman config set-lock-code --generate
     """
     dev = ctx.obj['dev']
     if not dev.can_write_config:
