@@ -55,11 +55,11 @@ test_script:
   - python setup.py test
 
 after_build:
-  - pip install pyinstaller
-  - pyinstaller --console --onefile --clean ykman.spec
-  - set ARTIFACT_NAME=%APPVEYOR_REPO_BRANCH%-%WIN_ARCH%
+  - if defined DEPLOY pip install pyinstaller
+  - if defined DEPLOY pyinstaller --console --onefile --clean ykman.spec
+  - if defined DEPLOY set ARTIFACT_NAME=%APPVEYOR_REPO_BRANCH%-%WIN_ARCH%
   - if defined APPVEYOR_REPO_TAG_NAME set ARTIFACT_NAME=%APPVEYOR_REPO_TAG_NAME%-%WIN_ARCH%
-  - 7z a yubikey-manager-%ARTIFACT_NAME%.zip .\dist\*
+  - if defined DEPLOY 7z a yubikey-manager-%ARTIFACT_NAME%.zip .\dist\*
 
 artifacts:
   - path: yubikey-manager-$(ARTIFACT_NAME).zip
