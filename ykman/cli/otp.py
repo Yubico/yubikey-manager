@@ -111,7 +111,8 @@ def otp(ctx, access_code):
     ctx.obj['controller'] = OtpController(ctx.obj['dev'].driver)
     if access_code is not None:
         if access_code == '':
-            access_code = click.prompt('Enter access code', show_default=False, err=True)
+            access_code = click.prompt(
+                'Enter access code', show_default=False, err=True)
 
         try:
             access_code = parse_access_code_hex(access_code)
