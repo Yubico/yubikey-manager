@@ -99,6 +99,16 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     MODE can be a string, such as "OTP+FIDO+CCID", or a shortened form: "o+f+c".
     It can also be a mode number.
+
+    Examples:
+
+    \b
+      Set the OTP and FIDO mode:
+      $ ykman mode OTP+FIDO
+
+    \b
+      Set the CCID only mode and use touch to eject the smart card:
+      $ ykman mode CCID --touch-eject
     """
     dev = ctx.obj['dev']
     if autoeject_timeout:
