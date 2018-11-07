@@ -29,8 +29,7 @@ from __future__ import absolute_import
 
 import six
 from .util import AID
-from .driver_ccid import (APDUError, SW_OK, SW_NO_INPUT_DATA,
-                          SW_CONDITIONS_NOT_SATISFIED)
+from .driver_ccid import (APDUError, SW)
 from enum import IntEnum, unique
 from binascii import b2a_hex
 from collections import namedtuple
@@ -81,12 +80,12 @@ class OpgpController(object):
     def version(self):
         return self._version
 
-    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
+    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW.OK):
         try:
             return self._driver.send_apdu(cl, ins, p1, p2, data, check)
         except APDUError as e:
             # If OpenPGP is in a terminated state send activate.
-            if e.sw in (SW_NO_INPUT_DATA, SW_CONDITIONS_NOT_SATISFIED):
+            if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
                 self._driver.send_apdu(0, INS.ACTIVATE, 0, 0)
                 return self._driver.send_apdu(cl, ins, p1, p2, data, check)
             raise

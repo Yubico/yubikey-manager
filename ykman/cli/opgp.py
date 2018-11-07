@@ -31,7 +31,7 @@ import logging
 import click
 from ..util import TRANSPORT
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
-from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
+from ..driver_ccid import APDUError, SW
 from .util import click_force_option, click_postpone_execution
 
 
@@ -87,7 +87,7 @@ def openpgp(ctx):
     try:
         ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
     except APDUError as e:
-        if e.sw == SW_APPLICATION_NOT_FOUND:
+        if e.sw == SW.APPLICATION_NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this "
                      'YubiKey.')
         logger.debug('Failed to load OpenPGP Application', exc_info=e)

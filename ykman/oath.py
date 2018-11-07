@@ -39,7 +39,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hmac, hashes
 from cryptography.hazmat.backends import default_backend
 from six.moves.urllib.parse import unquote, urlparse, parse_qs
-from .driver_ccid import APDUError, SW_OK
+from .driver_ccid import APDUError, SW
 from .util import (
     AID, Tlv, parse_tlvs, time_challenge, parse_b32_key,
     format_code, parse_truncated, hmac_shorten_key)
@@ -99,14 +99,6 @@ class INS(IntEnum):
 class MASK(IntEnum):
     ALGO = 0x0f
     TYPE = 0xf0
-
-
-@unique
-class SW(IntEnum):
-    NO_SPACE = 0x6a84
-    COMMAND_ABORTED = 0x6f00
-    MORE_DATA = 0x61
-    INVALID_INSTRUCTION = 0x6d00
 
 
 class CredentialData(object):
@@ -263,7 +255,7 @@ class OathController(object):
                 0, INS.SEND_REMAINING, 0, 0, b'', check=None)
             resp += more
 
-        if sw != SW_OK:
+        if sw != SW.OK:
             raise APDUError(resp, sw)
 
         return resp

@@ -28,7 +28,7 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
-from ..driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
+from ..driver_ccid import APDUError, SW as CcidSW
 from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
@@ -457,7 +457,7 @@ class PivController(object):
     def puk_blocked(self):
         return self._pivman_data.puk_blocked
 
-    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW_OK):
+    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=CcidSW.OK):
         while len(data) > 0xff:
             self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
             data = data[0xff:]
@@ -483,7 +483,7 @@ class PivController(object):
             self._pivman_protected_data = PivmanProtectedData(
                 self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
         except APDUError as e:
-            if e.sw == SW_APPLICATION_NOT_FOUND:
+            if e.sw == CcidSW.APPLICATION_NOT_FOUND:
                 # No data there, initialise a new object.
                 self._pivman_protected_data = PivmanProtectedData()
             else:
