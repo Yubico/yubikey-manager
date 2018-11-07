@@ -158,7 +158,7 @@ def cli(ctx, device, log_level, log_file, reader):
 
     \b
       List connected YubiKeys, only output serial number:
-      $ ykman list --serial
+      $ ykman list --serials
 
     \b
       Show information about YubiKey with serial number 0123456:
