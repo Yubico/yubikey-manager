@@ -28,7 +28,7 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
-from ..driver_ccid import APDUError, SW as CcidSW
+from ..driver_ccid import APDUError, SW
 from ..util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
@@ -36,7 +36,7 @@ from .errors import (
     AuthenticationBlocked, AuthenticationFailed, BadFormat,
     UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin,
     WrongPuk)
-from .util import SW
+from . import sw_util
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
@@ -457,7 +457,7 @@ class PivController(object):
     def puk_blocked(self):
         return self._pivman_data.puk_blocked
 
-    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=CcidSW.OK):
+    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW.OK):
         while len(data) > 0xff:
             self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
             data = data[0xff:]
@@ -483,7 +483,7 @@ class PivController(object):
             self._pivman_protected_data = PivmanProtectedData(
                 self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
         except APDUError as e:
-            if e.sw == CcidSW.APPLICATION_NOT_FOUND:
+            if e.sw == SW.NOT_FOUND:
                 # No data there, initialise a new object.
                 self._pivman_protected_data = PivmanProtectedData()
             else:
@@ -493,10 +493,10 @@ class PivController(object):
         try:
             self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
         except APDUError as e:
-            if e.sw == SW.AUTHENTICATION_BLOCKED:
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PIN is blocked.', e.sw)
 
-            elif SW.is_verify_fail(e.sw, self.version):
+            elif sw_util.is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
 
             raise
@@ -516,10 +516,10 @@ class PivController(object):
             self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
                           _pack_pin(old_pin) + _pack_pin(new_pin))
         except APDUError as e:
-            if e.sw == SW.AUTHENTICATION_BLOCKED:
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PIN is blocked.', e.sw)
 
-            elif SW.is_verify_fail(e.sw, self.version):
+            elif sw_util.is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
 
             raise
@@ -534,10 +534,10 @@ class PivController(object):
             self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
                           _pack_pin(old_puk) + _pack_pin(new_puk))
         except APDUError as e:
-            if e.sw == SW.AUTHENTICATION_BLOCKED:
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PUK is blocked.', e.sw)
 
-            elif SW.is_verify_fail(e.sw, self.version):
+            elif sw_util.is_verify_fail(e.sw, self.version):
                 raise WrongPuk(e.sw, self.version)
 
             raise
@@ -547,10 +547,10 @@ class PivController(object):
             self.send_cmd(
                 INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
         except APDUError as e:
-            if e.sw == SW.AUTHENTICATION_BLOCKED:
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PUK is blocked.', e.sw)
 
-            elif SW.is_verify_fail(e.sw, self.version):
+            elif sw_util.is_verify_fail(e.sw, self.version):
                 raise WrongPuk(e.sw, self.version)
 
             raise
@@ -601,7 +601,7 @@ class PivController(object):
                 )[4:12]
 
         except APDUError as e:
-            if e.sw == SW.ACCESS_DENIED:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 raise AuthenticationFailed(
                     'Incorrect management key', e.sw, self.version)
 
@@ -685,14 +685,14 @@ class PivController(object):
         """
         # Verify without PIN gives number of tries left.
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
-        return SW.tries_left(sw, self.version)
+        return sw_util.tries_left(sw, self.version)
 
     def _get_puk_tries(self):
         # A failed unblock pin will return number of PUK tries left,
         # but also uses one try.
         _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
                               check=None)
-        return SW.tries_left(sw, self.version)
+        return sw_util.tries_left(sw, self.version)
 
     def _block_pin(self):
         while self.get_pin_tries() > 0:

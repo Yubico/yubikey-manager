@@ -87,7 +87,7 @@ def openpgp(ctx):
     try:
         ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
     except APDUError as e:
-        if e.sw == SW.APPLICATION_NOT_FOUND:
+        if e.sw == SW.NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this "
                      'YubiKey.')
         logger.debug('Failed to load OpenPGP Application', exc_info=e)

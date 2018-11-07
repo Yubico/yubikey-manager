@@ -29,11 +29,11 @@ from __future__ import absolute_import
 
 from ..util import TRANSPORT, parse_private_key, parse_certificate
 from ..piv import (
-    PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
+    PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..piv.errors import (
     AuthenticationBlocked, AuthenticationFailed, WrongPin, WrongPuk)
-from ..driver_ccid import APDUError, SW as CcidSW
+from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
@@ -111,7 +111,7 @@ def piv(ctx):
     try:
         ctx.obj['controller'] = PivController(ctx.obj['dev'].driver)
     except APDUError as e:
-        if e.sw == CcidSW.APPLICATION_NOT_FOUND:
+        if e.sw == SW.NOT_FOUND:
             ctx.fail("The PIV application can't be found on this YubiKey.")
         raise
 

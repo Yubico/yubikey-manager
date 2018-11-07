@@ -25,15 +25,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .util import SW
+from . import sw_util
 
 
 class AuthenticationFailed(Exception):
     def __init__(self, message, sw, applet_version):
         super().__init__(message)
         self.tries_left = (
-            SW.tries_left(sw, applet_version)
-            if SW.is_verify_fail(sw, applet_version)
+            sw_util.tries_left(sw, applet_version)
+            if sw_util.is_verify_fail(sw, applet_version)
             else None)
 
 

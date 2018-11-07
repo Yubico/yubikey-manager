@@ -58,11 +58,27 @@ class SW(IntEnum):
     DATA_INVALID = 0x6984
     CONDITIONS_NOT_SATISFIED = 0x6985
     COMMAND_NOT_ALLOWED = 0x6986
-    APPLICATION_NOT_FOUND = 0x6a82
+    INCORRECT_PARAMETERS = 0x6a80
+    NOT_FOUND = 0x6a82
     NO_SPACE = 0x6a84
     INVALID_INSTRUCTION = 0x6d00
     COMMAND_ABORTED = 0x6f00
     OK = 0x9000
+
+    @staticmethod
+    def is_verify_fail(sw):
+        return 0x63c0 <= sw <= 0x63cf
+
+    @classmethod
+    def tries_left(cls, sw):
+        if sw == SW.AUTH_METHOD_BLOCKED:
+            return 0
+
+        if not cls.is_verify_fail(sw):
+            raise ValueError(
+                'Cannot read remaining tries from status word: %x' % sw)
+
+        return sw & 0xf
 
 
 @unique

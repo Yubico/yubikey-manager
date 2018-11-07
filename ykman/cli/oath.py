@@ -93,7 +93,7 @@ def oath(ctx, password):
         ctx.obj['controller'] = controller
         ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
-        if e.sw == SW.APPLICATION_NOT_FOUND:
+        if e.sw == SW.NOT_FOUND:
             ctx.fail("The OATH application can't be found on this YubiKey.")
         raise
 

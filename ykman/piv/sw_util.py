@@ -25,37 +25,25 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from enum import IntEnum, unique
+from ..driver_ccid import SW
 
 
-@unique
-class SW(IntEnum):
-    NO_SPACE = 0x6a84
-    COMMAND_ABORTED = 0x6f00
-    MORE_DATA = 0x61
-    INVALID_INSTRUCTION = 0x6d00
-    NOT_FOUND = 0x6a82
-    ACCESS_DENIED = 0x6982
-    AUTHENTICATION_BLOCKED = 0x6983
-    INCORRECT_PARAMETERS = 0x6a80
+def is_verify_fail(sw, applet_version):
+    if applet_version < (1, 0, 4):
+        return 0x6300 <= sw <= 0x63ff
+    else:
+        return SW.is_verify_fail(sw)
 
-    @staticmethod
-    def is_verify_fail(sw, applet_version):
-        if applet_version < (1, 0, 4):
-            return 0x6300 <= sw <= 0x63ff
-        else:
-            return 0x63c0 <= sw <= 0x63cf
 
-    @classmethod
-    def tries_left(cls, sw, applet_version):
-        if sw == SW.AUTHENTICATION_BLOCKED:
+def tries_left(sw, applet_version):
+    if applet_version < (1, 0, 4):
+        if sw == SW.AUTH_METHOD_BLOCKED:
             return 0
 
-        if not cls.is_verify_fail(sw, applet_version):
+        if not is_verify_fail(sw, applet_version):
             raise ValueError(
                 'Cannot read remaining tries from status word: %x' % sw)
 
-        if applet_version < (1, 0, 4):
-            return sw & 0xff
-        else:
-            return sw & 0xf
+        return sw & 0xff
+    else:
+        return SW.tries_left(sw)
