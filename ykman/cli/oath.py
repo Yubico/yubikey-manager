@@ -91,8 +91,8 @@ def oath(ctx, password):
     Examples:
 
     \b
-      Generate codes for all credentials:
-      $ ykman oath code
+      Generate codes for credentials starting with 'yubi':
+      $ ykman oath code yubi
 
     \b
       Add a touch credential with the secret key f5up4ub3dw and the name yubico:
