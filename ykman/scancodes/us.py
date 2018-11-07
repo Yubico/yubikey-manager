@@ -103,7 +103,7 @@ scancodes = {
     '%': 0x22 | SHIFT,
     '&': 0x24 | SHIFT,
     "'": 0x34,
-    "`" : 0x35,
+    '`': 0x35,
     '(': 0x26 | SHIFT,
     ')': 0x27 | SHIFT,
     '*': 0x25 | SHIFT,

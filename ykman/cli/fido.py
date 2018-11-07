@@ -318,7 +318,8 @@ def unlock(ctx, pin):
 
 
 def _prompt_current_pin(prompt='Enter your current PIN'):
-    return click.prompt(prompt, default='', hide_input=True, show_default=False, err=True)
+    return click.prompt(
+        prompt, default='', hide_input=True, show_default=False, err=True)
 
 
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):

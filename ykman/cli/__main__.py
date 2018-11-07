@@ -147,7 +147,8 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
               )
 @click.option(
         '-r', '--reader',
-        help='Use an external smart card reader. Conflicts with --device and list.',
+        help='Use an external smart card reader. Conflicts with --device and '
+             'list.',
         metavar='NAME', default=None)
 @click.pass_context
 def cli(ctx, device, log_level, log_file, reader):
