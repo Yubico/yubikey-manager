@@ -507,7 +507,7 @@ class PivController(object):
                 self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
         except APDUError as e:
             if e.sw == SW_APPLICATION_NOT_FOUND:
-                # No data there, initialise a new object.
+                # No data there, initialize a new object.
                 self._pivman_protected_data = PivmanProtectedData()
             else:
                 raise
