@@ -451,7 +451,7 @@ def parse_private_key(data, password):
 
 def parse_certificate(data, password):
     """
-    Identifies, decrypts and returns a cryptography x509 certficate.
+    Identifies, decrypts and returns a cryptography x509 certificate.
     """
     # PEM
     if data.startswith(b'-----'):
