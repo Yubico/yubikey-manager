@@ -45,7 +45,7 @@
  ** CLI breaking changes:
   *** OATH: Touch prompt now written to stderr instead of stdout
   *** OATH: `-a|--algorithm` option to `list` command removed
-  *** OATH: Columns in `code` command are now dymanically spaced depending on contents
+  *** OATH: Columns in `code` command are now dynamically spaced depending on contents
   *** OATH: `delete` command now requires confirmation or `-f|--force` argument
   *** OATH: IDs printed by `list` command now include TOTP period if not 30
   *** Changed outputs:
