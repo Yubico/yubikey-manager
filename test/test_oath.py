@@ -12,10 +12,10 @@ class TestOathFunctions(unittest.TestCase):
         self.assertEqual('Issuer', issuer)
         self.assertEqual('name', name)
 
-    def test_credential_parse_wierd_issuer_and_name(self):
-        issuer, name, period = Credential.parse_key(b'wierd/Issuer:name')
+    def test_credential_parse_weird_issuer_and_name(self):
+        issuer, name, period = Credential.parse_key(b'weird/Issuer:name')
         self.assertEqual(30, period)
-        self.assertEqual('wierd/Issuer', issuer)
+        self.assertEqual('weird/Issuer', issuer)
         self.assertEqual('name', name)
 
     def test_credential_parse_issuer_and_name(self):
