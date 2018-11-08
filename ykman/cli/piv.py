@@ -29,9 +29,11 @@ from __future__ import absolute_import
 
 from ..util import TRANSPORT, parse_private_key, parse_certificate
 from ..piv import (
-    PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
+    PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
-from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
+from ..piv import (
+    AuthenticationBlocked, AuthenticationFailed, WrongPin, WrongPuk)
+from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
@@ -71,11 +73,11 @@ def click_parse_management_key(ctx, param, val):
     try:
         key = a2b_hex(val)
         if key and len(key) != 24:
-            return ValueError('Management key must be exactly 24 bytes '
-                              '(48 hexadecimal digits) long.')
+            raise ValueError('Management key must be exactly 24 bytes '
+                             '(48 hexadecimal digits) long.')
         return key
     except Exception:
-        return ValueError(val)
+        raise ValueError(val)
 
 
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
@@ -109,7 +111,7 @@ def piv(ctx):
     try:
         ctx.obj['controller'] = PivController(ctx.obj['dev'].driver)
     except APDUError as e:
-        if e.sw == SW_APPLICATION_NOT_FOUND:
+        if e.sw == SW.NOT_FOUND:
             ctx.fail("The PIV application can't be found on this YubiKey.")
         raise
 
@@ -588,10 +590,16 @@ def change_pin(ctx, pin, new_pin):
             show_default=False, confirmation_prompt=True, err=True)
     try:
         controller.change_pin(pin, new_pin)
-    except APDUError as e:
-        logger.error('Failed to change PIN', exc_info=e)
-        ctx.fail('Changing the PIN failed.')
-    click.echo('New PIN set.')
+        click.echo('New PIN set.')
+
+    except AuthenticationBlocked as e:
+        logger.debug('PIN is blocked.', exc_info=e)
+        ctx.fail('PIN is blocked.')
+
+    except WrongPin as e:
+        logger.debug(
+            'Failed to change PIN, %d tries left', e.tries_left, exc_info=e)
+        ctx.fail('PIN change failed - %d tries left.' % e.tries_left)
 
 
 @piv.command('change-puk')
@@ -613,13 +621,18 @@ def change_puk(ctx, puk, new_puk):
             show_default=False, confirmation_prompt=True,
             err=True)
 
-    (success, retries) = controller.change_puk(puk, new_puk)
-
-    if success:
+    try:
+        controller.change_puk(puk, new_puk)
         click.echo('New PUK set.')
-    else:
-        logger.debug('Failed to change PUK, %d tries left', retries)
-        ctx.fail('PUK change failed - %d tries left.' % retries)
+
+    except AuthenticationBlocked as e:
+        logger.debug('PUK is blocked.', exc_info=e)
+        ctx.fail('PUK is blocked.')
+
+    except WrongPuk as e:
+        logger.debug(
+            'Failed to change PUK, %d tries left', e.tries_left, exc_info=e)
+        ctx.fail('PUK change failed - %d tries left.' % e.tries_left)
 
 
 @piv.command('change-management-key')
@@ -780,7 +793,11 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
 
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
-    except APDUError:
+    except WrongPin as e:
+        ctx.fail('PIN verification failed, {} tries left.'.format(e.tries_left))
+    except AuthenticationBlocked as e:
+        ctx.fail('PIN is blocked.')
+    except Exception:
         ctx.fail('PIN verification failed.')
 
 
@@ -796,7 +813,10 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
-    except (APDUError, TypeError):
+    except AuthenticationFailed:
+        ctx.fail('Incorrect management key.')
+    except Exception as e:
+        logger.error('Authentication with management key failed.', exc_info=e)
         ctx.fail('Authentication with management key failed.')
 
 

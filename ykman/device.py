@@ -254,10 +254,13 @@ class YubiKey(object):
             if not TRANSPORT.has(self.mode.transports, TRANSPORT.OTP):
                 usb_enabled &= ~APPLICATION.OTP
             if not TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO):
-               usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
+                usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
             if not TRANSPORT.has(self.mode.transports, TRANSPORT.CCID):
-                usb_enabled &= ~(TRANSPORT.CCID | APPLICATION.OATH |
-                             APPLICATION.OPGP | APPLICATION.PIV)
+                usb_enabled &= ~(
+                    TRANSPORT.CCID |
+                    APPLICATION.OATH |
+                    APPLICATION.OPGP |
+                    APPLICATION.PIV)
             config._set(TAG.USB_ENABLED, usb_enabled)
 
         # Workaround for invalid configurations.
@@ -284,8 +287,8 @@ class YubiKey(object):
             elif self.version >= (5, 1, 0):
                 logger.debug('Identified YubiKey 5')
                 self.device_name = 'YubiKey 5'
-                if config.form_factor == FORM_FACTOR.USB_A_KEYCHAIN \
-                    and not config.nfc_supported:
+                if (config.form_factor == FORM_FACTOR.USB_A_KEYCHAIN
+                        and not config.nfc_supported):
                     self.device_name += 'A'
                 elif config.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
                     self.device_name += ' NFC'

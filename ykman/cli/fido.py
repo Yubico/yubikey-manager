@@ -32,9 +32,7 @@ from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
 from .util import click_postpone_execution, prompt_for_touch, click_force_option
-from ..driver_ccid import (
-    SW_COMMAND_NOT_ALLOWED, SW_VERIFY_FAIL_NO_RETRY,
-    SW_AUTH_METHOD_BLOCKED, SW_WRONG_LENGTH)
+from ..driver_ccid import SW
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..descriptor import get_descriptors
@@ -136,7 +134,7 @@ def set_pin(ctx, pin, new_pin, u2f):
                     # Failing this with empty current PIN does not cost a retry
                     controller.change_pin(old_pin=pin or '', new_pin=new_pin)
                 except ApduError as e:
-                    if e.code == SW_WRONG_LENGTH:
+                    if e.code == SW.WRONG_LENGTH:
                         pin = _prompt_current_pin()
                         _fail_if_not_valid_pin(ctx, pin, is_fips)
                         controller.change_pin(old_pin=pin, new_pin=new_pin)
@@ -159,10 +157,10 @@ def set_pin(ctx, pin, new_pin, u2f):
             ctx.fail('Failed to change PIN.')
 
         except ApduError as e:
-            if e.code == SW_VERIFY_FAIL_NO_RETRY:
+            if e.code == SW.VERIFY_FAIL_NO_RETRY:
                 ctx.fail('Wrong PIN.')
 
-            if e.code == SW_AUTH_METHOD_BLOCKED:
+            if e.code == SW.AUTH_METHOD_BLOCKED:
                 ctx.fail('PIN is blocked.')
 
             logger.error('Failed to change PIN', exc_info=e)
@@ -252,7 +250,7 @@ def reset(ctx, force):
             try_reset(FipsU2fController)
 
         except ApduError as e:
-            if e.code == SW_COMMAND_NOT_ALLOWED:
+            if e.code == SW.COMMAND_NOT_ALLOWED:
                 ctx.fail(
                     'Reset failed. Reset must be triggered within 5 seconds'
                     ' after the YubiKey is inserted.')
@@ -306,11 +304,11 @@ def unlock(ctx, pin):
     try:
         controller.verify_pin(pin)
     except ApduError as e:
-        if e.code == SW_VERIFY_FAIL_NO_RETRY:
+        if e.code == SW.VERIFY_FAIL_NO_RETRY:
             ctx.fail('Wrong PIN.')
-        if e.code == SW_AUTH_METHOD_BLOCKED:
+        if e.code == SW.AUTH_METHOD_BLOCKED:
             ctx.fail('PIN is blocked.')
-        if e.code == SW_COMMAND_NOT_ALLOWED:
+        if e.code == SW.COMMAND_NOT_ALLOWED:
             ctx.fail('PIN is not set.')
 
         logger.error('PIN verification failed', exc_info=e)
@@ -318,7 +316,8 @@ def unlock(ctx, pin):
 
 
 def _prompt_current_pin(prompt='Enter your current PIN'):
-    return click.prompt(prompt, default='', hide_input=True, show_default=False, err=True)
+    return click.prompt(
+        prompt, default='', hide_input=True, show_default=False, err=True)
 
 
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):

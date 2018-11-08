@@ -41,20 +41,45 @@ from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
 from .util import AID, APPLICATION, TRANSPORT, YUBIKEY, Mode
 
-SW_OK = 0x9000
-SW_VERIFY_FAIL_NO_RETRY = 0x63c0
-SW_WRONG_LENGTH = 0x6700
-SW_APPLICATION_NOT_FOUND = 0x6a82
-SW_NO_INPUT_DATA = 0x6285
-SW_SECURITY_CONDITION_NOT_SATISFIED = 0x6982
-SW_AUTH_METHOD_BLOCKED = 0x6983
-SW_DATA_INVALID = 0x6984
-SW_CONDITIONS_NOT_SATISFIED = 0x6985
-SW_COMMAND_NOT_ALLOWED = 0x6986
 
 GP_INS_SELECT = 0xa4
 
 YK_READER_NAME = 'yubico yubikey'
+
+
+@unique
+class SW(IntEnum):
+    MORE_DATA = 0x61
+    NO_INPUT_DATA = 0x6285
+    VERIFY_FAIL_NO_RETRY = 0x63c0
+    WRONG_LENGTH = 0x6700
+    SECURITY_CONDITION_NOT_SATISFIED = 0x6982
+    AUTH_METHOD_BLOCKED = 0x6983
+    DATA_INVALID = 0x6984
+    CONDITIONS_NOT_SATISFIED = 0x6985
+    COMMAND_NOT_ALLOWED = 0x6986
+    INCORRECT_PARAMETERS = 0x6a80
+    NOT_FOUND = 0x6a82
+    NO_SPACE = 0x6a84
+    INVALID_INSTRUCTION = 0x6d00
+    COMMAND_ABORTED = 0x6f00
+    OK = 0x9000
+
+    @staticmethod
+    def is_verify_fail(sw):
+        return 0x63c0 <= sw <= 0x63cf
+
+    @classmethod
+    def tries_left(cls, sw):
+        if sw == SW.AUTH_METHOD_BLOCKED:
+            return 0
+
+        if not cls.is_verify_fail(sw):
+            raise ValueError(
+                'Cannot read remaining tries from status word: %x' % sw)
+
+        return sw & 0xf
+
 
 @unique
 class MGR_INS(IntEnum):
@@ -192,7 +217,7 @@ class CCIDDriver(AbstractDriver):
                     'Missing applet: aid: %s , capability: %s', aid, code)
         return capa
 
-    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW_OK):
+    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW.OK):
         header = [cl, ins, p1, p2, len(data)]
         body = list(six.iterbytes(data))
         try:

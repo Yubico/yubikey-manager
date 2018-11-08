@@ -32,7 +32,7 @@ import time
 from fido2.ctap1 import CTAP1, ApduError
 from fido2.ctap2 import CTAP2, PinProtocolV1
 from threading import Timer
-from .driver_ccid import SW_CONDITIONS_NOT_SATISFIED
+from .driver_ccid import SW
 from .driver_fido import FIPS_U2F_CMD
 
 
@@ -115,7 +115,7 @@ class FipsU2fController(object):
                     self._pin = False
                     return True
                 except ApduError as e:
-                    if e.code == SW_CONDITIONS_NOT_SATISFIED:
+                    if e.code == SW.CONDITIONS_NOT_SATISFIED:
                         time.sleep(0.5)
                     else:
                         raise e

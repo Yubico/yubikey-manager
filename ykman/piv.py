@@ -28,11 +28,10 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
-from .driver_ccid import APDUError, SW_OK, SW_APPLICATION_NOT_FOUND
+from .driver_ccid import APDUError, SW
 from .util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
-from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
@@ -90,7 +89,8 @@ class ALGO(IntEnum):
                 return cls.ECCP256
             elif curve_name == 'secp384r1':
                 return cls.ECCP384
-        raise ValueError('Unsupported key type!')
+        raise UnsupportedAlgorithm(
+            'Unsupported key type: %s' % type(key), key=key)
 
     @classmethod
     def from_string(cls, algorithm):
@@ -102,7 +102,9 @@ class ALGO(IntEnum):
             return cls.ECCP256
         if algorithm == 'ECCP384':
             return cls.ECCP384
-        raise ValueError('Unsupported algorithm!')
+        raise UnsupportedAlgorithm(
+            'Unsupported algorithm name: %s' % algorithm,
+            algorithm_id=algorithm)
 
     @classmethod
     def is_rsa(cls, algorithm_int):
@@ -222,7 +224,7 @@ class PIN_POLICY(IntEnum):
             return cls.ONCE
         if pin_policy == 'ALWAYS':
             return cls.ALWAYS
-        raise ValueError('Unsupported pin policy!')
+        raise UnknownPinPolicy(pin_policy)
 
 
 @unique
@@ -242,44 +244,63 @@ class TOUCH_POLICY(IntEnum):
             return cls.ALWAYS
         if touch_policy == 'CACHED':
             return cls.CACHED
-        raise ValueError('Unsupported touch policy!')
+        raise UnknownTouchPolicy(touch_policy)
 
 
-@unique
-class SW(IntEnum):
-    NO_SPACE = 0x6a84
-    COMMAND_ABORTED = 0x6f00
-    MORE_DATA = 0x61
-    INVALID_INSTRUCTION = 0x6d00
-    NOT_FOUND = 0x6a82
-    ACCESS_DENIED = 0x6982
-    AUTHENTICATION_BLOCKED = 0x6983
-    INCORRECT_PARAMETERS = 0x6a80
+class AuthenticationFailed(Exception):
+    def __init__(self, message, sw, applet_version):
+        super().__init__(message)
+        self.tries_left = (
+            tries_left(sw, applet_version)
+            if is_verify_fail(sw, applet_version)
+            else None)
 
-    @staticmethod
-    def is_verify_fail(sw, applet_version):
-        if applet_version < (1, 0, 4):
-            return 0x6300 <= sw <= 0x63ff
-        else:
-            return 0x63c0 <= sw <= 0x63cf
 
-    @classmethod
-    def tries_left(cls, sw, applet_version):
-        # Blocked, 0 tries left.
-        if sw == SW.AUTHENTICATION_BLOCKED:
-            return 0
+class AuthenticationBlocked(AuthenticationFailed):
+    def __init__(self, message, sw):
+        # Dummy applet_version since sw will always be "authentication blocked"
+        super().__init__(message, sw, ())
 
-        if not cls.is_verify_fail(sw, applet_version):
+
+class BadFormat(Exception):
+    def __init__(self, message, bad_value):
+        super().__init__(message)
+        self.bad_value = bad_value
+
+
+class UnsupportedAlgorithm(Exception):
+    def __init__(self, message, algorithm_id=None, key=None, ):
+        super().__init__(message)
+        if algorithm_id is None and key is None:
             raise ValueError(
-                'Cannot read remaining tries from status word: %x' % sw)
+                'At least one of algorithm_id and key must be given.')
 
-        if applet_version < (1, 0, 4):
-            return sw & 0xff
-        else:
-            return sw & 0xf
+        self.algorithm_id = algorithm_id
+        self.key = key
 
 
-CodeChangeResult = namedtuple('CodeChangeResult', ['success', 'tries_left'])
+class UnknownPinPolicy(Exception):
+    def __init__(self, policy_name):
+        super().__init__(
+            'Unsupported pin policy: %s' % policy_name)
+        self.policy_name = policy_name
+
+
+class UnknownTouchPolicy(Exception):
+    def __init__(self, policy_name):
+        super().__init__(
+            'Unsupported touch policy: %s' % policy_name)
+        self.policy_name = policy_name
+
+
+class WrongPin(AuthenticationFailed):
+    def __init__(self, sw, applet_version):
+        super().__init__('Incorrect PIN', sw, applet_version)
+
+
+class WrongPuk(AuthenticationFailed):
+    def __init__(self, sw, applet_version):
+        super().__init__('Incorrect PUK', sw, applet_version)
 
 
 PIN = 0x80
@@ -299,14 +320,18 @@ def _pack_pin(pin):
     if isinstance(pin, six.text_type):
         pin = pin.encode('utf8')
     if len(pin) > 8:
-        raise ValueError('PIN/PUK too large (max 8 bytes, was %d)' % len(pin))
+        raise BadFormat(
+            'PIN/PUK too large (max 8 bytes, was %d)' % len(pin), pin)
     return pin.ljust(8, b'\xff')
 
 
 def _get_key_data(key):
     if isinstance(key, rsa.RSAPrivateKey):
         if key.public_key().public_numbers().e != 65537:
-            raise ValueError('Unsupported RSA exponent!')
+            raise UnsupportedAlgorithm(
+                'Unsupported RSA exponent: %d'
+                % key.public_key().public_numbers().e,
+                key=key)
 
         if key.key_size == 1024:
             algo = ALGO.RSA1024
@@ -315,7 +340,8 @@ def _get_key_data(key):
             algo = ALGO.RSA2048
             ln = 128
         else:
-            raise ValueError('Unsupported RSA key size!')
+            raise UnsupportedAlgorithm(
+                'Unsupported RSA key size: %d' % key.key_size, key=key)
 
         priv = key.private_numbers()
         data = Tlv(0x01, int_to_bytes(priv.p, ln)) + \
@@ -331,11 +357,12 @@ def _get_key_data(key):
             algo = ALGO.ECCP384
             ln = 48
         else:
-            raise ValueError('Unsupported elliptic curve!')
+            raise UnsupportedAlgorithm(
+                    'Unsupported elliptic curve: %s', key.curve, key=key)
         priv = key.private_numbers()
         data = Tlv(0x06, int_to_bytes(priv.private_value, ln))
     else:
-        raise ValueError('Unsupported key type!')
+        raise UnsupportedAlgorithm('Unsupported key type!', key=key)
     return algo, data
 
 
@@ -348,7 +375,8 @@ def _dummy_key(algorithm):
         return ec.generate_private_key(ec.SECP256R1(), default_backend())
     if algorithm == ALGO.ECCP384:
         return ec.generate_private_key(ec.SECP384R1(), default_backend())
-    raise ValueError('Unsupported algorithm!')
+    raise UnsupportedAlgorithm(
+        'Unsupported algorithm: %s' % algorithm, algorithm_id=algorithm)
 
 
 def _pkcs1_15_pad(algorithm, message):
@@ -384,6 +412,27 @@ def _derive_key(pin, salt):
 
 def generate_random_management_key():
     return os.urandom(24)
+
+
+def is_verify_fail(sw, applet_version):
+    if applet_version < (1, 0, 4):
+        return 0x6300 <= sw <= 0x63ff
+    else:
+        return SW.is_verify_fail(sw)
+
+
+def tries_left(sw, applet_version):
+    if applet_version < (1, 0, 4):
+        if sw == SW.AUTH_METHOD_BLOCKED:
+            return 0
+
+        if not is_verify_fail(sw, applet_version):
+            raise ValueError(
+                'Cannot read remaining tries from status word: %x' % sw)
+
+        return sw & 0xff
+    else:
+        return SW.tries_left(sw)
 
 
 class PivmanData(object):
@@ -480,7 +529,7 @@ class PivController(object):
     def puk_blocked(self):
         return self._pivman_data.puk_blocked
 
-    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW_OK):
+    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW.OK):
         while len(data) > 0xff:
             self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
             data = data[0xff:]
@@ -506,7 +555,7 @@ class PivController(object):
             self._pivman_protected_data = PivmanProtectedData(
                 self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
         except APDUError as e:
-            if e.sw == SW_APPLICATION_NOT_FOUND:
+            if e.sw == SW.NOT_FOUND:
                 # No data there, initialise a new object.
                 self._pivman_protected_data = PivmanProtectedData()
             else:
@@ -515,10 +564,14 @@ class PivController(object):
     def verify(self, pin, touch_callback=None):
         try:
             self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
-        except APDUError:
-            raise ValueError(
-                'Pin verification failed. {} tries left.'.format(
-                        self.get_pin_tries()))
+        except APDUError as e:
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
+                raise AuthenticationBlocked('PIN is blocked.', e.sw)
+
+            elif is_verify_fail(e.sw, self.version):
+                raise WrongPin(e.sw, self.version)
+
+            raise
 
         if self.has_derived_key and not self._authenticated:
             self.authenticate(
@@ -531,8 +584,18 @@ class PivController(object):
             self.verify(pin, touch_callback)
 
     def change_pin(self, old_pin, new_pin):
-        self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
-                      _pack_pin(old_pin) + _pack_pin(new_pin))
+        try:
+            self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
+                          _pack_pin(old_pin) + _pack_pin(new_pin))
+        except APDUError as e:
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
+                raise AuthenticationBlocked('PIN is blocked.', e.sw)
+
+            elif is_verify_fail(e.sw, self.version):
+                raise WrongPin(e.sw, self.version)
+
+            raise
+
         if self.has_derived_key:
             if not self._authenticated:
                 self.authenticate(_derive_key(old_pin, self._pivman_data.salt))
@@ -542,23 +605,27 @@ class PivController(object):
         try:
             self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
                           _pack_pin(old_puk) + _pack_pin(new_puk))
-            return CodeChangeResult(True, None)
         except APDUError as e:
-            retries = (SW.tries_left(e.sw, self.version)
-                       if SW.is_verify_fail(e.sw, self.version) else None)
-            logger.debug('PUK change failed, %d tries remaining', retries,
-                         exc_info=e)
-            return CodeChangeResult(False, retries)
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
+                raise AuthenticationBlocked('PUK is blocked.', e.sw)
+
+            elif is_verify_fail(e.sw, self.version):
+                raise WrongPuk(e.sw, self.version)
+
+            raise
 
     def unblock_pin(self, puk, new_pin):
         try:
             self.send_cmd(
                 INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
         except APDUError as e:
-            tries = SW.tries_left(e.sw, self.version)
-            if tries == 0:
-                raise ValueError('PUK is blocked.')
-            raise ValueError('Unblock PIN failed, {} tries left.'.format(tries))
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
+                raise AuthenticationBlocked('PUK is blocked.', e.sw)
+
+            elif is_verify_fail(e.sw, self.version):
+                raise WrongPuk(e.sw, self.version)
+
+            raise
 
     def set_pin_retries(self, pin_retries, puk_retries):
         self.send_cmd(INS.SET_PIN_RETRIES, pin_retries, puk_retries)
@@ -585,7 +652,12 @@ class PivController(object):
         ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                             Tlv(TAG.DYN_AUTH, Tlv(0x80)))[4:12]
         backend = default_backend()
-        cipher = Cipher(algorithms.TripleDES(key), modes.ECB(), backend)
+        try:
+            cipher_key = algorithms.TripleDES(key)
+        except ValueError:
+            raise BadFormat('Management key must be exactly 24 bytes long, '
+                            'was: {}'.format(len(key)), None)
+        cipher = Cipher(cipher_key, modes.ECB(), backend)
         decryptor = cipher.decryptor()
         pt1 = decryptor.update(ct1) + decryptor.finalize()
         ct2 = os.urandom(8)
@@ -599,6 +671,19 @@ class PivController(object):
                 INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
                 Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
                 )[4:12]
+
+        except APDUError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                raise AuthenticationFailed(
+                    'Incorrect management key', e.sw, self.version)
+
+            logger.error('Failed to authenticate management key.', exc_info=e)
+            raise
+
+        except Exception as e:
+            logger.error('Failed to authenticate management key.', exc_info=e)
+            raise
+
         finally:
             if touch_callback is not None:
                 touch_timer.cancel()
@@ -620,8 +705,10 @@ class PivController(object):
                                  'store_on_device was not True')
 
         if len(new_key) != 24:
-            raise ValueError('Management key must be exactly 24 bytes long, '
-                             'was: {}'.format(len(new_key)))
+            raise BadFormat(
+                'Management key must be exactly 24 bytes long, was: {}'.format(
+                    len(new_key)),
+                new_key)
 
         if store_on_device or (not store_on_device and self.has_stored_key):
             # Ensure we have access to protected data before overwriting key
@@ -670,14 +757,14 @@ class PivController(object):
         """
         # Verify without PIN gives number of tries left.
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
-        return SW.tries_left(sw, self.version)
+        return tries_left(sw, self.version)
 
     def _get_puk_tries(self):
         # A failed unblock pin will return number of PUK tries left,
         # but also uses one try.
         _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
                               check=None)
-        return SW.tries_left(sw, self.version)
+        return tries_left(sw, self.version)
 
     def _block_pin(self):
         while self.get_pin_tries() > 0:
@@ -731,7 +818,10 @@ class PivController(object):
                 curve(),
                 resp[5:]
             ).public_key(default_backend())
-        raise ValueError('Invalid algorithm!')
+
+        raise UnsupportedAlgorithm(
+            'Invalid algorithm: %s'.format(algorithm),
+            algorithm_id=algorithm)
 
     def generate_self_signed_certificate(
             self, slot, public_key, common_name, valid_from, valid_to,
@@ -824,7 +914,9 @@ class PivController(object):
 
     def _raw_sign_decrypt(self, slot, algorithm, payload, condition):
         if not condition(len(payload.value)):
-            raise ValueError('Input has invalid length!')
+            raise BadFormat(
+                'Input has invalid length for algorithm %s' % algorithm,
+                len(payload.value))
 
         data = Tlv(TAG.DYN_AUTH, Tlv(0x82) + payload)
         resp = self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data)

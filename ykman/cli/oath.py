@@ -35,10 +35,10 @@ from .util import (
     click_parse_b32_key, prompt_for_touch, UpperCaseChoice
 )
 from ..driver_ccid import (
-    APDUError,  SW_APPLICATION_NOT_FOUND, SW_SECURITY_CONDITION_NOT_SATISFIED
+    APDUError,  SW
 )
 from ..util import TRANSPORT, parse_b32_key
-from ..oath import OathController, SW, CredentialData, OATH_TYPE, ALGO
+from ..oath import OathController, CredentialData, OATH_TYPE, ALGO
 from ..settings import Settings
 
 
@@ -93,7 +93,7 @@ def oath(ctx, password):
         ctx.obj['controller'] = controller
         ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
-        if e.sw == SW_APPLICATION_NOT_FOUND:
+        if e.sw == SW.NOT_FOUND:
             ctx.fail("The OATH application can't be found on this YubiKey.")
         raise
 
@@ -353,7 +353,7 @@ def code(ctx, show_hidden, query, single):
             elif code is None:
                 creds = [(cred, controller.calculate(cred))]
         except APDUError as e:
-            if e.sw == SW_SECURITY_CONDITION_NOT_SATISFIED:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 ctx.fail('Touch credential timed out!')
 
     elif single:
