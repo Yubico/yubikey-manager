@@ -88,7 +88,7 @@
 
 * Version 0.4.1 (released 2017-08-10)
  ** PIV: Dropped support for deriving a management key from PIN.
- ** PIV: Addded support for generating a random management key and storing it on the device protected by the PIN.
+ ** PIV: Added support for generating a random management key and storing it on the device protected by the PIN.
  ** OpenPGP: The reset command now handles a device in terminated state.
  ** OATH: Credential filtering is now working properly on Python 2.
 
