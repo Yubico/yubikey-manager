@@ -28,15 +28,10 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
-from ..driver_ccid import APDUError, SW
-from ..util import (
+from .driver_ccid import APDUError, SW
+from .util import (
     AID, Tlv, parse_tlvs,
     ensure_not_cve201715361_vulnerable_firmware_version)
-from .errors import (
-    AuthenticationBlocked, AuthenticationFailed, BadFormat,
-    UnsupportedAlgorithm, UnknownPinPolicy, UnknownTouchPolicy, WrongPin,
-    WrongPuk)
-from . import sw_util
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
@@ -252,6 +247,62 @@ class TOUCH_POLICY(IntEnum):
         raise UnknownTouchPolicy(touch_policy)
 
 
+class AuthenticationFailed(Exception):
+    def __init__(self, message, sw, applet_version):
+        super().__init__(message)
+        self.tries_left = (
+            tries_left(sw, applet_version)
+            if is_verify_fail(sw, applet_version)
+            else None)
+
+
+class AuthenticationBlocked(AuthenticationFailed):
+    def __init__(self, message, sw):
+        # Dummy applet_version since sw will always be "authentication blocked"
+        super().__init__(message, sw, ())
+
+
+class BadFormat(Exception):
+    def __init__(self, message, bad_value):
+        super().__init__(message)
+        self.bad_value = bad_value
+
+
+class UnsupportedAlgorithm(Exception):
+    def __init__(self, message, algorithm_id=None, key=None, ):
+        super().__init__(message)
+        if algorithm_id is None and key is None:
+            raise ValueError(
+                'At least one of algorithm_id and key must be given.')
+
+        self.algorithm_id = algorithm_id
+        self.key = key
+
+
+class UnknownPinPolicy(Exception):
+    def __init__(self, policy_name):
+        super().__init__(
+            'Unsupported pin policy: %s' % policy_name)
+        self.policy_name = policy_name
+
+
+class UnknownTouchPolicy(Exception):
+    def __init__(self, policy_name):
+        super().__init__(
+            'Unsupported touch policy: %s' % policy_name)
+        self.policy_name = policy_name
+
+
+class WrongPin(AuthenticationFailed):
+    def __init__(self, sw, applet_version):
+        super().__init__('Incorrect PIN', sw, applet_version)
+
+
+class WrongPuk(AuthenticationFailed):
+    def __init__(self, sw, applet_version):
+        super().__init__('Incorrect PUK', sw, applet_version)
+
+
 PIN = 0x80
 PUK = 0x81
 
@@ -361,6 +412,27 @@ def _derive_key(pin, salt):
 
 def generate_random_management_key():
     return os.urandom(24)
+
+
+def is_verify_fail(sw, applet_version):
+    if applet_version < (1, 0, 4):
+        return 0x6300 <= sw <= 0x63ff
+    else:
+        return SW.is_verify_fail(sw)
+
+
+def tries_left(sw, applet_version):
+    if applet_version < (1, 0, 4):
+        if sw == SW.AUTH_METHOD_BLOCKED:
+            return 0
+
+        if not is_verify_fail(sw, applet_version):
+            raise ValueError(
+                'Cannot read remaining tries from status word: %x' % sw)
+
+        return sw & 0xff
+    else:
+        return SW.tries_left(sw)
 
 
 class PivmanData(object):
@@ -496,7 +568,7 @@ class PivController(object):
             if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PIN is blocked.', e.sw)
 
-            elif sw_util.is_verify_fail(e.sw, self.version):
+            elif is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
 
             raise
@@ -519,7 +591,7 @@ class PivController(object):
             if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PIN is blocked.', e.sw)
 
-            elif sw_util.is_verify_fail(e.sw, self.version):
+            elif is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
 
             raise
@@ -537,7 +609,7 @@ class PivController(object):
             if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PUK is blocked.', e.sw)
 
-            elif sw_util.is_verify_fail(e.sw, self.version):
+            elif is_verify_fail(e.sw, self.version):
                 raise WrongPuk(e.sw, self.version)
 
             raise
@@ -550,7 +622,7 @@ class PivController(object):
             if e.sw == SW.AUTH_METHOD_BLOCKED:
                 raise AuthenticationBlocked('PUK is blocked.', e.sw)
 
-            elif sw_util.is_verify_fail(e.sw, self.version):
+            elif is_verify_fail(e.sw, self.version):
                 raise WrongPuk(e.sw, self.version)
 
             raise
@@ -685,14 +757,14 @@ class PivController(object):
         """
         # Verify without PIN gives number of tries left.
         _, sw = self.send_cmd(INS.VERIFY, 0, PIN, check=None)
-        return sw_util.tries_left(sw, self.version)
+        return tries_left(sw, self.version)
 
     def _get_puk_tries(self):
         # A failed unblock pin will return number of PUK tries left,
         # but also uses one try.
         _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
                               check=None)
-        return sw_util.tries_left(sw, self.version)
+        return tries_left(sw, self.version)
 
     def _block_pin(self):
         while self.get_pin_tries() > 0:

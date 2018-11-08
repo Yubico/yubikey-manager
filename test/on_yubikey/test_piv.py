@@ -7,7 +7,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
-from ykman.piv.errors import (
+from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk)
 from ykman.util import TRANSPORT, parse_certificate, parse_private_key
 from .util import (

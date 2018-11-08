@@ -31,7 +31,7 @@ from ..util import TRANSPORT, parse_private_key, parse_certificate
 from ..piv import (
     PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
-from ..piv.errors import (
+from ..piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW
 from .util import (
