@@ -60,15 +60,14 @@ def _find_library_local(libname):
 
 def _load_usb_backend():
     # First try to find backend locally, if not found try the systems.
-    for m in (libusb1, openusb, libusb0):
-        backend = m.get_backend(find_library=_find_library_local)
+    for lib in (libusb1, openusb, libusb0):
+        backend = lib.get_backend(find_library=_find_library_local)
         if backend is not None:
             return backend
-        else:
-            for m in (libusb1, openusb, libusb0):
-                backend = m.get_backend()
-                if backend is not None:
-                    return backend
+    for lib in (libusb1, openusb, libusb0):
+        backend = lib.get_backend()
+        if backend is not None:
+            return backend
 
 
 _usb_backend = None
@@ -101,8 +100,8 @@ def get_usb_backend_version():
         version = lib.libusb_get_version().contents
         return 'libusb {0.major}.{0.minor}.{0.micro}'.format(version)
     elif isinstance(backend, openusb._OpenUSB):
-        from usb.backend.openusb import _lib as lib
+        lib = openusb._lib
         usb.core.find(True)  # OpenUSB seems to hang if not called.
     elif isinstance(backend, libusb0._LibUSB):
-        from usb.backend.libusb0 import _lib as lib
+        lib = libusb0._lib
     return lib._name

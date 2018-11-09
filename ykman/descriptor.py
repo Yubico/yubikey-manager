@@ -174,12 +174,12 @@ def _open_driver(transports, serial, key_type, mode, attempts):
                              key_type, dev.driver.key_type)
                 del dev
                 continue
-            return dev.driver
             if mode is not None and dev.driver.mode != mode:
                 logger.debug('Mode does not match. Want: %s, got: %s',
                              mode, dev.driver.mode)
                 del dev
                 continue
+            return dev.driver
         #  Wait a little before trying again.
         logger.debug('Sleeping for %f s', sleep_time)
         time.sleep(sleep_time)
