@@ -60,15 +60,14 @@ def _find_library_local(libname):
 
 def _load_usb_backend():
     # First try to find backend locally, if not found try the systems.
-    for m in (libusb1, openusb, libusb0):
-        backend = m.get_backend(find_library=_find_library_local)
+    for local_lib in (libusb1, openusb, libusb0):
+        backend = local_lib.get_backend(find_library=_find_library_local)
         if backend is not None:
             return backend
-        else:
-            for m in (libusb1, openusb, libusb0):
-                backend = m.get_backend()
-                if backend is not None:
-                    return backend
+    for system_lib in (libusb1, openusb, libusb0):
+        backend = system_lib.get_backend()
+        if backend is not None:
+            return backend
 
 
 _usb_backend = None
