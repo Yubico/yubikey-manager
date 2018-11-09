@@ -725,7 +725,7 @@ class PivController(object):
                 int_from_bytes(data[0x82], 'big'),
                 int_from_bytes(data[0x81], 'big')
             ).public_key(default_backend())
-        else:
+        elif algorithm in [ALGO.ECCP256, ALGO.ECCP384]:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
             return ec.EllipticCurvePublicNumbers.from_encoded_point(
                 curve(),
