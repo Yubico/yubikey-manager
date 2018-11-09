@@ -47,6 +47,12 @@ class Settings(dict):
             with open(self.fname, 'r') as f:
                 self.update(json.load(f))
 
+    def __eq__(self, other):
+        return other is not None and self.fname == other.fname
+
+    def __ne__(self, other):
+        return other is not None or self.fname != other.fname
+
     def write(self):
         conf_dir = os.path.dirname(self.fname)
         if not os.path.isdir(conf_dir):
@@ -54,3 +60,5 @@ class Settings(dict):
         data = json.dumps(self, indent=2)
         with open(self.fname, 'w') as f:
             f.write(data)
+
+    __hash__ = None
