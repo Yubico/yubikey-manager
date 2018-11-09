@@ -414,7 +414,6 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
                     break
                 except Exception as e:
                     click.echo(e)
-                    pass
         else:
             if generate:
                 key = os.urandom(20)
@@ -514,7 +513,6 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
                 break
             except Exception as e:
                 click.echo(e)
-                pass
 
     force or click.confirm(
         'Program a HOTP credential in slot {}?'.format(slot), abort=True)

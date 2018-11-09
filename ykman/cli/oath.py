@@ -209,7 +209,6 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
                 break
             except Exception as e:
                 click.echo(e)
-                pass
 
     ensure_validated(ctx)
 
@@ -237,7 +236,6 @@ def uri(ctx, uri, touch, force):
                 break
             except Exception as e:
                 click.echo(e)
-                pass
 
     ensure_validated(ctx)
     data = uri
