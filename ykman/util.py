@@ -221,6 +221,8 @@ class Mode(object):
     def from_pid(cls, pid):
         return cls(PID(pid).get_transports())
 
+    __hash__ = None
+
 
 class Tlv(bytes):
 
