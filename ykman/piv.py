@@ -661,6 +661,21 @@ class PivController(object):
                     self._pivman_protected_data.get_bytes())
             except APDUError as e:
                 logger.debug("No PIN provided, can't clear key..", exc_info=e)
+        # Update CHUID and CCC if not set
+        try:
+            self.get_data(OBJ.CAPABILITY)
+        except APDUError as e:
+            if e.sw == SW.NOT_FOUND:
+                self.update_ccc()
+            else:
+                logger.debug("Failed to read CCC...", exc_info=e)
+        try:
+            self.get_data(OBJ.CHUID)
+        except APDUError as e:
+            if e.sw == SW.NOT_FOUND:
+                self.update_chuid()
+            else:
+                logger.debug("Failed to read CHUID...", exc_info=e)
 
     def get_pin_tries(self):
         """
