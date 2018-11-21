@@ -31,6 +31,7 @@ from enum import IntEnum, unique
 from .driver_ccid import APDUError, SW
 from .util import (
     AID, Tlv, parse_tlvs,
+    is_cve201715361_vulnerable_firmware_version,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -799,6 +800,12 @@ class PivController(object):
         if ALGO.is_rsa(algorithm):
             ensure_not_cve201715361_vulnerable_firmware_version(self.version)
 
+        if algorithm not in self.supported_algorithms:
+            raise UnsupportedAlgorithm(
+                'Algorithm not supported on this YubiKey: {}'
+                .format(algorithm),
+                algorithm_id=algorithm)
+
         data = Tlv(TAG.ALGO, six.int2byte(algorithm))
         if pin_policy:
             data += Tlv(TAG.PIN_POLICY, six.int2byte(pin_policy))
@@ -1041,3 +1048,23 @@ class PivController(object):
                     TOUCH_POLICY.ALWAYS]  # Cached policy was added in 4.3
         else:
             return [policy for policy in TOUCH_POLICY]
+
+    @property
+    def is_fips(self):
+        return (4, 4, 0) <= self.version < (4, 5, 0)
+
+    @property
+    def supported_algorithms(self):
+        supported = list(ALGO)
+        supported.remove(ALGO.TDES)
+
+        if is_cve201715361_vulnerable_firmware_version(self.version):
+            supported = [alg for alg in supported if not ALGO.is_rsa(alg)]
+
+        if self.version < (4, 0, 0):
+            supported.remove(ALGO.ECCP384)
+
+        if self.is_fips and ALGO.RSA1024 in supported:
+            supported.remove(ALGO.RSA1024)
+
+        return supported

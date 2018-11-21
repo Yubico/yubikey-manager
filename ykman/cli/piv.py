@@ -32,7 +32,8 @@ from ..piv import (
     PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..piv import (
-    AuthenticationBlocked, AuthenticationFailed, WrongPin, WrongPuk)
+    AuthenticationBlocked, AuthenticationFailed, UnsupportedAlgorithm,
+    WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
@@ -223,22 +224,25 @@ def generate_key(
 
     _ensure_authenticated(ctx, controller, pin, management_key)
 
-    algorithm = ALGO.from_string(algorithm)
+    algorithm_id = ALGO.from_string(algorithm)
 
     if pin_policy:
         pin_policy = PIN_POLICY.from_string(pin_policy)
     if touch_policy:
         touch_policy = TOUCH_POLICY.from_string(touch_policy)
 
-    _check_algorithm(ctx, dev, controller, algorithm)
     _check_pin_policy(ctx, dev, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
 
-    public_key = controller.generate_key(
-        slot,
-        algorithm,
-        pin_policy,
-        touch_policy)
+    try:
+        public_key = controller.generate_key(
+            slot,
+            algorithm_id,
+            pin_policy,
+            touch_policy)
+    except UnsupportedAlgorithm:
+        ctx.fail('Algorithm {} is not supported by this '
+                 'YubiKey.'.format(algorithm))
 
     key_encoding = format
     public_key_output.write(public_key.public_bytes(
@@ -346,7 +350,7 @@ def import_key(
 
     _check_pin_policy(ctx, dev, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
-    _check_key_size(ctx, dev, private_key)
+    _check_key_size(ctx, controller, private_key)
 
     controller.import_key(
             slot,
@@ -820,16 +824,9 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
         ctx.fail('Authentication with management key failed.')
 
 
-def _check_algorithm(ctx, dev, controller, algorithm):
-    #  ECCP384 not supported on NEO.
-    if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
-        ctx.fail('ECCP384 is not supported by this YubiKey.')
-    if algorithm == ALGO.RSA1024 and dev.is_fips:
-        ctx.fail('RSA1024 is not supported by this YubiKey.')
-
-
-def _check_key_size(ctx, dev, private_key):
-    if dev.is_fips and private_key.key_size == 1024:
+def _check_key_size(ctx, controller, private_key):
+    if (private_key.key_size == 1024
+            and ALGO.RSA1024 not in controller.supported_algorithms):
         ctx.fail('1024 is not a supported key size on this YubiKey.')
 
 
