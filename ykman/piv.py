@@ -806,6 +806,7 @@ class PivController(object):
         cert_data = certificate.public_bytes(Encoding.DER)
         self.put_data(OBJ.from_slot(slot), Tlv(TAG.CERTIFICATE, cert_data) +
                       Tlv(TAG.CERT_INFO, b'\0') + Tlv(TAG.LRC))
+        self.update_chuid()
 
     def read_certificate(self, slot):
         data = _parse_tlv_dict(self.get_data(OBJ.from_slot(slot)))
