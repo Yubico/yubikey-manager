@@ -1055,16 +1055,12 @@ class PivController(object):
 
     @property
     def supported_algorithms(self):
-        supported = list(ALGO)
-        supported.remove(ALGO.TDES)
+        return [
+            alg for alg in ALGO
 
-        if is_cve201715361_vulnerable_firmware_version(self.version):
-            supported = [alg for alg in supported if not ALGO.is_rsa(alg)]
-
-        if self.version < (4, 0, 0):
-            supported.remove(ALGO.ECCP384)
-
-        if self.is_fips and ALGO.RSA1024 in supported:
-            supported.remove(ALGO.RSA1024)
-
-        return supported
+            if not alg == ALGO.TDES
+            if not (ALGO.is_rsa(alg) and
+                    is_cve201715361_vulnerable_firmware_version(self.version))
+            if not (alg == ALGO.ECCP384 and self.version < (4, 0, 0))
+            if not (alg == ALGO.RSA1024 and self.is_fips)
+        ]
