@@ -28,6 +28,7 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
+from .device import YubiKey
 from .driver_ccid import APDUError, SW
 from .util import (
     AID, Tlv, parse_tlvs,
@@ -1050,10 +1051,6 @@ class PivController(object):
             return [policy for policy in TOUCH_POLICY]
 
     @property
-    def is_fips(self):
-        return (4, 4, 0) <= self.version < (4, 5, 0)
-
-    @property
     def supported_algorithms(self):
         return [
             alg for alg in ALGO
@@ -1062,5 +1059,6 @@ class PivController(object):
             if not (ALGO.is_rsa(alg) and
                     is_cve201715361_vulnerable_firmware_version(self.version))
             if not (alg == ALGO.ECCP384 and self.version < (4, 0, 0))
-            if not (alg == ALGO.RSA1024 and self.is_fips)
+            if not (alg == ALGO.RSA1024 and
+                    YubiKey.is_fips_version(self.version))
         ]
