@@ -87,6 +87,20 @@ def click_parse_uri(ctx, param, val):
 def oath(ctx, password):
     """
     Manage OATH Application.
+
+    Examples:
+
+    \b
+      Generate codes for credentials starting with 'yubi':
+      $ ykman oath code yubi
+
+    \b
+      Add a touch credential with the secret key f5up4ub3dw and the name yubico:
+      $ ykman oath add yubico f5up4ub3dw --touch
+
+    \b
+      Set a password for the OATH application:
+      $ ykman oath set-password
     """
     try:
         controller = OathController(ctx.obj['dev'].driver)
@@ -195,7 +209,6 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
                 break
             except Exception as e:
                 click.echo(e)
-                pass
 
     ensure_validated(ctx)
 
@@ -223,7 +236,6 @@ def uri(ctx, uri, touch, force):
                 break
             except Exception as e:
                 click.echo(e)
-                pass
 
     ensure_validated(ctx)
     data = uri

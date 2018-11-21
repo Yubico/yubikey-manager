@@ -154,6 +154,16 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
 def cli(ctx, device, log_level, log_file, reader):
     """
     Configure your YubiKey via the command line.
+
+    Examples:
+
+    \b
+      List connected YubiKeys, only output serial number:
+      $ ykman list --serials
+
+    \b
+      Show information about YubiKey with serial number 0123456:
+      $ ykman --device 0123456 info
     """
     ctx.obj = YkmanContextObject()
 

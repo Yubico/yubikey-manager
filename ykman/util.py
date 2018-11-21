@@ -221,6 +221,8 @@ class Mode(object):
     def from_pid(cls, pid):
         return cls(PID(pid).get_transports())
 
+    __hash__ = None
+
 
 class Tlv(bytes):
 
@@ -290,7 +292,7 @@ class MissingLibrary(object):
         self._message = message
 
     def __getattr__(self, name):
-        raise ValueError(self._message)
+        raise AttributeError(self._message)
 
 
 def parse_tlvs(data):
@@ -451,7 +453,7 @@ def parse_private_key(data, password):
 
 def parse_certificate(data, password):
     """
-    Identifies, decrypts and returns a cryptography x509 certficate.
+    Identifies, decrypts and returns a cryptography x509 certificate.
     """
     # PEM
     if data.startswith(b'-----'):

@@ -45,7 +45,7 @@
  ** CLI breaking changes:
   *** OATH: Touch prompt now written to stderr instead of stdout
   *** OATH: `-a|--algorithm` option to `list` command removed
-  *** OATH: Columns in `code` command are now dymanically spaced depending on contents
+  *** OATH: Columns in `code` command are now dynamically spaced depending on contents
   *** OATH: `delete` command now requires confirmation or `-f|--force` argument
   *** OATH: IDs printed by `list` command now include TOTP period if not 30
   *** Changed outputs:
@@ -76,10 +76,10 @@
  ** OATH: Don't print issuer if there is no issuer.
 
 * Version 0.4.4 (released 2017-09-06)
- ** OATH: Fix yet another issue with backwards compability, for adding new credentials.
+ ** OATH: Fix yet another issue with backwards compatibility, for adding new credentials.
 
 * Version 0.4.3 (released 2017-09-06)
- ** OATH: Fix issue with backwards compability, when used as a library.
+ ** OATH: Fix issue with backwards compatibility, when used as a library.
 
 * Version 0.4.2 (released 2017-09-05)
  ** OATH: Support 7 digit credentials.
@@ -88,7 +88,7 @@
 
 * Version 0.4.1 (released 2017-08-10)
  ** PIV: Dropped support for deriving a management key from PIN.
- ** PIV: Addded support for generating a random management key and storing it on the device protected by the PIN.
+ ** PIV: Added support for generating a random management key and storing it on the device protected by the PIN.
  ** OpenPGP: The reset command now handles a device in terminated state.
  ** OATH: Credential filtering is now working properly on Python 2.
 

@@ -748,6 +748,21 @@ class PivController(object):
                     self._pivman_protected_data.get_bytes())
             except APDUError as e:
                 logger.debug("No PIN provided, can't clear key..", exc_info=e)
+        # Update CHUID and CCC if not set
+        try:
+            self.get_data(OBJ.CAPABILITY)
+        except APDUError as e:
+            if e.sw == SW.NOT_FOUND:
+                self.update_ccc()
+            else:
+                logger.debug("Failed to read CCC...", exc_info=e)
+        try:
+            self.get_data(OBJ.CHUID)
+        except APDUError as e:
+            if e.sw == SW.NOT_FOUND:
+                self.update_chuid()
+            else:
+                logger.debug("Failed to read CHUID...", exc_info=e)
 
     def get_pin_tries(self):
         """
@@ -812,7 +827,7 @@ class PivController(object):
                 int_from_bytes(data[0x82], 'big'),
                 int_from_bytes(data[0x81], 'big')
             ).public_key(default_backend())
-        else:
+        elif algorithm in [ALGO.ECCP256, ALGO.ECCP384]:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
             return ec.EllipticCurvePublicNumbers.from_encoded_point(
                 curve(),
@@ -896,6 +911,7 @@ class PivController(object):
         cert_data = certificate.public_bytes(Encoding.DER)
         self.put_data(OBJ.from_slot(slot), Tlv(TAG.CERTIFICATE, cert_data) +
                       Tlv(TAG.CERT_INFO, b'\0') + Tlv(TAG.LRC))
+        self.update_chuid()
 
     def read_certificate(self, slot):
         data = _parse_tlv_dict(self.get_data(OBJ.from_slot(slot)))

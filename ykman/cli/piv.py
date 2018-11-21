@@ -107,6 +107,21 @@ click_touch_policy_option = click.option(
 def piv(ctx):
     """
     Manage PIV Application.
+
+    Examples:
+
+    \b
+      Generate an ECC P-256 private key and a self-signed certificate in slot 9a:
+      $ ykman piv generate-key --algorithm ECCP256 9a pubkey.pem
+      $ ykman piv generate-certificate --subject "yubico" 9a pubkey.pem
+
+    \b
+      Change the PIN from 123456 to 654321:
+      $ ykman piv change-pin --pin 123456 --new-pin 654321
+
+    \b
+      Reset all PIV data and restore default settings:
+      $ ykman piv reset
     """
     try:
         ctx.obj['controller'] = PivController(ctx.obj['dev'].driver)
