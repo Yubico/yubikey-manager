@@ -94,6 +94,13 @@ def ykman_cli(*args, **kwargs):
     )
 
 
+def ykman_cli_raw(*args, **kwargs):
+    return test.util.ykman_cli_raw(
+        '--device', _test_serial,
+        *args, **kwargs
+    )
+
+
 def open_device(transports=sum(TRANSPORT)):
     return ykman.descriptor.open_device(transports=transports,
                                         serial=int(_test_serial))
