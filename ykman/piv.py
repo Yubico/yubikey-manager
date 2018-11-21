@@ -820,7 +820,7 @@ class PivController(object):
             ).public_key(default_backend())
 
         raise UnsupportedAlgorithm(
-            'Invalid algorithm: %s'.format(algorithm),
+            'Invalid algorithm: {}'.format(algorithm),
             algorithm_id=algorithm)
 
     def generate_self_signed_certificate(
