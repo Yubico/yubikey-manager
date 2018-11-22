@@ -11,8 +11,13 @@ def open_file(*relative_path):
 
 
 def ykman_cli(*argv, **kwargs):
-    runner = CliRunner()
-    result = runner.invoke(cli, list(argv), obj={}, **kwargs)
+    result = ykman_cli_raw(*argv, **kwargs)
     if result.exit_code != 0:
         raise result.exception
     return result.output
+
+
+def ykman_cli_raw(*argv, **kwargs):
+    runner = CliRunner()
+    result = runner.invoke(cli, list(argv), obj={}, **kwargs)
+    return result

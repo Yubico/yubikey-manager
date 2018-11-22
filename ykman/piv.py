@@ -28,9 +28,11 @@
 
 from __future__ import absolute_import
 from enum import IntEnum, unique
+from .device import YubiKey
 from .driver_ccid import APDUError, SW
 from .util import (
     AID, Tlv, parse_tlvs,
+    is_cve201715361_vulnerable_firmware_version,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -814,6 +816,12 @@ class PivController(object):
         if ALGO.is_rsa(algorithm):
             ensure_not_cve201715361_vulnerable_firmware_version(self.version)
 
+        if algorithm not in self.supported_algorithms:
+            raise UnsupportedAlgorithm(
+                'Algorithm not supported on this YubiKey: {}'
+                .format(algorithm),
+                algorithm_id=algorithm)
+
         data = Tlv(TAG.ALGO, six.int2byte(algorithm))
         if pin_policy:
             data += Tlv(TAG.PIN_POLICY, six.int2byte(pin_policy))
@@ -835,7 +843,7 @@ class PivController(object):
             ).public_key(default_backend())
 
         raise UnsupportedAlgorithm(
-            'Invalid algorithm: %s'.format(algorithm),
+            'Invalid algorithm: {}'.format(algorithm),
             algorithm_id=algorithm)
 
     def generate_self_signed_certificate(
@@ -1057,3 +1065,16 @@ class PivController(object):
                     TOUCH_POLICY.ALWAYS]  # Cached policy was added in 4.3
         else:
             return [policy for policy in TOUCH_POLICY]
+
+    @property
+    def supported_algorithms(self):
+        return [
+            alg for alg in ALGO
+
+            if not alg == ALGO.TDES
+            if not (ALGO.is_rsa(alg) and
+                    is_cve201715361_vulnerable_firmware_version(self.version))
+            if not (alg == ALGO.ECCP384 and self.version < (4, 0, 0))
+            if not (alg == ALGO.RSA1024 and
+                    YubiKey.is_fips_version(self.version))
+        ]
