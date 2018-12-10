@@ -73,8 +73,16 @@ TOUCH_METHOD_BUTTON = 0x20
 class OpgpController(object):
 
     def __init__(self, driver):
-        driver.select(AID.OPGP)
         self._driver = driver
+        try:
+            driver.select(AID.OPGP)
+        except APDUError as e:
+            # If OpenPGP is in a terminated state send activate.
+            if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
+                self._driver.send_apdu(0, INS.ACTIVATE, 0, 0)
+                driver.select(AID.OPGP)
+            else:
+                raise
         self._version = self._read_version()
 
     @property
