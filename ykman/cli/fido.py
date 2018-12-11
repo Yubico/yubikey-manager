@@ -166,6 +166,8 @@ def set_pin(ctx, pin, new_pin, u2f):
                     'Remove and re-insert the YubiKey.')
             if e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail('PIN is blocked.')
+            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+                ctx.fail('New PIN is too long, maxiumum size is 128 bytes.')
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
 
@@ -181,7 +183,13 @@ def set_pin(ctx, pin, new_pin, u2f):
 
     def set_pin(new_pin):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
-        controller.set_pin(new_pin)
+        try:
+            controller.set_pin(new_pin)
+        except CtapError as e:
+            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+                ctx.fail('PIN is too long, maxiumum size is 128 bytes.')
+            logger.error('Failed to set PIN', exc_info=e)
+            ctx.fail('Failed to set PIN')
 
     if pin and not controller.has_pin:
         ctx.fail('There is no current PIN set. Use --new-pin to set one.')
