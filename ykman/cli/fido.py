@@ -167,7 +167,7 @@ def set_pin(ctx, pin, new_pin, u2f):
             if e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail('PIN is blocked.')
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                ctx.fail('New PIN is too long, maxiumum size is 128 bytes.')
+                ctx.fail('New PIN is too long.')
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
 
@@ -187,7 +187,7 @@ def set_pin(ctx, pin, new_pin, u2f):
             controller.set_pin(new_pin)
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                ctx.fail('PIN is too long, maxiumum size is 128 bytes.')
+                ctx.fail('PIN is too long.')
             logger.error('Failed to set PIN', exc_info=e)
             ctx.fail('Failed to set PIN')
 
@@ -344,9 +344,8 @@ def _prompt_current_pin(prompt='Enter your current PIN'):
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
     min_length = FIPS_PIN_MIN_LENGTH \
         if is_fips else PIN_MIN_LENGTH
-    if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
-        ctx.fail('PIN must be over {} characters long and under 128 bytes.'
-                 .format(min_length))
+    if not pin or len(pin) < min_length:
+        ctx.fail('PIN must be over {} characters long'.format(min_length))
 
 
 fido.transports = TRANSPORT.FIDO
