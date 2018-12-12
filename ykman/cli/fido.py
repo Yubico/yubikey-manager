@@ -166,6 +166,8 @@ def set_pin(ctx, pin, new_pin, u2f):
                     'Remove and re-insert the YubiKey.')
             if e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail('PIN is blocked.')
+            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+                ctx.fail('New PIN is too long.')
             logger.error('Failed to change PIN', exc_info=e)
             ctx.fail('Failed to change PIN.')
 
@@ -181,7 +183,13 @@ def set_pin(ctx, pin, new_pin, u2f):
 
     def set_pin(new_pin):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
-        controller.set_pin(new_pin)
+        try:
+            controller.set_pin(new_pin)
+        except CtapError as e:
+            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+                ctx.fail('PIN is too long.')
+            logger.error('Failed to set PIN', exc_info=e)
+            ctx.fail('Failed to set PIN')
 
     if pin and not controller.has_pin:
         ctx.fail('There is no current PIN set. Use --new-pin to set one.')
@@ -336,9 +344,8 @@ def _prompt_current_pin(prompt='Enter your current PIN'):
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
     min_length = FIPS_PIN_MIN_LENGTH \
         if is_fips else PIN_MIN_LENGTH
-    if not pin or len(pin) < min_length or len(pin.encode('utf-8')) > 128:
-        ctx.fail('PIN must be over {} characters long and under 128 bytes.'
-                 .format(min_length))
+    if not pin or len(pin) < min_length:
+        ctx.fail('PIN must be over {} characters long'.format(min_length))
 
 
 fido.transports = TRANSPORT.FIDO
