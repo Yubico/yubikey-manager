@@ -79,10 +79,10 @@ class KeyManagement(PivTestCase):
             controller = PivController(dev.driver)
             controller.reset()
 
-    def generate_key(self, slot, pin_policy=None):
+    def generate_key(self, slot, alg=ALGO.ECCP256, pin_policy=None):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         public_key = self.controller.generate_key(
-            slot, ALGO.ECCP256, pin_policy=pin_policy,
+            slot, alg, pin_policy=pin_policy,
             touch_policy=TOUCH_POLICY.NEVER)
         self.reconnect()
         return public_key
@@ -179,10 +179,10 @@ class KeyManagement(PivTestCase):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
 
-    def test_import_certificate_verifies_key_pairing(self):
+    def _test_import_key_pairing(self, alg1, alg2):
         # Set up a key in the slot and create a certificate for it
         public_key = self.generate_key(
-            SLOT.AUTHENTICATION, pin_policy=PIN_POLICY.NEVER)
+            SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER)
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.generate_self_signed_certificate(
             SLOT.AUTHENTICATION, public_key, 'test', datetime.datetime.now(),
@@ -195,10 +195,24 @@ class KeyManagement(PivTestCase):
 
         # Overwrite the key
         self.generate_key(
-            SLOT.AUTHENTICATION, pin_policy=PIN_POLICY.NEVER)
+            SLOT.AUTHENTICATION, alg=alg2, pin_policy=PIN_POLICY.NEVER)
         # Importing the same certificate should not work with the new key
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         with self.assertRaises(InvalidSignature):
             self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
+    @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
+    def test_import_certificate_verifies_key_pairing_rsa1024(self):
+        self._test_import_key_pairing(ALGO.RSA1024, ALGO.ECCP256)
+
+    def test_import_certificate_verifies_key_pairing_rsa2048(self):
+        self._test_import_key_pairing(ALGO.RSA2048, ALGO.ECCP256)
+
+    def test_import_certificate_verifies_key_pairing_eccp256(self):
+        self._test_import_key_pairing(ALGO.ECCP256, ALGO.ECCP384)
+
+    def test_import_certificate_verifies_key_pairing_eccp384(self):
+        self._test_import_key_pairing(ALGO.ECCP384, ALGO.ECCP256)
 
     def test_import_key_requires_authentication(self):
         private_key = get_test_key()
