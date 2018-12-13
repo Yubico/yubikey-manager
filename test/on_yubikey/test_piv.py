@@ -211,7 +211,8 @@ class KeyManagement(PivTestCase):
     def test_read_certificate_does_not_require_authentication(self):
         cert = get_test_cert()
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-        self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+        self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
+                                           verify=False)
 
         self.reconnect()
 

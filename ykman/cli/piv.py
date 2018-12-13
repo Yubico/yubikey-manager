@@ -308,7 +308,25 @@ def import_certificate(
             continue
         break
 
-    controller.import_certificate(slot, cert)
+    def do_import():
+        try:
+            result = controller.import_certificate(slot, cert)
+            if result['no_key_in_slot']:
+                click.echo('WARNING: Imported certificate into slot {} which '
+                           'contains no private key.'.format(slot.name))
+
+        except InvalidSignature:
+            ctx.fail('This certificate is not tied to the private key in the '
+                     '{} slot.'.format(slot.name))
+
+    try:
+        do_import()
+    except APDUError as e:
+        if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+            _verify_pin(ctx, controller, pin)
+            do_import()
+        else:
+            raise
 
 
 @piv.command('import-key')
