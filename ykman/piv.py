@@ -907,38 +907,29 @@ class PivController(object):
     def import_certificate(self, slot, certificate, verify=True):
         cert_data = certificate.public_bytes(Encoding.DER)
 
-        no_key_warning = False
-
         if verify:
             # Verify that the public key used in the certificate
             # is from the same keypair as the private key.
             public_key = certificate.public_key()
 
             random_data = bytes(random.randint(0, 255) for i in range(32))
-            try:
-                random_sig = self.sign(
-                    slot, ALGO.from_public_key(public_key), random_data)
+            random_sig = self.sign(
+                slot, ALGO.from_public_key(public_key), random_data)
 
-                if isinstance(public_key, rsa.RSAPublicKey):
-                    public_key.verify(
-                        random_sig, random_data, padding.PKCS1v15(),
-                        certificate.signature_hash_algorithm)
-                elif isinstance(public_key, ec.EllipticCurvePublicKey):
-                    public_key.verify(
-                        random_sig, random_data,
-                        ec.ECDSA(hashes.SHA256()))
-            except APDUError as e:
-                if e.sw == SW.INCORRECT_PARAMETERS:
-                    logger.warning('Importing certificate into slot %s which '
-                                   'contains no private key', slot.name)
-                    no_key_warning = True
-                else:
-                    raise
+            if isinstance(public_key, rsa.RSAPublicKey):
+                public_key.verify(
+                    random_sig, random_data, padding.PKCS1v15(),
+                    certificate.signature_hash_algorithm)
+            elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                public_key.verify(
+                    random_sig, random_data,
+                    ec.ECDSA(hashes.SHA256()))
+            else:
+                raise ValueError('Unknown key type: ' + type(public_key))
 
         self.put_data(OBJ.from_slot(slot), Tlv(TAG.CERTIFICATE, cert_data) +
                       Tlv(TAG.CERT_INFO, b'\0') + Tlv(TAG.LRC))
         self.update_chuid()
-        return {'no_key_in_slot': no_key_warning}
 
     def read_certificate(self, slot):
         data = _parse_tlv_dict(self.get_data(OBJ.from_slot(slot)))

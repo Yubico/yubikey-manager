@@ -8,7 +8,7 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from ykman.driver_ccid import APDUError
+from ykman.driver_ccid import APDUError, SW
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk)
@@ -177,7 +177,8 @@ class KeyManagement(PivTestCase):
             self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-        self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+        self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
+                                           verify=False)
 
     def _test_import_key_pairing(self, alg1, alg2):
         # Set up a key in the slot and create a certificate for it
@@ -193,13 +194,22 @@ class KeyManagement(PivTestCase):
         # Importing the correct certificate should work
         self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
 
-        # Overwrite the key
+        # Overwrite the key with one of the same type
         self.generate_key(
-            SLOT.AUTHENTICATION, alg=alg2, pin_policy=PIN_POLICY.NEVER)
+            SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER)
         # Importing the same certificate should not work with the new key
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         with self.assertRaises(InvalidSignature):
             self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
+        # Overwrite the key with one of a different type
+        self.generate_key(
+            SLOT.AUTHENTICATION, alg=alg2, pin_policy=PIN_POLICY.NEVER)
+        # Importing the same certificate should not work with the new key
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        with self.assertRaises(APDUError) as cm:
+            self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+        self.assertEqual(cm.exception.sw, SW.INCORRECT_PARAMETERS)
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_import_certificate_verifies_key_pairing_rsa1024(self):
