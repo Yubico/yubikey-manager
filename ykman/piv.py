@@ -758,14 +758,14 @@ class PivController(object):
             if e.sw == SW.NOT_FOUND:
                 self.update_ccc()
             else:
-                logger.debug("Failed to read CCC...", exc_info=e)
+                logger.debug('Failed to read CCC...', exc_info=e)
         try:
             self.get_data(OBJ.CHUID)
         except APDUError as e:
             if e.sw == SW.NOT_FOUND:
                 self.update_chuid()
             else:
-                logger.debug("Failed to read CHUID...", exc_info=e)
+                logger.debug('Failed to read CHUID...', exc_info=e)
 
     def get_pin_tries(self):
         """
