@@ -1,10 +1,13 @@
 from __future__ import unicode_literals
 
 import datetime
+import random
 import unittest
 from binascii import a2b_hex
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.piv import (
@@ -76,10 +79,11 @@ class KeyManagement(PivTestCase):
             controller = PivController(dev.driver)
             controller.reset()
 
-    def generate_key(self, slot):
+    def generate_key(self, slot, pin_policy=None):
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         public_key = self.controller.generate_key(
-            slot, ALGO.ECCP256, touch_policy=TOUCH_POLICY.NEVER)
+            slot, ALGO.ECCP256, pin_policy=pin_policy,
+            touch_policy=TOUCH_POLICY.NEVER)
         self.reconnect()
         return public_key
 
@@ -174,6 +178,27 @@ class KeyManagement(PivTestCase):
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
+    def test_import_certificate_verifies_key_pairing(self):
+        # Set up a key in the slot and create a certificate for it
+        public_key = self.generate_key(
+            SLOT.AUTHENTICATION, pin_policy=PIN_POLICY.NEVER)
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.generate_self_signed_certificate(
+            SLOT.AUTHENTICATION, public_key, 'test', datetime.datetime.now(),
+            datetime.datetime.now())
+        cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
+        self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+        # Importing the correct certificate should work
+        self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+
+        # Overwrite the key
+        self.generate_key(
+            SLOT.AUTHENTICATION, pin_policy=PIN_POLICY.NEVER)
+        # Importing the same certificate should not work with the new key
+        with self.assertRaises(InvalidSignature):
+            self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
 
     def test_import_key_requires_authentication(self):
         private_key = get_test_key()
@@ -353,6 +378,20 @@ class Operations(PivTestCase):
 
         sig = self.controller.sign(SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
         self.assertIsNotNone(sig)
+
+    def test_signature_can_be_verified_by_public_key(self):
+        public_key = self.generate_key(pin_policy=PIN_POLICY.ONCE)
+
+        signed_data = bytes(random.randint(0, 255) for i in range(32))
+
+        self.controller.verify(DEFAULT_PIN)
+        sig = self.controller.sign(
+            SLOT.AUTHENTICATION, ALGO.ECCP256, signed_data)
+        self.assertIsNotNone(sig)
+
+        public_key.verify(
+            sig, signed_data,
+            ec.ECDSA(hashes.SHA256()))
 
 
 class UnblockPin(PivTestCase):
