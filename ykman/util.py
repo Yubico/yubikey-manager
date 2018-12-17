@@ -31,6 +31,7 @@ import os
 import six
 import struct
 import re
+import logging
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
@@ -39,6 +40,12 @@ from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
 from .scancodes import KEYBOARD_LAYOUT
+
+
+logger = logging.getLogger(__name__)
+
+
+PEM_IDENTIFIER = b'-----BEGIN'
 
 
 class BitflagEnum(IntEnum):
@@ -416,7 +423,7 @@ def parse_private_key(data, password):
     Identifies, decrypts and returns a cryptography private key object.
     """
     # PEM
-    if data.startswith(b'-----'):
+    if is_pem(data):
         if b'ENCRYPTED' in data:
             if password is None:
                 raise TypeError('No password provided for encrypted key.')
@@ -455,9 +462,12 @@ def parse_certificate(data, password):
     """
     Identifies, decrypts and returns a cryptography x509 certificate.
     """
+
     # PEM
-    if data.startswith(b'-----'):
+    if is_pem(data):
         try:
+            logger.debug('Certificate is in PEM format')
+            data = data[data.index(PEM_IDENTIFIER):]  # Strip comments before cert
             return x509.load_pem_x509_certificate(data, default_backend())
         except Exception:
             pass
@@ -479,6 +489,10 @@ def parse_certificate(data, password):
         pass
 
     raise ValueError('Could not parse certificate.')
+
+
+def is_pem(data):
+    return PEM_IDENTIFIER in data if data else False
 
 
 def is_pkcs12(data):
