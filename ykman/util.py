@@ -458,18 +458,22 @@ def parse_private_key(data, password):
     raise ValueError('Could not parse private key.')
 
 
-def parse_certificate(data, password):
+def parse_certificates(data, password):
     """
-    Identifies, decrypts and returns a cryptography x509 certificate.
+    Identifies, decrypts and returns list of cryptography x509 certificates.
     """
 
     # PEM
     if is_pem(data):
-        try:
-            logger.debug('Certificate is in PEM format no strip')
-            return x509.load_pem_x509_certificate(data, default_backend())
-        except Exception:
-            pass
+        certs = []
+        for cert in data.split(PEM_IDENTIFIER):
+            try:
+                certs.append(
+                    x509.load_pem_x509_certificate(
+                        PEM_IDENTIFIER + cert, default_backend()))
+            except Exception:
+                pass
+        return certs
 
     # PKCS12
     if is_pkcs12(data):
@@ -477,13 +481,13 @@ def parse_certificate(data, password):
             p12 = crypto.load_pkcs12(data, password)
             data = crypto.dump_certificate(
                 crypto.FILETYPE_PEM, p12.get_certificate())
-            return x509.load_pem_x509_certificate(data, default_backend())
+            return [x509.load_pem_x509_certificate(data, default_backend())]
         except crypto.Error as e:
             raise ValueError(e)
 
     # DER
     try:
-        return x509.load_der_x509_certificate(data, default_backend())
+        return [x509.load_der_x509_certificate(data, default_backend())]
     except Exception:
         pass
 
