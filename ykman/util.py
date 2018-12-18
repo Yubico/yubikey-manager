@@ -466,8 +466,7 @@ def parse_certificate(data, password):
     # PEM
     if is_pem(data):
         try:
-            logger.debug('Certificate is in PEM format')
-            data = data[data.index(PEM_IDENTIFIER):]  # Strip comments before cert
+            logger.debug('Certificate is in PEM format no strip')
             return x509.load_pem_x509_certificate(data, default_backend())
         except Exception:
             pass
