@@ -272,9 +272,12 @@ def generate_key(
 @click_pin_option
 @click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
+@click.option(
+    '--verify/--no-verify', default=True,
+    help='Verify that the certificate matches the private key in the slot.')
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(
-        ctx, slot, management_key, pin, cert, password):
+        ctx, slot, management_key, pin, cert, password, verify):
     """
     Import a X.509 certificate.
 
@@ -310,7 +313,7 @@ def import_certificate(
 
     def do_import(retry=True):
         try:
-            controller.import_certificate(slot, cert)
+            controller.import_certificate(slot, cert, verify=verify)
 
         except KeypairMismatch:
             ctx.fail('This certificate is not tied to the private key in the '
