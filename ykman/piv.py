@@ -912,7 +912,7 @@ class PivController(object):
         self.send_cmd(INS.IMPORT_KEY, algorithm, slot, data)
         return algorithm
 
-    def import_certificate(self, slot, certificate, verify=True):
+    def import_certificate(self, slot, certificate, verify=False):
         cert_data = certificate.public_bytes(Encoding.DER)
 
         if verify:

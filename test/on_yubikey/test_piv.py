@@ -192,7 +192,8 @@ class KeyManagement(PivTestCase):
         self.controller.delete_certificate(SLOT.AUTHENTICATION)
 
         # Importing the correct certificate should work
-        self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+        self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
+                                           verify=True)
 
         # Overwrite the key with one of the same type
         self.generate_key(
@@ -200,7 +201,8 @@ class KeyManagement(PivTestCase):
         # Importing the same certificate should not work with the new key
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         with self.assertRaises(KeypairMismatch):
-            self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+            self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
+                                               verify=True)
 
         # Overwrite the key with one of a different type
         self.generate_key(
@@ -208,7 +210,8 @@ class KeyManagement(PivTestCase):
         # Importing the same certificate should not work with the new key
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         with self.assertRaises(KeypairMismatch):
-            self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+            self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
+                                               verify=True)
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_import_certificate_verifies_key_pairing_rsa1024(self):
