@@ -281,6 +281,8 @@ class YubiKey(object):
             if not APPLICATION.has(config.usb_supported, APPLICATION.FIDO2):
                 logger.debug('SKY has no FIDO2, SKY 1')
                 self.device_name = 'FIDO U2F Security Key'  # SKY 1
+            if config.nfc_supported:
+                self.device_name = 'Security Key NFC'
         elif self._key_type == YUBIKEY.YK4:
             if (5, 1, 0) > self.version >= (5, 0, 0):
                 self.device_name = 'YubiKey Preview'
