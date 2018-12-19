@@ -549,9 +549,6 @@ def generate_certificate(
                      exc_info=e)
         ctx.fail('Certificate generation failed.')
 
-    except InvalidSignature:
-        ctx.fail('Invalid signature, certificate not imported.')
-
 
 @piv.command('generate-csr')
 @click.pass_context
