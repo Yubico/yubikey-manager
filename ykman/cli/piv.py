@@ -317,12 +317,11 @@ def import_certificate(
         leafs = [
             cert for cert in certs if cert.subject.get_attributes_for_oid(
                 x509.NameOID.COMMON_NAME) not in issuers]
-        try:
-            controller.import_certificate(slot, leafs[0], verify=True)
-        except Exception:  # TODO: Should only pass on specific No-match exception
-            pass
+        cert_to_import = leafs[0]
     else:
-        controller.import_certificate(slot, certs[0], verify=True)
+        cert_to_import = certs[0]
+
+    controller.import_certificate(slot, cert_to_import)
 
 
 @piv.command('import-key')
