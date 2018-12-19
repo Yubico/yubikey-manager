@@ -35,6 +35,7 @@ from .util import (
     is_cve201715361_vulnerable_firmware_version,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -269,6 +270,14 @@ class BadFormat(Exception):
     def __init__(self, message, bad_value):
         super().__init__(message)
         self.bad_value = bad_value
+
+
+class KeypairMismatch(Exception):
+    def __init__(self, slot, cert):
+        super().__init__(
+            'The certificate does not match the private key in slot %s.' % slot)
+        self.slot = slot
+        self.cert = cert
 
 
 class UnsupportedAlgorithm(Exception):
@@ -910,22 +919,31 @@ class PivController(object):
         if verify:
             # Verify that the public key used in the certificate
             # is from the same keypair as the private key.
-            public_key = certificate.public_key()
+            try:
+                public_key = certificate.public_key()
 
-            random_data = bytes(random.randint(0, 255) for i in range(32))
-            random_sig = self.sign(
-                slot, ALGO.from_public_key(public_key), random_data)
+                random_data = bytes(random.randint(0, 255) for i in range(32))
+                random_sig = self.sign(
+                    slot, ALGO.from_public_key(public_key), random_data)
 
-            if isinstance(public_key, rsa.RSAPublicKey):
-                public_key.verify(
-                    random_sig, random_data, padding.PKCS1v15(),
-                    certificate.signature_hash_algorithm)
-            elif isinstance(public_key, ec.EllipticCurvePublicKey):
-                public_key.verify(
-                    random_sig, random_data,
-                    ec.ECDSA(hashes.SHA256()))
-            else:
-                raise ValueError('Unknown key type: ' + type(public_key))
+                if isinstance(public_key, rsa.RSAPublicKey):
+                    public_key.verify(
+                        random_sig, random_data, padding.PKCS1v15(),
+                        certificate.signature_hash_algorithm)
+                elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                    public_key.verify(
+                        random_sig, random_data,
+                        ec.ECDSA(hashes.SHA256()))
+                else:
+                    raise ValueError('Unknown key type: ' + type(public_key))
+
+            except APDUError as e:
+                if e.sw == SW.INCORRECT_PARAMETERS:
+                    raise KeypairMismatch(slot, certificate)
+                raise
+
+            except InvalidSignature as e:
+                raise KeypairMismatch(slot, certificate)
 
         self.put_data(OBJ.from_slot(slot), Tlv(TAG.CERTIFICATE, cert_data) +
                       Tlv(TAG.CERT_INFO, b'\0') + Tlv(TAG.LRC))

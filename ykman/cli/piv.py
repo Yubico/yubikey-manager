@@ -32,14 +32,13 @@ from ..piv import (
     PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..piv import (
-    AuthenticationBlocked, AuthenticationFailed, UnsupportedAlgorithm,
-    WrongPin, WrongPuk)
+    AuthenticationBlocked, AuthenticationFailed, KeypairMismatch,
+    UnsupportedAlgorithm, WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from binascii import b2a_hex, a2b_hex
@@ -313,7 +312,7 @@ def import_certificate(
         try:
             controller.import_certificate(slot, cert)
 
-        except InvalidSignature:
+        except KeypairMismatch:
             ctx.fail('This certificate is not tied to the private key in the '
                      '{} slot.'.format(slot.name))
 
@@ -321,9 +320,6 @@ def import_certificate(
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
                 _verify_pin(ctx, controller, pin)
                 do_import(retry=False)
-            elif e.sw == SW.INCORRECT_PARAMETERS:
-                ctx.fail('This certificate is not tied to the private key in '
-                         'the {} slot.'.format(slot.name))
             else:
                 raise
 

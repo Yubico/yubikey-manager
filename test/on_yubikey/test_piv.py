@@ -5,13 +5,12 @@ import random
 import unittest
 from binascii import a2b_hex
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from ykman.driver_ccid import APDUError, SW
+from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.piv import (
-    AuthenticationBlocked, AuthenticationFailed, WrongPuk)
+    AuthenticationBlocked, AuthenticationFailed, KeypairMismatch, WrongPuk)
 from ykman.util import TRANSPORT, parse_certificate, parse_private_key
 from .util import (
     DestructiveYubikeyTestCase, missing_mode, open_device, get_version, is_fips)
@@ -174,7 +173,8 @@ class KeyManagement(PivTestCase):
     def test_import_certificate_requires_authentication(self):
         cert = get_test_cert()
         with self.assertRaises(APDUError):
-            self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
+            self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
+                                               verify=False)
 
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
         self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
@@ -199,7 +199,7 @@ class KeyManagement(PivTestCase):
             SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER)
         # Importing the same certificate should not work with the new key
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-        with self.assertRaises(InvalidSignature):
+        with self.assertRaises(KeypairMismatch):
             self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
 
         # Overwrite the key with one of a different type
@@ -207,9 +207,8 @@ class KeyManagement(PivTestCase):
             SLOT.AUTHENTICATION, alg=alg2, pin_policy=PIN_POLICY.NEVER)
         # Importing the same certificate should not work with the new key
         self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-        with self.assertRaises(APDUError) as cm:
+        with self.assertRaises(KeypairMismatch):
             self.controller.import_certificate(SLOT.AUTHENTICATION, cert)
-        self.assertEqual(cm.exception.sw, SW.INCORRECT_PARAMETERS)
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_import_certificate_verifies_key_pairing_rsa1024(self):
