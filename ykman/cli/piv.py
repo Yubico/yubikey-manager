@@ -273,7 +273,8 @@ def generate_key(
 @click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
 @click.option(
-    '--verify/--no-verify', default=True,
+    '--no-verify', 'verify', is_flag=True, default=False,
+    callback=lambda ctx, param, value: not value,
     help='Verify that the certificate matches the private key in the slot.')
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(
