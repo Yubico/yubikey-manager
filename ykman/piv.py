@@ -48,7 +48,6 @@ from cryptography.x509.oid import NameOID
 from collections import OrderedDict
 from threading import Timer
 import logging
-import random
 import struct
 import six
 import os
@@ -922,18 +921,17 @@ class PivController(object):
             try:
                 public_key = certificate.public_key()
 
-                random_data = bytes(random.randint(0, 255) for i in range(32))
-                random_sig = self.sign(
-                    slot, ALGO.from_public_key(public_key), random_data)
+                test_data = b'test'
+                test_sig = self.sign(
+                    slot, ALGO.from_public_key(public_key), test_data)
 
                 if isinstance(public_key, rsa.RSAPublicKey):
                     public_key.verify(
-                        random_sig, random_data, padding.PKCS1v15(),
+                        test_sig, test_data, padding.PKCS1v15(),
                         certificate.signature_hash_algorithm)
                 elif isinstance(public_key, ec.EllipticCurvePublicKey):
                     public_key.verify(
-                        random_sig, random_data,
-                        ec.ECDSA(hashes.SHA256()))
+                        test_sig, test_data, ec.ECDSA(hashes.SHA256()))
                 else:
                     raise ValueError('Unknown key type: ' + type(public_key))
 
