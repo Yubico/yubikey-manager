@@ -309,14 +309,20 @@ def import_certificate(
         break
 
     if len(certs) > 1:
-        #  If multiple certs, only one will match. Try all.
-        for cert in certs:
-            try:
-                controller.import_certificate(slot, cert)
-            except Exception: # TODO: Should only pass on specific No-match exception
-                pass
+        #  If multiple certs, only import leaf.
+        #  Leaf is the cert with a subject that is not an issuer in the chain.
+        issuers = [
+            cert.issuer.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME) for cert in certs]
+        leafs = [
+            cert for cert in certs if cert.subject.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME) not in issuers]
+        try:
+            controller.import_certificate(slot, leafs[0], verify=True)
+        except Exception:  # TODO: Should only pass on specific No-match exception
+            pass
     else:
-        controller.import_certificate(slot, certs[0])
+        controller.import_certificate(slot, certs[0], verify=True)
 
 
 @piv.command('import-key')
