@@ -27,7 +27,8 @@
 
 from __future__ import absolute_import
 
-from ..util import TRANSPORT, parse_private_key, parse_certificates
+from ..util import (
+    TRANSPORT, get_leaf_certificates, parse_private_key, parse_certificates)
 from ..piv import (
     PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
@@ -316,12 +317,7 @@ def import_certificate(
     if len(certs) > 1:
         #  If multiple certs, only import leaf.
         #  Leaf is the cert with a subject that is not an issuer in the chain.
-        issuers = [
-            cert.issuer.get_attributes_for_oid(
-                x509.NameOID.COMMON_NAME) for cert in certs]
-        leafs = [
-            cert for cert in certs if cert.subject.get_attributes_for_oid(
-                x509.NameOID.COMMON_NAME) not in issuers]
+        leafs = get_leaf_certificates(certs)
         cert_to_import = leafs[0]
     else:
         cert_to_import = certs[0]
