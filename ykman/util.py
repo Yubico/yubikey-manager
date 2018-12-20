@@ -494,6 +494,20 @@ def parse_certificates(data, password):
     raise ValueError('Could not parse certificate.')
 
 
+def get_leaf_certificates(certs):
+    """
+    Extracts the leaf certificates from a list of certificates. Leaf
+    certificates are ones whose subject does not appear as issuer among the
+    others.
+    """
+    issuers = [cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+               for cert in certs]
+    leafs = [cert for cert in certs
+             if (cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+                 not in issuers)]
+    return leafs
+
+
 def is_pem(data):
     return PEM_IDENTIFIER in data if data else False
 
