@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 import six
 from .util import AID
-from .driver_ccid import (APDUError, SW)
+from .driver_ccid import (APDUError, SW, GP_INS_SELECT)
 from enum import IntEnum, unique
 from binascii import b2a_hex
 from collections import namedtuple
@@ -75,7 +75,7 @@ class OpgpController(object):
         self._driver = driver
         # Use send_apdu instead of driver.select()
         # to get OpenPGP specific error handling.
-        self.send_apdu(0, INS_SELECT, 0x04, 0, AID.OPGP)
+        self.send_apdu(0, GP_INS_SELECT, 0x04, 0, AID.OPGP)
         self._version = self._read_version()
 
     @property
