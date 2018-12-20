@@ -1,3 +1,12 @@
+* Version 2.0.0 (unreleased)
+ ** Add examples in help texts.
+ ** Add experimental support for external smart card reader. See --reader flag.
+ ** Restructure and improve the PIV API, with breaking changes.
+ ** PIV: update CHUID when importing a certificate.
+ ** PIV: Validate that private key and certificate matches when importing a certificate by default.
+ ** PIV: Improve support for importing certificate chains and .PEM files with comments.
+ ** Add a minimal manpage.
+
 * Version 1.0.1 (released 2018-10-10)
  ** Support for YubiKey 5A
  ** OATH: Ignore extra parameters in URI parsing
