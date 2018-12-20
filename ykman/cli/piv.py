@@ -502,7 +502,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     click.echo('WARNING: This will reset the PIN and PUK to the factory '
                'defaults!')
     force or click.confirm('Set PIN and PUK retry counters to: {} {}?'.format(
-        pin_retries, puk_retries), abort=True)
+        pin_retries, puk_retries), abort=True, err=True)
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
         click.echo('Default PINs are set.')
@@ -736,7 +736,7 @@ def change_management_key(
             force or click.confirm(
                     'The current management key is stored on the YubiKey'
                     ' and will not be cleared if no PIN is provided. Continue?',
-                    abort=True)
+                    abort=True, err=True)
 
     if not new_management_key and not protect:
         if generate:
@@ -755,7 +755,7 @@ def change_management_key(
         else:
             new_management_key = click.prompt(
                 'Enter your new management key',
-                hide_input=True, confirmation_prompt=True)
+                hide_input=True, confirmation_prompt=True, err=True)
 
     if new_management_key and type(new_management_key) is not bytes:
         try:

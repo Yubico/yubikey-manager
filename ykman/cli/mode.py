@@ -131,7 +131,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
                            .format(mode))
                 ctx.fail('Use --force to attempt to set it anyway.')
             force or click.confirm('Set mode of YubiKey to {}?'.format(mode),
-                                   abort=True)
+                                   abort=True, err=True)
 
         try:
             dev.set_mode(mode, chalresp_timeout, autoeject)
