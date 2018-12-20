@@ -816,17 +816,22 @@ def _ensure_authenticated(
         mgm_key_prompt=None,
         no_prompt=False):
 
+    pin_verified = False
+
     if controller.has_protected_key:
         if not management_key:
-            _verify_pin(ctx, controller, pin, no_prompt=no_prompt)
+            pin_verified = _verify_pin(
+                ctx, controller, pin, no_prompt=no_prompt)
         else:
             _authenticate(ctx, controller, management_key, mgm_key_prompt,
                           no_prompt=no_prompt)
     else:
         if require_pin_and_key:
-            _verify_pin(ctx, controller, pin, no_prompt=no_prompt)
+            pin_verified = _verify_pin(
+                ctx, controller, pin, no_prompt=no_prompt)
         _authenticate(ctx, controller, management_key, mgm_key_prompt,
                       no_prompt=no_prompt)
+    return pin_verified
 
 
 def _verify_pin(ctx, controller, pin, no_prompt=False):
@@ -838,6 +843,7 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
 
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
+        return True
     except WrongPin as e:
         ctx.fail('PIN verification failed, {} tries left.'.format(e.tries_left))
     except AuthenticationBlocked as e:
