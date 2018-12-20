@@ -713,7 +713,7 @@ def change_management_key(
     """
     controller = ctx.obj['controller']
 
-    _ensure_authenticated(
+    pin_verified = _ensure_authenticated(
         ctx, controller, pin, management_key,
         require_pin_and_key=protect,
         mgm_key_prompt='Enter your current management key '
@@ -729,7 +729,7 @@ def change_management_key(
         ctx.fail('Require touch not supported on this YubiKey.')
 
     # If an old stored key needs to be cleared, the PIN is needed.
-    if not protect and controller.has_stored_key:
+    if not pin_verified and controller.has_stored_key:
         if pin:
             _verify_pin(ctx, controller, pin, no_prompt=force)
         else:
