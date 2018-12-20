@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from ..util import TRANSPORT, parse_private_key, parse_certificate
+from ..util import TRANSPORT, parse_private_key, parse_certificates
 from ..piv import (
     PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
@@ -293,7 +293,7 @@ def import_certificate(
         if password is not None:
             password = password.encode()
         try:
-            cert = parse_certificate(data, password)
+            certs = parse_certificates(data, password)
         except (ValueError, TypeError):
             if password is None:
                 password = click.prompt(
@@ -308,7 +308,20 @@ def import_certificate(
             continue
         break
 
-    controller.import_certificate(slot, cert)
+    if len(certs) > 1:
+        #  If multiple certs, only import leaf.
+        #  Leaf is the cert with a subject that is not an issuer in the chain.
+        issuers = [
+            cert.issuer.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME) for cert in certs]
+        leafs = [
+            cert for cert in certs if cert.subject.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME) not in issuers]
+        cert_to_import = leafs[0]
+    else:
+        cert_to_import = certs[0]
+
+    controller.import_certificate(slot, cert_to_import)
 
 
 @piv.command('import-key')

@@ -9,7 +9,7 @@ from ykman.driver_ccid import APDUError
 from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk)
-from ykman.util import TRANSPORT, parse_certificate, parse_private_key
+from ykman.util import TRANSPORT, parse_certificates, parse_private_key
 from .util import (
     DestructiveYubikeyTestCase, missing_mode, open_device, get_version, is_fips)
 from ..util import open_file
@@ -31,7 +31,7 @@ no_pin_policy = (get_version() is not None and get_version() < (4, 0, 0),
 
 def get_test_cert():
     with open_file('rsa_2048_cert.pem') as f:
-        return parse_certificate(f.read(), None)
+        return parse_certificates(f.read(), None)[0]
 
 
 def get_test_key():
