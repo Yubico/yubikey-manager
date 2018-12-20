@@ -32,14 +32,13 @@ from ..piv import (
     PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
 from ..piv import (
-    AuthenticationBlocked, AuthenticationFailed, UnsupportedAlgorithm,
-    WrongPin, WrongPuk)
+    AuthenticationBlocked, AuthenticationFailed, KeypairMismatch,
+    UnsupportedAlgorithm, WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from binascii import b2a_hex, a2b_hex
@@ -112,7 +111,8 @@ def piv(ctx):
     Examples:
 
     \b
-      Generate an ECC P-256 private key and a self-signed certificate in slot 9a:
+      Generate an ECC P-256 private key and a self-signed certificate in
+      slot 9a:
       $ ykman piv generate-key --algorithm ECCP256 9a pubkey.pem
       $ ykman piv generate-certificate --subject "yubico" 9a pubkey.pem
 
@@ -272,9 +272,14 @@ def generate_key(
 @click_pin_option
 @click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
+@click.option(
+    '--no-verify', 'verify', is_flag=True, default=False,
+    callback=lambda ctx, param, value: not value,
+    help='Skip verifying that the certificate matches the private key in the '
+         'slot.')
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(
-        ctx, slot, management_key, pin, cert, password):
+        ctx, slot, management_key, pin, cert, password, verify):
     """
     Import a X.509 certificate.
 
@@ -321,7 +326,22 @@ def import_certificate(
     else:
         cert_to_import = certs[0]
 
-    controller.import_certificate(slot, cert_to_import)
+    def do_import(retry=True):
+        try:
+            controller.import_certificate(slot, cert_to_import, verify=verify)
+
+        except KeypairMismatch:
+            ctx.fail('This certificate is not tied to the private key in the '
+                     '{} slot.'.format(slot.name))
+
+        except APDUError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
+                _verify_pin(ctx, controller, pin)
+                do_import(retry=False)
+            else:
+                raise
+
+    do_import()
 
 
 @piv.command('import-key')
@@ -542,9 +562,6 @@ def generate_certificate(
         logger.error('Failed to generate certificate for slot %s', slot,
                      exc_info=e)
         ctx.fail('Certificate generation failed.')
-
-    except InvalidSignature:
-        ctx.fail('Invalid signature, certificate not imported.')
 
 
 @piv.command('generate-csr')
