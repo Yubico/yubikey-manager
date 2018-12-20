@@ -1,11 +1,22 @@
 * Version 2.0.0 (unreleased)
- ** Add examples in help texts.
- ** Add experimental support for external smart card reader. See --reader flag.
- ** Restructure and improve the PIV API, with breaking changes.
- ** PIV: update CHUID when importing a certificate.
- ** PIV: Validate that private key and certificate matches when importing a certificate by default.
- ** PIV: Improve support for importing certificate chains and .PEM files with comments.
- ** Add a minimal manpage.
+ ** Breaking changes:
+  *** Merge CCID status word constants into a single SW enum in ykman.driver_ccid
+  *** Throw custom exception types instead of raw APDUErrors from many methods of PivController
+  *** Write CLI prompts to standard error instead of standard output
+  *** Replace function `ykman.util.parse_certificate` with `parse_certificates` which returns a list
+ ** New features:
+  *** Add examples in help texts.
+  *** Add experimental support for external smart card reader. See --reader flag.
+  *** PIV: update CHUID when importing a certificate.
+  *** PIV: Optionally validate that private key and certificate match when importing a certificate (on by default in CLI).
+  *** PIV: Improve support for importing certificate chains and .PEM files with comments.
+  *** Add a minimal manpage.
+  *** Add static method `YubiKey.is_fips_version`
+  *** Add property `PivController.supported_algorithms`
+  *** Add function `ykman.piv.get_leaf_certificates`
+ ** Bug fixes:
+  *** Rendering of Unicode characters in OATH credential names
+  *** Quirks in libusb backend binding
 
 * Version 1.0.1 (released 2018-10-10)
  ** Support for YubiKey 5A
