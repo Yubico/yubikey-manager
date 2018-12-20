@@ -273,7 +273,8 @@ def _add_cred(ctx, data, force):
     if not force and any(cred.key == key for cred in controller.list()):
         click.confirm(
             'A credential called {} already exists on this YubiKey.'
-            ' Do you want to overwrite it?'.format(data.name), abort=True)
+            ' Do you want to overwrite it?'.format(data.name), abort=True,
+            err=True)
 
     firmware_overwrite_issue = (4, 0, 0) < controller.version < (4, 3, 5)
     cred_is_subset = any(
@@ -417,7 +418,7 @@ def delete(ctx, query, force):
         cred = hits[0]
         if force or (click.confirm(
                 u'Delete credential: {} ?'.format(cred.printable_key),
-                default=False
+                default=False, err=True
         )):
             controller.delete(cred)
             click.echo(u'Deleted {}.'.format(cred.printable_key))

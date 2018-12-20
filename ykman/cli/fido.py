@@ -225,7 +225,8 @@ def reset(ctx, force):
     if not force:
         if not click.confirm('WARNING! This will delete all FIDO credentials, '
                              'including FIDO U2F credentials, and restore '
-                             'factory settings. Proceed?'):
+                             'factory settings. Proceed?',
+                             err=True):
             ctx.abort()
 
     def prompt_re_insert_key():

@@ -82,11 +82,11 @@ def _confirm_slot_overwrite(controller, slot):
     if slot == 1 and slot1:
         click.confirm(
             'Slot 1 is already configured. Overwrite configuration?',
-            abort=True)
+            abort=True, err=True)
     if slot == 2 and slot2:
         click.confirm(
             'Slot 2 is already configured. Overwrite configuration?',
-            abort=True)
+            abort=True, err=True)
 
 
 @click.group()
@@ -215,7 +215,7 @@ def delete(ctx, slot, force):
         ctx.fail('Not possible to delete an empty slot.')
     force or click.confirm(
         'Do you really want to delete'
-        ' the configuration of slot {}?'.format(slot), abort=True)
+        ' the configuration of slot {}?'.format(slot), abort=True, err=True)
     click.echo('Deleting the configuration of slot {}...'.format(slot))
     try:
         controller.zap_slot(slot)
@@ -314,7 +314,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             key = a2b_hex(key)
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
-                           abort=True)
+                           abort=True, err=True)
     try:
         controller.program_otp(slot, key, public_id, private_id, not no_enter)
     except YkpersError as e:
@@ -425,7 +425,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     cred_type = 'TOTP' if totp else 'challenge-response'
     force or click.confirm('Program a {} credential in slot {}?'
-                           .format(cred_type, slot), abort=True)
+                           .format(cred_type, slot), abort=True, err=True)
     try:
         controller.program_chalresp(slot, key, touch)
     except YkpersError as e:
@@ -515,7 +515,8 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
                 click.echo(e)
 
     force or click.confirm(
-        'Program a HOTP credential in slot {}?'.format(slot), abort=True)
+        'Program a HOTP credential in slot {}?'.format(slot), abort=True,
+        err=True)
     try:
         controller.program_hotp(
             slot, key, counter, int(digits) == 8, not no_enter)
@@ -569,7 +570,8 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
 
     force or click.confirm(
         'Update the settings for slot {}? '
-        'All existing settings will be overwritten.'.format(slot), abort=True)
+        'All existing settings will be overwritten.'.format(slot), abort=True,
+        err=True)
     click.echo('Updating settings for slot {}...'.format(slot))
 
     if pacing is not None:

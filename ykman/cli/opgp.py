@@ -170,7 +170,7 @@ def touch(ctx, key, policy, admin_pin, force):
         ctx.fail('A FIXED policy cannot be changed!')
 
     force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
-        key, policy), abort=True)
+        key, policy), abort=True, err=True)
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
     controller.set_touch(key, policy, admin_pin.encode('utf8'))
@@ -198,7 +198,7 @@ def set_pin_retries(ctx, pw_attempts, admin_pin, force):
         click.echo('WARNING: Setting PIN retries will reset the values for all '
                    '3 PINs!')
     force or click.confirm('Set PIN retry counters to: {} {} {}?'.format(
-        *pw_attempts), abort=True)
+        *pw_attempts), abort=True, err=True)
     controller.set_pin_retries(*(pw_attempts + (admin_pin.encode('utf8'),)))
     click.echo('PIN retries successfully set.')
     if resets_pins:
