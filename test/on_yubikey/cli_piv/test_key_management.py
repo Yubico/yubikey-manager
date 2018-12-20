@@ -107,6 +107,84 @@ class KeyManagement(PivTestCase):
             csr = x509.load_pem_x509_csr(output.encode(), default_backend())
             self.assertTrue(csr.is_signature_valid)
 
+    def test_import_correct_cert_succeeds_with_pin(self):
+        # Set up a key in the slot and create a certificate for it
+        public_key_pem = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
+            DEFAULT_MANAGEMENT_KEY, '--pin-policy', 'ALWAYS', '-')
+
+        ykman_cli(
+            'piv', 'generate-certificate', '9a', '-',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, '-s', 'test',
+            input=public_key_pem)
+
+        ykman_cli('piv', 'export-certificate', '9a', '/tmp/test-pub-key.pem')
+
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'piv', 'import-certificate', '9a', '/tmp/test-pub-key.pem',
+                '-m', DEFAULT_MANAGEMENT_KEY)
+
+        ykman_cli(
+            'piv', 'import-certificate', '9a', '/tmp/test-pub-key.pem',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN)
+        ykman_cli(
+            'piv', 'import-certificate', '9a', '/tmp/test-pub-key.pem',
+            '-m', DEFAULT_MANAGEMENT_KEY, input=DEFAULT_PIN)
+
+    def test_import_wrong_cert_fails(self):
+        # Set up a key in the slot and create a certificate for it
+        public_key_pem = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
+            DEFAULT_MANAGEMENT_KEY, '--pin-policy', 'ALWAYS', '-')
+
+        ykman_cli(
+            'piv', 'generate-certificate', '9a', '-',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, '-s', 'test',
+            input=public_key_pem)
+
+        cert_pem = ykman_cli('piv', 'export-certificate', '9a', '-')
+
+        # Overwrite the key with a new one
+        ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
+            DEFAULT_MANAGEMENT_KEY, '--pin-policy', 'ALWAYS', '-',
+            input=public_key_pem)
+
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'piv', 'import-certificate', '9a', '-',
+                '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, input=cert_pem)
+
+    def test_import_wrong_cert_can_be_forced(self):
+        # Set up a key in the slot and create a certificate for it
+        public_key_pem = ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
+            DEFAULT_MANAGEMENT_KEY, '--pin-policy', 'ALWAYS', '-')
+
+        ykman_cli(
+            'piv', 'generate-certificate', '9a', '-',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, '-s', 'test',
+            input=public_key_pem)
+
+        cert_pem = ykman_cli('piv', 'export-certificate', '9a', '-')
+
+        # Overwrite the key with a new one
+        ykman_cli(
+            'piv', 'generate-key', '9a', '-a', 'ECCP256', '-m',
+            DEFAULT_MANAGEMENT_KEY, '--pin-policy', 'ALWAYS', '-',
+            input=public_key_pem)
+
+        with self.assertRaises(SystemExit):
+            ykman_cli(
+                'piv', 'import-certificate', '9a', '-',
+                '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, input=cert_pem)
+
+        ykman_cli(
+            'piv', 'import-certificate', '9a', '-',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, '--no-verify',
+            input=cert_pem)
+
     @unittest.skipIf(*no_attestation)
     def test_export_attestation_certificate(self):
         output = ykman_cli('piv', 'export-certificate', 'f9', '-')

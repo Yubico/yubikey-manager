@@ -3,7 +3,7 @@
 from ykman.util import (bytes2int, format_code, generate_static_pw,
                         hmac_shorten_key, modhex_decode, modhex_encode,
                         parse_tlvs, parse_truncated, time_challenge, Tlv,
-                        is_pkcs12, FORM_FACTOR)
+                        is_pkcs12, is_pem, FORM_FACTOR)
 from .util import open_file
 import unittest
 
@@ -130,6 +130,31 @@ class TestUtilityFunctions(unittest.TestCase):
             'rsa_2048_key_cert_encrypted.pfx') as \
                 rsa_2048_key_cert_encrypted_pfx:
             self.assertTrue(is_pkcs12(rsa_2048_key_cert_encrypted_pfx.read()))
+
+    def test_is_pem(self):
+        self.assertFalse(is_pem(b'just a byte string'))
+        self.assertFalse(is_pem(None))
+
+        with open_file('rsa_2048_key.pem') as rsa_2048_key_pem:
+            self.assertTrue(is_pem(rsa_2048_key_pem.read()))
+
+        with open_file('rsa_2048_key_encrypted.pem') as f:
+            self.assertTrue(is_pem(f.read()))
+
+        with open_file('rsa_2048_cert.pem') as rsa_2048_cert_pem:
+            self.assertTrue(is_pem(rsa_2048_cert_pem.read()))
+
+        with open_file('rsa_2048_key_cert.pfx') as rsa_2048_key_cert_pfx:
+            self.assertFalse(is_pem(rsa_2048_key_cert_pfx.read()))
+
+        with open_file('rsa_2048_cert_metadata.pem') as rsa_2048_cert_metadata_pem:
+            self.assertTrue(is_pem(rsa_2048_cert_metadata_pem.read()))
+
+        with open_file(
+            'rsa_2048_key_cert_encrypted.pfx') as \
+                rsa_2048_key_cert_encrypted_pfx:
+            self.assertFalse(is_pem(rsa_2048_key_cert_encrypted_pfx.read()))
+
 
     def test_form_factor_from_code(self):
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(None))

@@ -31,6 +31,7 @@ import os
 import six
 import struct
 import re
+import logging
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
@@ -39,6 +40,12 @@ from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
 from .scancodes import KEYBOARD_LAYOUT
+
+
+logger = logging.getLogger(__name__)
+
+
+PEM_IDENTIFIER = b'-----BEGIN'
 
 
 class BitflagEnum(IntEnum):
@@ -416,7 +423,7 @@ def parse_private_key(data, password):
     Identifies, decrypts and returns a cryptography private key object.
     """
     # PEM
-    if data.startswith(b'-----'):
+    if is_pem(data):
         if b'ENCRYPTED' in data:
             if password is None:
                 raise TypeError('No password provided for encrypted key.')
@@ -451,16 +458,22 @@ def parse_private_key(data, password):
     raise ValueError('Could not parse private key.')
 
 
-def parse_certificate(data, password):
+def parse_certificates(data, password):
     """
-    Identifies, decrypts and returns a cryptography x509 certificate.
+    Identifies, decrypts and returns list of cryptography x509 certificates.
     """
+
     # PEM
-    if data.startswith(b'-----'):
-        try:
-            return x509.load_pem_x509_certificate(data, default_backend())
-        except Exception:
-            pass
+    if is_pem(data):
+        certs = []
+        for cert in data.split(PEM_IDENTIFIER):
+            try:
+                certs.append(
+                    x509.load_pem_x509_certificate(
+                        PEM_IDENTIFIER + cert, default_backend()))
+            except Exception:
+                pass
+        return certs
 
     # PKCS12
     if is_pkcs12(data):
@@ -468,17 +481,35 @@ def parse_certificate(data, password):
             p12 = crypto.load_pkcs12(data, password)
             data = crypto.dump_certificate(
                 crypto.FILETYPE_PEM, p12.get_certificate())
-            return x509.load_pem_x509_certificate(data, default_backend())
+            return [x509.load_pem_x509_certificate(data, default_backend())]
         except crypto.Error as e:
             raise ValueError(e)
 
     # DER
     try:
-        return x509.load_der_x509_certificate(data, default_backend())
+        return [x509.load_der_x509_certificate(data, default_backend())]
     except Exception:
         pass
 
     raise ValueError('Could not parse certificate.')
+
+
+def get_leaf_certificates(certs):
+    """
+    Extracts the leaf certificates from a list of certificates. Leaf
+    certificates are ones whose subject does not appear as issuer among the
+    others.
+    """
+    issuers = [cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+               for cert in certs]
+    leafs = [cert for cert in certs
+             if (cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+                 not in issuers)]
+    return leafs
+
+
+def is_pem(data):
+    return PEM_IDENTIFIER in data if data else False
 
 
 def is_pkcs12(data):

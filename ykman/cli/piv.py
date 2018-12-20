@@ -27,16 +27,19 @@
 
 from __future__ import absolute_import
 
-from ..util import TRANSPORT, parse_private_key, parse_certificate
+from ..util import (
+    TRANSPORT, get_leaf_certificates, parse_private_key, parse_certificates)
 from ..piv import (
-    PivController, ALGO, OBJ, SW, SLOT, PIN_POLICY, TOUCH_POLICY,
+    PivController, ALGO, OBJ, SLOT, PIN_POLICY, TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY, generate_random_management_key)
-from ..driver_ccid import APDUError, SW_APPLICATION_NOT_FOUND
+from ..piv import (
+    AuthenticationBlocked, AuthenticationFailed, KeypairMismatch,
+    UnsupportedAlgorithm, WrongPin, WrongPuk)
+from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from binascii import b2a_hex, a2b_hex
@@ -71,11 +74,11 @@ def click_parse_management_key(ctx, param, val):
     try:
         key = a2b_hex(val)
         if key and len(key) != 24:
-            return ValueError('Management key must be exactly 24 bytes '
-                              '(48 hexadecimal digits) long.')
+            raise ValueError('Management key must be exactly 24 bytes '
+                             '(48 hexadecimal digits) long.')
         return key
     except Exception:
-        return ValueError(val)
+        raise ValueError(val)
 
 
 click_slot_argument = click.argument('slot', callback=click_parse_piv_slot)
@@ -109,7 +112,8 @@ def piv(ctx):
     Examples:
 
     \b
-      Generate an ECC P-256 private key and a self-signed certificate in slot 9a:
+      Generate an ECC P-256 private key and a self-signed certificate in
+      slot 9a:
       $ ykman piv generate-key --algorithm ECCP256 9a pubkey.pem
       $ ykman piv generate-certificate --subject "yubico" 9a pubkey.pem
 
@@ -124,7 +128,7 @@ def piv(ctx):
     try:
         ctx.obj['controller'] = PivController(ctx.obj['dev'].driver)
     except APDUError as e:
-        if e.sw == SW_APPLICATION_NOT_FOUND:
+        if e.sw == SW.NOT_FOUND:
             ctx.fail("The PIV application can't be found on this YubiKey.")
         raise
 
@@ -236,22 +240,25 @@ def generate_key(
 
     _ensure_authenticated(ctx, controller, pin, management_key)
 
-    algorithm = ALGO.from_string(algorithm)
+    algorithm_id = ALGO.from_string(algorithm)
 
     if pin_policy:
         pin_policy = PIN_POLICY.from_string(pin_policy)
     if touch_policy:
         touch_policy = TOUCH_POLICY.from_string(touch_policy)
 
-    _check_algorithm(ctx, dev, controller, algorithm)
     _check_pin_policy(ctx, dev, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
 
-    public_key = controller.generate_key(
-        slot,
-        algorithm,
-        pin_policy,
-        touch_policy)
+    try:
+        public_key = controller.generate_key(
+            slot,
+            algorithm_id,
+            pin_policy,
+            touch_policy)
+    except UnsupportedAlgorithm:
+        ctx.fail('Algorithm {} is not supported by this '
+                 'YubiKey.'.format(algorithm))
 
     key_encoding = format
     public_key_output.write(public_key.public_bytes(
@@ -266,9 +273,14 @@ def generate_key(
 @click_pin_option
 @click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
+@click.option(
+    '--no-verify', 'verify', is_flag=True, default=False,
+    callback=lambda ctx, param, value: not value,
+    help='Skip verifying that the certificate matches the private key in the '
+         'slot.')
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(
-        ctx, slot, management_key, pin, cert, password):
+        ctx, slot, management_key, pin, cert, password, verify):
     """
     Import a X.509 certificate.
 
@@ -287,7 +299,7 @@ def import_certificate(
         if password is not None:
             password = password.encode()
         try:
-            cert = parse_certificate(data, password)
+            certs = parse_certificates(data, password)
         except (ValueError, TypeError):
             if password is None:
                 password = click.prompt(
@@ -302,7 +314,30 @@ def import_certificate(
             continue
         break
 
-    controller.import_certificate(slot, cert)
+    if len(certs) > 1:
+        #  If multiple certs, only import leaf.
+        #  Leaf is the cert with a subject that is not an issuer in the chain.
+        leafs = get_leaf_certificates(certs)
+        cert_to_import = leafs[0]
+    else:
+        cert_to_import = certs[0]
+
+    def do_import(retry=True):
+        try:
+            controller.import_certificate(slot, cert_to_import, verify=verify)
+
+        except KeypairMismatch:
+            ctx.fail('This certificate is not tied to the private key in the '
+                     '{} slot.'.format(slot.name))
+
+        except APDUError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
+                _verify_pin(ctx, controller, pin)
+                do_import(retry=False)
+            else:
+                raise
+
+    do_import()
 
 
 @piv.command('import-key')
@@ -359,7 +394,7 @@ def import_key(
 
     _check_pin_policy(ctx, dev, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
-    _check_key_size(ctx, dev, private_key)
+    _check_key_size(ctx, controller, private_key)
 
     controller.import_key(
             slot,
@@ -524,9 +559,6 @@ def generate_certificate(
                      exc_info=e)
         ctx.fail('Certificate generation failed.')
 
-    except InvalidSignature:
-        ctx.fail('Invalid signature, certificate not imported.')
-
 
 @piv.command('generate-csr')
 @click.pass_context
@@ -603,10 +635,16 @@ def change_pin(ctx, pin, new_pin):
             show_default=False, confirmation_prompt=True, err=True)
     try:
         controller.change_pin(pin, new_pin)
-    except APDUError as e:
-        logger.error('Failed to change PIN', exc_info=e)
-        ctx.fail('Changing the PIN failed.')
-    click.echo('New PIN set.')
+        click.echo('New PIN set.')
+
+    except AuthenticationBlocked as e:
+        logger.debug('PIN is blocked.', exc_info=e)
+        ctx.fail('PIN is blocked.')
+
+    except WrongPin as e:
+        logger.debug(
+            'Failed to change PIN, %d tries left', e.tries_left, exc_info=e)
+        ctx.fail('PIN change failed - %d tries left.' % e.tries_left)
 
 
 @piv.command('change-puk')
@@ -628,13 +666,18 @@ def change_puk(ctx, puk, new_puk):
             show_default=False, confirmation_prompt=True,
             err=True)
 
-    (success, retries) = controller.change_puk(puk, new_puk)
-
-    if success:
+    try:
+        controller.change_puk(puk, new_puk)
         click.echo('New PUK set.')
-    else:
-        logger.debug('Failed to change PUK, %d tries left', retries)
-        ctx.fail('PUK change failed - %d tries left.' % retries)
+
+    except AuthenticationBlocked as e:
+        logger.debug('PUK is blocked.', exc_info=e)
+        ctx.fail('PUK is blocked.')
+
+    except WrongPuk as e:
+        logger.debug(
+            'Failed to change PUK, %d tries left', e.tries_left, exc_info=e)
+        ctx.fail('PUK change failed - %d tries left.' % e.tries_left)
 
 
 @piv.command('change-management-key')
@@ -795,7 +838,11 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
 
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
-    except APDUError:
+    except WrongPin as e:
+        ctx.fail('PIN verification failed, {} tries left.'.format(e.tries_left))
+    except AuthenticationBlocked as e:
+        ctx.fail('PIN is blocked.')
+    except Exception:
         ctx.fail('PIN verification failed.')
 
 
@@ -811,20 +858,16 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
-    except (APDUError, TypeError):
+    except AuthenticationFailed:
+        ctx.fail('Incorrect management key.')
+    except Exception as e:
+        logger.error('Authentication with management key failed.', exc_info=e)
         ctx.fail('Authentication with management key failed.')
 
 
-def _check_algorithm(ctx, dev, controller, algorithm):
-    #  ECCP384 not supported on NEO.
-    if algorithm == ALGO.ECCP384 and controller.version < (4, 0, 0):
-        ctx.fail('ECCP384 is not supported by this YubiKey.')
-    if algorithm == ALGO.RSA1024 and dev.is_fips:
-        ctx.fail('RSA1024 is not supported by this YubiKey.')
-
-
-def _check_key_size(ctx, dev, private_key):
-    if dev.is_fips and private_key.key_size == 1024:
+def _check_key_size(ctx, controller, private_key):
+    if (private_key.key_size == 1024
+            and ALGO.RSA1024 not in controller.supported_algorithms):
         ctx.fail('1024 is not a supported key size on this YubiKey.')
 
 
