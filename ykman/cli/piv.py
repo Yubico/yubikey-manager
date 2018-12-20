@@ -732,8 +732,8 @@ def change_management_key(
     if not pin_verified and controller.has_stored_key:
         if pin:
             _verify_pin(ctx, controller, pin, no_prompt=force)
-        else:
-            force or click.confirm(
+        elif not force:
+            click.confirm(
                     'The current management key is stored on the YubiKey'
                     ' and will not be cleared if no PIN is provided. Continue?',
                     abort=True)
