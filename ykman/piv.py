@@ -999,12 +999,18 @@ class PivController(object):
         return certs
 
     def update_chuid(self):
+        # Non-Federal Issuer FASC-N
+        # [9999-9999-999999-0-1-0000000000300001]
+        FASC_N=b'\xd4\xe7\x39\xda\x73\x9c\xed\x39\xce\x73\x9d\x83\x68' + \
+               b'\x58\x21\x08\x42\x10\x84\x21\xc8\x42\x10\xc3\xeb'
+        # Expires on: 2030-01-01
+        EXPIRY=b'\x32\x30\x33\x30\x30\x31\x30\x31'
+
         self.put_data(
             OBJ.CHUID,
-            Tlv(0x30, b'\xd4\xe7\x39\xda\x73\x9c\xed\x39\xce\x73\x9d\x83\x68'
-                b'\x58\x21\x08\x42\x10\x84\x21\xc8\x42\x10\xc3\xeb') +
+            Tlv(0x30, FASC_N) +
             Tlv(0x34, os.urandom(16)) +
-            Tlv(0x35, b'\x32\x30\x33\x30\x30\x31\x30\x31') +
+            Tlv(0x35, EXPIRY) +
             Tlv(0x3e) +
             Tlv(TAG.LRC)
         )
