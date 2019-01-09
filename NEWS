@@ -1,4 +1,4 @@
-* Version 2.0.0 (unreleased)
+* Version 2.0.0 (released 2019-01-09)
  ** Add support for Security Key NFC
  ** Add experimental support for external smart card reader. See --reader flag
  ** Add a minimal manpage
