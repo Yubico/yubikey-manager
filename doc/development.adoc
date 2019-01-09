@@ -64,3 +64,7 @@ WARNING: ONLY run these on a dedicated developer key, as it will permanently del
 To run integration tests, indicate the serial number (given by `ykman list`) of the YubiKey to test with:
 
    $ DESTRUCTIVE_TEST_YUBIKEY_SERIAL=123456 python setup.py test
+
+=== Packaging
+
+For third-party packaging, use the source releases and signatures available https://developers.yubico.com/yubikey-manager/Releases/[here].
