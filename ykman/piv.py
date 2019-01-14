@@ -85,7 +85,12 @@ class ALGO(IntEnum):
     @classmethod
     def from_public_key(cls, key):
         if isinstance(key, rsa.RSAPublicKey):
-            return getattr(cls, 'RSA%d' % key.key_size)
+            keySize = key.key_size
+            if keySize == 1023:
+                keySize = 1024
+            elif keySize == 2047:
+                keySize = 2048
+            return getattr(cls, 'RSA%d' % keySize)
         elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
             if curve_name == 'secp256r1':
@@ -344,10 +349,10 @@ def _get_key_data(key):
                 % key.public_key().public_numbers().e,
                 key=key)
 
-        if key.key_size == 1024:
+        if key.key_size == 1024 or key.key_size == 1023:
             algo = ALGO.RSA1024
             ln = 64
-        elif key.key_size == 2048:
+        elif key.key_size == 2048 or key.key_size == 2047:
             algo = ALGO.RSA2048
             ln = 128
         else:
