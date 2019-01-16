@@ -41,6 +41,7 @@ CONFIG2_VALID = 0x02
 
 CMD_VERIFY_FIPS_MODE = 0x14
 
+MISSING_LIBYKPERS_MSG = 'libykpers not found, OTP functionality not available'
 
 try:
     ykpers = Ykpers('ykpers-1', '1')
@@ -50,8 +51,7 @@ try:
                        .decode('ascii').split('.'))
 except Exception as e:
     logger.error('libykpers not found', exc_info=e)
-    ykpers = MissingLibrary(
-        'libykpers not found, slot functionality not available!')
+    ykpers = MissingLibrary(MISSING_LIBYKPERS_MSG)
     libversion = None
 
 
@@ -210,6 +210,9 @@ class OTPDriver(AbstractDriver):
 
 
 def open_devices():
+    if not libversion:
+        logger.error(MISSING_LIBYKPERS_MSG)
+        return
     if libversion < (1, 18):
         yield OTPDriver(ykpers.yk_open_first_key())
     else:
