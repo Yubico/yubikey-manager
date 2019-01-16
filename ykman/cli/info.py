@@ -121,9 +121,13 @@ def get_overall_fips_status(serial, config):
     return statuses
 
 
+@click.option(
+    '-c', '--check-fips',
+    help='Check if YubiKey is in FIPS Approved mode.',
+    is_flag=True)
 @click.command()
 @click.pass_context
-def info(ctx):
+def info(ctx, check_fips):
     """
     Show general information.
 
@@ -132,7 +136,7 @@ def info(ctx):
     """
     dev = ctx.obj['dev']
 
-    if dev.is_fips:
+    if dev.is_fips and check_fips:
         fips_status = get_overall_fips_status(dev.serial, dev.config)
 
     click.echo('Device type: {}'.format(dev.device_name))
@@ -158,7 +162,7 @@ def info(ctx):
 
     print_app_status_table(config)
 
-    if dev.is_fips:
+    if dev.is_fips and check_fips:
         click.echo()
 
         click.echo('FIPS Approved Mode: {}'.format(
