@@ -810,7 +810,7 @@ def read_object(ctx, pin, object_id):
 
     def do_read_object(retry=True):
         try:
-            click.echo(b2a_hex(controller.get_data(object_id)))
+            click.echo(controller.get_data(object_id))
         except APDUError as e:
             if e.sw == SW.NOT_FOUND:
                 ctx.fail('No data found.')
