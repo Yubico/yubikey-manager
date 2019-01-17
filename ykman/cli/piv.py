@@ -822,6 +822,35 @@ def read_object(ctx, pin, object_id):
 
     do_read_object()
 
+@piv.command('write-object')
+@click_pin_option
+@click_management_key_option
+@click.pass_context
+@click.option(
+        '-i', '--id', 'object_id',
+        callback=lambda ctx, param, value: int(value, 16),
+        metavar='HEX', help='Id of PIV object.', required=True)
+@click.argument('data', type=click.File('rb'), metavar='DATA')
+def write_object(ctx, pin, management_key, object_id, data):
+    """
+    Write  arbitrary PIV object.
+
+    Write PIV object by providing the object id.
+    """
+
+    controller = ctx.obj['controller']
+    _ensure_authenticated(ctx, controller, pin, management_key)
+
+    def do_write_object(retry=True):
+        try:
+            controller.put_data(object_id, data.read())
+        except APDUError as e:
+            if e.sw == SW.INCORRECT_PARAMETERS:
+                ctx.fail('Something went wrong.')
+            raise
+
+    do_write_object()
+
 def _prompt_management_key(
         ctx, prompt='Enter a management key [blank to use default key]'):
     management_key = click.prompt(
