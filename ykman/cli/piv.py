@@ -792,6 +792,35 @@ def unblock_pin(ctx, puk, new_pin):
             show_default=False, hide_input=True, err=True)
     controller.unblock_pin(puk, new_pin)
 
+@piv.command('read-object')
+@click_pin_option
+@click.pass_context
+@click.option(
+        '-i', '--id', 'object_id',
+        callback=lambda ctx, param, value: int(value, 16),
+        metavar='HEX', help='Id of PIV object.', required=True)
+def read_object(ctx, pin, object_id):
+    """
+    Read arbitrary PIV object.
+
+    Read PIV object by providing the object id.
+    """
+
+    controller = ctx.obj['controller']
+
+    def do_read_object(retry=True):
+        try:
+            click.echo(b2a_hex(controller.get_data(object_id)))
+        except APDUError as e:
+            if e.sw == SW.NOT_FOUND:
+                ctx.fail('No data found.')
+            elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                _verify_pin(ctx, controller, pin)
+                do_read_object(retry=False)
+            else:
+                raise
+
+    do_read_object()
 
 def _prompt_management_key(
         ctx, prompt='Enter a management key [blank to use default key]'):
