@@ -833,9 +833,11 @@ def read_object(ctx, pin, object_id):
 @click.argument('data', type=click.File('rb'), metavar='DATA')
 def write_object(ctx, pin, management_key, object_id, data):
     """
-    Write  arbitrary PIV object.
+    Write an arbitrary PIV object.
 
-    Write PIV object by providing the object id.
+    Write a PIV object by providing the object id.
+    Yubico writable PIV objects are available in
+    the range 5f0000 - 5fffff.
     """
 
     controller = ctx.obj['controller']
@@ -845,11 +847,13 @@ def write_object(ctx, pin, management_key, object_id, data):
         try:
             controller.put_data(object_id, data.read())
         except APDUError as e:
+            logger.debug('Failed writing object', exc_info=e)
             if e.sw == SW.INCORRECT_PARAMETERS:
-                ctx.fail('Something went wrong.')
+                ctx.fail('Something went wrong, is the object id valid?')
             raise
 
     do_write_object()
+
 
 def _prompt_management_key(
         ctx, prompt='Enter a management key [blank to use default key]'):

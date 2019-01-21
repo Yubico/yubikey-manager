@@ -1,6 +1,5 @@
 from ..util import ykman_cli
-from .util import PivTestCase
-
+from .util import PivTestCase, DEFAULT_MANAGEMENT_KEY
 
 class Misc(PivTestCase):
 
@@ -11,3 +10,11 @@ class Misc(PivTestCase):
     def test_reset(self):
         output = ykman_cli('piv', 'reset', '-f')
         self.assertIn('Success!', output)
+
+    def test_write_read_object(self):
+        ykman_cli(
+            'piv', 'write-object', '--id',
+            '0x5f0001', '-m', DEFAULT_MANAGEMENT_KEY,
+            '-', input='test data')
+        output = ykman_cli('piv', 'read-object', '--id', '0x5f0001')
+        self.assertIn('test data', output)
