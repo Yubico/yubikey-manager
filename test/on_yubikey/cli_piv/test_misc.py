@@ -17,4 +17,4 @@ class Misc(PivTestCase):
             '0x5f0001', '-m', DEFAULT_MANAGEMENT_KEY,
             '-', input='test data')
         output = ykman_cli('piv', 'read-object', '--id', '0x5f0001')
-        self.assertIn('test data', output)
+        self.assertEquals('test data\n', output)
