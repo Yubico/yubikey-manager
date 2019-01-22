@@ -792,6 +792,75 @@ def unblock_pin(ctx, puk, new_pin):
             show_default=False, hide_input=True, err=True)
     controller.unblock_pin(puk, new_pin)
 
+@piv.command('read-object')
+@click_pin_option
+@click.pass_context
+@click.argument(
+    'object-id',
+    callback=lambda ctx, param, value: int(value, 16),
+    metavar='OBJECT-ID')
+def read_object(ctx, pin, object_id):
+    """
+    Read arbitrary PIV object.
+
+    Read PIV object by providing the object id.
+
+    \b
+    OBJECT-ID       Id of PIV object in HEX.
+    """
+
+    controller = ctx.obj['controller']
+
+    def do_read_object(retry=True):
+        try:
+            click.echo(controller.get_data(object_id))
+        except APDUError as e:
+            if e.sw == SW.NOT_FOUND:
+                ctx.fail('No data found.')
+            elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                _verify_pin(ctx, controller, pin)
+                do_read_object(retry=False)
+            else:
+                raise
+
+    do_read_object()
+
+@piv.command('write-object')
+@click_pin_option
+@click_management_key_option
+@click.pass_context
+@click.argument(
+    'object-id',
+    callback=lambda ctx, param, value: int(value, 16),
+    metavar='OBJECT-ID')
+@click.argument('data', type=click.File('rb'), metavar='DATA')
+def write_object(ctx, pin, management_key, object_id, data):
+    """
+    Write an arbitrary PIV object.
+
+    Write a PIV object by providing the object id.
+    Yubico writable PIV objects are available in
+    the range 5f0000 - 5fffff.
+
+    \b
+    OBJECT-ID       Id of PIV object in HEX.
+    DATA            File containing the data to be written. Use '-' to use stdin.
+    """
+
+    controller = ctx.obj['controller']
+    _ensure_authenticated(ctx, controller, pin, management_key)
+
+    def do_write_object(retry=True):
+        try:
+            controller.put_data(object_id, data.read())
+        except APDUError as e:
+            logger.debug('Failed writing object', exc_info=e)
+            if e.sw == SW.INCORRECT_PARAMETERS:
+                ctx.fail('Something went wrong, is the object id valid?')
+            raise
+
+    do_write_object()
+
 
 def _prompt_management_key(
         ctx, prompt='Enter a management key [blank to use default key]'):

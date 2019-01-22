@@ -810,9 +810,10 @@ class PivController(object):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
         tlv = Tlv(self.send_cmd(INS.GET_DATA, 0x3f, 0xff,
                                 Tlv(TAG.OBJ_ID, id_bytes)))
-        if tlv.tag != TAG.OBJ_DATA:
+        if tlv.tag not in [TAG.OBJ_DATA, OBJ.DISCOVERY]:
             raise ValueError('Wrong tag in response data!')
         return tlv.value
+
 
     def put_data(self, object_id, data):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
