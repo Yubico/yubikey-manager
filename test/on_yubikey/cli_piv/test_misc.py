@@ -13,8 +13,8 @@ class Misc(PivTestCase):
 
     def test_write_read_object(self):
         ykman_cli(
-            'piv', 'write-object', '--id',
-            '0x5f0001', '-m', DEFAULT_MANAGEMENT_KEY,
+            'piv', 'write-object',
+            '-m', DEFAULT_MANAGEMENT_KEY,'0x5f0001',
             '-', input='test data')
-        output = ykman_cli('piv', 'read-object', '--id', '0x5f0001')
+        output = ykman_cli('piv', 'read-object', '0x5f0001')
         self.assertEquals('test data\n', output)

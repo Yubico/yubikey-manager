@@ -795,15 +795,18 @@ def unblock_pin(ctx, puk, new_pin):
 @piv.command('read-object')
 @click_pin_option
 @click.pass_context
-@click.option(
-        '-i', '--id', 'object_id',
-        callback=lambda ctx, param, value: int(value, 16),
-        metavar='HEX', help='Id of PIV object.', required=True)
+@click.argument(
+    'object-id',
+    callback=lambda ctx, param, value: int(value, 16),
+    metavar='OBJECT-ID')
 def read_object(ctx, pin, object_id):
     """
     Read arbitrary PIV object.
 
     Read PIV object by providing the object id.
+
+    \b
+    OBJECT-ID       Id of PIV object in HEX.
     """
 
     controller = ctx.obj['controller']
@@ -826,10 +829,10 @@ def read_object(ctx, pin, object_id):
 @click_pin_option
 @click_management_key_option
 @click.pass_context
-@click.option(
-        '-i', '--id', 'object_id',
-        callback=lambda ctx, param, value: int(value, 16),
-        metavar='HEX', help='Id of PIV object.', required=True)
+@click.argument(
+    'object-id',
+    callback=lambda ctx, param, value: int(value, 16),
+    metavar='OBJECT-ID')
 @click.argument('data', type=click.File('rb'), metavar='DATA')
 def write_object(ctx, pin, management_key, object_id, data):
     """
@@ -838,6 +841,10 @@ def write_object(ctx, pin, management_key, object_id, data):
     Write a PIV object by providing the object id.
     Yubico writable PIV objects are available in
     the range 5f0000 - 5fffff.
+
+    \b
+    OBJECT-ID       Id of PIV object in HEX.
+    DATA            File containing the data to be written. Use '-' to use stdin.
     """
 
     controller = ctx.obj['controller']
