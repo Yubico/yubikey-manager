@@ -116,6 +116,17 @@ def info(ctx):
     click.echo('PIN tries remaining: {}'.format(retries.pin))
     click.echo('Reset code tries remaining: {}'.format(retries.reset))
     click.echo('Admin PIN tries remaining: {}'.format(retries.admin))
+    click.echo()
+    click.echo('Touch policies')
+    click.echo(
+        'Signature key           {.name}'.format(
+            controller.get_touch(KEY_SLOT.SIGNATURE)))
+    click.echo(
+        'Encryption key          {.name}'.format(
+            controller.get_touch(KEY_SLOT.ENCRYPTION)))
+    click.echo(
+        'Authentication key      {.name}'.format(
+            controller.get_touch(KEY_SLOT.AUTHENTICATION)))
 
 
 @openpgp.command()
