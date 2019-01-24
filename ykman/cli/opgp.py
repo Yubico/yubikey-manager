@@ -167,17 +167,13 @@ def touch(ctx, key, policy, admin_pin, force):
     Manage touch policy for OpenPGP keys.
 
     \b
-    KEY     Key slot to get/set (sig, enc or aut).
+    KEY     Key slot to set (sig, enc or aut).
     POLICY  Touch policy to set (on, off or fixed).
     """
     controller = ctx.obj['controller']
     old_policy = controller.get_touch(key)
-    click.echo('Current touch policy of {.name} key is {.name}.'.format(
-        key, old_policy))
-    if policy is None:
-        return
 
-    if old_policy == TOUCH_MODE.ON_FIXED:
+    if old_policy == TOUCH_MODE.FIXED:
         ctx.fail('A FIXED policy cannot be changed!')
 
     force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
