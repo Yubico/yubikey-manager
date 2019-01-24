@@ -181,7 +181,6 @@ def touch(ctx, key, policy, admin_pin, force):
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
     controller.set_touch(key, policy, admin_pin.encode('utf8'))
-    click.echo('Touch policy successfully set.')
 
 
 @openpgp.command('set-pin-retries')
