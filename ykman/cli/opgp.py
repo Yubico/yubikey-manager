@@ -39,15 +39,15 @@ logger = logging.getLogger(__name__)
 
 
 KEY_NAMES = dict(
-    sig=KEY_SLOT.SIGN,
-    enc=KEY_SLOT.ENCRYPT,
-    aut=KEY_SLOT.AUTHENTICATE
+    sig=KEY_SLOT.SIGNATURE,
+    enc=KEY_SLOT.ENCRYPTION,
+    aut=KEY_SLOT.AUTHENTICATION
 )
 
 MODE_NAMES = dict(
     off=TOUCH_MODE.OFF,
     on=TOUCH_MODE.ON,
-    fixed=TOUCH_MODE.ON_FIXED
+    fixed=TOUCH_MODE.FIXED
 )
 
 

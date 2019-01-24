@@ -37,16 +37,16 @@ from collections import namedtuple
 
 @unique
 class KEY_SLOT(IntEnum):  # noqa: N801
-    SIGN = 0xd6
-    ENCRYPT = 0xd7
-    AUTHENTICATE = 0xd8
+    SIGNATURE = 0xd6
+    ENCRYPTION = 0xd7
+    AUTHENTICATION = 0xd8
 
 
 @unique
 class TOUCH_MODE(IntEnum):  # noqa: N801
     OFF = 0x00
     ON = 0x01
-    ON_FIXED = 0x02
+    FIXED = 0x02
 
 
 @unique
