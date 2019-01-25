@@ -39,15 +39,15 @@ logger = logging.getLogger(__name__)
 
 
 KEY_NAMES = dict(
-    sig=KEY_SLOT.SIGN,
-    enc=KEY_SLOT.ENCRYPT,
-    aut=KEY_SLOT.AUTHENTICATE
+    sig=KEY_SLOT.SIGNATURE,
+    enc=KEY_SLOT.ENCRYPTION,
+    aut=KEY_SLOT.AUTHENTICATION
 )
 
 MODE_NAMES = dict(
     off=TOUCH_MODE.OFF,
     on=TOUCH_MODE.ON,
-    fixed=TOUCH_MODE.ON_FIXED
+    fixed=TOUCH_MODE.FIXED
 )
 
 
@@ -116,6 +116,17 @@ def info(ctx):
     click.echo('PIN tries remaining: {}'.format(retries.pin))
     click.echo('Reset code tries remaining: {}'.format(retries.reset))
     click.echo('Admin PIN tries remaining: {}'.format(retries.admin))
+    click.echo()
+    click.echo('Touch policies')
+    click.echo(
+        'Signature key           {.name}'.format(
+            controller.get_touch(KEY_SLOT.SIGNATURE)))
+    click.echo(
+        'Encryption key          {.name}'.format(
+            controller.get_touch(KEY_SLOT.ENCRYPTION)))
+    click.echo(
+        'Authentication key      {.name}'.format(
+            controller.get_touch(KEY_SLOT.AUTHENTICATION)))
 
 
 @openpgp.command()
@@ -143,10 +154,10 @@ def echo_default_pins():
 
 
 @openpgp.command()
-@click.argument('key', type=click.Choice(sorted(KEY_NAMES)),
+@click.argument('key', metavar='KEY', type=click.Choice(sorted(KEY_NAMES)),
                 callback=lambda c, p, k: KEY_NAMES.get(k))
-@click.argument('policy', type=click.Choice(sorted(MODE_NAMES)),
-                callback=lambda c, p, k: MODE_NAMES.get(k), required=False)
+@click.argument('policy', metavar='POLICY', type=click.Choice(sorted(MODE_NAMES)),
+                callback=lambda c, p, k: MODE_NAMES.get(k))
 @click.option('--admin-pin', required=False, metavar='PIN',
               help='Admin PIN for OpenPGP.')
 @click_force_option
@@ -156,17 +167,13 @@ def touch(ctx, key, policy, admin_pin, force):
     Manage touch policy for OpenPGP keys.
 
     \b
-    KEY     Key slot to get/set (sig, enc or aut).
+    KEY     Key slot to set (sig, enc or aut).
     POLICY  Touch policy to set (on, off or fixed).
     """
     controller = ctx.obj['controller']
     old_policy = controller.get_touch(key)
-    click.echo('Current touch policy of {.name} key is {.name}.'.format(
-        key, old_policy))
-    if policy is None:
-        return
 
-    if old_policy == TOUCH_MODE.ON_FIXED:
+    if old_policy == TOUCH_MODE.FIXED:
         ctx.fail('A FIXED policy cannot be changed!')
 
     force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
@@ -174,7 +181,6 @@ def touch(ctx, key, policy, admin_pin, force):
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
     controller.set_touch(key, policy, admin_pin.encode('utf8'))
-    click.echo('Touch policy successfully set.')
 
 
 @openpgp.command('set-pin-retries')
