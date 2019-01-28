@@ -94,11 +94,11 @@ class APPLICATION(BitflagEnum):
         return APPLICATION.OPGP | APPLICATION.OATH | APPLICATION.PIV
 
     def __str__(self):
-        if self == self.U2F:
+        if self == APPLICATION.U2F:
             return 'FIDO U2F'
-        elif self == self.FIDO2:
+        elif self == APPLICATION.FIDO2:
             return 'FIDO2'
-        elif self == self.OPGP:
+        elif self == APPLICATION.OPGP:
             return 'OpenPGP'
         else:
             return self.name
@@ -113,15 +113,15 @@ class FORM_FACTOR(IntEnum):
     USB_C_NANO = 0x04
 
     def __str__(self):
-        if self == self.USB_A_KEYCHAIN:
+        if self == FORM_FACTOR.USB_A_KEYCHAIN:
             return 'Keychain (USB-A)'
-        elif self == self.USB_A_NANO:
+        elif self == FORM_FACTOR.USB_A_NANO:
             return 'Nano (USB-A)'
-        elif self == self.USB_C_KEYCHAIN:
+        elif self == FORM_FACTOR.USB_C_KEYCHAIN:
             return 'Keychain (USB-C)'
-        elif self == self.USB_C_NANO:
+        elif self == FORM_FACTOR.USB_C_NANO:
             return 'Nano (USB-C)'
-        elif self == self.UNKNOWN:
+        elif self == FORM_FACTOR.UNKNOWN:
             return 'Unknown.'
 
     @classmethod
