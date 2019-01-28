@@ -473,7 +473,9 @@ def parse_certificates(data, password):
                         PEM_IDENTIFIER + cert, default_backend()))
             except Exception:
                 pass
-        return certs
+        # Could be valid PEM but not certificates.
+        if len(certs) > 0:
+            return certs
 
     # PKCS12
     if is_pkcs12(data):
