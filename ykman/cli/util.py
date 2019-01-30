@@ -81,7 +81,7 @@ class YkmanContextObject(MutableMapping):
     def resolve(self):
         if not self._resolved:
             self._resolved = True
-            for k, f in self._objects.items():
+            for k, f in self._objects.copy().items():
                 self._objects[k] = f()
 
     def __getitem__(self, key):
