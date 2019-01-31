@@ -622,7 +622,7 @@ def change_pin(ctx, pin, new_pin):
     """
     Change the PIN code.
 
-    The PIN must be between 6 - 8 characters long, and supports any type of
+    The PIN must be between 6 and 8 characters long, and supports any type of
     alphanumeric characters. For cross-platform compatibility,
     numeric digits are recommended.
     """
@@ -637,10 +637,10 @@ def change_pin(ctx, pin, new_pin):
             show_default=False, confirmation_prompt=True, err=True)
 
     if not _valid_pin_length(pin):
-        ctx.fail('Current PIN must be between 6 - 8 characters.')
+        ctx.fail('Current PIN must be between 6 and 8 characters long.')
 
     if not _valid_pin_length(new_pin):
-        ctx.fail('New PIN must be between 6 - 8 characters.')
+        ctx.fail('New PIN must be between 6 and 8 characters long.')
 
     try:
         controller.change_pin(pin, new_pin)
@@ -665,7 +665,7 @@ def change_puk(ctx, puk, new_puk):
     Change the PUK code.
 
     If the PIN is lost or blocked it can be reset using a PUK.
-    The PUK must be between 6 - 8 characters long, and supports any type of
+    The PUK must be between 6 and 8 characters long, and supports any type of
     alphanumeric characters.
     """
     controller = ctx.obj['controller']
@@ -678,10 +678,10 @@ def change_puk(ctx, puk, new_puk):
             err=True)
 
     if not _valid_pin_length(puk):
-        ctx.fail('Current PUK must be between 6 - 8 characters.')
+        ctx.fail('Current PUK must be between 6 and 8 characters long.')
 
     if not _valid_pin_length(new_puk):
-        ctx.fail('New PUK must be between 6 - 8 characters.')
+        ctx.fail('New PUK must be between 6 and 8 characters long.')
 
     try:
         controller.change_puk(puk, new_puk)
