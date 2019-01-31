@@ -622,17 +622,26 @@ def change_pin(ctx, pin, new_pin):
     """
     Change the PIN code.
 
-    The PIN can be up to 8 characters long, and supports any type of
+    The PIN must be between 6 and 8 characters long, and supports any type of
     alphanumeric characters. For cross-platform compatibility,
-    a PIN of 6 - 8 numeric digits is recommended.
+    numeric digits are recommended.
     """
+
     controller = ctx.obj['controller']
+
     if not pin:
         pin = _prompt_pin(ctx, prompt='Enter your current PIN')
     if not new_pin:
         new_pin = click.prompt(
             'Enter your new PIN', default='', hide_input=True,
             show_default=False, confirmation_prompt=True, err=True)
+
+    if not _valid_pin_length(pin):
+        ctx.fail('Current PIN must be between 6 and 8 characters long.')
+
+    if not _valid_pin_length(new_pin):
+        ctx.fail('New PIN must be between 6 and 8 characters long.')
+
     try:
         controller.change_pin(pin, new_pin)
         click.echo('New PIN set.')
@@ -656,6 +665,8 @@ def change_puk(ctx, puk, new_puk):
     Change the PUK code.
 
     If the PIN is lost or blocked it can be reset using a PUK.
+    The PUK must be between 6 and 8 characters long, and supports any type of
+    alphanumeric characters.
     """
     controller = ctx.obj['controller']
     if not puk:
@@ -665,6 +676,12 @@ def change_puk(ctx, puk, new_puk):
             'Enter your new PUK', default='', hide_input=True,
             show_default=False, confirmation_prompt=True,
             err=True)
+
+    if not _valid_pin_length(puk):
+        ctx.fail('Current PUK must be between 6 and 8 characters long.')
+
+    if not _valid_pin_length(new_puk):
+        ctx.fail('New PUK must be between 6 and 8 characters long.')
 
     try:
         controller.change_puk(puk, new_puk)
@@ -877,6 +894,10 @@ def _prompt_management_key(
 def _prompt_pin(ctx, prompt='Enter PIN'):
     return click.prompt(
         prompt, default='', hide_input=True, show_default=False, err=True)
+
+
+def _valid_pin_length(pin):
+    return 6 <= len(pin) <= 8
 
 
 def _ensure_authenticated(
