@@ -5,4 +5,5 @@ include resources/*
 include doc/*.adoc
 recursive-include test *
 include README.adoc
+include man/*
 include ykman/VERSION

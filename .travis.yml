@@ -45,6 +45,7 @@ install:
       pre-commit run --all-files
       pip install -e .
       python setup.py test
+      python setup.py sdist
     fi
 
 script:
@@ -70,6 +71,7 @@ after_success:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
+      cp dist/yubikey-manager-*.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH.tar.gz
       id=$(docker create xenial)
       docker cp $id:/yubikey-manager-debian-packages.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-deb.tar.gz
     fi
