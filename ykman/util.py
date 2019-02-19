@@ -27,7 +27,6 @@
 
 from __future__ import absolute_import
 
-import os
 import six
 import struct
 import re
@@ -356,7 +355,8 @@ def generate_static_pw(
         keyboard_layout=KEYBOARD_LAYOUT.MODHEX,
         blacklist=DEFAULT_PW_CHAR_BLACKLIST):
     chars = [k for k in keyboard_layout.value.keys() if k not in blacklist]
-    return ''.join([random.SystemRandom().choice(chars) for _ in range(length)])
+    sr = random.SystemRandom()
+    return ''.join([sr.choice(chars) for _ in range(length)])
 
 
 def format_code(code, digits=6, steam=False):
