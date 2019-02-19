@@ -913,7 +913,7 @@ class PivController(object):
         self.send_cmd(INS.IMPORT_KEY, algorithm, slot, data)
         return algorithm
 
-    def import_certificate(self, slot, certificate, verify=False):
+    def import_certificate(self, slot, certificate, verify=False, touch_callback=None):
         cert_data = certificate.public_bytes(Encoding.DER)
 
         if verify:
@@ -923,8 +923,16 @@ class PivController(object):
                 public_key = certificate.public_key()
 
                 test_data = b'test'
+
+                if touch_callback is not None:
+                    touch_timer = Timer(0.500, touch_callback)
+                    touch_timer.start()
+
                 test_sig = self.sign(
                     slot, ALGO.from_public_key(public_key), test_data)
+
+                if touch_callback is not None:
+                    touch_timer.cancel()
 
                 if isinstance(public_key, rsa.RSAPublicKey):
                     public_key.verify(

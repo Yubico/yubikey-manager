@@ -322,7 +322,9 @@ def import_certificate(
 
     def do_import(retry=True):
         try:
-            controller.import_certificate(slot, cert_to_import, verify=verify)
+            controller.import_certificate(
+                slot, cert_to_import, verify=verify,
+                touch_callback=prompt_for_touch)
 
         except KeypairMismatch:
             ctx.fail('This certificate is not tied to the private key in the '
