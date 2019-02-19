@@ -274,10 +274,8 @@ def generate_key(
 @click.option(
     '-p', '--password', help='A password may be needed to decrypt the data.')
 @click.option(
-    '--no-verify', 'verify', is_flag=True, default=False,
-    callback=lambda ctx, param, value: not value,
-    help='Skip verifying that the certificate matches the private key in the '
-         'slot.')
+    '-v', '--verify', is_flag=True,
+    help='Verify that the certificate matches the private key in the slot.')
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(
         ctx, slot, management_key, pin, cert, password, verify):
@@ -324,7 +322,9 @@ def import_certificate(
 
     def do_import(retry=True):
         try:
-            controller.import_certificate(slot, cert_to_import, verify=verify)
+            controller.import_certificate(
+                slot, cert_to_import, verify=verify,
+                touch_callback=prompt_for_touch)
 
         except KeypairMismatch:
             ctx.fail('This certificate is not tied to the private key in the '

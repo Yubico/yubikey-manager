@@ -182,7 +182,7 @@ class KeyManagement(PivTestCase):
 
         ykman_cli(
             'piv', 'import-certificate', '9a', '-',
-            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN, '--no-verify',
+            '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN,
             input=cert_pem)
 
     @unittest.skipIf(*no_attestation)
