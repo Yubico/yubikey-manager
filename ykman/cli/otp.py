@@ -362,7 +362,7 @@ def static(
     if not password and not generate:
         password = click.prompt('Enter a static password', err=True)
     elif not password and generate:
-        password = generate_static_pw(length, keyboard_layout).decode()
+        password = generate_static_pw(length, keyboard_layout)
 
     if not force:
         _confirm_slot_overwrite(controller, slot)

@@ -27,11 +27,11 @@
 
 from __future__ import absolute_import
 
-import os
 import six
 import struct
 import re
 import logging
+import random
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
@@ -351,14 +351,12 @@ def modhex_encode(value):
 
 
 def generate_static_pw(
-    length, keyboard_layout=KEYBOARD_LAYOUT.MODHEX,
+        length,
+        keyboard_layout=KEYBOARD_LAYOUT.MODHEX,
         blacklist=DEFAULT_PW_CHAR_BLACKLIST):
-    data = os.urandom(length)
-    keys = ''.join([
-        k for k in keyboard_layout.value.keys() if k not in blacklist]).encode()
-    return bytes(
-            bytearray(six.indexbytes(
-                keys, d % len(keys)) for d in six.iterbytes(data)))
+    chars = [k for k in keyboard_layout.value.keys() if k not in blacklist]
+    sr = random.SystemRandom()
+    return ''.join([sr.choice(chars) for _ in range(length)])
 
 
 def format_code(code, digits=6, steam=False):
