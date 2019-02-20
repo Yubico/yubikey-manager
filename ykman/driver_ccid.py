@@ -323,7 +323,7 @@ def open_devices(name_filter=YK_READER_NAME):
     while readers:
         try_again = []
         for reader in readers:
-            if reader.name.lower().startswith(name_filter.lower()):
+            if name_filter.lower() in reader.name.lower():
                 try:
                     conn = reader.createConnection()
                     conn.connect()
