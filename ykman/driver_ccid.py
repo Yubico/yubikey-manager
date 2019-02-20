@@ -307,7 +307,7 @@ def kill_scdaemon():
     return killed
 
 
-def _list_readers():
+def list_readers():
     try:
         return System.readers()
     except ListReadersException:
@@ -319,7 +319,7 @@ def _list_readers():
 
 
 def open_devices(name_filter=YK_READER_NAME):
-    readers = _list_readers()
+    readers = list_readers()
     while readers:
         try_again = []
         for reader in readers:
