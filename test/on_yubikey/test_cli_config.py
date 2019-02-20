@@ -30,6 +30,11 @@ class TestConfigUSB(DestructiveYubikeyTestCase):
         output = ykman_cli('config', 'usb', '--list')
         self.assertNotIn('OpenPGP', output)
 
+    def test_disable_openpgp_alternative_syntax(self):
+        ykman_cli('config', 'usb', '--disable', 'openpgp', '-f')
+        output = ykman_cli('config', 'usb', '--list')
+        self.assertNotIn('OpenPGP', output)
+
     def test_disable_piv(self):
         ykman_cli('config', 'usb', '--disable', 'PIV', '-f')
         output = ykman_cli('config', 'usb', '--list')
