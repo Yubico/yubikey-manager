@@ -32,7 +32,7 @@ from ykman import __version__
 from ..util import TRANSPORT, Cve201715361VulnerableError, YUBIKEY
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
-from ..driver_ccid import open_devices as open_ccid
+from ..driver_ccid import open_devices as open_ccid, list_readers
 from ..device import YubiKey
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException, Descriptor)
@@ -194,11 +194,17 @@ def cli(ctx, device, log_level, log_file, reader):
 @cli.command('list')
 @click.option('-s', '--serials', is_flag=True, help='Output only serial '
               'numbers, one per line (devices without serial will be omitted).')
+@click.option('-r', '--readers', is_flag=True, help='List available smart card readers.')
 @click.pass_context
-def list_keys(ctx, serials):
+def list_keys(ctx, serials, readers):
     """
     List connected YubiKeys.
     """
+    if readers:
+        for reader in list_readers():
+            click.echo(reader.name)
+        ctx.exit()
+
     all_descriptors = get_descriptors()
     descriptors = [d for d in all_descriptors if d.key_type != YUBIKEY.SKY]
     skys = len(all_descriptors) - len(descriptors)
