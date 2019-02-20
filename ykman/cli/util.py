@@ -53,6 +53,15 @@ class UpperCaseChoice(click.Choice):
                 value, ', '.join(self.choices)), param, ctx)
 
 
+class ApplicationsChoice(UpperCaseChoice):
+    """
+    Special version of UpperCaseChoice that accepts openpgp as OPGP
+    """
+    def convert(self, value, param, ctx):
+        return 'OPGP' if value.lower() == 'openpgp' \
+            else super().convert(value, param, ctx)
+
+
 def click_callback(invoke_on_missing=False):
     def wrap(f):
         @functools.wraps(f)
