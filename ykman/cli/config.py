@@ -42,6 +42,15 @@ logger = logging.getLogger(__name__)
 CLEAR_LOCK_CODE = '0' * 32
 
 
+class ApplicationsChoice(UpperCaseChoice):
+    """
+    Special version of UpperCaseChoice that accepts openpgp as OPGP
+    """
+    def convert(self, value, param, ctx):
+        return 'OPGP' if value.lower() == 'openpgp' \
+            else super().convert(value, param, ctx)
+
+
 def prompt_lock_code(prompt='Enter your lock code'):
     return click.prompt(
         prompt, default='', hide_input=True, show_default=False, err=True)
@@ -174,10 +183,10 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
 @click.pass_context
 @click_force_option
 @click.option(
-    '-e', '--enable', multiple=True, type=UpperCaseChoice(
+    '-e', '--enable', multiple=True, type=ApplicationsChoice(
         APPLICATION.__members__.keys()), help='Enable applications.')
 @click.option(
-    '-d', '--disable', multiple=True, type=UpperCaseChoice(
+    '-d', '--disable', multiple=True, type=ApplicationsChoice(
         APPLICATION.__members__.keys()), help='Disable applications.')
 @click.option('-l', '--list', is_flag=True, help='List enabled applications.')
 @click.option(
@@ -307,10 +316,10 @@ def usb(
 @click.pass_context
 @click_force_option
 @click.option(
-    '-e', '--enable', multiple=True, type=UpperCaseChoice(
+    '-e', '--enable', multiple=True, type=ApplicationsChoice(
         APPLICATION.__members__.keys()), help='Enable applications.')
 @click.option(
-    '-d', '--disable', multiple=True, type=UpperCaseChoice(
+    '-d', '--disable', multiple=True, type=ApplicationsChoice(
         APPLICATION.__members__.keys()), help='Disable applications.')
 @click.option(
     '-a', '--enable-all', is_flag=True, help='Enable all applications.')
