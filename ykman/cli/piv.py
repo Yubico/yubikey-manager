@@ -176,7 +176,7 @@ def info(ctx):
         try:
             click.echo('\tSubject DN:\t%s' % cert.subject.rfc4514_string())
             click.echo('\tIssuer DN:\t%s' % cert.issuer.rfc4514_string())
-        except Exception:
+        except AttributeError:
             logger.debug('Failed to read DN, falling back to only CNs')
             cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
             cn = cn[0].value if len(cn) > 0 else 'None'
