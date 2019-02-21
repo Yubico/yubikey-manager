@@ -531,7 +531,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
 @click.argument('public-key', type=click.File('rb'), metavar='PUBLIC-KEY')
 @click.option(
     '-s', '--subject',
-    help='A subject name for the certificate.', required=True)
+    help='Subject common name (CN) for the certificate.', required=True)
 @click.option(
     '-d', '--valid-days',
     help='Number of days until the certificate expires.',
@@ -578,7 +578,7 @@ def generate_certificate(
 @click.argument('csr-output', type=click.File('wb'), metavar='CSR')
 @click.option(
     '-s', '--subject',
-    help='A subject name for the requested certificate.', required=True)
+    help='Subject common name (CN) for the requested certificate.', required=True)
 def generate_certificate_signing_request(
         ctx, slot, pin, public_key, csr_output, subject):
     """
