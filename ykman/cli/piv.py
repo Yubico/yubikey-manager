@@ -176,6 +176,7 @@ def info(ctx):
         cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
         cn = cn[0].value if len(cn) > 0 else 'None'
         click.echo('\tIssuer CN:\t%s' % cn)
+        click.echo('\tSerial:\t\t%s' % cert.serial_number)
         click.echo('\tFingerprint:\t%s' % b2a_hex(
             cert.fingerprint(hashes.SHA256())).decode('ascii'))
         click.echo('\tNot before:\t%s' % cert.not_valid_before)
