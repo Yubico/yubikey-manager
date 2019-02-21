@@ -170,12 +170,21 @@ def info(ctx):
         click.echo('Slot %02x:' % slot)
         click.echo('\tAlgorithm:\t%s' % ALGO.from_public_key(cert.public_key())
                    .name)
-        cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-        cn = cn[0].value if len(cn) > 0 else 'None'
-        click.echo('\tSubject CN:\t%s' % cn)
-        cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-        cn = cn[0].value if len(cn) > 0 else 'None'
-        click.echo('\tIssuer CN:\t%s' % cn)
+
+        # Try to print out full DN, fallback to only CN.
+        # Support for DN was added in crytography 2.5
+        try:
+            click.echo('\tSubject DN:\t%s' % cert.subject.rfc4514_string())
+            click.echo('\tIssuer DN:\t%s' % cert.issuer.rfc4514_string())
+        except:
+            logger.debug('Failed to read DN, falling back to only CNs')
+            cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            cn = cn[0].value if len(cn) > 0 else 'None'
+            click.echo('\tSubject CN:\t%s' % cn)
+            cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            cn = cn[0].value if len(cn) > 0 else 'None'
+            click.echo('\tIssuer CN:\t%s' % cn)
+
         click.echo('\tSerial:\t\t%s' % cert.serial_number)
         click.echo('\tFingerprint:\t%s' % b2a_hex(
             cert.fingerprint(hashes.SHA256())).decode('ascii'))
