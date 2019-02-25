@@ -32,9 +32,7 @@ import click
 import sys
 from ..util import parse_b32_key
 from collections import OrderedDict, MutableMapping
-
-click_force_option = click.option('-f', '--force', is_flag=True,
-                                  help='Confirm the action without prompting.')
+from cryptography.hazmat.primitives import serialization
 
 
 class UpperCaseChoice(click.Choice):
@@ -66,6 +64,26 @@ def click_callback(invoke_on_missing=False):
                     param.name, str(e)))
         return inner
     return wrap
+
+
+@click_callback()
+def click_parse_format(ctx, param, val):
+    if val == 'PEM':
+        return serialization.Encoding.PEM
+    elif val == 'DER':
+        return serialization.Encoding.DER
+    else:
+        raise ValueError(val)
+
+
+click_force_option = click.option(
+    '-f', '--force', is_flag=True, help='Confirm the action without prompting.')
+
+
+click_format_option = click.option(
+    '-F', '--format',
+    type=UpperCaseChoice(['PEM', 'DER']), default='PEM', show_default=True,
+    help='Encoding format.', callback=click_parse_format)
 
 
 class YkmanContextObject(MutableMapping):

@@ -60,16 +60,6 @@ def click_parse_piv_slot(ctx, param, val):
 
 
 @click_callback()
-def click_parse_format(ctx, param, val):
-    if val == 'PEM':
-        return serialization.Encoding.PEM
-    elif val == 'DER':
-        return serialization.Encoding.DER
-    else:
-        raise ValueError(val)
-
-
-@click_callback()
 def click_parse_management_key(ctx, param, val):
     try:
         key = a2b_hex(val)
@@ -88,10 +78,6 @@ click_management_key_option = click.option(
     callback=click_parse_management_key)
 click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
-click_format_option = click.option(
-    '-F', '--format',
-    type=UpperCaseChoice(['PEM', 'DER']), default='PEM', show_default=True,
-    help='Encoding format.', callback=click_parse_format)
 click_pin_policy_option = click.option(
     '--pin-policy',
     type=UpperCaseChoice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
