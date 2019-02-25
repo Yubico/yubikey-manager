@@ -37,7 +37,8 @@ from ..piv import (
     UnsupportedAlgorithm, WrongPin, WrongPuk)
 from ..driver_ccid import APDUError, SW
 from .util import (
-    click_force_option, click_postpone_execution, click_callback,
+    click_force_option, click_format_option,
+    click_postpone_execution, click_callback,
     prompt_for_touch, UpperCaseChoice)
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
