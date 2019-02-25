@@ -194,7 +194,8 @@ def cli(ctx, device, log_level, log_file, reader):
 @cli.command('list')
 @click.option('-s', '--serials', is_flag=True, help='Output only serial '
               'numbers, one per line (devices without serial will be omitted).')
-@click.option('-r', '--readers', is_flag=True, help='List available smart card readers.')
+@click.option(
+    '-r', '--readers', is_flag=True, help='List available smart card readers.')
 @click.pass_context
 def list_keys(ctx, serials, readers):
     """

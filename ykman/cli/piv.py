@@ -578,7 +578,8 @@ def generate_certificate(
 @click.argument('csr-output', type=click.File('wb'), metavar='CSR')
 @click.option(
     '-s', '--subject',
-    help='Subject common name (CN) for the requested certificate.', required=True)
+    help='Subject common name (CN) for the requested certificate.',
+    required=True)
 def generate_certificate_signing_request(
         ctx, slot, pin, public_key, csr_output, subject):
     """
@@ -851,6 +852,7 @@ def read_object(ctx, pin, object_id):
                 raise
 
     do_read_object()
+
 
 @piv.command('write-object')
 @click_pin_option

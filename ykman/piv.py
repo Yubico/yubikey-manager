@@ -814,7 +814,6 @@ class PivController(object):
             raise ValueError('Wrong tag in response data!')
         return tlv.value
 
-
     def put_data(self, object_id, data):
         id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
         self.send_cmd(INS.PUT_DATA, 0x3f, 0xff, Tlv(TAG.OBJ_ID, id_bytes) +
@@ -913,7 +912,8 @@ class PivController(object):
         self.send_cmd(INS.IMPORT_KEY, algorithm, slot, data)
         return algorithm
 
-    def import_certificate(self, slot, certificate, verify=False, touch_callback=None):
+    def import_certificate(
+            self, slot, certificate, verify=False, touch_callback=None):
         cert_data = certificate.public_bytes(Encoding.DER)
 
         if verify:
