@@ -155,33 +155,43 @@ def info(ctx):
 
     for (slot, cert) in controller.list_certificates().items():
         click.echo('Slot %02x:' % slot)
+
         try:
-            click.echo('\tAlgorithm:\t%s' % ALGO.from_public_key(cert.public_key())
-                   .name)
-
-            # Try to print out full DN, fallback to only CN.
+            # Try to read out full DN, fallback to only CN.
             # Support for DN was added in crytography 2.5
-            try:
-                click.echo('\tSubject DN:\t%s' % cert.subject.rfc4514_string())
-                click.echo('\tIssuer DN:\t%s' % cert.issuer.rfc4514_string())
-            except AttributeError:
-                logger.debug('Failed to read DN, falling back to only CNs')
-                cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-                cn = cn[0].value if len(cn) > 0 else 'None'
-                click.echo('\tSubject CN:\t%s' % cn)
-                cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-                cn = cn[0].value if len(cn) > 0 else 'None'
-                click.echo('\tIssuer CN:\t%s' % cn)
-
-            click.echo('\tSerial:\t\t%s' % cert.serial_number)
-            click.echo('\tFingerprint:\t%s' % b2a_hex(
-                cert.fingerprint(hashes.SHA256())).decode('ascii'))
-            click.echo('\tNot before:\t%s' % cert.not_valid_before)
-            click.echo('\tNot after:\t%s' % cert.not_valid_after)
+            subject_dn = cert.subject.rfc4514_string()
+            issuer_dn = cert.issuer.rfc4514_string()
+            print_dn = True
+        except AttributeError:
+            logger.debug('Failed to read DN, falling back to only CNs')
+            subject_cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            subject_cn = subject_cn[0].value if len(cn) > 0 else 'None'
+            issuer_cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            issuer_cn = issuer_cn[0].value if len(cn) > 0 else 'None'
         except ValueError as e:
-             # Malformed certificates may throw ValueError
+            # Malformed certificates may throw ValueError
             logger.debug('Failed parsing certificate', exc_info=e)
-            click.echo('\tMalformed certificate.')
+            click.echo('\tMalformed certificate: {}'.format(e))
+            continue
+
+        fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode('ascii')
+        algo = ALGO.from_public_key(cert.public_key())
+        serial = cert.serial_number
+        not_before = cert.not_valid_before
+        not_after = cert.not_valid_after
+
+        # Print out everything
+        click.echo('\tAlgorithm:\t%s' % algo)
+        if print_dn:
+            click.echo('\tSubject DN:\t%s' % subject_dn)
+            click.echo('\tIssuer DN:\t%s' % issuer_dn)
+        else:
+            click.echo('\tSubject CN:\t%s' % subject_cn)
+            click.echo('\tIssuer CN:\t%s' % issuer_cn)
+        click.echo('\tSerial:\t\t%s' % serial)
+        click.echo('\tFingerprint:\t%s' % fingerprint)
+        click.echo('\tNot before:\t%s' % not_before)
+        click.echo('\tNot after:\t%s' % not_after)
 
 
 @piv.command()
