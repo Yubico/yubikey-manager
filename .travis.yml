@@ -21,7 +21,7 @@ before_install:
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]
     then
       brew update
-      brew install ykpers libyubikey libusb swig
+      brew install ykpers libyubikey libusb swig openssl
       brew upgrade pyenv
       eval "$(pyenv init -)"
       env PYTHON_CONFIGURE_OPTS="--enable-framework CC=clang" pyenv install $PY_VERSION
