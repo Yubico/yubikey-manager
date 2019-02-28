@@ -55,6 +55,7 @@ script:
       find /usr/local/Cellar/json-c/ -name '*.dylib' -exec sudo cp '{}' . ';'
       find /usr/local/Cellar/ykpers/ -name '*.dylib' -exec sudo cp '{}' . ';'
       find /usr/local/Cellar/libyubikey/ -name '*.dylib' -exec sudo cp '{}' . ';'
+      pip3 install --upgrade pip
       pip3 install .
       pip3 install pyinstaller
       pyinstaller --console --onefile --clean ykman.spec
