@@ -1,3 +1,16 @@
+* Version 2.1.0 (unreleased)
+ ** Add --reader flag to ykman list, to list available smart card readers
+ ** FIPS: Checking if a YubiKey FIPS is in FIPS mode is now opt-in, with the --check-fips flag
+ ** PIV: Add commands for writing and reading arbitrary PIV objects
+ ** PIV: Verify that the PIN must be between 6 - 8 characters long
+ ** PIV: In import-certificate, make the verification that the certificate and private key matches opt-in, with the --verify flag
+ ** PIV: The piv info command now shows the serial number of the certificates
+ ** PIV: The piv info command now shows the full Distinguished Name (DN) of the certificate subject and issuer, if possible
+ ** PIV: Malformed certificates are now handled better
+ ** OpenPGP: The openpgp touch command now shows current touch policies
+ ** The ykman usb/nfc config command now accepts openpgp as well as opgp as an argument
+ ** Bugfix: Fix support for german (DE) keyboard layout for static passwords
+
 * Version 2.0.0 (released 2019-01-09)
  ** Add support for Security Key NFC
  ** Add experimental support for external smart card reader. See --reader flag
