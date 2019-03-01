@@ -7,3 +7,4 @@ recursive-include test *
 include README.adoc
 include man/*
 include ykman/VERSION
+recursive-exclude *.pyc
