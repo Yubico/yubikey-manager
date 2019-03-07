@@ -46,6 +46,8 @@ install:
       pip install -e .
       python setup.py test
       python setup.py sdist
+      pip install pyinstaller
+      pyinstaller --console --onefile --clean ykman.spec
     fi
 
 script:
@@ -72,6 +74,8 @@ after_success:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
+      cd dist && zip yubikey-manager-$TRAVIS_BRANCH-linux.zip ykman && cd ..
+      cp dist/yubikey-manager-$TRAVIS_BRANCH-linux.zip deploy/
       cp dist/yubikey-manager-*.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH.tar.gz
       id=$(docker create xenial)
       docker cp $id:/yubikey-manager-debian-packages.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-deb.tar.gz
