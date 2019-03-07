@@ -31,6 +31,7 @@ before_install:
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
       docker build -t xenial -f docker/xenial/Dockerfile .
+      docker build -t xenial-pyinstaller -f docker/xenial-pyinstaller/Dockerfile .
       sudo apt-add-repository -y ppa:yubico/stable
       sudo apt-get update
       sudo apt-get install -qq libykpers-1-1 python-pyscard swig libpcsclite-dev
@@ -46,8 +47,6 @@ install:
       pip install -e .
       python setup.py test
       python setup.py sdist
-      pip install pyinstaller
-      pyinstaller --console --onefile --clean ykman.spec
     fi
 
 script:
@@ -74,11 +73,13 @@ after_success:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
-      cd dist && zip yubikey-manager-$TRAVIS_BRANCH-linux.zip ykman && cd ..
-      cp dist/yubikey-manager-$TRAVIS_BRANCH-linux.zip deploy/
       cp dist/yubikey-manager-*.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH.tar.gz
       id=$(docker create xenial)
       docker cp $id:/yubikey-manager-debian-packages.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-deb.tar.gz
+      id=$(docker create xenial-pyinstaller)
+      docker cp $id:/yubikey-manager/dist/ykman dist/ykman
+      cd dist && zip yubikey-manager-$TRAVIS_BRANCH-linux.zip ykman && cd ..
+      cp dist/yubikey-manager-$TRAVIS_BRANCH-linux.zip deploy/
     fi
 
 deploy:
