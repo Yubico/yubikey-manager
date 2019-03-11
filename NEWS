@@ -1,4 +1,4 @@
-* Version 2.1.0 (unreleased)
+* Version 2.1.0 (released 2019-03-11)
  ** Add --reader flag to ykman list, to list available smart card readers
  ** FIPS: Checking if a YubiKey FIPS is in FIPS mode is now opt-in, with the --check-fips flag
  ** PIV: Add commands for writing and reading arbitrary PIV objects
