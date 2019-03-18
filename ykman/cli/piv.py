@@ -182,7 +182,7 @@ def info(ctx):
         not_after = cert.not_valid_after
 
         # Print out everything
-        click.echo('\tAlgorithm:\t%s' % algo)
+        click.echo('\tAlgorithm:\t%s' % algo.name)
         if print_dn:
             click.echo('\tSubject DN:\t%s' % subject_dn)
             click.echo('\tIssuer DN:\t%s' % issuer_dn)
