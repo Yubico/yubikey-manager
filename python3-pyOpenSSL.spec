@@ -3,10 +3,9 @@
 
 Summary: Python wrapper module around the OpenSSL library
 Name: python3-pyOpenSSL
-Version: 17.0.0
+Version: 19.0.0
 Release: 1%{?dist}
 Source0: https://files.pythonhosted.org/packages/source/p/pyOpenSSL/pyOpenSSL-%{version}.tar.gz
-Source1: https://files.pythonhosted.org/packages/source/p/pyOpenSSL/pyOpenSSL-%{version}.tar.gz.asc
 
 BuildArch: noarch
 License: ASL 2.0
@@ -28,9 +27,9 @@ High-level wrapper around a subset of the OpenSSL library, includes among others
 %package -n python%{python3_pkgversion}-pyOpenSSL
 Summary: Python 3 wrapper module around the OpenSSL library
 BuildRequires: python%{python3_pkgversion}-devel
-BuildRequires: python%{python3_pkgversion}-cryptography >= 1.7
+BuildRequires: python%{python3_pkgversion}-cryptography >= 2.2.1
 BuildRequires: python%{python3_pkgversion}-six
-Requires: python%{python3_pkgversion}-cryptography >= 1.7
+Requires: python%{python3_pkgversion}-cryptography >= 2.2.1
 Requires: python%{python3_pkgversion}-six
 %{?python_provide:%python_provide python%{python3_pkgversion}-pyOpenSSL}
 
