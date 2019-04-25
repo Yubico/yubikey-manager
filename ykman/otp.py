@@ -27,16 +27,23 @@
 
 from __future__ import absolute_import
 
+import binascii
+import requests
 import time
 import logging
+import webbrowser
 from ctypes import sizeof, byref, c_uint, create_string_buffer
 from .driver_otp import ykpers, check, YkpersError
-from .util import time_challenge, parse_totp_hash, format_code, hmac_shorten_key
+from .util import (time_challenge, parse_totp_hash, format_code,
+                   hmac_shorten_key, modhex_encode)
 from .scancodes import encode, KEYBOARD_LAYOUT
 from enum import IntEnum, unique
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)
+
+
+UPLOAD_URL = 'http://localhost:8000/prepare'
 
 
 @unique
@@ -122,6 +129,36 @@ class OtpController(object):
                                           cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
+
+    def upload_key(self, key, public_id, private_id):
+        serial_ref = c_uint()
+        if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial_ref)):
+            serial = serial_ref.value
+        else:
+            serial = 0
+
+        modhex_public_id = modhex_encode(public_id)
+        data = {
+            'aeskey': binascii.b2a_hex(key).decode('utf-8'),
+            'serial': serial,
+            'prefix': modhex_public_id,
+            'uid': binascii.b2a_hex(private_id).decode('utf-8'),
+        }
+        prepare_post = requests.post(UPLOAD_URL, data=data)
+
+        if prepare_post.status_code == 200:
+            url = prepare_post.json()['finish_url']
+            url += '?serial=' + str(serial)
+            url += '&prefix=' + modhex_public_id
+            webbrowser.open_new_tab(url)
+            return {'success': True, 'url': url}
+        else:
+            try:
+                errors = prepare_post.json()['errors']
+                return {'success': False, 'errors': errors}
+            except Exception as e:
+                logger.debug('YubiCloud key upload failed', exc_info=e)
+                return {'success': False, 'content': prepare_post.content}
 
     def program_static(self, slot, password, append_cr=True,
                        keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
