@@ -15,7 +15,8 @@ Source0:        https://github.com/%{owner}/%{name}/archive/%{commit}.tar.gz#/%{
 BuildArch:      noarch
 BuildRequires:  python36-devel swig pcsc-lite-devel
 # install_requires from setup.py
-BuildRequires:  python36-six python36-pyscard python36-pyusb python36-click python36-cryptography python36-pyopenssl python36-fido2
+# todo: add python36-openssl
+BuildRequires:  python36-setuptools python36-six python36-pyscard python36-pyusb python36-click python36-cryptography python36-fido2
 Requires:       python3-%{name}
 
 %description
@@ -25,7 +26,7 @@ Command line tool for configuring a YubiKey.
 Summary:        Python library for configuring a YubiKey
 Requires:       ykpers pcsc-lite
 
-%{?python_provide:%python_provide python3-%{name}}
+# %{?python_provide:%python_provide python3-%{name}}
 
 %description -n python3-%{name}
 Python library for configuring a YubiKey.
