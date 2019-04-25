@@ -18,3 +18,6 @@ RUN cd yubikey-manager && rpmbuild -bs yubikey-manager.spec && rpmbuild -bb yubi
 RUN yum -y install /root/rpmbuild/RPMS/noarch/python3-yubikey-manager-*.rpm
 RUN yum -y install /root/rpmbuild/RPMS/noarch/yubikey-manager-*.rpm
 RUN ykman --version
+RUN mkdir /rpms
+RUN mv /root/rpmbuild/RPMS/noarch/*.rpm /rpms
+RUN tar czvf /yubikey-manager-centos7-rpms.tar.gz /rpms
