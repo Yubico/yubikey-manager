@@ -140,11 +140,11 @@ class OtpController(object):
         modhex_public_id = modhex_encode(public_id)
         data = {
             'aeskey': binascii.b2a_hex(key).decode('utf-8'),
-            'serial': serial,
+            'serial': str(serial),
             'prefix': modhex_public_id,
             'uid': binascii.b2a_hex(private_id).decode('utf-8'),
         }
-        prepare_post = requests.post(UPLOAD_URL, data=data)
+        prepare_post = requests.post(UPLOAD_URL, json=data)
 
         if prepare_post.status_code == 200:
             url = prepare_post.json()['finish_url']
