@@ -17,7 +17,7 @@ Command line tool for configuring a YubiKey.
 
 %package -n python3-%{name}
 Summary:        Python library for configuring a YubiKey
-Requires:       ykpers pcsc-lite python36-setuptools python36-six python36-pyscard python36-pyusb python36-cryptography python36-fido2
+Requires:       ykpers pcsc-lite python36-setuptools python36-six python36-pyscard python36-pyusb python36-cryptography python36-fido2 u2f-hidraw-policy
 
 %description -n python3-%{name}
 Python library for configuring a YubiKey.
