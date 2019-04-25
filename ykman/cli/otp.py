@@ -338,6 +338,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             if 'errors' in upload_result:
                 for k, v in upload_result['errors'].items():
                     click.echo('%s: %s' % (k, v))
+            elif upload_result.get('error') == 'connection_failed':
+                click.echo('Failed to open HTTPS connection.')
             else:
                 click.echo(upload_result['content'])
 

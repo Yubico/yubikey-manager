@@ -28,9 +28,10 @@
 from __future__ import absolute_import
 
 import binascii
-import requests
-import time
+import http.client
+import json
 import logging
+import time
 import webbrowser
 from ctypes import sizeof, byref, c_uint, create_string_buffer
 from .driver_otp import ykpers, check, YkpersError
@@ -43,7 +44,8 @@ from binascii import a2b_hex, b2a_hex
 logger = logging.getLogger(__name__)
 
 
-UPLOAD_URL = 'http://localhost:8000/prepare'
+UPLOAD_HOST = 'upload.yubico.com'
+UPLOAD_PATH = '/prepare'
 
 
 @unique
@@ -144,21 +146,32 @@ class OtpController(object):
             'prefix': modhex_public_id,
             'uid': binascii.b2a_hex(private_id).decode('utf-8'),
         }
-        prepare_post = requests.post(UPLOAD_URL, json=data)
 
-        if prepare_post.status_code == 200:
-            url = prepare_post.json()['finish_url']
+        httpconn = http.client.HTTPSConnection(UPLOAD_HOST, timeout=1)
+        try:
+            httpconn.request('POST', UPLOAD_PATH,
+                             body=json.dumps(data, indent=False, sort_keys=True)
+                             .encode('utf-8'),
+                             headers={'Content-Type': 'application/json'})
+        except Exception as e:
+            logger.error('Failed to connect to %s', UPLOAD_HOST, exc_info=e)
+            return {'success': False, 'error': 'connection_failed'}
+
+        resp = httpconn.getresponse()
+        if resp.status == 200:
+            url = json.loads(resp.read().decode('utf-8'))['finish_url']
             url += '?serial=' + str(serial)
             url += '&prefix=' + modhex_public_id
             webbrowser.open_new_tab(url)
             return {'success': True, 'url': url}
         else:
+            resp_body = resp.read()
             try:
-                errors = prepare_post.json()['errors']
+                errors = json.loads(resp_body.decode('utf-8'))['errors']
                 return {'success': False, 'errors': errors}
             except Exception as e:
                 logger.debug('YubiCloud key upload failed', exc_info=e)
-                return {'success': False, 'content': prepare_post.content}
+                return {'success': False, 'content': resp_body}
 
     def program_static(self, slot, password, append_cr=True,
                        keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
