@@ -131,7 +131,7 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def upload_key(self, key, public_id, private_id):
+    def prepare_upload_key(self, key, public_id, private_id):
         serial_ref = c_uint()
         if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial_ref)):
             serial = serial_ref.value

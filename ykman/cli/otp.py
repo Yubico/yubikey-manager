@@ -328,7 +328,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
         _failed_to_write_msg(ctx, e)
 
     if upload:
-        upload_result = controller.upload_key(key, public_id, private_id)
+        upload_result = controller.prepare_upload_key(
+            key, public_id, private_id)
         if upload_result['success']:
             click.echo('Upload to YubiCloud initiated successfully. '
                        'Please finish the upload procedure in your browser.')
