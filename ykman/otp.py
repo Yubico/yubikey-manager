@@ -160,8 +160,6 @@ class OtpController(object):
         resp = httpconn.getresponse()
         if resp.status == 200:
             url = json.loads(resp.read().decode('utf-8'))['finish_url']
-            url += '?serial=' + str(serial)
-            url += '&prefix=' + modhex_public_id
             webbrowser.open_new_tab(url)
             return {'success': True, 'url': url}
         else:
