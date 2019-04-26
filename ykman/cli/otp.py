@@ -342,8 +342,6 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             click.echo('If the browser did not open automatically, '
                        'open this URL manually: ' + upload_result['url'])
         else:
-            click.echo('ERROR: Upload to YubiCloud failed. '
-                       'YubiKey slot was NOT programmed.')
             if 'errors' in upload_result:
                 for k, v in upload_result['errors'].items():
                     click.echo('%s: %s' % (k, v))
@@ -351,6 +349,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                 click.echo('Failed to open HTTPS connection.')
             else:
                 click.echo(upload_result['content'])
+            ctx.fail('Upload to YubiCloud failed. '
+                     'YubiKey slot was NOT programmed.')
 
 
 @otp.command()
