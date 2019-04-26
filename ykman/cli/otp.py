@@ -322,14 +322,19 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True, err=True)
-    try:
-        controller.program_otp(slot, key, public_id, private_id, not no_enter)
-    except YkpersError as e:
-        _failed_to_write_msg(ctx, e)
 
     if upload:
         upload_result = controller.prepare_upload_key(
             key, public_id, private_id)
+
+    try:
+        if (not upload) or (upload and upload_result['success']):
+            controller.program_otp(
+                slot, key, public_id, private_id, not no_enter)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
+
+    if upload:
         if upload_result['success']:
             click.echo('Upload to YubiCloud initiated successfully. '
                        'Please finish the upload procedure in your browser.')
@@ -337,7 +342,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             click.echo('If the browser did not open automatically, '
                        'open this URL manually: ' + upload_result['url'])
         else:
-            click.echo('ERROR: Upload to YubiCloud failed!')
+            click.echo('ERROR: Upload to YubiCloud failed. '
+                       'YubiKey slot was NOT programmed.')
             if 'errors' in upload_result:
                 for k, v in upload_result['errors'].items():
                     click.echo('%s: %s' % (k, v))
