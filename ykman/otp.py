@@ -141,7 +141,7 @@ class OtpController(object):
         modhex_public_id = modhex_encode(public_id)
         data = {
             'aeskey': binascii.b2a_hex(key).decode('utf-8'),
-            'serial': str(serial),
+            'serial': serial,
             'prefix': modhex_public_id,
             'uid': binascii.b2a_hex(private_id).decode('utf-8'),
         }
