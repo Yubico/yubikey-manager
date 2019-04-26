@@ -32,7 +32,6 @@ import http.client
 import json
 import logging
 import time
-import webbrowser
 from ctypes import sizeof, byref, c_uint, create_string_buffer
 from .driver_otp import ykpers, check, YkpersError
 from .util import (time_challenge, parse_totp_hash, format_code,
@@ -160,7 +159,6 @@ class OtpController(object):
         resp = httpconn.getresponse()
         if resp.status == 200:
             url = json.loads(resp.read().decode('utf-8'))['finish_url']
-            webbrowser.open_new_tab(url)
             return {'success': True, 'url': url}
         else:
             resp_body = resp.read()

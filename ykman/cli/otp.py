@@ -41,6 +41,7 @@ import logging
 import os
 import struct
 import click
+import webbrowser
 
 
 logger = logging.getLogger(__name__)
@@ -331,6 +332,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
         if upload_result['success']:
             click.echo('Upload to YubiCloud initiated successfully. '
                        'Please finish the upload procedure in your browser.')
+            webbrowser.open_new_tab(upload_result['url'])
             click.echo('If the browser did not open automatically, '
                        'open this URL manually: ' + upload_result['url'])
         else:
