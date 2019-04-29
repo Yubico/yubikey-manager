@@ -344,15 +344,16 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
         else:
             if 'errors' in upload_result:
                 for k, v in upload_result['errors'].items():
-                    click.echo('%s: %s' % (k, v))
+                    click.echo('%s: %s' % (k, v), err=True)
             elif upload_result.get('error') == 'connection_failed':
-                click.echo('Failed to open HTTPS connection.')
+                click.echo('Failed to open HTTPS connection.', err=True)
             elif upload_result.get('status') == 404:
-                click.echo('Upload request not recognized by server.')
+                click.echo('Upload request not recognized by server.', err=True)
             else:
                 click.echo(
                     'Upload request failed with status {}: {}'
-                    .format(upload_result['status'], upload_result['content'])
+                    .format(upload_result['status'], upload_result['content']),
+                    err=True
                 )
             ctx.fail('Upload to YubiCloud failed. '
                      'YubiKey slot was NOT programmed.')
