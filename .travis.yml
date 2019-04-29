@@ -32,6 +32,7 @@ before_install:
     then
       docker build -t xenial -f docker/xenial/Dockerfile .
       docker build -t xenial-pyinstaller -f docker/xenial-pyinstaller/Dockerfile .
+      docker build -t centos7-rpm -f docker/centos7-rpm/Dockerfile .
       sudo apt-add-repository -y ppa:yubico/stable
       sudo apt-get update
       sudo apt-get install -qq libykpers-1-1 python-pyscard swig libpcsclite-dev
@@ -80,6 +81,8 @@ after_success:
       docker cp $id:/yubikey-manager/dist/ykman dist/ykman
       cd dist && zip yubikey-manager-$TRAVIS_BRANCH-linux.zip ykman && cd ..
       cp dist/yubikey-manager-$TRAVIS_BRANCH-linux.zip deploy/
+      id=$(docker create centos7-rpm)
+      docker cp $id:/yubikey-manager-centos7-rpms.tar.gz deploy/yubikey-manager-$TRAVIS_BRANCH-centos7-rpms.tar.gz
     fi
 
 deploy:
