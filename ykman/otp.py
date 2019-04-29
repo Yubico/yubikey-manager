@@ -164,10 +164,18 @@ class OtpController(object):
             resp_body = resp.read()
             try:
                 errors = json.loads(resp_body.decode('utf-8'))['errors']
-                return {'success': False, 'errors': errors}
+                return {
+                    'success': False,
+                    'status': resp.status,
+                    'errors': errors,
+                }
             except Exception as e:
                 logger.debug('YubiCloud key upload failed', exc_info=e)
-                return {'success': False, 'content': resp_body}
+                return {
+                    'success': False,
+                    'status': resp.status,
+                    'content': resp_body,
+                }
 
     def program_static(self, slot, password, append_cr=True,
                        keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
