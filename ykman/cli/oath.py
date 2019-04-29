@@ -499,9 +499,11 @@ def remember_password(ctx, forget, clear_all):
 def ensure_validated(ctx, prompt='Enter your password', remember=False):
     controller = ctx.obj['controller']
     if controller.locked:
+
         # If password given as arg, use it
         if 'key' in ctx.obj:
             _validate(ctx, ctx.obj['key'], remember)
+            return
 
         # Use stored key if available
         keys = ctx.obj['settings'].setdefault('keys', {})
