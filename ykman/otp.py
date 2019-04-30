@@ -191,7 +191,8 @@ class OtpController(object):
             else:
                 challenge = time_challenge(challenge)
             # Always use 64 byte challenges for TOTP, assume HMAC_LT64
-            challenge = challenge.ljust(64, '0')
+            challenge = challenge.ljust(
+                64, b'\1' if challenge.endswith(b'\0') else b'\0')
         else:
             challenge = a2b_hex(challenge)
         resp = create_string_buffer(64)
