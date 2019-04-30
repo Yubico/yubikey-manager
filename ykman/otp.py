@@ -190,11 +190,11 @@ class OtpController(object):
                 challenge = time_challenge(time.time())
             else:
                 challenge = time_challenge(challenge)
-            # Always use 64 byte challenges for TOTP, assume HMAC_LT64
-            challenge = challenge.ljust(
-                64, b'\1' if challenge.endswith(b'\0') else b'\0')
         else:
             challenge = a2b_hex(challenge)
+        # Always use 64 byte challenges, assume HMAC_LT64
+        challenge = challenge.ljust(
+            64, b'\1' if challenge.endswith(b'\0') else b'\0')
         resp = create_string_buffer(64)
         # Some versions of the NEO firmware returns error 11 too often.
         # Give the YubiKey 10 tries to do the calculation.
