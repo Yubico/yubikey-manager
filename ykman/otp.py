@@ -37,6 +37,7 @@ from .driver_otp import ykpers, check, YkpersError
 from .util import (time_challenge, parse_totp_hash, format_code,
                    hmac_shorten_key, modhex_encode)
 from .scancodes import encode, KEYBOARD_LAYOUT
+from . import __version__
 from enum import IntEnum, unique
 from binascii import a2b_hex, b2a_hex
 
@@ -151,7 +152,11 @@ class OtpController(object):
             httpconn.request('POST', UPLOAD_PATH,
                              body=json.dumps(data, indent=False, sort_keys=True)
                              .encode('utf-8'),
-                             headers={'Content-Type': 'application/json'})
+                             headers={
+                                 'Content-Type': 'application/json',
+                                 'User-Agent':
+                                 'python-yubikey-manager/' + __version__,
+                             })
         except Exception as e:
             logger.error('Failed to connect to %s', UPLOAD_HOST, exc_info=e)
             return {'success': False, 'error': 'connection_failed'}
