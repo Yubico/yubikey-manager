@@ -34,6 +34,7 @@ from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
+from .. import __version__
 from ..driver_otp import YkpersError
 from ..otp import OtpController, PrepareUploadFailed
 from ..scancodes import KEYBOARD_LAYOUT
@@ -327,7 +328,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     if upload:
         try:
             upload_url = controller.prepare_upload_key(
-                key, public_id, private_id, serial=dev.serial)
+                key, public_id, private_id, serial=dev.serial,
+                user_agent='ykman/' + __version__)
             click.echo('Upload to YubiCloud initiated successfully.')
         except PrepareUploadFailed as e:
             if e.errors:

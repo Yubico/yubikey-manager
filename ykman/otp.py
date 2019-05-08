@@ -141,7 +141,8 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def prepare_upload_key(self, key, public_id, private_id, serial=None):
+    def prepare_upload_key(self, key, public_id, private_id, serial=None,
+                           user_agent='python-yubikey-manager/' + __version__):
         modhex_public_id = modhex_encode(public_id)
         data = {
             'aes_key': b2a_hex(key).decode('utf-8'),
@@ -157,8 +158,7 @@ class OtpController(object):
                              .encode('utf-8'),
                              headers={
                                  'Content-Type': 'application/json',
-                                 'User-Agent':
-                                 'python-yubikey-manager/' + __version__,
+                                 'User-Agent': user_agent,
                              })
         except Exception as e:
             logger.error('Failed to connect to %s', UPLOAD_HOST, exc_info=e)
