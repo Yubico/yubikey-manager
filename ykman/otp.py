@@ -131,17 +131,11 @@ class OtpController(object):
         finally:
             ykpers.ykp_free_config(cfg)
 
-    def prepare_upload_key(self, key, public_id, private_id):
-        serial_ref = c_uint()
-        if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial_ref)):
-            serial = serial_ref.value
-        else:
-            serial = 0
-
+    def prepare_upload_key(self, key, public_id, private_id, serial=None):
         modhex_public_id = modhex_encode(public_id)
         data = {
             'aes_key': b2a_hex(key).decode('utf-8'),
-            'serial': serial,
+            'serial': serial or 0,
             'public_id': modhex_public_id,
             'private_id': b2a_hex(private_id).decode('utf-8'),
         }
