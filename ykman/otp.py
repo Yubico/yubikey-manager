@@ -27,7 +27,6 @@
 
 from __future__ import absolute_import
 
-import binascii
 import http.client
 import json
 import logging
@@ -141,10 +140,10 @@ class OtpController(object):
 
         modhex_public_id = modhex_encode(public_id)
         data = {
-            'aes_key': binascii.b2a_hex(key).decode('utf-8'),
+            'aes_key': b2a_hex(key).decode('utf-8'),
             'serial': serial,
             'public_id': modhex_public_id,
-            'private_id': binascii.b2a_hex(private_id).decode('utf-8'),
+            'private_id': b2a_hex(private_id).decode('utf-8'),
         }
 
         httpconn = http.client.HTTPSConnection(UPLOAD_HOST, timeout=1)
