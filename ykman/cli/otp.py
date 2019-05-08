@@ -245,7 +245,7 @@ def delete(ctx, slot, force):
     help='Generate a random secret key. Conflicts with --key.')
 @click.option(
     '-u', '--upload', is_flag=True, required=False,
-    help='Upload secret key to YubiCloud (opens in browser). '
+    help='Upload credential to YubiCloud (opens in browser). '
     'Conflicts with --force.')
 @click_force_option
 @click.pass_context
