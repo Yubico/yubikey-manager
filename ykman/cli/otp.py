@@ -344,8 +344,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                     .format(upload_result['status'], upload_result['content']),
                     err=True
                 )
-            ctx.fail('Upload to YubiCloud failed. '
-                     'YubiKey slot was NOT programmed.')
+            ctx.fail('Upload to YubiCloud failed.')
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True, err=True)
