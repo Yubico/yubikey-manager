@@ -27,11 +27,11 @@
 
 from __future__ import absolute_import
 
-import http.client
 import json
 import logging
 import time
 from ctypes import sizeof, byref, c_uint, create_string_buffer
+from six.moves import http_client
 from .driver_otp import ykpers, check, YkpersError
 from .util import (time_challenge, parse_totp_hash, format_code,
                    hmac_shorten_key, modhex_encode)
@@ -151,7 +151,7 @@ class OtpController(object):
             'private_id': b2a_hex(private_id).decode('utf-8'),
         }
 
-        httpconn = http.client.HTTPSConnection(UPLOAD_HOST, timeout=1)
+        httpconn = http_client.HTTPSConnection(UPLOAD_HOST, timeout=1)
         try:
             httpconn.request('POST', UPLOAD_PATH,
                              body=json.dumps(data, indent=False, sort_keys=True)
