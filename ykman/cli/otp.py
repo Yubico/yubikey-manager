@@ -245,7 +245,8 @@ def delete(ctx, slot, force):
     help='Generate a random secret key. Conflicts with --key.')
 @click.option(
     '-u', '--upload', is_flag=True, required=False,
-    help='Upload secret key to YubiCloud (opens in browser)')
+    help='Upload secret key to YubiCloud (opens in browser). '
+    'Conflicts with --force.')
 @click_force_option
 @click.pass_context
 def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
@@ -266,6 +267,9 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     if private_id and generate_private_id:
         ctx.fail('Invalid options: --private-id conflicts with '
                  '--generate-public-id.')
+
+    if upload and force:
+        ctx.fail('Invalid options: --upload conflicts with --force.')
 
     if key and generate_key:
         ctx.fail('Invalid options: --key conflicts with --generate-key.')
@@ -317,30 +321,15 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             key = click.prompt('Enter secret key', err=True)
             key = a2b_hex(key)
 
-    if upload:
-        click.echo('Will upload secret key to YubiCloud.')
-
-    force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
-                           abort=True, err=True)
-
+    if not upload:
+        upload = click.confirm('Upload credential to YubiCloud?',
+                               abort=False, err=True)
     if upload:
         upload_result = controller.prepare_upload_key(
             key, public_id, private_id)
 
-    try:
-        if (not upload) or (upload and upload_result['success']):
-            controller.program_otp(
-                slot, key, public_id, private_id, not no_enter)
-    except YkpersError as e:
-        _failed_to_write_msg(ctx, e)
-
-    if upload:
         if upload_result['success']:
-            click.echo('Upload to YubiCloud initiated successfully. '
-                       'Please finish the upload procedure in your browser.')
-            webbrowser.open_new_tab(upload_result['url'])
-            click.echo('If the browser did not open automatically, '
-                       'open this URL manually: ' + upload_result['url'])
+            click.echo('Upload to YubiCloud initiated successfully.')
         else:
             if 'errors' in upload_result:
                 for k, v in upload_result['errors'].items():
@@ -357,6 +346,21 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                 )
             ctx.fail('Upload to YubiCloud failed. '
                      'YubiKey slot was NOT programmed.')
+
+    force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
+                           abort=True, err=True)
+
+    try:
+        controller.program_otp(slot, key, public_id, private_id, not no_enter)
+    except YkpersError as e:
+        _failed_to_write_msg(ctx, e)
+
+    if upload:
+        if upload_result['success']:
+            click.echo('Please finish the upload procedure in your browser.')
+            webbrowser.open_new_tab(upload_result['url'])
+            click.echo('If the browser did not open automatically, '
+                       'open this URL manually: ' + upload_result['url'])
 
 
 @otp.command()
