@@ -35,7 +35,7 @@ from ..util import (
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
 from ..driver_otp import YkpersError
-from ..otp import OtpController
+from ..otp import OtpController, PrepareUploadFailed
 from ..scancodes import KEYBOARD_LAYOUT
 import logging
 import os
@@ -325,26 +325,23 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
         upload = click.confirm('Upload credential to YubiCloud?',
                                abort=False, err=True)
     if upload:
-        upload_result = controller.prepare_upload_key(
-            key, public_id, private_id, serial=dev.serial)
-
-        if upload_result['success']:
+        try:
+            upload_url = controller.prepare_upload_key(
+                key, public_id, private_id, serial=dev.serial)
             click.echo('Upload to YubiCloud initiated successfully.')
-        else:
-            if 'errors' in upload_result:
-                for k, v in upload_result['errors'].items():
-                    click.echo('%s: %s' % (k, v), err=True)
-            elif upload_result.get('error') == 'connection_failed':
-                click.echo('Failed to open HTTPS connection.', err=True)
-            elif upload_result.get('status') == 404:
-                click.echo('Upload request not recognized by server.', err=True)
+        except PrepareUploadFailed as e:
+            if e.errors:
+                if 'connection_failed' in e.errors:
+                    ctx.fail('Failed to open HTTPS connection.')
+                else:
+                    error_msg = '\n'.join([
+                        '{}: {}'.format(k, v) for k, v in e.errors.items()])
+                    ctx.fail('Upload to YubiCloud failed.\n' + error_msg)
+            elif e.status == 404:
+                ctx.fail('Upload request not recognized by server.')
             else:
-                click.echo(
-                    'Upload request failed with status {}: {}'
-                    .format(upload_result['status'], upload_result['content']),
-                    err=True
-                )
-            ctx.fail('Upload to YubiCloud failed.')
+                ctx.fail(
+                    'Upload request failed with status {}.'.format(e.status))
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True, err=True)
@@ -355,10 +352,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
         _failed_to_write_msg(ctx, e)
 
     if upload:
-        if upload_result['success']:
-            click.echo('Opening upload form in browser: '
-                       + upload_result['url'])
-            webbrowser.open_new_tab(upload_result['url'])
+        click.echo('Opening upload form in browser: ' + upload_url)
+        webbrowser.open_new_tab(upload_url)
 
 
 @otp.command()

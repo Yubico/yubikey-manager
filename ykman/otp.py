@@ -70,6 +70,16 @@ def slot_to_cmd(slot, update=False):
         raise ValueError('slot must be 1 or 2')
 
 
+class PrepareUploadFailed(Exception):
+    def __init__(self, status, content, errors):
+        super().__init__(
+            'Upload to YubiCloud failed with status {}: {}'
+            .format(status, content))
+        self.status = status
+        self.content = content
+        self.errors = errors
+
+
 class OtpController(object):
 
     def __init__(self, driver):
@@ -152,28 +162,19 @@ class OtpController(object):
                              })
         except Exception as e:
             logger.error('Failed to connect to %s', UPLOAD_HOST, exc_info=e)
-            return {'success': False, 'error': 'connection_failed'}
+            raise PrepareUploadFailed(None, None, {'connection_failed': True})
 
         resp = httpconn.getresponse()
         if resp.status == 200:
             url = json.loads(resp.read().decode('utf-8'))['finish_url']
-            return {'success': True, 'url': url}
+            return url
         else:
             resp_body = resp.read()
             try:
-                errors = json.loads(resp_body.decode('utf-8'))['errors']
-                return {
-                    'success': False,
-                    'status': resp.status,
-                    'errors': errors,
-                }
-            except Exception as e:
-                logger.debug('YubiCloud key upload failed', exc_info=e)
-                return {
-                    'success': False,
-                    'status': resp.status,
-                    'content': resp_body,
-                }
+                errors = json.loads(resp_body.decode('utf-8')).get('errors')
+            except Exception:
+                errors = None
+            raise PrepareUploadFailed(resp.status, resp_body, errors)
 
     def program_static(self, slot, password, append_cr=True,
                        keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
