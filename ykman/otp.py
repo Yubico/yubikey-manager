@@ -31,6 +31,7 @@ import json
 import logging
 import time
 from ctypes import sizeof, byref, c_uint, create_string_buffer
+from enum import Enum
 from six.moves import http_client
 from .driver_otp import ykpers, check, YkpersError
 from .util import (time_challenge, parse_totp_hash, format_code,
@@ -70,14 +71,43 @@ def slot_to_cmd(slot, update=False):
         raise ValueError('slot must be 1 or 2')
 
 
+class PrepareUploadError(Enum):
+    # Defined here
+    CONNECTION_FAILED = 'Failed to open HTTPS connection'
+    NOT_FOUND = 'Upload request not recognized by server'
+
+    # Defined in upload project
+    PRIVATE_ID_INVALID_LENGTH = 'Private ID must be 12 characters long.'
+    PRIVATE_ID_NOT_HEX = 'Private ID must consist only of hex characters (0-9A-F).'  # noqa: E501
+    PRIVATE_ID_UNDEFINED = 'Private ID is required.'
+    PUBLIC_ID_INVALID_LENGTH = 'Public ID must be 12 characters long.'
+    PUBLIC_ID_NOT_MODHEX = 'Public ID must consist only of modhex characters (cbdefghijklnrtuv).'  # noqa: E501
+    PUBLIC_ID_NOT_VV = 'Public ID must begin with "vv".'
+    PUBLIC_ID_OCCUPIED = 'Public ID is already in use.'
+    PUBLIC_ID_UNDEFINED = 'Public ID is required.'
+    SECRET_KEY_INVALID_LENGTH = 'Secret key must be 32 character long.'
+    SECRET_KEY_NOT_HEX = 'Secret key must consist only of hex characters (0-9A-F).'  # noqa: E501
+    SECRET_KEY_UNDEFINED = 'AES key is required.'
+    SERIAL_NOT_INT = 'Serial number must be an integer.'
+    SERIAL_TOO_LONG = 'Serial number too long.'
+
+    def message(self):
+        return self.value
+
+
 class PrepareUploadFailed(Exception):
-    def __init__(self, status, content, errors):
+    def __init__(self, status, content, error_ids):
         super().__init__(
             'Upload to YubiCloud failed with status {}: {}'
             .format(status, content))
         self.status = status
         self.content = content
-        self.errors = errors
+        self.errors = [
+            e if e in PrepareUploadError else PrepareUploadError[e]
+            for e in error_ids]
+
+    def messages(self):
+        return [e.message() for e in self.errors]
 
 
 class OtpController(object):
@@ -162,7 +192,8 @@ class OtpController(object):
                              })
         except Exception as e:
             logger.error('Failed to connect to %s', UPLOAD_HOST, exc_info=e)
-            raise PrepareUploadFailed(None, None, {'connection_failed': True})
+            raise PrepareUploadFailed(
+                None, None, [PrepareUploadError.CONNECTION_FAILED])
 
         resp = httpconn.getresponse()
         if resp.status == 200:
@@ -170,11 +201,17 @@ class OtpController(object):
             return url
         else:
             resp_body = resp.read()
-            try:
-                errors = json.loads(resp_body.decode('utf-8')).get('errors')
-            except Exception:
-                errors = None
-            raise PrepareUploadFailed(resp.status, resp_body, errors)
+            logger.debug('Upload failed with status %d: %s',
+                         resp.status, resp_body)
+            if resp.status == 404:
+                raise PrepareUploadFailed(
+                    resp.status, resp_body, [PrepareUploadError.NOT_FOUND])
+            else:
+                try:
+                    errors = json.loads(resp_body.decode('utf-8')).get('errors')
+                except Exception:
+                    errors = []
+                raise PrepareUploadFailed(resp.status, resp_body, errors)
 
     def program_static(self, slot, password, append_cr=True,
                        keyboard_layout=KEYBOARD_LAYOUT.MODHEX):

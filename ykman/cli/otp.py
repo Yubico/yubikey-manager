@@ -332,18 +332,8 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                 user_agent='ykman/' + __version__)
             click.echo('Upload to YubiCloud initiated successfully.')
         except PrepareUploadFailed as e:
-            if e.errors:
-                if 'connection_failed' in e.errors:
-                    ctx.fail('Failed to open HTTPS connection.')
-                else:
-                    error_msg = '\n'.join([
-                        '{}: {}'.format(k, v) for k, v in e.errors.items()])
-                    ctx.fail('Upload to YubiCloud failed.\n' + error_msg)
-            elif e.status == 404:
-                ctx.fail('Upload request not recognized by server.')
-            else:
-                ctx.fail(
-                    'Upload request failed with status {}.'.format(e.status))
+            error_msg = '\n'.join(e.messages())
+            ctx.fail('Upload to YubiCloud failed.\n' + error_msg)
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True, err=True)
