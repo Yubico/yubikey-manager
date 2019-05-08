@@ -356,10 +356,9 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
 
     if upload:
         if upload_result['success']:
-            click.echo('Please finish the upload procedure in your browser.')
+            click.echo('Opening upload form in browser: '
+                       + upload_result['url'])
             webbrowser.open_new_tab(upload_result['url'])
-            click.echo('If the browser did not open automatically, '
-                       'open this URL manually: ' + upload_result['url'])
 
 
 @otp.command()
