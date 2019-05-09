@@ -75,6 +75,7 @@ class PrepareUploadError(Enum):
     # Defined here
     CONNECTION_FAILED = 'Failed to open HTTPS connection'
     NOT_FOUND = 'Upload request not recognized by server'
+    SERVICE_UNAVAILABLE = 'Service temporarily unavailable, please try again later'  # noqa: E501
 
     # Defined in upload project
     PRIVATE_ID_INVALID_LENGTH = 'Private ID must be 12 characters long.'
@@ -206,6 +207,10 @@ class OtpController(object):
             if resp.status == 404:
                 raise PrepareUploadFailed(
                     resp.status, resp_body, [PrepareUploadError.NOT_FOUND])
+            elif resp.status == 503:
+                raise PrepareUploadFailed(
+                    resp.status, resp_body,
+                    [PrepareUploadError.SERVICE_UNAVAILABLE])
             else:
                 try:
                     errors = json.loads(resp_body.decode('utf-8')).get('errors')
