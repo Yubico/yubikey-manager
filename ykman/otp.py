@@ -73,9 +73,9 @@ def slot_to_cmd(slot, update=False):
 
 class PrepareUploadError(Enum):
     # Defined here
-    CONNECTION_FAILED = 'Failed to open HTTPS connection'
-    NOT_FOUND = 'Upload request not recognized by server'
-    SERVICE_UNAVAILABLE = 'Service temporarily unavailable, please try again later'  # noqa: E501
+    CONNECTION_FAILED = 'Failed to open HTTPS connection.'
+    NOT_FOUND = 'Upload request not recognized by server.'
+    SERVICE_UNAVAILABLE = 'Service temporarily unavailable, please try again later.'  # noqa: E501
 
     # Defined in upload project
     PRIVATE_ID_INVALID_LENGTH = 'Private ID must be 12 characters long.'
