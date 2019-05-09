@@ -34,13 +34,15 @@ from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
     modhex_encode, parse_key, parse_b32_key)
 from binascii import a2b_hex, b2a_hex
+from .. import __version__
 from ..driver_otp import YkpersError
-from ..otp import OtpController
+from ..otp import OtpController, PrepareUploadFailed
 from ..scancodes import KEYBOARD_LAYOUT
 import logging
 import os
 import struct
 import click
+import webbrowser
 
 
 logger = logging.getLogger(__name__)
@@ -242,11 +244,15 @@ def delete(ctx, slot, force):
 @click.option(
     '-G', '--generate-key', is_flag=True, required=False,
     help='Generate a random secret key. Conflicts with --key.')
+@click.option(
+    '-u', '--upload', is_flag=True, required=False,
+    help='Upload credential to YubiCloud (opens in browser). '
+    'Conflicts with --force.')
 @click_force_option
 @click.pass_context
 def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             serial_public_id, generate_private_id,
-            generate_key):
+            generate_key, upload):
     """
     Program a Yubico OTP credential.
 
@@ -262,6 +268,9 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     if private_id and generate_private_id:
         ctx.fail('Invalid options: --private-id conflicts with '
                  '--generate-public-id.')
+
+    if upload and force:
+        ctx.fail('Invalid options: --upload conflicts with --force.')
 
     if key and generate_key:
         ctx.fail('Invalid options: --key conflicts with --generate-key.')
@@ -313,12 +322,30 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             key = click.prompt('Enter secret key', err=True)
             key = a2b_hex(key)
 
+    if not upload:
+        upload = click.confirm('Upload credential to YubiCloud?',
+                               abort=False, err=True)
+    if upload:
+        try:
+            upload_url = controller.prepare_upload_key(
+                key, public_id, private_id, serial=dev.serial,
+                user_agent='ykman/' + __version__)
+            click.echo('Upload to YubiCloud initiated successfully.')
+        except PrepareUploadFailed as e:
+            error_msg = '\n'.join(e.messages())
+            ctx.fail('Upload to YubiCloud failed.\n' + error_msg)
+
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True, err=True)
+
     try:
         controller.program_otp(slot, key, public_id, private_id, not no_enter)
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
+
+    if upload:
+        click.echo('Opening upload form in browser: ' + upload_url)
+        webbrowser.open_new_tab(upload_url)
 
 
 @otp.command()

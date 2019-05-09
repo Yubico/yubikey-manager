@@ -27,16 +27,25 @@
 
 from __future__ import absolute_import
 
-import time
+import json
 import logging
+import time
 from ctypes import sizeof, byref, c_uint, create_string_buffer
+from enum import Enum
+from six.moves import http_client
 from .driver_otp import ykpers, check, YkpersError
-from .util import time_challenge, parse_totp_hash, format_code, hmac_shorten_key
+from .util import (time_challenge, parse_totp_hash, format_code,
+                   hmac_shorten_key, modhex_encode)
 from .scancodes import encode, KEYBOARD_LAYOUT
+from . import __version__
 from enum import IntEnum, unique
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)
+
+
+UPLOAD_HOST = 'upload.yubico.com'
+UPLOAD_PATH = '/prepare'
 
 
 @unique
@@ -60,6 +69,46 @@ def slot_to_cmd(slot, update=False):
         return SLOT.UPDATE2 if update else SLOT.CONFIG2
     else:
         raise ValueError('slot must be 1 or 2')
+
+
+class PrepareUploadError(Enum):
+    # Defined here
+    CONNECTION_FAILED = 'Failed to open HTTPS connection.'
+    NOT_FOUND = 'Upload request not recognized by server.'
+    SERVICE_UNAVAILABLE = 'Service temporarily unavailable, please try again later.'  # noqa: E501
+
+    # Defined in upload project
+    PRIVATE_ID_INVALID_LENGTH = 'Private ID must be 12 characters long.'
+    PRIVATE_ID_NOT_HEX = 'Private ID must consist only of hex characters (0-9A-F).'  # noqa: E501
+    PRIVATE_ID_UNDEFINED = 'Private ID is required.'
+    PUBLIC_ID_INVALID_LENGTH = 'Public ID must be 12 characters long.'
+    PUBLIC_ID_NOT_MODHEX = 'Public ID must consist only of modhex characters (cbdefghijklnrtuv).'  # noqa: E501
+    PUBLIC_ID_NOT_VV = 'Public ID must begin with "vv".'
+    PUBLIC_ID_OCCUPIED = 'Public ID is already in use.'
+    PUBLIC_ID_UNDEFINED = 'Public ID is required.'
+    SECRET_KEY_INVALID_LENGTH = 'Secret key must be 32 character long.'
+    SECRET_KEY_NOT_HEX = 'Secret key must consist only of hex characters (0-9A-F).'  # noqa: E501
+    SECRET_KEY_UNDEFINED = 'AES key is required.'
+    SERIAL_NOT_INT = 'Serial number must be an integer.'
+    SERIAL_TOO_LONG = 'Serial number too long.'
+
+    def message(self):
+        return self.value
+
+
+class PrepareUploadFailed(Exception):
+    def __init__(self, status, content, error_ids):
+        super().__init__(
+            'Upload to YubiCloud failed with status {}: {}'
+            .format(status, content))
+        self.status = status
+        self.content = content
+        self.errors = [
+            e if e in PrepareUploadError else PrepareUploadError[e]
+            for e in error_ids]
+
+    def messages(self):
+        return [e.message() for e in self.errors]
 
 
 class OtpController(object):
@@ -122,6 +171,52 @@ class OtpController(object):
                                           cmd, self.access_code))
         finally:
             ykpers.ykp_free_config(cfg)
+
+    def prepare_upload_key(self, key, public_id, private_id, serial=None,
+                           user_agent='python-yubikey-manager/' + __version__):
+        modhex_public_id = modhex_encode(public_id)
+        data = {
+            'aes_key': b2a_hex(key).decode('utf-8'),
+            'serial': serial or 0,
+            'public_id': modhex_public_id,
+            'private_id': b2a_hex(private_id).decode('utf-8'),
+        }
+
+        httpconn = http_client.HTTPSConnection(UPLOAD_HOST, timeout=1)
+        try:
+            httpconn.request('POST', UPLOAD_PATH,
+                             body=json.dumps(data, indent=False, sort_keys=True)
+                             .encode('utf-8'),
+                             headers={
+                                 'Content-Type': 'application/json',
+                                 'User-Agent': user_agent,
+                             })
+        except Exception as e:
+            logger.error('Failed to connect to %s', UPLOAD_HOST, exc_info=e)
+            raise PrepareUploadFailed(
+                None, None, [PrepareUploadError.CONNECTION_FAILED])
+
+        resp = httpconn.getresponse()
+        if resp.status == 200:
+            url = json.loads(resp.read().decode('utf-8'))['finish_url']
+            return url
+        else:
+            resp_body = resp.read()
+            logger.debug('Upload failed with status %d: %s',
+                         resp.status, resp_body)
+            if resp.status == 404:
+                raise PrepareUploadFailed(
+                    resp.status, resp_body, [PrepareUploadError.NOT_FOUND])
+            elif resp.status == 503:
+                raise PrepareUploadFailed(
+                    resp.status, resp_body,
+                    [PrepareUploadError.SERVICE_UNAVAILABLE])
+            else:
+                try:
+                    errors = json.loads(resp_body.decode('utf-8')).get('errors')
+                except Exception:
+                    errors = []
+                raise PrepareUploadFailed(resp.status, resp_body, errors)
 
     def program_static(self, slot, password, append_cr=True,
                        keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
