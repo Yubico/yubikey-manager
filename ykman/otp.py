@@ -411,7 +411,9 @@ class OtpController(object):
 
         self.set_access_code(slot, None)
 
-    def update_settings(self, slot, enter=True, pacing=None):
+    def update_settings(
+            self, slot, enter=True, pacing=None,
+            use_numeric_keypad=False):
         cmd = slot_to_cmd(slot, update=True)
         cfg = self._create_cfg(cmd)
         if enter:
@@ -426,6 +428,8 @@ class OtpController(object):
             check(ykpers.ykp_set_cfgflag(cfg, 'PACING_10MS'))
             check(ykpers.ykp_set_cfgflag(cfg, 'PACING_20MS'))
 
+        if use_numeric_keypad:
+            check(ykpers.ykp_set_extflag(cfg, 'USE_NUMERIC_KEYPAD'))
         try:
             check(ykpers.yk_write_command(
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
