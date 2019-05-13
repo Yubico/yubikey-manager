@@ -322,7 +322,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             key = click.prompt('Enter secret key', err=True)
             key = a2b_hex(key)
 
-    if not upload:
+    if not upload and not force:
         upload = click.confirm('Upload credential to YubiCloud?',
                                abort=False, err=True)
     if upload:
