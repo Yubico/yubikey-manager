@@ -151,6 +151,7 @@ class TestSlotProgramming(DestructiveYubikeyTestCase):
             'otp', 'yubiotp', '2', input='vvccccfiluij\n'
                                          '267e0a88949b\n'
                                          'b8e31ab90bb8830e3c1fe1b483a8e0d4\n'
+                                         'n\n'
                                          'y\n')
         self._check_slot_2_programmed()
 
