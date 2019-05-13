@@ -337,9 +337,11 @@ class OathController(object):
         data = Tlv(TAG.NAME, cred.key)
         self.send_apdu(INS.DELETE, 0, 0, data)
 
-    def calculate_all(self, timestamp=None):
+    def calculate_all(self, timestamp=None, epoch=0):
         if timestamp is None:
             timestamp = int(time.time())
+
+        timestamp -= epoch
 
         def _gen_all():
             valid_from = timestamp - (timestamp % 30)

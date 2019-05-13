@@ -332,7 +332,9 @@ def list(ctx, show_hidden, oath_type, period):
 @click.argument('query', required=False, default='')
 @click.option('-s', '--single', is_flag=True, help='Ensure only a single '
               'match, and output only the code.')
-def code(ctx, show_hidden, query, single):
+@click.option('-e', '--epoch', type=click.INT, default=0, help='Initial time since the UNIX epoch from '
+              'which to calculate the counter value. Defaults to 0 (no offset).')
+def code(ctx, show_hidden, query, single, epoch):
     """
     Generate codes.
 
@@ -345,7 +347,7 @@ def code(ctx, show_hidden, query, single):
 
     controller = ctx.obj['controller']
     creds = [(cr, c)
-             for (cr, c) in controller.calculate_all()
+             for (cr, c) in controller.calculate_all(epoch=epoch)
              if show_hidden or not cr.is_hidden
              ]
 
