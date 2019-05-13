@@ -111,6 +111,68 @@ class PrepareUploadFailed(Exception):
         return [e.message() for e in self.errors]
 
 
+class SlotConfig(object):
+    def __init__(
+            self,
+            serial_api_visible=True,
+            allow_update=True,
+            append_cr=True,
+            pacing=None,
+            numeric_keypad=False,
+    ):
+        self.serial_api_visible = serial_api_visible
+        self.allow_update = allow_update
+        self.append_cr = append_cr
+        self.pacing = pacing
+        self.numeric_keypad = numeric_keypad
+
+
+class _SlotConfigContext(object):
+
+    def __init__(self, dev, cmd, conf):
+        st = ykpers.ykds_alloc()
+        self.cfg = ykpers.ykp_alloc()
+        try:
+            check(ykpers.yk_get_status(dev, st))
+            ykpers.ykp_configure_version(self.cfg, st)
+            ykpers.ykp_configure_command(self.cfg, cmd)
+        except YkpersError:
+            ykpers.ykp_free_config(self.cfg)
+            raise
+        finally:
+            ykpers.ykds_free(st)
+
+        if conf is None:
+            conf = SlotConfig()
+        self._apply(conf)
+
+    def _apply(self, config):
+        if config.serial_api_visible:
+            check(ykpers.ykp_set_extflag(self.cfg, 'SERIAL_API_VISIBLE'))
+        if config.allow_update:
+            check(ykpers.ykp_set_extflag(self.cfg, 'ALLOW_UPDATE'))
+        if config.append_cr:
+            check(ykpers.ykp_set_tktflag(self.cfg, 'APPEND_CR'))
+
+        # Output speed throttling
+        if config.pacing == 20:
+            check(ykpers.ykp_set_cfgflag(self.cfg, 'PACING_10MS'))
+        elif config.pacing == 40:
+            check(ykpers.ykp_set_cfgflag(self.cfg, 'PACING_20MS'))
+        elif config.pacing == 60:
+            check(ykpers.ykp_set_cfgflag(self.cfg, 'PACING_10MS'))
+            check(ykpers.ykp_set_cfgflag(self.cfg, 'PACING_20MS'))
+
+        if config.numeric_keypad:
+            check(ykpers.ykp_set_tktflag(self.cfg, 'USE_NUMERIC_KEYPAD'))
+
+    def __enter__(self):
+        return self.cfg
+
+    def __exit__(self, type, value, traceback):
+        ykpers.ykp_free_config(self.cfg)
+
+
 class OtpController(object):
 
     def __init__(self, driver):
@@ -126,30 +188,19 @@ class OtpController(object):
     def access_code(self, value):
         self._access_code = value
 
-    def _create_cfg(self, cmd):
-        st = ykpers.ykds_alloc()
-        cfg = ykpers.ykp_alloc()
-        try:
-            check(ykpers.yk_get_status(self._dev, st))
-            ykpers.ykp_configure_version(cfg, st)
-            ykpers.ykp_configure_command(cfg, cmd)
-            check(ykpers.ykp_set_extflag(cfg, 'SERIAL_API_VISIBLE'))
-            check(ykpers.ykp_set_extflag(cfg, 'ALLOW_UPDATE'))
-            if self.access_code is not None:
-                check(ykpers.ykp_set_access_code(
-                    cfg, self.access_code, _ACCESS_CODE_LENGTH))
-            return cfg
-        except YkpersError:
-            ykpers.ykp_free_config(cfg)
-            raise
-        finally:
-            ykpers.ykds_free(st)
+    def _create_cfg(self, cmd, conf=None):
+        context = _SlotConfigContext(self._dev, cmd, conf)
+        if self.access_code is not None:
+            check(ykpers.ykp_set_access_code(
+                context.cfg, self.access_code, _ACCESS_CODE_LENGTH))
+
+        return context
 
     @property
     def slot_status(self):
         return self._driver.slot_status
 
-    def program_otp(self, slot, key, fixed, uid, append_cr=True):
+    def program_otp(self, slot, key, fixed, uid, config=None):
         if len(key) != 16:
             raise ValueError('key must be 16 bytes')
         if len(uid) != 6:
@@ -158,19 +209,16 @@ class OtpController(object):
             raise ValueError('public ID must be <= 16 bytes')
 
         cmd = slot_to_cmd(slot)
-        cfg = self._create_cfg(cmd)
 
-        try:
+        with self._create_cfg(cmd, config) as cfg:
             check(ykpers.ykp_set_fixed(cfg, fixed, len(fixed)))
             check(ykpers.ykp_set_uid(cfg, uid, 6))
             ykpers.ykp_AES_key_from_raw(cfg, key)
-            if append_cr:
-                check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
-            check(ykpers.yk_write_command(self._dev,
-                                          ykpers.ykp_core_config(cfg),
-                                          cmd, self.access_code))
-        finally:
-            ykpers.ykp_free_config(cfg)
+            check(ykpers.yk_write_command(
+                self._dev,
+                ykpers.ykp_core_config(cfg),
+                cmd, self.access_code
+            ))
 
     def prepare_upload_key(self, key, public_id, private_id, serial=None,
                            user_agent='python-yubikey-manager/' + __version__):
@@ -218,8 +266,13 @@ class OtpController(object):
                     errors = []
                 raise PrepareUploadFailed(resp.status, resp_body, errors)
 
-    def program_static(self, slot, password, append_cr=True,
-                       keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
+    def program_static(
+            self,
+            slot,
+            password,
+            keyboard_layout=KEYBOARD_LAYOUT.MODHEX,
+            config=None
+    ):
         pw_len = len(password)
         if self._driver.version < (2, 0, 0):
             raise ValueError('static password requires YubiKey 2.0.0 or later')
@@ -231,14 +284,9 @@ class OtpController(object):
                              'maximum of %d characters' % 38)
 
         cmd = slot_to_cmd(slot)
-        cfg = self._create_cfg(cmd)
 
-        try:
+        with self._create_cfg(cmd, config) as cfg:
             check(ykpers.ykp_set_cfgflag(cfg, 'SHORT_TICKET'))
-
-            if append_cr:
-                check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
-
             pw_bytes = encode(password, keyboard_layout=keyboard_layout)
             if pw_len <= 16:  # All in fixed
                 check(ykpers.ykp_set_fixed(cfg, pw_bytes, pw_len))
@@ -252,10 +300,8 @@ class OtpController(object):
 
             check(ykpers.yk_write_command(
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
-        finally:
-            ykpers.ykp_free_config(cfg)
 
-    def program_chalresp(self, slot, key, touch=False):
+    def program_chalresp(self, slot, key, touch=False, config=None):
         if self._driver.version < (2, 2, 0):
             raise ValueError('challenge-response requires YubiKey 2.2.0 or '
                              'later')
@@ -263,9 +309,9 @@ class OtpController(object):
         if len(key) > 20:
             raise ValueError('key lengths >20 bytes not supported')
         cmd = slot_to_cmd(slot)
-        cfg = self._create_cfg(cmd)
         key = key.ljust(20, b'\0')  # Pad key to 20 bytes
-        try:
+
+        with self._create_cfg(cmd, config) as cfg:
             check(ykpers.ykp_set_tktflag(cfg, 'CHAL_RESP'))
             check(ykpers.ykp_set_cfgflag(cfg, 'CHAL_HMAC'))
             check(ykpers.ykp_set_cfgflag(cfg, 'HMAC_LT64'))
@@ -274,8 +320,6 @@ class OtpController(object):
             ykpers.ykp_HMAC_key_from_raw(cfg, key)
             check(ykpers.yk_write_command(
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
-        finally:
-            ykpers.ykp_free_config(cfg)
 
     def calculate(
             self, slot, challenge=None, totp=False,
@@ -323,7 +367,7 @@ class OtpController(object):
         else:
             return b2a_hex(resp.raw[:20])
 
-    def program_hotp(self, slot, key, imf=0, hotp8=False, append_cr=True):
+    def program_hotp(self, slot, key, imf=0, hotp8=False, config=None):
         if self._driver.version < (2, 1, 0):
             raise ValueError('HOTP requires YubiKey 2.1.0 or later')
         key = hmac_shorten_key(key, 'SHA1')
@@ -333,20 +377,15 @@ class OtpController(object):
         if imf % 16 != 0:
             raise ValueError('imf must be a multiple of 16')
         cmd = slot_to_cmd(slot)
-        cfg = self._create_cfg(cmd)
 
-        try:
+        with self._create_cfg(cmd, config) as cfg:
             check(ykpers.ykp_set_tktflag(cfg, 'OATH_HOTP'))
             check(ykpers.ykp_set_oath_imf(cfg, imf))
             if hotp8:
                 check(ykpers.ykp_set_cfgflag(cfg, 'OATH_HOTP8'))
-            if append_cr:
-                check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
             ykpers.ykp_HMAC_key_from_raw(cfg, key)
             check(ykpers.yk_write_command(
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
-        finally:
-            ykpers.ykp_free_config(cfg)
 
     def zap_slot(self, slot):
         check(ykpers.yk_write_command(self._dev, None, slot_to_cmd(slot),
@@ -355,12 +394,10 @@ class OtpController(object):
     def swap_slots(self):
         if self._driver.version < (2, 3, 0):
             raise ValueError('swapping slots requires YubiKey 2.3.0 or later')
-        cfg = self._create_cfg(SLOT.SWAP)
-        try:
+
+        with self._create_cfg(SLOT.SWAP) as cfg:
             ycfg = ykpers.ykp_core_config(cfg)
             check(ykpers.yk_write_command(self._dev, ycfg, SLOT.SWAP, None))
-        finally:
-            ykpers.ykp_free_config(cfg)
 
     def configure_ndef_slot(self, slot, prefix='https://my.yubico.com/yk/#'):
         ndef = ykpers.ykp_alloc_ndef()
@@ -389,8 +426,7 @@ class OtpController(object):
                 'code when initially programming the slot instead.')
 
         cmd = slot_to_cmd(slot, update)
-        cfg = self._create_cfg(cmd)
-        try:
+        with self._create_cfg(cmd) as cfg:
             check(ykpers.ykp_set_access_code(
                 cfg, new_code or _RESET_ACCESS_CODE, _ACCESS_CODE_LENGTH))
             ycfg = ykpers.ykp_core_config(cfg)
@@ -398,9 +434,6 @@ class OtpController(object):
                                           self.access_code))
 
             self.access_code = new_code
-
-        finally:
-            ykpers.ykp_free_config(cfg)
 
     def delete_access_code(self, slot):
         if self._has_update_access_code_bug:
@@ -411,26 +444,11 @@ class OtpController(object):
 
         self.set_access_code(slot, None)
 
-    def update_settings(self, slot, enter=True, pacing=None):
+    def update_settings(self, slot, config=None):
         cmd = slot_to_cmd(slot, update=True)
-        cfg = self._create_cfg(cmd)
-        if enter:
-            check(ykpers.ykp_set_tktflag(cfg, 'APPEND_CR'))
-
-        # Output speed throttling
-        if pacing == 20:
-            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_10MS'))
-        elif pacing == 40:
-            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_20MS'))
-        elif pacing == 60:
-            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_10MS'))
-            check(ykpers.ykp_set_cfgflag(cfg, 'PACING_20MS'))
-
-        try:
+        with self._create_cfg(cmd, config) as cfg:
             check(ykpers.yk_write_command(
                 self._dev, ykpers.ykp_core_config(cfg), cmd, self.access_code))
-        finally:
-            ykpers.ykp_free_config(cfg)
 
     @property
     def is_in_fips_mode(self):
