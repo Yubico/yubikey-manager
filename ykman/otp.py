@@ -164,7 +164,7 @@ class _SlotConfigContext(object):
             check(ykpers.ykp_set_cfgflag(self.cfg, 'PACING_20MS'))
 
         if config.numeric_keypad:
-            check(ykpers.ykp_set_tktflag(self.cfg, 'USE_NUMERIC_KEYPAD'))
+            check(ykpers.ykp_set_extflag(self.cfg, 'USE_NUMERIC_KEYPAD'))
 
     def __enter__(self):
         return self.cfg
