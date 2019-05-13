@@ -574,8 +574,11 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     '-p', '--pacing', type=click.Choice(['0', '20', '40', '60']),
     default='0', show_default=True, help='Throttle output speed by '
     'adding a delay (in ms) between characters emitted.')
+@click.option('--use-numeric-keypad', is_flag=True, show_default=True,
+              help='Use scancodes for numeric keypad when sending digits.'
+              ' Helps with some keyboard layouts. ')
 def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
-             force):
+             use_numeric_keypad, force):
     """
     Update the settings for a slot.
 
@@ -612,7 +615,8 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
     try:
         controller.update_settings(slot, SlotConfig(
             append_cr=enter,
-            pacing=pacing
+            pacing=pacing,
+            numeric_keypad=use_numeric_keypad
         ))
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
