@@ -219,6 +219,14 @@ class CCIDDriver(AbstractDriver):
                 logger.debug(
                     'Failed reading applet: aid: %s , capability: %s , %s',
                     aid, code, e)
+                # NEO over 3.3.0 have U2F, might fail
+                # because of access can be blocked
+                # on some operating systems.
+                if self.key_type == YUBIKEY.NEO and aid == AID.U2F:
+                    s = self.select(AID.OTP)
+                    v = tuple(c for c in six.iterbytes(s[:3]))
+                    if v >= (3, 3, 0):
+                        capa |= code
         return capa
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW.OK):
