@@ -215,6 +215,10 @@ class CCIDDriver(AbstractDriver):
             except APDUError:
                 logger.debug(
                     'Missing applet: aid: %s , capability: %s', aid, code)
+            except CCIDError as e:
+                logger.debug(
+                    'Failed reading applet: aid: %s , capability: %s , %s',
+                    aid, code, e)
         return capa
 
     def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW.OK):
