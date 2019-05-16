@@ -224,8 +224,8 @@ class CCIDDriver(AbstractDriver):
                 # on some operating systems.
                 if self.key_type == YUBIKEY.NEO and aid == AID.U2F:
                     s = self.select(AID.OTP)
-                    v = tuple(c for c in six.iterbytes(s[:3]))
-                    if v >= (3, 3, 0):
+                    version = tuple(c for c in six.iterbytes(s[:3]))
+                    if version >= (3, 3, 0):
                         capa |= code
         return capa
 
