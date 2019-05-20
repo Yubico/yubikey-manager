@@ -120,7 +120,7 @@ def otp(ctx, access_code):
       $ ykman otp chalresp --generate 2
 
     \b
-      Program a Yubico OTP credential to slot 2, using the serial as public id:
+      Program a Yubico OTP credential to slot 1, using the serial as public id:
       $ ykman otp yubiotp 1 --serial-public-id
 
     \b
