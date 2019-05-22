@@ -206,19 +206,20 @@ def list_keys(ctx, serials, readers):
             click.echo(reader.name)
         ctx.exit()
 
-    all_descriptors = get_descriptors()
-    descriptors = [d for d in all_descriptors if d.key_type != YUBIKEY.SKY]
-    skys = len(all_descriptors) - len(descriptors)
+    descriptors = get_descriptors()
     handled_serials = set()
     for dev in list_devices():
         handled = False
-        if skys > 0 and dev.key_type == YUBIKEY.SKY:
-            skys -= 1
+        if dev.key_type == YUBIKEY.SKY:
             serial = None
+            # We have nothing to match on, so just drop a SKY descriptor
+            d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
+            descriptors.remove(d)
             handled = True
         else:
             serial = dev.serial
             if serial not in handled_serials:
+                # Drop a descriptor with a matching serial and mode
                 handled_serials.add(serial)
                 matches = [d for d in descriptors if (d.key_type, d.mode)
                            == (dev.driver.key_type, dev.driver.mode)]
@@ -237,9 +238,24 @@ def list_keys(ctx, serials, readers):
                     ' Serial: {}'.format(serial) if serial else '')
                 )
         dev.close()
-        if not descriptors and not skys:
+        if not descriptors:
             break
 
+    # List descriptors that failed to open.
+    logger.debug('Failed to open all devices, listing based on descriptors')
+    for desc in descriptors:
+        if desc.key_type == YUBIKEY.SKY:
+            if desc.version >= (5, 1, 0):
+                name = 'Security Key NFC'
+            elif desc.version <= (5, 0, 0):
+                name = 'FIDO U2F Security Key'
+            else:
+                name = desc.key_type.value
+        elif desc.key_type == YUBIKEY.YK4 and desc.version >= (5, 0, 0):
+            name = 'YubiKey 5'
+        else:
+            name = desc.key_type.value
+        click.echo('{} [{}]'.format(name, desc.mode))
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
 
