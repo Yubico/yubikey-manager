@@ -72,13 +72,8 @@ class Descriptor(object):
 
     @property
     def name(self):
-        if self.key_type == YUBIKEY.SKY:
-            if self.version >= (5, 1, 0):
-                return'Security Key NFC'
-            elif self.version <= (5, 0, 0):
-                return 'FIDO U2F Security Key'
-            else:
-                return desc.key_type.value
+        if self.key_type == YUBIKEY.SKY and self.version <= (5, 0, 0):
+            return 'FIDO U2F Security Key'
         elif self.key_type == YUBIKEY.YK4 and self.version >= (5, 0, 0):
             return 'YubiKey 5'
         else:
