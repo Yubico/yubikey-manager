@@ -231,10 +231,10 @@ class YubiKey(object):
                 else:  # Assume base capabilities
                     logger.debug('CCID not available, guess capabilities')
                     usb_supported = _NEO_BASE_CAPABILITIES
-                    if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
-                            or (version and version >= (3, 3, 0)):
-                        usb_supported |= APPLICATION.U2F
-
+                # NEO over 3.3.0 have U2F (which might be blocked by OS)
+                if TRANSPORT.has(self.mode.transports, TRANSPORT.FIDO) \
+                        or (version and version >= (3, 3, 0)):
+                    usb_supported |= APPLICATION.U2F
                 config._set(TAG.USB_SUPPORTED, usb_supported)
                 config._set(TAG.NFC_SUPPORTED, usb_supported)
                 config._set(TAG.NFC_ENABLED, usb_supported)
