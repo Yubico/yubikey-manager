@@ -127,7 +127,8 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to {} [{}]'.format(descriptor.name, descriptor.mode))
+            ctx.fail('Failed connecting to {} [{}]'.format(
+                descriptor.name, descriptor.mode))
     else:
         _disabled_transport(ctx, transports, cmd)
 
@@ -245,6 +246,7 @@ def list_keys(ctx, serials, readers):
     logger.debug('Failed to open all devices, listing based on descriptors')
     for desc in descriptors:
         click.echo('{} [{}]'.format(desc.name, desc.mode))
+
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
 
