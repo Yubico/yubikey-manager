@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import PID, TRANSPORT, Mode
+from .util import PID, TRANSPORT, Mode, YUBIKEY
 from .device import YubiKey
 from .driver_ccid import open_devices as open_ccid
 from .driver_fido import open_devices as open_fido
@@ -69,6 +69,20 @@ class Descriptor(object):
     @property
     def key_type(self):
         return self._key_type
+
+    @property
+    def name(self):
+        if self.key_type == YUBIKEY.SKY:
+            if self.version >= (5, 1, 0):
+                return'Security Key NFC'
+            elif self.version <= (5, 0, 0):
+                return 'FIDO U2F Security Key'
+            else:
+                return desc.key_type.value
+        elif self.key_type == YUBIKEY.YK4 and self.version >= (5, 0, 0):
+            return 'YubiKey 5'
+        else:
+            return self.key_type.value
 
     def open_device(self, transports=sum(TRANSPORT), serial=None, attempts=10):
         self._logger.debug('transports: 0x%x, self.mode.transports: 0x%x',

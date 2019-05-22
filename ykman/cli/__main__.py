@@ -127,7 +127,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to the YubiKey.')
+            ctx.fail('Failed connecting to {} [{}]'.format(descriptor.name, descriptor.mode))
     else:
         _disabled_transport(ctx, transports, cmd)
 
@@ -244,18 +244,7 @@ def list_keys(ctx, serials, readers):
     # List descriptors that failed to open.
     logger.debug('Failed to open all devices, listing based on descriptors')
     for desc in descriptors:
-        if desc.key_type == YUBIKEY.SKY:
-            if desc.version >= (5, 1, 0):
-                name = 'Security Key NFC'
-            elif desc.version <= (5, 0, 0):
-                name = 'FIDO U2F Security Key'
-            else:
-                name = desc.key_type.value
-        elif desc.key_type == YUBIKEY.YK4 and desc.version >= (5, 0, 0):
-            name = 'YubiKey 5'
-        else:
-            name = desc.key_type.value
-        click.echo('{} [{}]'.format(name, desc.mode))
+        click.echo('{} [{}]'.format(desc.name, desc.mode))
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
 
