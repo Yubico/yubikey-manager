@@ -127,7 +127,8 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to {} [{}]'.format(descriptor.name, descriptor.mode))
+            ctx.fail('Failed connecting to {} [{}]'.format(
+                descriptor.name, descriptor.mode))
     else:
         _disabled_transport(ctx, transports, cmd)
 
@@ -201,6 +202,18 @@ def list_keys(ctx, serials, readers):
     """
     List connected YubiKeys.
     """
+
+    def _print_device(dev, serial):
+        if serials:
+            if serial:
+                click.echo(serial)
+        else:
+            click.echo('{} [{}]{}'.format(
+                dev.device_name,
+                dev.mode,
+                ' Serial: {}'.format(serial) if serial else '')
+            )
+
     if readers:
         for reader in list_readers():
             click.echo(reader.name)
@@ -209,13 +222,11 @@ def list_keys(ctx, serials, readers):
     descriptors = get_descriptors()
     handled_serials = set()
     for dev in list_devices():
-        handled = False
         if dev.key_type == YUBIKEY.SKY:
-            serial = None
             # We have nothing to match on, so just drop a SKY descriptor
             d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
             descriptors.remove(d)
-            handled = True
+            _print_device(dev, None)
         else:
             serial = dev.serial
             if serial not in handled_serials:
@@ -226,17 +237,7 @@ def list_keys(ctx, serials, readers):
                 if len(matches) > 0:
                     d = matches[0]
                     descriptors.remove(d)
-                    handled = True
-        if handled:
-            if serials:
-                if serial:
-                    click.echo(serial)
-            else:
-                click.echo('{} [{}]{}'.format(
-                    dev.device_name,
-                    dev.mode,
-                    ' Serial: {}'.format(serial) if serial else '')
-                )
+                    _print_device(dev, serial)
         dev.close()
         if not descriptors:
             break
@@ -245,6 +246,7 @@ def list_keys(ctx, serials, readers):
     logger.debug('Failed to open all devices, listing based on descriptors')
     for desc in descriptors:
         click.echo('{} [{}]'.format(desc.name, desc.mode))
+
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
 
