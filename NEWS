@@ -1,3 +1,9 @@
+* Version 2.1.1 (unreleased)
+ ** OTP: Add initial support for uploading Yubico OTP credentials to YubiCloud
+ ** Don't automatically select the U2F applet on YubiKey NEO, it might be blocked by the OS
+ ** Bugfix: Don't crash with older versions of cryptography
+ ** Bugfix: Password was always prompted in OATH command, even if sent as argument
+
 * Version 2.1.0 (released 2019-03-11)
  ** Add --reader flag to ykman list, to list available smart card readers
  ** FIPS: Checking if a YubiKey FIPS is in FIPS mode is now opt-in, with the --check-fips flag
