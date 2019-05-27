@@ -203,7 +203,7 @@ def list_keys(ctx, serials, readers):
     List connected YubiKeys.
     """
 
-    def print_device(dev, serial):
+    def _print_device(dev, serial):
         if serials:
             if serial:
                 click.echo(serial)
@@ -226,7 +226,7 @@ def list_keys(ctx, serials, readers):
             # We have nothing to match on, so just drop a SKY descriptor
             d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
             descriptors.remove(d)
-            print_device(dev, None)
+            _print_device(dev, None)
         else:
             serial = dev.serial
             if serial not in handled_serials:
@@ -237,7 +237,7 @@ def list_keys(ctx, serials, readers):
                 if len(matches) > 0:
                     d = matches[0]
                     descriptors.remove(d)
-                    print_device(dev, serial)
+                    _print_device(dev, serial)
         dev.close()
         if not descriptors:
             break
