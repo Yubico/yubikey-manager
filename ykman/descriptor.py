@@ -72,7 +72,7 @@ class Descriptor(object):
 
     @property
     def name(self):
-        if self.key_type == YUBIKEY.SKY and self.version <= (5, 0, 0):
+        if self.key_type == YUBIKEY.SKY and self.version < (5, 0, 0):
             return 'FIDO U2F Security Key'
         elif self.key_type == YUBIKEY.YK4 and self.version >= (5, 0, 0):
             return 'YubiKey 5'
