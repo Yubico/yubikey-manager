@@ -1,6 +1,7 @@
-* Version 2.1.1 (unreleased)
+* Version 2.1.1 (released 2019-05-28)
  ** OTP: Add initial support for uploading Yubico OTP credentials to YubiCloud
  ** Don't automatically select the U2F applet on YubiKey NEO, it might be blocked by the OS
+ ** ChalResp: Always pad challenge correctly
  ** Bugfix: Don't crash with older versions of cryptography
  ** Bugfix: Password was always prompted in OATH command, even if sent as argument
 

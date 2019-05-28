@@ -1,5 +1,5 @@
 Name:           yubikey-manager
-Version:        2.1.0
+Version:        2.1.1
 Release:        1%{?dist}
 Summary:        Python library and command line tool for configuring a YubiKey
 
