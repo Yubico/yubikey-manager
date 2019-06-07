@@ -285,7 +285,7 @@ class YubiKey(object):
             if config.nfc_supported:
                 self.device_name = 'Security Key NFC'
         elif self._key_type == YUBIKEY.YK4:
-            if (5, 1, 0) > self.version >= (5, 0, 0) or \
+            if (5, 0, 0) <= self.version < (5, 1, 0) or \
                     self.version in [(5, 2, 0), (5, 2, 1), (5, 2, 2)]:
                 self.device_name = 'YubiKey Preview'
             elif self.version >= (5, 1, 0):
