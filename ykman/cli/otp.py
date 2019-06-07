@@ -36,7 +36,7 @@ from ..util import (
 from binascii import a2b_hex, b2a_hex
 from .. import __version__
 from ..driver_otp import YkpersError
-from ..otp import OtpController, PrepareUploadFailed
+from ..otp import OtpController, PrepareUploadFailed, SlotConfig
 from ..scancodes import KEYBOARD_LAYOUT
 import logging
 import os
@@ -339,7 +339,9 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                            abort=True, err=True)
 
     try:
-        controller.program_otp(slot, key, public_id, private_id, not no_enter)
+        controller.program_otp(slot, key, public_id, private_id, SlotConfig(
+            append_cr=not no_enter
+        ))
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -394,8 +396,9 @@ def static(
     if not force:
         _confirm_slot_overwrite(controller, slot)
     try:
-        controller.program_static(
-            slot, password, not no_enter, keyboard_layout=keyboard_layout)
+        controller.program_static(slot, password, keyboard_layout, SlotConfig(
+            append_cr=not no_enter
+        ))
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -546,7 +549,9 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
         err=True)
     try:
         controller.program_hotp(
-            slot, key, counter, int(digits) == 8, not no_enter)
+            slot, key, counter, int(digits) == 8, SlotConfig(
+                append_cr=not no_enter
+            ))
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -569,8 +574,11 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     '-p', '--pacing', type=click.Choice(['0', '20', '40', '60']),
     default='0', show_default=True, help='Throttle output speed by '
     'adding a delay (in ms) between characters emitted.')
+@click.option('--use-numeric-keypad', is_flag=True, show_default=True,
+              help='Use scancodes for numeric keypad when sending digits.'
+              ' Helps with some keyboard layouts. ')
 def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
-             force):
+             use_numeric_keypad, force):
     """
     Update the settings for a slot.
 
@@ -605,7 +613,11 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
         pacing = int(pacing)
 
     try:
-        controller.update_settings(slot, enter=enter, pacing=pacing)
+        controller.update_settings(slot, SlotConfig(
+            append_cr=enter,
+            pacing=pacing,
+            numeric_keypad=use_numeric_keypad
+        ))
     except YkpersError as e:
         _failed_to_write_msg(ctx, e)
 
