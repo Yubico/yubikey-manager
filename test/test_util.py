@@ -166,4 +166,5 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(
             FORM_FACTOR.USB_C_KEYCHAIN, FORM_FACTOR.from_code(0x03))
         self.assertEqual(FORM_FACTOR.USB_C_NANO, FORM_FACTOR.from_code(0x04))
-        self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x05))
+        self.assertEqual(FORM_FACTOR.USB_C_LIGHTNING, FORM_FACTOR.from_code(0x05))
+        self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x06))
