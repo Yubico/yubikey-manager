@@ -29,6 +29,7 @@ from __future__ import absolute_import
 import click
 import logging
 from fido2.ctap1 import ApduError
+from fido2.ctap2 import CredentialManagement
 from fido2.ctap import CtapError
 from time import sleep
 from .util import click_postpone_execution, prompt_for_touch, click_force_option
@@ -100,6 +101,82 @@ def info(ctx):
                     click.echo('PIN is blocked.')
         else:
             click.echo('PIN is not set.')
+
+
+@fido.command('list')
+@click.pass_context
+@click.option('-P', '--pin', help='PIN code.')
+def list_creds(ctx, pin):
+    """
+    List resident credentials.
+    """
+    controller = ctx.obj['controller']
+
+    if not controller.has_pin:
+        ctx.fail('No PIN set.')
+
+    if controller.has_pin and pin is None:
+        pin = _prompt_current_pin(prompt='Enter your PIN')
+
+    try:
+        for cred, rp in controller.get_resident_credentials(pin):
+            click.echo('{} ({})'.format(
+                    cred[CredentialManagement.RESULT.USER]['name'],
+                    rp[CredentialManagement.RESULT.RP]['id']))
+    except CtapError as e:
+        if e.code == CtapError.ERR.PIN_INVALID:
+            ctx.fail('Wrong PIN.')
+    except Exception as e:
+        logger.debug('Failed to list resident credentials', exc_info=e)
+        ctx.fail('Failed to list resident credentials.')
+
+
+@fido.command()
+@click.pass_context
+@click.argument('query')
+@click.option('-P', '--pin', help='PIN code.')
+@click.option('-f', '--force', is_flag=True,
+              help='Confirm deletion without prompting')
+def delete(ctx, query, pin, force):
+    """
+    Delete a resident credential.
+    """
+    controller = ctx.obj['controller']
+
+    if not controller.has_pin:
+        ctx.fail('No PIN set.')
+
+    if controller.has_pin and pin is None:
+        pin = _prompt_current_pin(prompt='Enter your PIN')
+
+    hits = []
+    try:
+        for cred, rp in controller.get_resident_credentials(pin):
+            if query.lower() in cred[
+                CredentialManagement.RESULT.USER]['name'].lower() or \
+                    query.lower() in rp[
+                        CredentialManagement.RESULT.RP]['id']:
+                hits.append([cred, rp])
+        if len(hits) == 0:
+            ctx.fail('No matches, nothing to be done.')
+        elif len(hits) == 1:
+            cred, rp = hits[0]
+            if force or click.confirm(
+                    'Delete credential {} ({})?'.format(
+                        cred[CredentialManagement.RESULT.USER]['name'],
+                        rp[CredentialManagement.RESULT.RP]['id'],
+                        )
+                    ):
+                controller.delete_resident_credential(
+                    cred[CredentialManagement.RESULT.CREDENTIAL_ID], pin)
+        else:
+            ctx.fail('Multiple matches, make the query more specific.')
+    except CtapError as e:
+        if e.code == CtapError.ERR.PIN_INVALID:
+            ctx.fail('Wrong PIN.')
+    except Exception as e:
+        logger.debug('Failed to delete resident credential', exc_info=e)
+        ctx.fail('Failed to delete resident credential.')
 
 
 @fido.command('set-pin')

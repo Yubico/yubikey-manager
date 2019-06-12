@@ -29,11 +29,15 @@ from __future__ import absolute_import
 
 import six
 import time
+import logging
 from fido2.ctap1 import CTAP1, ApduError
-from fido2.ctap2 import CTAP2, PinProtocolV1
+from fido2.ctap2 import CTAP2, PinProtocolV1, CredentialManagement
 from threading import Timer
 from .driver_ccid import SW
 from .driver_fido import FIPS_U2F_CMD
+
+
+logger = logging.getLogger(__name__)
 
 
 class Fido2Controller(object):
@@ -47,6 +51,27 @@ class Fido2Controller(object):
     @property
     def has_pin(self):
         return self._pin
+
+    def get_resident_credentials(self, pin):
+        _credman = CredentialManagement(
+            self.ctap,
+            self.pin.VERSION,
+            self.pin.get_pin_token(pin))
+
+        for rp in _credman.enumerate_rps():
+            for cred in _credman.enumerate_creds(
+                    rp[CredentialManagement.RESULT.RP_ID_HASH]):
+                yield cred, rp
+
+    def delete_resident_credential(self, credential_id, pin):
+        _credman = CredentialManagement(
+            self.ctap,
+            self.pin.VERSION,
+            self.pin.get_pin_token(pin))
+
+        for cred, rp in self.get_resident_credentials(pin):
+            if credential_id == cred[CredentialManagement.RESULT.CREDENTIAL_ID]:
+                _credman.delete_cred(credential_id)
 
     def get_pin_retries(self):
         return self.pin.get_pin_retries()
