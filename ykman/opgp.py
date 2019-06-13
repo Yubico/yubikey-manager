@@ -224,7 +224,7 @@ class OpgpController(object):
         self.send_apdu(0, INS.PUT_DATA, 0, key_slot.touch_position(),
                        bytes(bytearray([mode, TOUCH_METHOD_BUTTON])))
 
-    def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, pin):
+    def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, admin_pin):
         if self.version < (1, 0, 7):  # For YubiKey NEO
             raise ValueError('Setting PIN retry counters requires version '
                              '1.0.7 or later.')

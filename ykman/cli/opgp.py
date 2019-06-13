@@ -189,21 +189,28 @@ def set_touch(ctx, key, policy, admin_pin, force):
 
 
 @openpgp.command('set-pin-retries')
-@click.argument('pw-attempts', nargs=3, type=click.IntRange(1, 99))
-@click.password_option('--admin-pin', metavar='PIN', prompt='Enter admin PIN',
-                       confirmation_prompt=False)
+@click.argument(
+    'pin-retries', type=click.IntRange(1, 99), metavar='PIN-RETRIES')
+@click.argument(
+    'reset-code-retries',
+    type=click.IntRange(1, 99), metavar='RESET-CODE-RETRIES')
+@click.argument(
+    'admin-pin-retries',
+    type=click.IntRange(1, 99), metavar='ADMIN-PIN-RETRIES')
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click_force_option
 @click.pass_context
-def set_pin_retries(ctx, pw_attempts, admin_pin, force):
+def set_pin_retries(
+        ctx, admin_pin, pin_retries,
+        reset_code_retries, admin_pin_retries, force):
     """
-    Manage pin-retries.
-
-    Sets the number of attempts available before locking for each PIN.
-
-    PW_ATTEMPTS should be three integer values corresponding to the number of
-    attempts for the PIN, Reset Code, and Admin PIN, respectively.
+    Set PIN, Reset Code and Admin PIN retries.
     """
     controller = ctx.obj['controller']
+
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
+
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
         click.echo('WARNING: Setting PIN retries will reset the values for all '
