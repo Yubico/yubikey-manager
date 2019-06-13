@@ -382,24 +382,4 @@ def import_attestation_key(ctx, private_key, admin_pin):
         ctx.fail('Failed to import attestation key.')
 
 
-@openpgp.command('delete-attestation-key')
-@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
-@click.pass_context
-def delete_attestation_key(ctx, admin_pin):
-    """
-    Delete the attestation key.
-
-    Delete the OpenPGP attestation key.
-    """
-    controller = ctx.obj['controller']
-
-    if admin_pin is None:
-        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
-    try:
-        controller.delete_attestation_key(admin_pin)
-    except Exception as e:
-        logger.debug('Failed to delete', exc_info=e)
-        ctx.fail('Failed to delete attestation key.')
-
-
 openpgp.transports = TRANSPORT.CCID
