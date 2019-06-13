@@ -234,3 +234,115 @@ class OpgpController(object):
         self._verify(PW3, admin_pin)
         self.send_apdu(0, INS.SET_PIN_RETRIES, 0, 0,
                        bytes(bytearray([pw1_tries, pw2_tries, pw3_tries])))
+
+    def read_certificate(self, key_slot):
+        self.send_cmd(
+            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0x04, data=a2b_hex('0660045C027F21'))
+        data = self.send_cmd(
+            0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
+        if not data:
+            raise ValueError('No certificate found!')
+        return x509.load_der_x509_certificate(data, default_backend())
+
+    def import_certificate(self, key_slot, certificate, admin_pin):
+        self._verify(PW3, admin_pin)
+        cert_data = certificate.public_bytes(Encoding.DER)
+        self.send_cmd(
+            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0x04, data=a2b_hex('0660045C027F21'))
+        self.send_cmd(
+            0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=cert_data)
+
+    def _get_key_attributes(self, key):
+        if isinstance(key, rsa.RSAPrivateKey):
+            return struct.pack(">BHHB", 0x01, key.key_size, 32, 0)
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            return int_to_bytes(
+                self._get_opgp_algo_id_from_ec(
+                    key)) + a2b_hex(self._get_oid_from_ec(key))
+        raise ValueError('Not a valid private key!')
+
+    def _get_oid_from_ec(self, key):
+        curve = key.curve.name
+        if curve == 'secp384r1':
+            return '2B81040022'
+        if curve == 'secp256r1':
+            return '2A8648CE3D030107'
+        if curve == 'secp521r1':
+            return '2B81040023'
+        if curve == 'x25519':
+            return '2B060104019755010501'
+        raise ValueError('No OID for curve!')
+
+    def _get_opgp_algo_id_from_ec(self, key):
+        curve = key.curve.name
+        if curve in ['secp384r1', 'secp256r1', 'secp521r1']:
+            return 0x13
+        if curve == 'x25519':
+            return 0x16
+        raise ValueError('No Algo ID for curve!')
+
+    def _get_key_data(self, key):
+
+        def _der_len(data):
+            ln = len(data)
+            if ln <= 128:
+                res = [ln]
+            elif ln <= 255:
+                res = [0x81, ln]
+            else:
+                res = [0x82, (ln >> 8) & 0xff, ln & 0xff]
+            return bytearray(res)
+
+        private_numbers = key.private_numbers()
+        data = a2b_hex('B603840181')
+
+        if isinstance(key, rsa.RSAPrivateKey):
+            ln = key.key_size // 8 // 2
+            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81\x80\x5f\x48\x82\x01\x03\x01\x00\x01'
+            data += int_to_bytes(private_numbers.p, ln)
+            data += int_to_bytes(private_numbers.q, ln)
+            return b'\x4d' + _der_len(data) + data
+        elif isinstance(key, ec.EllipticCurvePrivateKey):
+            ln = key.key_size // 8
+            privkey = int_to_bytes(private_numbers.private_value, ln)
+            data += b'\x7f\x48\x02\x92' + _der_len(privkey)
+            data += b'\x5f\x48' + _der_len(privkey) + privkey
+            return b'\x4d' + _der_len(data) + data
+
+
+    def import_attestation_key(self, key, admin_pin):
+        self._verify(PW3, admin_pin)
+        data = self._get_key_attributes(key)
+        self.send_cmd(0, INS.PUT_DATA, 0, 0xda, data=data)
+        data = self._get_key_data(key)
+        self.send_cmd(0, 0xdb, 0x3f, 0xff, data=data)
+
+    def delete_attestation_key(self, admin_pin):
+        self._verify(PW3, admin_pin)
+        # Delete attestation key by changing the key attributes twice.
+        self.send_cmd(
+            0, INS.PUT_DATA, 0, 0xda,
+            data=struct.pack(">BHHB", 0x01, 2048, 32, 0))
+        self.send_cmd(
+            0, INS.PUT_DATA, 0, 0xda,
+            data=struct.pack(">BHHB", 0x01, 4096, 32, 0))
+
+    def delete_certificate(self, key_slot, admin_pin):
+        self._verify(PW3, admin_pin)
+        self.send_cmd(
+            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0x04, data=a2b_hex('0660045C027F21'))
+        self.send_apdu(
+            0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=b'')
+
+    def attest(self, key_slot, pin):
+        self._verify(PW1, pin)
+        self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.key_position(), 0)
+        self.send_cmd(
+            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0x04, data=a2b_hex('0660045C027F21'))
+        data = self.send_cmd(
+            0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
+        return x509.load_der_x509_certificate(data, default_backend())
