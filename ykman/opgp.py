@@ -40,10 +40,10 @@ from cryptography.utils import int_to_bytes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from cryptography.hazmat.primitives.asymmetric.ec import (
-    SECP256R1, SECP384R1, SECP521R1)
+
 
 logger = logging.getLogger(__name__)
+
 
 @unique
 class KEY_SLOT(Enum):  # noqa: N801
@@ -300,7 +300,8 @@ class OpgpController(object):
 
         if isinstance(key, rsa.RSAPrivateKey):
             ln = key.key_size // 8 // 2
-            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81\x80\x5f\x48\x82\x01\x03\x01\x00\x01'
+            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81 \
+                \x80\x5f\x48\x82\x01\x03\x01\x00\x01'
             data += int_to_bytes(private_numbers.p, ln)
             data += int_to_bytes(private_numbers.q, ln)
             return b'\x4d' + _der_len(data) + data
@@ -310,7 +311,6 @@ class OpgpController(object):
             data += b'\x7f\x48\x02\x92' + _der_len(privkey)
             data += b'\x5f\x48' + _der_len(privkey) + privkey
             return b'\x4d' + _der_len(data) + data
-
 
     def import_attestation_key(self, key, admin_pin):
         self._verify(PW3, admin_pin)

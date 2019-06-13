@@ -175,10 +175,10 @@ def set_touch(ctx, key, policy, admin_pin, force):
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
 
     if force or click.confirm(
-            'Set touch policy of {} key to {}?'.format(
-                key.name.lower(),
-                policy.name.lower().replace('_', '-')),
-                abort=True, err=True):
+        'Set touch policy of {} key to {}?'.format(
+            key.name.lower(),
+            policy.name.lower().replace('_', '-')),
+            abort=True, err=True):
         try:
             controller.set_touch(key, policy, admin_pin)
         except APDUError as e:
@@ -261,8 +261,8 @@ def attest(ctx, key, certificate, pin, format):
         cert = None
 
     if not cert or click.confirm(
-        'There is already data stored in the certificate slot for {}, '
-        'do you want to overwrite it?'.format(key.name)):
+            'There is already data stored in the certificate slot for {}, '
+            'do you want to overwrite it?'.format(key.name)):
         touch_policy = controller.get_touch(KEY_SLOT.ATTESTATION)
         if touch_policy in [TOUCH_MODE.ON, TOUCH_MODE.FIXED]:
             click.echo('Touch your YubiKey...')
@@ -272,6 +272,7 @@ def attest(ctx, key, certificate, pin, format):
         except Exception as e:
             logger.debug('Failed to attest', exc_info=e)
             ctx.fail('Attestation failed')
+
 
 @openpgp.command('export-certificate')
 @click.pass_context
