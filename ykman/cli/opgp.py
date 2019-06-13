@@ -29,26 +29,15 @@ from __future__ import absolute_import
 
 import logging
 import click
-from ..util import TRANSPORT
+from ..util import TRANSPORT, parse_certificates, parse_private_key
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW
-from .util import click_force_option, click_postpone_execution
+from .util import (
+    click_force_option, click_format_option, click_postpone_execution,
+    UpperCaseChoice)
 
 
 logger = logging.getLogger(__name__)
-
-
-KEY_NAMES = dict(
-    sig=KEY_SLOT.SIGNATURE,
-    enc=KEY_SLOT.ENCRYPTION,
-    aut=KEY_SLOT.AUTHENTICATION
-)
-
-MODE_NAMES = dict(
-    off=TOUCH_MODE.OFF,
-    on=TOUCH_MODE.ON,
-    fixed=TOUCH_MODE.FIXED
-)
 
 
 def one_of(data):
@@ -92,7 +81,7 @@ def openpgp(ctx):
 
     \b
       Require touch to use the authentication key:
-      $ ykman openpgp touch aut on
+      $ ykman openpgp set-touch aut on
     """
     try:
         ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
@@ -116,17 +105,25 @@ def info(ctx):
     click.echo('PIN tries remaining: {}'.format(retries.pin))
     click.echo('Reset code tries remaining: {}'.format(retries.reset))
     click.echo('Admin PIN tries remaining: {}'.format(retries.admin))
-    click.echo()
-    click.echo('Touch policies')
-    click.echo(
-        'Signature key           {.name}'.format(
-            controller.get_touch(KEY_SLOT.SIGNATURE)))
-    click.echo(
-        'Encryption key          {.name}'.format(
-            controller.get_touch(KEY_SLOT.ENCRYPTION)))
-    click.echo(
-        'Authentication key      {.name}'.format(
-            controller.get_touch(KEY_SLOT.AUTHENTICATION)))
+    # Touch only available on YK4 and later
+    if controller.version >= (4, 2, 6):
+        click.echo()
+        click.echo('Touch policies')
+        click.echo(
+            'Signature key           {!s}'.format(
+                controller.get_touch(KEY_SLOT.SIGNATURE)))
+        click.echo(
+            'Encryption key          {!s}'.format(
+                controller.get_touch(KEY_SLOT.ENCRYPTION)))
+        click.echo(
+            'Authentication key      {!s}'.format(
+                controller.get_touch(KEY_SLOT.AUTHENTICATION)))
+        try:
+            click.echo(
+                'Attestation key         {!s}'.format(
+                    controller.get_touch(KEY_SLOT.ATTESTATION)))
+        except APDUError:
+            logger.debug('No attestation key slot found')
 
 
 @openpgp.command()
@@ -153,34 +150,42 @@ def echo_default_pins():
     click.echo('Admin PIN:   12345678')
 
 
-@openpgp.command()
-@click.argument('key', metavar='KEY', type=click.Choice(sorted(KEY_NAMES)),
-                callback=lambda c, p, k: KEY_NAMES.get(k))
-@click.argument('policy', metavar='POLICY', type=click.Choice(sorted(MODE_NAMES)),
-                callback=lambda c, p, k: MODE_NAMES.get(k))
-@click.option('--admin-pin', required=False, metavar='PIN',
-              help='Admin PIN for OpenPGP.')
+@openpgp.command('set-touch')
+@click.argument(
+    'key', metavar='KEY', type=UpperCaseChoice(['AUT', 'ENC', 'SIG', 'ATT']),
+    callback=lambda c, p, v: KEY_SLOT(v))
+@click.argument(
+    'policy', metavar='POLICY',
+    type=UpperCaseChoice(['ON', 'OFF', 'FIXED', 'CACHED', 'CACHED-FIXED']),
+    callback=lambda c, p, v: TOUCH_MODE[v.replace('-', '_')])
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click_force_option
 @click.pass_context
-def touch(ctx, key, policy, admin_pin, force):
+def set_touch(ctx, key, policy, admin_pin, force):
     """
-    Manage touch policy for OpenPGP keys.
+    Set touch policy for OpenPGP keys.
 
     \b
-    KEY     Key slot to set (sig, enc or aut).
-    POLICY  Touch policy to set (on, off or fixed).
+    KEY     Key slot to set (sig, enc, aut or att).
+    POLICY  Touch policy to set (on, off, fixed, cached or cached-fix).
     """
     controller = ctx.obj['controller']
-    old_policy = controller.get_touch(key)
 
-    if old_policy == TOUCH_MODE.FIXED:
-        ctx.fail('A FIXED policy cannot be changed!')
-
-    force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
-        key, policy), abort=True, err=True)
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
-    controller.set_touch(key, policy, admin_pin.encode('utf8'))
+
+    if force or click.confirm(
+            'Set touch policy of {} key to {}?'.format(
+                key.name.lower(),
+                policy.name.lower().replace('_', '-')),
+                abort=True, err=True):
+        try:
+            controller.set_touch(key, policy, admin_pin)
+        except APDUError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                ctx.fail('Touch policy not allowed.')
+            logger.debug('Failed to set touch policy', exc_info=e)
+            ctx.fail('Failed to set touch policy.')
 
 
 @openpgp.command('set-pin-retries')
