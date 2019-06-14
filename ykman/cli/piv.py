@@ -165,9 +165,11 @@ def info(ctx):
         except AttributeError:
             print_dn = False
             logger.debug('Failed to read DN, falling back to only CNs')
-            subject_cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            subject_cn = cert.subject.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME)
             subject_cn = subject_cn[0].value if subject_cn else 'None'
-            issuer_cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            issuer_cn = cert.issuer.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME)
             issuer_cn = issuer_cn[0].value if issuer_cn else 'None'
         except ValueError as e:
             # Malformed certificates may throw ValueError
@@ -823,6 +825,7 @@ def unblock_pin(ctx, puk, new_pin):
             show_default=False, hide_input=True, err=True)
     controller.unblock_pin(puk, new_pin)
 
+
 @piv.command('read-object')
 @click_pin_option
 @click.pass_context
@@ -875,8 +878,8 @@ def write_object(ctx, pin, management_key, object_id, data):
     the range 5f0000 - 5fffff.
 
     \b
-    OBJECT-ID       Id of PIV object in HEX.
-    DATA            File containing the data to be written. Use '-' to use stdin.
+    OBJECT-ID      Id of PIV object in HEX.
+    DATA           File containing the data to be written. Use '-' to use stdin.
     """
 
     controller = ctx.obj['controller']
