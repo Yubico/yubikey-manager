@@ -39,7 +39,7 @@ from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_format_option,
     click_postpone_execution, click_callback,
-    prompt_for_touch, EnumChoice)
+    prompt_for_touch, EnumNameChoice)
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
@@ -81,10 +81,10 @@ click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
 click_pin_policy_option = click.option(
     '--pin-policy',
-    type=EnumChoice(PIN_POLICY),
+    type=EnumNameChoice(PIN_POLICY),
     help='PIN policy for slot.')
 click_touch_policy_option = click.option(
-    '--touch-policy', type=EnumChoice(TOUCH_POLICY),
+    '--touch-policy', type=EnumNameChoice(TOUCH_POLICY),
     help='Touch policy for slot.')
 
 
@@ -227,7 +227,7 @@ def reset(ctx):
 @click_pin_option
 @click.option(
     '-a', '--algorithm', help='Algorithm to use in key generation.',
-    type=EnumChoice(ALGO), default=ALGO.RSA2048.name,
+    type=EnumNameChoice(ALGO), default=ALGO.RSA2048.name,
     show_default=True)
 @click_format_option
 @click_pin_policy_option

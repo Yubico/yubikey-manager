@@ -54,7 +54,7 @@ class UpperCaseChoice(click.Choice):
                 value, ', '.join(self.choices)), param, ctx)
 
 
-class EnumChoice(UpperCaseChoice):
+class EnumNameChoice(UpperCaseChoice):
     """
     Use an enum as the definition for a choice option.
 
