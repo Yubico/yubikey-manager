@@ -188,7 +188,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
 @click.option(
     '-d', '--disable', multiple=True, type=ApplicationsChoice(
         APPLICATION.__members__.keys()), help='Disable applications.')
-@click.option('-l', '--list', is_flag=True, help='List enabled applications.')
+@click.option('-l', '--list', 'list_enabled', is_flag=True,
+              help='List enabled applications.')
 @click.option(
     '-a', '--enable-all', is_flag=True, help='Enable all applications.')
 @click.option(
@@ -208,8 +209,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     metavar='SECONDS', help='Sets the timeout when waiting for touch'
     ' for challenge-response in the OTP application.')
 def usb(
-        ctx, enable, disable, list, enable_all, touch_eject, no_touch_eject,
-        autoeject_timeout, chalresp_timeout, lock_code, force):
+        ctx, enable, disable, list_enabled, enable_all, touch_eject,
+        no_touch_eject, autoeject_timeout, chalresp_timeout, lock_code, force):
     """
     Enable or disable applications over USB.
     """
@@ -220,7 +221,7 @@ def usb(
                 return
         ctx.fail('Can not disable all applications over USB.')
 
-    if not (list or
+    if not (list_enabled or
             enable_all or
             enable or
             disable or
@@ -246,7 +247,7 @@ def usb(
     if not usb_supported:
         ctx.fail('USB interface not supported.')
 
-    if list:
+    if list_enabled:
         _list_apps(ctx, usb_enabled)
 
     if touch_eject:
@@ -325,16 +326,18 @@ def usb(
     '-a', '--enable-all', is_flag=True, help='Enable all applications.')
 @click.option(
     '-D', '--disable-all', is_flag=True, help='Disable all applications')
-@click.option('-l', '--list', is_flag=True, help='List enabled applications')
+@click.option('-l', '--list', 'list_enabled', is_flag=True,
+              help='List enabled applications')
 @click.option(
     '-L', '--lock-code', metavar='HEX',
     help='Current application configuration lock code.')
-def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
+def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code,
+        force):
     """
     Enable or disable applications over NFC.
     """
 
-    if not (list or enable_all or enable or disable_all or disable):
+    if not (list_enabled or enable_all or enable or disable_all or disable):
         ctx.fail('No configuration options chosen.')
 
     if enable_all:
@@ -352,7 +355,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list, lock_code, force):
     if not nfc_supported:
         ctx.fail('NFC interface not available.')
 
-    if list:
+    if list_enabled:
         _list_apps(ctx, nfc_enabled)
 
     for app in enable:
