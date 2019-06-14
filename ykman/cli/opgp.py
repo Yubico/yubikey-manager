@@ -156,7 +156,8 @@ def echo_default_pins():
 @openpgp.command()
 @click.argument('key', metavar='KEY', type=click.Choice(sorted(KEY_NAMES)),
                 callback=lambda c, p, k: KEY_NAMES.get(k))
-@click.argument('policy', metavar='POLICY', type=click.Choice(sorted(MODE_NAMES)),
+@click.argument('policy', metavar='POLICY',
+                type=click.Choice(sorted(MODE_NAMES)),
                 callback=lambda c, p, k: MODE_NAMES.get(k))
 @click.option('--admin-pin', required=False, metavar='PIN',
               help='Admin PIN for OpenPGP.')
