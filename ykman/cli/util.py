@@ -39,8 +39,11 @@ class UpperCaseChoice(click.Choice):
     """
     Support lowercase option values for uppercase options.
     Does not support token normalization.
+    Choice options MUST be all uppercase.
     """
     def __init__(self, choices):
+        for v in choices:
+            assert v.upper() == v, 'Choice not all uppercase: ' + v
         click.Choice.__init__(self, choices)
 
     def convert(self, value, param, ctx):
