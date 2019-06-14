@@ -40,6 +40,24 @@ from .driver_fido import FIPS_U2F_CMD
 logger = logging.getLogger(__name__)
 
 
+class ResidentCredential(object):
+    def __init__(self, raw_credential, raw_rp):
+        self._raw_credential = raw_credential
+        self._raw_rp = raw_rp
+
+    @property
+    def credential_id(self):
+        return self._raw_credential[CredentialManagement.RESULT.CREDENTIAL_ID]
+
+    @property
+    def rp_id(self):
+        return self._raw_rp[CredentialManagement.RESULT.RP]['id']
+
+    @property
+    def user_name(self):
+        return self._raw_credential[CredentialManagement.RESULT.USER]['name']
+
+
 class Fido2Controller(object):
 
     def __init__(self, driver):
@@ -61,7 +79,7 @@ class Fido2Controller(object):
         for rp in _credman.enumerate_rps():
             for cred in _credman.enumerate_creds(
                     rp[CredentialManagement.RESULT.RP_ID_HASH]):
-                yield cred, rp
+                yield ResidentCredential(cred, rp)
 
     def delete_resident_credential(self, credential_id, pin):
         _credman = CredentialManagement(
@@ -69,8 +87,8 @@ class Fido2Controller(object):
             self.pin.VERSION,
             self.pin.get_pin_token(pin))
 
-        for cred, rp in self.get_resident_credentials(pin):
-            if credential_id == cred[CredentialManagement.RESULT.CREDENTIAL_ID]:
+        for cred in self.get_resident_credentials(pin):
+            if credential_id == cred.credential_id:
                 _credman.delete_cred(credential_id)
 
     def get_pin_retries(self):

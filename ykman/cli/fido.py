@@ -29,7 +29,6 @@ from __future__ import absolute_import
 import click
 import logging
 from fido2.ctap1 import ApduError
-from fido2.ctap2 import CredentialManagement
 from fido2.ctap import CtapError
 from time import sleep
 from .util import click_postpone_execution, prompt_for_touch, click_force_option
@@ -119,10 +118,8 @@ def list_creds(ctx, pin):
         pin = _prompt_current_pin(prompt='Enter your PIN')
 
     try:
-        for cred, rp in controller.get_resident_credentials(pin):
-            click.echo('{} ({})'.format(
-                    cred[CredentialManagement.RESULT.USER]['name'],
-                    rp[CredentialManagement.RESULT.RP]['id']))
+        for cred in controller.get_resident_credentials(pin):
+            click.echo('{} ({})'.format(cred.user_name, cred.rp_id))
     except CtapError as e:
         if e.code == CtapError.ERR.PIN_INVALID:
             ctx.fail('Wrong PIN.')
@@ -151,24 +148,18 @@ def delete(ctx, query, pin, force):
 
     hits = []
     try:
-        for cred, rp in controller.get_resident_credentials(pin):
-            if query.lower() in cred[
-                CredentialManagement.RESULT.USER]['name'].lower() or \
-                    query.lower() in rp[
-                        CredentialManagement.RESULT.RP]['id']:
-                hits.append([cred, rp])
+        for cred in controller.get_resident_credentials(pin):
+            if query.lower() in cred.user_name or query.lower() in cred.rp_id:
+                hits.append(cred)
         if len(hits) == 0:
             ctx.fail('No matches, nothing to be done.')
         elif len(hits) == 1:
-            cred, rp = hits[0]
+            cred = hits[0]
             if force or click.confirm(
                     'Delete credential {} ({})?'.format(
-                        cred[CredentialManagement.RESULT.USER]['name'],
-                        rp[CredentialManagement.RESULT.RP]['id'],
-                        )
-                    ):
+                        cred.user_name, cred.rp_id)):
                 controller.delete_resident_credential(
-                    cred[CredentialManagement.RESULT.CREDENTIAL_ID], pin)
+                    cred.credential_id, pin)
         else:
             ctx.fail('Multiple matches, make the query more specific.')
     except CtapError as e:
