@@ -25,6 +25,6 @@ def additional_tests(ykman_cli):
                 '-m', DEFAULT_MANAGEMENT_KEY, '0x5f0001',
                 '-', input='test data')
             output = ykman_cli('piv', 'read-object', '0x5f0001')
-            self.assertEquals('test data\n', output)
+            self.assertEqual('test data\n', output)
 
     return [Misc]
