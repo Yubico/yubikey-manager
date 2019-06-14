@@ -32,7 +32,7 @@ from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
-    click_parse_b32_key, prompt_for_touch, UpperCaseChoice
+    click_parse_b32_key, prompt_for_touch, EnumChoice
 )
 from ..driver_ccid import (
     APDUError,  SW
@@ -169,15 +169,17 @@ def reset(ctx):
 @click.argument('name')
 @click.argument('secret', callback=click_parse_b32_key, required=False)
 @click.option(
-    '-o', '--oath-type', type=UpperCaseChoice(['TOTP', 'HOTP']), default='TOTP',
+    '-o', '--oath-type',
+    type=EnumChoice(OATH_TYPE), default=OATH_TYPE.TOTP.name,
     help='Time-based (TOTP) or counter-based'
     ' (HOTP) credential.', show_default=True)
 @click.option(
     '-d', '--digits', type=click.Choice(['6', '7', '8']), default='6',
     help='Number of digits in generated code.', show_default=True)
 @click.option(
-    '-a', '--algorithm', type=UpperCaseChoice(['SHA1', 'SHA256', 'SHA512']),
-    default='SHA1', help='Algorithm to use for '
+    '-a', '--algorithm',
+    type=EnumChoice(ALGO), default=ALGO.SHA1.name,
+    help='Algorithm to use for '
     'code generation.', show_default=True)
 @click.option(
     '-c', '--counter', type=click.INT, default=0,
@@ -197,8 +199,6 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
     This will add a new credential to your YubiKey.
     """
 
-    oath_type = OATH_TYPE[oath_type]
-    algorithm = ALGO[algorithm]
     digits = int(digits)
 
     if not secret:

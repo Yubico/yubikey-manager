@@ -54,6 +54,22 @@ class UpperCaseChoice(click.Choice):
                 value, ', '.join(self.choices)), param, ctx)
 
 
+class EnumChoice(UpperCaseChoice):
+    """
+    Use an enum as the definition for a choice option.
+
+    Enum member names MUST be all uppercase. Options are not case sensitive.
+    Underscores in enum names are translated to dashes in the option choice.
+    """
+    def __init__(self, choices_enum):
+        super().__init__([v.name.replace('_', '-') for v in choices_enum])
+        self.choices_enum = choices_enum
+
+    def convert(self, value, param, ctx):
+        name = super().convert(value.replace('-', '_'), param, ctx)
+        return self.choices_enum[name]
+
+
 def click_callback(invoke_on_missing=False):
     def wrap(f):
         @functools.wraps(f)
