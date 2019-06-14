@@ -33,7 +33,7 @@ class TestUtilityFunctions(unittest.TestCase):
         for l in range(0, 38):
             self.assertRegex(
                 generate_static_pw(l),
-                '^[cbdefghijklnrtuvCBDEFGHIJKLNRTUV]{' + '{:d}'.format(l) + '}$')
+                '^[cbdefghijklnrtuvCBDEFGHIJKLNRTUV]{%d}$' % l)
 
     def test_hmac_shorten_key(self):
         self.assertEqual(b'short', hmac_shorten_key(b'short', 'sha1'))
@@ -146,14 +146,13 @@ class TestUtilityFunctions(unittest.TestCase):
         with open_file('rsa_2048_key_cert.pfx') as rsa_2048_key_cert_pfx:
             self.assertFalse(is_pem(rsa_2048_key_cert_pfx.read()))
 
-        with open_file('rsa_2048_cert_metadata.pem') as rsa_2048_cert_metadata_pem:
-            self.assertTrue(is_pem(rsa_2048_cert_metadata_pem.read()))
+        with open_file('rsa_2048_cert_metadata.pem') as f:
+            self.assertTrue(is_pem(f.read()))
 
         with open_file(
             'rsa_2048_key_cert_encrypted.pfx') as \
                 rsa_2048_key_cert_encrypted_pfx:
             self.assertFalse(is_pem(rsa_2048_key_cert_encrypted_pfx.read()))
-
 
     def test_form_factor_from_code(self):
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(None))
@@ -166,5 +165,6 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(
             FORM_FACTOR.USB_C_KEYCHAIN, FORM_FACTOR.from_code(0x03))
         self.assertEqual(FORM_FACTOR.USB_C_NANO, FORM_FACTOR.from_code(0x04))
-        self.assertEqual(FORM_FACTOR.USB_C_LIGHTNING, FORM_FACTOR.from_code(0x05))
+        self.assertEqual(FORM_FACTOR.USB_C_LIGHTNING,
+                         FORM_FACTOR.from_code(0x05))
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x06))
