@@ -146,11 +146,11 @@ def delete(ctx, query, pin, force):
     if controller.has_pin and pin is None:
         pin = _prompt_current_pin(prompt='Enter your PIN')
 
-    hits = []
     try:
-        for cred in controller.get_resident_credentials(pin):
-            if query.lower() in cred.user_name or query.lower() in cred.rp_id:
-                hits.append(cred)
+        hits = [
+            cred for cred in controller.get_resident_credentials(pin)
+            if query.lower() in cred.user_name or query.lower() in cred.rp_id
+        ]
         if len(hits) == 0:
             ctx.fail('No matches, nothing to be done.')
         elif len(hits) == 1:
