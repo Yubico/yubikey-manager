@@ -1,3 +1,9 @@
+* Version 3.0.0 (unreleased)
+ ** Add support for new YubiKey Preview and lightning form factor
+ ** FIDO: Support for credential management
+ ** OpenPGP: Support for OpenPGP attestation, cardholder certificates and cached touch policies
+ ** OTP: Add flag for using numeric keypad when sending digits
+
 * Version 2.1.1 (released 2019-05-28)
  ** OTP: Add initial support for uploading Yubico OTP credentials to YubiCloud
  ** Don't automatically select the U2F applet on YubiKey NEO, it might be blocked by the OS
