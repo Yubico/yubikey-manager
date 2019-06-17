@@ -172,10 +172,15 @@ def set_touch(ctx, key, policy, admin_pin, force):
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
 
+    policy_name = policy.name.lower().replace('_', '-')
+
+    if policy not in controller.supported_touch_policies:
+        ctx.fail('Touch policy {} not supported.'.format(policy_name))
+
     if force or click.confirm(
         'Set touch policy of {} key to {}?'.format(
             key.name.lower(),
-            policy.name.lower().replace('_', '-')),
+            policy_name),
             abort=True, err=True):
         try:
             controller.set_touch(key, policy, admin_pin)
