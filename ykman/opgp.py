@@ -73,6 +73,7 @@ class KEY_SLOT(Enum):  # noqa: N801
             return 0xd8
         if self == KEY_SLOT.ATTESTATION:
             return 0xd9
+
     @property
     def cert_position(self):
         if self == KEY_SLOT.SIGNATURE:
