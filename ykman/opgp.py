@@ -273,7 +273,7 @@ class OpgpController(object):
             return '2B81040023'
         if curve == 'x25519':
             return '2B060104019755010501'
-        raise ValueError('No OID for curve!')
+        raise ValueError('No OID for curve: ' + curve)
 
     def _get_opgp_algo_id_from_ec(self, key):
         curve = key.curve.name
@@ -281,7 +281,7 @@ class OpgpController(object):
             return 0x13
         if curve == 'x25519':
             return 0x16
-        raise ValueError('No Algo ID for curve!')
+        raise ValueError('No Algo ID for curve: ' + curve)
 
     def _get_key_data(self, key):
 
