@@ -207,8 +207,19 @@ class OpgpController(object):
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))
 
-    def get_touch(self, key_slot):
+    @property
+    def supported_touch_policies(self):
         if self.version < (4, 2, 0):
+            return []
+        if self.version < (5, 2, 1):
+            return [TOUCH_MODE.ON, TOUCH_MODE.OFF, TOUCH_MODE.FIXED]
+        if self.version >= (5, 2, 1):
+            return [
+                TOUCH_MODE.ON, TOUCH_MODE.OFF, TOUCH_MODE.FIXED,
+                TOUCH_MODE.CACHED, TOUCH_MODE.CACHED_FIXED]
+
+    def get_touch(self, key_slot):
+        if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
         if self.version < (5, 2, 1) and key_slot == KEY_SLOT.ATTESTATION:
             raise ValueError('Attestation key not available on this device.')
@@ -216,12 +227,10 @@ class OpgpController(object):
         return TOUCH_MODE(six.indexbytes(data, 0))
 
     def set_touch(self, key_slot, mode, admin_pin):
-        if self.version < (4, 2, 0):
+        if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
-        if self.version < (5, 2, 1) and mode in [
-                    TOUCH_MODE.CACHED, TOUCH_MODE.CACHED_FIXED]:
-            raise ValueError(
-                    'Cached touch policies not available on this device.')
+        if mode not in self.supported_touch_policies:
+            raise ValueError('Touch policy not available on this device.')
         self._verify(PW3, admin_pin)
         self.send_apdu(0, INS.PUT_DATA, 0, key_slot.touch_position,
                        bytes(bytearray([mode, TOUCH_METHOD_BUTTON])))
