@@ -1,11 +1,7 @@
 import unittest
-import os
 from test.util import ykman_cli
 
 
-@unittest.skipIf(
-    os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL') is None,
-    'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
 class TestExternalLibraries(unittest.TestCase):
 
     def test_ykman_version(self):
