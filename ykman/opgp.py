@@ -256,7 +256,7 @@ class OpgpController(object):
 
     def _get_key_attributes(self, key):
         if isinstance(key, rsa.RSAPrivateKey):
-            return struct.pack(">BHHB", 0x01, key.key_size, 32, 0)
+            return struct.pack('>BHHB', 0x01, key.key_size, 32, 0)
         if isinstance(key, ec.EllipticCurvePrivateKey):
             return int_to_bytes(
                 self._get_opgp_algo_id_from_ec(
@@ -300,8 +300,7 @@ class OpgpController(object):
 
         if isinstance(key, rsa.RSAPrivateKey):
             ln = key.key_size // 8 // 2
-            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81 \
-                \x80\x5f\x48\x82\x01\x03\x01\x00\x01'
+            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81\x80\x5f\x48\x82\x01\x03\x01\x00\x01'  # noqa: E501
             data += int_to_bytes(private_numbers.p, ln)
             data += int_to_bytes(private_numbers.q, ln)
             return b'\x4d' + _der_len(data) + data
@@ -324,10 +323,10 @@ class OpgpController(object):
         # Delete attestation key by changing the key attributes twice.
         self.send_cmd(
             0, INS.PUT_DATA, 0, 0xda,
-            data=struct.pack(">BHHB", 0x01, 2048, 32, 0))
+            data=struct.pack('>BHHB', 0x01, 2048, 32, 0))
         self.send_cmd(
             0, INS.PUT_DATA, 0, 0xda,
-            data=struct.pack(">BHHB", 0x01, 4096, 32, 0))
+            data=struct.pack('>BHHB', 0x01, 4096, 32, 0))
 
     def delete_certificate(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
