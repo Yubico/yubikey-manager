@@ -29,26 +29,15 @@ from __future__ import absolute_import
 
 import logging
 import click
-from ..util import TRANSPORT
+from ..util import TRANSPORT, parse_certificates, parse_private_key
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW
-from .util import click_force_option, click_postpone_execution
+from .util import (
+    click_force_option, click_format_option, click_postpone_execution,
+    UpperCaseChoice)
 
 
 logger = logging.getLogger(__name__)
-
-
-KEY_NAMES = dict(
-    sig=KEY_SLOT.SIGNATURE,
-    enc=KEY_SLOT.ENCRYPTION,
-    aut=KEY_SLOT.AUTHENTICATION
-)
-
-MODE_NAMES = dict(
-    off=TOUCH_MODE.OFF,
-    on=TOUCH_MODE.ON,
-    fixed=TOUCH_MODE.FIXED
-)
 
 
 def one_of(data):
@@ -92,7 +81,7 @@ def openpgp(ctx):
 
     \b
       Require touch to use the authentication key:
-      $ ykman openpgp touch aut on
+      $ ykman openpgp set-touch aut on
     """
     try:
         ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
@@ -116,17 +105,25 @@ def info(ctx):
     click.echo('PIN tries remaining: {}'.format(retries.pin))
     click.echo('Reset code tries remaining: {}'.format(retries.reset))
     click.echo('Admin PIN tries remaining: {}'.format(retries.admin))
-    click.echo()
-    click.echo('Touch policies')
-    click.echo(
-        'Signature key           {.name}'.format(
-            controller.get_touch(KEY_SLOT.SIGNATURE)))
-    click.echo(
-        'Encryption key          {.name}'.format(
-            controller.get_touch(KEY_SLOT.ENCRYPTION)))
-    click.echo(
-        'Authentication key      {.name}'.format(
-            controller.get_touch(KEY_SLOT.AUTHENTICATION)))
+    # Touch only available on YK4 and later
+    if controller.version >= (4, 2, 6):
+        click.echo()
+        click.echo('Touch policies')
+        click.echo(
+            'Signature key           {!s}'.format(
+                controller.get_touch(KEY_SLOT.SIGNATURE)))
+        click.echo(
+            'Encryption key          {!s}'.format(
+                controller.get_touch(KEY_SLOT.ENCRYPTION)))
+        click.echo(
+            'Authentication key      {!s}'.format(
+                controller.get_touch(KEY_SLOT.AUTHENTICATION)))
+        try:
+            click.echo(
+                'Attestation key         {!s}'.format(
+                    controller.get_touch(KEY_SLOT.ATTESTATION)))
+        except APDUError:
+            logger.debug('No attestation key slot found')
 
 
 @openpgp.command()
@@ -153,63 +150,256 @@ def echo_default_pins():
     click.echo('Admin PIN:   12345678')
 
 
-@openpgp.command()
-@click.argument('key', metavar='KEY', type=click.Choice(sorted(KEY_NAMES)),
-                callback=lambda c, p, k: KEY_NAMES.get(k))
-@click.argument('policy', metavar='POLICY', type=click.Choice(sorted(MODE_NAMES)),
-                callback=lambda c, p, k: MODE_NAMES.get(k))
-@click.option('--admin-pin', required=False, metavar='PIN',
-              help='Admin PIN for OpenPGP.')
+@openpgp.command('set-touch')
+@click.argument(
+    'key', metavar='KEY', type=UpperCaseChoice(['AUT', 'ENC', 'SIG', 'ATT']),
+    callback=lambda c, p, v: KEY_SLOT(v))
+@click.argument(
+    'policy', metavar='POLICY',
+    type=UpperCaseChoice(['ON', 'OFF', 'FIXED', 'CACHED', 'CACHED-FIXED']),
+    callback=lambda c, p, v: TOUCH_MODE[v.replace('-', '_')])
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click_force_option
 @click.pass_context
-def touch(ctx, key, policy, admin_pin, force):
+def set_touch(ctx, key, policy, admin_pin, force):
     """
-    Manage touch policy for OpenPGP keys.
+    Set touch policy for OpenPGP keys.
 
     \b
-    KEY     Key slot to set (sig, enc or aut).
-    POLICY  Touch policy to set (on, off or fixed).
+    KEY     Key slot to set (sig, enc, aut or att).
+    POLICY  Touch policy to set (on, off, fixed, cached or cached-fix).
     """
     controller = ctx.obj['controller']
-    old_policy = controller.get_touch(key)
 
-    if old_policy == TOUCH_MODE.FIXED:
-        ctx.fail('A FIXED policy cannot be changed!')
-
-    force or click.confirm('Set touch policy of {.name} key to {.name}?'.format(
-        key, policy), abort=True, err=True)
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
-    controller.set_touch(key, policy, admin_pin.encode('utf8'))
+
+    if force or click.confirm(
+            'Set touch policy of {} key to {}?'.format(
+                key.name.lower(),
+                policy.name.lower().replace('_', '-')),
+                abort=True, err=True):
+        try:
+            controller.set_touch(key, policy, admin_pin)
+        except APDUError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                ctx.fail('Touch policy not allowed.')
+            logger.debug('Failed to set touch policy', exc_info=e)
+            ctx.fail('Failed to set touch policy.')
 
 
 @openpgp.command('set-pin-retries')
-@click.argument('pw-attempts', nargs=3, type=click.IntRange(1, 99))
-@click.password_option('--admin-pin', metavar='PIN', prompt='Enter admin PIN',
-                       confirmation_prompt=False)
+@click.argument(
+    'pin-retries', type=click.IntRange(1, 99), metavar='PIN-RETRIES')
+@click.argument(
+    'reset-code-retries',
+    type=click.IntRange(1, 99), metavar='RESET-CODE-RETRIES')
+@click.argument(
+    'admin-pin-retries',
+    type=click.IntRange(1, 99), metavar='ADMIN-PIN-RETRIES')
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click_force_option
 @click.pass_context
-def set_pin_retries(ctx, pw_attempts, admin_pin, force):
+def set_pin_retries(
+        ctx, admin_pin, pin_retries,
+        reset_code_retries, admin_pin_retries, force):
     """
-    Manage pin-retries.
-
-    Sets the number of attempts available before locking for each PIN.
-
-    PW_ATTEMPTS should be three integer values corresponding to the number of
-    attempts for the PIN, Reset Code, and Admin PIN, respectively.
+    Set PIN, Reset Code and Admin PIN retries.
     """
     controller = ctx.obj['controller']
+
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
+
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
         click.echo('WARNING: Setting PIN retries will reset the values for all '
                    '3 PINs!')
-    force or click.confirm('Set PIN retry counters to: {} {} {}?'.format(
-        *pw_attempts), abort=True, err=True)
-    controller.set_pin_retries(*(pw_attempts + (admin_pin.encode('utf8'),)))
-    click.echo('PIN retries successfully set.')
-    if resets_pins:
-        click.echo('Default PINs are set.')
-        echo_default_pins()
+    if force or click.confirm(
+            'Set PIN retry counters to: {} {} {}?'.format(
+                pin_retries, reset_code_retries,
+                admin_pin_retries), abort=True, err=True):
+
+        controller.set_pin_retries(
+            pin_retries, reset_code_retries, admin_pin_retries, admin_pin)
+
+        if resets_pins:
+            click.echo('Default PINs are set.')
+            echo_default_pins()
+
+
+@openpgp.command()
+@click.pass_context
+@click.option('-P', '--pin', help='PIN code.')
+@click_format_option
+@click.argument(
+    'key', metavar='KEY', type=UpperCaseChoice(['AUT', 'ENC', 'SIG']),
+    callback=lambda c, p, v: KEY_SLOT(v))
+@click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
+def attest(ctx, key, certificate, pin, format):
+    """
+    Generate a attestation certificate for a key.
+
+    Attestation is used to show that an asymmetric key was generated on the
+    YubiKey and therefore doesn't exist outside the device.
+
+    \b
+    KEY         Key slot to attest (sig, enc, aut).
+    CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
+    """
+
+    controller = ctx.obj['controller']
+
+    if not pin:
+        pin = click.prompt(
+            'Enter PIN', default='', hide_input=True,
+            show_default=False, err=True)
+
+    try:
+        cert = controller.read_certificate(key)
+    except ValueError:
+        cert = None
+
+    if not cert or click.confirm(
+        'There is already data stored in the certificate slot for {}, '
+        'do you want to overwrite it?'.format(key.name)):
+        touch_policy = controller.get_touch(KEY_SLOT.ATTESTATION)
+        if touch_policy in [TOUCH_MODE.ON, TOUCH_MODE.FIXED]:
+            click.echo('Touch your YubiKey...')
+        try:
+            cert = controller.attest(key, pin)
+            certificate.write(cert.public_bytes(encoding=format))
+        except Exception as e:
+            logger.debug('Failed to attest', exc_info=e)
+            ctx.fail('Attestation failed')
+
+@openpgp.command('export-certificate')
+@click.pass_context
+@click.argument(
+    'key', metavar='KEY', type=UpperCaseChoice(['AUT', 'ENC', 'SIG', 'ATT']),
+    callback=lambda c, p, v: KEY_SLOT(v))
+@click_format_option
+@click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
+def export_certificate(ctx, key, format, certificate):
+    """
+    Export an OpenPGP Cardholder certificate.
+
+    \b
+    KEY         Key slot to read from (sig, enc, aut, or att).
+    CERTIFICATE File to write certificate to. Use '-' to use stdout.
+    """
+    controller = ctx.obj['controller']
+    try:
+        cert = controller.read_certificate(key)
+    except ValueError:
+        ctx.fail('Failed to read certificate from {}'.format(key.name))
+    certificate.write(cert.public_bytes(encoding=format))
+
+
+@openpgp.command('delete-certificate')
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
+@click.pass_context
+@click.argument(
+    'key', metavar='KEY', type=UpperCaseChoice(['AUT', 'ENC', 'SIG', 'ATT']),
+    callback=lambda c, p, v: KEY_SLOT(v))
+def delete_certificate(ctx, key, admin_pin):
+    """
+    Delete an OpenPGP Cardholder certificate.
+
+    \b
+    KEY         Key slot to delete certificate from (sig, enc, aut, or att).
+    """
+    controller = ctx.obj['controller']
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
+    try:
+        controller.delete_certificate(key, admin_pin)
+    except Exception as e:
+        logger.debug('Failed to delete ', exc_info=e)
+        ctx.fail('Failed to delete certificate.')
+
+
+@openpgp.command('import-certificate')
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
+@click.pass_context
+@click.argument(
+    'key', metavar='KEY', type=UpperCaseChoice(['AUT', 'ENC', 'SIG', 'ATT']),
+    callback=lambda c, p, v: KEY_SLOT(v))
+@click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
+def import_certificate(ctx, key, cert, admin_pin):
+    """
+    Import an OpenPGP Cardholder certificate.
+
+    \b
+    KEY         Key slot to import certificate to (sig, enc, aut, or att).
+    CERTIFICATE File containing the certificate. Use '-' to use stdin.
+    """
+    controller = ctx.obj['controller']
+
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
+
+    try:
+        certs = parse_certificates(cert.read(), password=None)
+    except Exception as e:
+        logger.debug('Failed to parse', exc_info=e)
+        ctx.fail('Failed to parse certificate.')
+    if len(certs) != 1:
+        ctx.fail('Can only import one certificate.')
+    try:
+        controller.import_certificate(key, certs[0], admin_pin)
+    except Exception as e:
+        logger.debug('Failed to import', exc_info=e)
+        ctx.fail('Failed to import certificate')
+
+
+@openpgp.command('import-attestation-key')
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
+@click.pass_context
+@click.argument('private-key', type=click.File('rb'), metavar='PRIVATE-KEY')
+def import_attestation_key(ctx, private_key, admin_pin):
+    """
+    Import a private attestation key.
+
+    Import a private key for OpenPGP attestation.
+
+    \b
+    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
+    """
+    controller = ctx.obj['controller']
+
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
+    try:
+        private_key = parse_private_key(private_key.read(), password=None)
+    except Exception as e:
+        logger.debug('Failed to parse', exc_info=e)
+        ctx.fail('Failed to parse private key.')
+    try:
+        controller.import_attestation_key(private_key, admin_pin)
+    except Exception as e:
+        logger.debug('Failed to import', exc_info=e)
+        ctx.fail('Failed to import attestation key.')
+
+
+@openpgp.command('delete-attestation-key')
+@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
+@click.pass_context
+def delete_attestation_key(ctx, admin_pin):
+    """
+    Delete the attestation key.
+
+    Delete the OpenPGP attestation key.
+    """
+    controller = ctx.obj['controller']
+
+    if admin_pin is None:
+        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
+    try:
+        controller.delete_attestation_key(admin_pin)
+    except Exception as e:
+        logger.debug('Failed to delete', exc_info=e)
+        ctx.fail('Failed to delete attestation key.')
 
 
 openpgp.transports = TRANSPORT.CCID

@@ -13,7 +13,7 @@ class TestYkmanInfo(DestructiveYubikeyTestCase):
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
     def test_ykman_info_does_not_report_fips_for_non_fips_device(self):
-        info = ykman_cli('info --check-fips')
+        info = ykman_cli('info', '--check-fips')
         self.assertNotIn('FIPS', info)
 
     @unittest.skipIf(not is_fips(), 'YubiKey FIPS required.')
