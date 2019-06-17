@@ -846,10 +846,18 @@ class PivController(object):
             ).public_key(default_backend())
         elif algorithm in [ALGO.ECCP256, ALGO.ECCP384]:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
-            return ec.EllipticCurvePublicNumbers.from_encoded_point(
-                curve(),
-                resp[5:]
-            ).public_key(default_backend())
+
+            try:
+                # Added in cryptography 2.5
+                return ec.EllipticCurvePublicKey.from_encoded_point(
+                    curve(),
+                    resp[5:]
+                )
+            except AttributeError:
+                return ec.EllipticCurvePublicNumbers.from_encoded_point(
+                    curve(),
+                    resp[5:]
+                ).public_key(default_backend())
 
         raise UnsupportedAlgorithm(
             'Invalid algorithm: {}'.format(algorithm),
