@@ -118,12 +118,10 @@ def info(ctx):
         click.echo(
             'Authentication key      {!s}'.format(
                 controller.get_touch(KEY_SLOT.AUTHENTICATION)))
-        try:
+        if controller.supports_attestation:
             click.echo(
                 'Attestation key         {!s}'.format(
                     controller.get_touch(KEY_SLOT.ATTESTATION)))
-        except APDUError:
-            logger.debug('No attestation key slot found')
 
 
 @openpgp.command()
@@ -167,18 +165,23 @@ def set_touch(ctx, key, policy, admin_pin, force):
 
     \b
     KEY     Key slot to set (sig, enc, aut or att).
-    POLICY  Touch policy to set (on, off, fixed, cached or cached-fix).
+    POLICY  Touch policy to set (on, off, fixed, cached or cached-fixed).
     """
     controller = ctx.obj['controller']
 
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
 
+    policy_name = policy.name.lower().replace('_', '-')
+
+    if policy not in controller.supported_touch_policies:
+        ctx.fail('Touch policy {} not supported.'.format(policy_name))
+
     if force or click.confirm(
-            'Set touch policy of {} key to {}?'.format(
-                key.name.lower(),
-                policy.name.lower().replace('_', '-')),
-                abort=True, err=True):
+        'Set touch policy of {} key to {}?'.format(
+            key.name.lower(),
+            policy_name),
+            abort=True, err=True):
         try:
             controller.set_touch(key, policy, admin_pin)
         except APDUError as e:
@@ -261,8 +264,8 @@ def attest(ctx, key, certificate, pin, format):
         cert = None
 
     if not cert or click.confirm(
-        'There is already data stored in the certificate slot for {}, '
-        'do you want to overwrite it?'.format(key.name)):
+            'There is already data stored in the certificate slot for {}, '
+            'do you want to overwrite it?'.format(key.name)):
         touch_policy = controller.get_touch(KEY_SLOT.ATTESTATION)
         if touch_policy in [TOUCH_MODE.ON, TOUCH_MODE.FIXED]:
             click.echo('Touch your YubiKey...')
@@ -272,6 +275,7 @@ def attest(ctx, key, certificate, pin, format):
         except Exception as e:
             logger.debug('Failed to attest', exc_info=e)
             ctx.fail('Attestation failed')
+
 
 @openpgp.command('export-certificate')
 @click.pass_context
@@ -380,26 +384,6 @@ def import_attestation_key(ctx, private_key, admin_pin):
     except Exception as e:
         logger.debug('Failed to import', exc_info=e)
         ctx.fail('Failed to import attestation key.')
-
-
-@openpgp.command('delete-attestation-key')
-@click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
-@click.pass_context
-def delete_attestation_key(ctx, admin_pin):
-    """
-    Delete the attestation key.
-
-    Delete the OpenPGP attestation key.
-    """
-    controller = ctx.obj['controller']
-
-    if admin_pin is None:
-        admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
-    try:
-        controller.delete_attestation_key(admin_pin)
-    except Exception as e:
-        logger.debug('Failed to delete', exc_info=e)
-        ctx.fail('Failed to delete attestation key.')
 
 
 openpgp.transports = TRANSPORT.CCID

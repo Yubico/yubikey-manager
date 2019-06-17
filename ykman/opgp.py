@@ -40,10 +40,10 @@ from cryptography.utils import int_to_bytes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from cryptography.hazmat.primitives.asymmetric.ec import (
-    SECP256R1, SECP384R1, SECP521R1)
+
 
 logger = logging.getLogger(__name__)
+
 
 @unique
 class KEY_SLOT(Enum):  # noqa: N801
@@ -52,6 +52,7 @@ class KEY_SLOT(Enum):  # noqa: N801
     AUTHENTICATION = 'AUT'
     ATTESTATION = 'ATT'
 
+    @property
     def key_position(self):
         if self == KEY_SLOT.SIGNATURE:
             return 0x01
@@ -62,6 +63,7 @@ class KEY_SLOT(Enum):  # noqa: N801
         if self == KEY_SLOT.ATTESTATION:
             return 0x04
 
+    @property
     def touch_position(self):
         if self == KEY_SLOT.SIGNATURE:
             return 0xd6
@@ -72,6 +74,7 @@ class KEY_SLOT(Enum):  # noqa: N801
         if self == KEY_SLOT.ATTESTATION:
             return 0xd9
 
+    @property
     def cert_position(self):
         if self == KEY_SLOT.SIGNATURE:
             return 0x02
@@ -205,23 +208,36 @@ class OpgpController(object):
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))
 
-    def get_touch(self, key_slot):
+    @property
+    def supported_touch_policies(self):
         if self.version < (4, 2, 0):
+            return []
+        if self.version < (5, 2, 1):
+            return [TOUCH_MODE.ON, TOUCH_MODE.OFF, TOUCH_MODE.FIXED]
+        if self.version >= (5, 2, 1):
+            return [
+                TOUCH_MODE.ON, TOUCH_MODE.OFF, TOUCH_MODE.FIXED,
+                TOUCH_MODE.CACHED, TOUCH_MODE.CACHED_FIXED]
+
+    @property
+    def supports_attestation(self):
+        return self.version >= (5, 2, 1)
+
+    def get_touch(self, key_slot):
+        if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
-        if self.version < (5, 2, 1) and key_slot == KEY_SLOT.ATTESTATION:
+        if key_slot == KEY_SLOT.ATTESTATION and not self.supports_attestation:
             raise ValueError('Attestation key not available on this device.')
-        data = self.send_apdu(0, INS.GET_DATA, 0, key_slot.touch_position())
+        data = self.send_apdu(0, INS.GET_DATA, 0, key_slot.touch_position)
         return TOUCH_MODE(six.indexbytes(data, 0))
 
     def set_touch(self, key_slot, mode, admin_pin):
-        if self.version < (4, 2, 0):
+        if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
-        if self.version < (5, 2, 1) and mode in [
-                    TOUCH_MODE.CACHED, TOUCH_MODE.CACHED_FIXED]:
-            raise ValueError(
-                    'Cached touch policies not available on this device.')
+        if mode not in self.supported_touch_policies:
+            raise ValueError('Touch policy not available on this device.')
         self._verify(PW3, admin_pin)
-        self.send_apdu(0, INS.PUT_DATA, 0, key_slot.touch_position(),
+        self.send_apdu(0, INS.PUT_DATA, 0, key_slot.touch_position,
                        bytes(bytearray([mode, TOUCH_METHOD_BUTTON])))
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, admin_pin):
@@ -237,7 +253,7 @@ class OpgpController(object):
 
     def read_certificate(self, key_slot):
         self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0, INS.SELECT_DATA, key_slot.cert_position,
             0x04, data=a2b_hex('0660045C027F21'))
         data = self.send_cmd(
             0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
@@ -249,14 +265,14 @@ class OpgpController(object):
         self._verify(PW3, admin_pin)
         cert_data = certificate.public_bytes(Encoding.DER)
         self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0, INS.SELECT_DATA, key_slot.cert_position,
             0x04, data=a2b_hex('0660045C027F21'))
         self.send_cmd(
             0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=cert_data)
 
     def _get_key_attributes(self, key):
         if isinstance(key, rsa.RSAPrivateKey):
-            return struct.pack(">BHHB", 0x01, key.key_size, 32, 0)
+            return struct.pack('>BHHB', 0x01, key.key_size, 32, 0)
         if isinstance(key, ec.EllipticCurvePrivateKey):
             return int_to_bytes(
                 self._get_opgp_algo_id_from_ec(
@@ -273,7 +289,7 @@ class OpgpController(object):
             return '2B81040023'
         if curve == 'x25519':
             return '2B060104019755010501'
-        raise ValueError('No OID for curve!')
+        raise ValueError('No OID for curve: ' + curve)
 
     def _get_opgp_algo_id_from_ec(self, key):
         curve = key.curve.name
@@ -281,7 +297,7 @@ class OpgpController(object):
             return 0x13
         if curve == 'x25519':
             return 0x16
-        raise ValueError('No Algo ID for curve!')
+        raise ValueError('No Algo ID for curve: ' + curve)
 
     def _get_key_data(self, key):
 
@@ -300,7 +316,7 @@ class OpgpController(object):
 
         if isinstance(key, rsa.RSAPrivateKey):
             ln = key.key_size // 8 // 2
-            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81\x80\x5f\x48\x82\x01\x03\x01\x00\x01'
+            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81\x80\x5f\x48\x82\x01\x03\x01\x00\x01'  # noqa: E501
             data += int_to_bytes(private_numbers.p, ln)
             data += int_to_bytes(private_numbers.q, ln)
             return b'\x4d' + _der_len(data) + data
@@ -310,7 +326,6 @@ class OpgpController(object):
             data += b'\x7f\x48\x02\x92' + _der_len(privkey)
             data += b'\x5f\x48' + _der_len(privkey) + privkey
             return b'\x4d' + _der_len(data) + data
-
 
     def import_attestation_key(self, key, admin_pin):
         self._verify(PW3, admin_pin)
@@ -324,10 +339,10 @@ class OpgpController(object):
         # Delete attestation key by changing the key attributes twice.
         self.send_cmd(
             0, INS.PUT_DATA, 0, 0xda,
-            data=struct.pack(">BHHB", 0x01, 2048, 32, 0))
+            data=struct.pack('>BHHB', 0x01, 2048, 32, 0))
         self.send_cmd(
             0, INS.PUT_DATA, 0, 0xda,
-            data=struct.pack(">BHHB", 0x01, 4096, 32, 0))
+            data=struct.pack('>BHHB', 0x01, 4096, 32, 0))
 
     def delete_certificate(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
@@ -339,7 +354,7 @@ class OpgpController(object):
 
     def attest(self, key_slot, pin):
         self._verify(PW1, pin)
-        self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.key_position(), 0)
+        self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.key_position, 0)
         self.send_cmd(
             0, INS.SELECT_DATA, key_slot.cert_position(),
             0x04, data=a2b_hex('0660045C027F21'))
