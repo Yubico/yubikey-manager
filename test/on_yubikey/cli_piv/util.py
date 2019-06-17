@@ -1,6 +1,4 @@
-import unittest
-from ykman.util import TRANSPORT
-from ..util import (DestructiveYubikeyTestCase, missing_mode)
+from ..util import (DestructiveYubikeyTestCase)
 
 
 DEFAULT_PIN = '123456'
@@ -15,6 +13,5 @@ def old_new_new(old, new):
     return '{0}\n{1}\n{1}\n'.format(old, new)
 
 
-@unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class PivTestCase(DestructiveYubikeyTestCase):
     pass

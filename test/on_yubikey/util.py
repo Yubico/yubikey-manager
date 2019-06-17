@@ -1,5 +1,6 @@
 from __future__ import print_function
 import click
+import functools
 import os
 import sys
 import unittest
@@ -9,123 +10,135 @@ from ykman.util import (
 import test.util
 
 
-_one_yubikey = False
-_the_yubikey = None
 _skip = True
 
-_test_serial = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIAL')
+_test_serials = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIALS')
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
+_versions = {}
 
-if _test_serial is not None:
-    _one_yubikey = len(ykman.descriptor.get_descriptors()) == 1
+if _test_serials is not None:
+    _test_serials = set(int(s) for s in _test_serials.split(','))
+    _serials_present = set()
+
+    for dev in ykman.descriptor.list_devices():
+        _serials_present.add(dev.serial)
+        _versions[dev.serial] = dev.version
+        dev.close()
+
+    _unwanted_serials = _serials_present.difference(_test_serials)
+
+    if len(_unwanted_serials) != 0:
+        print('Encountered YubiKeys not listed in serial numbers to be used '
+              'for the test: {}'.format(_unwanted_serials),
+              file=sys.stderr)
+        sys.exit(1)
+
+    if _serials_present != _test_serials:
+        print('Test YubiKeys missing: {}'
+              .format(_test_serials.difference(_serials_present)),
+              file=sys.stderr)
+        sys.exit(1)
 
     _skip = False
 
-    if (_one_yubikey):
-        if not _no_prompt:
-            click.confirm(
-                'Run integration tests? This will erase data on the YubiKey'
-                ' with serial number: %s. Make sure it is a key used for'
-                ' development.'
-                % _test_serial,
-                abort=True)
-        try:
-            _the_yubikey = ykman.descriptor.open_device(
-                serial=int(_test_serial), attempts=2)
-
-        except Exception:
-            print('Failed to open device. Please make sure you have connected'
-                  ' the YubiKey with serial number: {}'.format(_test_serial),
-                  file=sys.stderr)
-            sys.exit(1)
+    if not _no_prompt:
+        click.confirm(
+            'Run integration tests? This will erase data on the YubiKeys'
+            ' with serial numbers: {}. Make sure these are all keys used for'
+            ' development.'.format(_serials_present),
+            abort=True)
 
 
-def _missing_mode(mode):
-    if not _one_yubikey:
-        return False
-    return not _the_yubikey.mode.has_transport(mode)
-
-
-def get_version():
-    if not _one_yubikey:
-        return None
-    return _the_yubikey.version
-
-
-def can_write_config():
-    if _one_yubikey:
-        return _the_yubikey.can_write_config
-    else:
-        return False
-
-
-def is_NEO():
-    if _one_yubikey:
-        return get_version() < (4, 0, 0)
-    else:
-        return False
-
-
-def is_fips():
-    if _one_yubikey:
-        return _the_yubikey.is_fips
-    else:
-        return False
-
-
-def _no_attestation():
-    if _one_yubikey:
-        return get_version() < (4, 3, 0)
-    else:
-        return False
-
-
-def _is_cve201715361_vulnerable_yubikey():
-    if _one_yubikey:
-        return is_cve201715361_vulnerable_firmware_version(get_version())
-    else:
-        return False
-
-
-def ykman_cli(*args, **kwargs):
+def _ykman_cli(serial, *args, **kwargs):
     return test.util.ykman_cli(
-        '--device', _test_serial,
+        '--device', serial,
         *args, **kwargs
     )
 
 
-def ykman_cli_raw(*args, **kwargs):
-    return test.util.ykman_cli_raw(
-        '--device', _test_serial,
-        *args, **kwargs
-    )
+def _filter_yubikeys(self, transport, conditions):
+    matched_serials = set()
+    for serial in _test_serials:
+        with ykman.descriptor.open_device(
+                transports=transport, serial=serial) as dev:
+            if all(cond(dev) for cond in conditions):
+                matched_serials.add(serial)
+
+    if len(matched_serials) == 0:
+        self.skipTest('No test YubiKeys matched the test criteria')
+
+    return matched_serials
 
 
-def open_device(transports=sum(TRANSPORT)):
-    return ykman.descriptor.open_device(transports=transports,
-                                        serial=int(_test_serial))
+def _try_test(self, test, serial):
+    try:
+        return test(
+            self,
+            functools.partial(_ykman_cli, serial))
+    except Exception as e:
+        raise AssertionError(
+            'Serial {}, version {} failed: {}'
+            .format(serial, _versions[serial], str(e)))
 
 
-def missing_mode(transport):
-    return (_missing_mode(transport), transport.name + ' needs to be enabled')
+def _yubikey_any(transport, *conditions):
+    def decorate(f):
+        @functools.wraps(f)
+        def wrapped(self):
+            matched_serials = _filter_yubikeys(self, transport, conditions)
+            serial = next(iter(matched_serials))
+            return _try_test(self, f, serial)
+
+        return wrapped
+    return decorate
 
 
-not_one_yubikey = (not _one_yubikey, 'A single YubiKey needs to be connected.')
+def _yubikey_each(transport, *conditions):
+    def decorate(f):
+        @functools.wraps(f)
+        def wrapped(self):
+            matched_serials = _filter_yubikeys(self, transport, conditions)
+            for serial in matched_serials:
+                _try_test(self, f, serial)
+
+        return wrapped
+    return decorate
+
+
+def yubikey_any_ccid(*conditions):
+    return _yubikey_any(TRANSPORT.CCID, *conditions)
+
+
+def yubikey_each_ccid(*conditions):
+    return _yubikey_each(TRANSPORT.CCID, *conditions)
+
+
+def fips(should_be_fips):
+    return lambda dev: dev.is_fips == should_be_fips
+
+
+def neo(should_be_neo):
+    return lambda dev: (dev.version < (4, 0, 0)) == should_be_neo
+
+
+def piv_attestation(should_support):
+    return lambda dev: (dev.version >= (4, 3, 0)) == should_support
+
+
+def roca(should_be_vulnerable):
+    return lambda dev: (
+        is_cve201715361_vulnerable_firmware_version(dev.version)
+        == should_be_vulnerable)
+
+
+def interface_config(should_support):
+    return lambda dev: dev.can_write_config == should_support
+
 
 destructive_tests_not_activated = (
-    _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIAL == None')
-
-no_attestation = (_no_attestation(), 'Attestation not available.')
-
-skip_roca = (
-    _is_cve201715361_vulnerable_yubikey(),
-    'Not applicable to CVE-2017-15361 affected YubiKey.')
-skip_not_roca = (
-    not _is_cve201715361_vulnerable_yubikey(),
-    'Applicable only to CVE-2017-15361 affected YubiKey.')
+    _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIALS == None')
 
 
 @unittest.skipIf(*destructive_tests_not_activated)
-@unittest.skipIf(*not_one_yubikey)
 class DestructiveYubikeyTestCase(unittest.TestCase):
     pass
