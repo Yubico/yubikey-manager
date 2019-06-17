@@ -167,7 +167,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
 
     \b
     KEY     Key slot to set (sig, enc, aut or att).
-    POLICY  Touch policy to set (on, off, fixed, cached or cached-fix).
+    POLICY  Touch policy to set (on, off, fixed, cached or cached-fixed).
     """
     controller = ctx.obj['controller']
 
