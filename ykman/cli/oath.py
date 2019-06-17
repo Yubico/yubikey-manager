@@ -171,16 +171,15 @@ def reset(ctx):
 @click.option(
     '-o', '--oath-type',
     type=EnumNameChoice(OATH_TYPE), default=OATH_TYPE.TOTP.name,
-    help='Time-based (TOTP) or counter-based'
-    ' (HOTP) credential.', show_default=True)
+    help='Time-based (TOTP) or counter-based (HOTP) credential.',
+    show_default=True)
 @click.option(
     '-d', '--digits', type=click.Choice(['6', '7', '8']), default='6',
     help='Number of digits in generated code.', show_default=True)
 @click.option(
     '-a', '--algorithm',
-    type=EnumNameChoice(ALGO), default=ALGO.SHA1.name,
-    help='Algorithm to use for '
-    'code generation.', show_default=True)
+    type=EnumNameChoice(ALGO), default=ALGO.SHA1.name, show_default=True,
+    help='Algorithm to use for code generation.')
 @click.option(
     '-c', '--counter', type=click.INT, default=0,
     help='Initial counter value for HOTP credentials.')
