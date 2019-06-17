@@ -118,12 +118,10 @@ def info(ctx):
         click.echo(
             'Authentication key      {!s}'.format(
                 controller.get_touch(KEY_SLOT.AUTHENTICATION)))
-        try:
+        if controller.supports_attestation:
             click.echo(
                 'Attestation key         {!s}'.format(
                     controller.get_touch(KEY_SLOT.ATTESTATION)))
-        except APDUError:
-            logger.debug('No attestation key slot found')
 
 
 @openpgp.command()

@@ -218,10 +218,14 @@ class OpgpController(object):
                 TOUCH_MODE.ON, TOUCH_MODE.OFF, TOUCH_MODE.FIXED,
                 TOUCH_MODE.CACHED, TOUCH_MODE.CACHED_FIXED]
 
+    @property
+    def supports_attestation(self):
+        return self.version >= (5, 2, 1)
+
     def get_touch(self, key_slot):
         if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
-        if self.version < (5, 2, 1) and key_slot == KEY_SLOT.ATTESTATION:
+        if key_slot == KEY_SLOT.ATTESTATION and not self.supports_attestation:
             raise ValueError('Attestation key not available on this device.')
         data = self.send_apdu(0, INS.GET_DATA, 0, key_slot.touch_position)
         return TOUCH_MODE(six.indexbytes(data, 0))
