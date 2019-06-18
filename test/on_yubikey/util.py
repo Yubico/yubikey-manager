@@ -114,25 +114,52 @@ def yubikey_each_ccid(*conditions):
 
 
 def fips(should_be_fips):
-    return lambda dev: dev.is_fips == should_be_fips
+    def decorate(method):
+        method_conditions = (getattr(method, 'yubikey_conditions')
+                             if 'yubikey_conditions' in dir(method)
+                             else set())
+        method_conditions.add(lambda dev: should_be_fips == dev.is_fips)
+        setattr(method, 'yubikey_conditions', method_conditions)
+        return method
+    return decorate
 
 
 def neo(should_be_neo):
-    return lambda dev: (dev.version < (4, 0, 0)) == should_be_neo
+    def decorate(method):
+        method_conditions = (getattr(method, 'yubikey_conditions')
+                             if 'yubikey_conditions' in dir(method)
+                             else set())
+        method_conditions.add(
+            lambda dev: should_be_neo == (dev.version < (4, 0, 0)))
+        setattr(method, 'yubikey_conditions', method_conditions)
+        return method
+    return decorate
 
 
 def piv_attestation(should_support):
-    return lambda dev: (dev.version >= (4, 3, 0)) == should_support
+    def decorate(method):
+        method_conditions = (getattr(method, 'yubikey_conditions')
+                             if 'yubikey_conditions' in dir(method)
+                             else set())
+        method_conditions.add(
+            lambda dev: should_support == (dev.version >= (4, 3, 0)))
+        setattr(method, 'yubikey_conditions', method_conditions)
+        return method
+    return decorate
 
 
 def roca(should_be_vulnerable):
-    return lambda dev: (
-        is_cve201715361_vulnerable_firmware_version(dev.version)
-        == should_be_vulnerable)
-
-
-def interface_config(should_support):
-    return lambda dev: dev.can_write_config == should_support
+    def decorate(method):
+        method_conditions = (getattr(method, 'yubikey_conditions')
+                             if 'yubikey_conditions' in dir(method)
+                             else set())
+        method_conditions.add(
+            lambda dev:
+            should_be_vulnerable == is_cve201715361_vulnerable_firmware_version(
+                dev.version))
+        setattr(method, 'yubikey_conditions', method_conditions)
+        return method
+    return decorate
 
 
 destructive_tests_not_activated = (
