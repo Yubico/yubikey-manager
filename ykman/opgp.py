@@ -347,7 +347,7 @@ class OpgpController(object):
     def delete_certificate(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
         self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0, INS.SELECT_DATA, key_slot.cert_position,
             0x04, data=a2b_hex('0660045C027F21'))
         self.send_apdu(
             0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=b'')
@@ -356,7 +356,7 @@ class OpgpController(object):
         self._verify(PW1, pin)
         self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.key_position, 0)
         self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0, INS.SELECT_DATA, key_slot.cert_position,
             0x04, data=a2b_hex('0660045C027F21'))
         data = self.send_cmd(
             0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
