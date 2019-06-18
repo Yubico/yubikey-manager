@@ -144,6 +144,10 @@ def roca(should_be_vulnerable):
         is_cve201715361_vulnerable_firmware_version(dev.version))
 
 
+def version_min(min_version):
+    return _make_condition_adder(lambda dev: dev.version >= min_version)
+
+
 def _make_skipped_original_test_cases(mktestclasses):
     for test_class in mktestclasses(None):
         yield unittest.skip('No YubiKey available for test')(test_class)
