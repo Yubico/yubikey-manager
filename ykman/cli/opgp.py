@@ -34,7 +34,7 @@ from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_format_option, click_postpone_execution,
-    EnumNameChoice)
+    EnumChoice)
 
 
 logger = logging.getLogger(__name__)
@@ -149,8 +149,8 @@ def echo_default_pins():
 
 
 @openpgp.command('set-touch')
-@click.argument('key', metavar='KEY', type=EnumNameChoice(KEY_SLOT))
-@click.argument('policy', metavar='POLICY', type=EnumNameChoice(TOUCH_MODE))
+@click.argument('key', metavar='KEY', type=EnumChoice(KEY_SLOT))
+@click.argument('policy', metavar='POLICY', type=EnumChoice(TOUCH_MODE))
 @click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click_force_option
 @click.pass_context
@@ -230,7 +230,7 @@ def set_pin_retries(
 @click.pass_context
 @click.option('-P', '--pin', help='PIN code.')
 @click_format_option
-@click.argument('key', metavar='KEY', type=EnumNameChoice(KEY_SLOT))
+@click.argument('key', metavar='KEY', type=EnumChoice(KEY_SLOT))
 @click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
 def attest(ctx, key, certificate, pin, format):
     """
@@ -272,7 +272,7 @@ def attest(ctx, key, certificate, pin, format):
 
 @openpgp.command('export-certificate')
 @click.pass_context
-@click.argument('key', metavar='KEY', type=EnumNameChoice(KEY_SLOT))
+@click.argument('key', metavar='KEY', type=EnumChoice(KEY_SLOT))
 @click_format_option
 @click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
 def export_certificate(ctx, key, format, certificate):
@@ -294,7 +294,7 @@ def export_certificate(ctx, key, format, certificate):
 @openpgp.command('delete-certificate')
 @click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click.pass_context
-@click.argument('key', metavar='KEY', type=EnumNameChoice(KEY_SLOT))
+@click.argument('key', metavar='KEY', type=EnumChoice(KEY_SLOT))
 def delete_certificate(ctx, key, admin_pin):
     """
     Delete an OpenPGP Cardholder certificate.
@@ -315,7 +315,7 @@ def delete_certificate(ctx, key, admin_pin):
 @openpgp.command('import-certificate')
 @click.option('-a', '--admin-pin', help='Admin PIN for OpenPGP.')
 @click.pass_context
-@click.argument('key', metavar='KEY', type=EnumNameChoice(KEY_SLOT))
+@click.argument('key', metavar='KEY', type=EnumChoice(KEY_SLOT))
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(ctx, key, cert, admin_pin):
     """

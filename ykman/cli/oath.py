@@ -32,7 +32,7 @@ from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
-    click_parse_b32_key, prompt_for_touch, EnumNameChoice
+    click_parse_b32_key, prompt_for_touch, EnumChoice
 )
 from ..driver_ccid import (
     APDUError,  SW
@@ -170,7 +170,7 @@ def reset(ctx):
 @click.argument('secret', callback=click_parse_b32_key, required=False)
 @click.option(
     '-o', '--oath-type',
-    type=EnumNameChoice(OATH_TYPE), default=OATH_TYPE.TOTP.name,
+    type=EnumChoice(OATH_TYPE), default=OATH_TYPE.TOTP.name,
     help='Time-based (TOTP) or counter-based (HOTP) credential.',
     show_default=True)
 @click.option(
@@ -178,7 +178,7 @@ def reset(ctx):
     help='Number of digits in generated code.', show_default=True)
 @click.option(
     '-a', '--algorithm',
-    type=EnumNameChoice(ALGO), default=ALGO.SHA1.name, show_default=True,
+    type=EnumChoice(ALGO), default=ALGO.SHA1.name, show_default=True,
     help='Algorithm to use for code generation.')
 @click.option(
     '-c', '--counter', type=click.INT, default=0,
