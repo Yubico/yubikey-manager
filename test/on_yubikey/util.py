@@ -85,8 +85,9 @@ def _make_test_classes_for_device(
         transport,
         dev,
         mktestclasses,
-        mktestclasses_arg
+        make_mktestclasses_arg
 ):
+    mktestclasses_arg = make_mktestclasses_arg(dev, transport)
     for test_class in mktestclasses(mktestclasses_arg):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
@@ -111,13 +112,11 @@ def _make_test_suite(transports, make_mktestclasses_arg):
                 for serial in _test_serials or []:
                     with ykman.descriptor.open_device(
                             transports=transport, serial=serial) as dev:
-                        mktestclasses_arg = make_mktestclasses_arg(
-                            dev, transport)
                         for test_case in _make_test_classes_for_device(
                                 transport,
                                 dev,
                                 mktestclasses,
-                                mktestclasses_arg
+                                make_mktestclasses_arg
                         ):
                             orig_name = test_case._original_test_name
                             for attr_name in dir(test_case):
