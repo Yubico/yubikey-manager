@@ -68,8 +68,8 @@ def _specialize_open_device(dev, transports):
     )
 
 
-def _make_skipped_original_test_cases(mktestclasses):
-    for test_class in mktestclasses(None):
+def _make_skipped_original_test_cases(create_test_classes):
+    for test_class in create_test_classes(None):
         yield unittest.skip('No YubiKey available for test')(test_class)
 
 
@@ -84,11 +84,11 @@ def _device_satisfies_test_conditions(dev, test_method):
 def _make_test_classes_for_device(
         transport,
         dev,
-        mktestclasses,
+        create_test_classes,
         make_mktestclasses_arg
 ):
     mktestclasses_arg = make_mktestclasses_arg(dev, transport)
-    for test_class in mktestclasses(mktestclasses_arg):
+    for test_class in create_test_classes(mktestclasses_arg):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
         test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
@@ -103,7 +103,7 @@ def _make_test_classes_for_device(
 
 
 def _make_test_suite(transports, make_mktestclasses_arg):
-    def decorate(mktestclasses):
+    def decorate(create_test_classes):
         def additional_tests():
             suite = unittest.TestSuite()
             yubikey_test_names = {}
@@ -111,11 +111,13 @@ def _make_test_suite(transports, make_mktestclasses_arg):
             for transport in (t for t in TRANSPORT if transports & t):
                 for serial in _test_serials or []:
                     with ykman.descriptor.open_device(
-                            transports=transport, serial=serial) as dev:
+                            transports=transport,
+                            serial=serial
+                    ) as dev:
                         for test_case in _make_test_classes_for_device(
                                 transport,
                                 dev,
-                                mktestclasses,
+                                create_test_classes,
                                 make_mktestclasses_arg
                         ):
                             orig_name = test_case._original_test_name
@@ -128,7 +130,7 @@ def _make_test_suite(transports, make_mktestclasses_arg):
                                     suite.addTest(test_case(attr_name))
 
             for original_test_class in _make_skipped_original_test_cases(
-                    mktestclasses):
+                    create_test_classes):
                 original_test_names = set(
                     attr_name
                     for attr_name in dir(original_test_class)
