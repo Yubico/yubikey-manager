@@ -1,9 +1,8 @@
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from ykman.util import (Cve201715361VulnerableError, TRANSPORT)
-from ..util import (
-    cli_test_suite, is_not_fips, is_not_neo, supports_piv_attestation, is_roca,
-    is_not_roca, DestructiveYubikeyTestCase)
+from .. import yubikey_conditions
+from ..util import cli_test_suite, DestructiveYubikeyTestCase
 from .util import (DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
@@ -19,43 +18,43 @@ def additional_tests(ykman_cli):
         def tearDownClass(cls):
             ykman_cli('piv', 'reset', '-f')
 
-        @is_not_roca
+        @yubikey_conditions.is_not_roca
         def test_generate_key_default(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '-m', DEFAULT_MANAGEMENT_KEY, '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @is_roca
+        @yubikey_conditions.is_roca
         def test_generate_key_default_cve201715361(self):
             with self.assertRaises(Cve201715361VulnerableError):
                 ykman_cli(
                     'piv', 'generate-key', '9a',
                     '-m', DEFAULT_MANAGEMENT_KEY, '-')
 
-        @is_not_roca
-        @is_not_fips
+        @yubikey_conditions.is_not_roca
+        @yubikey_conditions.is_not_fips
         def test_generate_key_rsa1024(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @is_not_roca
+        @yubikey_conditions.is_not_roca
         def test_generate_key_rsa2048(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '-a', 'RSA2048',
                 '-m', DEFAULT_MANAGEMENT_KEY, '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @is_not_fips
-        @is_roca
+        @yubikey_conditions.is_not_fips
+        @yubikey_conditions.is_roca
         def test_generate_key_rsa1024_cve201715361(self):
             with self.assertRaises(Cve201715361VulnerableError):
                 ykman_cli(
                     'piv', 'generate-key', '9a', '-a', 'RSA1024', '-m',
                     DEFAULT_MANAGEMENT_KEY, '-')
 
-        @is_roca
+        @yubikey_conditions.is_roca
         def test_generate_key_rsa2048_cve201715361(self):
             with self.assertRaises(Cve201715361VulnerableError):
                 ykman_cli(
@@ -68,28 +67,28 @@ def additional_tests(ykman_cli):
                 DEFAULT_MANAGEMENT_KEY, '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @is_not_neo
+        @yubikey_conditions.is_not_neo
         def test_generate_key_eccp384(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '-a', 'ECCP384', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @is_not_neo
+        @yubikey_conditions.is_not_neo
         def test_generate_key_pin_policy_always(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '--pin-policy', 'ALWAYS', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @is_not_neo
+        @yubikey_conditions.is_not_neo
         def test_generate_key_touch_policy_always(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '--touch-policy', 'ALWAYS', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
-        @supports_piv_attestation
+        @yubikey_conditions.supports_piv_attestation
         def test_attest_key(self):
             ykman_cli(
                 'piv', 'generate-key', '9a', '-a', 'ECCP256',
@@ -107,8 +106,8 @@ def additional_tests(ykman_cli):
             csr = x509.load_pem_x509_csr(output.encode(), default_backend())
             self.assertTrue(csr.is_signature_valid)
 
-        @is_not_fips
-        @is_not_roca
+        @yubikey_conditions.is_not_fips
+        @yubikey_conditions.is_not_roca
         def test_generate_csr_rsa1024(self):
             self._test_generate_csr('RSA1024')
 
@@ -199,7 +198,7 @@ def additional_tests(ykman_cli):
                 '-m', DEFAULT_MANAGEMENT_KEY, '-P', DEFAULT_PIN,
                 input=cert_pem)
 
-        @supports_piv_attestation
+        @yubikey_conditions.supports_piv_attestation
         def test_export_attestation_certificate(self):
             output = ykman_cli('piv', 'export-certificate', 'f9', '-')
             self.assertIn('BEGIN CERTIFICATE', output)

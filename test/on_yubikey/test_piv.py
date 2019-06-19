@@ -12,9 +12,8 @@ from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk, KeypairMismatch)
 from ykman.util import TRANSPORT, parse_certificates, parse_private_key
-from .util import (
-    device_test_suite, is_fips, is_not_fips, is_not_roca, version_min,
-    yubikey_condition)
+from . import yubikey_conditions
+from .util import device_test_suite
 from ..util import open_file
 
 
@@ -29,7 +28,7 @@ NON_DEFAULT_MANAGEMENT_KEY = a2b_hex('010103040506070801020304050607080102030405
 now = datetime.datetime.now
 
 
-@yubikey_condition
+@yubikey_conditions.yubikey_condition
 def supports_pin_policy(dev):
     return dev.version >= (4, 0, 0)
 
@@ -217,12 +216,12 @@ def additional_tests(open_device):
                 self.controller.import_certificate(SLOT.AUTHENTICATION, cert,
                                                    verify=True)
 
-        @is_not_fips
-        @is_not_roca
+        @yubikey_conditions.is_not_fips
+        @yubikey_conditions.is_not_roca
         def test_import_certificate_verifies_key_pairing_rsa1024(self):
             self._test_import_key_pairing(ALGO.RSA1024, ALGO.ECCP256)
 
-        @is_not_roca
+        @yubikey_conditions.is_not_roca
         def test_import_certificate_verifies_key_pairing_rsa2048(self):
             self._test_import_key_pairing(ALGO.RSA2048, ALGO.ECCP256)
 
@@ -294,7 +293,7 @@ def additional_tests(open_device):
                 self.controller.set_mgm_key(NON_DEFAULT_MANAGEMENT_KEY)
             self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
-        @version_min((3, 5, 0))
+        @yubikey_conditions.version_min((3, 5, 0))
         def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(self):  # noqa: E501
             self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
             with self.assertRaises(APDUError):
@@ -375,7 +374,7 @@ def additional_tests(open_device):
                 SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
             self.assertIsNotNone(sig)
 
-        @is_not_fips
+        @yubikey_conditions.is_not_fips
         @supports_pin_policy
         def test_sign_with_pin_policy_never_does_not_require_pin(self):
             self.generate_key(pin_policy=PIN_POLICY.NEVER)
@@ -383,7 +382,7 @@ def additional_tests(open_device):
                 SLOT.AUTHENTICATION, ALGO.ECCP256, b'foo')
             self.assertIsNotNone(sig)
 
-        @is_fips
+        @yubikey_conditions.is_fips
         def test_pin_policy_never_blocked_on_fips(self):
             with self.assertRaises(APDUError):
                 self.generate_key(pin_policy=PIN_POLICY.NEVER)
