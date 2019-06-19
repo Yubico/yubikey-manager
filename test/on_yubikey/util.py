@@ -56,63 +56,6 @@ def _ykman_cli(serial, *args, **kwargs):
     )
 
 
-def _filter_yubikeys(self, transport, conditions):
-    matched_serials = set()
-    for serial in _test_serials:
-        with ykman.descriptor.open_device(
-                transports=transport, serial=serial) as dev:
-            if all(cond(dev) for cond in conditions):
-                matched_serials.add(serial)
-
-    if len(matched_serials) == 0:
-        self.skipTest('No test YubiKeys matched the test criteria')
-
-    return matched_serials
-
-
-def _try_test(self, test, serial):
-    try:
-        return test(
-            self,
-            functools.partial(_ykman_cli, serial))
-    except Exception as e:
-        raise AssertionError(
-            'Serial {}, version {} failed: {}'
-            .format(serial, _versions[serial], str(e)))
-
-
-def _yubikey_any(transport, *conditions):
-    def decorate(f):
-        @functools.wraps(f)
-        def wrapped(self):
-            matched_serials = _filter_yubikeys(self, transport, conditions)
-            serial = next(iter(matched_serials))
-            return _try_test(self, f, serial)
-
-        return wrapped
-    return decorate
-
-
-def _yubikey_each(transport, *conditions):
-    def decorate(f):
-        @functools.wraps(f)
-        def wrapped(self):
-            matched_serials = _filter_yubikeys(self, transport, conditions)
-            for serial in matched_serials:
-                _try_test(self, f, serial)
-
-        return wrapped
-    return decorate
-
-
-def yubikey_any_ccid(*conditions):
-    return _yubikey_any(TRANSPORT.CCID, *conditions)
-
-
-def yubikey_each_ccid(*conditions):
-    return _yubikey_each(TRANSPORT.CCID, *conditions)
-
-
 def _make_condition_adder(condition):
     def decorate(method):
         method_conditions = (getattr(method, '_yubikey_conditions')
