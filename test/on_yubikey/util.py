@@ -48,10 +48,23 @@ if _test_serials is not None:
             abort=True)
 
 
-def _ykman_cli(serial, *args, **kwargs):
-    return test.util.ykman_cli(
-        '--device', serial,
-        *args, **kwargs
+def _specialize_ykman_cli(dev, _transports):
+    '''
+    Creates a specialized version of ykman_cli preset with the serial number of
+    the given device.
+    '''
+    return functools.partial(test.util.ykman_cli, '--device', dev.serial)
+
+
+def _specialize_open_device(dev, transports):
+    '''
+    Creates a specialized version of open_device which will open the given
+    device using the given transport(s).
+    '''
+    return functools.partial(
+        ykman.descriptor.open_device,
+        transports=transports,
+        serial=dev.serial
     )
 
 
@@ -87,15 +100,16 @@ def _make_test_suite(transports, make_mktestclasses_arg):
     def decorate(mktestclasses):
         def additional_tests():
             suite = unittest.TestSuite()
-
             yubikey_test_names = {}
+
             for transport in (t for t in TRANSPORT if transports & t):
                 for serial in _test_serials or []:
                     with ykman.descriptor.open_device(
                             transports=transport,
                             serial=serial
                     ) as dev:
-                        mktestclasses_arg = make_mktestclasses_arg(dev)
+                        mktestclasses_arg = make_mktestclasses_arg(
+                            dev, transport)
                         for test_case in _make_test_cases(
                                 transport,
                                 dev,
@@ -133,27 +147,13 @@ def _make_test_suite(transports, make_mktestclasses_arg):
 def device_test_suite(transports):
     if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @device_test_suite must be a TRANSPORT value.')  # noqa: E501
-
-    def make_open_device(dev):
-        open_device = functools.partial(
-            ykman.descriptor.open_device,
-            transports=transports,
-            serial=dev.serial
-        )
-        return open_device
-
-    return _make_test_suite(transports, make_open_device)
+    return _make_test_suite(transports, _specialize_open_device)
 
 
 def cli_test_suite(transports):
     if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
-
-    def make_ykman_cli(dev):
-        ykman_cli = functools.partial(_ykman_cli, dev.serial)
-        return ykman_cli
-
-    return _make_test_suite(transports, make_ykman_cli)
+    return _make_test_suite(transports, _specialize_ykman_cli)
 
 
 destructive_tests_not_activated = (
