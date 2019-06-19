@@ -1,7 +1,7 @@
 import unittest
 
 from ykman.util import TRANSPORT
-from .util import (cli_test_suite, fips)
+from .util import (cli_test_suite, is_fips, is_not_fips)
 
 
 @cli_test_suite(sum(TRANSPORT))
@@ -14,12 +14,12 @@ def additional_tests(ykman_cli):
             self.assertIn('Serial number:', info)
             self.assertIn('Firmware version:', info)
 
-        @fips(False)
+        @is_not_fips
         def test_ykman_info_does_not_report_fips_for_non_fips_device(self):
             info = ykman_cli('info', '--check-fips')
             self.assertNotIn('FIPS', info)
 
-        @fips(True)
+        @is_fips
         def test_ykman_info_reports_fips_status(self):
             info = ykman_cli('info', '--check-fips')
             self.assertIn('FIPS Approved Mode:', info)

@@ -56,7 +56,7 @@ def _ykman_cli(serial, *args, **kwargs):
     )
 
 
-def _make_condition_adder(condition):
+def yubikey_condition(condition):
     def decorate(method):
         method_conditions = (getattr(method, '_yubikey_conditions')
                              if '_yubikey_conditions' in dir(method)
@@ -67,28 +67,48 @@ def _make_condition_adder(condition):
     return decorate
 
 
-def fips(should_be_fips):
-    return _make_condition_adder(lambda dev: should_be_fips == dev.is_fips)
+@yubikey_condition
+def is_fips(dev):
+    return dev.is_fips
 
 
-def neo(should_be_neo):
-    return _make_condition_adder(
-        lambda dev: should_be_neo == (dev.version < (4, 0, 0)))
+@yubikey_condition
+def is_not_fips(dev):
+    return not dev.is_fips
 
 
-def piv_attestation(should_support):
-    return _make_condition_adder(
-        lambda dev: should_support == (dev.version >= (4, 3, 0)))
+@yubikey_condition
+def is_neo(dev):
+    return dev.version < (4, 0, 0)
 
 
-def roca(should_be_vulnerable):
-    return _make_condition_adder(
-        lambda dev: should_be_vulnerable ==
-        is_cve201715361_vulnerable_firmware_version(dev.version))
+@yubikey_condition
+def is_not_neo(dev):
+    return dev.version >= (4, 0, 0)
+
+
+@yubikey_condition
+def supports_piv_attestation(dev):
+    return dev.version >= (4, 3, 0)
+
+
+@yubikey_condition
+def not_supports_piv_attestation(dev):
+    return dev.version < (4, 3, 0)
+
+
+@yubikey_condition
+def is_roca(dev):
+    return is_cve201715361_vulnerable_firmware_version(dev.version)
+
+
+@yubikey_condition
+def is_not_roca(dev):
+    return not is_cve201715361_vulnerable_firmware_version(dev.version)
 
 
 def version_min(min_version):
-    return _make_condition_adder(lambda dev: dev.version >= min_version)
+    return yubikey_condition(lambda dev: dev.version >= min_version)
 
 
 def _make_skipped_original_test_cases(mktestclasses):
