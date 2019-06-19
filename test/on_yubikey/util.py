@@ -81,7 +81,12 @@ def _device_satisfies_test_conditions(dev, test_method):
         return True
 
 
-def _make_test_cases(transport, dev, mktestclasses, mktestclasses_arg):
+def _make_test_classes_for_device(
+        transport,
+        dev,
+        mktestclasses,
+        mktestclasses_arg
+):
     for test_class in mktestclasses(mktestclasses_arg):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
@@ -105,12 +110,10 @@ def _make_test_suite(transports, make_mktestclasses_arg):
             for transport in (t for t in TRANSPORT if transports & t):
                 for serial in _test_serials or []:
                     with ykman.descriptor.open_device(
-                            transports=transport,
-                            serial=serial
-                    ) as dev:
+                            transports=transport, serial=serial) as dev:
                         mktestclasses_arg = make_mktestclasses_arg(
                             dev, transport)
-                        for test_case in _make_test_cases(
+                        for test_case in _make_test_classes_for_device(
                                 transport,
                                 dev,
                                 mktestclasses,
