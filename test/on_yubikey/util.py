@@ -85,10 +85,10 @@ def _make_test_classes_for_device(
         transport,
         dev,
         create_test_classes,
-        make_mktestclasses_arg
+        create_test_class_context
 ):
-    mktestclasses_arg = make_mktestclasses_arg(dev, transport)
-    for test_class in create_test_classes(mktestclasses_arg):
+    context = create_test_class_context(dev, transport)
+    for test_class in create_test_classes(context):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
         test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
@@ -102,7 +102,7 @@ def _make_test_classes_for_device(
         yield test_class
 
 
-def _make_test_suite(transports, make_mktestclasses_arg):
+def _make_test_suite(transports, create_test_class_context):
     def decorate(create_test_classes):
         def additional_tests():
             suite = unittest.TestSuite()
@@ -118,7 +118,7 @@ def _make_test_suite(transports, make_mktestclasses_arg):
                                 transport,
                                 dev,
                                 create_test_classes,
-                                make_mktestclasses_arg
+                                create_test_class_context
                         ):
                             orig_name = test_case._original_test_name
                             for attr_name in dir(test_case):
