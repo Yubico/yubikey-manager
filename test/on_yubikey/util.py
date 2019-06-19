@@ -153,6 +153,14 @@ def _make_skipped_original_test_cases(mktestclasses):
         yield unittest.skip('No YubiKey available for test')(test_class)
 
 
+def _device_satisfies_test_conditions(dev, test_method):
+    if '_yubikey_conditions' in dir(test_method):
+        conditions = getattr(test_method, '_yubikey_conditions')
+        return all(cond(dev) for cond in conditions)
+    else:
+        return True
+
+
 def _make_test_cases(transport, dev, mktestclasses, mktestclasses_arg):
     for test_class in mktestclasses(mktestclasses_arg):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
@@ -161,10 +169,8 @@ def _make_test_cases(transport, dev, mktestclasses, mktestclasses_arg):
 
         for attr_name in dir(test_class):
             method = getattr(test_class, attr_name)
-            if (attr_name.startswith('test')
-                    and '_yubikey_conditions' in dir(method)):
-                conditions = getattr(method, '_yubikey_conditions')
-                if not all(cond(dev) for cond in conditions):
+            if attr_name.startswith('test'):
+                if not _device_satisfies_test_conditions(dev, method):
                     delattr(test_class, attr_name)
 
         yield test_class
