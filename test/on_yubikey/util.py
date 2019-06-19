@@ -91,7 +91,7 @@ def _delete_inapplicable_test_methods(dev, test_class):
     return test_class
 
 
-def _make_test_classes_for_device(
+def _create_test_classes_for_device(
         transport,
         dev,
         create_test_classes,
@@ -124,7 +124,7 @@ def _make_test_suite(transports, create_test_class_context):
                             transports=transport,
                             serial=serial
                     ) as dev:
-                        for test_class in _make_test_classes_for_device(
+                        for test_class in _create_test_classes_for_device(
                                 transport,
                                 dev,
                                 create_test_classes,
