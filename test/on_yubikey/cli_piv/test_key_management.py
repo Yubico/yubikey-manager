@@ -208,10 +208,10 @@ def make_test_classes(ykman_cli):
     return [KeyManagement]
 
 
-def make_test_cases(dev):
+def make_test_cases(dev, mktestclasses):
     ykman_cli = functools.partial(_ykman_cli, dev.serial)
 
-    for test_class in make_test_classes(ykman_cli):
+    for test_class in mktestclasses(ykman_cli):
 
         fw_version = '.'.join(str(v) for v in dev.version)
         test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
@@ -227,13 +227,17 @@ def make_test_cases(dev):
         yield test_class
 
 
-def additional_tests():
+def wrap_with_test_suite(mktestclasses):
     suite = unittest.TestSuite()
     for serial in _test_serials:
         with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
-            for test_case in make_test_cases(dev):
+            for test_case in make_test_cases(dev, mktestclasses):
                 for attr_name in dir(test_case):
                     if attr_name.startswith('test'):
                         suite.addTest(test_case(attr_name))
 
     return suite
+
+
+def additional_tests():
+    return wrap_with_test_suite(make_test_classes)
