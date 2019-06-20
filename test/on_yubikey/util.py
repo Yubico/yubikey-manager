@@ -143,32 +143,37 @@ def _multiply_test_classes_by_devices(
     return tests, covered_test_names
 
 
+def _make_skips_for_uncovered_tests(create_test_classes, covered_test_names):
+    for original_test_class in _make_skipped_original_test_cases(
+            create_test_classes):
+        original_test_names = set(
+            attr_name
+            for attr_name in dir(original_test_class)
+            if attr_name.startswith('test')
+        )
+        uncovered_test_names = original_test_names.difference(
+            covered_test_names.get(
+                original_test_class.__qualname__, set()))
+
+        for uncovered_test_name in uncovered_test_names:
+            yield original_test_class(uncovered_test_name)
+
+
 def _make_test_suite(transports, create_test_class_context):
     def decorate(create_test_classes):
         def additional_tests():
-            suite = unittest.TestSuite()
-
             (tests, covered_test_names) = _multiply_test_classes_by_devices(
                 transports,
                 create_test_classes,
                 create_test_class_context
             )
 
+            skipped_tests = _make_skips_for_uncovered_tests(
+                create_test_classes, covered_test_names)
+
+            suite = unittest.TestSuite()
             suite.addTests(tests)
-
-            for original_test_class in _make_skipped_original_test_cases(
-                    create_test_classes):
-                original_test_names = set(
-                    attr_name
-                    for attr_name in dir(original_test_class)
-                    if attr_name.startswith('test')
-                )
-                uncovered_test_names = original_test_names.difference(
-                    covered_test_names.get(
-                        original_test_class.__qualname__, set()))
-
-                for uncovered_test_name in uncovered_test_names:
-                    suite.addTest(original_test_class(uncovered_test_name))
+            suite.addTests(skipped_tests)
 
             return suite
         return additional_tests
