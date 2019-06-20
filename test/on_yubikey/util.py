@@ -105,6 +105,13 @@ def _make_test_classes_for_device(
         yield _delete_inapplicable_test_methods(dev, test_class)
 
 
+def _get_test_method_names(test_class):
+    return set(
+        attr_name for attr_name in dir(test_class)
+        if attr_name.startswith('test')
+    )
+
+
 def _make_test_suite(transports, create_test_class_context):
     def decorate(create_test_classes):
         def additional_tests():
@@ -124,13 +131,12 @@ def _make_test_suite(transports, create_test_class_context):
                                 create_test_class_context
                         ):
                             orig_name = test_case._original_test_name
-                            for attr_name in dir(test_case):
-                                if attr_name.startswith('test'):
-                                    test_names = yubikey_test_names.get(
-                                        orig_name, set())
-                                    test_names.add(attr_name)
-                                    yubikey_test_names[orig_name] = test_names
-                                    suite.addTest(test_case(attr_name))
+                            for attr_name in _get_test_method_names(test_case):
+                                test_names = yubikey_test_names.get(
+                                    orig_name, set())
+                                test_names.add(attr_name)
+                                yubikey_test_names[orig_name] = test_names
+                                suite.addTest(test_case(attr_name))
 
             for original_test_class in _make_skipped_original_test_cases(
                     create_test_classes):
