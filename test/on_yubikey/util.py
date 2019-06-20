@@ -82,12 +82,11 @@ def _device_satisfies_test_conditions(dev, test_method):
 
 
 def _delete_inapplicable_test_methods(dev, test_class):
-    for attr_name in dir(test_class):
-        method = getattr(test_class, attr_name)
-        if attr_name.startswith('test'):
-            if not _device_satisfies_test_conditions(dev, method):
-                print('Deleting test', attr_name, 'from test', test_class)
-                delattr(test_class, attr_name)
+    for method_name in _get_test_method_names(test_class):
+        method = getattr(test_class, method_name)
+        if not _device_satisfies_test_conditions(dev, method):
+            print('Deleting test', method_name, 'from test', test_class)
+            delattr(test_class, method_name)
     return test_class
 
 
@@ -146,11 +145,7 @@ def _multiply_test_classes_by_devices(
 def _make_skips_for_uncovered_tests(create_test_classes, covered_test_names):
     for original_test_class in _make_skipped_original_test_cases(
             create_test_classes):
-        original_test_names = set(
-            attr_name
-            for attr_name in dir(original_test_class)
-            if attr_name.startswith('test')
-        )
+        original_test_names = _get_test_method_names(original_test_class)
         uncovered_test_names = original_test_names.difference(
             covered_test_names.get(
                 original_test_class.__qualname__, set()))
