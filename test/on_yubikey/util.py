@@ -157,7 +157,7 @@ def _make_skips_for_uncovered_tests(create_test_classes, covered_test_names):
             yield original_test_class(uncovered_test_name)
 
 
-def _make_test_suite(transports, create_test_class_context):
+def _make_test_suite_decorator(transports, create_test_class_context):
     def decorate(create_test_classes):
         def additional_tests():
             (tests, covered_test_names) = _multiply_test_classes_by_devices(
@@ -181,13 +181,13 @@ def _make_test_suite(transports, create_test_class_context):
 def device_test_suite(transports):
     if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @device_test_suite must be a TRANSPORT value.')  # noqa: E501
-    return _make_test_suite(transports, _specialize_open_device)
+    return _make_test_suite_decorator(transports, _specialize_open_device)
 
 
 def cli_test_suite(transports):
     if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
-    return _make_test_suite(transports, _specialize_ykman_cli)
+    return _make_test_suite_decorator(transports, _specialize_ykman_cli)
 
 
 destructive_tests_not_activated = (
