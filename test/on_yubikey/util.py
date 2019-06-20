@@ -153,8 +153,8 @@ def _make_skipped_original_test_cases(mktestclasses):
         yield unittest.skip('No YubiKey available for test')(test_class)
 
 
-def _make_test_cases(dev, mktestclasses, *mktestclasses_args):
-    for test_class in mktestclasses(*mktestclasses_args):
+def _make_test_cases(dev, mktestclasses, mktestclasses_arg):
+    for test_class in mktestclasses(mktestclasses_arg):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
         test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
@@ -170,10 +170,7 @@ def _make_test_cases(dev, mktestclasses, *mktestclasses_args):
         yield test_class
 
 
-def device_test_suite(transports):
-    if not isinstance(transports, TRANSPORT):
-        raise ValueError('Argument to @device_test_suite must be a TRANSPORT value.')  # noqa: E501
-
+def _make_test_suite(transports, make_mktestclasses_arg):
     def decorate(mktestclasses):
         def additional_tests():
             suite = unittest.TestSuite()
@@ -184,12 +181,9 @@ def device_test_suite(transports):
                         transports=transports,
                         serial=serial
                 ) as dev:
-                    open_device = functools.partial(
-                        ykman.descriptor.open_device,
-                        transports=transports,
-                        serial=dev.serial)
+                    mktestclasses_arg = make_mktestclasses_arg(dev)
                     for test_case in _make_test_cases(
-                            dev, mktestclasses, open_device):
+                            dev, mktestclasses, mktestclasses_arg):
                         orig_name = test_case._original_test_name
                         for attr_name in dir(test_case):
                             if attr_name.startswith('test'):
@@ -216,51 +210,32 @@ def device_test_suite(transports):
             return suite
         return additional_tests
     return decorate
+
+
+def device_test_suite(transports):
+    if not isinstance(transports, TRANSPORT):
+        raise ValueError('Argument to @device_test_suite must be a TRANSPORT value.')  # noqa: E501
+
+    def make_open_device(dev):
+        open_device = functools.partial(
+            ykman.descriptor.open_device,
+            transports=transports,
+            serial=dev.serial
+        )
+        return open_device
+
+    return _make_test_suite(transports, make_open_device)
 
 
 def cli_test_suite(transports):
     if not isinstance(transports, TRANSPORT):
         raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
 
-    def decorate(mktestclasses):
-        def additional_tests():
-            suite = unittest.TestSuite()
+    def make_ykman_cli(dev):
+        ykman_cli = functools.partial(_ykman_cli, dev.serial)
+        return ykman_cli
 
-            yubikey_test_names = {}
-            for serial in _test_serials or []:
-                with ykman.descriptor.open_device(
-                        transports=transports,
-                        serial=serial
-                ) as dev:
-                    ykman_cli = functools.partial(_ykman_cli, dev.serial)
-                    for test_case in _make_test_cases(
-                            dev, mktestclasses, ykman_cli):
-                        orig_name = test_case._original_test_name
-                        for attr_name in dir(test_case):
-                            if attr_name.startswith('test'):
-                                test_names = yubikey_test_names.get(
-                                    orig_name, set())
-                                test_names.add(attr_name)
-                                yubikey_test_names[orig_name] = test_names
-                                suite.addTest(test_case(attr_name))
-
-            for original_test_class in _make_skipped_original_test_cases(
-                    mktestclasses):
-                original_test_names = set(
-                    attr_name
-                    for attr_name in dir(original_test_class)
-                    if attr_name.startswith('test')
-                )
-                uncovered_test_names = original_test_names.difference(
-                    yubikey_test_names.get(
-                        original_test_class.__qualname__, set()))
-
-                for uncovered_test_name in uncovered_test_names:
-                    suite.addTest(original_test_class(uncovered_test_name))
-
-            return suite
-        return additional_tests
-    return decorate
+    return _make_test_suite(transports, make_ykman_cli)
 
 
 destructive_tests_not_activated = (
