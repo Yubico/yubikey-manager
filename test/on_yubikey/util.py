@@ -153,13 +153,8 @@ def _make_skipped_original_test_cases(mktestclasses):
         yield unittest.skip('No YubiKey available for test')(test_class)
 
 
-def _make_device_test_cases(transports, dev, mktestclasses):
-    open_device = functools.partial(
-        ykman.descriptor.open_device,
-        transports=transports,
-        serial=dev.serial)
-
-    for test_class in mktestclasses(open_device):
+def _make_test_cases(dev, mktestclasses, *mktestclasses_args):
+    for test_class in mktestclasses(*mktestclasses_args):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
         test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
@@ -189,8 +184,12 @@ def device_test_suite(transports):
                         transports=transports,
                         serial=serial
                 ) as dev:
-                    for test_case in _make_device_test_cases(
-                            transports, dev, mktestclasses):
+                    open_device = functools.partial(
+                        ykman.descriptor.open_device,
+                        transports=transports,
+                        serial=dev.serial)
+                    for test_case in _make_test_cases(
+                            dev, mktestclasses, open_device):
                         orig_name = test_case._original_test_name
                         for attr_name in dir(test_case):
                             if attr_name.startswith('test'):
@@ -219,25 +218,6 @@ def device_test_suite(transports):
     return decorate
 
 
-def _make_cli_test_cases(dev, mktestclasses):
-    ykman_cli = functools.partial(_ykman_cli, dev.serial)
-
-    for test_class in mktestclasses(ykman_cli):
-        setattr(test_class, '_original_test_name', test_class.__qualname__)
-        fw_version = '.'.join(str(v) for v in dev.version)
-        test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
-
-        for attr_name in dir(test_class):
-            method = getattr(test_class, attr_name)
-            if (attr_name.startswith('test')
-                    and '_yubikey_conditions' in dir(method)):
-                conditions = getattr(method, '_yubikey_conditions')
-                if not all(cond(dev) for cond in conditions):
-                    delattr(test_class, attr_name)
-
-        yield test_class
-
-
 def cli_test_suite(transports):
     if not isinstance(transports, TRANSPORT):
         raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
@@ -252,7 +232,9 @@ def cli_test_suite(transports):
                         transports=transports,
                         serial=serial
                 ) as dev:
-                    for test_case in _make_cli_test_cases(dev, mktestclasses):
+                    ykman_cli = functools.partial(_ykman_cli, dev.serial)
+                    for test_case in _make_test_cases(
+                            dev, mktestclasses, ykman_cli):
                         orig_name = test_case._original_test_name
                         for attr_name in dir(test_case):
                             if attr_name.startswith('test'):
