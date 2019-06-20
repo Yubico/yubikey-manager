@@ -10,9 +10,7 @@ from ..util import (
 from .util import (PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
-def make_test_case(dev):
-    ykman_cli = functools.partial(_ykman_cli, dev.serial)
-
+def make_test_classes(ykman_cli):
     class KeyManagement(PivTestCase):
         @classmethod
         def setUpClass(cls):
@@ -207,27 +205,35 @@ def make_test_case(dev):
             output = ykman_cli('piv', 'export-certificate', 'f9', '-')
             self.assertIn('BEGIN CERTIFICATE', output)
 
-    fw_version = '.'.join(str(v) for v in dev.version)
-    KeyManagement.__qualname__ = f'KeyManagement_{fw_version}_{dev.serial}'
+    return [KeyManagement]
 
-    for attr_name in dir(KeyManagement):
-        method = getattr(KeyManagement, attr_name)
-        if attr_name.startswith('test') and 'yubikey_conditions' in dir(method):
-            conditions = getattr(method, 'yubikey_conditions')
-            if not all(cond(dev) for cond in conditions):
-                delattr(KeyManagement, attr_name)
 
-    return KeyManagement
+def make_test_cases(dev):
+    ykman_cli = functools.partial(_ykman_cli, dev.serial)
+
+    for test_class in make_test_classes(ykman_cli):
+
+        fw_version = '.'.join(str(v) for v in dev.version)
+        test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
+
+        for attr_name in dir(test_class):
+            method = getattr(test_class, attr_name)
+            if (attr_name.startswith('test')
+                    and 'yubikey_conditions' in dir(method)):
+                conditions = getattr(method, 'yubikey_conditions')
+                if not all(cond(dev) for cond in conditions):
+                    delattr(test_class, attr_name)
+
+        yield test_class
 
 
 def additional_tests():
     suite = unittest.TestSuite()
-
     for serial in _test_serials:
         with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
-            test_case = make_test_case(dev)
-            for attr_name in dir(test_case):
-                if attr_name.startswith('test'):
-                    suite.addTest(test_case(attr_name))
+            for test_case in make_test_cases(dev):
+                for attr_name in dir(test_case):
+                    if attr_name.startswith('test'):
+                        suite.addTest(test_case(attr_name))
 
     return suite
