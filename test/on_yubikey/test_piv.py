@@ -432,11 +432,9 @@ def additional_tests(open_device):
 
     class UnblockPin(PivTestCase):
 
-        @classmethod
-        def setUpClass(cls):
-            with open_device() as dev:
-                controller = PivController(dev.driver)
-                controller.reset()
+        def setUp(self):
+            super().setUp()
+            self.controller.reset()
 
         def block_pin(self):
             while self.controller.get_pin_tries() > 0:
