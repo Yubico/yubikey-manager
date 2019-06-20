@@ -112,31 +112,49 @@ def _get_test_method_names(test_class):
     )
 
 
+def _multiply_test_classes_by_devices(
+        transports,
+        create_test_classes,
+        create_test_class_context
+):
+    tests = []
+    covered_test_names = {}
+
+    for transport in (t for t in TRANSPORT if transports & t):
+        for serial in _test_serials or []:
+            with ykman.descriptor.open_device(
+                    transports=transport,
+                    serial=serial
+            ) as dev:
+                for test_class in _create_test_classes_for_device(
+                        transport,
+                        dev,
+                        create_test_classes,
+                        create_test_class_context
+                ):
+                    orig_name = test_class._original_test_name
+                    test_names = _get_test_method_names(test_class)
+                    covered_test_names[orig_name] = (
+                        covered_test_names.get(orig_name, set())
+                        .union(test_names))
+                    for test_method_name in test_names:
+                        tests.append(test_class(test_method_name))
+
+    return tests, covered_test_names
+
+
 def _make_test_suite(transports, create_test_class_context):
     def decorate(create_test_classes):
         def additional_tests():
             suite = unittest.TestSuite()
-            yubikey_test_names = {}
 
-            for transport in (t for t in TRANSPORT if transports & t):
-                for serial in _test_serials or []:
-                    with ykman.descriptor.open_device(
-                            transports=transport,
-                            serial=serial
-                    ) as dev:
-                        for test_class in _create_test_classes_for_device(
-                                transport,
-                                dev,
-                                create_test_classes,
-                                create_test_class_context
-                        ):
-                            orig_name = test_class._original_test_name
-                            test_names = _get_test_method_names(test_class)
-                            yubikey_test_names[orig_name] = (
-                                yubikey_test_names.get(orig_name, set())
-                                .union(test_names))
-                            for test_method_name in test_names:
-                                suite.addTest(test_class(test_method_name))
+            (tests, covered_test_names) = _multiply_test_classes_by_devices(
+                transports,
+                create_test_classes,
+                create_test_class_context
+            )
+
+            suite.addTests(tests)
 
             for original_test_class in _make_skipped_original_test_cases(
                     create_test_classes):
@@ -146,7 +164,7 @@ def _make_test_suite(transports, create_test_class_context):
                     if attr_name.startswith('test')
                 )
                 uncovered_test_names = original_test_names.difference(
-                    yubikey_test_names.get(
+                    covered_test_names.get(
                         original_test_class.__qualname__, set()))
 
                 for uncovered_test_name in uncovered_test_names:
