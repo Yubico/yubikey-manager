@@ -4,7 +4,7 @@ from ykman.util import TRANSPORT
 from .util import (cli_test_suite, fips)
 
 
-@cli_test_suite(TRANSPORT.OTP)
+@cli_test_suite(sum(TRANSPORT))
 def additional_tests(ykman_cli):
     class TestYkmanInfo(unittest.TestCase):
 

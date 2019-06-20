@@ -153,11 +153,11 @@ def _make_skipped_original_test_cases(mktestclasses):
         yield unittest.skip('No YubiKey available for test')(test_class)
 
 
-def _make_test_cases(dev, mktestclasses, mktestclasses_arg):
+def _make_test_cases(transport, dev, mktestclasses, mktestclasses_arg):
     for test_class in mktestclasses(mktestclasses_arg):
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
-        test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
+        test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
 
         for attr_name in dir(test_class):
             method = getattr(test_class, attr_name)
@@ -176,22 +176,27 @@ def _make_test_suite(transports, make_mktestclasses_arg):
             suite = unittest.TestSuite()
 
             yubikey_test_names = {}
-            for serial in _test_serials or []:
-                with ykman.descriptor.open_device(
-                        transports=transports,
-                        serial=serial
-                ) as dev:
-                    mktestclasses_arg = make_mktestclasses_arg(dev)
-                    for test_case in _make_test_cases(
-                            dev, mktestclasses, mktestclasses_arg):
-                        orig_name = test_case._original_test_name
-                        for attr_name in dir(test_case):
-                            if attr_name.startswith('test'):
-                                test_names = yubikey_test_names.get(
-                                    orig_name, set())
-                                test_names.add(attr_name)
-                                yubikey_test_names[orig_name] = test_names
-                                suite.addTest(test_case(attr_name))
+            for transport in (t for t in TRANSPORT if transports & t):
+                for serial in _test_serials or []:
+                    with ykman.descriptor.open_device(
+                            transports=transport,
+                            serial=serial
+                    ) as dev:
+                        mktestclasses_arg = make_mktestclasses_arg(dev)
+                        for test_case in _make_test_cases(
+                                transport,
+                                dev,
+                                mktestclasses,
+                                mktestclasses_arg
+                        ):
+                            orig_name = test_case._original_test_name
+                            for attr_name in dir(test_case):
+                                if attr_name.startswith('test'):
+                                    test_names = yubikey_test_names.get(
+                                        orig_name, set())
+                                    test_names.add(attr_name)
+                                    yubikey_test_names[orig_name] = test_names
+                                    suite.addTest(test_case(attr_name))
 
             for original_test_class in _make_skipped_original_test_cases(
                     mktestclasses):
