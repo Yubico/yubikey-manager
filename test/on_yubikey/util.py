@@ -131,12 +131,13 @@ def _make_test_suite(transports, create_test_class_context):
                                 create_test_class_context
                         ):
                             orig_name = test_case._original_test_name
-                            for attr_name in _get_test_method_names(test_case):
+                            for test_method_name in _get_test_method_names(
+                                    test_case):
                                 test_names = yubikey_test_names.get(
                                     orig_name, set())
-                                test_names.add(attr_name)
+                                test_names.add(test_method_name)
                                 yubikey_test_names[orig_name] = test_names
-                                suite.addTest(test_case(attr_name))
+                                suite.addTest(test_case(test_method_name))
 
             for original_test_class in _make_skipped_original_test_cases(
                     create_test_classes):
