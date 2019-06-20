@@ -81,6 +81,16 @@ def _device_satisfies_test_conditions(dev, test_method):
         return True
 
 
+def _delete_inapplicable_test_methods(dev, test_class):
+    for attr_name in dir(test_class):
+        method = getattr(test_class, attr_name)
+        if attr_name.startswith('test'):
+            if not _device_satisfies_test_conditions(dev, method):
+                print('Deleting test', attr_name, 'from test', test_class)
+                delattr(test_class, attr_name)
+    return test_class
+
+
 def _make_test_classes_for_device(
         transport,
         dev,
@@ -92,14 +102,7 @@ def _make_test_classes_for_device(
         setattr(test_class, '_original_test_name', test_class.__qualname__)
         fw_version = '.'.join(str(v) for v in dev.version)
         test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
-
-        for attr_name in dir(test_class):
-            method = getattr(test_class, attr_name)
-            if attr_name.startswith('test'):
-                if not _device_satisfies_test_conditions(dev, method):
-                    delattr(test_class, attr_name)
-
-        yield test_class
+        yield _delete_inapplicable_test_methods(dev, test_class)
 
 
 def _make_test_suite(transports, create_test_class_context):
