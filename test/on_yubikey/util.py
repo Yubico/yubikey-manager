@@ -3,10 +3,11 @@ import click
 import functools
 import os
 import sys
+import test.util
 import unittest
 import ykman.descriptor
+
 from ykman.util import TRANSPORT
-import test.util
 
 
 _skip = True
