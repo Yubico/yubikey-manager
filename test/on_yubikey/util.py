@@ -124,20 +124,19 @@ def _make_test_suite(transports, create_test_class_context):
                             transports=transport,
                             serial=serial
                     ) as dev:
-                        for test_case in _make_test_classes_for_device(
+                        for test_class in _make_test_classes_for_device(
                                 transport,
                                 dev,
                                 create_test_classes,
                                 create_test_class_context
                         ):
-                            orig_name = test_case._original_test_name
-                            for test_method_name in _get_test_method_names(
-                                    test_case):
-                                test_names = yubikey_test_names.get(
-                                    orig_name, set())
-                                test_names.add(test_method_name)
-                                yubikey_test_names[orig_name] = test_names
-                                suite.addTest(test_case(test_method_name))
+                            orig_name = test_class._original_test_name
+                            test_names = _get_test_method_names(test_class)
+                            yubikey_test_names[orig_name] = (
+                                yubikey_test_names.get(orig_name, set())
+                                .union(test_names))
+                            for test_method_name in test_names:
+                                suite.addTest(test_class(test_method_name))
 
             for original_test_class in _make_skipped_original_test_cases(
                     create_test_classes):
