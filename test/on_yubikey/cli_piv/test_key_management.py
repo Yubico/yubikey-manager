@@ -1,17 +1,16 @@
-import functools
-import unittest
-
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from ykman.descriptor import open_device
 from ykman.util import (Cve201715361VulnerableError, TRANSPORT)
 from ..util import (
-    _test_serials, _ykman_cli, fips, neo, piv_attestation, roca)
-from .util import (PivTestCase, DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
+    cli_test_suite, fips, neo, piv_attestation, roca,
+    DestructiveYubikeyTestCase)
+from .util import (DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
-def make_test_classes(ykman_cli):
-    class KeyManagement(PivTestCase):
+@cli_test_suite(TRANSPORT.CCID)
+def additional_tests(ykman_cli):
+
+    class KeyManagement(DestructiveYubikeyTestCase):
         @classmethod
         def setUpClass(cls):
             ykman_cli('piv', 'reset', '-f')
@@ -206,38 +205,3 @@ def make_test_classes(ykman_cli):
             self.assertIn('BEGIN CERTIFICATE', output)
 
     return [KeyManagement]
-
-
-def make_test_cases(dev, mktestclasses):
-    ykman_cli = functools.partial(_ykman_cli, dev.serial)
-
-    for test_class in mktestclasses(ykman_cli):
-
-        fw_version = '.'.join(str(v) for v in dev.version)
-        test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
-
-        for attr_name in dir(test_class):
-            method = getattr(test_class, attr_name)
-            if (attr_name.startswith('test')
-                    and 'yubikey_conditions' in dir(method)):
-                conditions = getattr(method, 'yubikey_conditions')
-                if not all(cond(dev) for cond in conditions):
-                    delattr(test_class, attr_name)
-
-        yield test_class
-
-
-def wrap_with_test_suite(mktestclasses):
-    suite = unittest.TestSuite()
-    for serial in _test_serials:
-        with open_device(transports=TRANSPORT.CCID, serial=serial) as dev:
-            for test_case in make_test_cases(dev, mktestclasses):
-                for attr_name in dir(test_case):
-                    if attr_name.startswith('test'):
-                        suite.addTest(test_case(attr_name))
-
-    return suite
-
-
-def additional_tests():
-    return wrap_with_test_suite(make_test_classes)

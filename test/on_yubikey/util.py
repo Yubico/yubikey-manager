@@ -144,6 +144,54 @@ def roca(should_be_vulnerable):
         is_cve201715361_vulnerable_firmware_version(dev.version))
 
 
+def _make_cli_test_cases(dev, mktestclasses):
+    if dev is None:
+        for test_class in mktestclasses(None):
+            yield test_class
+    else:
+        ykman_cli = functools.partial(_ykman_cli, dev.serial)
+
+        for test_class in mktestclasses(ykman_cli):
+            fw_version = '.'.join(str(v) for v in dev.version)
+            test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
+
+            for attr_name in dir(test_class):
+                method = getattr(test_class, attr_name)
+                if (attr_name.startswith('test')
+                        and 'yubikey_conditions' in dir(method)):
+                    conditions = getattr(method, 'yubikey_conditions')
+                    if not all(cond(dev) for cond in conditions):
+                        delattr(test_class, attr_name)
+
+            yield test_class
+
+
+def cli_test_suite(transports):
+    def decorate(mktestclasses):
+        def additional_tests():
+            suite = unittest.TestSuite()
+            if _test_serials is None:
+                for test_case in _make_cli_test_cases(None, mktestclasses):
+                    for attr_name in dir(test_case):
+                        if attr_name.startswith('test'):
+                            suite.addTest(test_case(attr_name))
+            else:
+                for serial in _test_serials:
+                    with ykman.descriptor.open_device(
+                            transports=transports,
+                            serial=serial
+                    ) as dev:
+                        for test_case in _make_cli_test_cases(
+                                dev, mktestclasses):
+                            for attr_name in dir(test_case):
+                                if attr_name.startswith('test'):
+                                    suite.addTest(test_case(attr_name))
+
+            return suite
+        return additional_tests
+    return decorate
+
+
 destructive_tests_not_activated = (
     _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIALS == None')
 
