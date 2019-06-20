@@ -89,6 +89,13 @@ def _delete_inapplicable_test_methods(dev, test_class):
     return test_class
 
 
+def _add_suffix_to_class_name(transport, dev, test_class):
+    setattr(test_class, '_original_test_name', test_class.__qualname__)
+    fw_version = '.'.join(str(v) for v in dev.version)
+    test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
+    return test_class
+
+
 def _create_test_classes_for_device(
         transport,
         dev,
@@ -97,10 +104,9 @@ def _create_test_classes_for_device(
 ):
     context = create_test_class_context(dev, transport)
     for test_class in create_test_classes(context):
-        setattr(test_class, '_original_test_name', test_class.__qualname__)
-        fw_version = '.'.join(str(v) for v in dev.version)
-        test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
-        yield _delete_inapplicable_test_methods(dev, test_class)
+        _delete_inapplicable_test_methods(dev, test_class)
+        _add_suffix_to_class_name(transport, dev, test_class)
+        yield test_class
 
 
 def _get_test_method_names(test_class):
