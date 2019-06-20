@@ -85,7 +85,6 @@ def _delete_inapplicable_test_methods(dev, test_class):
     for method_name in _get_test_method_names(test_class):
         method = getattr(test_class, method_name)
         if not _device_satisfies_test_conditions(dev, method):
-            print('Deleting test', method_name, 'from test', test_class)
             delattr(test_class, method_name)
     return test_class
 
