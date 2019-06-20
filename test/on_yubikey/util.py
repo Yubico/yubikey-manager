@@ -213,7 +213,7 @@ def _make_test_suite(transports, make_mktestclasses_arg):
 
 
 def device_test_suite(transports):
-    if not isinstance(transports, TRANSPORT):
+    if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @device_test_suite must be a TRANSPORT value.')  # noqa: E501
 
     def make_open_device(dev):
@@ -228,7 +228,7 @@ def device_test_suite(transports):
 
 
 def cli_test_suite(transports):
-    if not isinstance(transports, TRANSPORT):
+    if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
 
     def make_ykman_cli(dev):
