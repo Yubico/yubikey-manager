@@ -115,11 +115,11 @@ def yubikey_each_ccid(*conditions):
 
 def _make_condition_adder(condition):
     def decorate(method):
-        method_conditions = (getattr(method, 'yubikey_conditions')
-                             if 'yubikey_conditions' in dir(method)
+        method_conditions = (getattr(method, '_yubikey_conditions')
+                             if '_yubikey_conditions' in dir(method)
                              else set())
         method_conditions.add(condition)
-        setattr(method, 'yubikey_conditions', method_conditions)
+        setattr(method, '_yubikey_conditions', method_conditions)
         return method
     return decorate
 
@@ -144,48 +144,67 @@ def roca(should_be_vulnerable):
         is_cve201715361_vulnerable_firmware_version(dev.version))
 
 
+def _make_skipped_original_test_cases(mktestclasses):
+    for test_class in mktestclasses(None):
+        yield unittest.skip('No YubiKey available for test')(test_class)
+
+
 def _make_cli_test_cases(dev, mktestclasses):
-    if dev is None:
-        for test_class in mktestclasses(None):
-            yield test_class
-    else:
-        ykman_cli = functools.partial(_ykman_cli, dev.serial)
+    ykman_cli = functools.partial(_ykman_cli, dev.serial)
 
-        for test_class in mktestclasses(ykman_cli):
-            fw_version = '.'.join(str(v) for v in dev.version)
-            test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
+    for test_class in mktestclasses(ykman_cli):
+        setattr(test_class, '_original_test_name', test_class.__qualname__)
+        fw_version = '.'.join(str(v) for v in dev.version)
+        test_class.__qualname__ += f'_{fw_version}_{dev.serial}'
 
-            for attr_name in dir(test_class):
-                method = getattr(test_class, attr_name)
-                if (attr_name.startswith('test')
-                        and 'yubikey_conditions' in dir(method)):
-                    conditions = getattr(method, 'yubikey_conditions')
-                    if not all(cond(dev) for cond in conditions):
-                        delattr(test_class, attr_name)
+        for attr_name in dir(test_class):
+            method = getattr(test_class, attr_name)
+            if (attr_name.startswith('test')
+                    and '_yubikey_conditions' in dir(method)):
+                conditions = getattr(method, '_yubikey_conditions')
+                if not all(cond(dev) for cond in conditions):
+                    delattr(test_class, attr_name)
 
-            yield test_class
+        yield test_class
 
 
 def cli_test_suite(transports):
+    if not isinstance(transports, TRANSPORT):
+        raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
+
     def decorate(mktestclasses):
         def additional_tests():
             suite = unittest.TestSuite()
-            if _test_serials is None:
-                for test_case in _make_cli_test_cases(None, mktestclasses):
-                    for attr_name in dir(test_case):
-                        if attr_name.startswith('test'):
-                            suite.addTest(test_case(attr_name))
-            else:
-                for serial in _test_serials:
-                    with ykman.descriptor.open_device(
-                            transports=transports,
-                            serial=serial
-                    ) as dev:
-                        for test_case in _make_cli_test_cases(
-                                dev, mktestclasses):
-                            for attr_name in dir(test_case):
-                                if attr_name.startswith('test'):
-                                    suite.addTest(test_case(attr_name))
+
+            yubikey_test_names = {}
+            for serial in _test_serials or []:
+                with ykman.descriptor.open_device(
+                        transports=transports,
+                        serial=serial
+                ) as dev:
+                    for test_case in _make_cli_test_cases(dev, mktestclasses):
+                        orig_name = test_case._original_test_name
+                        for attr_name in dir(test_case):
+                            if attr_name.startswith('test'):
+                                test_names = yubikey_test_names.get(
+                                    orig_name, set())
+                                test_names.add(attr_name)
+                                yubikey_test_names[orig_name] = test_names
+                                suite.addTest(test_case(attr_name))
+
+            for original_test_class in _make_skipped_original_test_cases(
+                    mktestclasses):
+                original_test_names = set(
+                    attr_name
+                    for attr_name in dir(original_test_class)
+                    if attr_name.startswith('test')
+                )
+                uncovered_test_names = original_test_names.difference(
+                    yubikey_test_names.get(
+                        original_test_class.__qualname__, set()))
+
+                for uncovered_test_name in uncovered_test_names:
+                    suite.addTest(original_test_class(uncovered_test_name))
 
             return suite
         return additional_tests
