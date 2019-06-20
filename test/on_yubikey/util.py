@@ -5,8 +5,8 @@ import os
 import sys
 import test.util
 import unittest
-import ykman.descriptor
 
+from ykman.descriptor import list_devices, open_device
 from ykman.util import TRANSPORT
 
 
@@ -20,7 +20,7 @@ if _test_serials is not None:
     _test_serials = set(int(s) for s in _test_serials.split(','))
     _serials_present = set()
 
-    for dev in ykman.descriptor.list_devices():
+    for dev in list_devices():
         _serials_present.add(dev.serial)
         _versions[dev.serial] = dev.version
         dev.close()
@@ -63,7 +63,7 @@ def _specialize_open_device(dev, transports):
     device using the given transport(s).
     '''
     return functools.partial(
-        ykman.descriptor.open_device,
+        open_device,
         transports=transports,
         serial=dev.serial
     )
@@ -127,10 +127,7 @@ def _multiply_test_classes_by_devices(
 
     for transport in (t for t in TRANSPORT if transports & t):
         for serial in _test_serials or []:
-            with ykman.descriptor.open_device(
-                    transports=transport,
-                    serial=serial
-            ) as dev:
+            with open_device(transports=transport, serial=serial) as dev:
                 for test_class in _create_test_classes_for_device(
                         transport,
                         dev,
