@@ -146,7 +146,7 @@ def _get_test_method_names(test_class):
 
 
 def _multiply_test_classes_by_devices(
-        transports,
+        transports_and_serials,
         create_test_classes,
         create_test_class_context
 ):
@@ -157,7 +157,9 @@ def _multiply_test_classes_by_devices(
     Each test class returned by create_test_classes is instantiated for each
     combination of transport and device.
 
-    :param transports: the ykman.util.TRANSPORTs to use to open the devices.
+    :param transports_and_serials: a sequence of (ykman.util.TRANSPORT,
+            ykman.device.YubiKey) pairs, for each of which to instantiate each
+            test.
     :param create_test_classes: the additional_tests function that was
             decorated with @device_test_suite or @cli_test_suite.
     :param create_test_class_context: a function which, given a
@@ -172,22 +174,21 @@ def _multiply_test_classes_by_devices(
     tests = []
     covered_test_names = {}
 
-    for transport in (t for t in TRANSPORT if transports & t):
-        for serial in _test_serials or []:
-            with open_device(transports=transport, serial=serial) as dev:
-                for test_class in _create_test_classes_for_device(
-                        transport,
-                        dev,
-                        create_test_classes,
-                        create_test_class_context
-                ):
-                    orig_name = test_class._original_test_name
-                    test_names = _get_test_method_names(test_class)
-                    covered_test_names[orig_name] = (
-                        covered_test_names.get(orig_name, set())
-                        .union(test_names))
-                    for test_method_name in test_names:
-                        tests.append(test_class(test_method_name))
+    for (transport, serial) in transports_and_serials:
+        with open_device(transports=transport, serial=serial) as dev:
+            for test_class in _create_test_classes_for_device(
+                    transport,
+                    dev,
+                    create_test_classes,
+                    create_test_class_context
+            ):
+                orig_name = test_class._original_test_name
+                test_names = _get_test_method_names(test_class)
+                covered_test_names[orig_name] = (
+                    covered_test_names.get(orig_name, set())
+                    .union(test_names))
+                for test_method_name in test_names:
+                    tests.append(test_class(test_method_name))
 
     return tests, covered_test_names
 
@@ -204,12 +205,17 @@ def _make_skips_for_uncovered_tests(create_test_classes, covered_test_names):
             yield original_test_class(uncovered_test_name)
 
 
-def _make_test_suite_decorator(transports, create_test_class_context):
+def _make_test_suite_decorator(
+        transports_and_serials,
+        create_test_class_context
+):
     '''
     Create a decorator that will instantiate device-specific versions of the
     test classes returned by the decorated function.
 
-    :param transports: the ykman.util.TRANSPORTs to use to open the devices.
+    :param transports_and_serials: a sequence of (ykman.util.TRANSPORT,
+            ykman.device.YubiKey) pairs, for each of which to instantiate each
+            test.
     :param create_test_class_context: a function which, given a
             ykman.device.Yubikey and a ykman.util.TRANSPORT, returns a
             specialized open_device or ykman_cli function for that device and
@@ -222,7 +228,7 @@ def _make_test_suite_decorator(transports, create_test_class_context):
             start_time = time.time()
             print(f'Starting test instantiation: {create_test_classes.__module__} ...')  # noqa: E501
             (tests, covered_test_names) = _multiply_test_classes_by_devices(
-                transports,
+                transports_and_serials,
                 create_test_classes,
                 create_test_class_context
             )
@@ -249,9 +255,14 @@ def device_test_suite(transports):
 
     The decorated function must take one parameter, which will receive a
     specialized ykman.descriptor.open_device function as an argument. This
-    open_device function opens a specific YubiKey device, and can be used as if
-    that YubiKey is the only one connected. The tests defined in the decorated
-    function should use this argument to open a YubiKey.
+    open_device function opens a specific YubiKey device via a specific
+    transport, and can be used as if that YubiKey is the only one connected.
+    The tests defined in the decorated function should use this argument to
+    open a YubiKey.
+
+    Each test class is instantiated once per device and transport, with an
+    open_device argument function specialized for that combination of device
+    and transport.
 
     The test methods in the annotated function can be decorated with conditions
     from the yubikey_conditions module. These condition decorators will ensure
@@ -264,7 +275,14 @@ def device_test_suite(transports):
     '''
     if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
         raise ValueError('Argument to @device_test_suite must be a TRANSPORT value.')  # noqa: E501
-    return _make_test_suite_decorator(transports, _specialize_open_device)
+
+    return _make_test_suite_decorator(
+        ((t, s)
+         for t in TRANSPORT if t & transports
+         for s in _test_serials
+         ),
+        _specialize_open_device,
+    )
 
 
 def cli_test_suite(transports):
@@ -292,9 +310,13 @@ def cli_test_suite(transports):
     :returns: a decorator that transforms an additional_tests function into the
             format expected by unittest test discovery.
     '''
-    if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
-        raise ValueError('Argument to @cli_test_suite must be a TRANSPORT value.')  # noqa: E501
-    return _make_test_suite_decorator(transports, _specialize_ykman_cli)
+    return _make_test_suite_decorator(
+        ((t, s)
+         for t in TRANSPORT if t | transports
+         for s in _test_serials
+         ),
+        _specialize_ykman_cli
+    )
 
 
 destructive_tests_not_activated = (
