@@ -1,11 +1,10 @@
 import unittest
 
-from ykman.util import TRANSPORT
 from . import yubikey_conditions
 from .util import (cli_test_suite)
 
 
-@cli_test_suite(sum(TRANSPORT))
+@cli_test_suite
 def additional_tests(ykman_cli):
     class TestYkmanInfo(unittest.TestCase):
 

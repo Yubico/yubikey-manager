@@ -1,12 +1,12 @@
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from ykman.util import (Cve201715361VulnerableError, TRANSPORT)
+from ykman.util import (Cve201715361VulnerableError)
 from .. import yubikey_conditions
 from ..util import cli_test_suite, DestructiveYubikeyTestCase
 from .util import (DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
-@cli_test_suite(TRANSPORT.CCID)
+@cli_test_suite
 def additional_tests(ykman_cli):
 
     class KeyManagement(DestructiveYubikeyTestCase):

@@ -1,10 +1,9 @@
-from ykman.util import TRANSPORT
 from .. import yubikey_conditions
 from ...util import open_file
 from ..util import cli_test_suite, DestructiveYubikeyTestCase
 
 
-@cli_test_suite(TRANSPORT.CCID)
+@cli_test_suite
 def additional_tests(ykman_cli):
     class TestFIPS(DestructiveYubikeyTestCase):
 

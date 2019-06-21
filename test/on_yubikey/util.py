@@ -100,8 +100,11 @@ def _delete_inapplicable_test_methods(dev, test_class):
 
 def _add_suffix_to_class_name(transport, dev, test_class):
     setattr(test_class, '_original_test_name', test_class.__qualname__)
+    transport_part = (f'_{transport.name}'
+                      if isinstance(transport, TRANSPORT)
+                      else '')
     fw_version = '.'.join(str(v) for v in dev.version)
-    test_class.__qualname__ = f'{test_class.__qualname__}_{transport.name}_{fw_version}_{dev.serial}'  # noqa: E501
+    test_class.__qualname__ = f'{test_class.__qualname__}{transport_part}_{fw_version}_{dev.serial}'  # noqa: E501
     return test_class
 
 
@@ -148,7 +151,7 @@ def _get_test_method_names(test_class):
 def _multiply_test_classes_by_devices(
         transports_and_serials,
         create_test_classes,
-        create_test_class_context
+        create_test_class_context,
 ):
     '''
     Instantiate device-specific versions of test classes for each combination
@@ -285,7 +288,7 @@ def device_test_suite(transports):
     )
 
 
-def cli_test_suite(transports):
+def cli_test_suite(additional_tests):
     '''
     Transform an additional_tests function into the format expected by unittest
     test discovery.
@@ -302,21 +305,14 @@ def cli_test_suite(transports):
     that the decorated test is not run with YubiKey devices that do not match
     the conditions.
 
-    :param transports: the ykman.util.TRANSPORTs required for the functions
-            under test.
-
-    TODO: implement transports as described here
-
-    :returns: a decorator that transforms an additional_tests function into the
-            format expected by unittest test discovery.
+    :param additional_tests: The decorated function
+    :returns: the argument function transformed into the format expected by
+            unittest test discovery.
     '''
     return _make_test_suite_decorator(
-        ((t, s)
-         for t in TRANSPORT if t | transports
-         for s in _test_serials
-         ),
+        ((sum(TRANSPORT), s) for s in _test_serials),
         _specialize_ykman_cli
-    )
+    )(additional_tests)
 
 
 destructive_tests_not_activated = (
