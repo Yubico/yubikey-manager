@@ -1,4 +1,4 @@
-* Version 3.0.0 (unreleased)
+* Version 3.0.0 (released 2019-06-24)
  ** Add support for new YubiKey Preview and lightning form factor
  ** FIDO: Support for credential management
  ** OpenPGP: Support for OpenPGP attestation, cardholder certificates and cached touch policies
