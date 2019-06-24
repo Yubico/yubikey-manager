@@ -282,7 +282,7 @@ def device_test_suite(transports):
     return _make_test_suite_decorator(
         ((t, s)
          for t in TRANSPORT if t & transports
-         for s in _test_serials
+         for s in _test_serials or []
          ),
         _specialize_open_device,
     )
@@ -310,7 +310,7 @@ def cli_test_suite(additional_tests):
             unittest test discovery.
     '''
     return _make_test_suite_decorator(
-        ((sum(TRANSPORT), s) for s in _test_serials),
+        ((sum(TRANSPORT), s) for s in _test_serials or []),
         _specialize_ykman_cli
     )(additional_tests)
 
