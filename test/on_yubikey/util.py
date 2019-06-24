@@ -5,6 +5,7 @@ import os
 import sys
 import test.util
 import unittest
+import time
 
 from ykman.descriptor import list_devices, open_device
 from ykman.util import TRANSPORT
@@ -17,10 +18,14 @@ _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 _versions = {}
 
 if _test_serials is not None:
+    start_time = time.time()
+    print('Initiating device discovery...')
+
     _test_serials = set(int(s) for s in _test_serials.split(','))
     _serials_present = set()
 
     for dev in list_devices():
+        print(f'{time.time() - start_time:.3f} {dev}')
         _serials_present.add(dev.serial)
         _versions[dev.serial] = dev.version
         dev.close()
@@ -47,6 +52,9 @@ if _test_serials is not None:
             ' with serial numbers: {}. Make sure these are all keys used for'
             ' development.'.format(_serials_present),
             abort=True)
+
+    end_time = time.time()
+    print(f'Device discovery finished in {end_time - start_time:.3f} s')
 
 
 def _specialize_ykman_cli(dev, _transports):
@@ -160,6 +168,8 @@ def _make_skips_for_uncovered_tests(create_test_classes, covered_test_names):
 def _make_test_suite_decorator(transports, create_test_class_context):
     def decorate(create_test_classes):
         def additional_tests():
+            start_time = time.time()
+            print(f'Starting test instantiation: {create_test_classes.__module__} ...')  # noqa: E501
             (tests, covered_test_names) = _multiply_test_classes_by_devices(
                 transports,
                 create_test_classes,
@@ -172,6 +182,9 @@ def _make_test_suite_decorator(transports, create_test_class_context):
             suite = unittest.TestSuite()
             suite.addTests(tests)
             suite.addTests(skipped_tests)
+
+            end_time = time.time()
+            print(f'Test instantiation completed in {end_time - start_time:.3f} s')  # noqa: E501
 
             return suite
         return additional_tests
