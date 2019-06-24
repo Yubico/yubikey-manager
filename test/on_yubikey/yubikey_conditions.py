@@ -69,5 +69,10 @@ def is_not_roca(dev):
     return not is_cve201715361_vulnerable_firmware_version(dev.version)
 
 
+@yubikey_condition
+def can_write_config(dev):
+    return dev.can_write_config
+
+
 def version_min(min_version):
     return yubikey_condition(lambda dev: dev.version >= min_version)
