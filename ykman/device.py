@@ -433,7 +433,7 @@ class YubiKey(object):
         self.close()
 
     def __str__(self):
-        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}]' \
+        return '{0} {1[0]}.{1[1]}.{1[2]} {2} [{3.name}] ' \
             'serial: {4}' \
             .format(
                 self.device_name,
