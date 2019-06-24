@@ -76,3 +76,17 @@ def can_write_config(dev):
 
 def version_min(min_version):
     return yubikey_condition(lambda dev: dev.version >= min_version)
+
+
+def version_in_range(min_inclusive, max_inclusive):
+    return yubikey_condition(
+        lambda dev:
+        min_inclusive <= dev.version <= max_inclusive
+    )
+
+
+def version_not_in_range(min_inclusive, max_inclusive):
+    return yubikey_condition(
+        lambda dev:
+        dev.version < min_inclusive or dev.version > max_inclusive
+    )
