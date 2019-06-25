@@ -1,3 +1,4 @@
+import time
 import unittest
 from .util import (DestructiveYubikeyTestCase, ykman_cli, can_write_config)
 
@@ -86,6 +87,9 @@ class TestConfigUSB(DestructiveYubikeyTestCase):
         self.assertNotIn('OATH', output)
         self.assertNotIn('PIV', output)
         self.assertNotIn('OpenPGP', output)
+
+        # Prevent communication errors in other tests
+        time.sleep(1)
 
 
 @unittest.skipIf(not can_write_config(), 'Device can not write config')

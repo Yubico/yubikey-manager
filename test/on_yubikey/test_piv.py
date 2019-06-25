@@ -13,7 +13,8 @@ from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk, KeypairMismatch)
 from ykman.util import TRANSPORT, parse_certificates, parse_private_key
 from .util import (
-    DestructiveYubikeyTestCase, missing_mode, open_device, get_version, is_fips)
+    DestructiveYubikeyTestCase, missing_mode, open_device, get_version,
+    is_fips, skip_roca)
 from ..util import open_file
 
 
@@ -214,9 +215,11 @@ class KeyManagement(PivTestCase):
                                                verify=True)
 
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
+    @unittest.skipIf(*skip_roca)
     def test_import_certificate_verifies_key_pairing_rsa1024(self):
         self._test_import_key_pairing(ALGO.RSA1024, ALGO.ECCP256)
 
+    @unittest.skipIf(*skip_roca)
     def test_import_certificate_verifies_key_pairing_rsa2048(self):
         self._test_import_key_pairing(ALGO.RSA2048, ALGO.ECCP256)
 

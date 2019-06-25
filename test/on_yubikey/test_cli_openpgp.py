@@ -6,6 +6,9 @@ from .util import (DestructiveYubikeyTestCase, missing_mode, ykman_cli)
 @unittest.skipIf(*missing_mode(TRANSPORT.CCID))
 class TestOpenPGP(DestructiveYubikeyTestCase):
 
+    def setUp(self):
+        ykman_cli('openpgp', 'reset', '-f')
+
     def test_openpgp_info(self):
         output = ykman_cli('openpgp', 'info')
         self.assertIn('OpenPGP version:', output)

@@ -95,17 +95,23 @@ class KeyManagement(PivTestCase):
         output = ykman_cli('piv', 'attest', '9a', '-')
         self.assertIn('BEGIN CERTIFICATE', output)
 
+    def _test_generate_csr(self, algo):
+        ykman_cli(
+            'piv', 'generate-key', '9a', '-a', algo, '-m',
+            DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
+        output = ykman_cli(
+            'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
+            '-s', 'test-subject', '-P', DEFAULT_PIN, '-')
+        csr = x509.load_pem_x509_csr(output.encode(), default_backend())
+        self.assertTrue(csr.is_signature_valid)
+
     @unittest.skipIf(is_fips(), 'Not applicable to YubiKey FIPS.')
-    def test_generate_csr(self):
-        for algo in ('ECCP256', 'RSA1024'):
-            ykman_cli(
-                'piv', 'generate-key', '9a', '-a', algo, '-m',
-                DEFAULT_MANAGEMENT_KEY, '/tmp/test-pub-key.pem')
-            output = ykman_cli(
-                'piv', 'generate-csr', '9a', '/tmp/test-pub-key.pem',
-                '-s', 'test-subject', '-P', DEFAULT_PIN, '-')
-            csr = x509.load_pem_x509_csr(output.encode(), default_backend())
-            self.assertTrue(csr.is_signature_valid)
+    @unittest.skipIf(*skip_roca)
+    def test_generate_csr_rsa1024(self):
+        self._test_generate_csr('RSA1024')
+
+    def test_generate_csr_eccp256(self):
+        self._test_generate_csr('ECCP256')
 
     def test_import_verify_correct_cert_succeeds_with_pin(self):
         # Set up a key in the slot and create a certificate for it
