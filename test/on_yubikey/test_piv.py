@@ -83,6 +83,7 @@ def additional_tests(open_device):
             self.reconnect()
             return public_key
 
+        @yubikey_conditions.supports_piv_touch_policies
         def test_delete_certificate_requires_authentication(self):
             self.generate_key(SLOT.AUTHENTICATION)
 
