@@ -27,11 +27,6 @@ NON_DEFAULT_MANAGEMENT_KEY = a2b_hex('010103040506070801020304050607080102030405
 now = datetime.datetime.now
 
 
-@yubikey_conditions.yubikey_condition
-def supports_pin_policy(dev):
-    return dev.version >= (4, 0, 0)
-
-
 def get_test_cert():
     with open_file('rsa_2048_cert.pem') as f:
         return parse_certificates(f.read(), None)[0]
@@ -353,7 +348,7 @@ def additional_tests(open_device):
             self.reconnect()
             return public_key
 
-        @supports_pin_policy
+        @yubikey_conditions.supports_piv_pin_policies
         def test_sign_with_pin_policy_always_requires_pin_every_time(self):
             self.generate_key(pin_policy=PIN_POLICY.ALWAYS)
 
@@ -374,7 +369,7 @@ def additional_tests(open_device):
             self.assertIsNotNone(sig)
 
         @yubikey_conditions.is_not_fips
-        @supports_pin_policy
+        @yubikey_conditions.supports_piv_pin_policies
         def test_sign_with_pin_policy_never_does_not_require_pin(self):
             self.generate_key(pin_policy=PIN_POLICY.NEVER)
             sig = self.controller.sign(

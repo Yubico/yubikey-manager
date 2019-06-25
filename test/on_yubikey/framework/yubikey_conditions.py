@@ -60,6 +60,11 @@ def not_supports_piv_attestation(dev):
 
 
 @yubikey_condition
+def supports_piv_pin_policies(dev):
+    return dev.version >= (4, 0, 0)
+
+
+@yubikey_condition
 def is_roca(dev):
     return is_cve201715361_vulnerable_firmware_version(dev.version)
 
