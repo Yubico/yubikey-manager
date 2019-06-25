@@ -8,6 +8,9 @@ from .util import DEFAULT_MANAGEMENT_KEY
 def additional_tests(ykman_cli):
     class Misc(unittest.TestCase):
 
+        def setUp(self):
+            ykman_cli('piv', 'reset', '-f')
+
         def test_info(self):
             output = ykman_cli('piv', 'info')
             self.assertIn('PIV version:', output)
