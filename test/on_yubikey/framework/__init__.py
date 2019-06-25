@@ -65,14 +65,16 @@ def _specialize_ykman_cli(dev, _transports):
     return functools.partial(test.util.ykman_cli, '--device', dev.serial)
 
 
-def _specialize_open_device(dev, transports):
+def _specialize_open_device(dev, transport):
     '''
     Creates a specialized version of open_device which will open the given
     device using the given transport(s).
     '''
+    assert isinstance(transport, TRANSPORT), \
+        '_specialize_open_device accepts only one transport at a time.'
     return functools.partial(
         open_device,
-        transports=transports,
+        transports=transport,
         serial=dev.serial
     )
 
