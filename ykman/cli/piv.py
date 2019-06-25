@@ -39,7 +39,7 @@ from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_format_option,
     click_postpone_execution, click_callback,
-    prompt_for_touch, UpperCaseChoice)
+    prompt_for_touch, EnumChoice)
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
@@ -81,11 +81,10 @@ click_pin_option = click.option(
     '-P', '--pin', help='PIN code.')
 click_pin_policy_option = click.option(
     '--pin-policy',
-    type=UpperCaseChoice(['DEFAULT', 'NEVER', 'ONCE', 'ALWAYS']),
+    type=EnumChoice(PIN_POLICY),
     help='PIN policy for slot.')
 click_touch_policy_option = click.option(
-    '--touch-policy', type=UpperCaseChoice(
-        ['DEFAULT', 'NEVER', 'ALWAYS', 'CACHED']),
+    '--touch-policy', type=EnumChoice(TOUCH_POLICY),
     help='Touch policy for slot.')
 
 
@@ -228,8 +227,7 @@ def reset(ctx):
 @click_pin_option
 @click.option(
     '-a', '--algorithm', help='Algorithm to use in key generation.',
-    type=UpperCaseChoice(
-        ['RSA1024', 'RSA2048', 'ECCP256', 'ECCP384']), default='RSA2048',
+    type=EnumChoice(ALGO), default=ALGO.RSA2048.name,
     show_default=True)
 @click_format_option
 @click_pin_policy_option
@@ -255,25 +253,18 @@ def generate_key(
 
     _ensure_authenticated(ctx, controller, pin, management_key)
 
-    algorithm_id = ALGO.from_string(algorithm)
-
-    if pin_policy:
-        pin_policy = PIN_POLICY.from_string(pin_policy)
-    if touch_policy:
-        touch_policy = TOUCH_POLICY.from_string(touch_policy)
-
     _check_pin_policy(ctx, dev, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
 
     try:
         public_key = controller.generate_key(
             slot,
-            algorithm_id,
+            algorithm,
             pin_policy,
             touch_policy)
     except UnsupportedAlgorithm:
         ctx.fail('Algorithm {} is not supported by this '
-                 'YubiKey.'.format(algorithm))
+                 'YubiKey.'.format(algorithm.name))
 
     key_encoding = format
     public_key_output.write(public_key.public_bytes(
@@ -401,11 +392,6 @@ def import_key(
                 click.echo('Wrong password.')
             continue
         break
-
-    if pin_policy:
-        pin_policy = PIN_POLICY.from_string(pin_policy)
-    if touch_policy:
-        touch_policy = TOUCH_POLICY.from_string(touch_policy)
 
     _check_pin_policy(ctx, dev, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)

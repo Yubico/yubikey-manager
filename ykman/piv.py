@@ -96,20 +96,6 @@ class ALGO(IntEnum):
             'Unsupported key type: %s' % type(key), key=key)
 
     @classmethod
-    def from_string(cls, algorithm):
-        if algorithm == 'RSA1024':
-            return cls.RSA1024
-        if algorithm == 'RSA2048':
-            return cls.RSA2048
-        if algorithm == 'ECCP256':
-            return cls.ECCP256
-        if algorithm == 'ECCP384':
-            return cls.ECCP384
-        raise UnsupportedAlgorithm(
-            'Unsupported algorithm name: %s' % algorithm,
-            algorithm_id=algorithm)
-
-    @classmethod
     def is_rsa(cls, algorithm_int):
         # Implemented as "not not RSA" to reduce risk of false negatives if
         # more algorithms are added
@@ -217,18 +203,6 @@ class PIN_POLICY(IntEnum):
     ONCE = 0x2
     ALWAYS = 0x3
 
-    @classmethod
-    def from_string(cls, pin_policy):
-        if pin_policy == 'DEFAULT':
-            return cls.DEFAULT
-        if pin_policy == 'NEVER':
-            return cls.NEVER
-        if pin_policy == 'ONCE':
-            return cls.ONCE
-        if pin_policy == 'ALWAYS':
-            return cls.ALWAYS
-        raise UnknownPinPolicy(pin_policy)
-
 
 @unique
 class TOUCH_POLICY(IntEnum):
@@ -236,18 +210,6 @@ class TOUCH_POLICY(IntEnum):
     NEVER = 0x1
     ALWAYS = 0x2
     CACHED = 0x3
-
-    @classmethod
-    def from_string(cls, touch_policy):
-        if touch_policy == 'DEFAULT':
-            return cls.DEFAULT
-        if touch_policy == 'NEVER':
-            return cls.NEVER
-        if touch_policy == 'ALWAYS':
-            return cls.ALWAYS
-        if touch_policy == 'CACHED':
-            return cls.CACHED
-        raise UnknownTouchPolicy(touch_policy)
 
 
 class AuthenticationFailed(Exception):
@@ -288,20 +250,6 @@ class UnsupportedAlgorithm(Exception):
 
         self.algorithm_id = algorithm_id
         self.key = key
-
-
-class UnknownPinPolicy(Exception):
-    def __init__(self, policy_name):
-        super().__init__(
-            'Unsupported pin policy: %s' % policy_name)
-        self.policy_name = policy_name
-
-
-class UnknownTouchPolicy(Exception):
-    def __init__(self, policy_name):
-        super().__init__(
-            'Unsupported touch policy: %s' % policy_name)
-        self.policy_name = policy_name
 
 
 class WrongPin(AuthenticationFailed):

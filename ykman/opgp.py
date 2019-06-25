@@ -47,42 +47,42 @@ logger = logging.getLogger(__name__)
 
 @unique
 class KEY_SLOT(Enum):  # noqa: N801
-    SIGNATURE = 'SIG'
-    ENCRYPTION = 'ENC'
-    AUTHENTICATION = 'AUT'
-    ATTESTATION = 'ATT'
+    SIG = 'SIGNATURE'
+    ENC = 'ENCRYPTION'
+    AUT = 'AUTHENTICATION'
+    ATT = 'ATTESTATION'
 
     @property
     def key_position(self):
-        if self == KEY_SLOT.SIGNATURE:
+        if self == KEY_SLOT.SIG:
             return 0x01
-        if self == KEY_SLOT.ENCRYPTION:
+        if self == KEY_SLOT.ENC:
             return 0x02
-        if self == KEY_SLOT.AUTHENTICATION:
+        if self == KEY_SLOT.AUT:
             return 0x03
-        if self == KEY_SLOT.ATTESTATION:
+        if self == KEY_SLOT.ATT:
             return 0x04
 
     @property
     def touch_position(self):
-        if self == KEY_SLOT.SIGNATURE:
+        if self == KEY_SLOT.SIG:
             return 0xd6
-        if self == KEY_SLOT.ENCRYPTION:
+        if self == KEY_SLOT.ENC:
             return 0xd7
-        if self == KEY_SLOT.AUTHENTICATION:
+        if self == KEY_SLOT.AUT:
             return 0xd8
-        if self == KEY_SLOT.ATTESTATION:
+        if self == KEY_SLOT.ATT:
             return 0xd9
 
     @property
     def cert_position(self):
-        if self == KEY_SLOT.SIGNATURE:
+        if self == KEY_SLOT.SIG:
             return 0x02
-        if self == KEY_SLOT.ENCRYPTION:
+        if self == KEY_SLOT.ENC:
             return 0x01
-        if self == KEY_SLOT.AUTHENTICATION:
+        if self == KEY_SLOT.AUT:
             return 0x00
-        if self == KEY_SLOT.ATTESTATION:
+        if self == KEY_SLOT.ATT:
             return 0x03
 
 
@@ -226,7 +226,7 @@ class OpgpController(object):
     def get_touch(self, key_slot):
         if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
-        if key_slot == KEY_SLOT.ATTESTATION and not self.supports_attestation:
+        if key_slot == KEY_SLOT.ATT and not self.supports_attestation:
             raise ValueError('Attestation key not available on this device.')
         data = self.send_apdu(0, INS.GET_DATA, 0, key_slot.touch_position)
         return TOUCH_MODE(six.indexbytes(data, 0))
@@ -347,7 +347,7 @@ class OpgpController(object):
     def delete_certificate(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
         self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0, INS.SELECT_DATA, key_slot.cert_position,
             0x04, data=a2b_hex('0660045C027F21'))
         self.send_apdu(
             0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=b'')
@@ -356,7 +356,7 @@ class OpgpController(object):
         self._verify(PW1, pin)
         self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.key_position, 0)
         self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position(),
+            0, INS.SELECT_DATA, key_slot.cert_position,
             0x04, data=a2b_hex('0660045C027F21'))
         data = self.send_cmd(
             0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)

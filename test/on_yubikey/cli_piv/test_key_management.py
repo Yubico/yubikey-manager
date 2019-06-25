@@ -2,9 +2,20 @@ import unittest
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from ykman.util import (Cve201715361VulnerableError)
 from ..framework import cli_test_suite, yubikey_conditions
 from .util import (DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
+
+
+def generate_pem_eccp256_key():
+    pk = ec.generate_private_key(ec.SECP256R1(), default_backend())
+    return pk.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    )
 
 
 @cli_test_suite
@@ -68,6 +79,12 @@ def additional_tests(ykman_cli):
                 DEFAULT_MANAGEMENT_KEY, '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
 
+        def test_import_key_eccp256(self):
+            ykman_cli(
+                'piv', 'import-key', '9a',
+                '-m', DEFAULT_MANAGEMENT_KEY,
+                '-', input=generate_pem_eccp256_key())
+
         @yubikey_conditions.is_not_neo
         def test_generate_key_eccp384(self):
             output = ykman_cli(
@@ -83,11 +100,29 @@ def additional_tests(ykman_cli):
             self.assertIn('BEGIN PUBLIC KEY', output)
 
         @yubikey_conditions.is_not_neo
+        def test_import_key_pin_policy_always(self):
+            for pin_policy in ['ALWAYS', 'always']:
+                ykman_cli(
+                    'piv', 'import-key', '9a',
+                    '--pin-policy', pin_policy,
+                    '-m', DEFAULT_MANAGEMENT_KEY,
+                    '-', input=generate_pem_eccp256_key())
+
+        @yubikey_conditions.is_not_neo
         def test_generate_key_touch_policy_always(self):
             output = ykman_cli(
                 'piv', 'generate-key', '9a', '--touch-policy', 'ALWAYS', '-m',
                 DEFAULT_MANAGEMENT_KEY, '-a', 'ECCP256', '-')
             self.assertIn('BEGIN PUBLIC KEY', output)
+
+        @yubikey_conditions.is_not_neo
+        def test_import_key_touch_policy_always(self):
+            for touch_policy in ['ALWAYS', 'always']:
+                ykman_cli(
+                    'piv', 'import-key', '9a',
+                    '--touch-policy', touch_policy,
+                    '-m', DEFAULT_MANAGEMENT_KEY,
+                    '-', input=generate_pem_eccp256_key())
 
         @yubikey_conditions.supports_piv_attestation
         def test_attest_key(self):

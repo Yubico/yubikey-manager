@@ -39,8 +39,11 @@ class UpperCaseChoice(click.Choice):
     """
     Support lowercase option values for uppercase options.
     Does not support token normalization.
+    Choice options MUST be all uppercase.
     """
     def __init__(self, choices):
+        for v in choices:
+            assert v.upper() == v, 'Choice not all uppercase: ' + v
         click.Choice.__init__(self, choices)
 
     def convert(self, value, param, ctx):
@@ -49,6 +52,22 @@ class UpperCaseChoice(click.Choice):
         self.fail(
             'invalid choice: %s. (choose from %s)' % (
                 value, ', '.join(self.choices)), param, ctx)
+
+
+class EnumChoice(UpperCaseChoice):
+    """
+    Use an enum's member names as the definition for a choice option.
+
+    Enum member names MUST be all uppercase. Options are not case sensitive.
+    Underscores in enum names are translated to dashes in the option choice.
+    """
+    def __init__(self, choices_enum):
+        super().__init__([v.name.replace('_', '-') for v in choices_enum])
+        self.choices_enum = choices_enum
+
+    def convert(self, value, param, ctx):
+        name = super().convert(value.replace('-', '_'), param, ctx)
+        return self.choices_enum[name]
 
 
 def click_callback(invoke_on_missing=False):
