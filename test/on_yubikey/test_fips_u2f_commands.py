@@ -4,8 +4,7 @@ import unittest
 from fido2.hid import (CTAPHID)
 from ykman.util import (TRANSPORT)
 from ykman.driver_fido import (FIPS_U2F_CMD)
-from .util import device_test_suite
-from . import yubikey_conditions
+from .framework import device_test_suite, yubikey_conditions
 
 
 HID_CMD = 0x03

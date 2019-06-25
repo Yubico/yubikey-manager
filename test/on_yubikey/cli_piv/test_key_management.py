@@ -3,8 +3,7 @@ import unittest
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from ykman.util import (Cve201715361VulnerableError)
-from .. import yubikey_conditions
-from ..util import cli_test_suite
+from ..framework import cli_test_suite, yubikey_conditions
 from .util import (DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 

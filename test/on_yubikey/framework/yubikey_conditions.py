@@ -1,5 +1,5 @@
 from ykman.util import is_cve201715361_vulnerable_firmware_version
-from .util import _get_test_method_names
+from . import _get_test_method_names
 
 
 def yubikey_condition(condition):

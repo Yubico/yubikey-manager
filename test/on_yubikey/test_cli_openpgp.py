@@ -1,5 +1,5 @@
 import unittest
-from .util import cli_test_suite
+from .framework import cli_test_suite
 
 
 @cli_test_suite

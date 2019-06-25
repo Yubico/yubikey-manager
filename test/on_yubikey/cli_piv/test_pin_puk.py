@@ -1,6 +1,6 @@
 import unittest
 
-from ..util import cli_test_suite
+from ..framework import cli_test_suite
 from .util import (
     old_new_new, DEFAULT_PIN, NON_DEFAULT_PIN, DEFAULT_PUK, NON_DEFAULT_PUK)
 

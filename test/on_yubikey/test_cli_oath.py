@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-from .util import cli_test_suite
-from . import yubikey_conditions
+from .framework import cli_test_suite, yubikey_conditions
 
 
 URI_HOTP_EXAMPLE = 'otpauth://hotp/Example:demo@example.com?' \

@@ -1,4 +1,4 @@
-from .util import DestructiveYubikeyTestCase
+from .framework import DestructiveYubikeyTestCase
 from ykman import driver_fido, driver_otp, driver_ccid
 
 

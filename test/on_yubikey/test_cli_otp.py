@@ -28,8 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import unittest
-from .util import cli_test_suite
-from . import yubikey_conditions
+from .framework import cli_test_suite, yubikey_conditions
 
 
 @cli_test_suite

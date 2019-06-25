@@ -1,8 +1,7 @@
 import unittest
 
-from .. import yubikey_conditions
 from ...util import open_file
-from ..util import cli_test_suite
+from ..framework import cli_test_suite, yubikey_conditions
 
 
 @cli_test_suite

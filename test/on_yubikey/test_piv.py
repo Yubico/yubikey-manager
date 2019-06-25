@@ -12,8 +12,7 @@ from ykman.piv import (ALGO, PIN_POLICY, PivController, SLOT, TOUCH_POLICY)
 from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk, KeypairMismatch)
 from ykman.util import TRANSPORT, parse_certificates, parse_private_key
-from . import yubikey_conditions
-from .util import device_test_suite
+from .framework import device_test_suite, yubikey_conditions
 from ..util import open_file
 
 

@@ -1,7 +1,6 @@
 import time
 import unittest
-from .util import cli_test_suite
-from . import yubikey_conditions
+from .framework import cli_test_suite, yubikey_conditions
 
 
 VALID_LOCK_CODE = 'a' * 32

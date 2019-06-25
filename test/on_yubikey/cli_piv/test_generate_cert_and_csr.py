@@ -4,8 +4,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
-from ..util import cli_test_suite
-from .. import yubikey_conditions
+from ..framework import cli_test_suite, yubikey_conditions
 from .util import (
     DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_MANAGEMENT_KEY)
 

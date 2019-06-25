@@ -1,6 +1,6 @@
 import unittest
 
-from ..util import cli_test_suite
+from ..framework import cli_test_suite
 from .util import DEFAULT_MANAGEMENT_KEY
 
 
