@@ -1,15 +1,17 @@
+import unittest
+
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from ykman.util import (Cve201715361VulnerableError)
 from .. import yubikey_conditions
-from ..util import cli_test_suite, DestructiveYubikeyTestCase
+from ..util import cli_test_suite
 from .util import (DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY)
 
 
 @cli_test_suite
 def additional_tests(ykman_cli):
 
-    class KeyManagement(DestructiveYubikeyTestCase):
+    class KeyManagement(unittest.TestCase):
         @classmethod
         def setUpClass(cls):
             ykman_cli('piv', 'reset', '-f')
