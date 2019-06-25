@@ -1,11 +1,13 @@
+import unittest
+
 from .. import yubikey_conditions
 from ...util import open_file
-from ..util import cli_test_suite, DestructiveYubikeyTestCase
+from ..util import cli_test_suite
 
 
 @cli_test_suite
 def additional_tests(ykman_cli):
-    class TestFIPS(DestructiveYubikeyTestCase):
+    class TestFIPS(unittest.TestCase):
 
         @classmethod
         def setUpClass(cls):
