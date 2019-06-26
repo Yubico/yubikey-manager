@@ -70,13 +70,8 @@ def _load_usb_backend():
             return backend
 
 
-_usb_backend = None
-
-
 def get_usb_backend():
-    global _usb_backend
-    _usb_backend = _usb_backend or _load_usb_backend()
-    return _usb_backend
+    return _load_usb_backend()
 
 
 class LibUsb1Version(ctypes.Structure):
