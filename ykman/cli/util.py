@@ -62,11 +62,13 @@ class EnumChoice(UpperCaseChoice):
     Underscores in enum names are translated to dashes in the option choice.
     """
     def __init__(self, choices_enum):
-        super().__init__([v.name.replace('_', '-') for v in choices_enum])
+        super(EnumChoice, self).__init__(
+            [v.name.replace('_', '-') for v in choices_enum])
         self.choices_enum = choices_enum
 
     def convert(self, value, param, ctx):
-        name = super().convert(value.replace('-', '_'), param, ctx)
+        name = super(EnumChoice, self).convert(
+            value.replace('-', '_'), param, ctx)
         return self.choices_enum[name]
 
 
