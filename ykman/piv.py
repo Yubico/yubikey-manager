@@ -214,7 +214,7 @@ class TOUCH_POLICY(IntEnum):
 
 class AuthenticationFailed(Exception):
     def __init__(self, message, sw, applet_version):
-        super().__init__(message)
+        super(AuthenticationFailed, self).__init__(message)
         self.tries_left = (
             tries_left(sw, applet_version)
             if is_verify_fail(sw, applet_version)
@@ -224,18 +224,18 @@ class AuthenticationFailed(Exception):
 class AuthenticationBlocked(AuthenticationFailed):
     def __init__(self, message, sw):
         # Dummy applet_version since sw will always be "authentication blocked"
-        super().__init__(message, sw, ())
+        super(AuthenticationBlocked, self).__init__(message, sw, ())
 
 
 class BadFormat(Exception):
     def __init__(self, message, bad_value):
-        super().__init__(message)
+        super(BadFormat, self).__init__(message)
         self.bad_value = bad_value
 
 
 class KeypairMismatch(Exception):
     def __init__(self, slot, cert):
-        super().__init__(
+        super(KeypairMismatch, self).__init__(
             'The certificate does not match the private key in slot %s.' % slot)
         self.slot = slot
         self.cert = cert
@@ -243,7 +243,7 @@ class KeypairMismatch(Exception):
 
 class UnsupportedAlgorithm(Exception):
     def __init__(self, message, algorithm_id=None, key=None, ):
-        super().__init__(message)
+        super(UnsupportedAlgorithm, self).__init__(message)
         if algorithm_id is None and key is None:
             raise ValueError(
                 'At least one of algorithm_id and key must be given.')
@@ -254,12 +254,14 @@ class UnsupportedAlgorithm(Exception):
 
 class WrongPin(AuthenticationFailed):
     def __init__(self, sw, applet_version):
-        super().__init__('Incorrect PIN', sw, applet_version)
+        super(WrongPin, self).__init__(
+            'Incorrect PIN', sw, applet_version)
 
 
 class WrongPuk(AuthenticationFailed):
     def __init__(self, sw, applet_version):
-        super().__init__('Incorrect PUK', sw, applet_version)
+        super(WrongPuk, self).__init__(
+            'Incorrect PUK', sw, applet_version)
 
 
 PIN = 0x80

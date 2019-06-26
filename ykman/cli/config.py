@@ -48,9 +48,9 @@ class ApplicationsChoice(EnumChoice):
     """
     def convert(self, value, param, ctx):
         if value.lower() == 'openpgp':
-            return super().convert('OPGP', param, ctx)
+            return super(ApplicationsChoice, self).convert('OPGP', param, ctx)
         else:
-            return super().convert(value, param, ctx)
+            return super(ApplicationsChoice, self).convert(value, param, ctx)
 
 
 def prompt_lock_code(prompt='Enter your lock code'):
