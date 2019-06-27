@@ -29,8 +29,6 @@ from .libloader import load_library
 import os
 import sys
 
-__all__ = ['load_library', 'use_library', 'CLibrary']
-
 
 def use_library(libname, version=None, extra_paths=[]):
     lib = load_library(libname, version, extra_paths)
