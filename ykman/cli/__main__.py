@@ -45,10 +45,14 @@ from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
+
+from runpy import run_module
 import usb.core
 import click
 import logging
 import sys
+import ast
+import tempfile
 
 
 logger = logging.getLogger(__name__)
@@ -248,7 +252,70 @@ def list_keys(ctx, serials, readers):
         click.echo('{} [{}]'.format(desc.name, desc.mode))
 
 
-COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
+@cli.command('script')
+@click.pass_context
+@click.option(
+    '-s', '--site-dir', type=click.Path(exists=True), multiple=True,
+    metavar='DIR', help='Specify additional path(s) to load python modules '
+    'from.')
+@click.option(
+    '-r', '--requirements', multiple=True, metavar='FILE',
+    help='Optionally specify requirements.txt file(s) to load additional '
+    'python requirements from.')
+@click.argument('script', type=click.File('rb'), metavar='FILE')
+def run_script(ctx, site_dir, requirements, script):
+    """
+    Executes a python script.
+
+    Additional dependencies may be specified in one or more "requiremenst.txt"
+    files, or in the body of the script by defining a variable named
+    __requires__ containing a list of requirements.
+
+    Examples:
+
+    \b
+      Run the file "myscript.py", loading dependencies from "requirements.txt":
+      $ ykman script -r requirements.txt myscript.py
+
+    \b
+      Example __requires__ declaration:
+      __requires__ = ["requests>=2.22", "pyasn1"]
+    """
+    for sd in site_dir:
+        logger.debug('Add %s to path.', sd)
+        sys.path.append(sd)
+
+    script_body = script.read()
+    root = ast.parse(script_body)
+    assignment = next(filter(lambda n: isinstance(n, ast.Assign)
+                             and n.targets[0].id == '__requires__', root.body),
+                      None)
+    deps = ast.literal_eval(assignment.value) if assignment else []
+    if not isinstance(deps, list):
+        ctx.fail('Invalid type for __requires__, must be list.')
+
+    for r in requirements:
+        deps.extend(['-r', r])
+
+    if deps:
+        temp = tempfile.mkdtemp(prefix='ykman-script-temp-')
+        click.echo('Installing script dependencies...')
+        sys.argv = ['pip', 'install', '-t', temp] + deps
+        try:
+            run_module('pip', run_name='__main__')
+        except SystemExit as e:
+            if e.args[0] != 0:
+                ctx.fail('Failed to install script dependencies.')
+        logger.debug('Add %s to path.', temp)
+        sys.path.append(temp)
+        click.echo('Dependencies installed.')
+
+    click.echo('Running script.\n')
+    exec(script_body)
+
+
+COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config,
+            run_script)
 
 
 for cmd in COMMANDS:
