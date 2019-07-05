@@ -267,7 +267,7 @@ def run_script(ctx, site_dir, requirements, script):
     """
     Executes a python script.
 
-    Additional dependencies may be specified in one or more "requiremenst.txt"
+    Additional dependencies may be specified in one or more "requirements.txt"
     files, or in the body of the script by defining a variable named
     __requires__ containing a list of requirements.
 
