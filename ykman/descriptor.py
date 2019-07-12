@@ -47,12 +47,13 @@ class FailedOpeningDeviceException(Exception):
 
 class Descriptor(object):
 
-    def __init__(self, key_type, mode, version, fingerprint, serial=None):
+    def __init__(self, key_type, mode, version, fingerprint, serial=None, backend=None):
         self._logger = logger.getChild('Descriptor')
         self._version = version
         self._key_type = key_type
         self._mode = mode
         self._fingerprint = fingerprint
+        self._backend = backend
 
     @property
     def fingerprint(self):
@@ -113,12 +114,12 @@ class Descriptor(object):
         raise FailedOpeningDeviceException()
 
     @classmethod
-    def from_usb(cls, usb_dev):
+    def from_usb(cls, usb_dev, backend):
         v_int = usb_dev.bcdDevice
         version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
         pid = PID(usb_dev.idProduct)
         fp = (pid, version, usb_dev.bus, usb_dev.address, usb_dev.iSerialNumber)
-        return cls(pid.get_type(), Mode.from_pid(pid), version, fp)
+        return cls(pid.get_type(), Mode.from_pid(pid), version, fp, backend=backend)
 
     @classmethod
     def from_driver(cls, driver):
@@ -128,12 +129,13 @@ class Descriptor(object):
 
 def _gen_descriptors():
     found = []  # Composite devices are listed multiple times on Windows...
-    for dev in usb.core.find(True, idVendor=0x1050, backend=get_usb_backend()):
+    backend = get_usb_backend()
+    for dev in usb.core.find(True, idVendor=0x1050, backend=backend):
         try:
             addr = (dev.bus, dev.address)
             if addr not in found:
                 found.append(addr)
-                yield Descriptor.from_usb(dev)
+                yield Descriptor.from_usb(dev, backend)
         except ValueError as e:
             logger.debug('Invalid PID', exc_info=e)
 
