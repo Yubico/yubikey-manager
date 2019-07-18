@@ -100,7 +100,9 @@ def info(ctx):
     Display status of OpenPGP application.
     """
     controller = ctx.obj['controller']
-    click.echo('OpenPGP version: %d.%d.%d' % controller.version)
+    click.echo('OpenPGP version: %d.%d' % controller.get_openpgp_version())
+    click.echo('Application version: %d.%d.%d' % controller.version)
+    click.echo()
     retries = controller.get_remaining_pin_tries()
     click.echo('PIN tries remaining: {}'.format(retries.pin))
     click.echo('Reset code tries remaining: {}'.format(retries.reset))
