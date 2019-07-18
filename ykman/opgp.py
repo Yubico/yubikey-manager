@@ -83,7 +83,7 @@ class KEY_SLOT(Enum):  # noqa: N801
         if self == KEY_SLOT.AUT:
             return 0x00
         if self == KEY_SLOT.ATT:
-            return 0x03
+            return 0xfc
 
 
 @unique
@@ -252,11 +252,14 @@ class OpgpController(object):
                        bytes(bytearray([pw1_tries, pw2_tries, pw3_tries])))
 
     def read_certificate(self, key_slot):
-        self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position,
-            0x04, data=a2b_hex('0660045C027F21'))
-        data = self.send_cmd(
-            0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
+        if key_slot == KEY_SLOT.ATT:
+            data = self.send_cmd(0, INS.GET_DATA, 0, key_slot.cert_position)
+        else:
+            self.send_cmd(
+                0, INS.SELECT_DATA, key_slot.cert_position,
+                0x04, data=a2b_hex('0660045C027F21'))
+            data = self.send_cmd(
+                0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
         if not data:
             raise ValueError('No certificate found!')
         return x509.load_der_x509_certificate(data, default_backend())
@@ -264,11 +267,16 @@ class OpgpController(object):
     def import_certificate(self, key_slot, certificate, admin_pin):
         self._verify(PW3, admin_pin)
         cert_data = certificate.public_bytes(Encoding.DER)
-        self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position,
-            0x04, data=a2b_hex('0660045C027F21'))
-        self.send_cmd(
-            0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=cert_data)
+        if key_slot == KEY_SLOT.ATT:
+            self.send_cmd(
+                0, INS.PUT_DATA, 0, key_slot.cert_position, data=cert_data)
+        else:
+            self.send_cmd(
+                0, INS.SELECT_DATA, key_slot.cert_position,
+                0x04, data=a2b_hex('0660045C027F21'))
+            self.send_cmd(
+                0, INS.PUT_DATA,
+                TAG.CARDHOLDER_CERTIFICATE, 0x21, data=cert_data)
 
     def _get_key_attributes(self, key):
         if isinstance(key, rsa.RSAPrivateKey):
@@ -346,11 +354,15 @@ class OpgpController(object):
 
     def delete_certificate(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
-        self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position,
-            0x04, data=a2b_hex('0660045C027F21'))
-        self.send_apdu(
-            0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=b'')
+        if key_slot == KEY_SLOT.ATT:
+            self.send_cmd(
+                0, INS.PUT_DATA, 0, key_slot.cert_position, data=b'')
+        else:
+            self.send_cmd(
+                0, INS.SELECT_DATA, key_slot.cert_position,
+                0x04, data=a2b_hex('0660045C027F21'))
+            self.send_apdu(
+                0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=b'')
 
     def attest(self, key_slot, pin):
         self._verify(PW1, pin)
