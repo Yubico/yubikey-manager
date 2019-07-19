@@ -179,6 +179,10 @@ class OpgpController(object):
         bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
         return tuple(int(bcd_hex[i:i+2]) for i in range(0, 6, 2))
 
+    def get_openpgp_version(self):
+        data = self.send_apdu(0, INS.GET_DATA, 0, 0x4f)
+        return (data[6], data[7])
+
     def get_remaining_pin_tries(self):
         data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
         return PinRetries(*six.iterbytes(data[4:7]))
