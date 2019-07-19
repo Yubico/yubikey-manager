@@ -279,7 +279,7 @@ def attest(ctx, key, certificate, pin, format):
 @click.argument('certificate', type=click.File('wb'), metavar='CERTIFICATE')
 def export_certificate(ctx, key, format, certificate):
     """
-    Export an OpenPGP Cardholder certificate.
+    Export an OpenPGP certificate.
 
     \b
     KEY         Key slot to read from (sig, enc, aut, or att).
@@ -299,7 +299,7 @@ def export_certificate(ctx, key, format, certificate):
 @click.argument('key', metavar='KEY', type=EnumChoice(KEY_SLOT))
 def delete_certificate(ctx, key, admin_pin):
     """
-    Delete an OpenPGP Cardholder certificate.
+    Delete an OpenPGP certificate.
 
     \b
     KEY         Key slot to delete certificate from (sig, enc, aut, or att).
@@ -321,7 +321,7 @@ def delete_certificate(ctx, key, admin_pin):
 @click.argument('cert', type=click.File('rb'), metavar='CERTIFICATE')
 def import_certificate(ctx, key, cert, admin_pin):
     """
-    Import an OpenPGP Cardholder certificate.
+    Import an OpenPGP certificate.
 
     \b
     KEY         Key slot to import certificate to (sig, enc, aut, or att).
