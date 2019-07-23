@@ -547,7 +547,7 @@ def generate_certificate(
     public_key = serialization.load_pem_public_key(
         data, default_backend())
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.utcnow()
     valid_to = now + datetime.timedelta(days=valid_days)
 
     try:
