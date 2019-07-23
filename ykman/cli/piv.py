@@ -179,9 +179,17 @@ def info(ctx):
         fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode('ascii')
         algo = ALGO.from_public_key(cert.public_key())
         serial = cert.serial_number
-        not_before = cert.not_valid_before
-        not_after = cert.not_valid_after
-
+        try:
+            not_before = cert.not_valid_before
+        except ValueError as e:
+            logger.debug('Failed reading not_valid_before', exc_info=e)
+            not_before = None
+        try:
+            not_after = cert.not_valid_after
+            not_after = None
+        except ValueError as e:
+            logger.debug('Failed reading not_valid_after', exc_info=e)
+            not_after = None
         # Print out everything
         click.echo('\tAlgorithm:\t%s' % algo.name)
         if print_dn:
@@ -192,8 +200,10 @@ def info(ctx):
             click.echo('\tIssuer CN:\t%s' % issuer_cn)
         click.echo('\tSerial:\t\t%s' % serial)
         click.echo('\tFingerprint:\t%s' % fingerprint)
-        click.echo('\tNot before:\t%s' % not_before)
-        click.echo('\tNot after:\t%s' % not_after)
+        if not_before:
+            click.echo('\tNot before:\t%s' % not_before)
+        if not_after:
+            click.echo('\tNot after:\t%s' % not_after)
 
 
 @piv.command()
