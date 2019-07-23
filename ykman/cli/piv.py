@@ -186,7 +186,6 @@ def info(ctx):
             not_before = None
         try:
             not_after = cert.not_valid_after
-            not_after = None
         except ValueError as e:
             logger.debug('Failed reading not_valid_after', exc_info=e)
             not_after = None
