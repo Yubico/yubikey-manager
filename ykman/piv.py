@@ -789,7 +789,7 @@ class PivController(object):
         data = Tlv(0xac, data)
         resp = self.send_cmd(INS.GENERATE_ASYMMETRIC, 0, slot, data)
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
-            data = _parse_tlv_dict(Tlv(resp[1:]).value)
+            data = _parse_tlv_dict(Tlv(resp).value)
             return rsa.RSAPublicNumbers(
                 int_from_bytes(data[0x82], 'big'),
                 int_from_bytes(data[0x81], 'big')

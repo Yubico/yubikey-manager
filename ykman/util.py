@@ -234,20 +234,36 @@ class Mode(object):
     __hash__ = None
 
 
+def _tlv_parse_tag(data, offs=0):
+    t = six.indexbytes(data, offs)
+    if t & 0x1f != 0x1f:
+        return t, 1
+    else:
+        t = t << 8 | six.indexbytes(data, offs+1)
+        return t, 2
+
+
+def _tlv_parse_length(data, offs=0):
+    ln = six.indexbytes(data, offs)
+    offs += 1
+    if ln > 0x80:
+        n_bytes = ln - 0x80
+        ln = bytes2int(data[offs:offs + n_bytes])
+    else:
+        n_bytes = 0
+    return ln, n_bytes + 1
+
+
 class Tlv(bytes):
 
     @property
     def tag(self):
-        return six.indexbytes(self, 0)
+        return _tlv_parse_tag(self)[0]
 
     @property
     def length(self):
-        ln = six.indexbytes(self, 1)
-        offs = 2
-        if ln > 0x80:
-            n_bytes = ln - 0x80
-            ln = bytes2int(self[offs:offs + n_bytes])
-        return ln
+        _, offs = _tlv_parse_tag(self)
+        return _tlv_parse_length(self, offs)[0]
 
     @property
     def value(self):
@@ -270,13 +286,9 @@ class Tlv(bytes):
                 tag = data
                 value = b''
             else:  # Called with binary TLV data
-                tag = six.indexbytes(data, 0)
-                ln = six.indexbytes(data, 1)
-                offs = 2
-                if ln > 0x80:
-                    n_bytes = ln - 0x80
-                    ln = bytes2int(data[offs:offs + n_bytes])
-                    offs = offs + n_bytes
+                tag, tag_ln = _tlv_parse_tag(data)
+                ln, ln_ln = _tlv_parse_length(data, tag_ln)
+                offs = tag_ln + ln_ln
                 value = data[offs:offs+ln]
         elif len(args) == 2:  # Called with tag and value.
             (tag, value) = args
@@ -284,7 +296,15 @@ class Tlv(bytes):
             raise TypeError('{}() takes at most 2 arguments ({} given)'.format(
                 cls, len(args)))
 
-        data = bytearray([tag])
+        data = bytearray([])
+        if tag <= 0xff:
+            data.append(tag)
+        else:
+            tag_1 = tag >> 8
+            if tag_1 > 0xff or tag_1 & 0x1f != 0x1f:
+                raise ValueError('Unsupported tag value')
+            tag_2 = tag & 0xff
+            data.extend([tag_1, tag_2])
         length = len(value)
         if length < 0x80:
             data.append(length)
