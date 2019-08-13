@@ -275,6 +275,12 @@ class OpgpController(object):
             raise ValueError('Invalid PIN, {} tries remaining.'.format(
                 pw_remaining))
 
+    def verify_pin(self, pin):
+        self._verify(PW1, pin)
+
+    def verify_admin(self, admin_pin):
+        self._verify(PW3, admin_pin)
+
     @property
     def supported_touch_policies(self):
         if self.version < (4, 2, 0):
@@ -298,25 +304,25 @@ class OpgpController(object):
         data = self._get_data(key_slot.uif)
         return TOUCH_MODE(six.indexbytes(data, 0))
 
-    def set_touch(self, key_slot, mode, admin_pin):
+    def set_touch(self, key_slot, mode):
+        """Requires Admin PIN verification."""
         if not self.supported_touch_policies:
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
         if mode not in self.supported_touch_policies:
             raise ValueError('Touch policy not available on this device.')
-        self._verify(PW3, admin_pin)
         self._put_data(key_slot.uif,
-                       bytes(bytearray([mode, TOUCH_METHOD_BUTTON])))
+                       struct.pack('>BB', mode, TOUCH_METHOD_BUTTON))
 
-    def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, admin_pin):
+    def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries):
+        """Requires Admin PIN verification."""
         if self.version < (1, 0, 7):  # For YubiKey NEO
             raise ValueError('Setting PIN retry counters requires version '
                              '1.0.7 or later.')
         if (4, 0, 0) <= self.version < (4, 3, 1):  # For YubiKey 4
             raise ValueError('Setting PIN retry counters requires version '
                              '4.3.1 or later.')
-        self._verify(PW3, admin_pin)
         self.send_apdu(0, INS.SET_PIN_RETRIES, 0, 0,
-                       bytes(bytearray([pw1_tries, pw2_tries, pw3_tries])))
+                       struct.pack('>BBB', pw1_tries, pw2_tries, pw3_tries))
 
     def read_certificate(self, key_slot):
         if key_slot == KEY_SLOT.ATT:
@@ -328,8 +334,8 @@ class OpgpController(object):
             raise ValueError('No certificate found!')
         return x509.load_der_x509_certificate(data, default_backend())
 
-    def import_certificate(self, key_slot, certificate, admin_pin):
-        self._verify(PW3, admin_pin)
+    def import_certificate(self, key_slot, certificate):
+        """Requires Admin PIN verification."""
         cert_data = certificate.public_bytes(Encoding.DER)
         if key_slot == KEY_SLOT.ATT:
             self._put_data(DO.ATT_CERTIFICATE, cert_data)
@@ -337,10 +343,8 @@ class OpgpController(object):
             self._select_certificate(key_slot)
             self._put_data(DO.CARDHOLDER_CERTIFICATE, cert_data)
 
-    def import_key(self, key_slot, key, admin_pin, fingerprint=None,
-                   timestamp=None):
-        self._verify(PW3, admin_pin)
-
+    def import_key(self, key_slot, key, fingerprint=None, timestamp=None):
+        """Requires Admin PIN verification."""
         attributes = _get_key_attributes(key, key_slot)
         self._put_data(key_slot.key_id, attributes)
 
@@ -353,27 +357,21 @@ class OpgpController(object):
         if timestamp is not None:
             self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
 
-    def import_attestation_key(self, key, admin_pin):
-        self.import_key(KEY_SLOT.ATT, key, admin_pin)
-
-    def delete_key(self, key_slot, admin_pin):
-        self._verify(PW3, admin_pin)
+    def delete_key(self, key_slot):
+        """Requires Admin PIN verification."""
         # Delete key by changing the key attributes twice.
         self._put_data(key_slot.key_id, struct.pack('>BHHB', 0x01, 2048, 32, 0))
         self._put_data(key_slot.key_id, struct.pack('>BHHB', 0x01, 4096, 32, 0))
 
-    def delete_attestation_key(self, admin_pin):
-        self.delete_key(KEY_SLOT.ATT, admin_pin)
-
-    def delete_certificate(self, key_slot, admin_pin):
-        self._verify(PW3, admin_pin)
+    def delete_certificate(self, key_slot):
+        """Requires Admin PIN verification."""
         if key_slot == KEY_SLOT.ATT:
             self._put_data(DO.ATT_CERTIFICATE, b'')
         else:
             self._select_certificate(key_slot)
             self._put_data(DO.CARDHOLDER_CERTIFICATE, b'')
 
-    def attest(self, key_slot, pin):
-        self._verify(PW1, pin)
+    def attest(self, key_slot):
+        """Requires User PIN verification."""
         self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
         return self.read_certificate(key_slot)
