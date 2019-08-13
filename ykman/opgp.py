@@ -148,7 +148,7 @@ def _get_key_attributes(key, key_slot):
     raise ValueError('Not a valid private key!')
 
 
-def _get_key_template(key, key_slot):
+def _get_key_template(key, key_slot, crt=False):
 
     def _pack_tlvs(tlvs):
         header = b''
@@ -166,8 +166,13 @@ def _get_key_template(key, key_slot):
         e = Tlv(0x91, b'\x01\x00\x01')  # e=65537
         p = Tlv(0x92, int_to_bytes(private_numbers.p, ln))
         q = Tlv(0x93, int_to_bytes(private_numbers.q, ln))
-        # TODO: Add crt (NEO may need it)?
         values = (e, p, q)
+        if crt:
+            dp = Tlv(0x94, int_to_bytes(private_numbers.dmp1, ln))
+            dq = Tlv(0x95, int_to_bytes(private_numbers.dmq1, ln))
+            qinv = Tlv(0x96, int_to_bytes(private_numbers.iqmp, ln))
+            n = Tlv(0x97, int_to_bytes(private_numbers.public_numbers.n, 2*ln))
+            values += (dp, dq, qinv, n)
 
     elif isinstance(key, ec.EllipticCurvePrivateKey):
         ln = key.key_size // 8
@@ -336,7 +341,7 @@ class OpgpController(object):
         attributes = _get_key_attributes(key, key_slot)
         self._put_data(key_slot.key_id, attributes)
 
-        template = _get_key_template(key, key_slot)
+        template = _get_key_template(key, key_slot, self.version < (4, 0, 0))
         self.send_cmd(0, INS.PUT_DATA_ODD, 0x3f, 0xff, template)
 
         if fingerprint is not None:
