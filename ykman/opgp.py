@@ -30,10 +30,10 @@ from __future__ import absolute_import
 import six
 import struct
 import logging
-from .util import AID
+from .util import AID, Tlv
 from .driver_ccid import (APDUError, SW, GP_INS_SELECT)
 from enum import Enum, IntEnum, unique
-from binascii import b2a_hex, a2b_hex
+from binascii import b2a_hex
 from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes
@@ -45,45 +45,24 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec
 logger = logging.getLogger(__name__)
 
 
+_KeySlot = namedtuple('KeySlot', [
+    'value',
+    'index',
+    'key_id',
+    'fingerprint',
+    'gen_time',
+    'uif',  # touch policy
+    'crt'  # Control Reference Template
+])
+
+
 @unique
-class KEY_SLOT(Enum):  # noqa: N801
-    SIG = 'SIGNATURE'
-    ENC = 'ENCRYPTION'
-    AUT = 'AUTHENTICATION'
-    ATT = 'ATTESTATION'
-
-    @property
-    def key_position(self):
-        if self == KEY_SLOT.SIG:
-            return 0x01
-        if self == KEY_SLOT.ENC:
-            return 0x02
-        if self == KEY_SLOT.AUT:
-            return 0x03
-        if self == KEY_SLOT.ATT:
-            return 0x04
-
-    @property
-    def touch_position(self):
-        if self == KEY_SLOT.SIG:
-            return 0xd6
-        if self == KEY_SLOT.ENC:
-            return 0xd7
-        if self == KEY_SLOT.AUT:
-            return 0xd8
-        if self == KEY_SLOT.ATT:
-            return 0xd9
-
-    @property
-    def cert_position(self):
-        if self == KEY_SLOT.SIG:
-            return 0x02
-        if self == KEY_SLOT.ENC:
-            return 0x01
-        if self == KEY_SLOT.AUT:
-            return 0x00
-        if self == KEY_SLOT.ATT:
-            return 0xfc
+class KEY_SLOT(_KeySlot, Enum):  # noqa: N801
+    SIG = _KeySlot('SIGNATURE', 1, 0xc1, 0xc7, 0xce, 0xd6, Tlv(0xb6))
+    ENC = _KeySlot('ENCRYPTION', 2, 0xc2, 0xc8, 0xcf, 0xd7, Tlv(0xb8))
+    AUT = _KeySlot('AUTHENTICATION', 3, 0xc3, 0xc9, 0xd0, 0xd8, Tlv(0xa4))
+    ATT = _KeySlot('ATTESTATION', 4, 0xda, 0xdb, 0xdd, 0xd9,
+                   Tlv(0xb6, Tlv(0x84, b'\x81')))
 
 
 @unique
@@ -108,11 +87,6 @@ class TOUCH_MODE(IntEnum):  # noqa: N801
 
 
 @unique
-class TAG(IntEnum):  # noqa: N801
-    CARDHOLDER_CERTIFICATE = 0x7f
-
-
-@unique
 class INS(IntEnum):  # noqa: N801
     GET_DATA = 0xca
     GET_VERSION = 0xf1
@@ -121,6 +95,7 @@ class INS(IntEnum):  # noqa: N801
     TERMINATE = 0xe6
     ACTIVATE = 0x44
     PUT_DATA = 0xda
+    PUT_DATA_ODD = 0xdb
     GET_ATTESTATION = 0xfb
     SEND_REMAINING = 0xc0
     SELECT_DATA = 0xa5
@@ -133,6 +108,74 @@ PW1 = 0x81
 PW3 = 0x83
 INVALID_PIN = b'\0'*8
 TOUCH_METHOD_BUTTON = 0x20
+
+
+@unique
+class DO(IntEnum):
+    AID = 0x4f
+    PW_STATUS = 0xc4
+    CARDHOLDER_CERTIFICATE = 0x7f21
+    ATT_CERTIFICATE = 0xfc
+
+
+@unique
+class OID(bytes, Enum):
+    SECP256R1 = b'\x2a\x86\x48\xce\x3d\x03\x01\x07',
+    SECP384R1 = b'\x2b\x81\x04\x00\x22',
+    SECP521R1 = b'\x2b\x81\x04\x00\x23',
+    X25519 = b'\x2b\x06\x01\x04\x01\x97\x55\x01\x05\x01'
+    ED25519 = b'\x2b\x06\x01\x04\x01\xda\x47\x0f\x01'
+    # TODO: Add more curves
+
+    @classmethod
+    def for_name(cls, name):
+        return getattr(cls, name.upper())
+
+
+def _get_key_attributes(key, key_slot):
+    if isinstance(key, rsa.RSAPrivateKey):
+        if key.private_numbers().public_numbers.e != 65537:
+            raise ValueError('RSA keys with e != 65537 are not supported!')
+        return struct.pack('>BHHB', 0x01, key.key_size, 32, 0)
+    if isinstance(key, ec.EllipticCurvePrivateKey):
+        if key.curve.name in ('x25519', 'ed25519'):
+            algorithm = b'\x16'
+        elif key_slot == KEY_SLOT.ENC:
+            algorithm = b'\x12'
+        else:
+            algorithm = b'\x13'
+        return algorithm + OID.for_name(key.curve.name)
+    raise ValueError('Not a valid private key!')
+
+
+def _get_key_template(key, key_slot):
+
+    def _pack_tlvs(tlvs):
+        header = b''
+        body = b''
+        for tlv in tlvs:
+            header += tlv[:-tlv.length]
+            body += tlv.value
+        return Tlv(0x7f48, header) + Tlv(0x5f48, body)
+
+    private_numbers = key.private_numbers()
+
+    if isinstance(key, rsa.RSAPrivateKey):
+        ln = (key.key_size // 8) // 2
+
+        e = Tlv(0x91, b'\x01\x00\x01')  # e=65537
+        p = Tlv(0x92, int_to_bytes(private_numbers.p, ln))
+        q = Tlv(0x93, int_to_bytes(private_numbers.q, ln))
+        # TODO: Add crt (NEO may need it)?
+        values = (e, p, q)
+
+    elif isinstance(key, ec.EllipticCurvePrivateKey):
+        ln = key.key_size // 8
+
+        privkey = Tlv(0x92, int_to_bytes(private_numbers.private_value, ln))
+        values = (privkey,)
+
+    return Tlv(0x4d, key_slot.crt + _pack_tlvs(values))
 
 
 class OpgpController(object):
@@ -175,16 +218,28 @@ class OpgpController(object):
             raise APDUError(resp, sw)
         return resp
 
+    def _get_data(self, do):
+        return self.send_cmd(0, INS.GET_DATA, do >> 8, do & 0xff)
+
+    def _put_data(self, do, data):
+        self.send_cmd(0, INS.PUT_DATA, do >> 8, do & 0xff, data)
+
+    def _select_certificate(self, key_slot):
+        self.send_cmd(
+            0, INS.SELECT_DATA, 3 - key_slot.index, 0x04,
+            Tlv(0, Tlv(0x60, Tlv(0x5c, b'\x7f\x21')))[1:]
+        )
+
     def _read_version(self):
         bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
         return tuple(int(bcd_hex[i:i+2]) for i in range(0, 6, 2))
 
     def get_openpgp_version(self):
-        data = self.send_apdu(0, INS.GET_DATA, 0, 0x4f)
-        return (data[6], data[7])
+        data = self._get_data(DO.AID)
+        return (six.indexbytes(data, 6), six.indexbytes(data, 7))
 
     def get_remaining_pin_tries(self):
-        data = self.send_apdu(0, INS.GET_DATA, 0, 0xc4)
+        data = self._get_data(DO.PW_STATUS)
         return PinRetries(*six.iterbytes(data[4:7]))
 
     def _block_pins(self):
@@ -232,7 +287,7 @@ class OpgpController(object):
             raise ValueError('Touch policy is available on YubiKey 4 or later.')
         if key_slot == KEY_SLOT.ATT and not self.supports_attestation:
             raise ValueError('Attestation key not available on this device.')
-        data = self.send_apdu(0, INS.GET_DATA, 0, key_slot.touch_position)
+        data = self._get_data(key_slot.uif)
         return TOUCH_MODE(six.indexbytes(data, 0))
 
     def set_touch(self, key_slot, mode, admin_pin):
@@ -241,7 +296,7 @@ class OpgpController(object):
         if mode not in self.supported_touch_policies:
             raise ValueError('Touch policy not available on this device.')
         self._verify(PW3, admin_pin)
-        self.send_apdu(0, INS.PUT_DATA, 0, key_slot.touch_position,
+        self._put_data(key_slot.uif,
                        bytes(bytearray([mode, TOUCH_METHOD_BUTTON])))
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries, admin_pin):
@@ -257,13 +312,10 @@ class OpgpController(object):
 
     def read_certificate(self, key_slot):
         if key_slot == KEY_SLOT.ATT:
-            data = self.send_cmd(0, INS.GET_DATA, 0, key_slot.cert_position)
+            data = self._get_data(DO.ATT_CERTIFICATE)
         else:
-            self.send_cmd(
-                0, INS.SELECT_DATA, key_slot.cert_position,
-                0x04, data=a2b_hex('0660045C027F21'))
-            data = self.send_cmd(
-                0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
+            self._select_certificate(key_slot)
+            data = self._get_data(DO.CARDHOLDER_CERTIFICATE)
         if not data:
             raise ValueError('No certificate found!')
         return x509.load_der_x509_certificate(data, default_backend())
@@ -272,108 +324,48 @@ class OpgpController(object):
         self._verify(PW3, admin_pin)
         cert_data = certificate.public_bytes(Encoding.DER)
         if key_slot == KEY_SLOT.ATT:
-            self.send_cmd(
-                0, INS.PUT_DATA, 0, key_slot.cert_position, data=cert_data)
+            self._put_data(DO.ATT_CERTIFICATE, cert_data)
         else:
-            self.send_cmd(
-                0, INS.SELECT_DATA, key_slot.cert_position,
-                0x04, data=a2b_hex('0660045C027F21'))
-            self.send_cmd(
-                0, INS.PUT_DATA,
-                TAG.CARDHOLDER_CERTIFICATE, 0x21, data=cert_data)
+            self._select_certificate(key_slot)
+            self._put_data(DO.CARDHOLDER_CERTIFICATE, cert_data)
 
-    def _get_key_attributes(self, key):
-        if isinstance(key, rsa.RSAPrivateKey):
-            return struct.pack('>BHHB', 0x01, key.key_size, 32, 0)
-        if isinstance(key, ec.EllipticCurvePrivateKey):
-            return int_to_bytes(
-                self._get_opgp_algo_id_from_ec(
-                    key)) + a2b_hex(self._get_oid_from_ec(key))
-        raise ValueError('Not a valid private key!')
+    def import_key(self, key_slot, key, admin_pin, fingerprint=None,
+                   timestamp=None):
+        self._verify(PW3, admin_pin)
 
-    def _get_oid_from_ec(self, key):
-        curve = key.curve.name
-        if curve == 'secp384r1':
-            return '2B81040022'
-        if curve == 'secp256r1':
-            return '2A8648CE3D030107'
-        if curve == 'secp521r1':
-            return '2B81040023'
-        if curve == 'x25519':
-            return '2B060104019755010501'
-        raise ValueError('No OID for curve: ' + curve)
+        attributes = _get_key_attributes(key, key_slot)
+        self._put_data(key_slot.key_id, attributes)
 
-    def _get_opgp_algo_id_from_ec(self, key):
-        curve = key.curve.name
-        if curve in ['secp384r1', 'secp256r1', 'secp521r1']:
-            return 0x13
-        if curve == 'x25519':
-            return 0x16
-        raise ValueError('No Algo ID for curve: ' + curve)
+        template = _get_key_template(key, key_slot)
+        self.send_cmd(0, INS.PUT_DATA_ODD, 0x3f, 0xff, template)
 
-    def _get_key_data(self, key):
+        if fingerprint is not None:
+            self._put_data(key_slot.fingerprint, fingerprint)
 
-        def _der_len(data):
-            ln = len(data)
-            if ln <= 128:
-                res = [ln]
-            elif ln <= 255:
-                res = [0x81, ln]
-            else:
-                res = [0x82, (ln >> 8) & 0xff, ln & 0xff]
-            return bytearray(res)
-
-        private_numbers = key.private_numbers()
-        data = a2b_hex('B603840181')
-
-        if isinstance(key, rsa.RSAPrivateKey):
-            ln = key.key_size // 8 // 2
-            data += b'\x7f\x48\x08\x91\x03\x92\x81\x80\x93\x81\x80\x5f\x48\x82\x01\x03\x01\x00\x01'  # noqa: E501
-            data += int_to_bytes(private_numbers.p, ln)
-            data += int_to_bytes(private_numbers.q, ln)
-            return b'\x4d' + _der_len(data) + data
-        elif isinstance(key, ec.EllipticCurvePrivateKey):
-            ln = key.key_size // 8
-            privkey = int_to_bytes(private_numbers.private_value, ln)
-            data += b'\x7f\x48\x02\x92' + _der_len(privkey)
-            data += b'\x5f\x48' + _der_len(privkey) + privkey
-            return b'\x4d' + _der_len(data) + data
+        if timestamp is not None:
+            self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
 
     def import_attestation_key(self, key, admin_pin):
+        self.import_key(KEY_SLOT.ATT, key, admin_pin)
+
+    def delete_key(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
-        data = self._get_key_attributes(key)
-        self.send_cmd(0, INS.PUT_DATA, 0, 0xda, data=data)
-        data = self._get_key_data(key)
-        self.send_cmd(0, 0xdb, 0x3f, 0xff, data=data)
+        # Delete key by changing the key attributes twice.
+        self._put_data(key_slot.key_id, struct.pack('>BHHB', 0x01, 2048, 32, 0))
+        self._put_data(key_slot.key_id, struct.pack('>BHHB', 0x01, 4096, 32, 0))
 
     def delete_attestation_key(self, admin_pin):
-        self._verify(PW3, admin_pin)
-        # Delete attestation key by changing the key attributes twice.
-        self.send_cmd(
-            0, INS.PUT_DATA, 0, 0xda,
-            data=struct.pack('>BHHB', 0x01, 2048, 32, 0))
-        self.send_cmd(
-            0, INS.PUT_DATA, 0, 0xda,
-            data=struct.pack('>BHHB', 0x01, 4096, 32, 0))
+        self.delete_key(KEY_SLOT.ATT, admin_pin)
 
     def delete_certificate(self, key_slot, admin_pin):
         self._verify(PW3, admin_pin)
         if key_slot == KEY_SLOT.ATT:
-            self.send_cmd(
-                0, INS.PUT_DATA, 0, key_slot.cert_position, data=b'')
+            self._put_data(DO.ATT_CERTIFICATE, b'')
         else:
-            self.send_cmd(
-                0, INS.SELECT_DATA, key_slot.cert_position,
-                0x04, data=a2b_hex('0660045C027F21'))
-            self.send_apdu(
-                0, INS.PUT_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21, data=b'')
+            self._select_certificate(key_slot)
+            self._put_data(DO.CARDHOLDER_CERTIFICATE, b'')
 
     def attest(self, key_slot, pin):
         self._verify(PW1, pin)
-        self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.key_position, 0)
-        self.send_cmd(
-            0, INS.SELECT_DATA, key_slot.cert_position,
-            0x04, data=a2b_hex('0660045C027F21'))
-        data = self.send_cmd(
-            0, INS.GET_DATA, TAG.CARDHOLDER_CERTIFICATE, 0x21)
-        return x509.load_der_x509_certificate(data, default_backend())
+        self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
+        return self.read_certificate(key_slot)
