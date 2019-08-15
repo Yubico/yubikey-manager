@@ -1,3 +1,10 @@
+* Version 3.1.0 (unreleased)
+ ** Add support for YubiKey 5Ci
+ ** OpenPGP: the info command now prints OpenPGP specification version as well
+ ** OpenPGP: Update support for attestation to match OpenPGP v3.4
+ ** PIV: Use UTC time for self-signed certificates
+ ** OTP: Static password now supports the Norman keyboard layout
+
 * Version 3.0.0 (released 2019-06-24)
  ** Add support for new YubiKey Preview and lightning form factor
  ** FIDO: Support for credential management
