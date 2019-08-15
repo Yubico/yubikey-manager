@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 
 import six
+import time
 import struct
 import logging
 from .util import AID, Tlv
@@ -36,7 +37,7 @@ from enum import Enum, IntEnum, unique
 from binascii import b2a_hex
 from collections import namedtuple
 from cryptography import x509
-from cryptography.utils import int_to_bytes
+from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
@@ -94,6 +95,7 @@ class INS(IntEnum):  # noqa: N801
     VERIFY = 0x20
     TERMINATE = 0xe6
     ACTIVATE = 0x44
+    GENERATE_ASYM = 0x47
     PUT_DATA = 0xda
     PUT_DATA_ODD = 0xdb
     GET_ATTESTATION = 0xfb
@@ -124,30 +126,41 @@ class OID(bytes, Enum):
     SECP256K1 = b'\x2b\x81\x04\x00\x0a'
     SECP384R1 = b'\x2b\x81\x04\x00\x22'
     SECP521R1 = b'\x2b\x81\x04\x00\x23'
-    X25519 = b'\x2b\x06\x01\x04\x01\x97\x55\x01\x05\x01'
-    ED25519 = b'\x2b\x06\x01\x04\x01\xda\x47\x0f\x01'
     BRAINPOOLP256R1 = b'\x2b\x24\x03\x03\x02\x08\x01\x01\x07'
     BRAINPOOLP384R1 = b'\x2b\x24\x03\x03\x02\x08\x01\x01\x0b'
     BRAINPOOLP512R1 = b'\x2b\x24\x03\x03\x02\x08\x01\x01\x0d'
+    X25519 = b'\x2b\x06\x01\x04\x01\x97\x55\x01\x05\x01'
+    ED25519 = b'\x2b\x06\x01\x04\x01\xda\x47\x0f\x01'
 
     @classmethod
     def for_name(cls, name):
-        return getattr(cls, name.upper())
+        try:
+            return getattr(cls, name.upper())
+        except AttributeError:
+            raise ValueError('Unsupported curve: ' + name)
+
+
+def _format_rsa_attributes(key_size):
+    return struct.pack('>BHHB', 0x01, key_size, 32, 0)
+
+
+def _format_ec_attributes(key_slot, curve_name):
+    if curve_name in ('ed25519', 'x25519'):
+        algorithm = b'\x16'
+    elif key_slot == KEY_SLOT.ENC:
+        algorithm = b'\x12'
+    else:
+        algorithm = b'\x13'
+    return algorithm + OID.for_name(curve_name)
 
 
 def _get_key_attributes(key, key_slot):
     if isinstance(key, rsa.RSAPrivateKey):
         if key.private_numbers().public_numbers.e != 65537:
             raise ValueError('RSA keys with e != 65537 are not supported!')
-        return struct.pack('>BHHB', 0x01, key.key_size, 32, 0)
+        return _format_rsa_attributes(key.key_size)
     if isinstance(key, ec.EllipticCurvePrivateKey):
-        if key.curve.name in ('x25519', 'ed25519'):
-            algorithm = b'\x16'
-        elif key_slot == KEY_SLOT.ENC:
-            algorithm = b'\x12'
-        else:
-            algorithm = b'\x13'
-        return algorithm + OID.for_name(key.curve.name)
+        return _format_ec_attributes(key_slot, key.curve.name)
     raise ValueError('Not a valid private key!')
 
 
@@ -356,6 +369,62 @@ class OpgpController(object):
 
         if timestamp is not None:
             self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
+
+    def generate_rsa_key(self, key_slot, key_size, timestamp=None):
+        if timestamp is None:
+            timestamp = int(time.time())
+
+        attributes = _format_rsa_attributes(key_size)
+        self._put_data(key_slot.key_id, attributes)
+        resp = self.send_cmd(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
+
+        data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
+        numbers = rsa.RSAPublicNumbers(
+            int_from_bytes(data[0x82], 'big'),
+            int_from_bytes(data[0x81], 'big')
+        )
+
+        self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
+        # TODO: Calculate and write fingerprint
+
+        return numbers.public_key(default_backend())
+
+    def generate_ec_key(self, key_slot, curve_name, timestamp=None):
+        if timestamp is None:
+            timestamp = int(time.time())
+
+        attributes = _format_ec_attributes(key_slot, curve_name)
+        self._put_data(key_slot.key_id, attributes)
+        resp = self.send_cmd(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
+
+        data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
+        pubkey_enc = data[0x86]
+
+        self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
+        # TODO: Calculate and write fingerprint
+
+        # TODO: Return key
+        if curve_name == 'x25519':
+            # Added in 2.0
+            from cryptography.hazmat.primitives.asymmetric import x25519
+            return x25519.X25519PublicKey.from_public_bytes(pubkey_enc)
+        if curve_name == 'ed25519':
+            # Added in 2.6
+            from cryptography.hazmat.primitives.asymmetric import ed25519
+            return ed25519.Ed25519PublicKey.from_public_bytes(pubkey_enc)
+
+        curve = getattr(ec, curve_name.upper())
+        try:
+            # Added in cryptography 2.5
+            return ec.EllipticCurvePublicKey.from_encoded_point(
+                curve(),
+                pubkey_enc
+            )
+        except AttributeError:
+            return ec.EllipticCurvePublicNumbers.from_encoded_point(
+                curve(),
+                pubkey_enc
+            ).public_key(default_backend())
 
     def delete_key(self, key_slot):
         """Requires Admin PIN verification."""
