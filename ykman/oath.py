@@ -41,8 +41,9 @@ from cryptography.hazmat.backends import default_backend
 from six.moves.urllib.parse import unquote, urlparse, parse_qs
 from .driver_ccid import APDUError, SW
 from .util import (
-    AID, Tlv, parse_tlvs, time_challenge, parse_b32_key,
-    format_code, parse_truncated, hmac_shorten_key)
+    AID, Tlv, time_challenge, parse_b32_key, format_code, parse_truncated,
+    hmac_shorten_key
+)
 
 
 HMAC_MINIMUM_KEY_SIZE = 14
@@ -218,7 +219,7 @@ class OathController(object):
 
     def __init__(self, driver):
         resp = driver.select(AID.OATH)
-        tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
+        tags = Tlv.parse_dict(resp)
         self._version = tuple(six.iterbytes(tags[TAG.VERSION]))
         self._salt = tags[TAG.NAME]
         self._id = _get_device_id(self._salt)
@@ -263,7 +264,7 @@ class OathController(object):
     def reset(self):
         self.send_apdu(INS.RESET, 0xde, 0xad)
         resp = self._driver.select(AID.OATH)
-        tags = dict((x.tag, x.value) for x in parse_tlvs(resp))
+        tags = Tlv.parse_dict(resp)
         self._salt = tags[TAG.NAME]
         self._id = _get_device_id(self._salt)
 
@@ -322,7 +323,7 @@ class OathController(object):
             challenge = b''
         data = Tlv(TAG.NAME, cred.key) + Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.CALCULATE, 0, 0, data)
-        resp = parse_tlvs(resp)[0].value
+        resp = Tlv(resp).value
         # Manual dynamic truncation is required
         # for Steam entries, so let's do it for all.
         digits = six.indexbytes(resp, 0)
@@ -346,7 +347,7 @@ class OathController(object):
             valid_to = valid_from + 30
             data = Tlv(TAG.CHALLENGE, time_challenge(timestamp))
             resp = self.send_apdu(INS.CALCULATE_ALL, 0, 0x01, data)
-            tlvs = parse_tlvs(resp)
+            tlvs = Tlv.parse_list(resp)
             while tlvs:
                 key = tlvs.pop(0).value
                 resp = tlvs.pop(0)
@@ -394,7 +395,7 @@ class OathController(object):
         verification = h.finalize()
         data = Tlv(TAG.RESPONSE, response) + Tlv(TAG.CHALLENGE, challenge)
         resp = self.send_apdu(INS.VALIDATE, 0, 0, data)
-        if parse_tlvs(resp)[0].value != verification:
+        if Tlv(resp).value != verification:
             raise ValueError(
                 'Response from validation does not match verification!')
         self._challenge = None

@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from .util import (APPLICATION, TRANSPORT, YUBIKEY, FORM_FACTOR, Tlv,
-                   parse_tlvs, bytes2int, int2bytes)
+                   bytes2int, int2bytes)
 from .driver import AbstractDriver, NotSupportedError
 from enum import IntEnum, unique
 import logging
@@ -123,7 +123,7 @@ class DeviceConfig(object):
         c_len, data = six.indexbytes(data, 0), data[1:]
         data = data[:c_len]
 
-        self._tags = dict((x.tag, x.value) for x in parse_tlvs(data))
+        self._tags = Tlv.parse_dict(data)
 
     def _get(self, tag, default=None):
         if tag not in self._tags:

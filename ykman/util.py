@@ -316,6 +316,36 @@ class Tlv(bytes):
 
         return super(Tlv, cls).__new__(cls, bytes(data))
 
+    @classmethod
+    def parse_from(cls, data):
+        tlv = cls(data)
+        return tlv, data[len(tlv):]
+
+    @classmethod
+    def parse_list(cls, data):
+        res = []
+        while data:
+            tlv, data = cls.parse_from(data)
+            res.append(tlv)
+        return res
+
+    @classmethod
+    def parse_dict(cls, data):
+        return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
+
+    @classmethod
+    def unpack(cls, tag, data):
+        tlv = cls(data)
+        if tlv.tag != tag:
+            raise ValueError('Wrong tag, got {:02x} expected {:02x}'.format(
+                tlv.tag,
+                tag
+            ))
+        return tlv.value
+
+
+parse_tlvs = Tlv.parse_list  # Deprecated, use Tlv.parse_list directly
+
 
 class MissingLibrary(object):
     def __init__(self, message):
@@ -323,15 +353,6 @@ class MissingLibrary(object):
 
     def __getattr__(self, name):
         raise AttributeError(self._message)
-
-
-def parse_tlvs(data):
-    res = []
-    while data:
-        tlv = Tlv(data)
-        data = data[len(tlv):]
-        res.append(tlv)
-    return res
 
 
 def int2bytes(value):
