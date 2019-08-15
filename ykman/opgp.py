@@ -31,7 +31,7 @@ import six
 import time
 import struct
 import logging
-from .util import AID, Tlv
+from .util import AID, Tlv, ensure_not_cve201715361_vulnerable_firmware_version
 from .driver_ccid import (APDUError, SW, GP_INS_SELECT)
 from enum import Enum, IntEnum, unique
 from binascii import b2a_hex
@@ -39,7 +39,9 @@ from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.serialization import (
+    Encoding, PrivateFormat, NoEncryption
+)
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 
@@ -140,6 +142,17 @@ class OID(bytes, Enum):
             raise ValueError('Unsupported curve: ' + name)
 
 
+def _get_curve_name(key):
+    if isinstance(key, ec.EllipticCurvePrivateKey):
+        return key.curve.name
+    cls_name = key.__class__.__name__
+    if 'Ed25519' in cls_name:
+        return 'ed25519'
+    if 'X25519' in cls_name:
+        return 'x25519'
+    raise ValueError('Unsupported private key')
+
+
 def _format_rsa_attributes(key_size):
     return struct.pack('>BHHB', 0x01, key_size, 32, 0)
 
@@ -159,9 +172,8 @@ def _get_key_attributes(key, key_slot):
         if key.private_numbers().public_numbers.e != 65537:
             raise ValueError('RSA keys with e != 65537 are not supported!')
         return _format_rsa_attributes(key.key_size)
-    if isinstance(key, ec.EllipticCurvePrivateKey):
-        return _format_ec_attributes(key_slot, key.curve.name)
-    raise ValueError('Not a valid private key!')
+    curve_name = _get_curve_name(key)
+    return _format_ec_attributes(key_slot, curve_name)
 
 
 def _get_key_template(key, key_slot, crt=False):
@@ -174,9 +186,8 @@ def _get_key_template(key, key_slot, crt=False):
             body += tlv.value
         return Tlv(0x7f48, header) + Tlv(0x5f48, body)
 
-    private_numbers = key.private_numbers()
-
     if isinstance(key, rsa.RSAPrivateKey):
+        private_numbers = key.private_numbers()
         ln = (key.key_size // 8) // 2
 
         e = Tlv(0x91, b'\x01\x00\x01')  # e=65537
@@ -191,9 +202,17 @@ def _get_key_template(key, key_slot, crt=False):
             values += (dp, dq, qinv, n)
 
     elif isinstance(key, ec.EllipticCurvePrivateKey):
+        private_numbers = key.private_numbers()
         ln = key.key_size // 8
 
         privkey = Tlv(0x92, int_to_bytes(private_numbers.private_value, ln))
+        values = (privkey,)
+
+    elif _get_curve_name(key) in ('ed25519', 'x25519'):
+        privkey = Tlv(
+            0x92,
+            key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        )
         values = (privkey,)
 
     return Tlv(0x4d, key_slot.crt + _pack_tlvs(values))
@@ -371,6 +390,9 @@ class OpgpController(object):
             self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
 
     def generate_rsa_key(self, key_slot, key_size, timestamp=None):
+        """Requires Admin PIN verification."""
+        ensure_not_cve201715361_vulnerable_firmware_version(self.version)
+
         if timestamp is None:
             timestamp = int(time.time())
 
@@ -390,6 +412,7 @@ class OpgpController(object):
         return numbers.public_key(default_backend())
 
     def generate_ec_key(self, key_slot, curve_name, timestamp=None):
+        """Requires Admin PIN verification."""
         if timestamp is None:
             timestamp = int(time.time())
 
@@ -403,7 +426,6 @@ class OpgpController(object):
         self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))
         # TODO: Calculate and write fingerprint
 
-        # TODO: Return key
         if curve_name == 'x25519':
             # Added in 2.0
             from cryptography.hazmat.primitives.asymmetric import x25519
