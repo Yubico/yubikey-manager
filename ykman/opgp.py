@@ -377,8 +377,9 @@ class OpgpController(object):
 
     def import_key(self, key_slot, key, fingerprint=None, timestamp=None):
         """Requires Admin PIN verification."""
-        attributes = _get_key_attributes(key, key_slot)
-        self._put_data(key_slot.key_id, attributes)
+        if self.version >= (4, 0, 0):
+            attributes = _get_key_attributes(key, key_slot)
+            self._put_data(key_slot.key_id, attributes)
 
         template = _get_key_template(key, key_slot, self.version < (4, 0, 0))
         self.send_cmd(0, INS.PUT_DATA_ODD, 0x3f, 0xff, template)
@@ -396,8 +397,12 @@ class OpgpController(object):
         if timestamp is None:
             timestamp = int(time.time())
 
-        attributes = _format_rsa_attributes(key_size)
-        self._put_data(key_slot.key_id, attributes)
+        neo = self.version < (4, 0, 0)
+        if not neo:
+            attributes = _format_rsa_attributes(key_size)
+            self._put_data(key_slot.key_id, attributes)
+        elif key_size != 2048:
+            raise ValueError('Unsupported key size!')
         resp = self.send_cmd(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
 
         data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
@@ -450,9 +455,18 @@ class OpgpController(object):
 
     def delete_key(self, key_slot):
         """Requires Admin PIN verification."""
-        # Delete key by changing the key attributes twice.
-        self._put_data(key_slot.key_id, struct.pack('>BHHB', 0x01, 2048, 32, 0))
-        self._put_data(key_slot.key_id, struct.pack('>BHHB', 0x01, 4096, 32, 0))
+        if self.version < (4, 0, 0):
+            # Import over the key
+            self.import_key(
+                key_slot,
+                rsa.generate_private_key(65537, 2048, default_backend()),
+                b'\0' * 20,
+                0
+            )
+        else:
+            # Delete key by changing the key attributes twice.
+            self._put_data(key_slot.key_id, _format_rsa_attributes(4096))
+            self._put_data(key_slot.key_id, _format_rsa_attributes(2048))
 
     def delete_certificate(self, key_slot):
         """Requires Admin PIN verification."""

@@ -58,6 +58,7 @@ class KeyManagement(OpgpTestCase):
         self.controller.verify_admin(DEFAULT_ADMIN_PIN)
         pub = self.controller.generate_rsa_key(KEY_SLOT.SIG, 2048)
         self.assertEqual(pub.key_size, 2048)
+        self.controller.delete_key(KEY_SLOT.SIG)
 
     @unittest.skipIf(*skip_roca)
     @unittest.skipIf(*no_rsa4096)
