@@ -302,6 +302,9 @@ class YubiKey(object):
                     self.device_name += 'C'
                 elif config.form_factor == FORM_FACTOR.USB_C_NANO:
                     self.device_name += 'C Nano'
+                elif config.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
+                    self.device_name += 'Ci'
+
             elif self.is_fips:
                 self.device_name = 'YubiKey FIPS'
 
