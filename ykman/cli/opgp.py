@@ -180,7 +180,8 @@ def set_touch(ctx, key, policy, admin_pin, force):
             policy_name),
             abort=True, err=True):
         try:
-            controller.set_touch(key, policy, admin_pin)
+            controller.verify_admin(admin_pin)
+            controller.set_touch(key, policy)
         except APDUError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 ctx.fail('Touch policy not allowed.')
@@ -220,8 +221,9 @@ def set_pin_retries(
                 pin_retries, reset_code_retries,
                 admin_pin_retries), abort=True, err=True):
 
+        controller.verify_admin(admin_pin)
         controller.set_pin_retries(
-            pin_retries, reset_code_retries, admin_pin_retries, admin_pin)
+            pin_retries, reset_code_retries, admin_pin_retries)
 
         if resets_pins:
             click.echo('Default PINs are set.')
@@ -265,7 +267,8 @@ def attest(ctx, key, certificate, pin, format):
         if touch_policy in [TOUCH_MODE.ON, TOUCH_MODE.FIXED]:
             click.echo('Touch your YubiKey...')
         try:
-            cert = controller.attest(key, pin)
+            controller.verify_pin(pin)
+            cert = controller.attest(key)
             certificate.write(cert.public_bytes(encoding=format))
         except Exception as e:
             logger.debug('Failed to attest', exc_info=e)
@@ -308,7 +311,8 @@ def delete_certificate(ctx, key, admin_pin):
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
     try:
-        controller.delete_certificate(key, admin_pin)
+        controller.verify_admin(admin_pin)
+        controller.delete_certificate(key)
     except Exception as e:
         logger.debug('Failed to delete ', exc_info=e)
         ctx.fail('Failed to delete certificate.')
@@ -340,7 +344,8 @@ def import_certificate(ctx, key, cert, admin_pin):
     if len(certs) != 1:
         ctx.fail('Can only import one certificate.')
     try:
-        controller.import_certificate(key, certs[0], admin_pin)
+        controller.verify_admin(admin_pin)
+        controller.import_certificate(key, certs[0])
     except Exception as e:
         logger.debug('Failed to import', exc_info=e)
         ctx.fail('Failed to import certificate')
@@ -369,7 +374,8 @@ def import_attestation_key(ctx, private_key, admin_pin):
         logger.debug('Failed to parse', exc_info=e)
         ctx.fail('Failed to parse private key.')
     try:
-        controller.import_attestation_key(private_key, admin_pin)
+        controller.verify_admin(admin_pin)
+        controller.import_key(KEY_SLOT.ATT, private_key)
     except Exception as e:
         logger.debug('Failed to import', exc_info=e)
         ctx.fail('Failed to import attestation key.')

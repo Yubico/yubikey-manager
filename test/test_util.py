@@ -68,7 +68,7 @@ class TestUtilityFunctions(unittest.TestCase):
         )
 
     def test_parse_tlvs(self):
-        tlvs = parse_tlvs(b'\x00\x02\xd0\x0d\xa1\x00\xff\x04\xfe\xed\xfa\xce')
+        tlvs = parse_tlvs(b'\x00\x02\xd0\x0d\xa1\x00\xfe\x04\xfe\xed\xfa\xce')
         self.assertEqual(3, len(tlvs))
 
         self.assertEqual(0, tlvs[0].tag)
@@ -79,7 +79,7 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(0, tlvs[1].length)
         self.assertEqual(b'', tlvs[1].value)
 
-        self.assertEqual(0xff, tlvs[2].tag)
+        self.assertEqual(0xfe, tlvs[2].tag)
         self.assertEqual(4, tlvs[2].length)
         self.assertEqual(b'\xfe\xed\xfa\xce', tlvs[2].value)
 
@@ -96,7 +96,7 @@ class TestUtilityFunctions(unittest.TestCase):
                          time_challenge(1484223461.2644958))
 
     def test_tlv(self):
-        self.assertEqual(Tlv(b'\xff\6foobar'), Tlv(0xff, b'foobar'))
+        self.assertEqual(Tlv(b'\xfe\6foobar'), Tlv(0xfe, b'foobar'))
 
         tlv1 = Tlv(b'\0\5hello')
         tlv2 = Tlv(0xff, b'')

@@ -31,7 +31,7 @@ from enum import IntEnum, unique
 from .device import YubiKey
 from .driver_ccid import APDUError, SW
 from .util import (
-    AID, Tlv, parse_tlvs,
+    AID, Tlv,
     is_cve201715361_vulnerable_firmware_version,
     ensure_not_cve201715361_vulnerable_firmware_version)
 from cryptography import x509
@@ -273,10 +273,6 @@ DEFAULT_MANAGEMENT_KEY = b'\x01\x02\x03\x04\x05\x06\x07\x08' \
     + b'\x01\x02\x03\x04\x05\x06\x07\x08'
 
 
-def _parse_tlv_dict(data):
-    return dict((tlv.tag, tlv.value) for tlv in parse_tlvs(data))
-
-
 def _pack_pin(pin):
     if isinstance(pin, six.text_type):
         pin = pin.encode('utf8')
@@ -399,7 +395,7 @@ def tries_left(sw, applet_version):
 class PivmanData(object):
 
     def __init__(self, raw_data=Tlv(0x80)):
-        data = _parse_tlv_dict(Tlv(raw_data).value)
+        data = Tlv.parse_dict(Tlv(raw_data).value)
         self._flags = struct.unpack(
             '>B', data[0x81])[0] if 0x81 in data else None
         self.salt = data.get(0x82)
@@ -445,7 +441,7 @@ class PivmanData(object):
 class PivmanProtectedData(object):
 
     def __init__(self, raw_data=Tlv(0x88)):
-        data = _parse_tlv_dict(Tlv(raw_data).value)
+        data = Tlv.parse_dict(Tlv(raw_data).value)
         self.key = data.get(0x89)
 
     def get_bytes(self):
@@ -788,11 +784,11 @@ class PivController(object):
             data += Tlv(TAG.TOUCH_POLICY, six.int2byte(touch_policy))
         data = Tlv(0xac, data)
         resp = self.send_cmd(INS.GENERATE_ASYMMETRIC, 0, slot, data)
+        key_data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
-            data = _parse_tlv_dict(Tlv(resp[1:]).value)
             return rsa.RSAPublicNumbers(
-                int_from_bytes(data[0x82], 'big'),
-                int_from_bytes(data[0x81], 'big')
+                int_from_bytes(key_data[0x82], 'big'),
+                int_from_bytes(key_data[0x81], 'big')
             ).public_key(default_backend())
         elif algorithm in [ALGO.ECCP256, ALGO.ECCP384]:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
@@ -801,12 +797,12 @@ class PivController(object):
                 # Added in cryptography 2.5
                 return ec.EllipticCurvePublicKey.from_encoded_point(
                     curve(),
-                    resp[5:]
+                    key_data[0x86]
                 )
             except AttributeError:
                 return ec.EllipticCurvePublicNumbers.from_encoded_point(
                     curve(),
-                    resp[5:]
+                    key_data[0x86]
                 ).public_key(default_backend())
 
         raise UnsupportedAlgorithm(
@@ -915,7 +911,7 @@ class PivController(object):
         self.update_chuid()
 
     def read_certificate(self, slot):
-        data = _parse_tlv_dict(self.get_data(OBJ.from_slot(slot)))
+        data = Tlv.parse_dict(self.get_data(OBJ.from_slot(slot)))
         if TAG.CERT_INFO in data:  # Not available in attestation slot
             if data[TAG.CERT_INFO] != b'\0':
                 raise ValueError('Compressed certificates are not supported!')
@@ -937,7 +933,7 @@ class PivController(object):
 
         data = Tlv(TAG.DYN_AUTH, Tlv(0x82) + payload)
         resp = self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data)
-        return Tlv(Tlv(resp).value).value
+        return Tlv.unpack(0x82, Tlv.unpack(0x7c, resp))
 
     def sign_raw(self, slot, algorithm, message):
         return self._raw_sign_decrypt(slot, algorithm, Tlv(0x81, message),
@@ -1013,7 +1009,7 @@ class PivController(object):
         if touch_callback is not None:
             touch_timer.cancel()
 
-        seq = parse_tlvs(Tlv(cert.public_bytes(Encoding.DER)).value)
+        seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
         # Replace signature, add unused bits = 0
         seq[2] = Tlv(seq[2].tag, b'\0' + sig)
         # Re-assemble sequence
@@ -1025,7 +1021,7 @@ class PivController(object):
         algorithm = ALGO.from_public_key(public_key)
         dummy_key = _dummy_key(algorithm)
         csr = builder.sign(dummy_key, hashes.SHA256(), default_backend())
-        seq = parse_tlvs(Tlv(csr.public_bytes(Encoding.DER)).value)
+        seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
 
         # Replace public key
         pub_format = PublicFormat.PKCS1 if algorithm.name.startswith('RSA') \
