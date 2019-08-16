@@ -1,0 +1,167 @@
+The integration tests use an internal mini-framework to abstract access to YubiKeys to test with.
+This document describes how that framework works.
+
+
+== API for writing tests
+
+The framework is activated by defining a function `def additional_tests(arg)` decorated with either
+`@device_test_suite(transports)` or `@cli_test_suite`. This function is expected to return a list of
+`unittest.TestCase` subclasses - note: the classes themselves, not instances of the classes.
+
+The `additional_tests` function receives one argument. If decorated with
+`@device_test_suite(transports)`, the argument is a specialized variant of `descriptor.open_device`
+which opens a particular YubiKey, so name the argument `open_device`. If decorated with
+`@cli_test_suite`, the argument is a specialized variant of `test.util.ykman_cli` which runs the CLI
+with a particular YubiKey, so name the argument `ykman_cli`. Use this argument function to interact
+with YubiKeys within the `TestCase` classes defined in the `additional_tests` body.
+
+The module `test.on_yubikey.framework.yubikey_conditions` provides decorators which restrict test
+methods to running only on YubiKeys matching those conditions. Test methods with no condition
+decorators are run for all YubiKeys. You can also define new conditions by defining a function that
+takes a `ykman.device.YubiKey` as a parameter and returns `True` if tests with this condition should
+be run with that YubiKey, and decorating the function with `@yubikey_conditions.yubikey_condition`.
+See the `yubikey_conditions` module for examples.
+
+
+== How it works
+
+The system utilizes the
+https://setuptools.readthedocs.io/en/latest/setuptools.html#test-build-package-and-run-a-unittest-suite[`additional_tests()`]
+hook of setuptools's test discovery, and conceptually transforms this:
+
+```python
+@device_test_suite(TRANSPORT.CCID)
+def additional_tests(open_device):
+
+    class PivKeyManagement(unittest.TestCase):
+
+        def setUp(self):
+            self.dev = open_device()
+            self.controller = PivController(self.dev.driver)
+
+        def tearDown(self):
+            self.dev.driver.close()
+
+        def generate_key(self, slot, alg=ALGO.ECCP256, pin_policy=None):
+            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+            public_key = self.controller.generate_key(
+                slot, alg, pin_policy=pin_policy,
+                touch_policy=TOUCH_POLICY.NEVER)
+            self.reconnect()
+            return public_key
+
+        @yubikey_conditions.supports_piv_touch_policies
+        def test_delete_certificate_requires_authentication(self):
+            self.generate_key(SLOT.AUTHENTICATION)
+
+            with self.assertRaises(APDUError):
+                self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+        @yubikey_conditions.is_fips
+        def test_pin_policy_never_blocked_on_fips(self):
+            with self.assertRaises(APDUError):
+                self.generate_key(pin_policy=PIN_POLICY.NEVER)
+
+    return [PivKeyManagement]
+```
+
+into this:
+
+```python
+class PivKeyManagement_CCID_5.0.2_7652135(unittest.TestCase):
+
+    def setUp(self):
+        self.dev = open_device(transports=TRANSPORT.CCID, serial=7652135)
+        self.controller = PivController(self.dev.driver)
+
+    def tearDown(self):
+        self.dev.driver.close()
+
+    def generate_key(self, slot, alg=ALGO.ECCP256, pin_policy=None):
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        public_key = self.controller.generate_key(
+            slot, alg, pin_policy=pin_policy,
+            touch_policy=TOUCH_POLICY.NEVER)
+        self.reconnect()
+        return public_key
+
+    def test_delete_certificate_requires_authentication(self):
+        self.generate_key(SLOT.AUTHENTICATION)
+
+        with self.assertRaises(APDUError):
+            self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        self.controller.delete_certificate(SLOT.AUTHENTICATION)
+
+
+class PivKeyManagement_CCID_3.5.0_6513273(unittest.TestCase):
+
+    def setUp(self):
+        self.dev = open_device(transports=TRANSPORT.CCID, serial=6513273)
+        self.controller = PivController(self.dev.driver)
+
+    def tearDown(self):
+        self.dev.driver.close()
+
+    def generate_key(self, slot, alg=ALGO.ECCP256, pin_policy=None):
+        self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+        public_key = self.controller.generate_key(
+            slot, alg, pin_policy=pin_policy,
+            touch_policy=TOUCH_POLICY.NEVER)
+        self.reconnect()
+        return public_key
+
+
+class PivKeyManagement(unittest.TestCase):
+    def test_pin_policy_never_blocked_on_fips(self):
+        self.skipTest('No YubiKey available for test.')
+```
+
+So in this case the test suite is run with two YubiKeys: one of firmware version 3.5.0 and one
+5.0.2. Note that
+
+- Each YubiKey gets its own variant of the test class, where the class name contains the firmware
+  version and serial number of the YubiKey and the transport used to communicate with the YubiKey.
+- Each variant of the test class gets its own arguments to `open_device`
+- One test is missing from the 3.5.0 test class, because the method was decorated with
+  `@yubikey_conditions.supports_piv_touch_policies` which is a condition the YubiKey NEO does not
+  satisfy.
+- One test was not satisfied by either YubiKey because it was decorated with
+  `@yubikey_conditions.is_fips`, so it remains in the original test class which now marks all its
+  tests as skipped.
+
+This isn't actually how it's implemented under the hood, but it's the mental model for how the
+design is intended to work.
+
+In order to not break how the `setUp` and `tearDown` hooks work, we need to transform each original
+class definition into multiple variants of the class, one for each YubiKey and transport. That means
+we can't do this with a simple class decorator, which is why the `additional_tests()` hook is used.
+Functions can define and return classes, which is what happens inside the `@device_test_suite`
+decorator. A real `additional_tests()` function should take no parameters and return a
+`unittest.TestSuite` instance; the `@device_test_suite` decorator expects the decorated function to
+take one parameter and return a list of `unittest.TestCase` subclasses. `@device_test_suite` then
+creates a specialized `open_device` function for each YubiKey and transport, and calls the decorated
+function repeatedly once for each function specialization. Each call to the decorated
+`additional_tests(open_device)` creates a new set of test classes; the `@device_test_suite`
+decorator removes any unsupported test methods from each of them and finally assembles and returns a
+`TestSuite` instance to setuptools's test discovery mechanism.
+
+The `@cli_test_suite` decorator works in much the same way, except it doesn't take a `transports`
+parameter and it instead provides the decorated `additional_tests(ykman_cli)` with a specialized
+function for invoking the CLI.
+
+The condition decorators work by attaching a new attribute `_yubikey_conditions` to the test method.
+The attribute is a set of predicate functions, and each condition decorator adds a predicate to
+the set. The `@*_test_suite` decorators call each of the predicates in the set, passing as an
+argument the `ykman.device.YubiKey` handle for the YubiKey for the test method's parent test class,
+and deletes the method if any predicate returns a falsy value. This means that each test method can
+be decorated with multiple conditions, but the condition decorators themselves cannot reference each
+other (for "not" variants, for example) because the decorator functions themselves are not
+predicates.
+
+The condition decorators can also decorate test classes, in which case they are forwarded to all
+test methods.
