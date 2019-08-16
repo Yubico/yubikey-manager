@@ -3,6 +3,15 @@ from . import _get_test_method_names
 
 
 def yubikey_condition(condition):
+    '''
+    Apply this decorator to a function with the signature:
+    `ykman.device.YubiKey => Boolean`.
+
+    This makes the decorated function usable as a condition decorator for test
+    methods. The decorated function should return `True` if the `YubiKey`
+    argument matches the condition - and tests with this condition should run
+    with that YubiKey - and `False` otherwise.
+    '''
     def decorate_method(method):
         method_conditions = (
             getattr(method, '_yubikey_conditions')

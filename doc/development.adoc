@@ -67,7 +67,7 @@ To run integration tests, indicate the serial numbers (given by `ykman list`) of
 
 The integration test suite will automatically identify which test cases can be run with the
 available YubiKeys, and run those test cases for each eligible YubiKey. See
-integration-tests.adoc[integration-tests.adoc] for a deep dive into how this works.
+link:integration-tests.adoc[integration-tests.adoc] for a deep dive into how this works.
 
 
 === Packaging
