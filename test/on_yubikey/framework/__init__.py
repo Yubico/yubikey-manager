@@ -57,6 +57,10 @@ if _test_serials is not None:
     print(f'Device discovery finished in {end_time - start_time:.3f} s')
 
 
+def exactly_one_yubikey_present():
+    return len(_serials_present) == 1
+
+
 def _specialize_ykman_cli(dev, _transports):
     '''
     Creates a specialized version of ykman_cli preset with the serial number of
