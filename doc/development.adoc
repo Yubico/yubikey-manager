@@ -59,11 +59,16 @@ To run unit tests:
 
 === Integration tests
 
-WARNING: ONLY run these on a dedicated developer key, as it will permanently delete data on the device!
+WARNING: ONLY run these on dedicated developer keys, as it will permanently delete data on the device(s)!
 
-To run integration tests, indicate the serial number (given by `ykman list`) of the YubiKey to test with:
+To run integration tests, indicate the serial numbers (given by `ykman list`) of the YubiKeys to test with:
 
-   $ DESTRUCTIVE_TEST_YUBIKEY_SERIAL=123456 python setup.py test
+   $ DESTRUCTIVE_TEST_YUBIKEY_SERIALs=123456,234567 python setup.py test
+
+The integration test suite will automatically identify which test cases can be run with the
+available YubiKeys, and run those test cases for each eligible YubiKey. See
+link:integration-tests.adoc[integration-tests.adoc] for a deep dive into how this works.
+
 
 === Packaging
 
