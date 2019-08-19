@@ -14,6 +14,7 @@ from ykman.util import TRANSPORT
 _skip = True
 
 _test_serials = os.environ.get('DESTRUCTIVE_TEST_YUBIKEY_SERIALS')
+_serials_present = set()
 _no_prompt = os.environ.get('DESTRUCTIVE_TEST_DO_NOT_PROMPT') == 'TRUE'
 _versions = {}
 
@@ -22,7 +23,6 @@ if _test_serials is not None:
     print('Initiating device discovery...')
 
     _test_serials = set(int(s) for s in _test_serials.split(','))
-    _serials_present = set()
 
     for dev in list_devices():
         print(f'{time.time() - start_time:.3f} {dev}')
