@@ -3,7 +3,7 @@ from __future__ import unicode_literals
 import unittest
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from cryptography.hazmat.primitives.asymmetric import ec, rsa, ed25519, x25519
+from cryptography.hazmat.primitives.asymmetric import ec, rsa, x25519
 from ykman.driver_ccid import APDUError
 from ykman.opgp import OpgpController, KEY_SLOT
 from ykman.util import TRANSPORT
@@ -109,6 +109,7 @@ def additional_tests(open_device):
 
         @yubikey_conditions.version_min((5, 2, 0))
         def test_import_ed25519(self):
+            from cryptography.hazmat.primitives.asymmetric import ed25519
             priv = ed25519.Ed25519PrivateKey.generate()
             self.controller.verify_admin(DEFAULT_ADMIN_PIN)
             self.controller.import_key(KEY_SLOT.SIG, priv)
