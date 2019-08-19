@@ -236,6 +236,9 @@ def _make_test_suite_decorator(
     '''
     def decorate(create_test_classes):
         def additional_tests():
+            if _test_serials is None:
+                return unittest.TestSuite()
+
             start_time = time.time()
             print('Starting test instantiation: {} ...'
                   .format(create_test_classes.__module__))
