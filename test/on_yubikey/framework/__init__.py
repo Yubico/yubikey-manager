@@ -25,7 +25,7 @@ if _test_serials is not None:
     _test_serials = set(int(s) for s in _test_serials.split(','))
 
     for dev in list_devices():
-        print(f'{time.time() - start_time:.3f} {dev}')
+        print('{:%.3f} {}'.format(time.time() - start_time, dev))
         _serials_present.add(dev.serial)
         _versions[dev.serial] = dev.version
         dev.close()
@@ -54,7 +54,7 @@ if _test_serials is not None:
             abort=True)
 
     end_time = time.time()
-    print(f'Device discovery finished in {end_time - start_time:.3f} s')
+    print('Device discovery finished in {:.3f} s'.format(end_time - start_time))
 
 
 def exactly_one_yubikey_present():
@@ -106,11 +106,13 @@ def _delete_inapplicable_test_methods(dev, test_class):
 
 def _add_suffix_to_class_name(transport, dev, test_class):
     setattr(test_class, '_original_test_name', test_class.__qualname__)
-    transport_part = (f'_{transport.name}'
+    transport_part = ('_{}'.format(transport.name)
                       if isinstance(transport, TRANSPORT)
                       else '')
     fw_version = '.'.join(str(v) for v in dev.version)
-    test_class.__qualname__ = f'{test_class.__qualname__}{transport_part}_{fw_version}_{dev.serial}'  # noqa: E501
+    test_class.__qualname__ = '{}{}_{}_{}'.format(
+        test_class._original_test_name, transport_part, fw_version,
+        dev.serial)
     return test_class
 
 
@@ -235,7 +237,8 @@ def _make_test_suite_decorator(
     def decorate(create_test_classes):
         def additional_tests():
             start_time = time.time()
-            print(f'Starting test instantiation: {create_test_classes.__module__} ...')  # noqa: E501
+            print('Starting test instantiation: {} ...'
+                  .format(create_test_classes.__module__))
             (tests, covered_test_names) = _multiply_test_classes_by_devices(
                 transports_and_serials,
                 create_test_classes,
@@ -250,7 +253,8 @@ def _make_test_suite_decorator(
             suite.addTests(skipped_tests)
 
             end_time = time.time()
-            print(f'Test instantiation completed in {end_time - start_time:.3f} s')  # noqa: E501
+            print('Test instantiation completed in {:.3f} s'
+                  .format(end_time - start_time))
 
             return suite
         return additional_tests
