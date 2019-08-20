@@ -1,4 +1,4 @@
-* Version 3.1.0 (unreleased)
+* Version 3.1.0 (released 2019-08-20)
  ** Add support for YubiKey 5Ci
  ** OpenPGP: the info command now prints OpenPGP specification version as well
  ** OpenPGP: Update support for attestation to match OpenPGP v3.4
