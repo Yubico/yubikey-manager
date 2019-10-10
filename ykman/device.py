@@ -264,14 +264,11 @@ class YubiKey(object):
             config._set(TAG.USB_ENABLED, usb_enabled)
 
         # Workaround for invalid configurations.
-        # Assume all form factors except USB_A_KEYCHAIN
-        # does not support NFC.
-        if config.form_factor in (
-                FORM_FACTOR.USB_A_NANO,
-                FORM_FACTOR.USB_C_KEYCHAIN,
-                FORM_FACTOR.USB_C_NANO,
-                FORM_FACTOR.USB_C_LIGHTNING
-                ):
+        # Assume all form factors except USB_A_KEYCHAIN and
+        # USB_C_KEYCHAIN >= 5.2.4 does not support NFC.
+        if not ((config.form_factor is FORM_FACTOR.USB_A_KEYCHAIN)
+                or (config.form_factor is FORM_FACTOR.USB_C_KEYCHAIN
+                    and config.version >= (5, 2, 4))):
             config._set(TAG.NFC_SUPPORTED, 0)
             config._set(TAG.NFC_ENABLED, 0)
 
