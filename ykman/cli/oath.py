@@ -266,7 +266,7 @@ def _add_cred(ctx, data, force):
 
     if data.algorithm == ALGO.SHA512 and (
             controller.version < (4, 3, 1) or ctx.obj['dev'].is_fips):
-                ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
+        ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
 
     key = data.make_key()
     if not force and any(cred.key == key for cred in controller.list()):
