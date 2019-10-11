@@ -1,0 +1,39 @@
+name: Build a source package
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-add-repository -y ppa:yubico/stable
+          sudo apt-get update
+          sudo apt-get install -qq libykpers-1-1 swig libpcsclite-dev
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Run unit tests
+        run: python setup.py test
+
+      - name: Create source package
+        run: |
+          python setup.py sdist
+          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
+          mv dist/yubikey-manager-*.tar.gz dist/yubikey-manager-$REF.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: yubikey-manager-source-package
+          path: dist
