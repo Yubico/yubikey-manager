@@ -27,4 +27,7 @@ jobs:
         run: python setup.py test
 
       - name: Run CLI
-        run: ykman --version
+        shell: bash
+        run: |
+          ykman --version
+          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
