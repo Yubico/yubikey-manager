@@ -1,0 +1,24 @@
+name: macOS
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install ykpers libyubikey libusb swig python
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Run unit tests
+        run: python setup.py test
+
+      - name: Run CLI
+        run: ykman --version

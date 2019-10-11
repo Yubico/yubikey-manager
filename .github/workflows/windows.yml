@@ -1,0 +1,30 @@
+name: Windows
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install dependencies
+        run: |
+          choco install swig
+          wget https://developers.yubico.com/yubikey-personalization/Releases/ykpers-1.20.0-win64.zip -OutFile ykpers-1.20.0-win64.zip
+          7z x ykpers-1.20.0-win64.zip
+          Copy-Item .\bin\*.dll . -Force
+          wget https://github.com/libusb/libusb/releases/download/v1.0.22/libusb-1.0.22.7z -OutFile libusb-1.0.22.7z
+          7z x libusb-1.0.22.7z
+          Copy-Item .\MS64\dll\*.dll . -Force
+          python -m pip install --upgrade pip
+          pip install .
+        shell: powershell
+
+      - name: Run unit tests
+        run: python setup.py test
+
+      - name: Run CLI
+        run: ykman --version
