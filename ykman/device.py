@@ -297,6 +297,8 @@ class YubiKey(object):
                     self.device_name += ' Nano'
                 elif config.form_factor == FORM_FACTOR.USB_C_KEYCHAIN:
                     self.device_name += 'C'
+                    if config.nfc_supported:
+                        self.device_name += ' NFC'
                 elif config.form_factor == FORM_FACTOR.USB_C_NANO:
                     self.device_name += 'C Nano'
                 elif config.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
