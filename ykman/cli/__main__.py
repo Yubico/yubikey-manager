@@ -28,6 +28,8 @@
 from __future__ import absolute_import, print_function
 
 import ykman.logging_setup
+import smartcard.pcsc.PCSCExceptions
+
 from ykman import __version__
 from ..util import TRANSPORT, Cve201715361VulnerableError, YUBIKEY
 from ..native.pyusb import get_usb_backend_version
@@ -221,26 +223,32 @@ def list_keys(ctx, serials, readers):
 
     descriptors = get_descriptors()
     handled_serials = set()
-    for dev in list_devices():
-        if dev.key_type == YUBIKEY.SKY:
-            # We have nothing to match on, so just drop a SKY descriptor
-            d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
-            descriptors.remove(d)
-            _print_device(dev, None)
-        else:
-            serial = dev.serial
-            if serial not in handled_serials:
-                # Drop a descriptor with a matching serial and mode
-                handled_serials.add(serial)
-                matches = [d for d in descriptors if (d.key_type, d.mode)
-                           == (dev.driver.key_type, dev.driver.mode)]
-                if len(matches) > 0:
-                    d = matches[0]
-                    descriptors.remove(d)
-                    _print_device(dev, serial)
-        dev.close()
-        if not descriptors:
-            break
+
+    try:
+        for dev in list_devices(transports=TRANSPORT.CCID):
+            if dev.key_type == YUBIKEY.SKY:
+                # We have nothing to match on, so just drop a SKY descriptor
+                d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
+                descriptors.remove(d)
+                _print_device(dev, None)
+            else:
+                serial = dev.serial
+                if serial not in handled_serials:
+                    # Drop a descriptor with a matching serial and mode
+                    handled_serials.add(serial)
+                    matches = [d for d in descriptors if (d.key_type, d.mode)
+                               == (dev.driver.key_type, dev.driver.mode)]
+                    if len(matches) > 0:
+                        d = matches[0]
+                        descriptors.remove(d)
+                        _print_device(dev, serial)
+            dev.close()
+            if not descriptors:
+                break
+    except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
+        logger.error('Failed to list devices', exc_info=e)
+        ctx.fail(
+            'Failed to establish CCID context. Is the pcscd service running?')
 
     # List descriptors that failed to open.
     logger.debug('Failed to open all devices, listing based on descriptors')
