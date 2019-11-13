@@ -169,7 +169,8 @@ def set_touch(ctx, key, policy, admin_pin, force):
     policy_name = policy.name.lower().replace('_', '-')
 
     if policy not in controller.supported_touch_policies:
-        ctx.fail('Touch policy {} not supported.'.format(policy_name))
+        ctx.fail('Touch policy {} not supported by this YubiKey.'
+                 .format(policy_name))
 
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
