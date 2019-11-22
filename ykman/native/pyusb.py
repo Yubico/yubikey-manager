@@ -31,24 +31,10 @@ import ctypes
 import ctypes.util
 import os
 import sys
-import usb.core
 import usb.backend.libusb1 as libusb1
-import usb.backend.libusb0 as libusb0
-import usb.backend.openusb as openusb
 
 
 def _find_library_local(libname):
-    # Look in working directory
-    if os.path.isfile(libname):
-        return libname
-    elif sys.platform == 'win32' and os.path.isfile(libname + '.dll'):
-        return libname + '.dll'
-    # Look next to executable
-    libpath = os.path.join(os.path.dirname(sys.executable), libname)
-    if os.path.isfile(libpath):
-        return libpath
-    elif sys.platform == 'win32' and os.path.isfile(libpath + '.dll'):
-        return libpath + '.dll'
     # For .app bundles
     if sys.platform == 'darwin':
         libpath = os.path.join(
@@ -56,18 +42,29 @@ def _find_library_local(libname):
                 sys.executable), '../Frameworks', libname + '.dylib')
         if os.path.isfile(libpath):
             return libpath
+    else:
+        # Look in ykman/native/
+        libpath = os.path.join(os.path.dirname(__file__), libname)
+        if os.path.isfile(libpath):
+            return libpath
+        elif sys.platform == 'win32' and os.path.isfile(libpath + '.dll'):
+            return libpath + '.dll'
 
 
 def _load_usb_backend():
     # First try to find backend locally, if not found try the systems.
-    for lib in (libusb1, openusb, libusb0):
-        backend = lib.get_backend(find_library=_find_library_local)
+    try:
+        tmp = os.environ['PATH']
+        os.environ['PATH'] = ''
+        backend = libusb1.get_backend(find_library=_find_library_local)
         if backend is not None:
             return backend
-    for lib in (libusb1, openusb, libusb0):
-        backend = lib.get_backend()
-        if backend is not None:
-            return backend
+    finally:
+        os.environ['PATH'] = tmp
+
+    backend = libusb1.get_backend()
+    if backend is not None:
+        return backend
 
 
 def get_usb_backend():
@@ -94,9 +91,3 @@ def get_usb_backend_version():
         lib.libusb_get_version.restype = ctypes.POINTER(LibUsb1Version)
         version = lib.libusb_get_version().contents
         return 'libusb {0.major}.{0.minor}.{0.micro}'.format(version)
-    elif isinstance(backend, openusb._OpenUSB):
-        lib = openusb._lib
-        usb.core.find(True)  # OpenUSB seems to hang if not called.
-    elif isinstance(backend, libusb0._LibUSB):
-        lib = libusb0._lib
-    return lib._name
