@@ -104,7 +104,7 @@ class PrepareUploadFailed(Exception):
         self.status = status
         self.content = content
         self.errors = [
-            e if e in PrepareUploadError else PrepareUploadError[e]
+            e if isinstance(e, PrepareUploadError) else PrepareUploadError[e]
             for e in error_ids]
 
     def messages(self):
