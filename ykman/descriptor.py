@@ -120,14 +120,9 @@ class Descriptor(object):
         v_int = usb_dev.bcdDevice
         version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
         pid = PID(usb_dev.idProduct)
-        if pid.is_hsm:
-            return None
-        else:
-            fp = (pid, version, usb_dev.bus, usb_dev.address,
-                  usb_dev.iSerialNumber)
-            return cls(
-                pid.get_type(), Mode.from_pid(pid), version, fp,
-                backend=backend)
+        fp = (pid, version, usb_dev.bus, usb_dev.address, usb_dev.iSerialNumber)
+        return cls(
+            pid.get_type(), Mode.from_pid(pid), version, fp, backend=backend)
 
     @classmethod
     def from_driver(cls, driver):
@@ -143,9 +138,7 @@ def _gen_descriptors():
             addr = (dev.bus, dev.address)
             if addr not in found:
                 found.append(addr)
-                desc = Descriptor.from_usb(dev, backend)
-                if desc:
-                    yield desc
+                yield Descriptor.from_usb(dev, backend)
         except ValueError as e:
             logger.debug('Invalid PID', exc_info=e)
 

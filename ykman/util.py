@@ -163,8 +163,6 @@ class YUBIKEY(Enum):
 
 @unique
 class PID(IntEnum):
-    YHSM = 0x0018
-    YHSM2 = 0x0030
     YKS_OTP = 0x0010
     NEO_OTP = 0x0110
     NEO_OTP_CCID = 0x0111
@@ -188,10 +186,6 @@ class PID(IntEnum):
 
     def get_transports(self):
         return sum(TRANSPORT[x] for x in self.name.split('_')[1:])
-
-    @property
-    def is_hsm(self):
-        return self == self.YHSM or self == self.YHSM2
 
 
 class Mode(object):
