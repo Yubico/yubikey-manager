@@ -119,7 +119,12 @@ class Descriptor(object):
     def from_usb(cls, usb_dev, backend):
         v_int = usb_dev.bcdDevice
         version = ((v_int >> 8) % 16, (v_int >> 4) % 16, v_int % 16)
-        pid = PID(usb_dev.idProduct)
+        try:
+            pid = PID(usb_dev.idProduct)
+        except ValueError:
+            logger.debug('Ignoring unknown PID: {:x}'.format(usb_dev.idProduct))
+            return None
+
         fp = (pid, version, usb_dev.bus, usb_dev.address, usb_dev.iSerialNumber)
         return cls(
             pid.get_type(), Mode.from_pid(pid), version, fp, backend=backend)
@@ -134,13 +139,12 @@ def _gen_descriptors():
     found = []  # Composite devices are listed multiple times on Windows...
     backend = get_usb_backend()
     for dev in usb.core.find(True, idVendor=0x1050, backend=backend):
-        try:
-            addr = (dev.bus, dev.address)
-            if addr not in found:
-                found.append(addr)
-                yield Descriptor.from_usb(dev, backend)
-        except ValueError as e:
-            logger.debug('Invalid PID', exc_info=e)
+        addr = (dev.bus, dev.address)
+        if addr not in found:
+            found.append(addr)
+            desc = Descriptor.from_usb(dev, backend)
+            if desc:
+                yield desc
 
 
 def get_descriptors():
