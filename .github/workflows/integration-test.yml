@@ -1,0 +1,38 @@
+name: integration-test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: self-hosted
+    name: Python ${{ matrix.python }}
+
+    strategy:
+      max-parallel: 1
+      matrix:
+        python: [ '3.5', '3.8' ]
+
+    container:
+      image: python:${{ matrix.python }}-buster
+      options: --privileged
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y libykpers-1-1 swig libpcsclite-dev
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Set up pcscd
+        run: |
+          apt-get install -y pcscd
+          service pcscd start
+
+      - name: Run tests
+        run: python setup.py test
+        env:
+          DESTRUCTIVE_TEST_YUBIKEY_SERIALS: 7800014
+          DESTRUCTIVE_TEST_DO_NOT_PROMPT: 'TRUE'
