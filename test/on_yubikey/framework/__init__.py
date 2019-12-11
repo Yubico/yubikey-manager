@@ -25,7 +25,7 @@ if _test_serials is not None:
     _test_serials = set(int(s) for s in _test_serials.split(','))
 
     for dev in list_devices():
-        print('{:%.3f} {}'.format(time.time() - start_time, dev))
+        print('{:.3f} {}'.format(time.time() - start_time, dev))
         _serials_present.add(dev.serial)
         _versions[dev.serial] = dev.version
         dev.close()
