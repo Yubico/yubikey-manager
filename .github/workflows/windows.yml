@@ -1,6 +1,6 @@
 name: Windows
 
-on: []
+on: [pull_request]
 
 jobs:
   build:

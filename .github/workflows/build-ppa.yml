@@ -1,7 +1,7 @@
 name: Build ppa packages
 # No signing or uploading, just to make sure it doesn't break
 
-on: []
+on: [pull_request]
 
 jobs:
   build:
