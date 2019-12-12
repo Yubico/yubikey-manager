@@ -17,6 +17,12 @@ jobs:
       options: --privileged
 
     steps:
+      - name: I solemnly swear I am up to no good
+        run: |
+          apt-get update
+          apt-get install -y sl
+          /usr/games/sl
+
       - uses: actions/checkout@v1
 
       - name: Install dependencies
