@@ -88,9 +88,9 @@ class PrepareUploadError(Enum):
     PUBLIC_ID_UNDEFINED = 'Public ID is required.'
     SECRET_KEY_INVALID_LENGTH = 'Secret key must be 32 character long.'
     SECRET_KEY_NOT_HEX = 'Secret key must consist only of hex characters (0-9A-F).'  # noqa: E501
-    SECRET_KEY_UNDEFINED = 'AES key is required.'
+    SECRET_KEY_UNDEFINED = 'Secret key is required.'
     SERIAL_NOT_INT = 'Serial number must be an integer.'
-    SERIAL_TOO_LONG = 'Serial number too long.'
+    SERIAL_TOO_LONG = 'Serial number is too long.'
 
     def message(self):
         return self.value
@@ -104,7 +104,7 @@ class PrepareUploadFailed(Exception):
         self.status = status
         self.content = content
         self.errors = [
-            e if e in PrepareUploadError else PrepareUploadError[e]
+            e if isinstance(e, PrepareUploadError) else PrepareUploadError[e]
             for e in error_ids]
 
     def messages(self):
