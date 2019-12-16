@@ -120,3 +120,5 @@ def additional_tests(open_device):
             priv = x25519.X25519PrivateKey.generate()
             self.controller.verify_admin(DEFAULT_ADMIN_PIN)
             self.controller.import_key(KEY_SLOT.ENC, priv)
+
+    return [OpgpTestCase, KeyManagement]
