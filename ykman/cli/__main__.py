@@ -251,7 +251,9 @@ def list_keys(ctx, serials, readers):
             'Failed to establish CCID context. Is the pcscd service running?')
 
     # List descriptors that failed to open.
-    logger.debug('Failed to open all devices, listing based on descriptors')
+    if len(descriptors) > 0:
+        logger.debug(
+            'Failed to open some devices, listing based on descriptors')
     for desc in descriptors:
         click.echo('{} [{}]'.format(desc.name, desc.mode))
 
