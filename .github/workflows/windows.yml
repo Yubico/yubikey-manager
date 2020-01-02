@@ -20,7 +20,7 @@ jobs:
           7z x libusb-1.0.22.7z
           Copy-Item .\MS64\dll\*.dll .\ykman\native -Force
           python -m pip install --upgrade pip
-          pip install .
+          pip install -e .
         shell: powershell
 
       - name: Run unit tests
