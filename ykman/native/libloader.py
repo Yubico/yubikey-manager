@@ -42,6 +42,8 @@ import platform
 import ctypes
 import ctypes.util
 
+from ykman.util import override_os_path
+
 
 def _environ_path(name):
     if name in os.environ:
@@ -291,33 +293,30 @@ class WindowsLibraryLoader(LibraryLoader):
     name_formats = ['lib%s*.dll']
 
     def load_library(self, libname, version=None, extra_paths=[]):
-        tmp = os.environ['PATH']
-        try:
-            os.environ['PATH'] = ''
-            result = LibraryLoader.load_library(self, libname, version,
-                                                extra_paths)
-        except ImportError:
-            result = None
-            if os.path.sep not in libname:
-                formats = self.name_formats[:]
-                if version:
-                    formats.append('lib%%s-%s.dll' % version)
-                for name in formats:
+        with override_os_path(''):
+            try:
+                result = LibraryLoader.load_library(self, libname, version,
+                                                    extra_paths)
+            except ImportError:
+                result = None
+                if os.path.sep not in libname:
+                    formats = self.name_formats[:]
+                    if version:
+                        formats.append('lib%%s-%s.dll' % version)
+                    for name in formats:
+                        try:
+                            result = getattr(ctypes.cdll, name % libname)
+                            if result:
+                                break
+                        except WindowsError:
+                            result = None
+                if result is None:
                     try:
-                        result = getattr(ctypes.cdll, name % libname)
-                        if result:
-                            break
+                        result = getattr(ctypes.cdll, libname)
                     except WindowsError:
                         result = None
-            if result is None:
-                try:
-                    result = getattr(ctypes.cdll, libname)
-                except WindowsError:
-                    result = None
-            if result is None:
-                raise ImportError('%s not found.' % libname)
-        finally:
-            os.environ['PATH'] = tmp
+                if result is None:
+                    raise ImportError('%s not found.' % libname)
         return result
 
     def load(self, path):

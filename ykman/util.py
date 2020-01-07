@@ -27,6 +27,7 @@
 
 from __future__ import absolute_import
 
+import os
 import six
 import struct
 import re
@@ -570,3 +571,24 @@ def is_pkcs12(data):
         return False
     else:
         return False
+
+
+class OsPathContextManager(object):
+    """
+    A context manager that sets os.environ['PATH'] to tmp_path when entered,
+    then resets it to the previous value when exited.
+    """
+    def __init__(self, tmp_path):
+        self._original_path = None
+        self._tmp_path = tmp_path
+
+    def __enter__(self):
+        self._original_path = os.environ['PATH']
+        os.environ['PATH'] = self._tmp_path
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        os.environ['PATH'] = self._original_path
+
+
+def override_os_path(tmp_path):
+    return OsPathContextManager(tmp_path)

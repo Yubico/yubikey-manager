@@ -33,6 +33,8 @@ import os
 import sys
 import usb.backend.libusb1 as libusb1
 
+from ykman.util import override_os_path
+
 
 def _find_library_local(libname):
     # For .app bundles
@@ -53,14 +55,10 @@ def _find_library_local(libname):
 
 def _load_usb_backend():
     # First try to find backend locally, if not found try the systems.
-    try:
-        tmp = os.environ['PATH']
-        os.environ['PATH'] = ''
+    with override_os_path(''):
         backend = libusb1.get_backend(find_library=_find_library_local)
         if backend is not None:
             return backend
-    finally:
-        os.environ['PATH'] = tmp
 
     backend = libusb1.get_backend()
     if backend is not None:
