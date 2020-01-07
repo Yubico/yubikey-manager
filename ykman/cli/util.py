@@ -47,7 +47,7 @@ class UpperCaseChoice(click.Choice):
         click.Choice.__init__(self, choices)
 
     def convert(self, value, param, ctx):
-        if value.upper() in self.choices:
+        if value.upper().replace('_', '-') in self.choices:
             return value.upper()
         self.fail(
             'invalid choice: %s. (choose from %s)' % (
