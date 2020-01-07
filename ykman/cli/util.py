@@ -47,7 +47,7 @@ class UpperCaseChoice(click.Choice):
         click.Choice.__init__(self, choices)
 
     def convert(self, value, param, ctx):
-        if value.upper().replace('_', '-') in self.choices:
+        if value.upper() in self.choices:
             return value.upper()
         self.fail(
             'invalid choice: %s. (choose from %s)' % (
@@ -68,7 +68,7 @@ class EnumChoice(UpperCaseChoice):
 
     def convert(self, value, param, ctx):
         name = super(EnumChoice, self).convert(
-            value.replace('-', '_'), param, ctx)
+            value, param, ctx).replace('-', '_')
         return self.choices_enum[name]
 
 
