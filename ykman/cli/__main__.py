@@ -98,8 +98,10 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                     ctx.fail("Command '{}' is not supported by this device."
                              .format(cmd))
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to a YubiKey with serial: {}'
-                     .format(serial))
+            ctx.fail(
+                'Failed connecting to a YubiKey with serial: {}. \
+                        Make sure you have the correct permissions'.format(
+                            serial))
 
 
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
@@ -129,8 +131,9 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to {} [{}]'.format(
-                descriptor.name, descriptor.mode))
+            ctx.fail('Failed connecting to {} [{}]. Make sure you have \
+                    the correct permissions.'.format(
+                        descriptor.name, descriptor.mode))
     else:
         _disabled_transport(ctx, transports, cmd)
 
