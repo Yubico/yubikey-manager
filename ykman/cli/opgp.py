@@ -163,6 +163,23 @@ def set_touch(ctx, key, policy, admin_pin, force):
     \b
     KEY     Key slot to set (sig, enc, aut or att).
     POLICY  Touch policy to set (on, off, fixed, cached or cached-fixed).
+
+    The touch policy is used to require user interaction for all
+    operations using the private key on the YubiKey. The touch policy is set
+    indivdually for each key slot. To see the current touch policy, run
+
+    \b
+        $ ykman openpgp info
+
+    Touch policies:
+
+    \b
+    Off (default)   No touch required
+    On              Touch required
+    Fixed           Touch required, can't be disabled without a full reset
+    Cached          Touch required, cached for 15s after use
+    Cached-Fixed    Touch required, cached for 15s after use, can't be disabled
+                    without a full reset
     """
     controller = ctx.obj['controller']
 
