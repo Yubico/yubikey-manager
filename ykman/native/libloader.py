@@ -85,7 +85,6 @@ class LibraryLoader(object):
         if os.path.isabs(libname):
             yield libname
         else:
-            # FIXME / TODO return '.' and os.path.dirname(__file__)
             for path in self.getplatformpaths(libname, extra_paths):
                 yield path
 
@@ -272,7 +271,6 @@ class _WindowsLibrary(object):
         try:
             if dir:
                 os.chdir(dir)
-                path = os.path.basename(path)
             self.cdll = ctypes.cdll.LoadLibrary(path)
             self.windll = ctypes.windll.LoadLibrary(path)
         finally:
@@ -290,10 +288,12 @@ class _WindowsLibrary(object):
 
 
 class WindowsLibraryLoader(LibraryLoader):
-    name_formats = ['%s.dll', 'lib%s*.dll', '%slib.dll']
+    name_formats = ['lib%s*.dll']
 
     def load_library(self, libname, version=None, extra_paths=[]):
+        tmp = os.environ['PATH']
         try:
+            os.environ['PATH'] = ''
             result = LibraryLoader.load_library(self, libname, version,
                                                 extra_paths)
         except ImportError:
@@ -316,6 +316,8 @@ class WindowsLibraryLoader(LibraryLoader):
                     result = None
             if result is None:
                 raise ImportError('%s not found.' % libname)
+        finally:
+            os.environ['PATH'] = tmp
         return result
 
     def load(self, path):
@@ -324,7 +326,7 @@ class WindowsLibraryLoader(LibraryLoader):
     def getplatformpaths(self, libname, extra_paths):
         if os.path.sep not in libname:
             for name in self.name_formats:
-                for dir in extra_paths + ['.']:  # Include cwd
+                for dir in extra_paths:
                     pattern = os.path.abspath(os.path.join(dir, name % libname))
                     for path in glob.glob(pattern):
                         yield path
