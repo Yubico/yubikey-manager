@@ -8,6 +8,8 @@
  ** Windows: Improve how .DLL files are loaded.
  ** Bugfix: set-touch now accepts the cached-fixed option
  ** Bugfix: Fix crash in OtpController.prepare_upload_key() error parsing
+ ** PIV: read-object command no longer adds a trailing newline
+ ** Bugfix: Fixed crash in OtpController.prepare_upload_key() error parsing
 
 * Version 3.1.0 (released 2019-08-20)
  ** Add support for YubiKey 5Ci
