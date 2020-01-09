@@ -100,8 +100,8 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
         except FailedOpeningDeviceException:
             ctx.fail(
                 'Failed connecting to a YubiKey with serial: {}. \
-                        Make sure the application have the required permissions.'.format(
-                            serial))
+                        Make sure the application have the required \
+                            permissions.'.format(serial))
 
 
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
