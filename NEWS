@@ -1,7 +1,10 @@
 * Version 3.1.1 (unreleased)
  ** OpenPGP: set-touch now performs compatibility checks before prompting for PIN
  ** OpenPGP: Improved error messages in set-touch
+ ** PIV: PivController.read_certificate(slot) now wraps certificate parsing exceptions in new exception type `InvalidCertificate`
+ ** PIV: PivController.list_certificates() now returns `None` for slots containing invalid certificate, instead of raising an exception
  ** Bug fix: Fixed crash in OtpController.prepare_upload_key() error parsing
+ ** Bug fix: Fixed crash in piv info command when a certificate slot contains an invalid certificate
 
 * Version 3.1.0 (released 2019-08-20)
  ** Add support for YubiKey 5Ci
