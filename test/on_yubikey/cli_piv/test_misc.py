@@ -20,11 +20,13 @@ def additional_tests(ykman_cli):
             self.assertIn('Success!', output)
 
         def test_write_read_object(self):
-            ykman_cli(
-                'piv', 'write-object',
-                '-m', DEFAULT_MANAGEMENT_KEY, '0x5f0001',
-                '-', input='test data')
-            output = ykman_cli('piv', 'read-object', '0x5f0001')
-            self.assertEqual('test data\n', output)
+            data = 'test data'
+            for i in range(0, 3):
+                ykman_cli(
+                    'piv', 'write-object',
+                    '-m', DEFAULT_MANAGEMENT_KEY, '0x5f0001',
+                    '-', input=data)
+                data = ykman_cli('piv', 'read-object', '0x5f0001')
+            self.assertEqual(data, 'test data')
 
     return [Misc]
