@@ -1,7 +1,13 @@
+
 * Version 3.1.1 (unreleased)
+ ** Add support for YubiKey 5C NFC
  ** OpenPGP: set-touch now performs compatibility checks before prompting for PIN
- ** OpenPGP: Improved error messages in set-touch
- ** Bug fix: Fixed crash in OtpController.prepare_upload_key() error parsing
+ ** OpenPGP: Improve error messages and documentation for set-touch
+ ** Improve error handling when pcscd is not running
+ ** CLI: Hint at missing permissions when opening a device fails
+ ** Windows: Improve how .DLL files are loaded.
+ ** Bugfix: set-touch now accepts the cached-fixed option
+ ** Bugfix: Fix crash in OtpController.prepare_upload_key() error parsing
 
 * Version 3.1.0 (released 2019-08-20)
  ** Add support for YubiKey 5Ci
