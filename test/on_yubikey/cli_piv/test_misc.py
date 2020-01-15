@@ -3,7 +3,6 @@ import unittest
 from ykman.piv import OBJ
 from .util import DEFAULT_MANAGEMENT_KEY
 from ..framework import cli_test_suite
-from .util import DEFAULT_MANAGEMENT_KEY
 
 
 @cli_test_suite
@@ -32,7 +31,7 @@ def additional_tests(ykman_cli):
         def test_export_invalid_certificate_fails(self):
             ykman_cli('piv', 'write-object', hex(OBJ.AUTHENTICATION), '-',
                       '-m', DEFAULT_MANAGEMENT_KEY,
-                      input='Kom ihåg att du aldrig får snyta dig i mattan!')
+                      input='This is not a cert')
 
             with self.assertRaises(SystemExit):
                 ykman_cli('piv', 'export-certificate',
@@ -41,7 +40,7 @@ def additional_tests(ykman_cli):
         def test_info_with_invalid_certificate_does_not_crash(self):
             ykman_cli('piv', 'write-object', hex(OBJ.AUTHENTICATION), '-',
                       '-m', DEFAULT_MANAGEMENT_KEY,
-                      input='Kom ihåg att du aldrig får snyta dig i mattan!')
+                      input='This is not a cert')
             ykman_cli('piv', 'info')
 
     return [Misc]
