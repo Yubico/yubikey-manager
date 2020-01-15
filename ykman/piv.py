@@ -233,6 +233,13 @@ class BadFormat(Exception):
         self.bad_value = bad_value
 
 
+class InvalidCertificate(Exception):
+    def __init__(self, slot):
+        super(InvalidCertificate, self).__init__(
+            'Failed to parse certificate in slot {:x}'.format(slot))
+        self.slot = slot
+
+
 class KeypairMismatch(Exception):
     def __init__(self, slot, cert):
         super(KeypairMismatch, self).__init__(
@@ -915,8 +922,11 @@ class PivController(object):
         if TAG.CERT_INFO in data:  # Not available in attestation slot
             if data[TAG.CERT_INFO] != b'\0':
                 raise ValueError('Compressed certificates are not supported!')
-        return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
-                                              default_backend())
+        try:
+            return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
+                                                  default_backend())
+        except Exception:
+            raise InvalidCertificate(slot)
 
     def delete_certificate(self, slot):
         self.put_data(OBJ.from_slot(slot), b'')
@@ -959,6 +969,9 @@ class PivController(object):
                 certs[slot] = self.read_certificate(slot)
             except APDUError:
                 pass
+            except InvalidCertificate:
+                certs[slot] = None
+
         return certs
 
     def update_chuid(self):
