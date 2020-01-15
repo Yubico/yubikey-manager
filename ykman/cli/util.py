@@ -162,3 +162,7 @@ def prompt_for_touch():
         click.echo('Touch your YubiKey...', err=True)
     except Exception:
         sys.stderr.write('Touch your YubiKey...\n')
+
+def click_fail(message, error_code=1):
+    click.echo("Error: {}".format(message), err=True)
+    sys.exit(error_code)

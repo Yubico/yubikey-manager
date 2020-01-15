@@ -38,7 +38,7 @@ from ..driver_ccid import open_devices as open_ccid, list_readers
 from ..device import YubiKey
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException, Descriptor)
-from .util import UpperCaseChoice, YkmanContextObject
+from .util import UpperCaseChoice, YkmanContextObject, click_fail
 from .info import info
 from .mode import mode
 from .otp import otp
@@ -172,6 +172,7 @@ def cli(ctx, device, log_level, log_file, reader):
       $ ykman --device 0123456 info
     """
     ctx.obj = YkmanContextObject()
+    ctx.fail = click_fail
 
     if log_level:
         ykman.logging_setup.setup(log_level, log_file=log_file)
