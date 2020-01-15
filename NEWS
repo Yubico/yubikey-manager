@@ -3,6 +3,7 @@
  ** Add support for YubiKey 5C NFC
  ** OpenPGP: set-touch now performs compatibility checks before prompting for PIN
  ** OpenPGP: Improve error messages and documentation for set-touch
+ ** PIV: read-object command no longer adds a trailing newline
  ** Improve error handling when pcscd is not running
  ** CLI: Hint at missing permissions when opening a device fails
  ** Windows: Improve how .DLL files are loaded.
