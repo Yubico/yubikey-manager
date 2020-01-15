@@ -17,6 +17,13 @@ def ykman_cli(*argv, **kwargs):
     return result.output
 
 
+def ykman_cli_bytes(*argv, **kwargs):
+    result = ykman_cli_raw(*argv, **kwargs)
+    if result.exit_code != 0:
+        raise result.exception
+    return result.stdout_bytes
+
+
 def ykman_cli_raw(*argv, **kwargs):
     runner = CliRunner()
     result = runner.invoke(cli, list(argv), obj={}, **kwargs)
