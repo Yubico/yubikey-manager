@@ -66,7 +66,10 @@ def _specialize_ykman_cli(dev, _transports):
     Creates a specialized version of ykman_cli preset with the serial number of
     the given device.
     '''
-    return functools.partial(test.util.ykman_cli, '--device', dev.serial)
+    f = functools.partial(test.util.ykman_cli, '--device', dev.serial)
+    f.with_bytes_output = functools.partial(test.util.ykman_cli_bytes,
+                                            '--device', dev.serial)
+    return f
 
 
 def _specialize_open_device(dev, transport):
