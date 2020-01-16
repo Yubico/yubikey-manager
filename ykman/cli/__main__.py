@@ -38,7 +38,7 @@ from ..driver_ccid import open_devices as open_ccid, list_readers
 from ..device import YubiKey
 from ..descriptor import (get_descriptors, list_devices, open_device,
                           FailedOpeningDeviceException, Descriptor)
-from .util import UpperCaseChoice, YkmanContextObject
+from .util import UpperCaseChoice, YkmanContextObject, cli_fail
 from .info import info
 from .mode import mode
 from .otp import otp
@@ -82,7 +82,7 @@ def _disabled_transport(ctx, transports, cmd_name):
     req = ', '.join((t.name for t in TRANSPORT if t & transports))
     click.echo("Command '{}' requires one of the following USB interfaces "
                "to be enabled: '{}'.".format(cmd_name, req))
-    ctx.fail("Use 'ykman mode' to set the enabled USB interfaces.")
+    cli_fail("Use 'ykman mode' to set the enabled USB interfaces.")
 
 
 def _run_cmd_for_serial(ctx, cmd, transports, serial):
@@ -95,10 +95,10 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                 if dev.config.usb_supported & transports:
                     _disabled_transport(ctx, transports, cmd)
                 else:
-                    ctx.fail("Command '{}' is not supported by this device."
+                    cli_fail("Command '{}' is not supported by this device."
                              .format(cmd))
         except FailedOpeningDeviceException:
-            ctx.fail(
+            cli_fail(
                 'Failed connecting to a YubiKey with serial: {}. \
                         Make sure the application have the required \
                             permissions.'.format(serial))
@@ -111,27 +111,27 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
             if len(readers) == 1:
                 return YubiKey(Descriptor.from_driver(readers[0]), readers[0])
             elif len(readers) > 1:
-                ctx.fail('Multiple YubiKeys on external readers detected.')
+                cli_fail('Multiple YubiKeys on external readers detected.')
             else:
-                ctx.fail('No YubiKey found on external reader.')
+                cli_fail('No YubiKey found on external reader.')
         else:
-            ctx.fail('Not a CCID command.')
+            cli_fail('Not a CCID command.')
     try:
         descriptors = get_descriptors()
     except usb.core.NoBackendError:
-        ctx.fail('No PyUSB backend detected!')
+        cli_fail('No PyUSB backend detected!')
     n_keys = len(descriptors)
     if n_keys == 0:
-        ctx.fail('No YubiKey detected!')
+        cli_fail('No YubiKey detected!')
     if n_keys > 1:
-        ctx.fail('Multiple YubiKeys detected. Use --device SERIAL to specify '
+        cli_fail('Multiple YubiKeys detected. Use --device SERIAL to specify '
                  'which one to use.')
     descriptor = descriptors[0]
     if descriptor.mode.transports & transports:
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to {} [{}]. Make sure the application have \
+            cli_fail('Failed connecting to {} [{}]. Make sure the application have \
                     the required permissions.'.format(
                         descriptor.name, descriptor.mode))
     else:
@@ -177,12 +177,12 @@ def cli(ctx, device, log_level, log_file, reader):
         ykman.logging_setup.setup(log_level, log_file=log_file)
 
     if reader and device:
-        ctx.fail('--reader and --device options can\'t be combined.')
+        cli_fail('--reader and --device options can\'t be combined.')
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     if subcmd == list_keys:
         if reader:
-            ctx.fail('--reader and list command can\'t be combined.')
+            cli_fail('--reader and list command can\'t be combined.')
         return
 
     transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
@@ -250,7 +250,7 @@ def list_keys(ctx, serials, readers):
                 break
     except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
         logger.error('Failed to list devices', exc_info=e)
-        ctx.fail(
+        cli_fail(
             'Failed to establish CCID context. Is the pcscd service running?')
 
     # List descriptors that failed to open.

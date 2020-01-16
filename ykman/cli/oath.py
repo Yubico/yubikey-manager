@@ -32,7 +32,7 @@ from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option, click_postpone_execution, click_callback,
-    click_parse_b32_key, prompt_for_touch, EnumChoice
+    click_parse_b32_key, prompt_for_touch, EnumChoice, cli_fail
 )
 from ..driver_ccid import (
     APDUError,  SW
@@ -108,7 +108,7 @@ def oath(ctx, password):
         ctx.obj['settings'] = Settings('oath')
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
-            ctx.fail("The OATH application can't be found on this YubiKey.")
+            cli_fail("The OATH application can't be found on this YubiKey.")
         raise
 
     if password:
@@ -253,20 +253,20 @@ def _add_cred(ctx, data, force):
     controller = ctx.obj['controller']
 
     if not (0 < len(data.name) <= 64):
-        ctx.fail('Name must be between 1 and 64 bytes.')
+        cli_fail('Name must be between 1 and 64 bytes.')
 
     if len(data.secret) < 2:
-        ctx.fail('Secret must be at least 2 bytes.')
+        cli_fail('Secret must be at least 2 bytes.')
 
     if data.touch and controller.version < (4, 2, 6):
-        ctx.fail('Touch-required credentials not supported on this key.')
+        cli_fail('Touch-required credentials not supported on this key.')
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
-        ctx.fail('Counter only supported for HOTP credentials.')
+        cli_fail('Counter only supported for HOTP credentials.')
 
     if data.algorithm == ALGO.SHA512 and (
             controller.version < (4, 3, 1) or ctx.obj['dev'].is_fips):
-        ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
+        cli_fail('Algorithm SHA512 not supported on this YubiKey.')
 
     key = data.make_key()
     if not force and any(cred.key == key for cred in controller.list()):
@@ -282,17 +282,17 @@ def _add_cred(ctx, data, force):
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
-        ctx.fail(
+        cli_fail(
             'Choose a name that is not a subset of an existing credential.')
 
     try:
         controller.put(data)
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
-            ctx.fail('No space left on your YubiKey for OATH credentials.')
+            cli_fail('No space left on your YubiKey for OATH credentials.')
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
-            ctx.fail(
+            cli_fail(
                 'The command failed. Is there enough space on your YubiKey?')
         else:
             raise
@@ -366,7 +366,7 @@ def code(ctx, show_hidden, query, single):
                 creds = [(cred, controller.calculate(cred))]
         except APDUError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                ctx.fail('Touch credential timed out!')
+                cli_fail('Touch credential timed out!')
 
     elif single:
         _error_multiple_hits(ctx, [cr for cr, c in creds])
@@ -531,7 +531,7 @@ def _validate(ctx, key, remember):
             settings.write()
             click.echo('Password remembered.')
     except Exception:
-        ctx.fail('Authentication to the YubiKey failed. Wrong password?')
+        cli_fail('Authentication to the YubiKey failed. Wrong password?')
 
 
 def _search(creds, query):

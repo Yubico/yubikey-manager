@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import (
     click_force_option, click_callback, click_parse_b32_key,
-    click_postpone_execution, prompt_for_touch, EnumChoice)
+    click_postpone_execution, prompt_for_touch, EnumChoice, cli_fail)
 from ..util import (
     TRANSPORT, generate_static_pw, modhex_decode,
     modhex_encode, parse_key, parse_b32_key)
@@ -75,7 +75,7 @@ click_slot_argument = click.argument('slot', type=click.Choice(['1', '2']),
 
 def _failed_to_write_msg(ctx, exc_info):
     logger.error('Failed to write to device', exc_info=exc_info)
-    ctx.fail('Failed to write to the YubiKey. Make sure the device does not '
+    cli_fail('Failed to write to the YubiKey. Make sure the device does not '
              'have restricted access.')
 
 
@@ -137,7 +137,7 @@ def otp(ctx, access_code):
         try:
             access_code = parse_access_code_hex(access_code)
         except Exception as e:
-            ctx.fail('Failed to parse access code: ' + str(e))
+            cli_fail('Failed to parse access code: ' + str(e))
 
     ctx.obj['controller'].access_code = access_code
 
@@ -190,10 +190,10 @@ def ndef(ctx, slot, prefix):
     dev = ctx.obj['dev']
     controller = ctx.obj['controller']
     if not dev.config.nfc_supported:
-        ctx.fail('NFC interface not available.')
+        cli_fail('NFC interface not available.')
 
     if not controller.slot_status[slot - 1]:
-        ctx.fail('Slot {} is empty.'.format(slot))
+        cli_fail('Slot {} is empty.'.format(slot))
 
     try:
         if prefix:
@@ -214,7 +214,7 @@ def delete(ctx, slot, force):
     """
     controller = ctx.obj['controller']
     if not force and not controller.slot_status[slot - 1]:
-        ctx.fail('Not possible to delete an empty slot.')
+        cli_fail('Not possible to delete an empty slot.')
     force or click.confirm(
         'Do you really want to delete'
         ' the configuration of slot {}?'.format(slot), abort=True, err=True)
@@ -262,29 +262,29 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     controller = ctx.obj['controller']
 
     if public_id and serial_public_id:
-        ctx.fail('Invalid options: --public-id conflicts with '
+        cli_fail('Invalid options: --public-id conflicts with '
                  '--serial-public-id.')
 
     if private_id and generate_private_id:
-        ctx.fail('Invalid options: --private-id conflicts with '
+        cli_fail('Invalid options: --private-id conflicts with '
                  '--generate-public-id.')
 
     if upload and force:
-        ctx.fail('Invalid options: --upload conflicts with --force.')
+        cli_fail('Invalid options: --upload conflicts with --force.')
 
     if key and generate_key:
-        ctx.fail('Invalid options: --key conflicts with --generate-key.')
+        cli_fail('Invalid options: --key conflicts with --generate-key.')
 
     if not public_id:
         if serial_public_id:
             if dev.serial is None:
-                ctx.fail('Serial number not set, public ID must be provided')
+                cli_fail('Serial number not set, public ID must be provided')
             public_id = modhex_encode(
                 b'\xff\x00' + struct.pack(b'>I', dev.serial))
             click.echo(
                 'Using YubiKey serial as public ID: {}'.format(public_id))
         elif force:
-            ctx.fail(
+            cli_fail(
                 'Public ID not given. Please remove the --force flag, or '
                 'add the --serial-public-id flag or --public-id option.')
         else:
@@ -293,7 +293,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
     try:
         public_id = modhex_decode(public_id)
     except KeyError:
-        ctx.fail('Invalid public ID, must be modhex.')
+        cli_fail('Invalid public ID, must be modhex.')
 
     if not private_id:
         if generate_private_id:
@@ -302,7 +302,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                 'Using a randomly generated private ID: {}'.format(
                     b2a_hex(private_id).decode('ascii')))
         elif force:
-            ctx.fail(
+            cli_fail(
                 'Private ID not given. Please remove the --force flag, or '
                 'add the --generate-private-id flag or --private-id option.')
         else:
@@ -316,7 +316,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
                 'Using a randomly generated secret key: {}'.format(
                     b2a_hex(key).decode('ascii')))
         elif force:
-            ctx.fail('Secret key not given. Please remove the --force flag, or '
+            cli_fail('Secret key not given. Please remove the --force flag, or '
                      'add the --generate-key flag or --key option.')
         else:
             key = click.prompt('Enter secret key', err=True)
@@ -333,7 +333,7 @@ def yubiotp(ctx, slot, public_id, private_id, key, no_enter, force,
             click.echo('Upload to YubiCloud initiated successfully.')
         except PrepareUploadFailed as e:
             error_msg = '\n'.join(e.messages())
-            ctx.fail('Upload to YubiCloud failed.\n' + error_msg)
+            cli_fail('Upload to YubiCloud failed.\n' + error_msg)
 
     force or click.confirm('Program an OTP credential in slot {}?'.format(slot),
                            abort=True, err=True)
@@ -382,9 +382,9 @@ def static(
     controller = ctx.obj['controller']
 
     if password and len(password) > 38:
-        ctx.fail('Password too long (maximum length is 38 characters).')
+        cli_fail('Password too long (maximum length is 38 characters).')
     if generate and not length:
-        ctx.fail('Provide a length for the generated password.')
+        cli_fail('Provide a length for the generated password.')
 
     if not password and not generate:
         password = click.prompt('Enter a static password', err=True)
@@ -425,14 +425,14 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     if key:
         if generate:
-            ctx.fail('Invalid options: --generate conflicts with KEY argument.')
+            cli_fail('Invalid options: --generate conflicts with KEY argument.')
         elif totp:
             key = parse_b32_key(key)
         else:
             key = parse_key(key)
     else:
         if force and not generate:
-            ctx.fail('No secret key given. Please remove the --force flag, '
+            cli_fail('No secret key given. Please remove the --force flag, '
                      'set the KEY argument or set the --generate flag.')
         elif totp:
             while True:
@@ -479,12 +479,12 @@ def calculate(ctx, slot, challenge, totp, digits):
     """
     controller = ctx.obj['controller']
     if not challenge and not totp:
-        ctx.fail('No challenge provided.')
+        cli_fail('No challenge provided.')
 
     # Check that slot is not empty
     slot1, slot2 = controller.slot_status
     if (slot == 1 and not slot1) or (slot == 2 and not slot2):
-        ctx.fail('Cannot perform challenge-response on an empty slot.')
+        cli_fail('Cannot perform challenge-response on an empty slot.')
 
     # Timestamp challenge should be int
     if challenge and totp:
@@ -492,7 +492,7 @@ def calculate(ctx, slot, challenge, totp, digits):
             challenge = int(challenge)
         except Exception as e:
             logger.error('Error', exc_info=e)
-            ctx.fail('Timestamp challenge for TOTP must be an integer.')
+            cli_fail('Timestamp challenge for TOTP must be an integer.')
     try:
         res = controller.calculate(
             slot, challenge, totp=totp,
@@ -508,11 +508,11 @@ def calculate(ctx, slot, challenge, totp, digits):
             except YkpersError as e:
                 # Touch timed out
                 if e.errno == 4:
-                    ctx.fail('The YubiKey timed out.')
+                    cli_fail('The YubiKey timed out.')
                 else:
-                    ctx.fail(e)
+                    cli_fail(e)
         else:
-            ctx.fail('Failed to calculate challenge.')
+            cli_fail('Failed to calculate challenge.')
     click.echo(res)
 
 
@@ -586,10 +586,10 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
     controller = ctx.obj['controller']
 
     if (new_access_code is not None) and delete_access_code:
-        ctx.fail('--new-access-code conflicts with --delete-access-code.')
+        cli_fail('--new-access-code conflicts with --delete-access-code.')
 
     if not controller.slot_status[slot - 1]:
-        ctx.fail('Not possible to update settings on an empty slot.')
+        cli_fail('Not possible to update settings on an empty slot.')
 
     if new_access_code is not None:
         if new_access_code == '':
@@ -599,7 +599,7 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
         try:
             new_access_code = parse_access_code_hex(new_access_code)
         except Exception as e:
-            ctx.fail('Failed to parse access code: ' + str(e))
+            cli_fail('Failed to parse access code: ' + str(e))
 
     force or click.confirm(
         'Update the settings for slot {}? '
@@ -624,14 +624,14 @@ def settings(ctx, slot, new_access_code, delete_access_code, enter, pacing,
             controller.set_access_code(slot, new_access_code)
         except Exception as e:
             logger.error('Failed to set access code', exc_info=e)
-            ctx.fail('Failed to set access code: ' + str(e))
+            cli_fail('Failed to set access code: ' + str(e))
 
     if delete_access_code:
         try:
             controller.delete_access_code(slot)
         except Exception as e:
             logger.error('Failed to delete access code', exc_info=e)
-            ctx.fail('Failed to delete access code: ' + str(e))
+            cli_fail('Failed to delete access code: ' + str(e))
 
 
 otp.transports = TRANSPORT.OTP
