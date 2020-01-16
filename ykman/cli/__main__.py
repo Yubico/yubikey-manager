@@ -131,7 +131,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            cli_fail('Failed connecting to {} [{}]. Make sure the application have \
+            cli_fail('Failed connecting to {} [{}]. Make sure the application has \
                     the required permissions.'.format(
                         descriptor.name, descriptor.mode))
     else:
