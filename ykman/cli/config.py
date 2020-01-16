@@ -27,7 +27,8 @@
 
 from __future__ import absolute_import
 
-from .util import click_postpone_execution, click_force_option, EnumChoice
+from .util import (
+    click_postpone_execution, click_force_option, EnumChoice, cli_fail)
 from ..device import device_config, FLAGS
 from ..util import APPLICATION
 from binascii import a2b_hex, b2a_hex
@@ -85,7 +86,7 @@ def config(ctx):
     """
     dev = ctx.obj['dev']
     if not dev.can_write_config:
-        ctx.fail('Configuring applications is not supported on this YubiKey. '
+        cli_fail('Configuring applications is not supported on this YubiKey. '
                  'Use the `mode` command to configure USB interfaces.')
 
 
@@ -127,7 +128,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
                 lock_key=lock_code)
         except Exception as e:
             logger.error('Changing the lock code failed', exc_info=e)
-            ctx.fail('Failed to change the lock code. Wrong current code?')
+            cli_fail('Failed to change the lock code. Wrong current code?')
 
     def set_lock_code(new_lock_code):
         new_lock_code = _parse_lock_code(ctx, new_lock_code)
@@ -138,10 +139,10 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
                 reboot=True)
         except Exception as e:
             logger.error('Setting the lock code failed', exc_info=e)
-            ctx.fail('Failed to set the lock code.')
+            cli_fail('Failed to set the lock code.')
 
     if generate and new_lock_code:
-        ctx.fail('Invalid options: --new-lock-code conflicts with --generate.')
+        cli_fail('Invalid options: --new-lock-code conflicts with --generate.')
 
     if clear:
         new_lock_code = CLEAR_LOCK_CODE
@@ -170,7 +171,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
                 change_lock_code(lock_code, new_lock_code)
     else:
         if lock_code:
-            ctx.fail(
+            cli_fail(
                 'There is no current lock code set. '
                 'Use --new-lock-code to set one.')
         else:
@@ -221,7 +222,7 @@ def usb(
         for app in APPLICATION:
             if app & usb_enabled:
                 return
-        ctx.fail('Can not disable all applications over USB.')
+        cli_fail('Can not disable all applications over USB.')
 
     if not (list_enabled or
             enable_all or
@@ -231,14 +232,14 @@ def usb(
             no_touch_eject or
             autoeject_timeout or
             chalresp_timeout):
-        ctx.fail('No configuration options chosen.')
+        cli_fail('No configuration options chosen.')
 
     enable = list(APPLICATION) if enable_all else enable
 
     _ensure_not_invalid_options(ctx, enable, disable)
 
     if touch_eject and no_touch_eject:
-        ctx.fail('Invalid options.')
+        cli_fail('Invalid options.')
 
     dev = ctx.obj['dev']
 
@@ -247,7 +248,7 @@ def usb(
     flags = dev.config.device_flags
 
     if not usb_supported:
-        ctx.fail('USB interface not supported.')
+        cli_fail('USB interface not supported.')
 
     if list_enabled:
         _list_apps(ctx, usb_enabled)
@@ -261,12 +262,12 @@ def usb(
         if app & usb_supported:
             usb_enabled |= app
         else:
-            ctx.fail('{} not supported over USB.'.format(app.name))
+            cli_fail('{} not supported over USB.'.format(app.name))
     for app in disable:
         if app & usb_supported:
             usb_enabled &= ~app
         else:
-            ctx.fail('{} not supported over USB.'.format(app.name))
+            cli_fail('{} not supported over USB.'.format(app.name))
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
@@ -287,10 +288,10 @@ def usb(
     is_locked = dev.config.configuration_locked
 
     if force and is_locked and not lock_code:
-        ctx.fail('Configuration is locked - please supply the --lock-code '
+        cli_fail('Configuration is locked - please supply the --lock-code '
                  'option.')
     if lock_code and not is_locked:
-        ctx.fail('Configuration is not locked - please remove the '
+        cli_fail('Configuration is not locked - please remove the '
                  '--lock-code option.')
 
     force or click.confirm(f_confirm, abort=True, err=True)
@@ -312,7 +313,7 @@ def usb(
             lock_key=lock_code)
     except Exception as e:
         logger.error('Failed to write config', exc_info=e)
-        ctx.fail('Failed to configure USB applications.')
+        cli_fail('Failed to configure USB applications.')
 
 
 @config.command()
@@ -340,7 +341,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code,
     """
 
     if not (list_enabled or enable_all or enable or disable_all or disable):
-        ctx.fail('No configuration options chosen.')
+        cli_fail('No configuration options chosen.')
 
     if enable_all:
         enable = list(APPLICATION)
@@ -355,7 +356,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code,
     nfc_enabled = dev.config.nfc_enabled
 
     if not nfc_supported:
-        ctx.fail('NFC interface not available.')
+        cli_fail('NFC interface not available.')
 
     if list_enabled:
         _list_apps(ctx, nfc_enabled)
@@ -364,12 +365,12 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code,
         if app & nfc_supported:
             nfc_enabled |= app
         else:
-            ctx.fail('{} not supported over NFC.'.format(app.name))
+            cli_fail('{} not supported over NFC.'.format(app.name))
     for app in disable:
         if app & nfc_supported:
             nfc_enabled &= ~app
         else:
-            ctx.fail('{} not supported over NFC.'.format(app.name))
+            cli_fail('{} not supported over NFC.'.format(app.name))
 
     f_confirm = '{}{}Configure NFC interface?'.format(
         'Enable {}.\n'.format(
@@ -382,10 +383,10 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code,
     is_locked = dev.config.configuration_locked
 
     if force and is_locked and not lock_code:
-        ctx.fail('Configuration is locked - please supply the --lock-code '
+        cli_fail('Configuration is locked - please supply the --lock-code '
                  'option.')
     if lock_code and not is_locked:
-        ctx.fail('Configuration is not locked - please remove the '
+        cli_fail('Configuration is not locked - please remove the '
                  '--lock-code option.')
 
     force or click.confirm(f_confirm, abort=True, err=True)
@@ -403,7 +404,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code,
             reboot=True, lock_key=lock_code)
     except Exception as e:
         logger.error('Failed to write config', exc_info=e)
-        ctx.fail('Failed to configure NFC applications.')
+        cli_fail('Failed to configure NFC applications.')
 
 
 def _list_apps(ctx, enabled):
@@ -415,15 +416,15 @@ def _list_apps(ctx, enabled):
 
 def _ensure_not_invalid_options(ctx, enable, disable):
     if any(a in enable for a in disable):
-        ctx.fail('Invalid options.')
+        cli_fail('Invalid options.')
 
 
 def _parse_lock_code(ctx, lock_code):
     try:
         lock_code = a2b_hex(lock_code)
         if lock_code and len(lock_code) != 16:
-            ctx.fail('Lock code must be exactly 16 bytes '
+            cli_fail('Lock code must be exactly 16 bytes '
                      '(32 hexadecimal digits) long.')
         return lock_code
     except Exception:
-        ctx.fail('Lock code has the wrong format.')
+        cli_fail('Lock code has the wrong format.')

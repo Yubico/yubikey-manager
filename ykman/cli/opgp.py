@@ -34,7 +34,7 @@ from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option, click_format_option, click_postpone_execution,
-    EnumChoice)
+    EnumChoice, cli_fail)
 
 
 logger = logging.getLogger(__name__)
@@ -87,10 +87,10 @@ def openpgp(ctx):
         ctx.obj['controller'] = OpgpController(ctx.obj['dev'].driver)
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
-            ctx.fail("The OpenPGP application can't be found on this "
+            cli_fail("The OpenPGP application can't be found on this "
                      'YubiKey.')
         logger.debug('Failed to load OpenPGP Application', exc_info=e)
-        ctx.fail('Failed to load OpenPGP Application')
+        cli_fail('Failed to load OpenPGP Application')
 
 
 @openpgp.command()
@@ -186,11 +186,11 @@ def set_touch(ctx, key, policy, admin_pin, force):
     policy_name = policy.name.lower().replace('_', '-')
 
     if policy not in controller.supported_touch_policies:
-        ctx.fail('Touch policy {} not supported by this YubiKey.'
+        cli_fail('Touch policy {} not supported by this YubiKey.'
                  .format(policy_name))
 
     if key == KEY_SLOT.ATT and not controller.supports_attestation:
-        ctx.fail('Attestation is not supported by this YubiKey.')
+        cli_fail('Attestation is not supported by this YubiKey.')
 
     if admin_pin is None:
         admin_pin = click.prompt('Enter admin PIN', hide_input=True, err=True)
@@ -205,9 +205,9 @@ def set_touch(ctx, key, policy, admin_pin, force):
             controller.set_touch(key, policy)
         except APDUError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                ctx.fail('Touch policy not allowed.')
+                cli_fail('Touch policy not allowed.')
             logger.debug('Failed to set touch policy', exc_info=e)
-            ctx.fail('Failed to set touch policy.')
+            cli_fail('Failed to set touch policy.')
 
 
 @openpgp.command('set-pin-retries')
@@ -293,7 +293,7 @@ def attest(ctx, key, certificate, pin, format):
             certificate.write(cert.public_bytes(encoding=format))
         except Exception as e:
             logger.debug('Failed to attest', exc_info=e)
-            ctx.fail('Attestation failed')
+            cli_fail('Attestation failed')
 
 
 @openpgp.command('export-certificate')
@@ -313,7 +313,7 @@ def export_certificate(ctx, key, format, certificate):
     try:
         cert = controller.read_certificate(key)
     except ValueError:
-        ctx.fail('Failed to read certificate from {}'.format(key.name))
+        cli_fail('Failed to read certificate from {}'.format(key.name))
     certificate.write(cert.public_bytes(encoding=format))
 
 
@@ -336,7 +336,7 @@ def delete_certificate(ctx, key, admin_pin):
         controller.delete_certificate(key)
     except Exception as e:
         logger.debug('Failed to delete ', exc_info=e)
-        ctx.fail('Failed to delete certificate.')
+        cli_fail('Failed to delete certificate.')
 
 
 @openpgp.command('import-certificate')
@@ -361,15 +361,15 @@ def import_certificate(ctx, key, cert, admin_pin):
         certs = parse_certificates(cert.read(), password=None)
     except Exception as e:
         logger.debug('Failed to parse', exc_info=e)
-        ctx.fail('Failed to parse certificate.')
+        cli_fail('Failed to parse certificate.')
     if len(certs) != 1:
-        ctx.fail('Can only import one certificate.')
+        cli_fail('Can only import one certificate.')
     try:
         controller.verify_admin(admin_pin)
         controller.import_certificate(key, certs[0])
     except Exception as e:
         logger.debug('Failed to import', exc_info=e)
-        ctx.fail('Failed to import certificate')
+        cli_fail('Failed to import certificate')
 
 
 @openpgp.command('import-attestation-key')
@@ -393,13 +393,13 @@ def import_attestation_key(ctx, private_key, admin_pin):
         private_key = parse_private_key(private_key.read(), password=None)
     except Exception as e:
         logger.debug('Failed to parse', exc_info=e)
-        ctx.fail('Failed to parse private key.')
+        cli_fail('Failed to parse private key.')
     try:
         controller.verify_admin(admin_pin)
         controller.import_key(KEY_SLOT.ATT, private_key)
     except Exception as e:
         logger.debug('Failed to import', exc_info=e)
-        ctx.fail('Failed to import attestation key.')
+        cli_fail('Failed to import attestation key.')
 
 
 openpgp.transports = TRANSPORT.CCID

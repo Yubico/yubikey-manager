@@ -81,7 +81,7 @@ def click_callback(invoke_on_missing=False):
             try:
                 return f(ctx, param, val)
             except Exception as e:
-                ctx.fail('Invalid value for "{}": {}'.format(
+                cli_fail('Invalid value for "{}": {}'.format(
                     param.name, str(e)))
         return inner
     return wrap
@@ -164,6 +164,10 @@ def prompt_for_touch():
         sys.stderr.write('Touch your YubiKey...\n')
 
 
-def click_fail(message, error_code=1):
-    click.echo("Error: {}".format(message), err=True)
-    sys.exit(error_code)
+def cli_fail(message, error_code=1):
+    try:
+        click.echo("Error: {}".format(message), err=True)
+        sys.exit(error_code)
+    except Exception:
+        sys.stderr.writecl("Error: {}\n".format(message))
+        sys.exit(error_code)

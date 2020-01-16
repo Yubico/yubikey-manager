@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from .util import click_force_option
+from .util import click_force_option, cli_fail
 from ..util import Mode, TRANSPORT
 from ..driver import ModeSwitchError
 import logging
@@ -52,7 +52,7 @@ def _parse_mode_string(ctx, param, mode):
         mode_int = int(mode)
         return Mode.from_code(mode_int)
     except IndexError:
-        ctx.fail('Invalid mode: {}'.format(mode_int))
+        cli_fail('Invalid mode: {}'.format(mode_int))
     except ValueError:
         pass  # Not a numeric mode, parse string
 
@@ -70,7 +70,7 @@ def _parse_mode_string(ctx, param, mode):
             for t in filter(None, re.split(r'[+]+', mode.upper())):
                 transports.add(_parse_transport_string(t))
     except ValueError:
-        ctx.fail('Invalid mode string: {}'.format(mode))
+        cli_fail('Invalid mode string: {}'.format(mode))
 
     return Mode(sum(transports))
 
@@ -119,7 +119,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
         if mode.transports != TRANSPORT.CCID:
             autoeject = None
             if touch_eject:
-                ctx.fail('--touch-eject can only be used when setting'
+                cli_fail('--touch-eject can only be used when setting'
                          ' CCID-only mode')
 
         if not force:
@@ -129,7 +129,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             elif not dev.has_mode(mode):
                 click.echo('Mode {} is not supported on this YubiKey!'
                            .format(mode))
-                ctx.fail('Use --force to attempt to set it anyway.')
+                cli_fail('Use --force to attempt to set it anyway.')
             force or click.confirm('Set mode of YubiKey to {}?'.format(mode),
                                    abort=True, err=True)
 
