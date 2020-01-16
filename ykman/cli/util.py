@@ -169,5 +169,5 @@ def cli_fail(message, error_code=1):
         click.echo("Error: {}".format(message), err=True)
         sys.exit(error_code)
     except Exception:
-        sys.stderr.writecl("Error: {}\n".format(message))
+        sys.stderr.write("Error: {}\n".format(message))
         sys.exit(error_code)
