@@ -1,17 +1,16 @@
-
 * Version 3.1.1 (unreleased)
  ** Add support for YubiKey 5C NFC
  ** OpenPGP: set-touch now performs compatibility checks before prompting for PIN
  ** OpenPGP: Improve error messages and documentation for set-touch
  ** PIV: read-object command no longer adds a trailing newline
- ** PIV: PivController.read_certificate(slot) now wraps certificate parsing exceptions in new exception type `InvalidCertificate`
- ** PIV: PivController.list_certificates() now returns `None` for slots containing invalid certificate, instead of raising an exception
- ** Improve error handling when pcscd is not running
  ** CLI: Hint at missing permissions when opening a device fails
- ** Windows: Improve how .DLL files are loaded.
+ ** Linux: Improve error handling when pcscd is not running
+ ** Windows: Improve how .DLL files are loaded, thanks to Marius Gabriel Mihai for reporting this!
  ** Bugfix: set-touch now accepts the cached-fixed option
  ** Bugfix: Fix crash in OtpController.prepare_upload_key() error parsing
  ** Bugfix: Fix crash in piv info command when a certificate slot contains an invalid certificate
+ ** Library: PivController.read_certificate(slot) now wraps certificate parsing exceptions in new exception type `InvalidCertificate`
+ ** Library: PivController.list_certificates() now returns `None` for slots containing invalid certificate, instead of raising an exception
 
 * Version 3.1.0 (released 2019-08-20)
  ** Add support for YubiKey 5Ci
