@@ -133,7 +133,8 @@ def additional_tests(ykman_cli):
             for i in range(32):
                 ykman_cli('oath', 'add', 'test' + str(i), 'abba')
                 output = ykman_cli('oath', 'list')
-                self.assertEqual(len(output.strip().split('\n')), i + 1)
+                lines = output.strip().split('\n')
+                self.assertEqual(len(lines), i + 1)
 
             with self.assertRaises(SystemExit):
                 ykman_cli('oath', 'add', 'testx', 'abba')
