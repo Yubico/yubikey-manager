@@ -129,6 +129,15 @@ def additional_tests(ykman_cli):
             ykman_cli('oath', 'add', 'abba', 'abba', '--algorithm', 'SHA512')
             ykman_cli('oath', 'delete', 'abba', '-f')
 
+        def test_add_32_creds(self):
+            for i in range(32):
+                ykman_cli('oath', 'add', 'test' + str(i), 'abba')
+                output = ykman_cli('oath', 'list')
+                self.assertEqual(len(output.strip().split('\n')), i + 1)
+
+            with self.assertRaises(SystemExit):
+                ykman_cli('oath', 'add', 'testx', 'abba')
+
     @yubikey_conditions.is_fips
     class TestOathFips(unittest.TestCase):
 
