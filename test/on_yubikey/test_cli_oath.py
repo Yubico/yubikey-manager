@@ -32,6 +32,10 @@ def additional_tests(ykman_cli):
         def setUp(cls):
             ykman_cli('oath', 'reset', '-f')
 
+        @classmethod
+        def tearDownClass(cls):
+            ykman_cli('oath', 'reset', '-f')
+
         def test_oath_info(self):
             output = ykman_cli('oath', 'info')
             self.assertIn('version:', output)
