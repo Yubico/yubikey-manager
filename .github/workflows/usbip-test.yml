@@ -21,6 +21,7 @@ jobs:
 
       - name: Link hwdata
         run: |
+          mkdir /usr/share/hwdata
           ln -s /usr/share/misc/usb.ids /usr/share/hwdata/usb.ids
 
       - name: Try usbip
