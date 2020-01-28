@@ -24,6 +24,13 @@ jobs:
           mkdir /usr/share/hwdata
           ln -s /usr/share/misc/usb.ids /usr/share/hwdata/usb.ids
 
+      - name: Load vhci-hcd kernel module
+        run: |
+          sudo modprobe vhci-hcd
+
+      - name: List kernel modules
+        run: lsmod
+
       - name: Try usbip
         run: |
           usbip version
