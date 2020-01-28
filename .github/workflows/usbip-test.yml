@@ -17,7 +17,7 @@ jobs:
           sudo apt-get install -yy usbutils
 
       - name: List hwdata
-        run: ls -l /usr/share/usb.ids
+        run: ls -l /usr/share/hwdata
 
       - name: Link hwdata
         run: |
