@@ -1,16 +1,15 @@
-import unittest
 from test.util import ykman_cli
 
 
-class TestExternalLibraries(unittest.TestCase):
+class TestExternalLibraries(object):
 
     def test_ykman_version(self):
         output = ykman_cli('-v')
         # Test that major version is 1 on all libs
-        self.assertIn('libykpers 1', output)
-        self.assertIn('libusb 1', output)
+        assert 'libykpers 1' in output
+        assert 'libusb 1' in output
 
     def test_ykman_version_not_found(self):
         output = ykman_cli('-v')
-        self.assertNotIn('not found!', output)
-        self.assertNotIn('<pyusb backend missing>', output)
+        assert 'not found!' not in output
+        assert '<pyusb backend missing>' not in output
