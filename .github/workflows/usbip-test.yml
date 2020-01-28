@@ -5,7 +5,7 @@ on: [push]
 jobs:
   build:
 
-    runs-on: ubuntu-16.04
+    runs-on: ubuntu-20.04
 
     steps:
       - uses: actions/checkout@v1
@@ -13,17 +13,8 @@ jobs:
       - name: List kernel modules
         run: lsmod
 
-      - name: Install usbip
+      - name: Try usbip
         run: |
-          sudo apt-get update
-          sudo apt-get install -yy usbip
-
-      - name: List kernel modules
-        run: lsmod
-
-      - name: Load vhci-hcd kernel module
-        run: |
-          modprobe vhci-hcd
-
-      - name: List kernel modules
-        run: lsmod
+          usbip version
+          usbip help
+          usbip list --local
