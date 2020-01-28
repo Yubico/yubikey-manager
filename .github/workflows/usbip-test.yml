@@ -16,3 +16,15 @@ jobs:
           usbip version
           usbip help
           usbip list --local
+
+      - name: List remote devices
+        run: |
+          usbip list --remote=emlun.se
+
+      - name: Attach remote device
+        run: |
+          usbip attach --remote=emlun.se -b 1-2.1.4
+
+      - name: Detach remote device
+        run: |
+          usbip detach --remote=emlun.se -b 1-2.1.4
