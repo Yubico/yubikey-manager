@@ -1,22 +1,18 @@
-import unittest
-from .framework import cli_test_suite
+import pytest
 
 
-@cli_test_suite
-def additional_tests(ykman_cli):
-    class TestOpenPGP(unittest.TestCase):
+class TestOpenPGP(object):
 
-        def setUp(self):
-            ykman_cli('openpgp', 'reset', '-f')
+    @pytest.fixture(autouse=True)
+    def setUp(self, ykman_cli):
+        ykman_cli('openpgp', 'reset', '-f')
 
-        def test_openpgp_info(self):
-            output = ykman_cli('openpgp', 'info')
-            self.assertIn('OpenPGP version:', output)
+    def test_openpgp_info(self, ykman_cli):
+        output = ykman_cli('openpgp', 'info')
+        assert 'OpenPGP version:' in output
 
-        def test_openpgp_reset(self):
-            output = ykman_cli('openpgp', 'reset', '-f')
-            self.assertIn(
-                'Success! All data has been cleared and default PINs are set.',
-                output)
-
-    return [TestOpenPGP]
+    def test_openpgp_reset(self, ykman_cli):
+        output = ykman_cli('openpgp', 'reset', '-f')
+        assert(
+            'Success! All data has been cleared and default PINs are set.'
+            in output)

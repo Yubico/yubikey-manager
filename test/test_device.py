@@ -1,4 +1,4 @@
-import unittest
+import pytest
 try:
     from unittest.mock import Mock
 except ImportError:
@@ -23,7 +23,7 @@ def make_mocks():
     return descriptor, driver
 
 
-class TestDevice(unittest.TestCase):
+class TestDevice(object):
 
     def test_with_as_closes_driver(self):
         descriptor, driver = make_mocks()
@@ -34,7 +34,7 @@ class TestDevice(unittest.TestCase):
     def test_with_as_reraises_exception(self):
         descriptor, driver = make_mocks()
 
-        with self.assertRaises(TestSpecificError):
+        with pytest.raises(TestSpecificError):
             with YubiKey(descriptor, driver) as dev:  # noqa: F841
                 raise TestSpecificError()
 
@@ -49,7 +49,7 @@ class TestDevice(unittest.TestCase):
     def test_with_reraises_exception(self):
         descriptor, driver = make_mocks()
 
-        with self.assertRaises(TestSpecificError):
+        with pytest.raises(TestSpecificError):
             with YubiKey(descriptor, driver):
                 raise TestSpecificError()
 
