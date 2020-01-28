@@ -1,0 +1,29 @@
+name: build
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: List kernel modules
+        run: lsmod
+
+      - name: Install usbip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -yy usbip
+
+      - name: List kernel modules
+        run: lsmod
+
+      - name: Load vhci-hcd kernel module
+        run: |
+          modprobe vhci-hcd
+
+      - name: List kernel modules
+        run: lsmod
