@@ -16,6 +16,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -yy usbutils
 
+      - name: List hwdata
+        run: ls -l /usr/share/usb.ids
+
+      - name: Link hwdata
+        run: |
+          mkdir -p /usr/share/hwdata
+          ln -s /usr/share/usb.ids /usr/share/hwdata/usb.ids
+
       - name: Try usbip
         run: |
           usbip version
