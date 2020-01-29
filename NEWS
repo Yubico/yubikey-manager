@@ -1,4 +1,4 @@
-* Version 3.1.1 (unreleased)
+* Version 3.1.1 (released 2020-01-29)
  ** Add support for YubiKey 5C NFC
  ** OpenPGP: set-touch now performs compatibility checks before prompting for PIN
  ** OpenPGP: Improve error messages and documentation for set-touch
