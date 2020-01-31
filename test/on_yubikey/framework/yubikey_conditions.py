@@ -1,5 +1,4 @@
 from ykman.util import is_cve201715361_vulnerable_firmware_version
-from . import _get_test_method_names
 
 
 def yubikey_condition(condition):
@@ -36,6 +35,13 @@ def yubikey_condition(condition):
             return decorate_method(method_or_class)
 
     return decorate
+
+
+def _get_test_method_names(test_class):
+    return set(
+        attr_name for attr_name in dir(test_class)
+        if attr_name.startswith('test')
+    )
 
 
 @yubikey_condition
