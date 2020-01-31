@@ -35,7 +35,7 @@ install_requires = [
 ]
 tests_require = []
 if sys.version_info < (3, 3):
-    tests_require.append('mock')
+    tests_require.append('mock < 4')
 if sys.version_info < (3, 4):
     install_requires.append('enum34')
 if sys.platform == 'win32':
