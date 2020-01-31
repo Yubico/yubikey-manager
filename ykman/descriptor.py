@@ -35,8 +35,9 @@ from .driver_otp import open_devices as open_otp
 from .native.pyusb import get_usb_backend
 
 import logging
-import usb.core
+import smartcard
 import time
+import usb.core
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +154,13 @@ def get_descriptors():
 
 def _list_drivers(transports):
     if TRANSPORT.CCID & transports:
-        for dev in open_ccid():
-            if dev:
-                yield dev
+        try:
+            for dev in open_ccid():
+                if dev:
+                    yield dev
+        except smartcard.pcsc.PCSCExceptions.EstablishContextException:
+            logger.debug('Failed to establish CCID context. '
+                         'Is the pcscd service running?')
     if TRANSPORT.OTP & transports:
         for dev in open_otp():
             if dev:
