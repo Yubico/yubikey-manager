@@ -58,13 +58,6 @@ def exactly_one_yubikey_present():
     return len(_serials_present) == 1
 
 
-def _get_test_method_names(test_class):
-    return set(
-        attr_name for attr_name in dir(test_class)
-        if attr_name.startswith('test')
-    )
-
-
 destructive_tests_not_activated = (
     _skip, 'DESTRUCTIVE_TEST_YUBIKEY_SERIALS == None')
 
