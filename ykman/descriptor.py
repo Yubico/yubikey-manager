@@ -160,7 +160,7 @@ def _list_drivers(transports):
                     yield dev
         except smartcard.pcsc.PCSCExceptions.EstablishContextException:
             logger.debug('Failed to establish CCID context. '
-                         'Is the pcscd service running?')
+                         'Is the pcscd/smart card service running?')
     if TRANSPORT.OTP & transports:
         for dev in open_otp():
             if dev:
