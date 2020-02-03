@@ -268,8 +268,9 @@ def _add_cred(ctx, data, force):
             controller.version < (4, 3, 1) or ctx.obj['dev'].is_fips):
         ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
 
+    creds = controller.list()
     key = data.make_key()
-    if not force and any(cred.key == key for cred in controller.list()):
+    if not force and any(cred.key == key for cred in creds):
         click.confirm(
             'A credential called {} already exists on this YubiKey.'
             ' Do you want to overwrite it?'.format(data.name), abort=True,
@@ -277,8 +278,7 @@ def _add_cred(ctx, data, force):
 
     firmware_overwrite_issue = (4, 0, 0) < controller.version < (4, 3, 5)
     cred_is_subset = any(
-        (cred.key.startswith(key) and cred.key != key)
-        for cred in controller.list())
+        (cred.key.startswith(key) and cred.key != key) for cred in creds)
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
