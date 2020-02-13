@@ -34,6 +34,9 @@ import sys
 import usb.backend.libusb1 as libusb1
 
 
+_usb_backend = None
+
+
 def _find_library_local(libname):
     # For .app bundles
     if sys.platform == 'darwin':
@@ -68,7 +71,11 @@ def _load_usb_backend():
 
 
 def get_usb_backend():
-    return _load_usb_backend()
+    # Cache it to avoid segfault issues in libusb destructors
+    global _usb_backend
+    if _usb_backend is None:
+        _usb_backend = _load_usb_backend()
+    return _usb_backend
 
 
 class LibUsb1Version(ctypes.Structure):
