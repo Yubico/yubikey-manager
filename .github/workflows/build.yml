@@ -26,6 +26,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -qq libykpers-1-1 swig libpcsclite-dev
           python -m pip install --upgrade pip
+          pip install tox
           pip install .
 
       - name: Lint with flake8
@@ -34,7 +35,14 @@ jobs:
           flake8 .
 
       - name: Run unit tests
-        run: python setup.py test
+        run: tox -e py27
+        # tox manages Python environments internally
+        if: matrix.python == '2.x'
+
+      - name: Run unit tests
+        run: tox -e py38
+        # tox manages Python environments internally
+        if: matrix.python == '3.x'
 
       - name: Run CLI
         run: |
