@@ -239,7 +239,7 @@ def _make_test_suite_decorator(
     '''
     def decorate(create_test_classes):
         def additional_tests():
-            if _test_serials is None:
+            if sys.version_info < (3, 0):
                 # Workaround since framework crashes in py2
                 # This if statement can be deleted when py2 support is dropped
                 return unittest.TestSuite()
