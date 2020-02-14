@@ -61,14 +61,44 @@ def exactly_one_yubikey_present():
     return len(_serials_present) == 1
 
 
+def partial_with_retry(
+        func,
+        *partial_args,
+        default_retry_count=0,
+        **partial_kwargs
+):
+    '''
+    Like functools.partial, but with an added `retry_count` parameter.
+
+    If the wrapped function raises a non-exit exception or an `OSError`, then
+    the returned function waits for 0.5 seconds and then retries the wrapped
+    function call with the same arguments. This is done no more than
+    `retry_count` times, after which the exception is re-raised.
+
+    The `retry_count` argument is not passed to the wrapped function.
+    '''
+    @functools.wraps(func)
+    def wrap_func(*args, retry_count=default_retry_count, **kwargs):
+        try:
+            return func(*partial_args, *args, **partial_kwargs, **kwargs)
+        except Exception or OSError:
+            if retry_count > 0:
+                time.sleep(0.5)
+                return wrap_func(*args, retry_count=retry_count-1, **kwargs)
+            raise
+    return wrap_func
+
+
 def _specialize_ykman_cli(dev, _transports):
     '''
     Creates a specialized version of ykman_cli preset with the serial number of
     the given device.
     '''
     f = functools.partial(test.util.ykman_cli, '--device', dev.serial)
-    f.with_bytes_output = functools.partial(test.util.ykman_cli_bytes,
-                                            '--device', dev.serial)
+    f.with_bytes_output = partial_with_retry(
+        test.util.ykman_cli_bytes,
+        '--device', dev.serial,
+        default_retry_count=1)
     return f
 
 
@@ -79,10 +109,11 @@ def _specialize_open_device(dev, transport):
     '''
     assert isinstance(transport, TRANSPORT), \
         '_specialize_open_device accepts only one transport at a time.'
-    return functools.partial(
+    return partial_with_retry(
         open_device,
         transports=transport,
-        serial=dev.serial
+        serial=dev.serial,
+        default_retry_count=1
     )
 
 
