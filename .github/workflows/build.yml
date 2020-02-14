@@ -34,15 +34,11 @@ jobs:
           pip install flake8
           flake8 .
 
-      - name: Run unit tests
-        run: tox -e py27
-        # tox manages Python environments internally
-        if: matrix.python == '2.x'
+      - name: Install test dependencies
+        run: pip install -r test_requirements.txt
 
       - name: Run unit tests
-        run: tox -e py38
-        # tox manages Python environments internally
-        if: matrix.python == '3.x'
+        run: tox
 
       - name: Run CLI
         run: |
