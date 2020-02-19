@@ -129,6 +129,8 @@ def additional_tests(ykman_cli):
             ykman_cli('oath', 'add', 'abba', 'abba', '--algorithm', 'SHA512')
             ykman_cli('oath', 'delete', 'abba', '-f')
 
+        # NEO credential capacity may vary based on configuration
+        @yubikey_conditions.version_min((4, 0, 0))
         def test_add_32_creds(self):
             for i in range(32):
                 ykman_cli('oath', 'add', 'test' + str(i), 'abba')
