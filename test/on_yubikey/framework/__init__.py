@@ -64,11 +64,11 @@ def exactly_one_yubikey_present():
 def partial_with_retry(
         func,
         *partial_args,
-        default_retry_count=0,
         **partial_kwargs
 ):
     '''
-    Like functools.partial, but with an added `retry_count` parameter.
+    Like functools.partial, but adds a `retry_count` parameter to the wrapped
+    function.
 
     If the wrapped function raises a non-exit exception or an `OSError`, then
     the returned function waits for 0.5 seconds and then retries the wrapped
@@ -77,10 +77,16 @@ def partial_with_retry(
 
     The `retry_count` argument is not passed to the wrapped function.
     '''
+
+    default_retry_count = partial_kwargs.pop('default_retry_count', 0)
+
     @functools.wraps(func)
-    def wrap_func(*args, retry_count=default_retry_count, **kwargs):
+    def wrap_func(*args, **kwargs):
+        retry_count = kwargs.pop('retry_count', default_retry_count)
+        for k, v in partial_kwargs.items():
+            kwargs.setdefault(k, v)
         try:
-            return func(*partial_args, *args, **partial_kwargs, **kwargs)
+            return func(*(partial_args + args), **kwargs)
         except Exception or OSError:
             if retry_count > 0:
                 time.sleep(0.5)
