@@ -68,7 +68,7 @@ WARNING: ONLY run these on dedicated developer keys, as it will permanently dele
 
 To run integration tests, indicate the serial numbers (given by `ykman list`) of the YubiKeys to test with:
 
-   $ DESTRUCTIVE_TEST_YUBIKEY_SERIALS=123456,234567 tox
+   $ DESTRUCTIVE_TEST_YUBIKEY_SERIALS=123456,234567 tox -e integration-test
 
 The integration test suite will automatically identify which test cases can be run with the
 available YubiKeys, and run those test cases for each eligible YubiKey. See
