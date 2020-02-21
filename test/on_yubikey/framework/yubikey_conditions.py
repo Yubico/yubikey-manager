@@ -1,3 +1,5 @@
+import sys
+
 from ykman.util import is_cve201715361_vulnerable_firmware_version
 
 
@@ -29,10 +31,14 @@ def yubikey_condition(condition):
         return cls
 
     def decorate(method_or_class):
-        if type(method_or_class) is type:
-            return decorate_class(method_or_class)
+        # setattr above crashes in py2
+        if sys.version_info >= (3, 0):
+            if type(method_or_class) is type:
+                return decorate_class(method_or_class)
+            else:
+                return decorate_method(method_or_class)
         else:
-            return decorate_method(method_or_class)
+            return method_or_class
 
     return decorate
 
