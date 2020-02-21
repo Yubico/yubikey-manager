@@ -57,6 +57,11 @@ To run unit tests:
 
     $ tox
 
+To run with multiple Python versions (requires all those interpreters to be installed):
+
+    $ tox -e py27,py38
+
+
 === Integration tests
 
 WARNING: ONLY run these on dedicated developer keys, as it will permanently delete data on the device(s)!
