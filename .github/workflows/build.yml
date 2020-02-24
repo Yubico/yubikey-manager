@@ -34,9 +34,6 @@ jobs:
           pip install flake8
           flake8 .
 
-      - name: Install test dependencies
-        run: pip install -r test_requirements.txt
-
       - name: Run unit tests
         run: tox -- -v
 
