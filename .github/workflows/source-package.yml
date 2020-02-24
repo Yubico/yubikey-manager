@@ -25,7 +25,7 @@ jobs:
           pip install .
 
       - name: Run unit tests
-        run: tox
+        run: tox -- -v
 
       - name: Create source package
         run: |
