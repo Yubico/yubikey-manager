@@ -53,6 +53,10 @@ To use these:
 
 === Unit tests
 
+First, install https://tox.readthedocs.io/en/latest/[tox] if you haven't already:
+
+    $ pip install tox
+
 To run unit tests:
 
     $ tox
