@@ -1,6 +1,7 @@
 *.pyc
 *.egg-info
 *.egg/
+.tox/
 *.vagrant
 vagrant/development/*.log
 .eggs/
