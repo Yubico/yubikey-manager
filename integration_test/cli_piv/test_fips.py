@@ -1,6 +1,6 @@
 import pytest
 
-from ...util import open_file
+from test.util import open_file
 from ..framework import yubikey_conditions
 
 

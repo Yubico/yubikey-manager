@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives import serialization
 from ykman.piv import OBJ, SLOT, TAG
 from ykman.util import Tlv
 from .util import DEFAULT_MANAGEMENT_KEY
-from ...util import generate_self_signed_certificate
+from test.util import generate_self_signed_certificate
 
 
 class ReadWriteObject(object):

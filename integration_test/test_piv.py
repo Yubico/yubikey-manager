@@ -14,7 +14,7 @@ from ykman.piv import (
     AuthenticationBlocked, AuthenticationFailed, WrongPuk, KeypairMismatch)
 from ykman.util import parse_certificates, parse_private_key
 from .framework import yubikey_conditions
-from ..util import open_file
+from test.util import open_file
 
 
 DEFAULT_PIN = '123456'
