@@ -61,12 +61,51 @@ def exactly_one_yubikey_present():
     return len(_serials_present) == 1
 
 
+def partial_with_retry(
+        func,
+        *partial_args,
+        **partial_kwargs
+):
+    '''
+    Like functools.partial, but adds a `retry_count` parameter to the wrapped
+    function.
+
+    If the wrapped function raises a non-exit exception or an `OSError`, then
+    the returned function waits for 0.5 seconds and then retries the wrapped
+    function call with the same arguments. This is done no more than
+    `retry_count` times, after which the exception is re-raised.
+
+    The `retry_count` argument is not passed to the wrapped function.
+    '''
+
+    default_retry_count = partial_kwargs.pop('default_retry_count', 0)
+
+    @functools.wraps(func)
+    def wrap_func(*args, **kwargs):
+        retry_count = kwargs.pop('retry_count', default_retry_count)
+        for k, v in partial_kwargs.items():
+            kwargs.setdefault(k, v)
+        try:
+            return func(*(partial_args + args), **kwargs)
+        except Exception or OSError:
+            if retry_count > 0:
+                time.sleep(0.5)
+                return wrap_func(*args, retry_count=retry_count-1, **kwargs)
+            raise
+    return wrap_func
+
+
 def _specialize_ykman_cli(dev, _transports):
     '''
     Creates a specialized version of ykman_cli preset with the serial number of
     the given device.
     '''
-    return functools.partial(test.util.ykman_cli, '--device', dev.serial)
+    f = functools.partial(test.util.ykman_cli, '--device', dev.serial)
+    f.with_bytes_output = partial_with_retry(
+        test.util.ykman_cli_bytes,
+        '--device', dev.serial,
+        default_retry_count=1)
+    return f
 
 
 def _specialize_open_device(dev, transport):
@@ -76,10 +115,11 @@ def _specialize_open_device(dev, transport):
     '''
     assert isinstance(transport, TRANSPORT), \
         '_specialize_open_device accepts only one transport at a time.'
-    return functools.partial(
+    return partial_with_retry(
         open_device,
         transports=transport,
-        serial=dev.serial
+        serial=dev.serial,
+        default_retry_count=1
     )
 
 
@@ -236,7 +276,7 @@ def _make_test_suite_decorator(
     '''
     def decorate(create_test_classes):
         def additional_tests():
-            if _test_serials is None:
+            if sys.version_info < (3, 0):
                 # Workaround since framework crashes in py2
                 # This if statement can be deleted when py2 support is dropped
                 return unittest.TestSuite()

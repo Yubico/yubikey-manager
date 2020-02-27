@@ -53,9 +53,18 @@ To use these:
 
 === Unit tests
 
+First, install https://tox.readthedocs.io/en/latest/[tox] if you haven't already:
+
+    $ pip install tox
+
 To run unit tests:
 
-    $ python setup.py test
+    $ tox
+
+To run with multiple Python versions (requires all those interpreters to be installed):
+
+    $ tox -e py27,py38
+
 
 === Integration tests
 
@@ -63,7 +72,7 @@ WARNING: ONLY run these on dedicated developer keys, as it will permanently dele
 
 To run integration tests, indicate the serial numbers (given by `ykman list`) of the YubiKeys to test with:
 
-   $ DESTRUCTIVE_TEST_YUBIKEY_SERIALs=123456,234567 python setup.py test
+   $ DESTRUCTIVE_TEST_YUBIKEY_SERIALS=123456,234567 tox -e integration-test
 
 The integration test suite will automatically identify which test cases can be run with the
 available YubiKeys, and run those test cases for each eligible YubiKey. See

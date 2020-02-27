@@ -32,6 +32,10 @@ def additional_tests(ykman_cli):
         def setUp(cls):
             ykman_cli('oath', 'reset', '-f')
 
+        @classmethod
+        def tearDownClass(cls):
+            ykman_cli('oath', 'reset', '-f')
+
         def test_oath_info(self):
             output = ykman_cli('oath', 'info')
             self.assertIn('version:', output)
@@ -124,6 +128,18 @@ def additional_tests(ykman_cli):
         def test_oath_sha512(self):
             ykman_cli('oath', 'add', 'abba', 'abba', '--algorithm', 'SHA512')
             ykman_cli('oath', 'delete', 'abba', '-f')
+
+        # NEO credential capacity may vary based on configuration
+        @yubikey_conditions.version_min((4, 0, 0))
+        def test_add_32_creds(self):
+            for i in range(32):
+                ykman_cli('oath', 'add', 'test' + str(i), 'abba')
+                output = ykman_cli('oath', 'list')
+                lines = output.strip().split('\n')
+                self.assertEqual(len(lines), i + 1)
+
+            with self.assertRaises(SystemExit):
+                ykman_cli('oath', 'add', 'testx', 'abba')
 
     @yubikey_conditions.is_fips
     class TestOathFips(unittest.TestCase):

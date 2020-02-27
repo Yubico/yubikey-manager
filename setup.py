@@ -33,9 +33,6 @@ install_requires = [
     'six', 'pyscard', 'pyusb', 'click',
     'cryptography', 'pyopenssl', 'fido2 >= 0.7'
 ]
-tests_require = []
-if sys.version_info < (3, 3):
-    tests_require.append('mock')
 if sys.version_info < (3, 4):
     install_requires.append('enum34')
 if sys.platform == 'win32':
@@ -64,8 +61,6 @@ setup(
     install_requires=install_requires,
     package_data={'ykman': ['VERSION']},
     include_package_data=True,
-    test_suite='test',
-    tests_require=tests_require,
     classifiers=[
         'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
