@@ -368,10 +368,13 @@ def code(ctx, show_hidden, query, single):
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 ctx.fail('Touch credential timed out!')
 
-    elif single:
+    elif single and len(creds) > 1:
         _error_multiple_hits(ctx, [cr for cr, c in creds])
 
-    if single:
+    elif single and len(creds) == 0:
+        ctx.fail('No matching credential found.')
+
+    if single and creds:
         click.echo(creds[0][1].value)
     else:
         creds.sort()
