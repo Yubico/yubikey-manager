@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 from enum import Enum
-from . import us, de, fr, it, modhex, norman
+from . import us, de, fr, it, modhex, norman, bepo
 
 
 class KEYBOARD_LAYOUT(Enum):
@@ -37,6 +37,7 @@ class KEYBOARD_LAYOUT(Enum):
     NORMAN = norman.scancodes
     FR = fr.scancodes
     IT = it.scancodes
+    BEPO = bepo.scancodes
 
 
 def encode(data, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
