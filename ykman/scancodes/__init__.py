@@ -34,10 +34,10 @@ class KEYBOARD_LAYOUT(Enum):
     MODHEX = modhex.scancodes
     US = us.scancodes
     DE = de.scancodes
-    NORMAN = norman.scancodes
     FR = fr.scancodes
     IT = it.scancodes
     BEPO = bepo.scancodes
+    NORMAN = norman.scancodes
 
 
 def encode(data, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
