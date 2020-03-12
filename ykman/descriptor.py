@@ -153,27 +153,24 @@ def get_descriptors():
 
 
 def _list_drivers(transports):
+    res = []
     if TRANSPORT.CCID & transports:
         try:
-            for dev in open_ccid():
-                if dev:
-                    yield dev
+            res.extend(open_ccid())
         except smartcard.pcsc.PCSCExceptions.EstablishContextException:
             logger.debug('Failed to establish CCID context. '
                          'Is the pcscd/smart card service running?')
     if TRANSPORT.OTP & transports:
-        for dev in open_otp():
-            if dev:
-                yield dev
+        res.extend(open_otp())
     if TRANSPORT.FIDO & transports:
-        for dev in open_fido():
-            if dev:
-                yield dev
+        res.extend(open_fido())
+    return res
 
 
 def list_devices(transports=sum(TRANSPORT)):
-    for d in _list_drivers(transports):
-        yield YubiKey(Descriptor.from_driver(d), d)
+    return [
+        YubiKey(
+            Descriptor.from_driver(d), d) for d in _list_drivers(transports)]
 
 
 def _open_driver(transports, serial, key_type, mode, attempts):

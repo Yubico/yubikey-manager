@@ -210,11 +210,12 @@ class OTPDriver(AbstractDriver):
 
 
 def open_devices():
+    res = []
     if not libversion:
         logger.error(MISSING_LIBYKPERS_MSG)
-        return
+        return res
     if libversion < (1, 18):
-        yield OTPDriver(ykpers.yk_open_first_key())
+        res.append(OTPDriver(ykpers.yk_open_first_key()))
     else:
         for i in range(255):
             dev = ykpers.yk_open_key(i)
@@ -222,4 +223,5 @@ def open_devices():
                 logger.debug('Failed to open key at position %s', i)
                 break
             logger.debug('Success in opening key at position %s', i)
-            yield OTPDriver(dev)
+            res.append(OTPDriver(dev))
+    return res

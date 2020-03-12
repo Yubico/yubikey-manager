@@ -94,8 +94,10 @@ def descriptor_filter(desc):
 
 
 def open_devices():
+    res = []
     for dev in CtapHidDevice.list_devices(descriptor_filter):
         try:
-            yield FidoDriver(dev)
+            res.append(FidoDriver(dev))
         except Exception as e:
             logger.debug('Failed opening FIDO device', exc_info=e)
+    return res
