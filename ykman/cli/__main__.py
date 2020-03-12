@@ -229,7 +229,7 @@ def list_keys(ctx, serials, readers):
     handled_serials = set()
 
     try:
-        for dev in list_devices(transports=TRANSPORT.CCID):
+        for dev in list_devices():
             if dev.key_type == YUBIKEY.SKY:
                 # We have nothing to match on, so just drop a SKY descriptor
                 d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
