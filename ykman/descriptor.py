@@ -156,14 +156,24 @@ def _list_drivers(transports):
     res = []
     if TRANSPORT.CCID & transports:
         try:
-            res.extend(open_ccid())
+            ccid_drivers = open_ccid()
+            if not ccid_drivers:
+                logger.debug(
+                    'Trying to list CCID drivers, but no readers found.')
+            res.extend(ccid_drivers)
         except smartcard.pcsc.PCSCExceptions.EstablishContextException:
             logger.debug('Failed to establish CCID context. '
                          'Is the pcscd/smart card service running?')
     if TRANSPORT.OTP & transports:
-        res.extend(open_otp())
+        otp_drivers = open_otp()
+        if not otp_drivers:
+            logger.debug('Trying to list OTP drivers, but none found.')
+        res.extend(otp_drivers)
     if TRANSPORT.FIDO & transports:
-        res.extend(open_fido())
+        fido_drivers = open_fido()
+        if not fido_drivers:
+            logger.debug('Trying to list FIDO drivers, but none found.')
+        res.extend(fido_drivers)
     return res
 
 
