@@ -39,6 +39,7 @@ from collections import namedtuple
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import (
     Encoding, PrivateFormat, NoEncryption
 )
@@ -120,6 +121,7 @@ class DO(IntEnum):
     PW_STATUS = 0xc4
     CARDHOLDER_CERTIFICATE = 0x7f21
     ATT_CERTIFICATE = 0xfc
+    KDF = 0xf9
 
 
 @unique
@@ -218,6 +220,70 @@ def _get_key_template(key, key_slot, crt=False):
     return Tlv(0x4d, key_slot.crt + _pack_tlvs(values))
 
 
+@unique
+class KdfAlgorithm(bytes, Enum):
+    NONE = b'\x00'
+    KDF_ITERSALTED_S2K = b'\x03'
+
+
+@unique
+class HashAlgorithm(bytes, Enum):
+    SHA256 = b'\x08'
+    SHA512 = b'\x0a'
+
+    def create_digest(self):
+        algorithm = {
+            self.SHA256: hashes.SHA256,
+            self.SHA512: hashes.SHA512,
+        }[self]
+        return hashes.Hash(algorithm(), default_backend())
+
+
+class Kdf(object):
+    _fields = {
+        b'\x81': ('kdf_algorithm', KdfAlgorithm),
+        b'\x82': ('hash_algorithm', HashAlgorithm),
+        b'\x83': ('iteration_count', lambda data: struct.unpack('>I', data)[0]),
+        b'\x84': ('pw1_salt_bytes', bytes),
+        b'\x85': ('pw2_salt_bytes', bytes),
+        b'\x86': ('pw3_salt_bytes', bytes),
+        b'\x87': ('pw1_initial_hash', bytes),
+        b'\x88': ('pw3_initial_hash', bytes),
+    }
+
+    __slots__ = (name for name, _ in _fields.values())
+
+    def __init__(self, data):
+        for field_tag, (field_name, field_type) in self._fields.items():
+            tag, size = struct.unpack('cB', data[:2])
+            assert tag == field_tag
+            setattr(self, field_name, field_type(data[2:2+size]))
+            data = data[2+size:]
+
+    def process(self, pw, pin):
+        if self.kdf_algorithm != KdfAlgorithm.KDF_ITERSALTED_S2K:
+            raise ValueError('Unsupported KDF algorithm')
+        if pw == PW1:
+            salt = self.pw1_salt_bytes
+        elif pw == PW3:
+            salt = self.pw3_salt_bytes
+        else:
+            raise ValueError('Unsupported PIN type')
+        return self._itersalted_s2k(salt, pin)
+
+    def _itersalted_s2k(self, salt, pin):
+        data = salt + pin
+        digest = self.hash_algorithm.create_digest()
+        # Although the field is called "iteration count", it's actually
+        # the number of bytes to be passed to the hash function, which
+        # is called only once. Go figure!
+        data_count, trailing_bytes = divmod(self.iteration_count, len(data))
+        for _ in range(data_count):
+            digest.update(data)
+        digest.update(data[:trailing_bytes])
+        return digest.finalize()
+
+
 class OpgpController(object):
 
     def __init__(self, driver):
@@ -298,9 +364,19 @@ class OpgpController(object):
         self.send_apdu(0, INS.TERMINATE, 0, 0)
         self.send_apdu(0, INS.ACTIVATE, 0, 0)
 
+    def _get_kdf(self):
+        data = self._get_data(DO.KDF)
+        if data == b'\x81\x01\x00':
+            return None
+        else:
+            return Kdf(data)
+
     def _verify(self, pw, pin):
         try:
             pin = pin.encode('utf-8')
+            kdf = self._get_kdf()
+            if kdf:
+                pin = kdf.process(pw, pin)
             self.send_apdu(0, INS.VERIFY, 0, pw, pin)
         except APDUError:
             pw_remaining = self.get_remaining_pin_tries()[pw-PW1]
