@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 import click
 import logging
+from pskc import PSKC
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
@@ -247,6 +248,30 @@ def uri(ctx, uri, touch, force):
     data.touch = touch
 
     _add_cred(ctx, data, force=force)
+
+
+@oath.command('import')
+@click_force_option
+@click.pass_context
+@click.option(
+    '-p', '--password', help='A password may be needed to decrypt the file.')
+@click.argument('import_file', type=click.File('rb'), metavar='FILE')
+def import_from_file(ctx, import_file, password, force):
+    """
+    Import credentials from a file.
+
+    Import credentials from a PSKC file.
+    """
+    ensure_validated(ctx)
+    pskc = PSKC(import_file)
+    if pskc.encryption.is_encrypted:
+        if not password:
+            ctx.fail('File is encrypted, password required.')
+        else:
+            pskc.encryption.derive_key(password)
+    for key in pskc.keys:
+        cred_data = CredentialData.from_pskc(key)
+        _add_cred(ctx, cred_data, force=force)
 
 
 def _add_cred(ctx, data, force):
