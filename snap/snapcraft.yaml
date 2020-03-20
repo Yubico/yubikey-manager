@@ -1,0 +1,100 @@
+name: yubikey-manager
+version: 3.1.1
+summary: ykman
+base: core18
+grade: devel
+confinement: strict
+description: |
+    ykman desc
+
+apps:
+  pcscd:
+    command: usr/sbin/pcscd --foreground --auto-exit
+    daemon: simple
+    common-id: com.yubico.pcscd
+    plugs:
+      - hardware-observe
+      - network
+      - network-bind
+      - raw-usb
+
+  ykman:
+    environment:
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+    adapter: full
+    command: ykman
+    plugs:
+      - raw-usb
+      - u2f-devices
+      - hardware-observe
+
+parts:
+
+  ppa-ykpers:
+    plugin: nil
+    build-packages:
+      - software-properties-common
+    override-pull: |
+      add-apt-repository -y ppa:yubico/stable
+      apt-get -qq update
+      apt-get install -y libykpers-1-1
+
+  pcsc-lite:
+    plugin: autotools
+    source-type: tar
+    source: https://pcsclite.apdu.fr/files/pcsc-lite-1.8.25.tar.bz2
+    configflags:
+      - --enable-ipcdir=/run/snap.yubikey-manager
+      - --enable-runpid=/run/snap.yubikey-manager/pcscd/pcscd.pid
+      - --enable-confdir=/snap/yubikey-manager/current/etc/reader.conf.d
+      - --enable-usbdropdir=/snap/yubikey-manager/current/usr/lib/pcsc/drivers
+      - --prefix=/snap/yubikey-manager/current/usr
+    build-packages:
+      - gcc
+      - pkg-config
+      - libsystemd-dev
+      - libudev-dev
+    override-build: |
+      snapcraftctl build
+      cp -r ${SNAPCRAFT_PART_INSTALL}/snap/yubikey-manager/current/usr ${SNAPCRAFT_PART_INSTALL}/
+      rm -r ${SNAPCRAFT_PART_INSTALL}/snap ${SNAPCRAFT_PART_INSTALL}/lib
+      sed -i -e 's/\/snap\/yubikey-manager\/current//g' ${SNAPCRAFT_PART_INSTALL}/usr/lib/pkgconfig/libpcsclite.pc
+
+  ccid:
+    plugin: autotools
+    source-type: tar
+    configflags:
+      - --enable-usbdropdir=/snap/yubikey-manager/current/usr/lib/pcsc/drivers
+      - --prefix=/usr
+    source: https://ccid.apdu.fr/files/ccid-1.4.31.tar.bz2
+    build-packages:
+      - pkg-config
+      - libusb-1.0-0-dev
+    override-build: |
+      snapcraftctl build
+      cp -r ${SNAPCRAFT_PART_INSTALL}/snap/yubikey-manager/current/usr ${SNAPCRAFT_PART_INSTALL}/
+      rm -r ${SNAPCRAFT_PART_INSTALL}/snap
+    stage-packages:
+      - libusb-1.0-0
+    after: [pcsc-lite]
+
+  ykman:
+    source: .
+    plugin: python
+    override-pull: |
+      snapcraftctl pull
+      sudo pip3 install --upgrade pip
+      /usr/local/bin/pip3 download --no-binary :all: pyscard
+      ls
+      tar -xvf pyscard*
+      cd pyscard*
+      patch setup.py ../.github/workflows/snap-pyscard-patch.patch
+      /usr/local/bin/pip3 install --target=${SNAPCRAFT_PART_INSTALL}/lib/python3.6/site-packages/ .
+      cd ..
+    build-packages:
+      - swig
+      - python3-pip
+    stage-packages:
+      - libykpers-1-1
+      - libusb-1.0-0
