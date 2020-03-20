@@ -47,6 +47,7 @@ from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
+from .bio import bio
 import usb.core
 import click
 import logging
@@ -262,7 +263,7 @@ def list_keys(ctx, serials, readers):
         click.echo('{} [{}]'.format(desc.name, desc.mode))
 
 
-COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
+COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config, bio)
 
 
 for cmd in COMMANDS:
