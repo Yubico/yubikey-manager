@@ -1,17 +1,19 @@
 name: yubikey-manager
 version: 3.1.1
-summary: ykman
+summary: Command line tool for configuring any YubiKey over all USB interfaces.
 base: core18
 grade: devel
 confinement: strict
 description: |
-    ykman desc
+  YubiKey Manager (ykman) is a command line tool for configuring a YubiKey over
+  all transports. It is capable of reading out device information as well as
+  configuring several aspects of a YubiKey, including enabling or disabling
+  connection transports an programming various types of credentials.
 
 apps:
   pcscd:
     command: usr/sbin/pcscd --foreground --auto-exit
     daemon: simple
-    common-id: com.yubico.pcscd
     plugs:
       - hardware-observe
       - network
