@@ -34,6 +34,11 @@ jobs:
           pip install flake8
           flake8 .
 
+      - name: Scan with bandit
+        run: |
+          pip install bandit
+          bandit -r -lll .
+
       - name: Run unit tests
         run: tox -- -v
 
