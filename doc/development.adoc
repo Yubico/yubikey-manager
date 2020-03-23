@@ -5,7 +5,7 @@
 It's assumed a Python environment with pip is installed.
 
 ==== Windows
-Make sure the http://www.swig.org/[swig] executable is in your PATH. Add http://libusb.info/[libusb]
+Make sure the http://www.swig.org/[swig] executable is in your PATH. Add https://libusb.info/[libusb]
 and https://developers.yubico.com/yubikey-personalization/[ykpers] DLLs to the root of the repository.
 
 ==== macOS
