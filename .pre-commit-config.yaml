@@ -1,17 +1,13 @@
 repos:
   - repo: git://github.com/pre-commit/pre-commit-hooks
-    sha: v1.1.1
+    rev: master
     hooks:
       - id: double-quote-string-fixer
-  - repo: local
+  - repo: https://github.com/PyCQA/bandit
+    rev: master
+    hooks:
+      - id: bandit
+  - repo: https://github.com/PyCQA/flake8
+    rev: master
     hooks:
       - id: flake8
-        name: flake8
-        language: system
-        entry: flake8 .
-        files: \.py
-      - id: bandit
-        name: bandit
-        language: system
-        entry: bandit -r . -lll
-        files: \.py
