@@ -3,3 +3,7 @@ repos:
   rev: v2.5.0
   hooks:
     - id: double-quote-string-fixer
+- repo: https://gitlab.com/pycqa/flake8
+  rev: 3.7.9
+  hooks:
+    - id: flake8
