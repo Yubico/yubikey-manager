@@ -3,3 +3,9 @@ repos:
     sha: v1.1.1
     hooks:
       - id: double-quote-string-fixer
+  - repo: local
+    hooks:
+      - id: flake8
+        name: flake8
+        language: system
+        entry: flake8 .
