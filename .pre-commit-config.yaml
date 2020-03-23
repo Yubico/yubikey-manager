@@ -9,3 +9,8 @@ repos:
         name: flake8
         language: system
         entry: flake8 .
+      - id: bandit
+        name: bandit
+        language: system
+        entry: bandit -r . -lll
+        files: \.py
