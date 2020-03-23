@@ -45,10 +45,11 @@ To uninstall, run:
 
 === Code Style
 
-This project uses http://flake8.pycqa.org/[Flake8] for code style with a http://pre-commit.com/[pre-commit] hook.
+This project uses https://flake8.pycqa.org/[Flake8] for code style and https://github.com/PyCQA/bandit[Bandit] for security linting, used with a https://pre-commit.com/[pre-commit] hook.
+
 To use these:
 
-    $ pip install pre-commit flake8
+    $ pip install pre-commit flake8 bandit
     $ pre-commit install
 
 === Unit tests
