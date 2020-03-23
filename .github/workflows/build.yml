@@ -29,10 +29,11 @@ jobs:
           pip install tox
           pip install .
 
-      - name: Lint with flake8
+      - name: Run pre-commit hooks
         run: |
-          pip install flake8
-          flake8 .
+          pip install pre-commit
+          pre-commit install
+          pre-commit run --all-files
 
       - name: Run unit tests
         run: tox -- -v
