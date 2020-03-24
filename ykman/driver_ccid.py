@@ -323,7 +323,7 @@ def list_readers():
 
 
 def open_devices(name_filter=YK_READER_NAME):
-    res = []
+    devices = []
     readers = list_readers()
     while readers:
         try_again = []
@@ -332,7 +332,7 @@ def open_devices(name_filter=YK_READER_NAME):
                 try:
                     conn = reader.createConnection()
                     conn.connect()
-                    res.append(CCIDDriver(conn, reader.name))
+                    devices.append(CCIDDriver(conn, reader.name))
                 except CardConnectionException:
                     try_again.append(reader)
                 except Exception as e:
@@ -342,5 +342,5 @@ def open_devices(name_filter=YK_READER_NAME):
         if try_again and kill_scdaemon():
             readers = try_again
         else:
-            return res
-    return res
+            return devices
+    return devices

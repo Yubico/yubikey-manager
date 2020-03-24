@@ -153,14 +153,14 @@ def get_descriptors():
 
 
 def _list_drivers(transports):
-    res = []
+    drivers = []
     if TRANSPORT.CCID & transports:
         try:
             ccid_drivers = open_ccid()
             if not ccid_drivers:
                 logger.debug(
                     'Trying to list CCID drivers, but no readers found.')
-            res.extend(ccid_drivers)
+            drivers.extend(ccid_drivers)
         except smartcard.pcsc.PCSCExceptions.EstablishContextException:
             logger.debug('Failed to establish CCID context. '
                          'Is the pcscd/smart card service running?')
@@ -168,13 +168,13 @@ def _list_drivers(transports):
         otp_drivers = open_otp()
         if not otp_drivers:
             logger.debug('Trying to list OTP drivers, but none found.')
-        res.extend(otp_drivers)
+        drivers.extend(otp_drivers)
     if TRANSPORT.FIDO & transports:
         fido_drivers = open_fido()
         if not fido_drivers:
             logger.debug('Trying to list FIDO drivers, but none found.')
-        res.extend(fido_drivers)
-    return res
+        drivers.extend(fido_drivers)
+    return drivers
 
 
 def list_devices(transports=sum(TRANSPORT)):
