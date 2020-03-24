@@ -1,6 +1,9 @@
 repos:
--   repo: git://github.com/pre-commit/pre-commit-hooks
-    sha: v1.1.1
-    hooks:
-    -   id: flake8
-    -   id: double-quote-string-fixer
+- repo: git://github.com/pre-commit/pre-commit-hooks
+  rev: v2.5.0
+  hooks:
+    - id: double-quote-string-fixer
+- repo: https://gitlab.com/pycqa/flake8
+  rev: 3.7.9
+  hooks:
+    - id: flake8
