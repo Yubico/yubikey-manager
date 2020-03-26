@@ -117,13 +117,18 @@ class BioController(object):
 
     def dump_stm(self):
         self._driver.send_apdu(0, INS.DUMP_STM, 0, 0)
+        resp = b''
 
-        resp, sw = self._driver.send_apdu(0, INS.DUMP_STM, 1, 0, check=None)
-        while (sw >> 8) == SW.MORE_DATA:
-            more, sw = self._driver.send_apdu(0, INS.GET_RESPONSE, 0, 0, check=None)
+        while True:
+            more, sw = self._driver.send_apdu(0, INS.DUMP_STM, 1, 0, check=None)
             resp += more
-        if sw != SW.OK:
-            raise APDUError(resp, sw)
+            if sw == SW.OK:
+                break
+            while (sw >> 8) == SW.MORE_DATA:
+                more, sw = self._driver.send_apdu(0, INS.GET_RESPONSE, 0, 0, check=None)
+                resp += more
+            if sw != SW.OK:
+                raise APDUError(resp, sw)
 
         lines = []
         while resp:
