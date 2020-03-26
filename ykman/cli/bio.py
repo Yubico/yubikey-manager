@@ -120,6 +120,7 @@ class BioController(object):
 
     def dump_sle(self):
         resp = b''
+
         while True:
             data = self.send_cmd(INS.DUMP_SLE)
             if not data:
@@ -139,7 +140,15 @@ class BioController(object):
         resp = b''
 
         while True:
-            data = self.send_cmd(INS.DUMP_STM, 1)
+            try:
+                data = self.send_cmd(INS.DUMP_STM, 1)
+            except APDUError as e:
+                # Once done, we'll get an empty response with SW = MORE_DATA, which
+                # causes a GET_RESPONSE that results in this error. So we just stop.
+                if e.sw == 0x6d00:
+                    break
+                raise
+
             if not data:
                 break
             resp += data
