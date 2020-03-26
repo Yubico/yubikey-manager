@@ -49,6 +49,7 @@ class INS(IntEnum):
     DUMP_STM = 0x22
     SLE_VERSION = 0x0C
     STM_VERSION = 0x0D
+    GET_RESPONSE = 0xC0
 
 
 class FakeBioController(object):
@@ -121,7 +122,7 @@ class BioController(object):
         sw = SW.MORE_DATA << 8
 
         while (sw >> 8) == SW.MORE_DATA:
-            more, sw = self._driver.send_apdu(0, INS.DUMP_STM, 1, 0, check=None)
+            more, sw = self._driver.send_apdu(0, INS.GET_RESPONSE, 0, 0, check=None)
             resp += more
         if sw != SW.OK:
             raise APDUError(resp, sw)
