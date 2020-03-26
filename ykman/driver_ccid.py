@@ -29,8 +29,6 @@ from __future__ import absolute_import
 
 import logging
 import struct
-import subprocess
-import time
 import six
 from enum import IntEnum, unique
 from binascii import b2a_hex
@@ -281,36 +279,6 @@ def _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
     return pgm_seq_new == pgm_seq_old == 0 or pgm_seq_new > pgm_seq_old
 
 
-def kill_scdaemon():
-    killed = False
-    try:
-        # Works for Windows.
-        from win32com.client import GetObject
-        from win32api import OpenProcess, CloseHandle, TerminateProcess
-        wmi = GetObject('winmgmts:')
-        ps = wmi.InstancesOf('Win32_Process')
-        for p in ps:
-            if p.Properties_('Name').Value == 'scdaemon.exe':
-                pid = p.Properties_('ProcessID').Value
-                handle = OpenProcess(1, False, pid)
-                TerminateProcess(handle, -1)
-                CloseHandle(handle)
-                killed = True
-    except ImportError:
-        # Works for Linux and OS X.
-        pids = subprocess.check_output(
-            "ps ax | grep scdaemon | grep -v grep | awk '{ print $1 }'",
-            shell=True).strip()
-        if pids:
-            for pid in pids.split():
-                subprocess.call(['kill', '-9', pid])
-            killed = True
-
-    if killed:
-        time.sleep(0.1)
-    return killed
-
-
 def list_readers():
     try:
         return System.readers()
@@ -325,20 +293,14 @@ def list_readers():
 def open_devices(name_filter=YK_READER_NAME):
     readers = list_readers()
     while readers:
-        try_again = []
         for reader in readers:
             if name_filter.lower() in reader.name.lower():
                 try:
                     conn = reader.createConnection()
                     conn.connect()
                     yield CCIDDriver(conn, reader.name)
-                except CardConnectionException:
-                    try_again.append(reader)
                 except Exception as e:
                     # Try with next reader.
                     logger.debug(
                         'Failed to connect to reader %s', reader, exc_info=e)
-        if try_again and kill_scdaemon():
-            readers = try_again
-        else:
-            return
+        return
