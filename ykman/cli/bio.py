@@ -58,7 +58,7 @@ class FakeBioController(object):
         driver.select(AID.MGR)
 
     def clear_logs(self):
-        self._driver.send_apdu(0, INS.CLEAR_LOGS, 8, 0)
+        pass
 
     def read_sle_version(self):
         return 'SLE version x.y.z'
@@ -92,23 +92,42 @@ class BioController(object):
         driver.select(AID.MGR)
 
     def clear_logs(self):
-        self._driver.send_apdu(0, INS.CLEAR_LOGS, 8, 0)
+        self.send_cmd(INS.CLEAR_LOGS, 8)
 
     def read_sle_version(self):
-        return self._driver.send_apdu(0, INS.SLE_VERSION, 0, 0).decode('utf8')
+        return self.send_cmd(INS.SLE_VERSION).decode('utf8')
 
     def read_stm_version(self):
-        return self._driver.send_apdu(0, INS.STM_VERSION, 0, 0).decode('utf8')
+        return self.send_cmd(INS.STM_VERSION).decode('utf8')
+
+    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW.OK):
+        while len(data) > 0xff:
+            self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
+            data = data[0xff:]
+        resp, sw = self._driver.send_apdu(0, ins, p1, p2, data, check=None)
+
+        while (sw >> 8) == SW.MORE_DATA:
+            more, sw = self._driver.send_apdu(
+                0, INS.GET_RESPONSE, 0, 0, b'', check=None)
+            resp += more
+
+        if check is None:
+            return resp, sw
+        elif sw != check:
+            raise APDUError(resp, sw)
+
+        return resp
 
     def dump_sle(self):
         resp = b''
         while True:
-            data = self._driver.send_apdu(0, INS.DUMP_SLE, 0, 0)
+            data = self.send_cmd(INS.DUMP_SLE)
             if not data:
                 break
             resp += data
 
         lines = []
+
         while resp:
             lines.append(struct.unpack_from('!HHHBBBB', resp))
             resp = resp[10:]
@@ -116,19 +135,14 @@ class BioController(object):
         return lines
 
     def dump_stm(self):
-        self._driver.send_apdu(0, INS.DUMP_STM, 0, 0)
+        self.send_cmd(INS.DUMP_STM)
         resp = b''
 
         while True:
-            more, sw = self._driver.send_apdu(0, INS.DUMP_STM, 1, 0, check=None)
-            resp += more
-            if sw == SW.OK:
+            data = self.send_cmd(INS.DUMP_STM, 1)
+            if not data:
                 break
-            while (sw >> 8) == SW.MORE_DATA:
-                more, sw = self._driver.send_apdu(0, INS.GET_RESPONSE, 0, 0, check=None)
-                resp += more
-            if sw != SW.OK:
-                raise APDUError(resp, sw)
+            resp += data
 
         lines = []
         while resp:
