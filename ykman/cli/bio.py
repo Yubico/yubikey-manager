@@ -28,137 +28,15 @@
 from __future__ import absolute_import
 
 from .util import click_postpone_execution
-from ..util import AID, TRANSPORT
+from ..bio import BioController
+from ..util import TRANSPORT
 from ..descriptor import get_descriptors
-from ..driver_ccid import APDUError, SW
 from time import sleep
-from enum import IntEnum, unique
 import logging
 import click
-import struct
-import os
 
 
 logger = logging.getLogger(__name__)
-
-
-@unique
-class INS(IntEnum):
-    CLEAR_LOGS = 0x20
-    DUMP_SLE = 0x21
-    DUMP_STM = 0x22
-    SLE_VERSION = 0x0C
-    STM_VERSION = 0x0D
-    GET_RESPONSE = 0xC0
-
-
-class FakeBioController(object):
-    def __init__(self, driver):
-        self._driver = driver
-        driver.select(AID.MGR)
-
-    def clear_logs(self):
-        pass
-
-    def read_sle_version(self):
-        return 'SLE version x.y.z'
-
-    def read_stm_version(self):
-        return 'STM32 version x.y.z'
-
-    def dump_sle(self):
-        resp = os.urandom(10 * 6)
-        lines = []
-        while resp:
-            lines.append(struct.unpack_from('!HHHBBBB', resp))
-            resp = resp[10:]
-
-        return lines
-
-    def dump_stm(self):
-        resp = os.urandom(16 * 6)
-
-        lines = []
-        while resp:
-            lines.append(struct.unpack_from('!HHBBBBBBHI', resp))
-            resp = resp[16:]
-
-        return lines
-
-
-class BioController(object):
-    def __init__(self, driver):
-        self._driver = driver
-        driver.select(AID.MGR)
-
-    def clear_logs(self):
-        self.send_cmd(INS.CLEAR_LOGS, 8)
-
-    def read_sle_version(self):
-        return self.send_cmd(INS.SLE_VERSION).decode('utf8')
-
-    def read_stm_version(self):
-        return self.send_cmd(INS.STM_VERSION).decode('utf8')
-
-    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW.OK):
-        while len(data) > 0xff:
-            self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
-            data = data[0xff:]
-        resp, sw = self._driver.send_apdu(0, ins, p1, p2, data, check=None)
-
-        while (sw >> 8) == SW.MORE_DATA:
-            more, sw = self._driver.send_apdu(
-                0, INS.GET_RESPONSE, 0, 0, b'', check=None)
-            resp += more
-
-        if check is None:
-            return resp, sw
-        elif sw != check:
-            raise APDUError(resp, sw)
-
-        return resp
-
-    def dump_sle(self):
-        resp = b''
-
-        while True:
-            data = self.send_cmd(INS.DUMP_SLE)
-            if not data:
-                break
-            resp += data
-
-        lines = []
-
-        while resp:
-            lines.append(struct.unpack_from('!HHHBBBB', resp))
-            resp = resp[10:]
-
-        return lines
-
-    def dump_stm(self):
-        self.send_cmd(INS.DUMP_STM)
-        resp = b''
-
-        while True:
-            try:
-                data = self.send_cmd(INS.DUMP_STM, 1)
-            except APDUError as e:
-                # Once done, we'll get an empty response with SW = MORE_DATA, which
-                # causes a GET_RESPONSE that results in this error. So we just stop.
-                if e.sw == 0x6d00:
-                    break
-                raise
-
-            if not data:
-                break
-            resp += data
-
-        lines = []
-        while resp:
-            lines.append(struct.unpack_from('!HHBBBBBBHI', resp))
-            resp = resp[16:]
-
-        return lines
 
 
 @click.group()
@@ -215,31 +93,7 @@ def dump_logs(ctx, logfile):
     dev = list(get_descriptors())[0].open_device(TRANSPORT.CCID)
     controller = BioController(dev.driver)
 
-    sle_v = controller.read_sle_version()
-    stm_v = controller.read_stm_version()
-    logfile.write('# YubiKey BIO log dump\n')
-
-    logfile.write('# {}\n'.format(sle_v))
-    logfile.write(
-        '# Session ID, Duration, SPI Dur., Command, Error, ' 'Enrollments, Flags\n'
-    )
-    for line in controller.dump_sle():
-        logfile.write(
-            '0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},0x{:02x}\n'.format(
-                *line
-            )
-        )
-
-    logfile.write('# {}\n'.format(stm_v))
-    logfile.write(
-        '# Session ID, Duration, Command, Result, Last Enroll, '
-        'Samples Remaining, Error, Vendor Error, Flags, Reserved\n'
-    )
-    for line in controller.dump_stm():
-        logfile.write(
-            '0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},'
-            '0x{:04x},0x{:08x}\n'.format(*line)
-        )
+    controller.dump_logs(logfile)
 
 
 @bio.command()
