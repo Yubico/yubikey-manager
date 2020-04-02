@@ -117,7 +117,7 @@ class BioController(object):
 
         lines = []
         while resp:
-            lines.append(struct.unpack_from('!HHBBBBBBHI', resp))
+            lines.append(struct.unpack_from('<HHBBBBBBHI', resp))
             resp = resp[16:]
 
         return lines
@@ -133,7 +133,7 @@ class BioController(object):
         )
         for line in self.dump_sle():
             logfile.write(
-                '0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},'
+                '0x{:04x},0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},'
                 '0x{:02x}\n'.format(*line)
             )
 
