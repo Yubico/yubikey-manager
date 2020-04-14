@@ -149,7 +149,10 @@ def delete(ctx, query, pin, force):
     try:
         hits = [
             cred for cred in controller.get_resident_credentials(pin)
-            if query.lower() in cred.user_name or query.lower() in cred.rp_id
+            if query.lower() in cred.user_name.lower() or
+            query.lower() in cred.rp_id.lower() or
+            query.lower() in '{} ({})'.format(
+                cred.user_name, cred.rp_id).lower()
         ]
         if len(hits) == 0:
             ctx.fail('No matches, nothing to be done.')
