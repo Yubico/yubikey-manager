@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 import click
 import logging
+import sys
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
@@ -84,7 +85,9 @@ def click_parse_uri(ctx, param, val):
 @click_postpone_execution
 @click.option('-p', '--password', help='Provide a password to unlock the '
               'YubiKey.')
-def oath(ctx, password):
+@click.option('-S', '--password-stdin', is_flag=True, help='Read a password '
+              'to unlock the YubiKey from stdin instead of the terminal.')
+def oath(ctx, password, password_stdin):
     """
     Manage OATH Application.
 
@@ -112,6 +115,10 @@ def oath(ctx, password):
         raise
 
     if password:
+        ctx.obj['key'] = controller.derive_key(password)
+    if password_stdin:
+        lines = sys.stdin.readline().splitlines()
+        password = lines[0] if lines else ''
         ctx.obj['key'] = controller.derive_key(password)
 
 
