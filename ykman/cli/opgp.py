@@ -77,7 +77,7 @@ def openpgp(ctx):
 
     \b
       Set the retries for PIN, Reset Code and Admin PIN to 10:
-      $ ykman openpgp set-retries 10 10 10
+      $ ykman openpgp set-pin-retries 10 10 10
 
     \b
       Require touch to use the authentication key:
