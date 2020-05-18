@@ -64,6 +64,7 @@ class FidoDriver(AbstractDriver):
         pid = PID(dev.descriptor['product_id'])
         super(FidoDriver, self).__init__(pid.get_type(), Mode.from_pid(pid))
         self._dev = dev
+        self.is_nfc = False
 
     def read_config(self):
         if self.key_type == YUBIKEY.NEO:

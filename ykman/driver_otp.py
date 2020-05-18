@@ -86,6 +86,7 @@ class OTPDriver(AbstractDriver):
         self._slot1_valid = False
         self._slot2_valid = False
         self._read_status()
+        self.is_nfc = False
 
     @property
     def ykpers_dev(self):

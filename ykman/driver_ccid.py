@@ -152,8 +152,10 @@ class CCIDDriver(AbstractDriver):
             pid = _pid_from_name(name)
             key_type = pid.get_type()
             mode = Mode.from_pid(pid)
+            self.is_nfc = False
         else:
             key_type, mode = self._probe_type_and_mode()
+            self.is_nfc = True
         super(CCIDDriver, self).__init__(key_type, mode)
 
     def _probe_type_and_mode(self):
