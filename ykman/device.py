@@ -249,7 +249,7 @@ class YubiKey(object):
                 self._can_mode_switch = False
 
         # Fix usb_enabled
-        if not config.usb_enabled:
+        if not self._can_write_config:
             usb_enabled = config.usb_supported
             if not TRANSPORT.has(self.mode.transports, TRANSPORT.OTP):
                 usb_enabled &= ~APPLICATION.OTP
