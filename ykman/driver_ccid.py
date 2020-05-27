@@ -266,8 +266,10 @@ class CCIDDriver(AbstractDriver):
         self.send_apdu(0, MGR_INS.SET_MODE, SLOT.DEVICE_CONFIG, 0, mode_data)
 
     def close(self):
-        logger.debug('Close %s', self)
-        self._conn.disconnect()
+        if self._conn is not None:
+            logger.debug('Close %s', self)
+            self._conn.disconnect()
+            self._conn = None
 
     def __del__(self):
         logger.debug('Destroy %s', self)
