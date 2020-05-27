@@ -365,11 +365,14 @@ class OpgpController(object):
         self.send_apdu(0, INS.ACTIVATE, 0, 0)
 
     def _get_kdf(self):
-        data = self._get_data(DO.KDF)
-        if data == b'\x81\x01\x00':
+        try:
+            data = self._get_data(DO.KDF)
+            if data == b'\x81\x01\x00':
+                return None
+            else:
+                return Kdf(data)
+        except APDUError:
             return None
-        else:
-            return Kdf(data)
 
     def _verify(self, pw, pin):
         try:
