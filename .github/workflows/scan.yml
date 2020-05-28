@@ -1,0 +1,34 @@
+name: static code analysis
+# Documentation: https://github.com/Yubico/yes-static-code-analysis
+
+on:
+  push:
+  schedule:
+    - cron: '0 0 * * 1'
+
+env:
+  SCAN_IMG:
+    yes-docker-local.artifactory.in.yubico.org/static-code-analysis/python:v1
+  SECRET: ${{ secrets.ARTIFACTORY_READER_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@master
+
+    - name: Scan and fail if warnings
+      run: |
+        if [ "${SECRET}" != "" ]; then
+          docker login yes-docker-local.artifactory.in.yubico.org/ \
+            -u svc-static-code-analysis-reader -p ${SECRET}
+          docker pull ${SCAN_IMG}
+          docker run -v${PWD}:/k -e PROJECT_NAME=${GITHUB_REPOSITORY#Yubico/} -t ${SCAN_IMG}
+        fi
+
+    - uses: actions/upload-artifact@master
+      if: failure()
+      with:
+        name: suppression_files
+        path: suppression_files
