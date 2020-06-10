@@ -372,7 +372,7 @@ _HEX = b'0123456789abcdef'
 _MODHEX = b'cbdefghijklnrtuv'
 _MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
 _HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i:i+1]) for i in range(16))
-DEFAULT_PW_CHAR_BLACKLIST = ['\t', '\n', ' ']
+DEFAULT_PW_CHAR_BLOCKLIST = ['\t', '\n', ' ']
 
 
 def ensure_not_cve201715361_vulnerable_firmware_version(f_version):
@@ -397,8 +397,8 @@ def modhex_encode(value):
 def generate_static_pw(
         length,
         keyboard_layout=KEYBOARD_LAYOUT.MODHEX,
-        blacklist=DEFAULT_PW_CHAR_BLACKLIST):
-    chars = [k for k in keyboard_layout.value.keys() if k not in blacklist]
+        blocklist=DEFAULT_PW_CHAR_BLOCKLIST):
+    chars = [k for k in keyboard_layout.value.keys() if k not in blocklist]
     sr = random.SystemRandom()
     return ''.join([sr.choice(chars) for _ in range(length)])
 
