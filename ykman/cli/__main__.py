@@ -99,9 +99,12 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                              .format(cmd))
         except FailedOpeningDeviceException:
             ctx.fail(
-                'Failed connecting to a YubiKey with serial: {}. '
-                'Make sure the application has the required '
-                'permissions.'.format(serial))
+                'Failed connecting to YubiKey with serial {}. \n\n'
+                'Try to make sure:\n'
+                '    * ykman has the required permissions from the '
+                'operating system\n'
+                '    * the YubiKey is not in used by some other '
+                'application'.format(serial))
 
 
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
@@ -131,10 +134,13 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to {} [{}]. '
-                     'Make sure the application has the '
-                     'required permissions.'
-                     .format(descriptor.name, descriptor.mode))
+            ctx.fail(
+                'Failed connecting to {} [{}]. \n\n'
+                'Try to make sure:\n'
+                '    * ykman has the required permissions from the '
+                'operating system\n'
+                '    * the YubiKey is not in used by some other '
+                'application'.format(descriptor.name, descriptor.mode))
     else:
         _disabled_transport(ctx, transports, cmd)
 

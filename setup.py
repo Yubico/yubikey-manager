@@ -33,10 +33,9 @@ install_requires = [
     'six', 'pyscard', 'pyusb', 'click',
     'cryptography', 'pyopenssl', 'fido2 >= 0.7'
 ]
+
 if sys.version_info < (3, 4):
     install_requires.append('enum34')
-if sys.platform == 'win32':
-    install_requires.append('pypiwin32')
 
 with open(
     os.path.join(
