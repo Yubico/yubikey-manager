@@ -28,6 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install tox
           pip install .
+          pip install bandit
 
       - name: Run pre-commit hooks
         run: |
@@ -37,6 +38,9 @@ jobs:
 
       - name: Run unit tests
         run: tox -- -v
+
+      - name: Run bandit
+        run: bandit -r .
 
       - name: Run CLI
         run: |
