@@ -426,7 +426,7 @@ def parse_truncated(resp):
 
 def hmac_shorten_key(key, algo):
     if algo.upper() == 'SHA1':
-        h = hashes.SHA1()
+        h = hashes.SHA1()  # nosec
     elif algo.upper() == 'SHA256':
         h = hashes.SHA256()
     elif algo.upper() == 'SHA512':

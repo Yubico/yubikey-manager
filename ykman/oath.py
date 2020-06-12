@@ -193,7 +193,7 @@ class Credential(object):
 
 
 def _derive_key(salt, passphrase):
-    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())
+    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())  # nosec
     return kdf.derive(passphrase.encode('utf-8'))
 
 
@@ -374,7 +374,7 @@ class OathController(object):
         key = self.derive_key(password)
         keydata = bytearray([OATH_TYPE.TOTP | ALGO.SHA1]) + key
         challenge = os.urandom(8)
-        h = hmac.HMAC(key, hashes.SHA1(), default_backend())
+        h = hmac.HMAC(key, hashes.SHA1(), default_backend())  # nosec
         h.update(challenge)
         response = h.finalize()
         data = Tlv(TAG.KEY, keydata) + Tlv(TAG.CHALLENGE, challenge) + Tlv(
@@ -386,11 +386,11 @@ class OathController(object):
         self.send_apdu(INS.SET_CODE, 0, 0, Tlv(TAG.KEY, b''))
 
     def validate(self, key):
-        h = hmac.HMAC(key, hashes.SHA1(), default_backend())
+        h = hmac.HMAC(key, hashes.SHA1(), default_backend())  # nosec
         h.update(self._challenge)
         response = h.finalize()
         challenge = os.urandom(8)
-        h = hmac.HMAC(key, hashes.SHA1(), default_backend())
+        h = hmac.HMAC(key, hashes.SHA1(), default_backend())  # nosec
         h.update(challenge)
         verification = h.finalize()
         data = Tlv(TAG.RESPONSE, response) + Tlv(TAG.CHALLENGE, challenge)
