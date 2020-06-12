@@ -34,13 +34,10 @@ jobs:
         run: |
           pip install pre-commit
           pre-commit install
-          pre-commit run --all-files
+          pre-commit run --all-files --verbose
 
       - name: Run unit tests
         run: tox -- -v
-
-      - name: Run bandit
-        run: bandit -r .
 
       - name: Run CLI
         run: |
