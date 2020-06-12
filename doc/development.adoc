@@ -43,12 +43,12 @@ To uninstall, run:
 
     $ pip uninstall yubikey-manager
 
-=== Code Style
+=== Code Style & Security
 
-This project uses http://flake8.pycqa.org/[Flake8] for code style with a http://pre-commit.com/[pre-commit] hook.
+This project uses https://flake8.pycqa.org/[Flake8] for code style and https://github.com/PyCQA[Bandit] for security linting. These are invoked with a http://pre-commit.com/[pre-commit] hook.
 To use these:
 
-    $ pip install pre-commit flake8
+    $ pip install pre-commit flake8 bandit
     $ pre-commit install
 
 === Unit tests

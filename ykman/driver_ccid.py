@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 import logging
 import struct
-import subprocess
+import subprocess  # nosec
 import time
 import six
 from enum import IntEnum, unique
@@ -300,14 +300,10 @@ def kill_scdaemon():
                 killed = True
     except ImportError:
         # Works for Linux and OS X.
-        pids = subprocess.check_output(
-            "ps ax | grep scdaemon | grep -v grep | awk '{ print $1 }'",
-            shell=True).strip()
-        if pids:
-            for pid in pids.split():
-                subprocess.call(['kill', '-9', pid])
+        return_code = subprocess.call(  # nosec
+            ['/usr/bin/pkill', '-9', 'scdaemon'])
+        if return_code == 0:
             killed = True
-
     if killed:
         time.sleep(0.1)
     return killed

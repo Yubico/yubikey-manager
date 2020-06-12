@@ -332,7 +332,7 @@ def _get_key_data(key):
 
 def _dummy_key(algorithm):
     if algorithm == ALGO.RSA1024:
-        return rsa.generate_private_key(65537, 1024, default_backend())
+        return rsa.generate_private_key(65537, 1024, default_backend())  # nosec
     if algorithm == ALGO.RSA2048:
         return rsa.generate_private_key(65537, 2048, default_backend())
     if algorithm == ALGO.ECCP256:
@@ -370,7 +370,7 @@ _decrypt_len_conditions = {
 
 
 def _derive_key(pin, salt):
-    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())
+    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())  # nosec
     return kdf.derive(pin.encode('utf-8'))
 
 
@@ -621,7 +621,7 @@ class PivController(object):
         except ValueError:
             raise BadFormat('Management key must be exactly 24 bytes long, '
                             'was: {}'.format(len(key)), None)
-        cipher = Cipher(cipher_key, modes.ECB(), backend)
+        cipher = Cipher(cipher_key, modes.ECB(), backend)  # nosec
         decryptor = cipher.decryptor()
         pt1 = decryptor.update(ct1) + decryptor.finalize()
         ct2 = os.urandom(8)

@@ -43,7 +43,8 @@ class UpperCaseChoice(click.Choice):
     """
     def __init__(self, choices):
         for v in choices:
-            assert v.upper() == v, 'Choice not all uppercase: ' + v
+            if v.upper() != v:
+                raise ValueError('Choice not all uppercase: ' + v)
         click.Choice.__init__(self, choices)
 
     def convert(self, value, param, ctx):

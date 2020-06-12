@@ -426,7 +426,7 @@ def parse_truncated(resp):
 
 def hmac_shorten_key(key, algo):
     if algo.upper() == 'SHA1':
-        h = hashes.SHA1()
+        h = hashes.SHA1()  # nosec
     elif algo.upper() == 'SHA256':
         h = hashes.SHA256()
     elif algo.upper() == 'SHA512':
@@ -475,8 +475,8 @@ def parse_private_key(data, password):
         except ValueError:
             # Cryptography raises ValueError if decryption fails.
             raise
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug('Failed to parse PEM private key ', exc_info=e)
 
     # PKCS12
     if is_pkcs12(data):
@@ -493,8 +493,8 @@ def parse_private_key(data, password):
     try:
         return serialization.load_der_private_key(
             data, password, backend=default_backend())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug('Failed to parse private key as DER', exc_info=e)
 
     # All parsing failed
     raise ValueError('Could not parse private key.')
@@ -513,8 +513,8 @@ def parse_certificates(data, password):
                 certs.append(
                     x509.load_pem_x509_certificate(
                         PEM_IDENTIFIER + cert, default_backend()))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug('Failed to parse PEM certificate', exc_info=e)
         # Could be valid PEM but not certificates.
         if len(certs) > 0:
             return certs
@@ -532,8 +532,8 @@ def parse_certificates(data, password):
     # DER
     try:
         return [x509.load_der_x509_certificate(data, default_backend())]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug('Failed to parse certificate as DER', exc_info=e)
 
     raise ValueError('Could not parse certificate.')
 
