@@ -475,7 +475,8 @@ def parse_private_key(data, password):
         except ValueError:
             # Cryptography raises ValueError if decryption fails.
             raise
-        except Exception:
+        except Exception as e:
+            logger.debug('Failed to parse PEM private key ', exc_info=e)
             pass
 
     # PKCS12
@@ -493,7 +494,8 @@ def parse_private_key(data, password):
     try:
         return serialization.load_der_private_key(
             data, password, backend=default_backend())
-    except Exception:
+    except Exception as e:
+        logger.debug('Failed to parse private key as DER', exc_info=e)
         pass
 
     # All parsing failed
@@ -513,7 +515,8 @@ def parse_certificates(data, password):
                 certs.append(
                     x509.load_pem_x509_certificate(
                         PEM_IDENTIFIER + cert, default_backend()))
-            except Exception:
+            except Exception as e:
+                logger.debug('Failed to parse PEM certificate', exc_info=e)
                 pass
         # Could be valid PEM but not certificates.
         if len(certs) > 0:
@@ -532,7 +535,8 @@ def parse_certificates(data, password):
     # DER
     try:
         return [x509.load_der_x509_certificate(data, default_backend())]
-    except Exception:
+    except Exception as e:
+        logger.debug('Failed to parse certificate as DER', exc_info=e)
         pass
 
     raise ValueError('Could not parse certificate.')
