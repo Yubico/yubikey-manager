@@ -256,7 +256,6 @@ class Kdf(object):
     def __init__(self, data):
         for field_tag, (field_name, field_type) in self._fields.items():
             tag, size = struct.unpack('cB', data[:2])
-            assert tag == field_tag
             setattr(self, field_name, field_type(data[2:2+size]))
             data = data[2+size:]
 
