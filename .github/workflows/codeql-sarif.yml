@@ -12,7 +12,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Intall bandit and formatter
-      run: sudo apt-get install python3-setuptools && pip3 install wheel bandit bandit-sarif-formatter
+      run: sudo apt-get install python3-setuptools python3-wheel && pip3 install bandit bandit-sarif-formatter
 
     - name: Run bandit
       run: bandit -r . --format sarif --output results.sarif || true
