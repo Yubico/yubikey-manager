@@ -1,4 +1,4 @@
-name: "bandit sarif example"
+name: "bandit sarif example "
 
 on:
   push:
