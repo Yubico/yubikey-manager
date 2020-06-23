@@ -1,0 +1,23 @@
+name: "bandit sarif example"
+
+on:
+  push:
+
+jobs:
+  bandit-sarif:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Intall bandit and formatter
+      run: pip install wheel bandit bandit-sarif-formatter
+
+    - name: Run bandit
+      run: bandit -r . --format sarif --output results.sarif || true
+
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v1
+      with:
+        sarif_file: results.sarif
