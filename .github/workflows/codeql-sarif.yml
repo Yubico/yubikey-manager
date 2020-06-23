@@ -15,7 +15,7 @@ jobs:
       run: sudo apt-get install python3-setuptools python3-wheel && pip3 install bandit bandit-sarif-formatter
 
     - name: Run bandit
-      run: bandit -r . --format sarif --output results.sarif || true
+      run: python3 -m bandit -r . --format sarif --output results.sarif || true
 
     - name: Upload SARIF file
       uses: github/codeql-action/upload-sarif@v1
