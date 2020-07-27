@@ -8,7 +8,7 @@ on:
 
 env:
   SCAN_IMG:
-    yes-docker-local.artifactory.in.yubico.org/static-code-analysis/python:v1
+    yubico-yes-docker-local.jfrog.io/static-code-analysis/python:v1
   SECRET: ${{ secrets.ARTIFACTORY_READER_TOKEN }}
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
     - name: Scan and fail if warnings
       run: |
         if [ "${SECRET}" != "" ]; then
-          docker login yes-docker-local.artifactory.in.yubico.org/ \
+          docker login yubico-yes-docker-local.jfrog.io/ \
             -u svc-static-code-analysis-reader -p ${SECRET}
           docker pull ${SCAN_IMG}
           docker run -v${PWD}:/k -e PROJECT_NAME=${GITHUB_REPOSITORY#Yubico/} -t ${SCAN_IMG}
