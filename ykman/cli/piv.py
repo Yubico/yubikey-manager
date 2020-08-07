@@ -179,7 +179,10 @@ def info(ctx):
 
             fingerprint = b2a_hex(
                 cert.fingerprint(hashes.SHA256())).decode('ascii')
-            algo = ALGO.from_public_key(cert.public_key())
+            try:
+                algo = ALGO.from_public_key(cert.public_key()).name
+            except AttributeError:
+                algo = 'Unsupported'
             serial = cert.serial_number
             try:
                 not_before = cert.not_valid_before
@@ -192,7 +195,7 @@ def info(ctx):
                 logger.debug('Failed reading not_valid_after', exc_info=e)
                 not_after = None
             # Print out everything
-            click.echo('\tAlgorithm:\t%s' % algo.name)
+            click.echo('\tAlgorithm:\t%s' % algo)
             if print_dn:
                 click.echo('\tSubject DN:\t%s' % subject_dn)
                 click.echo('\tIssuer DN:\t%s' % issuer_dn)

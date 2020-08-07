@@ -234,9 +234,11 @@ class BadFormat(Exception):
 
 
 class InvalidCertificate(Exception):
-    def __init__(self, slot):
+    def __init__(self, slot, message=None):
         super(InvalidCertificate, self).__init__(
-            'Failed to parse certificate in slot {:x}'.format(slot))
+            'Failed to parse certificate in slot {:x}'.format(slot) +
+            ': {:s}'.format(message) if message else ''
+        )
         self.slot = slot
 
 
@@ -921,12 +923,13 @@ class PivController(object):
         data = Tlv.parse_dict(self.get_data(OBJ.from_slot(slot)))
         if TAG.CERT_INFO in data:  # Not available in attestation slot
             if data[TAG.CERT_INFO] != b'\0':
-                raise ValueError('Compressed certificates are not supported!')
+                raise InvalidCertificate(
+                    slot, 'Compressed certificates are not supported!')
         try:
             return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
                                                   default_backend())
-        except Exception:
-            raise InvalidCertificate(slot)
+        except Exception as e:
+            raise InvalidCertificate(slot, str(e))
 
     def delete_certificate(self, slot):
         self.put_data(OBJ.from_slot(slot), b'')
@@ -967,9 +970,12 @@ class PivController(object):
         for slot in set(SLOT) - {SLOT.CARD_MANAGEMENT, SLOT.ATTESTATION}:
             try:
                 certs[slot] = self.read_certificate(slot)
-            except APDUError:
-                pass
-            except InvalidCertificate:
+            except APDUError as e:
+                if e.sw != 0x6a82:  # Something other than empty slot
+                    logger.error('Failed reading certificate.', exc_info=e)
+                    certs[slot] = None
+            except InvalidCertificate as e:
+                logger.error('Failed parsing certificate.', exc_info=e)
                 certs[slot] = None
 
         return certs
