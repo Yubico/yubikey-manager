@@ -31,7 +31,7 @@ from setuptools import setup
 
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click',
-    'cryptography', 'pyopenssl', 'fido2 >= 0.7'
+    'cryptography==2.9.2', 'pyopenssl', 'fido2 >= 0.7'
 ]
 if sys.version_info < (3, 4):
     install_requires.append('enum34')
