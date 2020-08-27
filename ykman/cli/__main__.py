@@ -106,7 +106,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
 
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
     if reader:
-        if TRANSPORT.has(transports, TRANSPORT.CCID):
+        if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd == fido.name:
             readers = list(open_ccid(reader))
             if len(readers) == 1:
                 return YubiKey(Descriptor.from_driver(readers[0]), readers[0])

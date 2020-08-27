@@ -32,12 +32,20 @@ import time
 import logging
 from fido2.ctap1 import CTAP1, ApduError
 from fido2.ctap2 import CTAP2, PinProtocolV1, CredentialManagement
+from fido2.pcsc import CtapPcscDevice
 from threading import Timer
-from .driver_ccid import SW
+from .driver_ccid import SW, CCIDDriver
 from .driver_fido import FIPS_U2F_CMD
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_ctap_device(driver):
+    if isinstance(driver, CCIDDriver):
+        return CtapPcscDevice(driver._conn, 'YubiKey')
+    else:
+        return driver._dev
 
 
 class ResidentCredential(object):
@@ -61,7 +69,7 @@ class ResidentCredential(object):
 class Fido2Controller(object):
 
     def __init__(self, driver):
-        self.ctap = CTAP2(driver._dev)
+        self.ctap = CTAP2(_get_ctap_device(driver))
         self.pin = PinProtocolV1(self.ctap)
         self._info = self.ctap.get_info()
         self._pin = self._info.options['clientPin']
@@ -121,7 +129,7 @@ class FipsU2fController(object):
 
     def __init__(self, driver):
         self.driver = driver
-        self.ctap = CTAP1(driver._dev)
+        self.ctap = CTAP1(_get_ctap_device(driver))
 
     @property
     def has_pin(self):
