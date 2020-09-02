@@ -1,12 +1,12 @@
 repos:
-- repo: git://github.com/pre-commit/pre-commit-hooks
-  rev: v2.5.0
-  hooks:
-    - id: double-quote-string-fixer
 - repo: https://gitlab.com/pycqa/flake8
   rev: 3.7.9
   hooks:
     - id: flake8
+- repo: https://github.com/psf/black
+  rev: 19.10b0
+  hooks:
+    - id: black
 - repo: https://github.com/PyCQA/bandit
   rev: 1.6.2
   hooks:
