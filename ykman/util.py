@@ -196,7 +196,7 @@ class Mode(object):
         TRANSPORT.FIDO,  # 0x03
         TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
         TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
-        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID  # 0x06
+        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
     ]
 
     def __init__(self, transports):
@@ -236,10 +236,10 @@ class Mode(object):
 
 def _tlv_parse_tag(data, offs=0):
     t = six.indexbytes(data, offs)
-    if t & 0x1f != 0x1f:
+    if t & 0x1F != 0x1F:
         return t, 1
     else:
-        t = t << 8 | six.indexbytes(data, offs+1)
+        t = t << 8 | six.indexbytes(data, offs + 1)
         return t, 2
 
 
@@ -248,14 +248,13 @@ def _tlv_parse_length(data, offs=0):
     offs += 1
     if ln > 0x80:
         n_bytes = ln - 0x80
-        ln = bytes2int(data[offs:offs + n_bytes])
+        ln = bytes2int(data[offs : offs + n_bytes])
     else:
         n_bytes = 0
     return ln, n_bytes + 1
 
 
 class Tlv(bytes):
-
     @property
     def tag(self):
         return _tlv_parse_tag(self)[0]
@@ -274,9 +273,7 @@ class Tlv(bytes):
 
     def __repr__(self):
         return u'{}(tag={:02x}, value={})'.format(
-            self.__class__.__name__,
-            self.tag,
-            b2a_hex(self.value).decode('ascii')
+            self.__class__.__name__, self.tag, b2a_hex(self.value).decode('ascii')
         )
 
     def __new__(cls, *args):
@@ -289,29 +286,30 @@ class Tlv(bytes):
                 tag, tag_ln = _tlv_parse_tag(data)
                 ln, ln_ln = _tlv_parse_length(data, tag_ln)
                 offs = tag_ln + ln_ln
-                value = data[offs:offs+ln]
+                value = data[offs : offs + ln]
         elif len(args) == 2:  # Called with tag and value.
             (tag, value) = args
         else:
-            raise TypeError('{}() takes at most 2 arguments ({} given)'.format(
-                cls, len(args)))
+            raise TypeError(
+                '{}() takes at most 2 arguments ({} given)'.format(cls, len(args))
+            )
 
         data = bytearray([])
-        if tag <= 0xff:
+        if tag <= 0xFF:
             data.append(tag)
         else:
             tag_1 = tag >> 8
-            if tag_1 > 0xff or tag_1 & 0x1f != 0x1f:
+            if tag_1 > 0xFF or tag_1 & 0x1F != 0x1F:
                 raise ValueError('Unsupported tag value')
-            tag_2 = tag & 0xff
+            tag_2 = tag & 0xFF
             data.extend([tag_1, tag_2])
         length = len(value)
         if length < 0x80:
             data.append(length)
-        elif length < 0xff:
+        elif length < 0xFF:
             data.extend([0x81, length])
         else:
-            data.extend([0x82, length >> 8, length & 0xff])
+            data.extend([0x82, length >> 8, length & 0xFF])
         data += value
 
         return super(Tlv, cls).__new__(cls, bytes(data))
@@ -319,7 +317,7 @@ class Tlv(bytes):
     @classmethod
     def parse_from(cls, data):
         tlv = cls(data)
-        return tlv, data[len(tlv):]
+        return tlv, data[len(tlv) :]
 
     @classmethod
     def parse_list(cls, data):
@@ -337,10 +335,9 @@ class Tlv(bytes):
     def unpack(cls, tag, data):
         tlv = cls(data)
         if tlv.tag != tag:
-            raise ValueError('Wrong tag, got {:02x} expected {:02x}'.format(
-                tlv.tag,
-                tag
-            ))
+            raise ValueError(
+                'Wrong tag, got {:02x} expected {:02x}'.format(tlv.tag, tag)
+            )
         return tlv.value
 
 
@@ -355,13 +352,13 @@ class MissingLibrary(object):
         raise AttributeError(self._message)
 
 
-def int2bytes(value):
+def int2bytes(value, min_len=0):
     buf = []
-    while value > 0xff:
-        buf.append(value & 0xff)
+    while value > 0xFF:
+        buf.append(value & 0xFF)
         value >>= 8
     buf.append(value)
-    return bytes(bytearray(reversed(buf)))
+    return bytes(bytearray(reversed(buf))).rjust(min_len, b'\0')
 
 
 def bytes2int(data):
@@ -370,8 +367,8 @@ def bytes2int(data):
 
 _HEX = b'0123456789abcdef'
 _MODHEX = b'cbdefghijklnrtuv'
-_MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i:i+1]) for i in range(16))
-_HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i:i+1]) for i in range(16))
+_MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i : i + 1]) for i in range(16))
+_HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i : i + 1]) for i in range(16))
 DEFAULT_PW_CHAR_BLOCKLIST = ['\t', '\n', ' ']
 
 
@@ -395,9 +392,8 @@ def modhex_encode(value):
 
 
 def generate_static_pw(
-        length,
-        keyboard_layout=KEYBOARD_LAYOUT.MODHEX,
-        blocklist=DEFAULT_PW_CHAR_BLOCKLIST):
+    length, keyboard_layout=KEYBOARD_LAYOUT.MODHEX, blocklist=DEFAULT_PW_CHAR_BLOCKLIST
+):
     chars = [k for k in keyboard_layout.value.keys() if k not in blocklist]
     sr = random.SystemRandom()
     return ''.join([sr.choice(chars) for _ in range(length)])
@@ -416,12 +412,12 @@ def format_code(code, digits=6, steam=False):
 
 
 def parse_totp_hash(resp):
-    offs = six.indexbytes(resp, -1) & 0xf
-    return parse_truncated(resp[offs:offs+4])
+    offs = six.indexbytes(resp, -1) & 0xF
+    return parse_truncated(resp[offs : offs + 4])
 
 
 def parse_truncated(resp):
-    return struct.unpack('>I', resp)[0] & 0x7fffffff
+    return struct.unpack('>I', resp)[0] & 0x7FFFFFFF
 
 
 def hmac_shorten_key(key, algo):
@@ -471,7 +467,8 @@ def parse_private_key(data, password):
                 raise TypeError('No password provided for encrypted key.')
         try:
             return serialization.load_pem_private_key(
-                data, password, backend=default_backend())
+                data, password, backend=default_backend()
+            )
         except ValueError:
             # Cryptography raises ValueError if decryption fails.
             raise
@@ -482,17 +479,18 @@ def parse_private_key(data, password):
     if is_pkcs12(data):
         try:
             p12 = crypto.load_pkcs12(data, password)
-            data = crypto.dump_privatekey(
-                crypto.FILETYPE_PEM, p12.get_privatekey())
+            data = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
             return serialization.load_pem_private_key(
-                data, password=None, backend=default_backend())
+                data, password=None, backend=default_backend()
+            )
         except crypto.Error as e:
             raise ValueError(e)
 
     # DER
     try:
         return serialization.load_der_private_key(
-            data, password, backend=default_backend())
+            data, password, backend=default_backend()
+        )
     except Exception as e:
         logger.debug('Failed to parse private key as DER', exc_info=e)
 
@@ -512,7 +510,9 @@ def parse_certificates(data, password):
             try:
                 certs.append(
                     x509.load_pem_x509_certificate(
-                        PEM_IDENTIFIER + cert, default_backend()))
+                        PEM_IDENTIFIER + cert, default_backend()
+                    )
+                )
             except Exception as e:
                 logger.debug('Failed to parse PEM certificate', exc_info=e)
         # Could be valid PEM but not certificates.
@@ -523,8 +523,7 @@ def parse_certificates(data, password):
     if is_pkcs12(data):
         try:
             p12 = crypto.load_pkcs12(data, password)
-            data = crypto.dump_certificate(
-                crypto.FILETYPE_PEM, p12.get_certificate())
+            data = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
             return [x509.load_pem_x509_certificate(data, default_backend())]
         except crypto.Error as e:
             raise ValueError(e)
@@ -544,11 +543,16 @@ def get_leaf_certificates(certs):
     certificates are ones whose subject does not appear as issuer among the
     others.
     """
-    issuers = [cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-               for cert in certs]
-    leafs = [cert for cert in certs
-             if (cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-                 not in issuers)]
+    issuers = [
+        cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME) for cert in certs
+    ]
+    leafs = [
+        cert
+        for cert in certs
+        if (
+            cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME) not in issuers
+        )
+    ]
     return leafs
 
 
