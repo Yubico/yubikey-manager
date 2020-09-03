@@ -31,32 +31,36 @@ import logging
 import ykman
 
 
-LOG_LEVELS = [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR,
-              logging.CRITICAL]
+LOG_LEVELS = [
+    logging.DEBUG,
+    logging.INFO,
+    logging.WARNING,
+    logging.ERROR,
+    logging.CRITICAL,
+]
 LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
 
 
 def setup(log_level_name, log_file=None):
     log_level_value = next(
-        (lvl for lvl in LOG_LEVELS
-         if logging.getLevelName(lvl) == log_level_name),
-        None
+        (lvl for lvl in LOG_LEVELS if logging.getLevelName(lvl) == log_level_name), None
     )
 
     if log_level_value is None:
-        raise ValueError('Unknown log level: ' + log_level_name)
+        raise ValueError("Unknown log level: " + log_level_name)
 
     logging.disable(logging.NOTSET)
     logging.basicConfig(
-        datefmt='%Y-%m-%dT%H:%M:%S%z',
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
         filename=log_file,
-        format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
-        level=log_level_value
+        format="%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",  # noqa: E501
+        level=log_level_value,
     )
 
     logger = logging.getLogger(__name__)
-    logger.info('Initialized logging for %s version: %s',
-                ykman.__name__, ykman.__version__)
+    logger.info(
+        "Initialized logging for %s version: %s", ykman.__name__, ykman.__version__
+    )
 
 
 logging.disable(logging.CRITICAL * 2)

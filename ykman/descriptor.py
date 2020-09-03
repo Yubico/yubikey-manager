@@ -47,11 +47,8 @@ class FailedOpeningDeviceException(Exception):
 
 
 class Descriptor(object):
-
-    def __init__(
-            self, key_type, mode, version, fingerprint,
-            serial=None, backend=None):
-        self._logger = logger.getChild('Descriptor')
+    def __init__(self, key_type, mode, version, fingerprint, serial=None, backend=None):
+        self._logger = logger.getChild("Descriptor")
         self._version = version
         self._key_type = key_type
         self._mode = mode
@@ -77,43 +74,57 @@ class Descriptor(object):
     @property
     def name(self):
         if self.key_type == YUBIKEY.SKY and self.version < (5, 0, 0):
-            return 'FIDO U2F Security Key'
+            return "FIDO U2F Security Key"
         elif self.key_type == YUBIKEY.YK4 and self.version >= (5, 0, 0):
-            return 'YubiKey 5'
+            return "YubiKey 5"
         else:
             return self.key_type.value
 
     def open_device(self, transports=sum(TRANSPORT), serial=None, attempts=10):
-        self._logger.debug('transports: 0x%x, self.mode.transports: 0x%x',
-                           transports, self.mode.transports)
+        self._logger.debug(
+            "transports: 0x%x, self.mode.transports: 0x%x",
+            transports,
+            self.mode.transports,
+        )
 
         transports &= self.mode.transports
 
-        logger.debug('Opening driver for serial: %s, type: %s, mode: %s',
-                     serial, self.key_type, self.mode)
+        logger.debug(
+            "Opening driver for serial: %s, type: %s, mode: %s",
+            serial,
+            self.key_type,
+            self.mode,
+        )
         for attempt in range(1, attempts + 1):
-            logger.debug('Attempt %d of %d', attempt, attempts)
+            logger.debug("Attempt %d of %d", attempt, attempts)
             sleep_time = attempt * 0.1
             for drv in _list_drivers(transports):
-                logger.debug('Found driver: %s, key_type: %s, mode: %s',
-                             drv, drv.key_type, drv.mode)
+                logger.debug(
+                    "Found driver: %s, key_type: %s, mode: %s",
+                    drv,
+                    drv.key_type,
+                    drv.mode,
+                )
                 dev = YubiKey(self, drv)
                 if serial is not None and dev.serial != serial:
-                    logger.debug('Serial does not match. Want: %s, got: %s',
-                                 serial, dev.serial)
+                    logger.debug(
+                        "Serial does not match. Want: %s, got: %s", serial, dev.serial
+                    )
                     del dev
                     continue
                 if (drv.key_type, drv.mode) != (self.key_type, self.mode):
-                    logger.debug('Descriptor mismatch. Want: %s, got: %s',
-                                 (self.key_type, self.mode),
-                                 (drv.key_type, drv.mode))
+                    logger.debug(
+                        "Descriptor mismatch. Want: %s, got: %s",
+                        (self.key_type, self.mode),
+                        (drv.key_type, drv.mode),
+                    )
                     del dev
                     continue
                 return dev
             #  Wait a little before trying again.
-            logger.debug('Sleeping for %f s', sleep_time)
+            logger.debug("Sleeping for %f s", sleep_time)
             time.sleep(sleep_time)
-        logger.debug('No matching device found')
+        logger.debug("No matching device found")
         raise FailedOpeningDeviceException()
 
     @classmethod
@@ -123,12 +134,11 @@ class Descriptor(object):
         try:
             pid = PID(usb_dev.idProduct)
         except ValueError:
-            logger.debug('Ignoring unknown PID: {:x}'.format(usb_dev.idProduct))
+            logger.debug("Ignoring unknown PID: {:x}".format(usb_dev.idProduct))
             return None
 
         fp = (pid, version, usb_dev.bus, usb_dev.address, usb_dev.iSerialNumber)
-        return cls(
-            pid.get_type(), Mode.from_pid(pid), version, fp, backend=backend)
+        return cls(pid.get_type(), Mode.from_pid(pid), version, fp, backend=backend)
 
     @classmethod
     def from_driver(cls, driver):
@@ -159,8 +169,10 @@ def _list_drivers(transports):
                 if dev:
                     yield dev
         except smartcard.pcsc.PCSCExceptions.EstablishContextException:
-            logger.debug('Failed to establish CCID context. '
-                         'Is the pcscd/smart card service running?')
+            logger.debug(
+                "Failed to establish CCID context. "
+                "Is the pcscd/smart card service running?"
+            )
     if TRANSPORT.OTP & transports:
         for dev in open_otp():
             if dev:
@@ -177,45 +189,66 @@ def list_devices(transports=sum(TRANSPORT)):
 
 
 def _open_driver(transports, serial, key_type, mode, attempts):
-    logger.debug('Opening driver for transports: %s, serial: %s, key_type: %s, '
-                 'mode: %s',
-                 transports, serial, key_type, mode)
+    logger.debug(
+        "Opening driver for transports: %s, serial: %s, key_type: %s, " "mode: %s",
+        transports,
+        serial,
+        key_type,
+        mode,
+    )
     for attempt in range(1, attempts + 1):
-        logger.debug('Attempt %d of %d', attempt, attempts)
+        logger.debug("Attempt %d of %d", attempt, attempts)
         sleep_time = attempt * 0.1
         for dev in list_devices(transports):
-            logger.debug('Found driver: %s serial: %s, key_type: %s, mode: %s',
-                         dev.driver, dev.serial, dev.driver.key_type,
-                         dev.driver.mode)
+            logger.debug(
+                "Found driver: %s serial: %s, key_type: %s, mode: %s",
+                dev.driver,
+                dev.serial,
+                dev.driver.key_type,
+                dev.driver.mode,
+            )
             if serial is not None and dev.serial != serial:
-                logger.debug('Serial does not match. Want: %s, got: %s',
-                             serial, dev.serial)
+                logger.debug(
+                    "Serial does not match. Want: %s, got: %s", serial, dev.serial
+                )
                 del dev
                 continue
             if key_type is not None and dev.driver.key_type != key_type:
-                logger.debug('Key type does not match. Want: %s, got: %s',
-                             key_type, dev.driver.key_type)
+                logger.debug(
+                    "Key type does not match. Want: %s, got: %s",
+                    key_type,
+                    dev.driver.key_type,
+                )
                 del dev
                 continue
             if mode is not None and dev.driver.mode != mode:
-                logger.debug('Mode does not match. Want: %s, got: %s',
-                             mode, dev.driver.mode)
+                logger.debug(
+                    "Mode does not match. Want: %s, got: %s", mode, dev.driver.mode
+                )
                 del dev
                 continue
             return dev.driver
         #  Wait a little before trying again.
-        logger.debug('Sleeping for %f s', sleep_time)
+        logger.debug("Sleeping for %f s", sleep_time)
         time.sleep(sleep_time)
-        logger.debug('No driver found for serial: %s, key_type: %s, mode: %s',
-                     serial, key_type, mode)
+        logger.debug(
+            "No driver found for serial: %s, key_type: %s, mode: %s",
+            serial,
+            key_type,
+            mode,
+        )
     raise FailedOpeningDeviceException()
 
 
-def open_device(transports=sum(TRANSPORT), serial=None, key_type=None,
-                mode=None, attempts=10):
+def open_device(
+    transports=sum(TRANSPORT), serial=None, key_type=None, mode=None, attempts=10
+):
     driver = _open_driver(transports, serial, key_type, mode, attempts)
-    matches = [d for d in get_descriptors() if (d.key_type, d.mode)
-               == (driver.key_type, driver.mode)]
+    matches = [
+        d
+        for d in get_descriptors()
+        if (d.key_type, d.mode) == (driver.key_type, driver.mode)
+    ]
     if len(matches) == 1:  # Only one matching descriptor, must be it
         descriptor = matches[0]
     else:

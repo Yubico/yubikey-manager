@@ -26,7 +26,7 @@ class ApduError(Exception):
         self.sw = sw
 
     def __str__(self):
-        return 'APDU error: SW=0x{:04x}'.format(self.sw)
+        return "APDU error: SW=0x{:04x}".format(self.sw)
 
 
 INS_SELECT = 0xA4
@@ -41,14 +41,14 @@ SW1_HAS_MORE_DATA = 0x61
 SHORT_APDU_MAX_CHUNK = 0xFF
 
 
-def _encode_apdu(cla, ins, p1, p2, data=b''):
+def _encode_apdu(cla, ins, p1, p2, data=b""):
     data_len = len(data)
-    buf = struct.pack('>BBBB', cla, ins, p1, p2)
+    buf = struct.pack(">BBBB", cla, ins, p1, p2)
     if data_len <= SHORT_APDU_MAX_CHUNK:
         if data_len > 0:
-            buf += struct.pack('>B', data_len)
+            buf += struct.pack(">B", data_len)
     else:
-        buf += struct.pack('>BH', 0, data_len)
+        buf += struct.pack(">BH", 0, data_len)
     return buf + data
 
 
@@ -70,7 +70,7 @@ class Iso7816Application(object):
         # TODO: Catch SW_FILE_NOT_FOUND and thrown other exception
         return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, self.aid)
 
-    def send_apdu(self, cla, ins, p1, p2, data=b''):
+    def send_apdu(self, cla, ins, p1, p2, data=b""):
         if (
             self._touch_workaround
             and self._last_long_resp > 0
@@ -85,7 +85,7 @@ class Iso7816Application(object):
         response, sw = self.connection.transceive(_encode_apdu(cla, ins, p1, p2, data))
 
         # Read full response
-        buf = b''
+        buf = b""
         get_data = _encode_apdu(0, self._ins_send_remaining, 0, 0)
         while sw >> 8 == SW1_HAS_MORE_DATA:
             buf += response

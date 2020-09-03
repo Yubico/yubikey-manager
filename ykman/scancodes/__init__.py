@@ -44,4 +44,4 @@ def encode(data, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
     try:
         return bytes(bytearray(keyboard_layout.value[c] for c in data))
     except KeyError as e:
-        raise ValueError('Unsupported character: %s' % e.args[0])
+        raise ValueError("Unsupported character: %s" % e.args[0])

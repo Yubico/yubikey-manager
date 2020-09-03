@@ -39,10 +39,10 @@ _usb_backend = None
 
 def _find_library_local(libname):
     # For .app bundles
-    if sys.platform == 'darwin':
+    if sys.platform == "darwin":
         libpath = os.path.join(
-            os.path.dirname(
-                sys.executable), '../Frameworks', libname + '.dylib')
+            os.path.dirname(sys.executable), "../Frameworks", libname + ".dylib"
+        )
         if os.path.isfile(libpath):
             return libpath
     else:
@@ -50,20 +50,20 @@ def _find_library_local(libname):
         libpath = os.path.join(os.path.dirname(__file__), libname)
         if os.path.isfile(libpath):
             return libpath
-        elif sys.platform == 'win32' and os.path.isfile(libpath + '.dll'):
-            return libpath + '.dll'
+        elif sys.platform == "win32" and os.path.isfile(libpath + ".dll"):
+            return libpath + ".dll"
 
 
 def _load_usb_backend():
     # First try to find backend locally, if not found try the systems.
     try:
-        tmp = os.environ['PATH']
-        os.environ['PATH'] = ''
+        tmp = os.environ["PATH"]
+        os.environ["PATH"] = ""
         backend = libusb1.get_backend(find_library=_find_library_local)
         if backend is not None:
             return backend
     finally:
-        os.environ['PATH'] = tmp
+        os.environ["PATH"] = tmp
 
     backend = libusb1.get_backend()
     if backend is not None:
@@ -80,12 +80,12 @@ def get_usb_backend():
 
 class LibUsb1Version(ctypes.Structure):
     _fields_ = [
-        ('major', ctypes.c_uint16),
-        ('minor', ctypes.c_uint16),
-        ('micro', ctypes.c_uint16),
-        ('nano', ctypes.c_uint16),
-        ('rc', ctypes.c_char_p),
-        ('describe', ctypes.c_char_p)
+        ("major", ctypes.c_uint16),
+        ("minor", ctypes.c_uint16),
+        ("micro", ctypes.c_uint16),
+        ("nano", ctypes.c_uint16),
+        ("rc", ctypes.c_char_p),
+        ("describe", ctypes.c_char_p),
     ]
 
 
@@ -97,4 +97,4 @@ def get_usb_backend_version():
         lib = backend.lib
         lib.libusb_get_version.restype = ctypes.POINTER(LibUsb1Version)
         version = lib.libusb_get_version().contents
-        return 'libusb {0.major}.{0.minor}.{0.micro}'.format(version)
+        return "libusb {0.major}.{0.minor}.{0.micro}".format(version)

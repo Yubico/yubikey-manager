@@ -31,9 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 class ModeSwitchError(Exception):
-
     def __init__(self):
-        super(ModeSwitchError, self).__init__('Failed to switch mode.')
+        super(ModeSwitchError, self).__init__("Failed to switch mode.")
 
 
 class NotSupportedError(Exception):

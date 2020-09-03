@@ -61,7 +61,7 @@ class FidoDriver(AbstractDriver):
     transport = TRANSPORT.FIDO
 
     def __init__(self, dev):
-        pid = PID(dev.descriptor['product_id'])
+        pid = PID(dev.descriptor["product_id"])
         super(FidoDriver, self).__init__(pid.get_type(), Mode.from_pid(pid))
         self._dev = dev
 
@@ -83,14 +83,16 @@ class FidoDriver(AbstractDriver):
         return version
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
-        data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
+        data = struct.pack("BBH", mode_code, cr_timeout, autoeject_time)
         self._dev.call(CMD.YUBIKEY_DEVICE_CONFIG, data)
 
 
 def descriptor_filter(desc):
-    return desc['vendor_id'] == 0x1050 \
-            and desc['usage_page'] == 0xf1d0 \
-            and desc['usage'] == 1
+    return (
+        desc["vendor_id"] == 0x1050
+        and desc["usage_page"] == 0xF1D0
+        and desc["usage"] == 1
+    )
 
 
 def open_devices():
@@ -98,4 +100,4 @@ def open_devices():
         try:
             yield FidoDriver(dev)
         except Exception as e:
-            logger.debug('Failed opening FIDO device', exc_info=e)
+            logger.debug("Failed opening FIDO device", exc_info=e)

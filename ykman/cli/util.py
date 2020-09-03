@@ -41,18 +41,21 @@ class UpperCaseChoice(click.Choice):
     Does not support token normalization.
     Choice options MUST be all uppercase.
     """
+
     def __init__(self, choices):
         for v in choices:
             if v.upper() != v:
-                raise ValueError('Choice not all uppercase: ' + v)
+                raise ValueError("Choice not all uppercase: " + v)
         click.Choice.__init__(self, choices)
 
     def convert(self, value, param, ctx):
         if value.upper() in self.choices:
             return value.upper()
         self.fail(
-            'invalid choice: %s. (choose from %s)' % (
-                value, ', '.join(self.choices)), param, ctx)
+            "invalid choice: %s. (choose from %s)" % (value, ", ".join(self.choices)),
+            param,
+            ctx,
+        )
 
 
 class EnumChoice(UpperCaseChoice):
@@ -62,14 +65,15 @@ class EnumChoice(UpperCaseChoice):
     Enum member names MUST be all uppercase. Options are not case sensitive.
     Underscores in enum names are translated to dashes in the option choice.
     """
+
     def __init__(self, choices_enum):
         super(EnumChoice, self).__init__(
-            [v.name.replace('_', '-') for v in choices_enum])
+            [v.name.replace("_", "-") for v in choices_enum]
+        )
         self.choices_enum = choices_enum
 
     def convert(self, value, param, ctx):
-        name = super(EnumChoice, self).convert(
-            value, param, ctx).replace('-', '_')
+        name = super(EnumChoice, self).convert(value, param, ctx).replace("-", "_")
         return self.choices_enum[name]
 
 
@@ -82,30 +86,37 @@ def click_callback(invoke_on_missing=False):
             try:
                 return f(ctx, param, val)
             except Exception as e:
-                ctx.fail('Invalid value for "{}": {}'.format(
-                    param.name, str(e)))
+                ctx.fail('Invalid value for "{}": {}'.format(param.name, str(e)))
+
         return inner
+
     return wrap
 
 
 @click_callback()
 def click_parse_format(ctx, param, val):
-    if val == 'PEM':
+    if val == "PEM":
         return serialization.Encoding.PEM
-    elif val == 'DER':
+    elif val == "DER":
         return serialization.Encoding.DER
     else:
         raise ValueError(val)
 
 
 click_force_option = click.option(
-    '-f', '--force', is_flag=True, help='Confirm the action without prompting.')
+    "-f", "--force", is_flag=True, help="Confirm the action without prompting."
+)
 
 
 click_format_option = click.option(
-    '-F', '--format',
-    type=UpperCaseChoice(['PEM', 'DER']), default='PEM', show_default=True,
-    help='Encoding format.', callback=click_parse_format)
+    "-F",
+    "--format",
+    type=UpperCaseChoice(["PEM", "DER"]),
+    default="PEM",
+    show_default=True,
+    help="Encoding format.",
+    callback=click_parse_format,
+)
 
 
 class YkmanContextObject(MutableMapping):
@@ -130,7 +141,7 @@ class YkmanContextObject(MutableMapping):
 
     def __setitem__(self, key, value):
         if not self._resolved:
-            raise ValueError('BUG: Attempted to set item when unresolved.')
+            raise ValueError("BUG: Attempted to set item when unresolved.")
         self._objects[key] = value
 
     def __delitem__(self, key):
@@ -146,10 +157,8 @@ class YkmanContextObject(MutableMapping):
 def click_postpone_execution(f):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        click.get_current_context().obj.add_resolver(
-            str(f),
-            lambda: f(*args, **kwargs)
-        )
+        click.get_current_context().obj.add_resolver(str(f), lambda: f(*args, **kwargs))
+
     return inner
 
 
@@ -160,6 +169,6 @@ def click_parse_b32_key(ctx, param, val):
 
 def prompt_for_touch():
     try:
-        click.echo('Touch your YubiKey...', err=True)
+        click.echo("Touch your YubiKey...", err=True)
     except Exception:
-        sys.stderr.write('Touch your YubiKey...\n')
+        sys.stderr.write("Touch your YubiKey...\n")

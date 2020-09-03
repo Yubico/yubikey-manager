@@ -31,12 +31,14 @@ import logging
 from threading import Timer
 from binascii import b2a_hex, a2b_hex
 from .util import (
-    click_force_option, click_postpone_execution, click_callback,
-    click_parse_b32_key, prompt_for_touch, EnumChoice
+    click_force_option,
+    click_postpone_execution,
+    click_callback,
+    click_parse_b32_key,
+    prompt_for_touch,
+    EnumChoice,
 )
-from ..driver_ccid import (
-    APDUError,  SW
-)
+from ..driver_ccid import APDUError, SW
 from ..util import TRANSPORT, parse_b32_key
 from ..oath import OathController, CredentialData, OATH_TYPE, ALGO
 from ..settings import Settings
@@ -45,29 +47,29 @@ from ..settings import Settings
 logger = logging.getLogger(__name__)
 
 click_touch_option = click.option(
-    '-t', '--touch', is_flag=True,
-    help='Require touch on YubiKey to generate code.')
+    "-t", "--touch", is_flag=True, help="Require touch on YubiKey to generate code."
+)
 
 
 click_show_hidden_option = click.option(
-    '-H', '--show-hidden', is_flag=True,
-    help='Include hidden credentials.')
+    "-H", "--show-hidden", is_flag=True, help="Include hidden credentials."
+)
 
 
 @click_callback()
 def _clear_callback(ctx, param, clear):
     if clear:
         ensure_validated(ctx)
-        controller = ctx.obj['controller']
-        settings = ctx.obj['settings']
+        controller = ctx.obj["controller"]
+        settings = ctx.obj["settings"]
 
         controller.clear_password()
-        keys = settings.setdefault('keys', {})
+        keys = settings.setdefault("keys", {})
         if controller.id in keys:
             del keys[controller.id]
             settings.write()
 
-        click.echo('Password cleared.')
+        click.echo("Password cleared.")
         ctx.exit()
 
 
@@ -76,14 +78,13 @@ def click_parse_uri(ctx, param, val):
     try:
         return CredentialData.from_uri(val)
     except ValueError:
-        raise click.BadParameter('URI seems to have the wrong format.')
+        raise click.BadParameter("URI seems to have the wrong format.")
 
 
 @click.group()
 @click.pass_context
 @click_postpone_execution
-@click.option('-p', '--password', help='Provide a password to unlock the '
-              'YubiKey.')
+@click.option("-p", "--password", help="Provide a password to unlock the " "YubiKey.")
 def oath(ctx, password):
     """
     Manage OATH Application.
@@ -103,16 +104,16 @@ def oath(ctx, password):
       $ ykman oath set-password
     """
     try:
-        controller = OathController(ctx.obj['dev'].driver)
-        ctx.obj['controller'] = controller
-        ctx.obj['settings'] = Settings('oath')
+        controller = OathController(ctx.obj["dev"].driver)
+        ctx.obj["controller"] = controller
+        ctx.obj["settings"] = Settings("oath")
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail("The OATH application can't be found on this YubiKey.")
         raise
 
     if password:
-        ctx.obj['key'] = controller.derive_key(password)
+        ctx.obj["key"] = controller.derive_key(password)
 
 
 @oath.command()
@@ -121,27 +122,33 @@ def info(ctx):
     """
     Display status of OATH application.
     """
-    controller = ctx.obj['controller']
+    controller = ctx.obj["controller"]
     version = controller.version
+    click.echo("OATH version: {}.{}.{}".format(version[0], version[1], version[2]))
     click.echo(
-        'OATH version: {}.{}.{}'.format(version[0], version[1], version[2]))
-    click.echo('Password protection ' +
-               ('enabled' if controller.locked else 'disabled'))
+        "Password protection " + ("enabled" if controller.locked else "disabled")
+    )
 
-    keys = ctx.obj['settings'].get('keys', {})
+    keys = ctx.obj["settings"].get("keys", {})
     if controller.locked and controller.id in keys:
-        click.echo('The password for this YubiKey is remembered by ykman.')
+        click.echo("The password for this YubiKey is remembered by ykman.")
 
-    if ctx.obj['dev'].is_fips:
-        click.echo('FIPS Approved Mode: {}'.format(
-            'Yes' if controller.is_in_fips_mode else 'No'))
+    if ctx.obj["dev"].is_fips:
+        click.echo(
+            "FIPS Approved Mode: {}".format(
+                "Yes" if controller.is_in_fips_mode else "No"
+            )
+        )
 
 
 @oath.command()
 @click.pass_context
 @click.confirmation_option(
-    '-f', '--force', prompt='WARNING! This will delete '
-    'all stored OATH credentials and restore factory settings?')
+    "-f",
+    "--force",
+    prompt="WARNING! This will delete "
+    "all stored OATH credentials and restore factory settings?",
+)
 def reset(ctx):
     """
     Reset all OATH data.
@@ -150,48 +157,78 @@ def reset(ctx):
     the OATH application on the YubiKey.
     """
 
-    controller = ctx.obj['controller']
-    click.echo('Resetting OATH data...')
+    controller = ctx.obj["controller"]
+    click.echo("Resetting OATH data...")
     old_id = controller.id
     controller.reset()
 
-    settings = ctx.obj['settings']
-    keys = settings.setdefault('keys', {})
+    settings = ctx.obj["settings"]
+    keys = settings.setdefault("keys", {})
     if old_id in keys:
         del keys[old_id]
         settings.write()
 
-    click.echo(
-        'Success! All OATH credentials have been cleared from your YubiKey.')
+    click.echo("Success! All OATH credentials have been cleared from your YubiKey.")
 
 
 @oath.command()
-@click.argument('name')
-@click.argument('secret', callback=click_parse_b32_key, required=False)
+@click.argument("name")
+@click.argument("secret", callback=click_parse_b32_key, required=False)
 @click.option(
-    '-o', '--oath-type',
-    type=EnumChoice(OATH_TYPE), default=OATH_TYPE.TOTP.name,
-    help='Time-based (TOTP) or counter-based (HOTP) credential.',
-    show_default=True)
+    "-o",
+    "--oath-type",
+    type=EnumChoice(OATH_TYPE),
+    default=OATH_TYPE.TOTP.name,
+    help="Time-based (TOTP) or counter-based (HOTP) credential.",
+    show_default=True,
+)
 @click.option(
-    '-d', '--digits', type=click.Choice(['6', '7', '8']), default='6',
-    help='Number of digits in generated code.', show_default=True)
+    "-d",
+    "--digits",
+    type=click.Choice(["6", "7", "8"]),
+    default="6",
+    help="Number of digits in generated code.",
+    show_default=True,
+)
 @click.option(
-    '-a', '--algorithm',
-    type=EnumChoice(ALGO), default=ALGO.SHA1.name, show_default=True,
-    help='Algorithm to use for code generation.')
+    "-a",
+    "--algorithm",
+    type=EnumChoice(ALGO),
+    default=ALGO.SHA1.name,
+    show_default=True,
+    help="Algorithm to use for code generation.",
+)
 @click.option(
-    '-c', '--counter', type=click.INT, default=0,
-    help='Initial counter value for HOTP credentials.')
-@click.option('-i', '--issuer', help='Issuer of the credential.')
+    "-c",
+    "--counter",
+    type=click.INT,
+    default=0,
+    help="Initial counter value for HOTP credentials.",
+)
+@click.option("-i", "--issuer", help="Issuer of the credential.")
 @click.option(
-    '-p', '--period', help='Number of seconds a TOTP code is valid.',
-    default=30, show_default=True)
+    "-p",
+    "--period",
+    help="Number of seconds a TOTP code is valid.",
+    default=30,
+    show_default=True,
+)
 @click_touch_option
 @click_force_option
 @click.pass_context
-def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
-        counter, force):
+def add(
+    ctx,
+    secret,
+    name,
+    issuer,
+    period,
+    oath_type,
+    digits,
+    touch,
+    algorithm,
+    counter,
+    force,
+):
     """
     Add a new credential.
 
@@ -202,7 +239,7 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
 
     if not secret:
         while True:
-            secret = click.prompt('Enter a secret key (base32)', err=True)
+            secret = click.prompt("Enter a secret key (base32)", err=True)
             try:
                 secret = parse_b32_key(secret)
                 break
@@ -211,12 +248,17 @@ def add(ctx, secret, name, issuer, period, oath_type, digits, touch, algorithm,
 
     ensure_validated(ctx)
 
-    _add_cred(ctx, CredentialData(secret, issuer, name, oath_type, algorithm,
-                                  digits, period, counter, touch), force)
+    _add_cred(
+        ctx,
+        CredentialData(
+            secret, issuer, name, oath_type, algorithm, digits, period, counter, touch
+        ),
+        force,
+    )
 
 
 @oath.command()
-@click.argument('uri', callback=click_parse_uri, required=False)
+@click.argument("uri", callback=click_parse_uri, required=False)
 @click_touch_option
 @click_force_option
 @click.pass_context
@@ -229,7 +271,7 @@ def uri(ctx, uri, touch, force):
 
     if not uri:
         while True:
-            uri = click.prompt('Enter an OATH URI', err=True)
+            uri = click.prompt("Enter an OATH URI", err=True)
             try:
                 uri = CredentialData.from_uri(uri)
                 break
@@ -241,7 +283,7 @@ def uri(ctx, uri, touch, force):
 
     # Steam is a special case where we allow the otpauth
     # URI to contain a 'digits' value of '5'.
-    if data.digits == 5 and data.issuer == 'Steam':
+    if data.digits == 5 and data.issuer == "Steam":
         data.digits = 6
 
     data.touch = touch
@@ -250,50 +292,52 @@ def uri(ctx, uri, touch, force):
 
 
 def _add_cred(ctx, data, force):
-    controller = ctx.obj['controller']
+    controller = ctx.obj["controller"]
 
     if not (0 < len(data.name) <= 64):
-        ctx.fail('Name must be between 1 and 64 bytes.')
+        ctx.fail("Name must be between 1 and 64 bytes.")
 
     if len(data.secret) < 2:
-        ctx.fail('Secret must be at least 2 bytes.')
+        ctx.fail("Secret must be at least 2 bytes.")
 
     if data.touch and controller.version < (4, 2, 6):
-        ctx.fail('Touch-required credentials not supported on this key.')
+        ctx.fail("Touch-required credentials not supported on this key.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
-        ctx.fail('Counter only supported for HOTP credentials.')
+        ctx.fail("Counter only supported for HOTP credentials.")
 
     if data.algorithm == ALGO.SHA512 and (
-            controller.version < (4, 3, 1) or ctx.obj['dev'].is_fips):
-        ctx.fail('Algorithm SHA512 not supported on this YubiKey.')
+        controller.version < (4, 3, 1) or ctx.obj["dev"].is_fips
+    ):
+        ctx.fail("Algorithm SHA512 not supported on this YubiKey.")
 
     creds = controller.list()
     key = data.make_key()
     if not force and any(cred.key == key for cred in creds):
         click.confirm(
-            'A credential called {} already exists on this YubiKey.'
-            ' Do you want to overwrite it?'.format(data.name), abort=True,
-            err=True)
+            "A credential called {} already exists on this YubiKey."
+            " Do you want to overwrite it?".format(data.name),
+            abort=True,
+            err=True,
+        )
 
     firmware_overwrite_issue = (4, 0, 0) < controller.version < (4, 3, 5)
     cred_is_subset = any(
-        (cred.key.startswith(key) and cred.key != key) for cred in creds)
+        (cred.key.startswith(key) and cred.key != key) for cred in creds
+    )
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
-        ctx.fail(
-            'Choose a name that is not a subset of an existing credential.')
+        ctx.fail("Choose a name that is not a subset of an existing credential.")
 
     try:
         controller.put(data)
     except APDUError as e:
         if e.sw == SW.NO_SPACE:
-            ctx.fail('No space left on your YubiKey for OATH credentials.')
+            ctx.fail("No space left on your YubiKey for OATH credentials.")
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
-            ctx.fail(
-                'The command failed. Is there enough space on your YubiKey?')
+            ctx.fail("The command failed. Is there enough space on your YubiKey?")
         else:
             raise
 
@@ -301,8 +345,8 @@ def _add_cred(ctx, data, force):
 @oath.command()
 @click_show_hidden_option
 @click.pass_context
-@click.option('-o', '--oath-type', is_flag=True, help='Display the OATH type.')
-@click.option('-p', '--period', is_flag=True, help='Display the period.')
+@click.option("-o", "--oath-type", is_flag=True, help="Display the OATH type.")
+@click.option("-p", "--period", is_flag=True, help="Display the period.")
 def list(ctx, show_hidden, oath_type, period):
     """
     List all credentials.
@@ -310,27 +354,28 @@ def list(ctx, show_hidden, oath_type, period):
     List all credentials stored on your YubiKey.
     """
     ensure_validated(ctx)
-    controller = ctx.obj['controller']
-    creds = [cred
-             for cred in controller.list()
-             if show_hidden or not cred.is_hidden
-             ]
+    controller = ctx.obj["controller"]
+    creds = [cred for cred in controller.list() if show_hidden or not cred.is_hidden]
     creds.sort()
     for cred in creds:
         click.echo(cred.printable_key, nl=False)
         if oath_type:
-            click.echo(u', {}'.format(cred.oath_type.name), nl=False)
+            click.echo(u", {}".format(cred.oath_type.name), nl=False)
         if period:
-            click.echo(', {}'.format(cred.period), nl=False)
+            click.echo(", {}".format(cred.period), nl=False)
         click.echo()
 
 
 @oath.command()
 @click_show_hidden_option
 @click.pass_context
-@click.argument('query', required=False, default='')
-@click.option('-s', '--single', is_flag=True, help='Ensure only a single '
-              'match, and output only the code.')
+@click.argument("query", required=False, default="")
+@click.option(
+    "-s",
+    "--single",
+    is_flag=True,
+    help="Ensure only a single " "match, and output only the code.",
+)
 def code(ctx, show_hidden, query, single):
     """
     Generate codes.
@@ -342,11 +387,12 @@ def code(ctx, show_hidden, query, single):
 
     ensure_validated(ctx)
 
-    controller = ctx.obj['controller']
-    creds = [(cr, c)
-             for (cr, c) in controller.calculate_all()
-             if show_hidden or not cr.is_hidden
-             ]
+    controller = ctx.obj["controller"]
+    creds = [
+        (cr, c)
+        for (cr, c) in controller.calculate_all()
+        if show_hidden or not cr.is_hidden
+    ]
 
     creds = _search(creds, query)
 
@@ -366,13 +412,13 @@ def code(ctx, show_hidden, query, single):
                 creds = [(cred, controller.calculate(cred))]
         except APDUError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                ctx.fail('Touch credential timed out!')
+                ctx.fail("Touch credential timed out!")
 
     elif single and len(creds) > 1:
         _error_multiple_hits(ctx, [cr for cr, c in creds])
 
     elif single and len(creds) == 0:
-        ctx.fail('No matching credential found.')
+        ctx.fail("No matching credential found.")
 
     if single and creds:
         click.echo(creds[0][1].value)
@@ -382,16 +428,20 @@ def code(ctx, show_hidden, query, single):
         outputs = [
             (
                 cr.printable_key,
-                c.value if c
-                else '[Touch Credential]' if cr.touch
-                else '[HOTP Credential]' if cr.oath_type == OATH_TYPE.HOTP
-                else ''
-            ) for (cr, c) in creds
+                c.value
+                if c
+                else "[Touch Credential]"
+                if cr.touch
+                else "[HOTP Credential]"
+                if cr.oath_type == OATH_TYPE.HOTP
+                else "",
+            )
+            for (cr, c) in creds
         ]
 
         longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
         longest_code = max(len(c) for (n, c) in outputs) if outputs else 0
-        format_str = u'{:<%d}  {:>%d}' % (longest_name, longest_code)
+        format_str = u"{:<%d}  {:>%d}" % (longest_name, longest_code)
 
         for name, result in outputs:
             click.echo(format_str.format(name, result))
@@ -399,9 +449,8 @@ def code(ctx, show_hidden, query, single):
 
 @oath.command()
 @click.pass_context
-@click.argument('query')
-@click.option('-f', '--force', is_flag=True,
-              help='Confirm deletion without prompting')
+@click.argument("query")
+@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
 def delete(ctx, query, force):
     """
     Delete a credential.
@@ -411,36 +460,47 @@ def delete(ctx, query, force):
     """
 
     ensure_validated(ctx)
-    controller = ctx.obj['controller']
+    controller = ctx.obj["controller"]
     creds = controller.list()
     hits = _search(creds, query)
     if len(hits) == 0:
-        click.echo('No matches, nothing to be done.')
+        click.echo("No matches, nothing to be done.")
     elif len(hits) == 1:
         cred = hits[0]
-        if force or (click.confirm(
-                u'Delete credential: {} ?'.format(cred.printable_key),
-                default=False, err=True
-        )):
+        if force or (
+            click.confirm(
+                u"Delete credential: {} ?".format(cred.printable_key),
+                default=False,
+                err=True,
+            )
+        ):
             controller.delete(cred)
-            click.echo(u'Deleted {}.'.format(cred.printable_key))
+            click.echo(u"Deleted {}.".format(cred.printable_key))
         else:
-            click.echo('Deletion aborted by user.')
+            click.echo("Deletion aborted by user.")
 
     else:
         _error_multiple_hits(ctx, hits)
 
 
-@oath.command('set-password')
+@oath.command("set-password")
 @click.pass_context
 @click.option(
-    '-c', '--clear', is_flag=True, expose_value=False,
-    callback=_clear_callback, is_eager=True, help='Clear the current password.')
+    "-c",
+    "--clear",
+    is_flag=True,
+    expose_value=False,
+    callback=_clear_callback,
+    is_eager=True,
+    help="Clear the current password.",
+)
+@click.option("-n", "--new-password", help="Provide a new password as an argument.")
 @click.option(
-    '-n', '--new-password',
-    help='Provide a new password as an argument.')
-@click.option('-r', '--remember', is_flag=True, help='Remember the new '
-              'password on this machine.')
+    "-r",
+    "--remember",
+    is_flag=True,
+    help="Remember the new " "password on this machine.",
+)
 def set_password(ctx, new_password, remember):
     """
     Password protect the OATH credentials.
@@ -448,33 +508,38 @@ def set_password(ctx, new_password, remember):
     Allows you to set a password that will be required to access the OATH
     credentials stored on your YubiKey.
     """
-    ensure_validated(ctx, prompt='Enter your current password')
+    ensure_validated(ctx, prompt="Enter your current password")
     if not new_password:
         new_password = click.prompt(
-            'Enter your new password',
+            "Enter your new password",
             hide_input=True,
             confirmation_prompt=True,
-            err=True)
+            err=True,
+        )
 
-    controller = ctx.obj['controller']
-    settings = ctx.obj['settings']
-    keys = settings.setdefault('keys', {})
+    controller = ctx.obj["controller"]
+    settings = ctx.obj["settings"]
+    keys = settings.setdefault("keys", {})
     key = controller.set_password(new_password)
-    click.echo('Password updated.')
+    click.echo("Password updated.")
     if remember:
         keys[controller.id] = b2a_hex(key).decode()
         settings.write()
-        click.echo('Password remembered')
+        click.echo("Password remembered")
     elif controller.id in keys:
         del keys[controller.id]
         settings.write()
 
 
-@oath.command('remember-password')
+@oath.command("remember-password")
 @click.pass_context
-@click.option('-F', '--forget', is_flag=True, help='Forget a password.')
-@click.option('-c', '--clear-all', is_flag=True, help='Remove all stored '
-              'passwords from this computer.')
+@click.option("-F", "--forget", is_flag=True, help="Forget a password.")
+@click.option(
+    "-c",
+    "--clear-all",
+    is_flag=True,
+    help="Remove all stored " "passwords from this computer.",
+)
 def remember_password(ctx, forget, clear_all):
     """
     Manage local password storage.
@@ -482,39 +547,39 @@ def remember_password(ctx, forget, clear_all):
     Store your YubiKeys password on this computer to avoid having to enter it
     on each use, or delete stored passwords.
     """
-    controller = ctx.obj['controller']
-    settings = ctx.obj['settings']
-    keys = settings.setdefault('keys', {})
+    controller = ctx.obj["controller"]
+    settings = ctx.obj["settings"]
+    keys = settings.setdefault("keys", {})
     if clear_all:
-        del settings['keys']
+        del settings["keys"]
         settings.write()
-        click.echo('All passwords have been cleared.')
+        click.echo("All passwords have been cleared.")
     elif forget:
         if controller.id in keys:
             del keys[controller.id]
             settings.write()
-        click.echo('Password forgotten.')
+        click.echo("Password forgotten.")
     else:
         ensure_validated(ctx, remember=True)
 
 
-def ensure_validated(ctx, prompt='Enter your password', remember=False):
-    controller = ctx.obj['controller']
+def ensure_validated(ctx, prompt="Enter your password", remember=False):
+    controller = ctx.obj["controller"]
     if controller.locked:
 
         # If password given as arg, use it
-        if 'key' in ctx.obj:
-            _validate(ctx, ctx.obj['key'], remember)
+        if "key" in ctx.obj:
+            _validate(ctx, ctx.obj["key"], remember)
             return
 
         # Use stored key if available
-        keys = ctx.obj['settings'].setdefault('keys', {})
+        keys = ctx.obj["settings"].setdefault("keys", {})
         if controller.id in keys:
             try:
                 controller.validate(a2b_hex(keys[controller.id]))
                 return
             except Exception as e:
-                logger.debug('Error', exc_info=e)
+                logger.debug("Error", exc_info=e)
                 del keys[controller.id]
 
         # Prompt for password
@@ -525,16 +590,16 @@ def ensure_validated(ctx, prompt='Enter your password', remember=False):
 
 def _validate(ctx, key, remember):
     try:
-        controller = ctx.obj['controller']
+        controller = ctx.obj["controller"]
         controller.validate(key)
         if remember:
-            settings = ctx.obj['settings']
-            keys = settings.setdefault('keys', {})
+            settings = ctx.obj["settings"]
+            keys = settings.setdefault("keys", {})
             keys[controller.id] = b2a_hex(key).decode()
             settings.write()
-            click.echo('Password remembered.')
+            click.echo("Password remembered.")
     except Exception:
-        ctx.fail('Authentication to the YubiKey failed. Wrong password?')
+        ctx.fail("Authentication to the YubiKey failed. Wrong password?")
 
 
 def _search(creds, query):
@@ -550,10 +615,9 @@ def _search(creds, query):
 
 def _error_multiple_hits(ctx, hits):
     click.echo(
-        'Error: Multiple matches, please make the query more specific.',
-        err=True
+        "Error: Multiple matches, please make the query more specific.", err=True
     )
-    click.echo('', err=True)
+    click.echo("", err=True)
     for cred in hits:
         click.echo(cred.printable_key, err=True)
     ctx.exit(1)

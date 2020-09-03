@@ -31,9 +31,11 @@ from enum import IntEnum, unique
 from .device import YubiKey
 from .driver_ccid import APDUError, SW
 from .util import (
-    AID, Tlv,
+    AID,
+    Tlv,
     is_cve201715361_vulnerable_firmware_version,
-    ensure_not_cve201715361_vulnerable_firmware_version)
+    ensure_not_cve201715361_vulnerable_firmware_version,
+)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -60,18 +62,18 @@ logger = logging.getLogger(__name__)
 class INS(IntEnum):
     VERIFY = 0x20
     CHANGE_REFERENCE = 0x24
-    RESET_RETRY = 0x2c
+    RESET_RETRY = 0x2C
     GENERATE_ASYMMETRIC = 0x47
     AUTHENTICATE = 0x87
-    SEND_REMAINING = 0xc0
-    GET_DATA = 0xcb
-    PUT_DATA = 0xdb
-    SET_MGMKEY = 0xff
-    IMPORT_KEY = 0xfe
-    GET_VERSION = 0xfd
-    RESET = 0xfb
-    SET_PIN_RETRIES = 0xfa
-    ATTEST = 0xf9
+    SEND_REMAINING = 0xC0
+    GET_DATA = 0xCB
+    PUT_DATA = 0xDB
+    SET_MGMKEY = 0xFF
+    IMPORT_KEY = 0xFE
+    GET_VERSION = 0xFD
+    RESET = 0xFB
+    SET_PIN_RETRIES = 0xFA
+    ATTEST = 0xF9
 
 
 @unique
@@ -85,15 +87,14 @@ class ALGO(IntEnum):
     @classmethod
     def from_public_key(cls, key):
         if isinstance(key, rsa.RSAPublicKey):
-            return getattr(cls, 'RSA%d' % key.key_size)
+            return getattr(cls, "RSA%d" % key.key_size)
         elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
-            if curve_name == 'secp256r1':
+            if curve_name == "secp256r1":
                 return cls.ECCP256
-            elif curve_name == 'secp384r1':
+            elif curve_name == "secp384r1":
                 return cls.ECCP384
-        raise UnsupportedAlgorithm(
-            'Unsupported key type: %s' % type(key), key=key)
+        raise UnsupportedAlgorithm("Unsupported key type: %s" % type(key), key=key)
 
     @classmethod
     def is_rsa(cls, algorithm_int):
@@ -108,11 +109,11 @@ class ALGO(IntEnum):
 
 @unique
 class SLOT(IntEnum):
-    AUTHENTICATION = 0x9a
-    CARD_MANAGEMENT = 0x9b
-    SIGNATURE = 0x9c
-    KEY_MANAGEMENT = 0x9d
-    CARD_AUTH = 0x9e
+    AUTHENTICATION = 0x9A
+    CARD_MANAGEMENT = 0x9B
+    SIGNATURE = 0x9C
+    KEY_MANAGEMENT = 0x9D
+    CARD_AUTH = 0x9E
 
     RETIRED1 = 0x82
     RETIRED2 = 0x83
@@ -122,12 +123,12 @@ class SLOT(IntEnum):
     RETIRED6 = 0x87
     RETIRED7 = 0x88
     RETIRED8 = 0x89
-    RETIRED9 = 0x8a
-    RETIRED10 = 0x8b
-    RETIRED11 = 0x8c
-    RETIRED12 = 0x8d
-    RETIRED13 = 0x8e
-    RETIRED14 = 0x8f
+    RETIRED9 = 0x8A
+    RETIRED10 = 0x8B
+    RETIRED11 = 0x8C
+    RETIRED12 = 0x8D
+    RETIRED13 = 0x8E
+    RETIRED14 = 0x8F
     RETIRED15 = 0x90
     RETIRED16 = 0x91
     RETIRED17 = 0x92
@@ -135,48 +136,48 @@ class SLOT(IntEnum):
     RETIRED19 = 0x94
     RETIRED20 = 0x95
 
-    ATTESTATION = 0xf9
+    ATTESTATION = 0xF9
 
 
 @unique
 class OBJ(IntEnum):
-    CAPABILITY = 0x5fc107
-    CHUID = 0x5fc102
-    AUTHENTICATION = 0x5fc105  # cert for 9a key
-    FINGERPRINTS = 0x5fc103
-    SECURITY = 0x5fc106
-    FACIAL = 0x5fc108
-    SIGNATURE = 0x5fc10a  # cert for 9c key
-    KEY_MANAGEMENT = 0x5fc10b  # cert for 9d key
-    CARD_AUTH = 0x5fc101  # cert for 9e key
-    DISCOVERY = 0x7e
-    KEY_HISTORY = 0x5fc10c
-    IRIS = 0x5fc121
+    CAPABILITY = 0x5FC107
+    CHUID = 0x5FC102
+    AUTHENTICATION = 0x5FC105  # cert for 9a key
+    FINGERPRINTS = 0x5FC103
+    SECURITY = 0x5FC106
+    FACIAL = 0x5FC108
+    SIGNATURE = 0x5FC10A  # cert for 9c key
+    KEY_MANAGEMENT = 0x5FC10B  # cert for 9d key
+    CARD_AUTH = 0x5FC101  # cert for 9e key
+    DISCOVERY = 0x7E
+    KEY_HISTORY = 0x5FC10C
+    IRIS = 0x5FC121
 
-    RETIRED1 = 0x5fc10d
-    RETIRED2 = 0x5fc10e
-    RETIRED3 = 0x5fc10f
-    RETIRED4 = 0x5fc110
-    RETIRED5 = 0x5fc111
-    RETIRED6 = 0x5fc112
-    RETIRED7 = 0x5fc113
-    RETIRED8 = 0x5fc114
-    RETIRED9 = 0x5fc115
-    RETIRED10 = 0x5fc116
-    RETIRED11 = 0x5fc117
-    RETIRED12 = 0x5fc118
-    RETIRED13 = 0x5fc119
-    RETIRED14 = 0x5fc11a
-    RETIRED15 = 0x5fc11b
-    RETIRED16 = 0x5fc11c
-    RETIRED17 = 0x5fc11d
-    RETIRED18 = 0x5fc11e
-    RETIRED19 = 0x5fc11f
-    RETIRED20 = 0x5fc120
+    RETIRED1 = 0x5FC10D
+    RETIRED2 = 0x5FC10E
+    RETIRED3 = 0x5FC10F
+    RETIRED4 = 0x5FC110
+    RETIRED5 = 0x5FC111
+    RETIRED6 = 0x5FC112
+    RETIRED7 = 0x5FC113
+    RETIRED8 = 0x5FC114
+    RETIRED9 = 0x5FC115
+    RETIRED10 = 0x5FC116
+    RETIRED11 = 0x5FC117
+    RETIRED12 = 0x5FC118
+    RETIRED13 = 0x5FC119
+    RETIRED14 = 0x5FC11A
+    RETIRED15 = 0x5FC11B
+    RETIRED16 = 0x5FC11C
+    RETIRED17 = 0x5FC11D
+    RETIRED18 = 0x5FC11E
+    RETIRED19 = 0x5FC11F
+    RETIRED20 = 0x5FC120
 
-    PIVMAN_DATA = 0x5fff00
-    PIVMAN_PROTECTED_DATA = 0x5fc109  # Use slot for printed information.
-    ATTESTATION = 0x5fff01
+    PIVMAN_DATA = 0x5FFF00
+    PIVMAN_PROTECTED_DATA = 0x5FC109  # Use slot for printed information.
+    ATTESTATION = 0x5FFF01
 
     @classmethod
     def from_slot(cls, slot):
@@ -185,15 +186,15 @@ class OBJ(IntEnum):
 
 @unique
 class TAG(IntEnum):
-    DYN_AUTH = 0x7c
-    OBJ_ID = 0x5c
+    DYN_AUTH = 0x7C
+    OBJ_ID = 0x5C
     OBJ_DATA = 0x53
     CERTIFICATE = 0x70
     CERT_INFO = 0x71
     ALGO = 0x80
-    PIN_POLICY = 0xaa
-    TOUCH_POLICY = 0xab
-    LRC = 0xfe
+    PIN_POLICY = 0xAA
+    TOUCH_POLICY = 0xAB
+    LRC = 0xFE
 
 
 @unique
@@ -218,7 +219,8 @@ class AuthenticationFailed(Exception):
         self.tries_left = (
             tries_left(sw, applet_version)
             if is_verify_fail(sw, applet_version)
-            else None)
+            else None
+        )
 
 
 class AuthenticationBlocked(AuthenticationFailed):
@@ -236,24 +238,27 @@ class BadFormat(Exception):
 class InvalidCertificate(Exception):
     def __init__(self, slot):
         super(InvalidCertificate, self).__init__(
-            'Failed to parse certificate in slot {:x}'.format(slot))
+            "Failed to parse certificate in slot {:x}".format(slot)
+        )
         self.slot = slot
 
 
 class KeypairMismatch(Exception):
     def __init__(self, slot, cert):
         super(KeypairMismatch, self).__init__(
-            'The certificate does not match the private key in slot %s.' % slot)
+            "The certificate does not match the private key in slot %s." % slot
+        )
         self.slot = slot
         self.cert = cert
 
 
 class UnsupportedAlgorithm(Exception):
-    def __init__(self, message, algorithm_id=None, key=None, ):
+    def __init__(
+        self, message, algorithm_id=None, key=None,
+    ):
         super(UnsupportedAlgorithm, self).__init__(message)
         if algorithm_id is None and key is None:
-            raise ValueError(
-                'At least one of algorithm_id and key must be given.')
+            raise ValueError("At least one of algorithm_id and key must be given.")
 
         self.algorithm_id = algorithm_id
         self.key = key
@@ -261,41 +266,40 @@ class UnsupportedAlgorithm(Exception):
 
 class WrongPin(AuthenticationFailed):
     def __init__(self, sw, applet_version):
-        super(WrongPin, self).__init__(
-            'Incorrect PIN', sw, applet_version)
+        super(WrongPin, self).__init__("Incorrect PIN", sw, applet_version)
 
 
 class WrongPuk(AuthenticationFailed):
     def __init__(self, sw, applet_version):
-        super(WrongPuk, self).__init__(
-            'Incorrect PUK', sw, applet_version)
+        super(WrongPuk, self).__init__("Incorrect PUK", sw, applet_version)
 
 
 PIN = 0x80
 PUK = 0x81
 
 # 010203040506070801020304050607080102030405060708
-DEFAULT_MANAGEMENT_KEY = b'\x01\x02\x03\x04\x05\x06\x07\x08' \
-    + b'\x01\x02\x03\x04\x05\x06\x07\x08' \
-    + b'\x01\x02\x03\x04\x05\x06\x07\x08'
+DEFAULT_MANAGEMENT_KEY = (
+    b"\x01\x02\x03\x04\x05\x06\x07\x08"
+    + b"\x01\x02\x03\x04\x05\x06\x07\x08"
+    + b"\x01\x02\x03\x04\x05\x06\x07\x08"
+)
 
 
 def _pack_pin(pin):
     if isinstance(pin, six.text_type):
-        pin = pin.encode('utf8')
+        pin = pin.encode("utf8")
     if len(pin) > 8:
-        raise BadFormat(
-            'PIN/PUK too large (max 8 bytes, was %d)' % len(pin), pin)
-    return pin.ljust(8, b'\xff')
+        raise BadFormat("PIN/PUK too large (max 8 bytes, was %d)" % len(pin), pin)
+    return pin.ljust(8, b"\xff")
 
 
 def _get_key_data(key):
     if isinstance(key, rsa.RSAPrivateKey):
         if key.public_key().public_numbers().e != 65537:
             raise UnsupportedAlgorithm(
-                'Unsupported RSA exponent: %d'
-                % key.public_key().public_numbers().e,
-                key=key)
+                "Unsupported RSA exponent: %d" % key.public_key().public_numbers().e,
+                key=key,
+            )
 
         if key.key_size == 1024:
             algo = ALGO.RSA1024
@@ -305,14 +309,17 @@ def _get_key_data(key):
             ln = 128
         else:
             raise UnsupportedAlgorithm(
-                'Unsupported RSA key size: %d' % key.key_size, key=key)
+                "Unsupported RSA key size: %d" % key.key_size, key=key
+            )
 
         priv = key.private_numbers()
-        data = Tlv(0x01, int_to_bytes(priv.p, ln)) + \
-            Tlv(0x02, int_to_bytes(priv.q, ln)) + \
-            Tlv(0x03, int_to_bytes(priv.dmp1, ln)) + \
-            Tlv(0x04, int_to_bytes(priv.dmq1, ln)) + \
-            Tlv(0x05, int_to_bytes(priv.iqmp, ln))
+        data = (
+            Tlv(0x01, int_to_bytes(priv.p, ln))
+            + Tlv(0x02, int_to_bytes(priv.q, ln))
+            + Tlv(0x03, int_to_bytes(priv.dmp1, ln))
+            + Tlv(0x04, int_to_bytes(priv.dmq1, ln))
+            + Tlv(0x05, int_to_bytes(priv.iqmp, ln))
+        )
     elif isinstance(key, ec.EllipticCurvePrivateKey):
         if isinstance(key.curve, ec.SECP256R1):
             algo = ALGO.ECCP256
@@ -322,11 +329,12 @@ def _get_key_data(key):
             ln = 48
         else:
             raise UnsupportedAlgorithm(
-                    'Unsupported elliptic curve: %s', key.curve, key=key)
+                "Unsupported elliptic curve: %s", key.curve, key=key
+            )
         priv = key.private_numbers()
         data = Tlv(0x06, int_to_bytes(priv.private_value, ln))
     else:
-        raise UnsupportedAlgorithm('Unsupported key type!', key=key)
+        raise UnsupportedAlgorithm("Unsupported key type!", key=key)
     return algo, data
 
 
@@ -340,24 +348,28 @@ def _dummy_key(algorithm):
     if algorithm == ALGO.ECCP384:
         return ec.generate_private_key(ec.SECP384R1(), default_backend())
     raise UnsupportedAlgorithm(
-        'Unsupported algorithm: %s' % algorithm, algorithm_id=algorithm)
+        "Unsupported algorithm: %s" % algorithm, algorithm_id=algorithm
+    )
 
 
 def _pkcs1_15_pad(algorithm, message):
     h = hashes.Hash(hashes.SHA256(), default_backend())
     h.update(message)
-    t = b'\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01\x05' + \
-        b'\x00\x04\x20' + h.finalize()
+    t = (
+        b"\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01\x05"
+        + b"\x00\x04\x20"
+        + h.finalize()
+    )
     em_len = 128 if algorithm == ALGO.RSA1024 else 256
     f_len = em_len - len(t) - 3
-    return b'\0\1' + b'\xff' * f_len + b'\0' + t
+    return b"\0\1" + b"\xff" * f_len + b"\0" + t
 
 
 _sign_len_conditions = {
     ALGO.RSA1024: lambda ln: ln == 128,
     ALGO.RSA2048: lambda ln: ln == 256,
     ALGO.ECCP256: lambda ln: ln <= 32,
-    ALGO.ECCP384: lambda ln: ln <= 48
+    ALGO.ECCP384: lambda ln: ln <= 48,
 }
 
 
@@ -365,13 +377,13 @@ _decrypt_len_conditions = {
     ALGO.RSA1024: lambda ln: ln == 128,
     ALGO.RSA2048: lambda ln: ln == 256,
     ALGO.ECCP256: lambda ln: ln == 65,
-    ALGO.ECCP384: lambda ln: ln == 97
+    ALGO.ECCP384: lambda ln: ln == 97,
 }
 
 
 def _derive_key(pin, salt):
     kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())  # nosec
-    return kdf.derive(pin.encode('utf-8'))
+    return kdf.derive(pin.encode("utf-8"))
 
 
 def generate_random_management_key():
@@ -380,7 +392,7 @@ def generate_random_management_key():
 
 def is_verify_fail(sw, applet_version):
     if applet_version < (1, 0, 4):
-        return 0x6300 <= sw <= 0x63ff
+        return 0x6300 <= sw <= 0x63FF
     else:
         return SW.is_verify_fail(sw)
 
@@ -391,23 +403,19 @@ def tries_left(sw, applet_version):
             return 0
 
         if not is_verify_fail(sw, applet_version):
-            raise ValueError(
-                'Cannot read remaining tries from status word: %x' % sw)
+            raise ValueError("Cannot read remaining tries from status word: %x" % sw)
 
-        return sw & 0xff
+        return sw & 0xFF
     else:
         return SW.tries_left(sw)
 
 
 class PivmanData(object):
-
     def __init__(self, raw_data=Tlv(0x80)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
-        self._flags = struct.unpack(
-            '>B', data[0x81])[0] if 0x81 in data else None
+        self._flags = struct.unpack(">B", data[0x81])[0] if 0x81 in data else None
         self.salt = data.get(0x82)
-        self.pin_timestamp = struct.unpack('>I', data[0x83]) \
-            if 0x83 in data else None
+        self.pin_timestamp = struct.unpack(">I", data[0x83]) if 0x83 in data else None
 
     def _get_flag(self, mask):
         return bool((self._flags or 0) & mask)
@@ -435,31 +443,29 @@ class PivmanData(object):
         self._set_flag(0x02, value)
 
     def get_bytes(self):
-        data = b''
+        data = b""
         if self._flags is not None:
-            data += Tlv(0x81, struct.pack('>B', self._flags))
+            data += Tlv(0x81, struct.pack(">B", self._flags))
         if self.salt is not None:
             data += Tlv(0x82, self.salt)
         if self.pin_timestamp is not None:
-            data += Tlv(0x83, struct.pack('>I', self.pin_timestamp))
+            data += Tlv(0x83, struct.pack(">I", self.pin_timestamp))
         return Tlv(0x80, data)
 
 
 class PivmanProtectedData(object):
-
     def __init__(self, raw_data=Tlv(0x88)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
         self.key = data.get(0x89)
 
     def get_bytes(self):
-        data = b''
+        data = b""
         if self.key is not None:
             data += Tlv(0x89, self.key)
         return Tlv(0x88, data)
 
 
 class PivController(object):
-
     def __init__(self, driver):
         driver.select(AID.PIV)
         self._authenticated = False
@@ -493,15 +499,16 @@ class PivController(object):
     def puk_blocked(self):
         return self._pivman_data.puk_blocked
 
-    def send_cmd(self, ins, p1=0, p2=0, data=b'', check=SW.OK):
-        while len(data) > 0xff:
-            self._driver.send_apdu(0x10, ins, p1, p2, data[:0xff])
-            data = data[0xff:]
+    def send_cmd(self, ins, p1=0, p2=0, data=b"", check=SW.OK):
+        while len(data) > 0xFF:
+            self._driver.send_apdu(0x10, ins, p1, p2, data[:0xFF])
+            data = data[0xFF:]
         resp, sw = self._driver.send_apdu(0, ins, p1, p2, data, check=None)
 
         while (sw >> 8) == SW.MORE_DATA:
             more, sw = self._driver.send_apdu(
-                0, INS.SEND_REMAINING, 0, 0, b'', check=None)
+                0, INS.SEND_REMAINING, 0, 0, b"", check=None
+            )
             resp += more
 
         if check is None:
@@ -517,7 +524,8 @@ class PivController(object):
     def _init_pivman_protected(self):
         try:
             self._pivman_protected_data = PivmanProtectedData(
-                self.get_data(OBJ.PIVMAN_PROTECTED_DATA))
+                self.get_data(OBJ.PIVMAN_PROTECTED_DATA)
+            )
         except APDUError as e:
             if e.sw == SW.NOT_FOUND:
                 # No data there, initialise a new object.
@@ -530,7 +538,7 @@ class PivController(object):
             self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(pin))
         except APDUError as e:
             if e.sw == SW.AUTH_METHOD_BLOCKED:
-                raise AuthenticationBlocked('PIN is blocked.', e.sw)
+                raise AuthenticationBlocked("PIN is blocked.", e.sw)
 
             elif is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
@@ -538,8 +546,7 @@ class PivController(object):
             raise
 
         if self.has_derived_key and not self._authenticated:
-            self.authenticate(
-                _derive_key(pin, self._pivman_data.salt), touch_callback)
+            self.authenticate(_derive_key(pin, self._pivman_data.salt), touch_callback)
             self.verify(pin, touch_callback)
 
         if self.has_stored_key and not self._authenticated:
@@ -549,11 +556,12 @@ class PivController(object):
 
     def change_pin(self, old_pin, new_pin):
         try:
-            self.send_cmd(INS.CHANGE_REFERENCE, 0, PIN,
-                          _pack_pin(old_pin) + _pack_pin(new_pin))
+            self.send_cmd(
+                INS.CHANGE_REFERENCE, 0, PIN, _pack_pin(old_pin) + _pack_pin(new_pin)
+            )
         except APDUError as e:
             if e.sw == SW.AUTH_METHOD_BLOCKED:
-                raise AuthenticationBlocked('PIN is blocked.', e.sw)
+                raise AuthenticationBlocked("PIN is blocked.", e.sw)
 
             elif is_verify_fail(e.sw, self.version):
                 raise WrongPin(e.sw, self.version)
@@ -567,11 +575,12 @@ class PivController(object):
 
     def change_puk(self, old_puk, new_puk):
         try:
-            self.send_cmd(INS.CHANGE_REFERENCE, 0, PUK,
-                          _pack_pin(old_puk) + _pack_pin(new_puk))
+            self.send_cmd(
+                INS.CHANGE_REFERENCE, 0, PUK, _pack_pin(old_puk) + _pack_pin(new_puk)
+            )
         except APDUError as e:
             if e.sw == SW.AUTH_METHOD_BLOCKED:
-                raise AuthenticationBlocked('PUK is blocked.', e.sw)
+                raise AuthenticationBlocked("PUK is blocked.", e.sw)
 
             elif is_verify_fail(e.sw, self.version):
                 raise WrongPuk(e.sw, self.version)
@@ -580,11 +589,10 @@ class PivController(object):
 
     def unblock_pin(self, puk, new_pin):
         try:
-            self.send_cmd(
-                INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
+            self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin(puk) + _pack_pin(new_pin))
         except APDUError as e:
             if e.sw == SW.AUTH_METHOD_BLOCKED:
-                raise AuthenticationBlocked('PUK is blocked.', e.sw)
+                raise AuthenticationBlocked("PUK is blocked.", e.sw)
 
             elif is_verify_fail(e.sw, self.version):
                 raise WrongPuk(e.sw, self.version)
@@ -602,9 +610,12 @@ class PivController(object):
 
         new_salt = os.urandom(16)
         new_key = _derive_key(pin, new_salt)
-        self.send_cmd(INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
-                      six.int2byte(ALGO.TDES) +
-                      Tlv(SLOT.CARD_MANAGEMENT, new_key))
+        self.send_cmd(
+            INS.SET_MGMKEY,
+            0xFF,
+            0xFE if touch else 0xFF,
+            six.int2byte(ALGO.TDES) + Tlv(SLOT.CARD_MANAGEMENT, new_key),
+        )
         self._pivman_data.salt = new_salt
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
 
@@ -613,14 +624,21 @@ class PivController(object):
         self.put_data(OBJ.PIVMAN_DATA, self._pivman_data.get_bytes())
 
     def authenticate(self, key, touch_callback=None):
-        ct1 = self.send_cmd(INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                            Tlv(TAG.DYN_AUTH, Tlv(0x80)))[4:12]
+        ct1 = self.send_cmd(
+            INS.AUTHENTICATE,
+            ALGO.TDES,
+            SLOT.CARD_MANAGEMENT,
+            Tlv(TAG.DYN_AUTH, Tlv(0x80)),
+        )[4:12]
         backend = default_backend()
         try:
             cipher_key = algorithms.TripleDES(key)
         except ValueError:
-            raise BadFormat('Management key must be exactly 24 bytes long, '
-                            'was: {}'.format(len(key)), None)
+            raise BadFormat(
+                "Management key must be exactly 24 bytes long, "
+                "was: {}".format(len(key)),
+                None,
+            )
         cipher = Cipher(cipher_key, modes.ECB(), backend)  # nosec
         decryptor = cipher.decryptor()
         pt1 = decryptor.update(ct1) + decryptor.finalize()
@@ -632,20 +650,23 @@ class PivController(object):
 
         try:
             pt2 = self.send_cmd(
-                INS.AUTHENTICATE, ALGO.TDES, SLOT.CARD_MANAGEMENT,
-                Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2))
-                )[4:12]
+                INS.AUTHENTICATE,
+                ALGO.TDES,
+                SLOT.CARD_MANAGEMENT,
+                Tlv(TAG.DYN_AUTH, Tlv(0x80, pt1) + Tlv(0x81, ct2)),
+            )[4:12]
 
         except APDUError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 raise AuthenticationFailed(
-                    'Incorrect management key', e.sw, self.version)
+                    "Incorrect management key", e.sw, self.version
+                )
 
-            logger.error('Failed to authenticate management key.', exc_info=e)
+            logger.error("Failed to authenticate management key.", exc_info=e)
             raise
 
         except Exception as e:
-            logger.error('Failed to authenticate management key.', exc_info=e)
+            logger.error("Failed to authenticate management key.", exc_info=e)
             raise
 
         finally:
@@ -655,7 +676,7 @@ class PivController(object):
         encryptor = cipher.encryptor()
         pt2_cmp = encryptor.update(ct2) + encryptor.finalize()
         if not bytes_eq(pt2, pt2_cmp):
-            raise ValueError('Device challenge did not match!')
+            raise ValueError("Device challenge did not match!")
         self._authenticated = True
 
     def set_mgm_key(self, new_key, touch=False, store_on_device=False):
@@ -665,30 +686,35 @@ class PivController(object):
             if store_on_device:
                 new_key = generate_random_management_key()
             else:
-                raise ValueError('new_key was not given and '
-                                 'store_on_device was not True')
+                raise ValueError(
+                    "new_key was not given and " "store_on_device was not True"
+                )
 
         if len(new_key) != 24:
             raise BadFormat(
-                'Management key must be exactly 24 bytes long, was: {}'.format(
-                    len(new_key)),
-                new_key)
+                "Management key must be exactly 24 bytes long, was: {}".format(
+                    len(new_key)
+                ),
+                new_key,
+            )
 
         if store_on_device or (not store_on_device and self.has_stored_key):
             # Ensure we have access to protected data before overwriting key
             try:
                 self._init_pivman_protected()
             except Exception as e:
-                logger.debug('Failed to initialize protected pivman data',
-                             exc_info=e)
+                logger.debug("Failed to initialize protected pivman data", exc_info=e)
 
                 if store_on_device:
                     raise
 
         # Set the new management key
         self.send_cmd(
-            INS.SET_MGMKEY, 0xff, 0xfe if touch else 0xff,
-            six.int2byte(ALGO.TDES) + Tlv(SLOT.CARD_MANAGEMENT, new_key))
+            INS.SET_MGMKEY,
+            0xFF,
+            0xFE if touch else 0xFF,
+            six.int2byte(ALGO.TDES) + Tlv(SLOT.CARD_MANAGEMENT, new_key),
+        )
         if self.has_derived_key:
             # Clear salt for old derived keys.
             self._pivman_data.salt = None
@@ -700,16 +726,16 @@ class PivController(object):
             # Store key in protected pivman data
             self._pivman_protected_data.key = new_key
             self.put_data(
-                OBJ.PIVMAN_PROTECTED_DATA,
-                self._pivman_protected_data.get_bytes())
+                OBJ.PIVMAN_PROTECTED_DATA, self._pivman_protected_data.get_bytes()
+            )
         elif not store_on_device and self.has_stored_key:
             # If new key should not be stored and there is an old stored key,
             # try to clear it.
             try:
                 self._pivman_protected_data.key = None
                 self.put_data(
-                    OBJ.PIVMAN_PROTECTED_DATA,
-                    self._pivman_protected_data.get_bytes())
+                    OBJ.PIVMAN_PROTECTED_DATA, self._pivman_protected_data.get_bytes()
+                )
             except APDUError as e:
                 logger.debug("No PIN provided, can't clear key..", exc_info=e)
         # Update CHUID and CCC if not set
@@ -719,14 +745,14 @@ class PivController(object):
             if e.sw == SW.NOT_FOUND:
                 self.update_ccc()
             else:
-                logger.debug('Failed to read CCC...', exc_info=e)
+                logger.debug("Failed to read CCC...", exc_info=e)
         try:
             self.get_data(OBJ.CHUID)
         except APDUError as e:
             if e.sw == SW.NOT_FOUND:
                 self.update_chuid()
             else:
-                logger.debug('Failed to read CHUID...', exc_info=e)
+                logger.debug("Failed to read CHUID...", exc_info=e)
 
     def get_pin_tries(self):
         """
@@ -741,17 +767,16 @@ class PivController(object):
     def _get_puk_tries(self):
         # A failed unblock pin will return number of PUK tries left,
         # but also uses one try.
-        _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2,
-                              check=None)
+        _, sw = self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin("") * 2, check=None)
         return tries_left(sw, self.version)
 
     def _block_pin(self):
         while self.get_pin_tries() > 0:
-            self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(''), check=None)
+            self.send_cmd(INS.VERIFY, 0, PIN, _pack_pin(""), check=None)
 
     def _block_puk(self):
         while self._get_puk_tries() > 0:
-            self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin('')*2, check=None)
+            self.send_cmd(INS.RESET_RETRY, 0, PIN, _pack_pin("") * 2, check=None)
 
     def reset(self):
         self._block_pin()
@@ -760,42 +785,50 @@ class PivController(object):
         self._update_pivman_data()
 
     def get_data(self, object_id):
-        id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
-        tlv = Tlv(self.send_cmd(INS.GET_DATA, 0x3f, 0xff,
-                                Tlv(TAG.OBJ_ID, id_bytes)))
+        id_bytes = struct.pack(b">I", object_id).lstrip(b"\0")
+        tlv = Tlv(self.send_cmd(INS.GET_DATA, 0x3F, 0xFF, Tlv(TAG.OBJ_ID, id_bytes)))
         if tlv.tag not in [TAG.OBJ_DATA, OBJ.DISCOVERY]:
-            raise ValueError('Wrong tag in response data!')
+            raise ValueError("Wrong tag in response data!")
         return tlv.value
 
     def put_data(self, object_id, data):
-        id_bytes = struct.pack(b'>I', object_id).lstrip(b'\0')
-        self.send_cmd(INS.PUT_DATA, 0x3f, 0xff, Tlv(TAG.OBJ_ID, id_bytes) +
-                      Tlv(TAG.OBJ_DATA, data))
+        id_bytes = struct.pack(b">I", object_id).lstrip(b"\0")
+        self.send_cmd(
+            INS.PUT_DATA,
+            0x3F,
+            0xFF,
+            Tlv(TAG.OBJ_ID, id_bytes) + Tlv(TAG.OBJ_DATA, data),
+        )
 
-    def generate_key(self, slot, algorithm, pin_policy=PIN_POLICY.DEFAULT,
-                     touch_policy=TOUCH_POLICY.DEFAULT):
+    def generate_key(
+        self,
+        slot,
+        algorithm,
+        pin_policy=PIN_POLICY.DEFAULT,
+        touch_policy=TOUCH_POLICY.DEFAULT,
+    ):
 
         if ALGO.is_rsa(algorithm):
             ensure_not_cve201715361_vulnerable_firmware_version(self.version)
 
         if algorithm not in self.supported_algorithms:
             raise UnsupportedAlgorithm(
-                'Algorithm not supported on this YubiKey: {}'
-                .format(algorithm),
-                algorithm_id=algorithm)
+                "Algorithm not supported on this YubiKey: {}".format(algorithm),
+                algorithm_id=algorithm,
+            )
 
         data = Tlv(TAG.ALGO, six.int2byte(algorithm))
         if pin_policy:
             data += Tlv(TAG.PIN_POLICY, six.int2byte(pin_policy))
         if touch_policy:
             data += Tlv(TAG.TOUCH_POLICY, six.int2byte(touch_policy))
-        data = Tlv(0xac, data)
+        data = Tlv(0xAC, data)
         resp = self.send_cmd(INS.GENERATE_ASYMMETRIC, 0, slot, data)
-        key_data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
+        key_data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
             return rsa.RSAPublicNumbers(
-                int_from_bytes(key_data[0x82], 'big'),
-                int_from_bytes(key_data[0x81], 'big')
+                int_from_bytes(key_data[0x82], "big"),
+                int_from_bytes(key_data[0x81], "big"),
             ).public_key(default_backend())
         elif algorithm in [ALGO.ECCP256, ALGO.ECCP384]:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
@@ -803,68 +836,76 @@ class PivController(object):
             try:
                 # Added in cryptography 2.5
                 return ec.EllipticCurvePublicKey.from_encoded_point(
-                    curve(),
-                    key_data[0x86]
+                    curve(), key_data[0x86]
                 )
             except AttributeError:
                 return ec.EllipticCurvePublicNumbers.from_encoded_point(
-                    curve(),
-                    key_data[0x86]
+                    curve(), key_data[0x86]
                 ).public_key(default_backend())
 
         raise UnsupportedAlgorithm(
-            'Invalid algorithm: {}'.format(algorithm),
-            algorithm_id=algorithm)
+            "Invalid algorithm: {}".format(algorithm), algorithm_id=algorithm
+        )
 
     def generate_self_signed_certificate(
-            self, slot, public_key, common_name, valid_from, valid_to,
-            touch_callback=None):
+        self, slot, public_key, common_name, valid_from, valid_to, touch_callback=None
+    ):
 
         algorithm = ALGO.from_public_key(public_key)
 
         builder = x509.CertificateBuilder()
         builder = builder.public_key(public_key)
         builder = builder.subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+        )
 
         # Same as subject on self-signed certificates.
         builder = builder.issuer_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+        )
 
         # x509.random_serial_number added in cryptography 1.6
-        serial = int_from_bytes(os.urandom(20), 'big') >> 1
+        serial = int_from_bytes(os.urandom(20), "big") >> 1
         builder = builder.serial_number(serial)
 
         builder = builder.not_valid_before(valid_from)
         builder = builder.not_valid_after(valid_to)
 
         try:
-            cert = self.sign_cert_builder(
-                slot, algorithm, builder, touch_callback)
+            cert = self.sign_cert_builder(slot, algorithm, builder, touch_callback)
         except APDUError as e:
-            logger.error('Failed to generate certificate for slot %s', slot,
-                         exc_info=e)
+            logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
             raise
 
         self.import_certificate(slot, cert, verify=False)
 
-    def generate_certificate_signing_request(self, slot, public_key, subject,
-                                             touch_callback=None):
+    def generate_certificate_signing_request(
+        self, slot, public_key, subject, touch_callback=None
+    ):
         builder = x509.CertificateSigningRequestBuilder()
         builder = builder.subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject), ]))
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)])
+        )
 
         try:
             return self.sign_csr_builder(
-                slot, public_key, builder, touch_callback=touch_callback)
+                slot, public_key, builder, touch_callback=touch_callback
+            )
         except APDUError as e:
             logger.error(
-                'Failed to generate Certificate Signing Request for slot %s',
-                slot, exc_info=e)
+                "Failed to generate Certificate Signing Request for slot %s",
+                slot,
+                exc_info=e,
+            )
             raise
 
-    def import_key(self, slot, key, pin_policy=PIN_POLICY.DEFAULT,
-                   touch_policy=TOUCH_POLICY.DEFAULT):
+    def import_key(
+        self,
+        slot,
+        key,
+        pin_policy=PIN_POLICY.DEFAULT,
+        touch_policy=TOUCH_POLICY.DEFAULT,
+    ):
         algorithm, data = _get_key_data(key)
         if pin_policy:
             data += Tlv(TAG.PIN_POLICY, six.int2byte(pin_policy))
@@ -873,8 +914,7 @@ class PivController(object):
         self.send_cmd(INS.IMPORT_KEY, algorithm, slot, data)
         return algorithm
 
-    def import_certificate(
-            self, slot, certificate, verify=False, touch_callback=None):
+    def import_certificate(self, slot, certificate, verify=False, touch_callback=None):
         cert_data = certificate.public_bytes(Encoding.DER)
 
         if verify:
@@ -883,27 +923,28 @@ class PivController(object):
             try:
                 public_key = certificate.public_key()
 
-                test_data = b'test'
+                test_data = b"test"
 
                 if touch_callback is not None:
                     touch_timer = Timer(0.500, touch_callback)
                     touch_timer.start()
 
-                test_sig = self.sign(
-                    slot, ALGO.from_public_key(public_key), test_data)
+                test_sig = self.sign(slot, ALGO.from_public_key(public_key), test_data)
 
                 if touch_callback is not None:
                     touch_timer.cancel()
 
                 if isinstance(public_key, rsa.RSAPublicKey):
                     public_key.verify(
-                        test_sig, test_data, padding.PKCS1v15(),
-                        certificate.signature_hash_algorithm)
+                        test_sig,
+                        test_data,
+                        padding.PKCS1v15(),
+                        certificate.signature_hash_algorithm,
+                    )
                 elif isinstance(public_key, ec.EllipticCurvePublicKey):
-                    public_key.verify(
-                        test_sig, test_data, ec.ECDSA(hashes.SHA256()))
+                    public_key.verify(test_sig, test_data, ec.ECDSA(hashes.SHA256()))
                 else:
-                    raise ValueError('Unknown key type: ' + type(public_key))
+                    raise ValueError("Unknown key type: " + type(public_key))
 
             except APDUError as e:
                 if e.sw == SW.INCORRECT_PARAMETERS:
@@ -913,41 +954,47 @@ class PivController(object):
             except InvalidSignature:
                 raise KeypairMismatch(slot, certificate)
 
-        self.put_data(OBJ.from_slot(slot), Tlv(TAG.CERTIFICATE, cert_data) +
-                      Tlv(TAG.CERT_INFO, b'\0') + Tlv(TAG.LRC))
+        self.put_data(
+            OBJ.from_slot(slot),
+            Tlv(TAG.CERTIFICATE, cert_data) + Tlv(TAG.CERT_INFO, b"\0") + Tlv(TAG.LRC),
+        )
         self.update_chuid()
 
     def read_certificate(self, slot):
         data = Tlv.parse_dict(self.get_data(OBJ.from_slot(slot)))
         if TAG.CERT_INFO in data:  # Not available in attestation slot
-            if data[TAG.CERT_INFO] != b'\0':
-                raise ValueError('Compressed certificates are not supported!')
+            if data[TAG.CERT_INFO] != b"\0":
+                raise ValueError("Compressed certificates are not supported!")
         try:
-            return x509.load_der_x509_certificate(data[TAG.CERTIFICATE],
-                                                  default_backend())
+            return x509.load_der_x509_certificate(
+                data[TAG.CERTIFICATE], default_backend()
+            )
         except Exception:
             raise InvalidCertificate(slot)
 
     def delete_certificate(self, slot):
-        self.put_data(OBJ.from_slot(slot), b'')
+        self.put_data(OBJ.from_slot(slot), b"")
 
     def attest(self, slot):
-        return x509.load_der_x509_certificate(self.send_cmd(INS.ATTEST, slot),
-                                              default_backend())
+        return x509.load_der_x509_certificate(
+            self.send_cmd(INS.ATTEST, slot), default_backend()
+        )
 
     def _raw_sign_decrypt(self, slot, algorithm, payload, condition):
         if not condition(len(payload.value)):
             raise BadFormat(
-                'Input has invalid length for algorithm %s' % algorithm,
-                len(payload.value))
+                "Input has invalid length for algorithm %s" % algorithm,
+                len(payload.value),
+            )
 
         data = Tlv(TAG.DYN_AUTH, Tlv(0x82) + payload)
         resp = self.send_cmd(INS.AUTHENTICATE, algorithm, slot, data)
-        return Tlv.unpack(0x82, Tlv.unpack(0x7c, resp))
+        return Tlv.unpack(0x82, Tlv.unpack(0x7C, resp))
 
     def sign_raw(self, slot, algorithm, message):
-        return self._raw_sign_decrypt(slot, algorithm, Tlv(0x81, message),
-                                      _sign_len_conditions[algorithm])
+        return self._raw_sign_decrypt(
+            slot, algorithm, Tlv(0x81, message), _sign_len_conditions[algorithm]
+        )
 
     def sign(self, slot, algorithm, message):
         if algorithm in (ALGO.RSA1024, ALGO.RSA2048):
@@ -959,8 +1006,9 @@ class PivController(object):
         return self.sign_raw(slot, algorithm, message)
 
     def decrypt_raw(self, slot, algorithm, message):
-        return self._raw_sign_decrypt(slot, algorithm, Tlv(0x85, message),
-                                      _decrypt_len_conditions[algorithm])
+        return self._raw_sign_decrypt(
+            slot, algorithm, Tlv(0x85, message), _decrypt_len_conditions[algorithm]
+        )
 
     def list_certificates(self):
         certs = OrderedDict()
@@ -977,36 +1025,38 @@ class PivController(object):
     def update_chuid(self):
         # Non-Federal Issuer FASC-N
         # [9999-9999-999999-0-1-0000000000300001]
-        FASC_N = b'\xd4\xe7\x39\xda\x73\x9c\xed\x39\xce\x73\x9d\x83\x68' + \
-                 b'\x58\x21\x08\x42\x10\x84\x21\xc8\x42\x10\xc3\xeb'
+        FASC_N = (
+            b"\xd4\xe7\x39\xda\x73\x9c\xed\x39\xce\x73\x9d\x83\x68"
+            + b"\x58\x21\x08\x42\x10\x84\x21\xc8\x42\x10\xc3\xeb"
+        )
         # Expires on: 2030-01-01
-        EXPIRY = b'\x32\x30\x33\x30\x30\x31\x30\x31'
+        EXPIRY = b"\x32\x30\x33\x30\x30\x31\x30\x31"
 
         self.put_data(
             OBJ.CHUID,
-            Tlv(0x30, FASC_N) +
-            Tlv(0x34, os.urandom(16)) +
-            Tlv(0x35, EXPIRY) +
-            Tlv(0x3e) +
-            Tlv(TAG.LRC)
+            Tlv(0x30, FASC_N)
+            + Tlv(0x34, os.urandom(16))
+            + Tlv(0x35, EXPIRY)
+            + Tlv(0x3E)
+            + Tlv(TAG.LRC),
         )
 
     def update_ccc(self):
         self.put_data(
             OBJ.CAPABILITY,
-            Tlv(0xf0, b'\xa0\x00\x00\x01\x16\xff\x02' + os.urandom(14)) +
-            Tlv(0xf1, b'\x21') +
-            Tlv(0xf2, b'\x21') +
-            Tlv(0xf3) +
-            Tlv(0xf4, b'\x00') +
-            Tlv(0xf5, b'\x10') +
-            Tlv(0xf6) +
-            Tlv(0xf7) +
-            Tlv(0xfa) +
-            Tlv(0xfb) +
-            Tlv(0xfc) +
-            Tlv(0xfd) +
-            Tlv(TAG.LRC)
+            Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
+            + Tlv(0xF1, b"\x21")
+            + Tlv(0xF2, b"\x21")
+            + Tlv(0xF3)
+            + Tlv(0xF4, b"\x00")
+            + Tlv(0xF5, b"\x10")
+            + Tlv(0xF6)
+            + Tlv(0xF7)
+            + Tlv(0xFA)
+            + Tlv(0xFB)
+            + Tlv(0xFC)
+            + Tlv(0xFD)
+            + Tlv(TAG.LRC),
         )
 
     def sign_cert_builder(self, slot, algorithm, builder, touch_callback=None):
@@ -1024,9 +1074,9 @@ class PivController(object):
 
         seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
         # Replace signature, add unused bits = 0
-        seq[2] = Tlv(seq[2].tag, b'\0' + sig)
+        seq[2] = Tlv(seq[2].tag, b"\0" + sig)
         # Re-assemble sequence
-        der = Tlv(0x30, b''.join(seq))
+        der = Tlv(0x30, b"".join(seq))
 
         return x509.load_der_x509_certificate(der, default_backend())
 
@@ -1037,10 +1087,12 @@ class PivController(object):
         seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
 
         # Replace public key
-        pub_format = PublicFormat.PKCS1 if algorithm.name.startswith('RSA') \
+        pub_format = (
+            PublicFormat.PKCS1
+            if algorithm.name.startswith("RSA")
             else PublicFormat.SubjectPublicKeyInfo
-        dummy_bytes = dummy_key.public_key().public_bytes(
-            Encoding.DER, pub_format)
+        )
+        dummy_bytes = dummy_key.public_key().public_bytes(Encoding.DER, pub_format)
         pub_bytes = public_key.public_bytes(Encoding.DER, pub_format)
         seq[0] = seq[0].replace(dummy_bytes, pub_bytes)
 
@@ -1054,9 +1106,9 @@ class PivController(object):
             touch_timer.cancel()
 
         # Replace signature, add unused bits = 0
-        seq[2] = Tlv(seq[2].tag, b'\0' + sig)
+        seq[2] = Tlv(seq[2].tag, b"\0" + sig)
         # Re-assemble sequence
-        der = Tlv(0x30, b''.join(seq))
+        der = Tlv(0x30, b"".join(seq))
 
         return x509.load_der_x509_csr(der, default_backend())
 
@@ -1069,20 +1121,24 @@ class PivController(object):
         if self.version < (4, 0, 0):
             return []  # Touch policy not supported on NEO.
         elif self.version < (4, 3, 0):
-            return [TOUCH_POLICY.DEFAULT, TOUCH_POLICY.NEVER,
-                    TOUCH_POLICY.ALWAYS]  # Cached policy was added in 4.3
+            return [
+                TOUCH_POLICY.DEFAULT,
+                TOUCH_POLICY.NEVER,
+                TOUCH_POLICY.ALWAYS,
+            ]  # Cached policy was added in 4.3
         else:
             return [policy for policy in TOUCH_POLICY]
 
     @property
     def supported_algorithms(self):
         return [
-            alg for alg in ALGO
-
+            alg
+            for alg in ALGO
             if not alg == ALGO.TDES
-            if not (ALGO.is_rsa(alg) and
-                    is_cve201715361_vulnerable_firmware_version(self.version))
+            if not (
+                ALGO.is_rsa(alg)
+                and is_cve201715361_vulnerable_firmware_version(self.version)
+            )
             if not (alg == ALGO.ECCP384 and self.version < (4, 0, 0))
-            if not (alg == ALGO.RSA1024 and
-                    YubiKey.is_fips_version(self.version))
+            if not (alg == ALGO.RSA1024 and YubiKey.is_fips_version(self.version))
         ]

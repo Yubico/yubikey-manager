@@ -44,19 +44,19 @@ def print_app_status_table(config):
     for app in APPLICATION:
         if app & config.usb_supported:
             if app & config.usb_enabled:
-                usb_status = 'Enabled'
+                usb_status = "Enabled"
             else:
-                usb_status = 'Disabled'
+                usb_status = "Disabled"
         else:
-            usb_status = 'Not available'
+            usb_status = "Not available"
         if config.nfc_supported:
             if app & config.nfc_supported:
                 if app & config.nfc_enabled:
-                    nfc_status = 'Enabled'
+                    nfc_status = "Enabled"
                 else:
-                    nfc_status = 'Disabled'
+                    nfc_status = "Disabled"
             else:
-                nfc_status = 'Not available'
+                nfc_status = "Not available"
             rows.append([str(app), usb_status, nfc_status])
         else:
             rows.append([str(app), usb_status])
@@ -70,21 +70,21 @@ def print_app_status_table(config):
             else:
                 column_l.append(len(c))
 
-    f_apps = 'Applications'.ljust(column_l[0])
+    f_apps = "Applications".ljust(column_l[0])
     if config.nfc_supported:
-        f_USB = 'USB'.ljust(column_l[1])
-        f_NFC = 'NFC'.ljust(column_l[2])
-    f_table = ''
+        f_USB = "USB".ljust(column_l[1])
+        f_NFC = "NFC".ljust(column_l[2])
+    f_table = ""
 
     for row in rows:
         for idx, c in enumerate(row):
-            f_table += '{}\t'.format(c.ljust(column_l[idx]))
-        f_table += '\n'
+            f_table += "{}\t".format(c.ljust(column_l[idx]))
+        f_table += "\n"
 
     if config.nfc_supported:
-        click.echo('{}\t{}\t{}'.format(f_apps, f_USB, f_NFC))
+        click.echo("{}\t{}\t{}".format(f_apps, f_USB, f_NFC))
     else:
-        click.echo('{}'.format(f_apps))
+        click.echo("{}".format(f_apps))
     click.echo(f_table, nl=False)
 
 
@@ -93,7 +93,7 @@ def get_fips_status_over_transport(serial, transport, controller_constructor):
         with open_device(transports=transport, serial=serial) as dev:
             return controller_constructor(dev._driver).is_in_fips_mode
     except FailedOpeningDeviceException as e:
-        logger.debug('Failed to open device', exc_info=e)
+        logger.debug("Failed to open device", exc_info=e)
         return False
 
 
@@ -101,30 +101,35 @@ def get_overall_fips_status(serial, config):
     statuses = {}
 
     if config.usb_enabled & APPLICATION.OTP:
-        statuses['OTP'] = get_fips_status_over_transport(
-            serial, TRANSPORT.OTP, OtpController)
+        statuses["OTP"] = get_fips_status_over_transport(
+            serial, TRANSPORT.OTP, OtpController
+        )
     else:
-        statuses['OTP'] = False
+        statuses["OTP"] = False
 
     if config.usb_enabled & APPLICATION.OATH:
-        statuses['OATH'] = get_fips_status_over_transport(
-            serial, TRANSPORT.CCID, OathController)
+        statuses["OATH"] = get_fips_status_over_transport(
+            serial, TRANSPORT.CCID, OathController
+        )
     else:
-        statuses['OATH'] = False
+        statuses["OATH"] = False
 
     if config.usb_enabled & APPLICATION.U2F:
-        statuses['FIDO U2F'] = get_fips_status_over_transport(
-            serial, TRANSPORT.FIDO, FipsU2fController)
+        statuses["FIDO U2F"] = get_fips_status_over_transport(
+            serial, TRANSPORT.FIDO, FipsU2fController
+        )
     else:
-        statuses['FIDO U2F'] = False
+        statuses["FIDO U2F"] = False
 
     return statuses
 
 
 @click.option(
-    '-c', '--check-fips',
-    help='Check if YubiKey is in FIPS Approved mode.',
-    is_flag=True)
+    "-c",
+    "--check-fips",
+    help="Check if YubiKey is in FIPS Approved mode.",
+    is_flag=True,
+)
 @click.command()
 @click.pass_context
 def info(ctx, check_fips):
@@ -134,30 +139,30 @@ def info(ctx, check_fips):
     Displays information about the attached YubiKey such as serial number,
     firmware version, applications, etc.
     """
-    dev = ctx.obj['dev']
+    dev = ctx.obj["dev"]
 
     if dev.is_fips and check_fips:
         fips_status = get_overall_fips_status(dev.serial, dev.config)
 
-    click.echo('Device type: {}'.format(dev.device_name))
-    click.echo('Serial number: {}'.format(
-        dev.serial or 'Not set or unreadable'))
+    click.echo("Device type: {}".format(dev.device_name))
+    click.echo("Serial number: {}".format(dev.serial or "Not set or unreadable"))
     if dev.version:
-        f_version = '.'.join(str(x) for x in dev.version)
-        click.echo('Firmware version: {}'.format(f_version))
+        f_version = ".".join(str(x) for x in dev.version)
+        click.echo("Firmware version: {}".format(f_version))
     else:
-        click.echo('Firmware version: Uncertain, re-run with only one '
-                   'YubiKey connected')
+        click.echo(
+            "Firmware version: Uncertain, re-run with only one " "YubiKey connected"
+        )
 
     config = dev.config
     if config.form_factor:
-        click.echo('Form factor: {!s}'.format(config.form_factor))
-    click.echo('Enabled USB interfaces: {}'.format(dev.mode))
+        click.echo("Form factor: {!s}".format(config.form_factor))
+    click.echo("Enabled USB interfaces: {}".format(dev.mode))
     if config.nfc_supported:
-        f_nfc = 'enabled' if config.nfc_enabled else 'disabled'
-        click.echo('NFC interface is {}.'.format(f_nfc))
+        f_nfc = "enabled" if config.nfc_enabled else "disabled"
+        click.echo("NFC interface is {}.".format(f_nfc))
     if config.configuration_locked:
-        click.echo('Configured applications are protected by a lock code.')
+        click.echo("Configured applications are protected by a lock code.")
     click.echo()
 
     print_app_status_table(config)
@@ -165,11 +170,17 @@ def info(ctx, check_fips):
     if dev.is_fips and check_fips:
         click.echo()
 
-        click.echo('FIPS Approved Mode: {}'.format(
-            'Yes' if all(fips_status.values()) else 'No'))
+        click.echo(
+            "FIPS Approved Mode: {}".format(
+                "Yes" if all(fips_status.values()) else "No"
+            )
+        )
 
         status_keys = list(fips_status.keys())
         status_keys.sort()
         for status_key in status_keys:
-            click.echo('  {}: {}'.format(
-                status_key, 'Yes' if fips_status[status_key] else 'No'))
+            click.echo(
+                "  {}: {}".format(
+                    status_key, "Yes" if fips_status[status_key] else "No"
+                )
+            )

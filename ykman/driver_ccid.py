@@ -42,32 +42,32 @@ from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
 from .util import AID, APPLICATION, TRANSPORT, YUBIKEY, Mode
 
 
-GP_INS_SELECT = 0xa4
+GP_INS_SELECT = 0xA4
 
-YK_READER_NAME = 'yubico yubikey'
+YK_READER_NAME = "yubico yubikey"
 
 
 @unique
 class SW(IntEnum):
     MORE_DATA = 0x61
     NO_INPUT_DATA = 0x6285
-    VERIFY_FAIL_NO_RETRY = 0x63c0
+    VERIFY_FAIL_NO_RETRY = 0x63C0
     WRONG_LENGTH = 0x6700
     SECURITY_CONDITION_NOT_SATISFIED = 0x6982
     AUTH_METHOD_BLOCKED = 0x6983
     DATA_INVALID = 0x6984
     CONDITIONS_NOT_SATISFIED = 0x6985
     COMMAND_NOT_ALLOWED = 0x6986
-    INCORRECT_PARAMETERS = 0x6a80
-    NOT_FOUND = 0x6a82
-    NO_SPACE = 0x6a84
-    INVALID_INSTRUCTION = 0x6d00
-    COMMAND_ABORTED = 0x6f00
+    INCORRECT_PARAMETERS = 0x6A80
+    NOT_FOUND = 0x6A82
+    NO_SPACE = 0x6A84
+    INVALID_INSTRUCTION = 0x6D00
+    COMMAND_ABORTED = 0x6F00
     OK = 0x9000
 
     @staticmethod
     def is_verify_fail(sw):
-        return 0x63c0 <= sw <= 0x63cf
+        return 0x63C0 <= sw <= 0x63CF
 
     @classmethod
     def tries_left(cls, sw):
@@ -75,16 +75,15 @@ class SW(IntEnum):
             return 0
 
         if not cls.is_verify_fail(sw):
-            raise ValueError(
-                'Cannot read remaining tries from status word: %x' % sw)
+            raise ValueError("Cannot read remaining tries from status word: %x" % sw)
 
-        return sw & 0xf
+        return sw & 0xF
 
 
 @unique
 class MGR_INS(IntEnum):
-    READ_CONFIG = 0x1d
-    WRITE_CONFIG = 0x1c
+    READ_CONFIG = 0x1D
+    WRITE_CONFIG = 0x1C
     SET_MODE = 0x16
 
 
@@ -105,7 +104,7 @@ KNOWN_APPLETS = {
     AID.U2F_YUBICO: APPLICATION.U2F,
     AID.PIV: APPLICATION.PIV,
     AID.OPGP: APPLICATION.OPGP,
-    AID.OATH: APPLICATION.OATH
+    AID.OATH: APPLICATION.OATH,
 }
 
 logger = logging.getLogger(__name__)
@@ -123,7 +122,7 @@ class APDUError(CCIDError):
         self.sw = sw
 
     def __str__(self):
-        return 'APDU error: SW=0x{:04x}'.format(self.sw)
+        return "APDU error: SW=0x{:04x}".format(self.sw)
 
 
 def _pid_from_name(name):
@@ -132,10 +131,10 @@ def _pid_from_name(name):
         if t.name in name:
             transports += t
 
-    if 'U2F' in name:
+    if "U2F" in name:
         transports += TRANSPORT.FIDO
 
-    key_type = YUBIKEY.NEO if 'NEO' in name else YUBIKEY.YK4
+    key_type = YUBIKEY.NEO if "NEO" in name else YUBIKEY.YK4
     return key_type.get_pid(transports)
 
 
@@ -143,6 +142,7 @@ class CCIDDriver(AbstractDriver):
     """
     Pyscard based CCID driver
     """
+
     transport = TRANSPORT.CCID
 
     def __init__(self, connection, name):
@@ -171,14 +171,14 @@ class CCIDDriver(AbstractDriver):
         except APDUError:
             pass
 
-        raise ValueError('Couldn\'t select OTP nor MGR applet!')
+        raise ValueError("Couldn't select OTP nor MGR applet!")
 
     def read_serial(self):
         try:
             self.select(AID.OTP)
             serial = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_SERIAL, 0)
             if serial:
-                return struct.unpack('>I', serial)[0]
+                return struct.unpack(">I", serial)[0]
         except APDUError:
             pass
         return None
@@ -210,24 +210,22 @@ class CCIDDriver(AbstractDriver):
             try:
                 self.select(aid)
                 capa |= code
-                logger.debug(
-                    'Found applet: aid: %s , capability: %s', aid, code)
+                logger.debug("Found applet: aid: %s , capability: %s", aid, code)
             except APDUError:
-                logger.debug(
-                    'Missing applet: aid: %s , capability: %s', aid, code)
+                logger.debug("Missing applet: aid: %s , capability: %s", aid, code)
             except CCIDError as e:
                 logger.debug(
-                    'Failed reading applet: aid: %s , capability: %s , %s',
-                    aid, code, e)
+                    "Failed reading applet: aid: %s , capability: %s , %s", aid, code, e
+                )
         return capa
 
-    def send_apdu(self, cl, ins, p1, p2, data=b'', check=SW.OK):
+    def send_apdu(self, cl, ins, p1, p2, data=b"", check=SW.OK):
         header = [cl, ins, p1, p2, len(data)]
         body = list(six.iterbytes(data))
         try:
-            logger.debug('SEND: %s', b2a_hex(bytearray(header + body)))
+            logger.debug("SEND: %s", b2a_hex(bytearray(header + body)))
             resp, sw1, sw2 = self._conn.transmit(header + body)
-            logger.debug('RECV: %s', b2a_hex(bytearray(resp + [sw1, sw2])))
+            logger.debug("RECV: %s", b2a_hex(bytearray(resp + [sw1, sw2])))
         except CardConnectionException as e:
             raise CCIDError(e)
         sw = sw1 << 8 | sw2
@@ -243,7 +241,7 @@ class CCIDDriver(AbstractDriver):
         return self.send_apdu(0, GP_INS_SELECT, 0x04, 0, aid)
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
-        mode_data = struct.pack('BBH', mode_code, cr_timeout, autoeject_time)
+        mode_data = struct.pack("BBH", mode_code, cr_timeout, autoeject_time)
         try:
             if self.key_type == YUBIKEY.NEO:
                 self._set_mode_otp(mode_data)
@@ -255,8 +253,7 @@ class CCIDDriver(AbstractDriver):
     def _set_mode_otp(self, mode_data):
         resp = self.select(AID.OTP)
         pgm_seq_old = six.indexbytes(resp, 3)
-        resp = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_CONFIG, 0,
-                              mode_data)
+        resp = self.send_apdu(0, OTP_INS.YK2_REQ, SLOT.DEVICE_CONFIG, 0, mode_data)
         pgm_seq_new = six.indexbytes(resp, 3)
         if not _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
             raise ModeSwitchError()
@@ -267,16 +264,16 @@ class CCIDDriver(AbstractDriver):
 
     def close(self):
         if self._conn is not None:
-            logger.debug('Close %s', self)
+            logger.debug("Close %s", self)
             self._conn.disconnect()
             self._conn = None
 
     def __del__(self):
-        logger.debug('Destroy %s', self)
+        logger.debug("Destroy %s", self)
         try:
             self.close()
         except Exception as e:
-            logger.debug('Exception in destructor', exc_info=e)
+            logger.debug("Exception in destructor", exc_info=e)
 
 
 def _pgm_seq_ok(pgm_seq_old, pgm_seq_new):
@@ -289,19 +286,19 @@ def kill_scdaemon():
         # Works for Windows.
         from win32com.client import GetObject
         from win32api import OpenProcess, CloseHandle, TerminateProcess
-        wmi = GetObject('winmgmts:')
-        ps = wmi.InstancesOf('Win32_Process')
+
+        wmi = GetObject("winmgmts:")
+        ps = wmi.InstancesOf("Win32_Process")
         for p in ps:
-            if p.Properties_('Name').Value == 'scdaemon.exe':
-                pid = p.Properties_('ProcessID').Value
+            if p.Properties_("Name").Value == "scdaemon.exe":
+                pid = p.Properties_("ProcessID").Value
                 handle = OpenProcess(1, False, pid)
                 TerminateProcess(handle, -1)
                 CloseHandle(handle)
                 killed = True
     except ImportError:
         # Works for Linux and OS X.
-        return_code = subprocess.call(  # nosec
-            ['/usr/bin/pkill', '-9', 'scdaemon'])
+        return_code = subprocess.call(["/usr/bin/pkill", "-9", "scdaemon"])  # nosec
         if return_code == 0:
             killed = True
     if killed:
@@ -334,8 +331,7 @@ def open_devices(name_filter=YK_READER_NAME):
                     try_again.append(reader)
                 except Exception as e:
                     # Try with next reader.
-                    logger.debug(
-                        'Failed to connect to reader %s', reader, exc_info=e)
+                    logger.debug("Failed to connect to reader %s", reader, exc_info=e)
         if try_again and kill_scdaemon():
             readers = try_again
         else:

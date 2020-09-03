@@ -39,12 +39,14 @@ def use_library(libname, version=None, extra_paths=[]):
             f.argtypes = argtypes
             f.restype = restype
         except AttributeError:
-            print('Undefined symbol: %s' % func_name)
+            print("Undefined symbol: %s" % func_name)
 
             def error(*args, **kwargs):
-                raise Exception('Undefined symbol: %s' % func_name)
+                raise Exception("Undefined symbol: %s" % func_name)
+
             f = error
         return f
+
     return define
 
 
@@ -60,6 +62,7 @@ class CLibrary(object):
 
         assert foo.foo_func(True, 'Hello!') == 7
     """
+
     def __init__(self, libname, version=None):
         module_path = sys.modules[self.__class__.__module__].__file__
         extra_paths = [os.path.dirname(module_path)]

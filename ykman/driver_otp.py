@@ -41,16 +41,17 @@ CONFIG2_VALID = 0x02
 
 CMD_VERIFY_FIPS_MODE = 0x14
 
-MISSING_LIBYKPERS_MSG = 'libykpers not found, OTP functionality not available'
+MISSING_LIBYKPERS_MSG = "libykpers not found, OTP functionality not available"
 
 try:
-    ykpers = Ykpers('ykpers-1', '1')
+    ykpers = Ykpers("ykpers-1", "1")
     if not ykpers.yk_init():
-        raise Exception('yk_init failed.')
-    libversion = tuple(int(x) for x in ykpers.ykpers_check_version(None)
-                       .decode('ascii').split('.'))
+        raise Exception("yk_init failed.")
+    libversion = tuple(
+        int(x) for x in ykpers.ykpers_check_version(None).decode("ascii").split(".")
+    )
 except Exception as e:
-    logger.error('libykpers not found', exc_info=e)
+    logger.error("libykpers not found", exc_info=e)
     ykpers = MissingLibrary(MISSING_LIBYKPERS_MSG)
     libversion = None
 
@@ -63,7 +64,7 @@ class YkpersError(Exception):
         self.message = ykpers.yk_strerror(errno)
 
     def __str__(self):
-        return 'ykpers error {}, {}'.format(self.errno, self.message)
+        return "ykpers error {}, {}".format(self.errno, self.message)
 
 
 def check(status):
@@ -75,6 +76,7 @@ class OTPDriver(AbstractDriver):
     """
     libykpers based OTP driver
     """
+
     transport = TRANSPORT.OTP
 
     def __init__(self, dev):
@@ -111,7 +113,7 @@ class OTPDriver(AbstractDriver):
                 self._version = (
                     ykpers.ykds_version_major(status),
                     ykpers.ykds_version_minor(status),
-                    ykpers.ykds_version_build(status)
+                    ykpers.ykds_version_build(status),
                 )
                 touch_level = ykpers.ykds_touch_level(status)
                 self._slot1_valid = touch_level & CONFIG1_VALID != 0
@@ -129,7 +131,7 @@ class OTPDriver(AbstractDriver):
         if ykpers.yk_get_serial(self._dev, 0, 0, byref(serial)):
             return serial.value
         else:
-            logger.debug('Failed to read serial from device.')
+            logger.debug("Failed to read serial from device.")
             return None  # Serial not visible
 
     def read_config(self):
@@ -139,24 +141,24 @@ class OTPDriver(AbstractDriver):
         buf_size = c_size_t(1024)
         resp = create_string_buffer(buf_size.value)
         try:
-            check(ykpers.yk_get_capabilities(
-                self._dev, 0, 0, resp, byref(buf_size)))
-            return resp.raw[:buf_size.value]
+            check(ykpers.yk_get_capabilities(self._dev, 0, 0, resp, byref(buf_size)))
+            return resp.raw[: buf_size.value]
         except YkpersError:
             logger.debug(
-                'Failed reading config.'
-                'OTP interface might be locked, try waiting 3 seconds...')
+                "Failed reading config."
+                "OTP interface might be locked, try waiting 3 seconds..."
+            )
             import time
+
             time.sleep(3)
-            check(ykpers.yk_get_capabilities(
-                self._dev, 0, 0, resp, byref(buf_size)))
-            return resp.raw[:buf_size.value]
+            check(ykpers.yk_get_capabilities(self._dev, 0, 0, resp, byref(buf_size)))
+            return resp.raw[: buf_size.value]
 
     def write_config(self, data):
         if self._version < (5, 0, 0):
             raise NotSupportedError()
         if libversion < (1, 19, 0):
-            raise NotSupportedError('This action requires libykpers >= 1.19')
+            raise NotSupportedError("This action requires libykpers >= 1.19")
         check(ykpers.yk_write_device_info(self._dev, data, len(data)))
 
     def set_mode(self, mode_code, cr_timeout=0, autoeject_time=0):
@@ -171,41 +173,52 @@ class OTPDriver(AbstractDriver):
         finally:
             ykpers.ykp_free_device_config(config)
 
-    def write_to_and_read_from_key(self, cmd, expected_output_length,
-                                   input_bytes=None, read_flags=0,
-                                   result_bufsize=16):
+    def write_to_and_read_from_key(
+        self,
+        cmd,
+        expected_output_length,
+        input_bytes=None,
+        read_flags=0,
+        result_bufsize=16,
+    ):
 
         input_bufcount = 0 if input_bytes is None else len(input_bytes)
 
         result_buf = create_string_buffer(result_bufsize)
         bytes_read = c_uint()
 
-        check(ykpers.yk_write_to_key(self._dev, cmd, input_bytes,
-                                     input_bufcount))
-        check(ykpers.yk_read_response_from_key(
-          self._dev, cmd, read_flags, result_buf, result_bufsize,
-          expected_output_length, byref(bytes_read)))
+        check(ykpers.yk_write_to_key(self._dev, cmd, input_bytes, input_bufcount))
+        check(
+            ykpers.yk_read_response_from_key(
+                self._dev,
+                cmd,
+                read_flags,
+                result_buf,
+                result_bufsize,
+                expected_output_length,
+                byref(bytes_read),
+            )
+        )
 
         result = bytearray(result_buf)
 
-        return (result[0:expected_output_length],
-                result[0:bytes_read.value],
-                result)
+        return (result[0:expected_output_length], result[0 : bytes_read.value], result)
 
     @property
     def is_in_fips_mode(self):
         (result, _, _) = self.write_to_and_read_from_key(
-            CMD_VERIFY_FIPS_MODE, expected_output_length=1)
-        return result == b'\x01'
+            CMD_VERIFY_FIPS_MODE, expected_output_length=1
+        )
+        return result == b"\x01"
 
     def close(self):
         if self._dev is not None:
-            logger.debug('Close %s', self)
+            logger.debug("Close %s", self)
             ykpers.yk_close_key(self._dev)
             self._dev = None
 
     def __del__(self):
-        logger.debug('Destroy %s', self)
+        logger.debug("Destroy %s", self)
         self.close()
 
 
@@ -219,7 +232,7 @@ def open_devices():
         for i in range(255):
             dev = ykpers.yk_open_key(i)
             if not dev:
-                logger.debug('Failed to open key at position %s', i)
+                logger.debug("Failed to open key at position %s", i)
                 break
-            logger.debug('Success in opening key at position %s', i)
+            logger.debug("Success in opening key at position %s", i)
             yield OTPDriver(dev)

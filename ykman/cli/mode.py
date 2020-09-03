@@ -52,43 +52,55 @@ def _parse_mode_string(ctx, param, mode):
         mode_int = int(mode)
         return Mode.from_code(mode_int)
     except IndexError:
-        ctx.fail('Invalid mode: {}'.format(mode_int))
+        ctx.fail("Invalid mode: {}".format(mode_int))
     except ValueError:
         pass  # Not a numeric mode, parse string
 
     try:
         transports = set()
-        if mode[0] in ['+', '-']:
-            transports.update(TRANSPORT.split(ctx.obj['dev'].mode.transports))
-            for mod in re.findall(r'[+-][A-Z]+', mode.upper()):
+        if mode[0] in ["+", "-"]:
+            transports.update(TRANSPORT.split(ctx.obj["dev"].mode.transports))
+            for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
                 transport = _parse_transport_string(mod[1:])
-                if mod.startswith('+'):
+                if mod.startswith("+"):
                     transports.add(transport)
                 else:
                     transports.discard(transport)
         else:
-            for t in filter(None, re.split(r'[+]+', mode.upper())):
+            for t in filter(None, re.split(r"[+]+", mode.upper())):
                 transports.add(_parse_transport_string(t))
     except ValueError:
-        ctx.fail('Invalid mode string: {}'.format(mode))
+        ctx.fail("Invalid mode string: {}".format(mode))
 
     return Mode(sum(transports))
 
 
 @click.command()
-@click.argument('mode', required=False, callback=_parse_mode_string)
-@click.option('--touch-eject', is_flag=True, help='When set, the button '
-              'toggles the state of the smartcard between ejected and inserted '
-              '(CCID mode only).')
-@click.option('--autoeject-timeout', required=False, type=int, default=0,
-              metavar='SECONDS',
-              help='When set, the smartcard will automatically eject after the '
-              'given time. Implies --touch-eject (CCID mode only).'
-              )
-@click.option('--chalresp-timeout', required=False, type=int, default=0,
-              metavar='SECONDS',
-              help='Sets the timeout when waiting for touch for challenge '
-              'response.')
+@click.argument("mode", required=False, callback=_parse_mode_string)
+@click.option(
+    "--touch-eject",
+    is_flag=True,
+    help="When set, the button "
+    "toggles the state of the smartcard between ejected and inserted "
+    "(CCID mode only).",
+)
+@click.option(
+    "--autoeject-timeout",
+    required=False,
+    type=int,
+    default=0,
+    metavar="SECONDS",
+    help="When set, the smartcard will automatically eject after the "
+    "given time. Implies --touch-eject (CCID mode only).",
+)
+@click.option(
+    "--chalresp-timeout",
+    required=False,
+    type=int,
+    default=0,
+    metavar="SECONDS",
+    help="Sets the timeout when waiting for touch for challenge " "response.",
+)
 @click_force_option
 @click.pass_context
 def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
@@ -110,7 +122,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
       Set the CCID only mode and use touch to eject the smart card:
       $ ykman mode CCID --touch-eject
     """
-    dev = ctx.obj['dev']
+    dev = ctx.obj["dev"]
     if autoeject_timeout:
         touch_eject = True
     autoeject = autoeject_timeout if touch_eject else None
@@ -119,33 +131,36 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
         if mode.transports != TRANSPORT.CCID:
             autoeject = None
             if touch_eject:
-                ctx.fail('--touch-eject can only be used when setting'
-                         ' CCID-only mode')
+                ctx.fail(
+                    "--touch-eject can only be used when setting" " CCID-only mode"
+                )
 
         if not force:
             if mode == dev.mode:
-                click.echo('Mode is already {}, nothing to do...'.format(mode))
+                click.echo("Mode is already {}, nothing to do...".format(mode))
                 ctx.exit()
             elif not dev.has_mode(mode):
-                click.echo('Mode {} is not supported on this YubiKey!'
-                           .format(mode))
-                ctx.fail('Use --force to attempt to set it anyway.')
-            force or click.confirm('Set mode of YubiKey to {}?'.format(mode),
-                                   abort=True, err=True)
+                click.echo("Mode {} is not supported on this YubiKey!".format(mode))
+                ctx.fail("Use --force to attempt to set it anyway.")
+            force or click.confirm(
+                "Set mode of YubiKey to {}?".format(mode), abort=True, err=True
+            )
 
         try:
             dev.set_mode(mode, chalresp_timeout, autoeject)
             if not dev.can_write_config:
                 click.echo(
-                    'Mode set! You must remove and re-insert your YubiKey '
-                    'for this change to take effect.')
+                    "Mode set! You must remove and re-insert your YubiKey "
+                    "for this change to take effect."
+                )
         except ModeSwitchError as e:
-            logger.debug('Failed to switch mode', exc_info=e)
-            click.echo('Failed to switch mode on the YubiKey. Make sure your '
-                       'YubiKey does not have an access code set.')
+            logger.debug("Failed to switch mode", exc_info=e)
+            click.echo(
+                "Failed to switch mode on the YubiKey. Make sure your "
+                "YubiKey does not have an access code set."
+            )
 
     else:
-        click.echo('Current connection mode is: {}'.format(dev.mode))
-        supported = ', '.join(t.name for t in TRANSPORT
-                              .split(dev.config.usb_supported))
-        click.echo('Supported USB interfaces are: {}'.format(supported))
+        click.echo("Current connection mode is: {}".format(dev.mode))
+        supported = ", ".join(t.name for t in TRANSPORT.split(dev.config.usb_supported))
+        click.echo("Supported USB interfaces are: {}".format(supported))

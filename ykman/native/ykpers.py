@@ -27,20 +27,30 @@
 
 from __future__ import print_function, absolute_import
 
-from ctypes import (Structure, POINTER, c_int, c_uint8, c_uint, c_ubyte,
-                    c_char_p, c_ushort, c_size_t, c_ulong)
+from ctypes import (
+    Structure,
+    POINTER,
+    c_int,
+    c_uint8,
+    c_uint,
+    c_ubyte,
+    c_char_p,
+    c_ushort,
+    c_size_t,
+    c_ulong,
+)
 from .util import CLibrary
 
 
-YK_KEY = type('YK_KEY', (Structure,), {})
-YK_STATUS = type('YK_STATUS', (Structure,), {})
-YK_TICKET = type('YK_TICKET', (Structure,), {})
-YK_CONFIG = type('YK_CONFIG', (Structure,), {})
-YK_NAV = type('YK_NAV', (Structure,), {})
-YK_FRAME = type('YK_FRAME', (Structure,), {})
-YK_NDEF = type('YK_NDEF', (Structure,), {})
-YK_DEVICE_CONFIG = type('YK_DEVICE_CONFIG', (Structure,), {})
-YKP_CONFIG = type('YKP_CONFIG', (Structure,), {})
+YK_KEY = type("YK_KEY", (Structure,), {})
+YK_STATUS = type("YK_STATUS", (Structure,), {})
+YK_TICKET = type("YK_TICKET", (Structure,), {})
+YK_CONFIG = type("YK_CONFIG", (Structure,), {})
+YK_NAV = type("YK_NAV", (Structure,), {})
+YK_FRAME = type("YK_FRAME", (Structure,), {})
+YK_NDEF = type("YK_NDEF", (Structure,), {})
+YK_DEVICE_CONFIG = type("YK_DEVICE_CONFIG", (Structure,), {})
+YKP_CONFIG = type("YKP_CONFIG", (Structure,), {})
 
 
 class Ykpers(CLibrary):
@@ -57,20 +67,22 @@ class Ykpers(CLibrary):
 
     yk_get_status = [POINTER(YK_KEY), POINTER(YK_STATUS)], bool
     yk_get_serial = [POINTER(YK_KEY), c_uint8, c_uint, POINTER(c_uint)], bool
-    yk_write_command = [POINTER(YK_KEY), POINTER(YK_CONFIG), c_uint8, c_char_p
-                        ], bool
+    yk_write_command = [POINTER(YK_KEY), POINTER(YK_CONFIG), c_uint8, c_char_p], bool
     yk_write_device_config = [POINTER(YK_KEY), POINTER(YK_DEVICE_CONFIG)], bool
     yk_write_to_key = [POINTER(YK_KEY), c_uint8, c_char_p, c_int], bool
-    yk_read_response_from_key = [POINTER(YK_KEY), c_uint8, c_uint, c_char_p,
-                                 c_uint, c_uint, POINTER(c_uint)], bool
+    yk_read_response_from_key = (
+        [POINTER(YK_KEY), c_uint8, c_uint, c_char_p, c_uint, c_uint, POINTER(c_uint)],
+        bool,
+    )
 
     yk_get_key_vid_pid = [POINTER(YK_KEY), POINTER(c_int), POINTER(c_int)], bool
 
     yk_get_capabilities = [POINTER(YK_KEY), c_uint8, c_uint, c_char_p], bool
 
-    yk_challenge_response = [
-        POINTER(YK_KEY), c_uint8, c_int, c_uint, c_char_p,
-        c_uint, c_char_p], bool
+    yk_challenge_response = (
+        [POINTER(YK_KEY), c_uint8, c_int, c_uint, c_char_p, c_uint, c_char_p],
+        bool,
+    )
 
     ykds_alloc = [], POINTER(YK_STATUS)
     ykds_free = [POINTER(YK_STATUS)], None
@@ -112,10 +124,10 @@ class Ykpers(CLibrary):
         return cmd(cfg, value)
 
     def ykp_set_tktflag(self, cfg, name, value=True):
-        return self._ykp_set(cfg, 'ykp_set_tktflag_' + name, value)
+        return self._ykp_set(cfg, "ykp_set_tktflag_" + name, value)
 
     def ykp_set_cfgflag(self, cfg, name, value=True):
-        return self._ykp_set(cfg, 'ykp_set_cfgflag_' + name, value)
+        return self._ykp_set(cfg, "ykp_set_cfgflag_" + name, value)
 
     def ykp_set_extflag(self, cfg, name, value=True):
-        return self._ykp_set(cfg, 'ykp_set_extflag_' + name, value)
+        return self._ykp_set(cfg, "ykp_set_extflag_" + name, value)
