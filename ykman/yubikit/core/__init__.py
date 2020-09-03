@@ -27,7 +27,6 @@
 
 from __future__ import absolute_import, unicode_literals
 
-from ...util import bytes2int
 from enum import Enum, IntEnum, unique
 from binascii import b2a_hex
 import six
@@ -219,6 +218,19 @@ class YubiKeyDevice(abc.ABC):
             self.pid,
             self.fingerprint,
         )
+
+
+def int2bytes(value, min_len=0):
+    buf = []
+    while value > 0xFF:
+        buf.append(value & 0xFF)
+        value >>= 8
+    buf.append(value)
+    return bytes(bytearray(reversed(buf))).rjust(min_len, b"\0")
+
+
+def bytes2int(data):
+    return int(b2a_hex(data), 16)
 
 
 def _tlv_parse_tag(data, offs=0):

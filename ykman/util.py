@@ -27,6 +27,17 @@
 
 from __future__ import absolute_import
 
+
+from .yubikit.core import (  # noqa
+    PID,
+    APPLICATION,
+    TRANSPORT,
+    YUBIKEY,
+    Mode,
+    bytes2int,
+    int2bytes,
+)  # noqa
+
 import six
 import struct
 import re
@@ -69,71 +80,6 @@ class AID(bytes, Enum):
     U2F_YUBICO = b"\xa0\x00\x00\x05\x27\x10\x02"  # Yubico - No longer used
 
 
-@unique
-class TRANSPORT(BitflagEnum):
-    OTP = 0x01
-    FIDO = 0x02
-    CCID = 0x04
-
-    @staticmethod
-    def usb_transports():
-        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.FIDO
-
-
-@unique
-class APPLICATION(BitflagEnum):
-    OTP = 0x01
-    U2F = 0x02
-    OPGP = 0x08
-    PIV = 0x10
-    OATH = 0x20
-    FIDO2 = 0x200
-
-    @staticmethod
-    def dependent_on_ccid():
-        return APPLICATION.OPGP | APPLICATION.OATH | APPLICATION.PIV
-
-    def __str__(self):
-        if self == APPLICATION.U2F:
-            return "FIDO U2F"
-        elif self == APPLICATION.FIDO2:
-            return "FIDO2"
-        elif self == APPLICATION.OPGP:
-            return "OpenPGP"
-        else:
-            return self.name
-
-
-@unique
-class FORM_FACTOR(IntEnum):
-    UNKNOWN = 0x00
-    USB_A_KEYCHAIN = 0x01
-    USB_A_NANO = 0x02
-    USB_C_KEYCHAIN = 0x03
-    USB_C_NANO = 0x04
-    USB_C_LIGHTNING = 0x05
-
-    def __str__(self):
-        if self == FORM_FACTOR.USB_A_KEYCHAIN:
-            return "Keychain (USB-A)"
-        elif self == FORM_FACTOR.USB_A_NANO:
-            return "Nano (USB-A)"
-        elif self == FORM_FACTOR.USB_C_KEYCHAIN:
-            return "Keychain (USB-C)"
-        elif self == FORM_FACTOR.USB_C_NANO:
-            return "Nano (USB-C)"
-        elif self == FORM_FACTOR.USB_C_LIGHTNING:
-            return "Keychain (USB-C, Lightning)"
-        elif self == FORM_FACTOR.UNKNOWN:
-            return "Unknown"
-
-    @classmethod
-    def from_code(cls, code):
-        if code and not isinstance(code, int):
-            raise ValueError("Invalid form factor code: {}".format(code))
-        return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
-
-
 class Cve201715361VulnerableError(Exception):
     """Thrown if on-chip RSA key generation is attempted on a YubiKey vulnerable
     to CVE-2017-15361."""
@@ -146,92 +92,6 @@ class Cve201715361VulnerableError(Exception):
             "On-chip RSA key generation on this YubiKey has been blocked.\n"
             "Please see https://yubi.co/ysa201701 for details."
         )
-
-
-@unique
-class YUBIKEY(Enum):
-    YKS = "YubiKey Standard"
-    NEO = "YubiKey NEO"
-    SKY = "Security Key by Yubico"
-    YKP = "YubiKey Plus"
-    YK4 = "YubiKey 4"
-
-    def get_pid(self, transports):
-        suffix = "_".join(t.name for t in TRANSPORT.split(transports))
-        return PID[self.name + "_" + suffix]
-
-
-@unique
-class PID(IntEnum):
-    YKS_OTP = 0x0010
-    NEO_OTP = 0x0110
-    NEO_OTP_CCID = 0x0111
-    NEO_CCID = 0x0112
-    NEO_FIDO = 0x0113
-    NEO_OTP_FIDO = 0x0114
-    NEO_FIDO_CCID = 0x0115
-    NEO_OTP_FIDO_CCID = 0x0116
-    SKY_FIDO = 0x0120
-    YK4_OTP = 0x0401
-    YK4_FIDO = 0x0402
-    YK4_OTP_FIDO = 0x0403
-    YK4_CCID = 0x0404
-    YK4_OTP_CCID = 0x0405
-    YK4_FIDO_CCID = 0x0406
-    YK4_OTP_FIDO_CCID = 0x0407
-    YKP_OTP_FIDO = 0x0410
-
-    def get_type(self):
-        return YUBIKEY[self.name.split("_", 1)[0]]
-
-    def get_transports(self):
-        return sum(TRANSPORT[x] for x in self.name.split("_")[1:])
-
-
-class Mode(object):
-    _modes = [
-        TRANSPORT.OTP,  # 0x00
-        TRANSPORT.CCID,  # 0x01
-        TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
-        TRANSPORT.FIDO,  # 0x03
-        TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
-        TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
-        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
-    ]
-
-    def __init__(self, transports):
-        try:
-            self.code = self._modes.index(transports)
-            self._transports = transports
-        except ValueError:
-            raise ValueError("Invalid mode!")
-
-    @property
-    def transports(self):
-        return self._transports
-
-    def has_transport(self, transport):
-        return TRANSPORT.has(self._transports, transport)
-
-    def __eq__(self, other):
-        return other is not None and self.code == other.code
-
-    def __ne__(self, other):
-        return other is None or self.code != other.code
-
-    def __str__(self):
-        return "+".join((t.name for t in TRANSPORT.split(self._transports)))
-
-    @classmethod
-    def from_code(cls, code):
-        code = code & 0b00000111
-        return cls(cls._modes[code])
-
-    @classmethod
-    def from_pid(cls, pid):
-        return cls(PID(pid).get_transports())
-
-    __hash__ = None
 
 
 def _tlv_parse_tag(data, offs=0):
@@ -350,19 +210,6 @@ class MissingLibrary(object):
 
     def __getattr__(self, name):
         raise AttributeError(self._message)
-
-
-def int2bytes(value, min_len=0):
-    buf = []
-    while value > 0xFF:
-        buf.append(value & 0xFF)
-        value >>= 8
-    buf.append(value)
-    return bytes(bytearray(reversed(buf))).rjust(min_len, b"\0")
-
-
-def bytes2int(data):
-    return int(b2a_hex(data), 16)
 
 
 _HEX = b"0123456789abcdef"

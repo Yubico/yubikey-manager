@@ -27,29 +27,16 @@
 
 from __future__ import absolute_import, print_function
 
-from ykman.yubikit.core.otp import OtpConnection
-from ykman.yubikit.core.iso7816 import Iso7816Connection
-from ykman.yubikit.mgmt import ManagementApplication
 from ykman.hid import list_devices as list_hid
 from ykman.scard import list_devices as list_ccid, list_readers
-from fido2.ctap import CtapDevice
-
+from ykman.yubikit.core import TRANSPORT
 
 import ykman.logging_setup
 import smartcard.pcsc.PCSCExceptions
 
 from ykman import __version__
-from ..util import TRANSPORT, Cve201715361VulnerableError
-from ..native.pyusb import get_usb_backend_version
-from ..driver_otp import libversion as ykpers_version
-from ..driver_ccid import open_devices as open_ccid
-from ..device import YubiKey
-from ..descriptor import (
-    get_descriptors,
-    open_device,
-    FailedOpeningDeviceException,
-    Descriptor,
-)
+from ..util import Cve201715361VulnerableError
+from ..device import read_info, get_name
 from .util import UpperCaseChoice, YkmanContextObject
 from .info import info
 from .mode import mode
@@ -75,20 +62,6 @@ def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
     click.echo("YubiKey Manager (ykman) version: {}".format(__version__))
-    libs = []
-    libs.append(
-        "libykpers "
-        + (
-            ".".join("%d" % d for d in ykpers_version)
-            if ykpers_version is not None
-            else "not found!"
-        )
-    )
-    usb_lib = get_usb_backend_version()
-    libs.append(usb_lib or "<pyusb backend missing>")
-    click.echo("Libraries:")
-    for lib in libs:
-        click.echo("    {}".format(lib))
     ctx.exit()
 
 
@@ -101,26 +74,11 @@ def _disabled_transport(ctx, transports, cmd_name):
     ctx.fail("Use 'ykman mode' to set the enabled USB interfaces.")
 
 
-def _read_info(conn):
-    if isinstance(conn, Iso7816Connection):
-        # TODO: NEO workaround
-        mgmt = ManagementApplication(conn)
-        info = mgmt.read_device_info()
-    elif isinstance(conn, OtpConnection):
-        # TODO: <4 workaround
-        mgmt = ManagementApplication(conn)
-        info = mgmt.read_device_info()
-    elif isinstance(conn, CtapDevice):
-        mgmt = ManagementApplication(conn)
-        info = mgmt.read_device_info()
-    return info
-
-
 def _run_cmd_for_serial(ctx, cmd, transports, serial):
     if TRANSPORT.has(transports, TRANSPORT.CCID):
         for dev in list_ccid():
             conn = dev.open_iso7816_connection()
-            info = _read_info(conn)
+            info = read_info(dev.pid, conn)
             if info.serial == serial:
                 return conn, info
             else:
@@ -129,7 +87,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
         for dev in list_hid():
             if dev.has_otp:
                 conn = dev.open_otp_connection()
-                info = _read_info(conn)
+                info = read_info(dev.pid, conn)
                 if info.serial == serial:
                     return conn, info
                 else:
@@ -138,7 +96,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
         for dev in list_hid():
             if dev.has_ctap:
                 conn = dev.open_ctap_device()
-                info = _read_info(conn)
+                info = read_info(dev.pid, conn)
                 if info.serial == serial:
                     return conn, info
                 else:
@@ -153,33 +111,13 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
     # Serial not found, see if it's among other transports in USB enabled:
 
 
-def _run_cmd_for_serial_old(ctx, cmd, transports, serial):
-    try:
-        return open_device(transports, serial=serial)
-    except FailedOpeningDeviceException:
-        try:  # Retry, any transport
-            dev = open_device(serial=serial)
-            if not dev.mode.transports & transports:
-                if dev.config.usb_supported & transports:
-                    _disabled_transport(ctx, transports, cmd)
-                else:
-                    ctx.fail(
-                        "Command '{}' is not supported by this device.".format(cmd)
-                    )
-        except FailedOpeningDeviceException:
-            ctx.fail(
-                "Failed connecting to a YubiKey with serial: {}. "
-                "Make sure the application has the required "
-                "permissions.".format(serial)
-            )
-
-
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
     if reader:
         if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd == fido.name:
-            readers = list(open_ccid(reader))
+            readers = list_ccid(reader)
             if len(readers) == 1:
-                return YubiKey(Descriptor.from_driver(readers[0]), readers[0])
+                # TODO: return YubiKey(Descriptor.from_driver(readers[0]), readers[0])
+                pass
             elif len(readers) > 1:
                 ctx.fail("Multiple YubiKeys on external readers detected.")
             else:
@@ -187,7 +125,9 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         else:
             ctx.fail("Not a CCID command.")
     try:
-        descriptors = get_descriptors()
+        # TODO: descriptors = get_descriptors()
+        descriptors = None
+        pass
     except usb.core.NoBackendError:
         ctx.fail("No PyUSB backend detected!")
     n_keys = len(descriptors)
@@ -202,7 +142,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
     if descriptor.mode.transports & transports:
         try:
             return descriptor.open_device(transports)
-        except FailedOpeningDeviceException:
+        except Exception:
             ctx.fail(
                 "Failed connecting to {} [{}]. "
                 "Make sure the application has the "
@@ -306,7 +246,7 @@ def list_keys(ctx, serials, readers):
     List connected YubiKeys.
     """
 
-    def _print_device(dev, name, serial):
+    def _print_device(dev, name, serial=None):
         if serials:
             if serial:
                 click.echo(serial)
@@ -330,39 +270,34 @@ def list_keys(ctx, serials, readers):
         try:
             if dev.has_otp:
                 with dev.open_otp_connection() as conn:
-                    # TODO: Handle older OTP devices
-                    # yk = YkCfgApplication(conn)
-                    # serial = yk.read_serial()
-                    mgmt = ManagementApplication(conn)
-                    info = mgmt.read_device_info()
+                    info = read_info(dev.pid, conn)
             elif dev.has_ctap:
                 with dev.open_ctap_device() as conn:
-                    mgmt = ManagementApplication(conn)
-                    info = mgmt.read_device_info()
+                    info = read_info(dev.pid, conn)
+            name = get_name(dev.pid, info)
             if info.serial:
                 if info.serial not in handled_serials:
                     handled_serials.add(info.serial)
-                    _print_device(
-                        dev, "%s: %r" % (info.form_factor, info.version), info.serial
-                    )
+                    _print_device(dev, "%s: %r" % (name, info.version), info.serial)
             else:
-                _print_device(dev, dev.pid, None)
+                _print_device(dev, "%s: %r" % (name, info.version))
         except Exception as e:
             print(e)
     try:
         for dev in list_ccid():
-            with dev.open_iso7816_connection() as conn:
-                # TODO: Fallback for NEO
-                mgmt = ManagementApplication(conn)
-                info = mgmt.read_device_info()
+            try:
+                with dev.open_iso7816_connection() as conn:
+                    info = read_info(dev.pid, conn)
+            except smartcard.Exceptions.NoCardException:
+                logger.info("Failed to connect to device, no card inserted")
+                continue
+            name = get_name(dev.pid, info)
             if info.serial:
                 if info.serial not in handled_serials:
                     handled_serials.add(info.serial)
-                    _print_device(
-                        dev, "%s: %r" % (info.form_factor, info.version), info.serial
-                    )
+                    _print_device(dev, "%s: %r" % (name, info.version), info.serial)
             else:
-                _print_device(dev, dev.pid, None)
+                _print_device(dev, "%s: %r" % (name, info.version))
     except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
         logger.error("Failed to list devices", exc_info=e)
         ctx.fail("Failed to establish CCID context. Is the pcscd service running?")

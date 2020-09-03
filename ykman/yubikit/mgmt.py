@@ -1,8 +1,9 @@
 from __future__ import absolute_import
 
+from .core import Tlv, APPLICATION, FORM_FACTOR, TRANSPORT
 from .core.otp import check_crc, OtpConnection, OtpApplication
 from .core.iso7816 import Iso7816Connection, Iso7816Application
-from ..util import Tlv, APPLICATION, FORM_FACTOR, TRANSPORT, bytes2int, int2bytes
+from ..util import bytes2int, int2bytes
 
 from fido2.ctap import CtapDevice
 
