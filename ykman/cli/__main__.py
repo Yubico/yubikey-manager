@@ -27,17 +27,29 @@
 
 from __future__ import absolute_import, print_function
 
+from ykman.yubikit.core.otp import OtpConnection
+from ykman.yubikit.core.iso7816 import Iso7816Connection
+from ykman.yubikit.mgmt import ManagementApplication
+from ykman.hid import list_devices as list_hid
+from ykman.scard import list_devices as list_ccid, list_readers
+from fido2.ctap import CtapDevice
+
+
 import ykman.logging_setup
 import smartcard.pcsc.PCSCExceptions
 
 from ykman import __version__
-from ..util import TRANSPORT, Cve201715361VulnerableError, YUBIKEY
+from ..util import TRANSPORT, Cve201715361VulnerableError
 from ..native.pyusb import get_usb_backend_version
 from ..driver_otp import libversion as ykpers_version
-from ..driver_ccid import open_devices as open_ccid, list_readers
+from ..driver_ccid import open_devices as open_ccid
 from ..device import YubiKey
-from ..descriptor import (get_descriptors, list_devices, open_device,
-                          FailedOpeningDeviceException, Descriptor)
+from ..descriptor import (
+    get_descriptors,
+    open_device,
+    FailedOpeningDeviceException,
+    Descriptor,
+)
 from .util import UpperCaseChoice, YkmanContextObject
 from .info import info
 from .mode import mode
@@ -56,36 +68,92 @@ import sys
 logger = logging.getLogger(__name__)
 
 
-CLICK_CONTEXT_SETTINGS = dict(
-    help_option_names=['-h', '--help'],
-    max_content_width=999
-)
+CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
 
 
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo('YubiKey Manager (ykman) version: {}'.format(__version__))
+    click.echo("YubiKey Manager (ykman) version: {}".format(__version__))
     libs = []
-    libs.append('libykpers ' + ('.'.join('%d' % d for d in ykpers_version)
-                                if ykpers_version is not None
-                                else 'not found!'))
+    libs.append(
+        "libykpers "
+        + (
+            ".".join("%d" % d for d in ykpers_version)
+            if ykpers_version is not None
+            else "not found!"
+        )
+    )
     usb_lib = get_usb_backend_version()
-    libs.append(usb_lib or '<pyusb backend missing>')
-    click.echo('Libraries:')
+    libs.append(usb_lib or "<pyusb backend missing>")
+    click.echo("Libraries:")
     for lib in libs:
-        click.echo('    {}'.format(lib))
+        click.echo("    {}".format(lib))
     ctx.exit()
 
 
 def _disabled_transport(ctx, transports, cmd_name):
-    req = ', '.join((t.name for t in TRANSPORT if t & transports))
-    click.echo("Command '{}' requires one of the following USB interfaces "
-               "to be enabled: '{}'.".format(cmd_name, req))
+    req = ", ".join((t.name for t in TRANSPORT if t & transports))
+    click.echo(
+        "Command '{}' requires one of the following USB interfaces "
+        "to be enabled: '{}'.".format(cmd_name, req)
+    )
     ctx.fail("Use 'ykman mode' to set the enabled USB interfaces.")
 
 
+def _read_info(conn):
+    if isinstance(conn, Iso7816Connection):
+        # TODO: NEO workaround
+        mgmt = ManagementApplication(conn)
+        info = mgmt.read_device_info()
+    elif isinstance(conn, OtpConnection):
+        # TODO: <4 workaround
+        mgmt = ManagementApplication(conn)
+        info = mgmt.read_device_info()
+    elif isinstance(conn, CtapDevice):
+        mgmt = ManagementApplication(conn)
+        info = mgmt.read_device_info()
+    return info
+
+
 def _run_cmd_for_serial(ctx, cmd, transports, serial):
+    if TRANSPORT.has(transports, TRANSPORT.CCID):
+        for dev in list_ccid():
+            conn = dev.open_iso7816_connection()
+            info = _read_info(conn)
+            if info.serial == serial:
+                return conn, info
+            else:
+                conn.close()
+    elif TRANSPORT.has(transports, TRANSPORT.OTP):
+        for dev in list_hid():
+            if dev.has_otp:
+                conn = dev.open_otp_connection()
+                info = _read_info(conn)
+                if info.serial == serial:
+                    return conn, info
+                else:
+                    conn.close()
+    elif TRANSPORT.has(transports, TRANSPORT.FIDO):
+        for dev in list_hid():
+            if dev.has_ctap:
+                conn = dev.open_ctap_device()
+                info = _read_info(conn)
+                if info.serial == serial:
+                    return conn, info
+                else:
+                    conn.close()
+    ctx.fail(
+        "Failed connecting to a YubiKey with serial: {}. "
+        "Make sure the application has the required "
+        "permissions.".format(serial)
+    )
+
+    # TODO: Check other transports for serial, and if device supports transport.
+    # Serial not found, see if it's among other transports in USB enabled:
+
+
+def _run_cmd_for_serial_old(ctx, cmd, transports, serial):
     try:
         return open_device(transports, serial=serial)
     except FailedOpeningDeviceException:
@@ -95,13 +163,15 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                 if dev.config.usb_supported & transports:
                     _disabled_transport(ctx, transports, cmd)
                 else:
-                    ctx.fail("Command '{}' is not supported by this device."
-                             .format(cmd))
+                    ctx.fail(
+                        "Command '{}' is not supported by this device.".format(cmd)
+                    )
         except FailedOpeningDeviceException:
             ctx.fail(
-                'Failed connecting to a YubiKey with serial: {}. '
-                'Make sure the application has the required '
-                'permissions.'.format(serial))
+                "Failed connecting to a YubiKey with serial: {}. "
+                "Make sure the application has the required "
+                "permissions.".format(serial)
+            )
 
 
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
@@ -111,52 +181,69 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
             if len(readers) == 1:
                 return YubiKey(Descriptor.from_driver(readers[0]), readers[0])
             elif len(readers) > 1:
-                ctx.fail('Multiple YubiKeys on external readers detected.')
+                ctx.fail("Multiple YubiKeys on external readers detected.")
             else:
-                ctx.fail('No YubiKey found on external reader.')
+                ctx.fail("No YubiKey found on external reader.")
         else:
-            ctx.fail('Not a CCID command.')
+            ctx.fail("Not a CCID command.")
     try:
         descriptors = get_descriptors()
     except usb.core.NoBackendError:
-        ctx.fail('No PyUSB backend detected!')
+        ctx.fail("No PyUSB backend detected!")
     n_keys = len(descriptors)
     if n_keys == 0:
-        ctx.fail('No YubiKey detected!')
+        ctx.fail("No YubiKey detected!")
     if n_keys > 1:
-        ctx.fail('Multiple YubiKeys detected. Use --device SERIAL to specify '
-                 'which one to use.')
+        ctx.fail(
+            "Multiple YubiKeys detected. Use --device SERIAL to specify "
+            "which one to use."
+        )
     descriptor = descriptors[0]
     if descriptor.mode.transports & transports:
         try:
             return descriptor.open_device(transports)
         except FailedOpeningDeviceException:
-            ctx.fail('Failed connecting to {} [{}]. '
-                     'Make sure the application has the '
-                     'required permissions.'
-                     .format(descriptor.name, descriptor.mode))
+            ctx.fail(
+                "Failed connecting to {} [{}]. "
+                "Make sure the application has the "
+                "required permissions.".format(descriptor.name, descriptor.mode)
+            )
     else:
         _disabled_transport(ctx, transports, cmd)
 
 
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
-@click.option('-v', '--version', is_flag=True, callback=print_version,
-              expose_value=False, is_eager=True)
-@click.option('-d', '--device', type=int, metavar='SERIAL')
-@click.option('-l', '--log-level', default=None,
-              type=UpperCaseChoice(ykman.logging_setup.LOG_LEVEL_NAMES),
-              help='Enable logging at given verbosity level.',
-              )
-@click.option('--log-file', default=None,
-              type=str, metavar='FILE',
-              help='Write logs to the given FILE instead of standard error; '
-                   'ignored unless --log-level is also set.',
-              )
 @click.option(
-        '-r', '--reader',
-        help='Use an external smart card reader. Conflicts with --device and '
-             'list.',
-        metavar='NAME', default=None)
+    "-v",
+    "--version",
+    is_flag=True,
+    callback=print_version,
+    expose_value=False,
+    is_eager=True,
+)
+@click.option("-d", "--device", type=int, metavar="SERIAL")
+@click.option(
+    "-l",
+    "--log-level",
+    default=None,
+    type=UpperCaseChoice(ykman.logging_setup.LOG_LEVEL_NAMES),
+    help="Enable logging at given verbosity level.",
+)
+@click.option(
+    "--log-file",
+    default=None,
+    type=str,
+    metavar="FILE",
+    help="Write logs to the given FILE instead of standard error; "
+    "ignored unless --log-level is also set.",
+)
+@click.option(
+    "-r",
+    "--reader",
+    help="Use an external smart card reader. Conflicts with --device and " "list.",
+    metavar="NAME",
+    default=None,
+)
 @click.pass_context
 def cli(ctx, device, log_level, log_file, reader):
     """
@@ -178,46 +265,58 @@ def cli(ctx, device, log_level, log_file, reader):
         ykman.logging_setup.setup(log_level, log_file=log_file)
 
     if reader and device:
-        ctx.fail('--reader and --device options can\'t be combined.')
+        ctx.fail("--reader and --device options can't be combined.")
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     if subcmd == list_keys:
         if reader:
-            ctx.fail('--reader and list command can\'t be combined.')
+            ctx.fail("--reader and list command can't be combined.")
         return
 
-    transports = getattr(subcmd, 'transports', TRANSPORT.usb_transports())
+    transports = getattr(subcmd, "transports", TRANSPORT.usb_transports())
     if transports:
+        conn, info = None, None
+
         def resolve_device():
             if device is not None:
-                dev = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
+                conn, info = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
             else:
-                dev = _run_cmd_for_single(ctx, subcmd.name, transports, reader)
-            ctx.call_on_close(dev.close)
-            return dev
-        ctx.obj.add_resolver('dev', resolve_device)
+                conn, info = _run_cmd_for_single(ctx, subcmd.name, transports, reader)
+            ctx.call_on_close(conn.close)
+            return conn, info
+
+        ctx.obj.add_resolver("conn", lambda: conn or resolve_device()[0])
+        ctx.obj.add_resolver("info", lambda: info or resolve_device()[1])
 
 
-@cli.command('list')
-@click.option('-s', '--serials', is_flag=True, help='Output only serial '
-              'numbers, one per line (devices without serial will be omitted).')
+@cli.command("list")
 @click.option(
-    '-r', '--readers', is_flag=True, help='List available smart card readers.')
+    "-s",
+    "--serials",
+    is_flag=True,
+    help="Output only serial "
+    "numbers, one per line (devices without serial will be omitted).",
+)
+@click.option(
+    "-r", "--readers", is_flag=True, help="List available smart card readers."
+)
 @click.pass_context
 def list_keys(ctx, serials, readers):
     """
     List connected YubiKeys.
     """
 
-    def _print_device(dev, serial):
+    def _print_device(dev, name, serial):
         if serials:
             if serial:
                 click.echo(serial)
         else:
-            click.echo('{} [{}]{}'.format(
-                dev.device_name,
-                dev.mode,
-                ' Serial: {}'.format(serial) if serial else '')
+            click.echo(
+                "{} [{}]{}".format(
+                    name,
+                    dev.pid.name.split("_", 1)[1].replace("_", "+"),
+                    " Serial: {}".format(serial) if serial else "",
+                )
             )
 
     if readers:
@@ -225,41 +324,48 @@ def list_keys(ctx, serials, readers):
             click.echo(reader.name)
         ctx.exit()
 
-    descriptors = get_descriptors()
     handled_serials = set()
 
-    try:
-        for dev in list_devices():
-            if dev.key_type == YUBIKEY.SKY:
-                # We have nothing to match on, so just drop a SKY descriptor
-                d = next(x for x in descriptors if x.key_type == YUBIKEY.SKY)
-                descriptors.remove(d)
-                _print_device(dev, None)
+    for dev in list_hid():
+        try:
+            if dev.has_otp:
+                with dev.open_otp_connection() as conn:
+                    # TODO: Handle older OTP devices
+                    # yk = YkCfgApplication(conn)
+                    # serial = yk.read_serial()
+                    mgmt = ManagementApplication(conn)
+                    info = mgmt.read_device_info()
+            elif dev.has_ctap:
+                with dev.open_ctap_device() as conn:
+                    mgmt = ManagementApplication(conn)
+                    info = mgmt.read_device_info()
+            if info.serial:
+                if info.serial not in handled_serials:
+                    handled_serials.add(info.serial)
+                    _print_device(
+                        dev, "%s: %r" % (info.form_factor, info.version), info.serial
+                    )
             else:
-                serial = dev.serial
-                if serial not in handled_serials:
-                    # Drop a descriptor with a matching serial and mode
-                    handled_serials.add(serial)
-                    matches = [d for d in descriptors if (d.key_type, d.mode)
-                               == (dev.driver.key_type, dev.driver.mode)]
-                    if len(matches) > 0:
-                        d = matches[0]
-                        descriptors.remove(d)
-                        _print_device(dev, serial)
-            dev.close()
-            if not descriptors:
-                break
+                _print_device(dev, dev.pid, None)
+        except Exception as e:
+            print(e)
+    try:
+        for dev in list_ccid():
+            with dev.open_iso7816_connection() as conn:
+                # TODO: Fallback for NEO
+                mgmt = ManagementApplication(conn)
+                info = mgmt.read_device_info()
+            if info.serial:
+                if info.serial not in handled_serials:
+                    handled_serials.add(info.serial)
+                    _print_device(
+                        dev, "%s: %r" % (info.form_factor, info.version), info.serial
+                    )
+            else:
+                _print_device(dev, dev.pid, None)
     except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
-        logger.error('Failed to list devices', exc_info=e)
-        ctx.fail(
-            'Failed to establish CCID context. Is the pcscd service running?')
-
-    # List descriptors that failed to open.
-    if len(descriptors) > 0:
-        logger.debug(
-            'Failed to open some devices, listing based on descriptors')
-    for desc in descriptors:
-        click.echo('{} [{}]'.format(desc.name, desc.mode))
+        logger.error("Failed to list devices", exc_info=e)
+        ctx.fail("Failed to establish CCID context. Is the pcscd service running?")
 
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
@@ -273,15 +379,15 @@ def main():
     try:
         cli(obj={})
     except ValueError as e:
-        logger.error('Error', exc_info=e)
-        click.echo('Error: ' + str(e))
+        logger.error("Error", exc_info=e)
+        click.echo("Error: " + str(e))
         return 1
 
     except Cve201715361VulnerableError as err:
-        logger.error('Error', exc_info=err)
-        click.echo('Error: ' + str(err))
+        logger.error("Error", exc_info=err)
+        click.echo("Error: " + str(err))
         return 2
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

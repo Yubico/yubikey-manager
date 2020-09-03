@@ -5,7 +5,6 @@ import platform
 from ctypes import wintypes
 from functools import partial
 
-
 from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
 from ..yubikit.core.otp import OtpConnection
 
