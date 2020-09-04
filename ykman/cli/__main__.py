@@ -46,7 +46,6 @@ from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
-import usb.core
 import click
 import logging
 import sys
@@ -80,7 +79,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
             conn = dev.open_iso7816_connection()
             info = read_info(dev.pid, conn)
             if info.serial == serial:
-                return conn, info
+                return dev, conn, info
             else:
                 conn.close()
     elif TRANSPORT.has(transports, TRANSPORT.OTP):
@@ -89,7 +88,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                 conn = dev.open_otp_connection()
                 info = read_info(dev.pid, conn)
                 if info.serial == serial:
-                    return conn, info
+                    return dev, conn, info
                 else:
                     conn.close()
     elif TRANSPORT.has(transports, TRANSPORT.FIDO):
@@ -98,7 +97,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                 conn = dev.open_ctap_device()
                 info = read_info(dev.pid, conn)
                 if info.serial == serial:
-                    return conn, info
+                    return dev, conn, info
                 else:
                     conn.close()
     ctx.fail(
@@ -116,40 +115,68 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd == fido.name:
             readers = list_ccid(reader)
             if len(readers) == 1:
-                # TODO: return YubiKey(Descriptor.from_driver(readers[0]), readers[0])
-                pass
+                dev = readers[0]
+                conn = dev.open_iso7816_connection()
+                info = read_info(dev.pid, conn)
+                return dev, conn, info
             elif len(readers) > 1:
                 ctx.fail("Multiple YubiKeys on external readers detected.")
             else:
                 ctx.fail("No YubiKey found on external reader.")
         else:
             ctx.fail("Not a CCID command.")
-    try:
-        # TODO: descriptors = get_descriptors()
-        descriptors = None
-        pass
-    except usb.core.NoBackendError:
-        ctx.fail("No PyUSB backend detected!")
-    n_keys = len(descriptors)
-    if n_keys == 0:
+
+    dev = [None, None, None, None]
+    for hid in list_hid():
+        if not dev[0]:
+            dev[0] = hid.pid
+        elif dev[0] != hid.pid:
+            ctx.fail("Multiple devices found")
+        if hid.has_otp:
+            if dev[1]:
+                ctx.fail("Multiple devices found")
+            dev[1] = hid
+        if hid.has_ctap:
+            if dev[2]:
+                ctx.fail("Multiple devices found")
+            dev[2] = hid
+    for ccid in list_ccid():
+        if not dev[0]:
+            dev[0] = ccid.pid
+        elif dev[0] != ccid.pid:
+            ctx.fail("Multiple devices found")
+        if dev[3]:
+            ctx.fail("Multiple devices found")
+        dev[3] = ccid
+
+    if dev[0] is None:
         ctx.fail("No YubiKey detected!")
-    if n_keys > 1:
+
+    if dev[3]:
+        dev = dev[3]
+        conn = dev.open_iso7816_connection()
+    elif dev[1]:
+        dev = dev[1]
+        conn = dev.open_otp_connection()
+    elif dev[2]:
+        dev = dev[2]
+        conn = dev.open_ctap_device()
+    else:
         ctx.fail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
             "which one to use."
         )
-    descriptor = descriptors[0]
-    if descriptor.mode.transports & transports:
-        try:
-            return descriptor.open_device(transports)
-        except Exception:
-            ctx.fail(
-                "Failed connecting to {} [{}]. "
-                "Make sure the application has the "
-                "required permissions.".format(descriptor.name, descriptor.mode)
+        ctx.fail(
+            "Failed connecting to {} {}. "
+            "Make sure the application has the "
+            "required permissions.".format(
+                dev.pid.get_type().value, TRANSPORT.split(dev.pid.get_transports())
             )
-    else:
-        _disabled_transport(ctx, transports, cmd)
+        )
+        # TODO: _disabled_transport(ctx, transports, cmd)
+
+    info = read_info(dev.pid, conn)
+    return dev, conn, info
 
 
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -215,18 +242,23 @@ def cli(ctx, device, log_level, log_file, reader):
 
     transports = getattr(subcmd, "transports", TRANSPORT.usb_transports())
     if transports:
-        conn, info = None, None
+        dev, conn, info = None, None, None
 
         def resolve_device():
             if device is not None:
-                conn, info = _run_cmd_for_serial(ctx, subcmd.name, transports, device)
+                dev, conn, info = _run_cmd_for_serial(
+                    ctx, subcmd.name, transports, device
+                )
             else:
-                conn, info = _run_cmd_for_single(ctx, subcmd.name, transports, reader)
+                dev, conn, info = _run_cmd_for_single(
+                    ctx, subcmd.name, transports, reader
+                )
             ctx.call_on_close(conn.close)
-            return conn, info
+            return dev, conn, info
 
-        ctx.obj.add_resolver("conn", lambda: conn or resolve_device()[0])
-        ctx.obj.add_resolver("info", lambda: info or resolve_device()[1])
+        ctx.obj.add_resolver("dev", lambda: dev or resolve_device()[0])
+        ctx.obj.add_resolver("conn", lambda: conn or resolve_device()[1])
+        ctx.obj.add_resolver("info", lambda: info or resolve_device()[2])
 
 
 @cli.command("list")
@@ -246,16 +278,17 @@ def list_keys(ctx, serials, readers):
     List connected YubiKeys.
     """
 
-    def _print_device(dev, name, serial=None):
+    def _print_device(dev, info):
         if serials:
-            if serial:
-                click.echo(serial)
+            if info.serial:
+                click.echo(info.serial)
         else:
             click.echo(
-                "{} [{}]{}".format(
-                    name,
+                "{} ({}) [{}]{}".format(
+                    get_name(dev.pid.get_type(), info),
+                    "%d.%d.%d" % info.version if info.version else "unknown",
                     dev.pid.name.split("_", 1)[1].replace("_", "+"),
-                    " Serial: {}".format(serial) if serial else "",
+                    " Serial: {}".format(info.serial) if info.serial else "",
                 )
             )
 
@@ -264,40 +297,37 @@ def list_keys(ctx, serials, readers):
             click.echo(reader.name)
         ctx.exit()
 
-    handled_serials = set()
+    # List all attached devices
+    handled_pids = set()
+    hid_devs = list_hid()
+    pids = {}
 
-    for dev in list_hid():
-        try:
-            if dev.has_otp:
-                with dev.open_otp_connection() as conn:
+    def handle(dev, get_connection):
+        if dev.pid not in handled_pids and pids.get(dev.pid, True):
+            try:
+                with get_connection(dev) as conn:
                     info = read_info(dev.pid, conn)
-            elif dev.has_ctap:
-                with dev.open_ctap_device() as conn:
-                    info = read_info(dev.pid, conn)
-            name = get_name(dev.pid, info)
-            if info.serial:
-                if info.serial not in handled_serials:
-                    handled_serials.add(info.serial)
-                    _print_device(dev, "%s: %r" % (name, info.version), info.serial)
-            else:
-                _print_device(dev, "%s: %r" % (name, info.version))
-        except Exception as e:
-            print(e)
+                pids[dev.pid] = True
+                _print_device(dev, info)
+            except Exception as e:
+                pids[dev.pid] = False
+                logger.error("Failed opening device", exc_info=e)
+
+    # Handle OTP devices
+    for dev in filter(lambda d: d.has_otp, hid_devs):
+        handle(dev, lambda d: d.open_otp_connection())
+    handled_pids.update({pid for pid, handled in pids.items() if handled})
+
+    # Handle FIDO devices
+    for dev in filter(lambda d: d.has_ctap, hid_devs):
+        handle(dev, lambda d: d.open_ctap_device())
+    handled_pids.update({pid for pid, handled in pids.items() if handled})
+
+    # Handle CCID devices
     try:
         for dev in list_ccid():
-            try:
-                with dev.open_iso7816_connection() as conn:
-                    info = read_info(dev.pid, conn)
-            except smartcard.Exceptions.NoCardException:
-                logger.info("Failed to connect to device, no card inserted")
-                continue
-            name = get_name(dev.pid, info)
-            if info.serial:
-                if info.serial not in handled_serials:
-                    handled_serials.add(info.serial)
-                    _print_device(dev, "%s: %r" % (name, info.version), info.serial)
-            else:
-                _print_device(dev, "%s: %r" % (name, info.version))
+            handle(dev, lambda d: d.open_iso7816_connection())
+        handled_pids.update({pid for pid, handled in pids.items() if handled})
     except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
         logger.error("Failed to list devices", exc_info=e)
         ctx.fail("Failed to establish CCID context. Is the pcscd service running?")

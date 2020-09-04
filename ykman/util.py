@@ -29,6 +29,8 @@ from __future__ import absolute_import
 
 
 from .yubikit.core import (  # noqa
+    Tlv,
+    BitflagEnum,
     PID,
     APPLICATION,
     TRANSPORT,
@@ -36,7 +38,7 @@ from .yubikit.core import (  # noqa
     Mode,
     bytes2int,
     int2bytes,
-)  # noqa
+)
 
 import six
 import struct
@@ -46,7 +48,7 @@ import random
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from enum import Enum, IntEnum, unique
+from enum import Enum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
@@ -57,16 +59,6 @@ logger = logging.getLogger(__name__)
 
 
 PEM_IDENTIFIER = b"-----BEGIN"
-
-
-class BitflagEnum(IntEnum):
-    @classmethod
-    def split(cls, flags):
-        return (c for c in cls if c & flags)
-
-    @staticmethod
-    def has(flags, check):
-        return flags & check == check
 
 
 @unique
@@ -92,113 +84,6 @@ class Cve201715361VulnerableError(Exception):
             "On-chip RSA key generation on this YubiKey has been blocked.\n"
             "Please see https://yubi.co/ysa201701 for details."
         )
-
-
-def _tlv_parse_tag(data, offs=0):
-    t = six.indexbytes(data, offs)
-    if t & 0x1F != 0x1F:
-        return t, 1
-    else:
-        t = t << 8 | six.indexbytes(data, offs + 1)
-        return t, 2
-
-
-def _tlv_parse_length(data, offs=0):
-    ln = six.indexbytes(data, offs)
-    offs += 1
-    if ln > 0x80:
-        n_bytes = ln - 0x80
-        ln = bytes2int(data[offs : offs + n_bytes])
-    else:
-        n_bytes = 0
-    return ln, n_bytes + 1
-
-
-class Tlv(bytes):
-    @property
-    def tag(self):
-        return _tlv_parse_tag(self)[0]
-
-    @property
-    def length(self):
-        _, offs = _tlv_parse_tag(self)
-        return _tlv_parse_length(self, offs)[0]
-
-    @property
-    def value(self):
-        ln = self.length
-        if ln == 0:
-            return b""
-        return bytes(self[-ln:])
-
-    def __repr__(self):
-        return u"{}(tag={:02x}, value={})".format(
-            self.__class__.__name__, self.tag, b2a_hex(self.value).decode("ascii")
-        )
-
-    def __new__(cls, *args):
-        if len(args) == 1:
-            data = args[0]
-            if isinstance(data, int):  # Called with tag only, blank value
-                tag = data
-                value = b""
-            else:  # Called with binary TLV data
-                tag, tag_ln = _tlv_parse_tag(data)
-                ln, ln_ln = _tlv_parse_length(data, tag_ln)
-                offs = tag_ln + ln_ln
-                value = data[offs : offs + ln]
-        elif len(args) == 2:  # Called with tag and value.
-            (tag, value) = args
-        else:
-            raise TypeError(
-                "{}() takes at most 2 arguments ({} given)".format(cls, len(args))
-            )
-
-        data = bytearray([])
-        if tag <= 0xFF:
-            data.append(tag)
-        else:
-            tag_1 = tag >> 8
-            if tag_1 > 0xFF or tag_1 & 0x1F != 0x1F:
-                raise ValueError("Unsupported tag value")
-            tag_2 = tag & 0xFF
-            data.extend([tag_1, tag_2])
-        length = len(value)
-        if length < 0x80:
-            data.append(length)
-        elif length < 0xFF:
-            data.extend([0x81, length])
-        else:
-            data.extend([0x82, length >> 8, length & 0xFF])
-        data += value
-
-        return super(Tlv, cls).__new__(cls, bytes(data))
-
-    @classmethod
-    def parse_from(cls, data):
-        tlv = cls(data)
-        return tlv, data[len(tlv) :]
-
-    @classmethod
-    def parse_list(cls, data):
-        res = []
-        while data:
-            tlv, data = cls.parse_from(data)
-            res.append(tlv)
-        return res
-
-    @classmethod
-    def parse_dict(cls, data):
-        return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
-
-    @classmethod
-    def unpack(cls, tag, data):
-        tlv = cls(data)
-        if tlv.tag != tag:
-            raise ValueError(
-                "Wrong tag, got {:02x} expected {:02x}".format(tlv.tag, tag)
-            )
-        return tlv.value
 
 
 parse_tlvs = Tlv.parse_list  # Deprecated, use Tlv.parse_list directly

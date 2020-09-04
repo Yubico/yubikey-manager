@@ -31,10 +31,10 @@ import logging
 
 from .util import AID
 from fido2.ctap import CtapDevice
-from .yubikit.core import TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
+from .yubikit.core import INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
 from .yubikit.core.otp import OtpConnection
 from .yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
-from .yubikit.mgmt import ManagementApplication, INTERFACE, DeviceInfo, DeviceConfig
+from .yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
 from .yubikit.otp import YkCfgApplication
 
 logger = logging.getLogger(__name__)
@@ -226,8 +226,7 @@ def read_info(pid, conn):
     return info
 
 
-def get_name(pid, info):
-    key_type = pid.get_type()
+def get_name(key_type, info):
     device_name = key_type.value
     usb_supported = info.supported_applications.get(INTERFACE.USB)
 

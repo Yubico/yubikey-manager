@@ -36,7 +36,6 @@ from .util import (
     EnumChoice,
 )
 from ..util import (
-    TRANSPORT,
     generate_static_pw,
     modhex_decode,
     modhex_encode,
@@ -49,7 +48,7 @@ from ..driver_otp import YkpersError
 from ..otp import OtpController, PrepareUploadFailed, SlotConfig
 from ..scancodes import KEYBOARD_LAYOUT
 from ..yubikit.otp import YkCfgApplication
-from ..yubikit.mgmt import INTERFACE
+from ..yubikit.core import INTERFACE, TRANSPORT
 import logging
 import os
 import struct

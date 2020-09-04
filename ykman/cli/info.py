@@ -27,7 +27,10 @@
 
 from __future__ import absolute_import
 
+from ..yubikit.core import INTERFACE
+
 from ..descriptor import open_device, FailedOpeningDeviceException
+from ..device import is_fips_version, get_name
 from ..fido import FipsU2fController
 from ..oath import OathController
 from ..otp import OtpController
@@ -39,19 +42,23 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def print_app_status_table(config):
+def print_app_status_table(supported_apps, enabled_apps):
+    usb_supported = supported_apps.get(INTERFACE.USB)
+    usb_enabled = enabled_apps.get(INTERFACE.USB)
+    nfc_supported = supported_apps.get(INTERFACE.NFC)
+    nfc_enabled = enabled_apps.get(INTERFACE.NFC)
     rows = []
     for app in APPLICATION:
-        if app & config.usb_supported:
-            if app & config.usb_enabled:
+        if app & usb_supported:
+            if app & usb_enabled:
                 usb_status = "Enabled"
             else:
                 usb_status = "Disabled"
         else:
             usb_status = "Not available"
-        if config.nfc_supported:
-            if app & config.nfc_supported:
-                if app & config.nfc_enabled:
+        if nfc_supported:
+            if app & nfc_supported:
+                if app & nfc_enabled:
                     nfc_status = "Enabled"
                 else:
                     nfc_status = "Disabled"
@@ -71,7 +78,7 @@ def print_app_status_table(config):
                 column_l.append(len(c))
 
     f_apps = "Applications".ljust(column_l[0])
-    if config.nfc_supported:
+    if nfc_supported:
         f_USB = "USB".ljust(column_l[1])
         f_NFC = "NFC".ljust(column_l[2])
     f_table = ""
@@ -81,7 +88,7 @@ def print_app_status_table(config):
             f_table += "{}\t".format(c.ljust(column_l[idx]))
         f_table += "\n"
 
-    if config.nfc_supported:
+    if nfc_supported:
         click.echo("{}\t{}\t{}".format(f_apps, f_USB, f_NFC))
     else:
         click.echo("{}".format(f_apps))
@@ -139,35 +146,44 @@ def info(ctx, check_fips):
     Displays information about the attached YubiKey such as serial number,
     firmware version, applications, etc.
     """
-    dev = ctx.obj["dev"]
+    key_type = ctx.obj["dev"].pid.get_type()
+    transports = ctx.obj["dev"].pid.get_transports()
+    info = ctx.obj["info"]
 
-    if dev.is_fips and check_fips:
-        fips_status = get_overall_fips_status(dev.serial, dev.config)
+    if is_fips_version(info.version) and check_fips:
+        fips_status = get_overall_fips_status(info.serial, info)
 
-    click.echo("Device type: {}".format(dev.device_name))
-    click.echo("Serial number: {}".format(dev.serial or "Not set or unreadable"))
-    if dev.version:
-        f_version = ".".join(str(x) for x in dev.version)
+    device_name = get_name(key_type, info)
+
+    click.echo("Device type: {}".format(device_name))
+    click.echo("Serial number: {}".format(info.serial or "Not set or unreadable"))
+    if info.version:
+        f_version = ".".join(str(x) for x in info.version)
         click.echo("Firmware version: {}".format(f_version))
     else:
         click.echo(
             "Firmware version: Uncertain, re-run with only one " "YubiKey connected"
         )
 
-    config = dev.config
-    if config.form_factor:
-        click.echo("Form factor: {!s}".format(config.form_factor))
-    click.echo("Enabled USB interfaces: {}".format(dev.mode))
-    if config.nfc_supported:
-        f_nfc = "enabled" if config.nfc_enabled else "disabled"
+    if info.form_factor:
+        click.echo("Form factor: {!s}".format(info.form_factor))
+    click.echo("Enabled USB interfaces: {}".format(TRANSPORT.split(transports)))
+    if INTERFACE.NFC in info.supported_applications:
+        f_nfc = (
+            "enabled"
+            if info.config.enabled_applications.get(INTERFACE.NFC)
+            else "disabled"
+        )
         click.echo("NFC interface is {}.".format(f_nfc))
-    if config.configuration_locked:
+    if info.is_locked:
         click.echo("Configured applications are protected by a lock code.")
     click.echo()
 
-    print_app_status_table(config)
+    print_app_status_table(
+        info.supported_applications, info.config.enabled_applications
+    )
 
-    if dev.is_fips and check_fips:
+    if is_fips_version(info.version) and check_fips:
         click.echo()
 
         click.echo(

@@ -1,13 +1,13 @@
 from __future__ import absolute_import
 
-from .core import Tlv, APPLICATION, FORM_FACTOR, TRANSPORT
+from .core import Tlv, INTERFACE, APPLICATION, FORM_FACTOR, TRANSPORT
 from .core.otp import check_crc, OtpConnection, OtpApplication
 from .core.iso7816 import Iso7816Connection, Iso7816Application
 from ..util import bytes2int, int2bytes
 
 from fido2.ctap import CtapDevice
 
-from enum import Enum, IntEnum, unique, auto
+from enum import IntEnum, unique
 from collections import namedtuple
 import re
 import struct
@@ -93,11 +93,6 @@ class _ManagementCtapBackend(object):
 
     def write_config(self, config):
         self.ctap.call(CTAP_WRITE_CONFIG, config)
-
-
-class INTERFACE(Enum):
-    USB = auto()
-    NFC = auto()
 
 
 @unique

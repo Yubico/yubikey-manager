@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import, unicode_literals
 
-from enum import Enum, IntEnum, unique
+from enum import Enum, IntEnum, unique, auto
 from binascii import b2a_hex
 import six
 import abc
@@ -36,11 +36,16 @@ import abc
 class BitflagEnum(IntEnum):
     @classmethod
     def split(cls, flags):
-        return (c for c in cls if c & flags)
+        return [c for c in cls if c & flags]
 
     @staticmethod
     def has(flags, check):
         return flags & check == check
+
+
+class INTERFACE(Enum):
+    USB = auto()
+    NFC = auto()
 
 
 @unique
