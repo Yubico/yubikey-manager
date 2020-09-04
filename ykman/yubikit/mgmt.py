@@ -2,6 +2,7 @@ from __future__ import absolute_import
 
 from .core import (
     Tlv,
+    BitflagEnum,
     INTERFACE,
     APPLICATION,
     FORM_FACTOR,
@@ -38,6 +39,12 @@ CTAP_VENDOR_FIRST = 0x40
 CTAP_YUBIKEY_DEVICE_CONFIG = CTAP_VENDOR_FIRST
 CTAP_READ_CONFIG = CTAP_VENDOR_FIRST + 2
 CTAP_WRITE_CONFIG = CTAP_VENDOR_FIRST + 3
+
+
+@unique
+class DEVICE_FLAG(BitflagEnum):
+    REMOTE_WAKEUP = 0x40
+    EJECT = 0x80
 
 
 class _ManagementOtpBackend(object):
@@ -228,11 +235,12 @@ class ManagementApplication(object):
         return DeviceInfo.parse(self.backend.read_config(), self.version)
 
     def write_device_config(
-        self, config, reboot=False, cur_lock_code=None, new_lock_code=None
+        self, config=None, reboot=False, cur_lock_code=None, new_lock_code=None
     ):
         if self.version < (5, 0, 0):
             raise NotSupportedError("Operation requires YubiKey 5 or later")
 
+        config = config or DeviceConfig({}, None, None, None)
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
         )

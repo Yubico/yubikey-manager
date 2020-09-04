@@ -270,5 +270,3 @@ def get_name(key_type, info):
 
 
 YubiKey = None
-device_config = None
-FLAGS = None

@@ -28,8 +28,8 @@
 from __future__ import absolute_import
 
 from .util import click_postpone_execution, click_force_option, EnumChoice
-from ..device import device_config, FLAGS
-from ..util import APPLICATION
+from ..yubikit.core import APPLICATION, INTERFACE
+from ..yubikit.mgmt import ManagementApplication, DeviceConfig, DEVICE_FLAG
 from binascii import a2b_hex, b2a_hex
 import os
 import logging
@@ -85,12 +85,13 @@ def config(ctx):
       Generate and set a random application lock code:
       $ ykman config set-lock-code --generate
     """
-    dev = ctx.obj["dev"]
-    if not dev.can_write_config:
+    info = ctx.obj["info"]
+    if info.version < (5, 0, 0):
         ctx.fail(
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."
         )
+    ctx.obj["controller"] = ManagementApplication(ctx.obj["conn"])
 
 
 @config.command("set-lock-code")
@@ -118,7 +119,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     The lock code must be a 32 characters (16 bytes) hex value.
     """
 
-    dev = ctx.obj["dev"]
+    info = ctx.obj["info"]
+    app = ctx.obj["controller"]
 
     def prompt_new_lock_code():
         return prompt_lock_code(prompt="Enter your new lock code")
@@ -130,10 +132,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         lock_code = _parse_lock_code(ctx, lock_code)
         new_lock_code = _parse_lock_code(ctx, new_lock_code)
         try:
-            dev.write_config(
-                device_config(config_lock=new_lock_code),
-                reboot=True,
-                lock_key=lock_code,
+            app.write_device_config(
+                None, True, lock_code, new_lock_code,
             )
         except Exception as e:
             logger.error("Changing the lock code failed", exc_info=e)
@@ -142,7 +142,9 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     def set_lock_code(new_lock_code):
         new_lock_code = _parse_lock_code(ctx, new_lock_code)
         try:
-            dev.write_config(device_config(config_lock=new_lock_code), reboot=True)
+            app.write_device_config(
+                None, True, None, new_lock_code,
+            )
         except Exception as e:
             logger.error("Setting the lock code failed", exc_info=e)
             ctx.fail("Failed to set the lock code.")
@@ -160,7 +162,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
             "Lock configuration with this lock code?", abort=True, err=True
         )
 
-    if dev.config.configuration_locked:
+    if info.is_locked:
         if lock_code:
             if new_lock_code:
                 change_lock_code(lock_code, new_lock_code)
@@ -226,7 +228,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     "--autoeject-timeout",
     required=False,
     type=int,
-    default=0,
+    default=None,
     metavar="SECONDS",
     help="When set, the smartcard will automatically eject"
     " after the given time. Implies --touch-eject.",
@@ -235,7 +237,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     "--chalresp-timeout",
     required=False,
     type=int,
-    default=0,
+    default=None,
     metavar="SECONDS",
     help="Sets the timeout when waiting for touch"
     " for challenge-response in the OTP application.",
@@ -282,11 +284,11 @@ def usb(
     if touch_eject and no_touch_eject:
         ctx.fail("Invalid options.")
 
-    dev = ctx.obj["dev"]
+    info = ctx.obj["info"]
 
-    usb_supported = dev.config.usb_supported
-    usb_enabled = dev.config.usb_enabled
-    flags = dev.config.device_flags
+    usb_supported = info.supported_applications[INTERFACE.USB]
+    usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+    flags = info.config.device_flags
 
     if not usb_supported:
         ctx.fail("USB interface not supported.")
@@ -295,9 +297,9 @@ def usb(
         _list_apps(ctx, usb_enabled)
 
     if touch_eject:
-        flags |= FLAGS.MODE_FLAG_EJECT
+        flags |= DEVICE_FLAG.EJECT
     if no_touch_eject:
-        flags &= ~FLAGS.MODE_FLAG_EJECT
+        flags &= ~DEVICE_FLAG.EJECT
 
     for app in enable:
         if app & usb_supported:
@@ -329,7 +331,7 @@ def usb(
         else "",
     )
 
-    is_locked = dev.config.configuration_locked
+    is_locked = info.is_locked
 
     if force and is_locked and not lock_code:
         ctx.fail("Configuration is locked - please supply the --lock-code " "option.")
@@ -346,16 +348,17 @@ def usb(
     if lock_code:
         lock_code = _parse_lock_code(ctx, lock_code)
 
+    app = ctx.obj["controller"]
     try:
-        dev.write_config(
-            device_config(
-                usb_enabled=usb_enabled,
-                flags=flags,
-                auto_eject_timeout=autoeject_timeout,
-                chalresp_timeout=chalresp_timeout,
+        app.write_device_config(
+            DeviceConfig(
+                {INTERFACE.USB: usb_enabled},
+                autoeject_timeout,
+                chalresp_timeout,
+                flags,
             ),
-            reboot=True,
-            lock_key=lock_code,
+            True,
+            lock_code,
         )
     except Exception as e:
         logger.error("Failed to write config", exc_info=e)
@@ -406,9 +409,9 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
 
     _ensure_not_invalid_options(ctx, enable, disable)
 
-    dev = ctx.obj["dev"]
-    nfc_supported = dev.config.nfc_supported
-    nfc_enabled = dev.config.nfc_enabled
+    info = ctx.obj["info"]
+    nfc_supported = info.supported_applications[INTERFACE.NFC]
+    nfc_enabled = info.config.enabled_applications[INTERFACE.NFC]
 
     if not nfc_supported:
         ctx.fail("NFC interface not available.")
@@ -436,7 +439,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
         else "",
     )
 
-    is_locked = dev.config.configuration_locked
+    is_locked = info.is_locked
 
     if force and is_locked and not lock_code:
         ctx.fail("Configuration is locked - please supply the --lock-code " "option.")
@@ -453,9 +456,12 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     if lock_code:
         lock_code = _parse_lock_code(ctx, lock_code)
 
+    app = ctx.obj["controller"]
     try:
-        dev.write_config(
-            device_config(nfc_enabled=nfc_enabled), reboot=True, lock_key=lock_code
+        app.write_device_config(
+            DeviceConfig({INTERFACE.NFC: nfc_enabled}, None, None, None),
+            True,
+            lock_code,
         )
     except Exception as e:
         logger.error("Failed to write config", exc_info=e)
