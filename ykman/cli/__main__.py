@@ -27,14 +27,14 @@
 
 from __future__ import absolute_import, print_function
 
-from ykman.hid import list_devices as list_hid
-from ykman.scard import list_devices as list_ccid, list_readers
-from ykman.yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT
 
 import ykman.logging_setup
 import smartcard.pcsc.PCSCExceptions
 
-from ykman import __version__
+from .. import __version__
+from ..hid import list_devices as list_hid
+from ..scard import list_devices as list_ccid, list_readers
 from ..util import Cve201715361VulnerableError
 from ..device import read_info, get_name
 from .util import UpperCaseChoice, YkmanContextObject

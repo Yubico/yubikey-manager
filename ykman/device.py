@@ -29,13 +29,13 @@ from __future__ import absolute_import
 
 import logging
 
-from .util import AID
+from yubikit.core import INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
+from yubikit.core.otp import OtpConnection
+from yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
+from yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
+from yubikit.otp import YkCfgApplication
 from fido2.ctap import CtapDevice
-from .yubikit.core import INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
-from .yubikit.core.otp import OtpConnection
-from .yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
-from .yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
-from .yubikit.otp import YkCfgApplication
+from .util import AID
 
 logger = logging.getLogger(__name__)
 

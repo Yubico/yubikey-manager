@@ -28,7 +28,8 @@
 from __future__ import absolute_import
 
 
-from .yubikit.core import (  # noqa
+# TODO: Remove this
+from yubikit.core import (  # noqa
     Tlv,
     BitflagEnum,
     PID,

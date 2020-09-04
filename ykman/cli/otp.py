@@ -27,6 +27,9 @@
 
 from __future__ import absolute_import
 
+from yubikit.otp import YkCfgApplication
+from yubikit.core import INTERFACE, TRANSPORT, CommandError
+
 from .util import (
     click_force_option,
     click_callback,
@@ -47,8 +50,6 @@ from .. import __version__
 from ..otp import OtpController, PrepareUploadFailed, SlotConfig
 from ..device import is_fips_version
 from ..scancodes import KEYBOARD_LAYOUT
-from ..yubikit.otp import YkCfgApplication
-from ..yubikit.core import INTERFACE, TRANSPORT, CommandError
 from threading import Event
 import logging
 import os

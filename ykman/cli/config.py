@@ -28,8 +28,8 @@
 from __future__ import absolute_import
 
 from .util import click_postpone_execution, click_force_option, EnumChoice
-from ..yubikit.core import APPLICATION, INTERFACE
-from ..yubikit.mgmt import ManagementApplication, DeviceConfig, DEVICE_FLAG
+from yubikit.core import APPLICATION, INTERFACE
+from yubikit.mgmt import ManagementApplication, DeviceConfig, DEVICE_FLAG
 from binascii import a2b_hex, b2a_hex
 import os
 import logging

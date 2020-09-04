@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from ykman.yubikit.otp import TKTFLAG, CFGFLAG, EXTFLAG
+from yubikit.otp import TKTFLAG, CFGFLAG, EXTFLAG
 
 import json
 import logging
@@ -35,6 +35,7 @@ import time
 import struct
 from enum import Enum
 from six.moves import http_client
+from . import __version__
 from .util import (
     time_challenge,
     parse_totp_hash,
@@ -43,7 +44,6 @@ from .util import (
     modhex_encode,
 )
 from .scancodes import encode, KEYBOARD_LAYOUT
-from . import __version__
 from binascii import a2b_hex, b2a_hex
 
 logger = logging.getLogger(__name__)

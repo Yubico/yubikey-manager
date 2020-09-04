@@ -1,6 +1,8 @@
 from __future__ import absolute_import
 
 from .core import (
+    bytes2int,
+    int2bytes,
     Tlv,
     BitflagEnum,
     INTERFACE,
@@ -12,7 +14,6 @@ from .core import (
 )
 from .core.otp import check_crc, OtpConnection, OtpApplication
 from .core.iso7816 import Iso7816Connection, Iso7816Application
-from ..util import bytes2int, int2bytes
 
 from fido2.ctap import CtapDevice
 

@@ -27,7 +27,7 @@
 
 import sys
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 
 install_requires = [
     "six",
@@ -56,7 +56,7 @@ setup(
     description="Tool for managing your YubiKey configuration.",
     license="BSD 2 clause",
     entry_points={"console_scripts": ["ykman=ykman.cli.__main__:main"]},
-    packages=["ykman", "ykman.native", "ykman.scancodes", "ykman.cli"],
+    packages=find_packages(exclude=["test", "test.*"]),
     install_requires=install_requires,
     package_data={"ykman": ["VERSION"]},
     include_package_data=True,

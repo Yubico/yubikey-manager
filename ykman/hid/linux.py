@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 
+from yubikit.core import bytes2int
+from yubikit.core.otp import OtpConnection
 from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
-from ..yubikit.core.otp import OtpConnection
-from ..util import bytes2int
 
 from functools import partial
 import glob

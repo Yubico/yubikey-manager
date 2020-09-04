@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
-from ..yubikit.core import TRANSPORT, YUBIKEY, YubiKeyDevice
-from ..yubikit.core.iso7816 import Iso7816Connection
+from yubikit.core import TRANSPORT, YUBIKEY, YubiKeyDevice
+from yubikit.core.iso7816 import Iso7816Connection
 
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException

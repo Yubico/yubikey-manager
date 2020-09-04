@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from ..yubikit.core import YubiKeyDevice
+from yubikit.core import YubiKeyDevice
 from fido2.hid import CtapHidDevice as _CtapHidDevice
 
 YUBICO_VID = 0x1050

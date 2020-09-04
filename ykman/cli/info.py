@@ -27,18 +27,20 @@
 
 from __future__ import absolute_import
 
-from ykman.hid import list_devices as list_hid
-from ykman.scard import list_devices as list_ccid
-from ..yubikit.core import INTERFACE
-from ..yubikit.core.iso7816 import ApduError
-from ..yubikit.otp import YkCfgApplication
-from ..yubikit.oath import OathApplication
+from yubikit.core import INTERFACE
+from yubikit.core.iso7816 import ApduError
+from yubikit.otp import YkCfgApplication
+from yubikit.oath import OathApplication
+
+from ..hid import list_devices as list_hid
+from ..scard import list_devices as list_ccid
 
 from ..otp import OtpController
 from ..fido import FIPS_U2F_CMD
 from ..oath import OathController
 from ..device import is_fips_version, get_name, read_info
 from ..util import APPLICATION, TRANSPORT
+
 import click
 import logging
 

@@ -5,8 +5,8 @@ import platform
 from ctypes import wintypes, LibraryLoader, WinDLL
 from functools import partial
 
+from yubikit.core.otp import OtpConnection
 from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
-from ..yubikit.core.otp import OtpConnection
 
 
 # Load relevant DLLs
