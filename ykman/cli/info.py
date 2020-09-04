@@ -35,17 +35,15 @@ from ..yubikit.otp import YkCfgApplication
 from ..yubikit.oath import OathApplication
 
 from ..otp import OtpController
+from ..fido import FIPS_U2F_CMD
 from ..oath import OathController
 from ..device import is_fips_version, get_name, read_info
 from ..util import APPLICATION, TRANSPORT
-from fido2.hid import CTAPHID
 import click
 import logging
 
 
 logger = logging.getLogger(__name__)
-
-CTAP_VERIFY_FIPS_MODE = CTAPHID.VENDOR_FIRST + 6
 
 
 def print_app_status_table(supported_apps, enabled_apps):
@@ -136,7 +134,7 @@ def get_overall_fips_status(pid, info):
                     info2 = read_info(pid, ctap)
                     if info2.serial == info.serial:
                         try:
-                            ctap.send_apdu(ins=CTAP_VERIFY_FIPS_MODE)
+                            ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
                             statuses["FIDO U2F"] = True
                         except ApduError:
                             pass

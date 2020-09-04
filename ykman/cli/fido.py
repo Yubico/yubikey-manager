@@ -27,14 +27,15 @@
 
 from __future__ import absolute_import
 
-from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
+from fido2.ctap1 import ApduError
 from time import sleep
 from .util import click_postpone_execution, prompt_for_touch, click_force_option
 from ..driver_ccid import SW
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..hid import list_devices as list_hid
+from ..device import is_fips_version
 
 import click
 import logging
@@ -64,16 +65,17 @@ def fido(ctx):
       $ ykman fido set-pin --pin 123456 --new-pin 654321
 
     """
-    dev = ctx.obj["dev"]
-    if dev.is_fips:
+    info = ctx.obj["info"]
+    conn = ctx.obj["conn"]
+    if is_fips_version(info.version):
         try:
-            ctx.obj["controller"] = FipsU2fController(dev.driver)
+            ctx.obj["controller"] = FipsU2fController(conn)
         except Exception as e:
             logger.debug("Failed to load FipsU2fController", exc_info=e)
             ctx.fail("Failed to load FIDO Application.")
     else:
         try:
-            ctx.obj["controller"] = Fido2Controller(dev.driver)
+            ctx.obj["controller"] = Fido2Controller(conn)
         except Exception as e:
             logger.debug("Failed to load Fido2Controller", exc_info=e)
             ctx.fail("Failed to load FIDO 2 Application.")

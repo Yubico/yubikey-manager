@@ -67,8 +67,12 @@ def probe_applications(conn):
 
 
 def read_info(pid, conn):
-    key_type = pid.get_type()
-    transports = pid.get_transports()
+    if pid:
+        key_type = pid.get_type()
+        transports = pid.get_transports()
+    else:
+        key_type = None
+        transports = 0
 
     if isinstance(conn, Iso7816Connection):
         try:
@@ -163,7 +167,7 @@ def read_info(pid, conn):
             mgmt = ManagementApplication(conn)
             info = mgmt.read_device_info()
         except Exception:  # SKY 1?
-            version = conn.device_version
+            version = getattr(conn, "device_version", (0,))
             if version[0] < 4:  # Prior to YK4 this was not firmware version
                 version = (3, 0, 0)  # Guess
             info = DeviceInfo(
