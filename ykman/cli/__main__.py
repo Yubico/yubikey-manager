@@ -112,7 +112,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
 
 def _run_cmd_for_single(ctx, cmd, transports, reader=None):
     if reader:
-        if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd == fido.name:
+        if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd in (fido.name, otp.name):
             readers = list_ccid(reader)
             if len(readers) == 1:
                 dev = readers[0]
@@ -129,46 +129,52 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         else:
             ctx.fail("Not a CCID command.")
 
-    dev = [None, None, None, None]
-    for hid in list_hid():
-        if not dev[0]:
-            dev[0] = hid.pid
-        elif dev[0] != hid.pid:
-            ctx.fail("Multiple devices found")
-        if hid.has_otp:
-            if dev[1]:
-                ctx.fail("Multiple devices found")
-            dev[1] = hid
-        if hid.has_ctap:
-            if dev[2]:
-                ctx.fail("Multiple devices found")
-            dev[2] = hid
-    for ccid in list_ccid():
-        if not dev[0]:
-            dev[0] = ccid.pid
-        elif dev[0] != ccid.pid:
-            ctx.fail("Multiple devices found")
-        if dev[3]:
-            ctx.fail("Multiple devices found")
-        dev[3] = ccid
-
-    if dev[0] is None:
-        ctx.fail("No YubiKey detected!")
-
-    if dev[3]:
-        dev = dev[3]
-        conn = dev.open_iso7816_connection()
-    elif dev[1]:
-        dev = dev[1]
-        conn = dev.open_otp_connection()
-    elif dev[2]:
-        dev = dev[2]
-        conn = dev.open_ctap_device()
-    else:
+    def fail_multiple():
         ctx.fail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
             "which one to use."
         )
+
+    pid, otp_dev, ctap_dev, ccid_dev = None, None, None, None
+    for hid in list_hid():
+        if hid.pid == pid or pid is None:
+            pid = hid.pid
+        else:
+            fail_multiple()
+        if hid.has_otp:
+            if otp_dev:
+                fail_multiple()
+            otp_dev = hid
+        if hid.has_ctap:
+            if ctap_dev:
+                fail_multiple()
+            ctap_dev = hid
+    for ccid in list_ccid():
+        if ccid.pid == pid or pid is None:
+            pid = ccid.pid
+        else:
+            fail_multiple()
+        if ccid_dev:
+            fail_multiple()
+        ccid_dev = dev
+
+    if pid is None:
+        ctx.fail("No YubiKey detected!")
+
+    try:
+        if ccid_dev and TRANSPORT.has(transports, TRANSPORT.CCID):
+            dev = ccid_dev
+            conn = dev.open_iso7816_connection()
+        elif otp_dev and TRANSPORT.has(transports, TRANSPORT.OTP):
+            dev = otp_dev
+            conn = dev.open_otp_connection()
+        elif ctap_dev and TRANSPORT.has(transports, TRANSPORT.FIDO):
+            dev = ctap_dev
+            conn = dev.open_ctap_device()
+        else:
+            _disabled_transport(ctx, transports, cmd)
+    except Exception as e:
+        logger.error("Failed opening device", exc_info=e)
         ctx.fail(
             "Failed connecting to {} {}. "
             "Make sure the application has the "
@@ -176,7 +182,10 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
                 dev.pid.get_type().value, TRANSPORT.split(dev.pid.get_transports())
             )
         )
-        # TODO: _disabled_transport(ctx, transports, cmd)
+        ctx.fail(
+            "Multiple YubiKeys detected. Use --device SERIAL to specify "
+            "which one to use."
+        )
 
     info = read_info(dev.pid, conn)
     return dev, conn, info
