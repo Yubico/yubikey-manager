@@ -45,6 +45,7 @@ from ..util import (
 from binascii import a2b_hex, b2a_hex
 from .. import __version__
 from ..otp import OtpController, PrepareUploadFailed, SlotConfig
+from ..device import is_fips_version
 from ..scancodes import KEYBOARD_LAYOUT
 from ..yubikit.otp import YkCfgApplication
 from ..yubikit.core import INTERFACE, TRANSPORT, CommandError
@@ -177,7 +178,7 @@ def info(ctx):
     click.echo("Slot 1: {}".format(slot1 and "programmed" or "empty"))
     click.echo("Slot 2: {}".format(slot2 and "programmed" or "empty"))
 
-    if (4, 4, 0) <= controller.version < (4, 5, 0):
+    if is_fips_version(controller.version):
         click.echo(
             "FIPS Approved Mode: {}".format(
                 "Yes" if controller.is_in_fips_mode else "No"

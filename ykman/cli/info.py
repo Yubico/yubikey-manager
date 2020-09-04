@@ -27,19 +27,25 @@
 
 from __future__ import absolute_import
 
+from ykman.hid import list_devices as list_hid
+from ykman.scard import list_devices as list_ccid
 from ..yubikit.core import INTERFACE
+from ..yubikit.core.iso7816 import ApduError
+from ..yubikit.otp import YkCfgApplication
+from ..yubikit.oath import OathApplication
 
-from ..descriptor import open_device, FailedOpeningDeviceException
-from ..device import is_fips_version, get_name
-from ..fido import FipsU2fController
-from ..oath import OathController
 from ..otp import OtpController
+from ..oath import OathController
+from ..device import is_fips_version, get_name, read_info
 from ..util import APPLICATION, TRANSPORT
+from fido2.hid import CTAPHID
 import click
 import logging
 
 
 logger = logging.getLogger(__name__)
+
+CTAP_VERIFY_FIPS_MODE = CTAPHID.VENDOR_FIRST + 6
 
 
 def print_app_status_table(supported_apps, enabled_apps):
@@ -95,40 +101,69 @@ def print_app_status_table(supported_apps, enabled_apps):
     click.echo(f_table, nl=False)
 
 
-def get_fips_status_over_transport(serial, transport, controller_constructor):
-    try:
-        with open_device(transports=transport, serial=serial) as dev:
-            return controller_constructor(dev._driver).is_in_fips_mode
-    except FailedOpeningDeviceException as e:
-        logger.debug("Failed to open device", exc_info=e)
-        return False
-
-
-def get_overall_fips_status(serial, config):
+def get_overall_fips_status(pid, info):
     statuses = {}
 
-    if config.usb_enabled & APPLICATION.OTP:
-        statuses["OTP"] = get_fips_status_over_transport(
-            serial, TRANSPORT.OTP, OtpController
-        )
-    else:
-        statuses["OTP"] = False
+    usb_enabled = info.config.enabled_applications[INTERFACE.USB]
 
-    if config.usb_enabled & APPLICATION.OATH:
-        statuses["OATH"] = get_fips_status_over_transport(
-            serial, TRANSPORT.CCID, OathController
-        )
-    else:
-        statuses["OATH"] = False
+    hid_devices = list_hid()
 
-    if config.usb_enabled & APPLICATION.U2F:
-        statuses["FIDO U2F"] = get_fips_status_over_transport(
-            serial, TRANSPORT.FIDO, FipsU2fController
-        )
-    else:
-        statuses["FIDO U2F"] = False
+    statuses["OTP"] = False
+    if usb_enabled & APPLICATION.OTP:
+        for dev in hid_devices:
+            if dev.pid == pid and dev.has_otp:
+                with dev.open_otp_connection() as conn:
+                    app = YkCfgApplication(conn)
+                    if app.get_serial() == info.serial:
+                        statuses["OTP"] = OtpController(app).is_in_fips_mode
+                        break
+
+    statuses["OATH"] = False
+    if usb_enabled & APPLICATION.OATH:
+        for dev in list_ccid():
+            with dev.open_iso7816_connection() as conn:
+                info2 = read_info(pid, conn)
+                if info2.serial == info.serial:
+                    app = OathController(OathApplication(conn))
+                    statuses["OATH"] = app.is_in_fips_mode
+                    break
+
+    statuses["FIDO U2F"] = False
+    if usb_enabled & APPLICATION.U2F:
+        for dev in hid_devices:
+            if dev.pid == pid and dev.has_ctap:
+                with dev.open_ctap_device() as ctap:
+                    info2 = read_info(pid, ctap)
+                    if info2.serial == info.serial:
+                        try:
+                            ctap.send_apdu(ins=CTAP_VERIFY_FIPS_MODE)
+                            statuses["FIDO U2F"] = True
+                        except ApduError:
+                            pass
+                        break
 
     return statuses
+
+
+def check_fips_status(pid, info):
+    if is_fips_version(info.version):
+        fips_status = get_overall_fips_status(pid, info)
+        click.echo()
+
+        click.echo(
+            "FIPS Approved Mode: {}".format(
+                "Yes" if all(fips_status.values()) else "No"
+            )
+        )
+
+        status_keys = list(fips_status.keys())
+        status_keys.sort()
+        for status_key in status_keys:
+            click.echo(
+                "  {}: {}".format(
+                    status_key, "Yes" if fips_status[status_key] else "No"
+                )
+            )
 
 
 @click.option(
@@ -146,12 +181,10 @@ def info(ctx, check_fips):
     Displays information about the attached YubiKey such as serial number,
     firmware version, applications, etc.
     """
-    key_type = ctx.obj["dev"].pid.get_type()
-    transports = ctx.obj["dev"].pid.get_transports()
+    pid = ctx.obj["dev"].pid
+    key_type = pid.get_type()
+    transports = pid.get_transports()
     info = ctx.obj["info"]
-
-    if is_fips_version(info.version) and check_fips:
-        fips_status = get_overall_fips_status(info.serial, info)
 
     device_name = get_name(key_type, info)
 
@@ -183,20 +216,6 @@ def info(ctx, check_fips):
         info.supported_applications, info.config.enabled_applications
     )
 
-    if is_fips_version(info.version) and check_fips:
-        click.echo()
-
-        click.echo(
-            "FIPS Approved Mode: {}".format(
-                "Yes" if all(fips_status.values()) else "No"
-            )
-        )
-
-        status_keys = list(fips_status.keys())
-        status_keys.sort()
-        for status_key in status_keys:
-            click.echo(
-                "  {}: {}".format(
-                    status_key, "Yes" if fips_status[status_key] else "No"
-                )
-            )
+    if check_fips:
+        ctx.obj["conn"].close()
+        check_fips_status(pid, info)
