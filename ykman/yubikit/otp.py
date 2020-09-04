@@ -310,8 +310,6 @@ class YkCfgApplication(object):
             self.backend = _YkCfgIso7816Backend(app)
         else:
             raise TypeError("Unsupported connection type")
-        if self.version < (3, 0, 0):
-            raise ValueError("ManagementApplication requires YubiKey 3 or later")
 
     def close(self):
         self.backend.close()

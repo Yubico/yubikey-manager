@@ -135,7 +135,7 @@ def read_info(pid, conn):
                     INTERFACE.USB: usb_supported,
                     INTERFACE.NFC: usb_supported,
                 }
-            elif key_type == YUBIKEY.PLS:
+            elif key_type == YUBIKEY.YKP:
                 applications = {
                     INTERFACE.USB: APPLICATION.OTP | INTERFACE.U2F,
                 }
@@ -180,8 +180,8 @@ def read_info(pid, conn):
                 is_locked=False,
             )
 
-    # Fix usb_enabled for YK 4
-    if (4, 0, 0) <= info.version < (5, 0, 0):
+    # Set usb_enabled for pre YubiKey 5
+    if info.version < (5, 0, 0):
         if info.version == (4, 2, 4):  # Doesn't report correctly
             info = info._replace(supported_applications={INTERFACE.USB: 0x3F})
 
@@ -199,17 +199,14 @@ def read_info(pid, conn):
             usb_enabled &= ~(
                 TRANSPORT.CCID | APPLICATION.OATH | APPLICATION.OPGP | APPLICATION.PIV
             )
-        info = info._replace(
-            config=info.config._replace(
-                enabled_applications={INTERFACE.USB: usb_enabled}
-            )
-        )
+        info.config.enabled_applications[INTERFACE.USB] = usb_enabled
 
     # Workaround for invalid configurations.
     # Assume all form factors except USB_A_KEYCHAIN and
     # USB_C_KEYCHAIN >= 5.2.4 does not support NFC.
     if not (
-        (info.form_factor is FORM_FACTOR.USB_A_KEYCHAIN)
+        info.version < (4, 0, 0)  # No relevant programming yet
+        or (info.form_factor is FORM_FACTOR.USB_A_KEYCHAIN)
         or (
             info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version >= (5, 2, 4)
         )

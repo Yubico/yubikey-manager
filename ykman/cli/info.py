@@ -43,10 +43,10 @@ logger = logging.getLogger(__name__)
 
 
 def print_app_status_table(supported_apps, enabled_apps):
-    usb_supported = supported_apps.get(INTERFACE.USB)
-    usb_enabled = enabled_apps.get(INTERFACE.USB)
-    nfc_supported = supported_apps.get(INTERFACE.NFC)
-    nfc_enabled = enabled_apps.get(INTERFACE.NFC)
+    usb_supported = supported_apps.get(INTERFACE.USB, 0)
+    usb_enabled = enabled_apps.get(INTERFACE.USB, 0)
+    nfc_supported = supported_apps.get(INTERFACE.NFC, 0)
+    nfc_enabled = enabled_apps.get(INTERFACE.NFC, 0)
     rows = []
     for app in APPLICATION:
         if app & usb_supported:
