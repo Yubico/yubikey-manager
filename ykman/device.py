@@ -73,15 +73,17 @@ def read_info(pid, conn):
     if isinstance(conn, Iso7816Connection):
         try:
             mgmt = ManagementApplication(conn)
+            version = mgmt.version
             info = mgmt.read_device_info()
         except Exception:
             if key_type == YUBIKEY.NEO:
-                version = (3, 0, 0)  # Guess
                 try:
+                    # Workaround to "de-select" the Management Applet
+                    conn.transceive(b"\xa4\x04\x00\x08")
                     ykcfg = YkCfgApplication(conn)
-                    version = ykcfg.version
                     serial = ykcfg.get_serial()
-                except Exception:
+                except Exception as e:
+                    logger.debug("Unable to read serial via OtpApplication", exc_info=e)
                     serial = None
                 applications = probe_applications(conn)
                 if TRANSPORT.has(transports, TRANSPORT.FIDO) or version >= (3, 3, 0):

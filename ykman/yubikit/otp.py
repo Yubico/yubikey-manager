@@ -8,7 +8,7 @@ from .mgmt import ManagementApplication
 import struct
 from enum import unique, IntEnum
 
-AID = b"\xa0\x00\x00\x05\x27\x20\x01\x01"
+AID = b"\xa0\x00\x00\x05\x27\x20\x01"
 
 
 @unique
@@ -288,21 +288,25 @@ class YkCfgApplication(object):
             self._version = tuple(self._status[:3])
             self.backend = _YkCfgOtpBackend(app)
         elif isinstance(connection, Iso7816Connection):
-            # Workaround for NFC issue
-            # TODO: Only use for NFC
-            # TODO: Avoid importing ManagementApplication?
-            version = None
-            try:
+            mgmt_version = None
+            try:  # This version number is more reliable for NEO
+                # TODO: Avoid importing ManagementApplication?
                 mgmt = ManagementApplication(connection)
-                version = mgmt.version
+                mgmt_version = mgmt.version
+                if mgmt_version < (4, 0, 0):
+                    # Workaround to "de-select" on NEO
+                    connection.transceive(b"\xa4\x04\x00\x08")
             except ApduError:
                 pass  # Not available, get version from status
 
             app = Iso7816Application(AID, connection)
             self._status = app.select()
-            if not version:
-                version = tuple(self._status[:3])
-            self.version = version
+            otp_version = tuple(self._status[:3])
+            if mgmt_version and mgmt_version[0] == 3:
+                # NEO reports the highest of these two
+                self._version = max(mgmt_version, otp_version)
+            else:
+                self._version = mgmt_version or otp_version
             self.backend = _YkCfgIso7816Backend(app)
         else:
             raise TypeError("Unsupported connection type")
@@ -317,7 +321,7 @@ class YkCfgApplication(object):
         return self._version
 
     def get_serial(self):
-        return bytes2int(self.backend.transceive(CONFIG_SLOT.DEVICE_SERIAL, None, 4))
+        return bytes2int(self.backend.transceive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4))
 
     def get_config_state(self):
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])

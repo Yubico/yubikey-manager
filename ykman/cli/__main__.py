@@ -318,11 +318,6 @@ def list_keys(ctx, serials, readers):
         handle(dev, lambda d: d.open_otp_connection())
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
-    # Handle FIDO devices
-    for dev in filter(lambda d: d.has_ctap, hid_devs):
-        handle(dev, lambda d: d.open_ctap_device())
-    handled_pids.update({pid for pid, handled in pids.items() if handled})
-
     # Handle CCID devices
     try:
         for dev in list_ccid():
@@ -331,6 +326,11 @@ def list_keys(ctx, serials, readers):
     except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
         logger.error("Failed to list devices", exc_info=e)
         ctx.fail("Failed to establish CCID context. Is the pcscd service running?")
+
+    # Handle FIDO devices
+    for dev in filter(lambda d: d.has_ctap, hid_devs):
+        handle(dev, lambda d: d.open_ctap_device())
+    handled_pids.update({pid for pid, handled in pids.items() if handled})
 
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)

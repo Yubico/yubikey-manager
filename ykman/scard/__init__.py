@@ -12,6 +12,10 @@ from fido2.pcsc import CtapPcscDevice
 from time import sleep
 import subprocess  # nosec
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 YK_READER_NAME = "yubico yubikey"
 
@@ -68,7 +72,9 @@ class ScardIso7816Connection(Iso7816Connection):
 
     def transceive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
+        logger.debug("SEND: %s", apdu.hex())
         data, sw1, sw2 = self.connection.transmit(list(apdu))
+        logger.debug("RECV: %s SW=%02x%02x", data, sw1, sw2)
         return bytes(bytearray(data)), sw1 << 8 | sw2
 
 
