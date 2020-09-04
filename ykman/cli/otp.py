@@ -44,11 +44,11 @@ from ..util import (
 )
 from binascii import a2b_hex, b2a_hex
 from .. import __version__
-from ..driver_otp import YkpersError
 from ..otp import OtpController, PrepareUploadFailed, SlotConfig
 from ..scancodes import KEYBOARD_LAYOUT
 from ..yubikit.otp import YkCfgApplication
-from ..yubikit.core import INTERFACE, TRANSPORT
+from ..yubikit.core import INTERFACE, TRANSPORT, CommandError
+from threading import Event
 import logging
 import os
 import struct
@@ -198,7 +198,7 @@ def swap(ctx):
     click.echo("Swapping slots...")
     try:
         controller.swap_slots()
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
 
@@ -225,7 +225,7 @@ def ndef(ctx, slot, prefix):
             controller.configure_ndef_slot(slot, prefix)
         else:
             controller.configure_ndef_slot(slot)
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
 
@@ -248,7 +248,7 @@ def delete(ctx, slot, force):
     click.echo("Deleting the configuration of slot {}...".format(slot))
     try:
         controller.zap_slot(slot)
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
 
@@ -426,7 +426,7 @@ def yubiotp(
         controller.program_otp(
             slot, key, public_id, private_id, SlotConfig(append_cr=not no_enter)
         )
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
     if upload:
@@ -485,7 +485,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
         controller.program_static(
             slot, password, keyboard_layout, SlotConfig(append_cr=not no_enter)
         )
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
 
@@ -563,7 +563,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     )
     try:
         controller.program_chalresp(slot, key, touch)
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
 
@@ -608,26 +608,24 @@ def calculate(ctx, slot, challenge, totp, digits):
             logger.error("Error", exc_info=e)
             ctx.fail("Timestamp challenge for TOTP must be an integer.")
     try:
+        event = Event()
+
+        def on_keepalive(status):
+            if not hasattr(on_keepalive, "prompted") and status == 2:
+                prompt_for_touch()
+                on_keepalive.prompted = True
+
         res = controller.calculate(
-            slot, challenge, totp=totp, digits=int(digits), wait_for_touch=False
+            slot,
+            challenge,
+            totp=totp,
+            digits=int(digits),
+            event=event,
+            on_keepalive=on_keepalive,
         )
-    except YkpersError as e:
-        # Touch is set
-        if e.errno == 11:
-            prompt_for_touch()
-            try:
-                res = controller.calculate(
-                    slot, challenge, totp=totp, digits=int(digits), wait_for_touch=True
-                )
-            except YkpersError as e:
-                # Touch timed out
-                if e.errno == 4:
-                    ctx.fail("The YubiKey timed out.")
-                else:
-                    ctx.fail(e)
-        else:
-            ctx.fail("Failed to calculate challenge.")
-    click.echo(res)
+        click.echo(res)
+    except CommandError as e:
+        _failed_to_write_msg(ctx, e)
 
 
 @otp.command()
@@ -670,7 +668,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
         controller.program_hotp(
             slot, key, counter, int(digits) == 8, SlotConfig(append_cr=not no_enter)
         )
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
 
@@ -764,7 +762,7 @@ def settings(
                 append_cr=enter, pacing=pacing, numeric_keypad=use_numeric_keypad
             ),
         )
-    except YkpersError as e:
+    except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
     if new_access_code:

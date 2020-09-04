@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from .core import BitflagEnum, bytes2int
+from .core import BitflagEnum, bytes2int, NotSupportedError, BadResponseError
 from .core.otp import check_crc, calculate_crc, OtpConnection, OtpApplication
 from .core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
 from .mgmt import ManagementApplication
@@ -231,12 +231,12 @@ class ConfigState(object):
 
     def is_configured(self, slot):
         if self.version < (2, 1, 0):
-            raise ValueError("Configuration state requires YubiKey 2.1 or later")
+            raise NotSupportedError("Configuration state requires YubiKey 2.1 or later")
         return self.flags & (CFGSTATE.SLOT1_VALID, CFGSTATE.SLOT2_VALID)[slot - 1] != 0
 
     def requires_touch(self, slot):
         if self.version < (3, 0, 0):
-            raise ValueError("Touch state requires YubiKey 3.0 or later")
+            raise NotSupportedError("Touch state requires YubiKey 3.0 or later")
         return self.flags & (CFGSTATE.SLOT1_TOUCH, CFGSTATE.SLOT2_TOUCH)[slot - 1] != 0
 
     def is_led_inverted(self):
@@ -257,7 +257,7 @@ class _YkCfgOtpBackend(object):
         response = self.app.transceive(slot, data, event, on_keepalive)
         if check_crc(response[: expected_len + 2]):
             return response[:expected_len]
-        raise Exception("Invalid CRC")  # TODO: Type
+        raise BadResponseError("Invalid CRC")
 
 
 INS_CONFIG = 0x01
@@ -277,7 +277,7 @@ class _YkCfgIso7816Backend(object):
         response = self.app.send_apdu(0, INS_CONFIG, slot, 0, data)
         if expected_len == len(response):
             return response
-        raise Exception("Unexpected response langth")  # TODO: Type
+        raise BadResponseError("Unexpected response length")
 
 
 class YkCfgApplication(object):
@@ -366,7 +366,7 @@ class YkCfgApplication(object):
 
     def calculate_hmac_sha1(self, slot, challenge, event=None, on_keepalive=None):
         if self.version < (2, 2, 0):
-            raise Exception("This operation requires YubiKey 2.2 or later")
+            raise NotSupportedError("This operation requires YubiKey 2.2 or later")
 
         # Pad challenge with byte different from last
         challenge = challenge.ljust(
@@ -382,7 +382,7 @@ class YkCfgApplication(object):
 
     def set_hmac_sha1_key(self, slot, secret, require_touch=False):
         if self.version < (2, 2, 0):
-            raise Exception("This operation requires YubiKey 2.2 or later")
+            raise NotSupportedError("This operation requires YubiKey 2.2 or later")
         if not secret or len(secret) > HMAC_KEY_SIZE:
             raise ValueError("Secret must be <= 20 bytes")
         secret = secret.ljust(KEY_SIZE + UID_SIZE, b"\0")

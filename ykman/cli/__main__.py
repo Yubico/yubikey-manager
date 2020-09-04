@@ -242,23 +242,23 @@ def cli(ctx, device, log_level, log_file, reader):
 
     transports = getattr(subcmd, "transports", TRANSPORT.usb_transports())
     if transports:
-        dev, conn, info = None, None, None
 
-        def resolve_device():
-            if device is not None:
-                dev, conn, info = _run_cmd_for_serial(
-                    ctx, subcmd.name, transports, device
-                )
-            else:
-                dev, conn, info = _run_cmd_for_single(
-                    ctx, subcmd.name, transports, reader
-                )
-            ctx.call_on_close(conn.close)
-            return dev, conn, info
+        def resolve():
+            if not getattr(resolve, "items", None):
+                if device is not None:
+                    resolve.items = _run_cmd_for_serial(
+                        ctx, subcmd.name, transports, device
+                    )
+                else:
+                    resolve.items = _run_cmd_for_single(
+                        ctx, subcmd.name, transports, reader
+                    )
+                ctx.call_on_close(resolve.items[1].close)
+            return resolve.items
 
-        ctx.obj.add_resolver("dev", lambda: dev or resolve_device()[0])
-        ctx.obj.add_resolver("conn", lambda: conn or resolve_device()[1])
-        ctx.obj.add_resolver("info", lambda: info or resolve_device()[2])
+        ctx.obj.add_resolver("dev", lambda: resolve()[0])
+        ctx.obj.add_resolver("conn", lambda: resolve()[1])
+        ctx.obj.add_resolver("info", lambda: resolve()[2])
 
 
 @cli.command("list")

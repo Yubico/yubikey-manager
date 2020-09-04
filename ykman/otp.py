@@ -45,7 +45,6 @@ from .util import (
 from .scancodes import encode, KEYBOARD_LAYOUT
 from . import __version__
 from binascii import a2b_hex, b2a_hex
-from threading import Event
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +291,7 @@ class OtpController(object):
         )
 
     def calculate(
-        self, slot, challenge=None, totp=False, digits=6, wait_for_touch=True
+        self, slot, challenge=None, totp=False, digits=6, event=None, on_keepalive=None
     ):
         if totp:
             if challenge is None:
@@ -301,15 +300,6 @@ class OtpController(object):
                 challenge = time_challenge(challenge)
         else:
             challenge = a2b_hex(challenge)
-
-        if wait_for_touch:
-            event, on_keepalive = None, None
-        else:
-            event = Event()
-
-            def on_keepalive(s):
-                if s == 2:
-                    event.set()
 
         resp = self._app.calculate_hmac_sha1(slot, challenge, event, on_keepalive)
         if totp:

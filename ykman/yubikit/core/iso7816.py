@@ -1,6 +1,10 @@
+from __future__ import absolute_import
+
 import abc
 import struct
 from time import time
+
+from . import CommandError, ApplicationNotAvailableError
 
 
 class Iso7816Connection(abc.ABC):
@@ -18,7 +22,7 @@ class Iso7816Connection(abc.ABC):
         """Sends a command APDU and returns the response"""
 
 
-class ApduError(Exception):
+class ApduError(CommandError):
     """Thrown when an APDU response has the wrong SW code"""
 
     def __init__(self, data, sw):
@@ -67,8 +71,12 @@ class Iso7816Application(object):
         self._touch_workaround = (4, 2, 0) <= version <= (4, 2, 6)
 
     def select(self):
-        # TODO: Catch SW_FILE_NOT_FOUND and thrown other exception
-        return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, self.aid)
+        try:
+            return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, self.aid)
+        except ApduError as e:
+            if e.sw == SW_FILE_NOT_FOUND:
+                raise ApplicationNotAvailableError()
+            raise
 
     def send_apdu(self, cla, ins, p1, p2, data=b""):
         if (

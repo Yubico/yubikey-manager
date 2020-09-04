@@ -1,6 +1,14 @@
 from __future__ import absolute_import
 
-from .core import Tlv, INTERFACE, APPLICATION, FORM_FACTOR, TRANSPORT
+from .core import (
+    Tlv,
+    INTERFACE,
+    APPLICATION,
+    FORM_FACTOR,
+    TRANSPORT,
+    NotSupportedError,
+    BadResponseError,
+)
 from .core.otp import check_crc, OtpConnection, OtpApplication
 from .core.iso7816 import Iso7816Connection, Iso7816Application
 from ..util import bytes2int, int2bytes
@@ -48,7 +56,7 @@ class _ManagementOtpBackend(object):
         r_len = response[0]
         if check_crc(response[: r_len + 1 + 2]):
             return response[: r_len + 1]
-        raise Exception("Invalid checksum")
+        raise BadResponseError("Invalid checksum")
 
     def write_config(self, config):
         self.app.transceive(SLOT_YK4_SET_DEVICE_INFO, config)
@@ -147,7 +155,7 @@ class DeviceConfig(
         if new_lock_code:
             buf += Tlv(TAG.CONFIG_LOCK, new_lock_code)
         if len(buf) > 0xFF:
-            raise ValueError("DeviceConfiguration too large")
+            raise NotSupportedError("DeviceConfiguration too large")
         return int2bytes(len(buf)) + buf
 
 
@@ -167,7 +175,7 @@ class DeviceInfo(
     @classmethod
     def parse(cls, encoded, default_version):
         if len(encoded) - 1 != encoded[0]:
-            raise ValueError("Invalid length")
+            raise BadResponseError("Invalid length")
         data = Tlv.parse_dict(encoded[1:])
         locked = data.get(TAG.CONFIG_LOCK) == b"\1"
         serial = bytes2int(data.get(TAG.SERIAL, b"\0")) or None
@@ -205,7 +213,7 @@ class ManagementApplication(object):
         else:
             raise TypeError("Unsupported connection type")
         if self.version < (3, 0, 0):
-            raise ValueError("ManagementApplication requires YubiKey 3 or later")
+            raise NotSupportedError("ManagementApplication requires YubiKey 3 or later")
 
     def close(self):
         self.backend.close()
@@ -216,14 +224,14 @@ class ManagementApplication(object):
 
     def read_device_info(self):
         if self.version < (4, 1, 0):
-            raise Exception("Operation requires YubiKey 4.1 or later")  # TODO: Type
+            raise NotSupportedError("Operation requires YubiKey 4.1 or later")
         return DeviceInfo.parse(self.backend.read_config(), self.version)
 
     def write_device_config(
         self, config, reboot=False, cur_lock_code=None, new_lock_code=None
     ):
         if self.version < (5, 0, 0):
-            raise Exception("Operation requires YubiKey 5 or later")  # TODO: Type
+            raise NotSupportedError("Operation requires YubiKey 5 or later")
 
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
@@ -231,7 +239,7 @@ class ManagementApplication(object):
 
     def set_mode(self, mode, chalresp_timeout=0, auto_eject_timeout=0):
         if self.version < (3, 0, 0):
-            raise ValueError("Changing mode requires YubiKey 3 or later")
+            raise NotSupportedError("Changing mode requires YubiKey 3 or later")
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
             usb_enabled = 0

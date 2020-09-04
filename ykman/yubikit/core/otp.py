@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+
+from . import CommandError, TimeoutError
+
 import abc
 import struct
 from time import sleep
@@ -5,6 +9,10 @@ from threading import Event
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class CommandRejectedError(CommandError):
+    """The issues command was rejected by the YubiKey"""
 
 
 class OtpConnection(abc.ABC):
@@ -123,7 +131,6 @@ class OtpApplication(object):
             ) == 0:
                 return
             sleep(0.05)
-        # IOException
         raise Exception("Timeout waiting for YubiKey to become ready to receive")
 
     def _send_frame(self, slot, payload):
@@ -175,10 +182,9 @@ class OtpApplication(object):
                     # Note: If no valid configurations exist, prog_seq is reset to 0.
                     return report[1:-1]
                 elif needs_touch:
-                    # TODO: TimeoutException
-                    raise Exception("Timed out waiting for touch")
+                    raise TimeoutError("Timed out waiting for touch")
                 else:
-                    raise Exception("No data")
+                    raise CommandRejectedError("No data")
             else:  # Need to wait
                 if (statusByte & RESP_TIMEOUT_WAIT_FLAG) != 0:
                     on_keepalive(STATUS_UPNEEDED)
@@ -190,8 +196,7 @@ class OtpApplication(object):
                 sleep(timeout)
                 if event.wait(timeout):
                     self._reset_state()
-                    # TODO: TimeoutException
-                    raise Exception("Command cancelled by Event")
+                    raise TimeoutError("Command cancelled by Event")
 
     def _reset_state(self):
         """Reset the state of YubiKey from reading"""

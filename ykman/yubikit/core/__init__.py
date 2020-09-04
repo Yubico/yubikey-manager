@@ -225,6 +225,26 @@ class YubiKeyDevice(abc.ABC):
         )
 
 
+class CommandError(Exception):
+    """An error response from a YubiKey"""
+
+
+class BadResponseError(CommandError):
+    """Invalid response data from the YubiKey"""
+
+
+class TimeoutError(CommandError):
+    """An operation timed out waiting for something"""
+
+
+class ApplicationNotAvailableError(CommandError):
+    """The application is either disabled or not supported on this YubiKey"""
+
+
+class NotSupportedError(ValueError):
+    """Attempting an action that is not supported on this YubiKey"""
+
+
 def int2bytes(value, min_len=0):
     buf = []
     while value > 0xFF:
