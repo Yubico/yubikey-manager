@@ -5,6 +5,8 @@ from .core import (
     int2bytes,
     Tlv,
     BitflagEnum,
+    AID,
+    PID,
     INTERFACE,
     APPLICATION,
     FORM_FACTOR,
@@ -21,8 +23,6 @@ from enum import IntEnum, unique
 from collections import namedtuple
 import re
 import struct
-
-AID = b"\xa0\x00\x00\x05\x27\x47\x11\x17"
 
 VERSION_PATTERN = re.compile(r"\b\d+.\d.\d\b")
 
@@ -72,7 +72,7 @@ class _ManagementOtpBackend(object):
 
 class _ManagementIso7816Backend(object):
     def __init__(self, iso7816_connection):
-        self.app = Iso7816Application(AID, iso7816_connection)
+        self.app = Iso7816Application(AID.MGMT, iso7816_connection)
         self.version = tuple(
             int(d)
             for d in VERSION_PATTERN.search(self.app.select().decode())
@@ -84,7 +84,13 @@ class _ManagementIso7816Backend(object):
         self.app.close()
 
     def set_mode(self, data):
-        self.app.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
+        if self.version[0] == 3:
+            from .otp import YkCfgApplication
+
+            ykcfg = YkCfgApplication(self.app.connection)
+            ykcfg.backend.write_update(SLOT_DEVICE_CONFIG, data)
+        else:
+            self.app.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
 
     def read_config(self):
         return self.app.send_apdu(0, INS_READ_CONFIG, 0, 0)
@@ -96,7 +102,10 @@ class _ManagementIso7816Backend(object):
 class _ManagementCtapBackend(object):
     def __init__(self, ctap_device):
         self.ctap = ctap_device
-        self.version = ctap_device.device_version
+        version = ctap_device.device_version
+        if version[0] < 4:  # Prior to YK4 this was not firmware version
+            version = (3, 0, 0)  # Guess
+        self.version = version
 
     def close(self):
         self.ctap.close()
@@ -210,6 +219,52 @@ class DeviceInfo(
         )
 
 
+class Mode(object):
+    _modes = [
+        TRANSPORT.OTP,  # 0x00
+        TRANSPORT.CCID,  # 0x01
+        TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
+        TRANSPORT.FIDO,  # 0x03
+        TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
+        TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
+        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
+    ]
+
+    def __init__(self, transports):
+        try:
+            self.code = self._modes.index(transports)
+            self._transports = transports
+        except ValueError:
+            raise ValueError("Invalid mode!")
+
+    @property
+    def transports(self):
+        return self._transports
+
+    def has_transport(self, transport):
+        return TRANSPORT.has(self._transports, transport)
+
+    def __eq__(self, other):
+        return other is not None and self.code == other.code
+
+    def __ne__(self, other):
+        return other is None or self.code != other.code
+
+    def __str__(self):
+        return "+".join((t.name for t in TRANSPORT.split(self._transports)))
+
+    @classmethod
+    def from_code(cls, code):
+        code = code & 0b00000111
+        return cls(cls._modes[code])
+
+    @classmethod
+    def from_pid(cls, pid):
+        return cls(PID(pid).get_transports())
+
+    __hash__ = None
+
+
 class ManagementApplication(object):
     def __init__(self, connection):
         if isinstance(connection, OtpConnection):
@@ -268,5 +323,5 @@ class ManagementApplication(object):
             )
         else:
             self.backend.set_mode(
-                struct.pack(">BBH", mode.value, chalresp_timeout, auto_eject_timeout)
+                struct.pack(">BBH", mode.code, chalresp_timeout, auto_eject_timeout)
             )

@@ -39,7 +39,7 @@ from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from .driver import AbstractDriver, ModeSwitchError, NotSupportedError
-from .util import AID, APPLICATION, TRANSPORT, YUBIKEY, Mode
+from .util import AID, TRANSPORT, YUBIKEY, Mode
 
 
 GP_INS_SELECT = 0xA4
@@ -98,14 +98,7 @@ class SLOT(IntEnum):
     DEVICE_CONFIG = 0x11
 
 
-KNOWN_APPLETS = {
-    AID.OTP: APPLICATION.OTP,
-    AID.U2F: APPLICATION.U2F,
-    AID.U2F_YUBICO: APPLICATION.U2F,
-    AID.PIV: APPLICATION.PIV,
-    AID.OPGP: APPLICATION.OPGP,
-    AID.OATH: APPLICATION.OATH,
-}
+KNOWN_APPLETS = {}
 
 logger = logging.getLogger(__name__)
 

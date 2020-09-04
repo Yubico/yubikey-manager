@@ -1,14 +1,11 @@
 from __future__ import absolute_import
 
-from .core import BitflagEnum, bytes2int, NotSupportedError, BadResponseError
+from .core import AID, BitflagEnum, bytes2int, NotSupportedError, BadResponseError
 from .core.otp import check_crc, calculate_crc, OtpConnection, OtpApplication
 from .core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
-from .mgmt import ManagementApplication
 
 import struct
 from enum import unique, IntEnum
-
-AID = b"\xa0\x00\x00\x05\x27\x20\x01"
 
 
 @unique
@@ -290,7 +287,8 @@ class YkCfgApplication(object):
         elif isinstance(connection, Iso7816Connection):
             mgmt_version = None
             try:  # This version number is more reliable for NEO
-                # TODO: Avoid importing ManagementApplication?
+                from .mgmt import ManagementApplication
+
                 mgmt = ManagementApplication(connection)
                 mgmt_version = mgmt.version
                 if mgmt_version < (4, 0, 0):
@@ -299,7 +297,7 @@ class YkCfgApplication(object):
             except ApduError:
                 pass  # Not available, get version from status
 
-            app = Iso7816Application(AID, connection)
+            app = Iso7816Application(AID.OTP, connection)
             self._status = app.select()
             otp_version = tuple(self._status[:3])
             if mgmt_version and mgmt_version[0] == 3:

@@ -60,6 +60,16 @@ class TRANSPORT(BitflagEnum):
 
 
 @unique
+class AID(bytes, Enum):
+    OTP = b"\xa0\x00\x00\x05\x27\x20\x01"
+    MGMT = b"\xa0\x00\x00\x05\x27\x47\x11\x17"
+    OPGP = b"\xd2\x76\x00\x01\x24\x01"
+    OATH = b"\xa0\x00\x00\x05\x27\x21\x01"
+    PIV = b"\xa0\x00\x00\x03\x08"
+    FIDO = b"\xa0\x00\x00\x06\x47\x2f\x00\x01"
+
+
+@unique
 class APPLICATION(BitflagEnum):
     OTP = 0x01
     U2F = 0x02
@@ -147,52 +157,6 @@ class PID(IntEnum):
 
     def get_transports(self):
         return sum(TRANSPORT[x] for x in self.name.split("_")[1:])
-
-
-class Mode(object):
-    _modes = [
-        TRANSPORT.OTP,  # 0x00
-        TRANSPORT.CCID,  # 0x01
-        TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
-        TRANSPORT.FIDO,  # 0x03
-        TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
-        TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
-        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
-    ]
-
-    def __init__(self, transports):
-        try:
-            self.code = self._modes.index(transports)
-            self._transports = transports
-        except ValueError:
-            raise ValueError("Invalid mode!")
-
-    @property
-    def transports(self):
-        return self._transports
-
-    def has_transport(self, transport):
-        return TRANSPORT.has(self._transports, transport)
-
-    def __eq__(self, other):
-        return other is not None and self.code == other.code
-
-    def __ne__(self, other):
-        return other is None or self.code != other.code
-
-    def __str__(self):
-        return "+".join((t.name for t in TRANSPORT.split(self._transports)))
-
-    @classmethod
-    def from_code(cls, code):
-        code = code & 0b00000111
-        return cls(cls._modes[code])
-
-    @classmethod
-    def from_pid(cls, pid):
-        return cls(PID(pid).get_transports())
-
-    __hash__ = None
 
 
 class YubiKeyDevice(abc.ABC):

@@ -28,19 +28,6 @@
 from __future__ import absolute_import
 
 
-# TODO: Remove this
-from yubikit.core import (  # noqa
-    Tlv,
-    BitflagEnum,
-    PID,
-    APPLICATION,
-    TRANSPORT,
-    YUBIKEY,
-    Mode,
-    bytes2int,
-    int2bytes,
-)
-
 import six
 import struct
 import re
@@ -49,28 +36,26 @@ import random
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from enum import Enum, unique
 from base64 import b32decode
 from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
 from .scancodes import KEYBOARD_LAYOUT
+from yubikit.core import Tlv
 
 
 logger = logging.getLogger(__name__)
 
+# TODO: Remove this
+from yubikit.core import AID, APPLICATION, TRANSPORT  # noqa
+
+PID = None
+YUBIKEY = None
+bytes2int = None
+int2bytes = None
+Mode = None
+
 
 PEM_IDENTIFIER = b"-----BEGIN"
-
-
-@unique
-class AID(bytes, Enum):
-    OTP = b"\xa0\x00\x00\x05\x27\x20\x01"
-    MGR = b"\xa0\x00\x00\x05\x27\x47\x11\x17"
-    OPGP = b"\xd2\x76\x00\x01\x24\x01"
-    OATH = b"\xa0\x00\x00\x05\x27\x21\x01"
-    PIV = b"\xa0\x00\x00\x03\x08"
-    U2F = b"\xa0\x00\x00\x06\x47\x2f\x00\x01"  # Official
-    U2F_YUBICO = b"\xa0\x00\x00\x05\x27\x10\x02"  # Yubico - No longer used
 
 
 class Cve201715361VulnerableError(Exception):

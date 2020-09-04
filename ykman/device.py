@@ -29,13 +29,12 @@ from __future__ import absolute_import
 
 import logging
 
-from yubikit.core import INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
+from yubikit.core import AID, INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
 from yubikit.core.otp import OtpConnection
 from yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
 from yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
 from yubikit.otp import YkCfgApplication
 from fido2.ctap import CtapDevice
-from .util import AID
 
 logger = logging.getLogger(__name__)
 
@@ -44,19 +43,24 @@ def is_fips_version(version):
     return (4, 4, 0) <= version < (4, 5, 0)
 
 
-KNOWN_APPLETS = {
+AID_U2F_YUBICO = b"\xa0\x00\x00\x05\x27\x10\x02"  # Old U2F AID
+
+NEO_APPLETS = {
     AID.OTP: APPLICATION.OTP,
-    AID.U2F: APPLICATION.U2F,
-    AID.U2F_YUBICO: APPLICATION.U2F,
+    AID.FIDO: APPLICATION.U2F,
+    AID_U2F_YUBICO: APPLICATION.U2F,
     AID.PIV: APPLICATION.PIV,
     AID.OPGP: APPLICATION.OPGP,
     AID.OATH: APPLICATION.OATH,
 }
 
 
+BASE_NEO_APPS = APPLICATION.OTP | APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
+
+
 def probe_applications(conn):
     capa = TRANSPORT.CCID
-    for aid, code in KNOWN_APPLETS.items():
+    for aid, code in NEO_APPLETS.items():
         try:
             Iso7816Application(aid, conn)
             capa |= code
@@ -74,6 +78,7 @@ def read_info(pid, conn):
         key_type = None
         transports = 0
 
+    # Get for CCID
     if isinstance(conn, Iso7816Connection):
         try:
             mgmt = ManagementApplication(conn)
@@ -114,6 +119,8 @@ def read_info(pid, conn):
                 )
             else:
                 raise ValueError("Unhandled key")
+
+    # Get for OTP
     elif isinstance(conn, OtpConnection):
         try:
             mgmt = ManagementApplication(conn)
@@ -127,12 +134,7 @@ def read_info(pid, conn):
                 serial = None
 
             if key_type == YUBIKEY.NEO:
-                usb_supported = (
-                    APPLICATION.OTP
-                    | APPLICATION.OATH
-                    | APPLICATION.PIV
-                    | APPLICATION.OPGP
-                )
+                usb_supported = BASE_NEO_APPS
                 if TRANSPORT.has(transports, TRANSPORT.FIDO) or version >= (3, 3, 0):
                     usb_supported |= APPLICATION.U2F
                 applications = {
@@ -150,7 +152,7 @@ def read_info(pid, conn):
 
             info = DeviceInfo(
                 config=DeviceConfig(
-                    enabled_applications=applications,
+                    enabled_applications=applications.copy(),
                     auto_eject_timeout=0,
                     challenge_response_timeout=0,
                     device_flags=0,
@@ -158,21 +160,34 @@ def read_info(pid, conn):
                 serial=serial,
                 version=version,
                 form_factor=FORM_FACTOR.UNKNOWN,
-                supported_applications=applications,
+                supported_applications=applications.copy(),
                 is_locked=False,
             )
 
+    # Get for CTAP
     elif isinstance(conn, CtapDevice):
         try:
             mgmt = ManagementApplication(conn)
             info = mgmt.read_device_info()
-        except Exception:  # SKY 1?
-            version = getattr(conn, "device_version", (0,))
-            if version[0] < 4:  # Prior to YK4 this was not firmware version
-                version = (3, 0, 0)  # Guess
+        except Exception:  # SKY 1 or NEO
+            version = (3, 0, 0)  # Guess, no way to know
+            enabled_apps = {INTERFACE.USB: APPLICATION.U2F}
+            if TRANSPORT.has(transports, TRANSPORT.CCID):
+                enabled_apps[INTERFACE.USB] |= (
+                    APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH
+                )
+            if TRANSPORT.has(transports, TRANSPORT.OTP):
+                enabled_apps[INTERFACE.USB] |= APPLICATION.OTP
+
+            supported_apps = {INTERFACE.USB: APPLICATION.U2F}
+            if key_type == YUBIKEY.NEO:
+                supported_apps[INTERFACE.USB] |= BASE_NEO_APPS
+                supported_apps[INTERFACE.NFC] = supported_apps[INTERFACE.USB]
+                enabled_apps[INTERFACE.NFC] = supported_apps[INTERFACE.NFC]
+
             info = DeviceInfo(
                 config=DeviceConfig(
-                    enabled_applications={INTERFACE.USB: APPLICATION.U2F},
+                    enabled_applications=enabled_apps,
                     auto_eject_timeout=0,
                     challenge_response_timeout=0,
                     device_flags=0,
@@ -180,7 +195,7 @@ def read_info(pid, conn):
                 serial=None,
                 version=version,
                 form_factor=FORM_FACTOR.USB_A_KEYCHAIN,
-                supported_applications={INTERFACE.USB: APPLICATION.U2F},
+                supported_applications=supported_apps,
                 is_locked=False,
             )
 

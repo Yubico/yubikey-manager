@@ -27,8 +27,10 @@
 
 from __future__ import absolute_import
 
+from yubikit.core import TRANSPORT, INTERFACE, APPLICATION, YUBIKEY
+from yubikit.mgmt import ManagementApplication, Mode
+
 from .util import click_force_option
-from ..util import Mode, TRANSPORT
 from ..driver import ModeSwitchError
 import logging
 import re
@@ -73,6 +75,25 @@ def _parse_mode_string(ctx, param, mode):
         ctx.fail("Invalid mode string: {}".format(mode))
 
     return Mode(sum(transports))
+
+
+def _mode_from_usb_enabled(usb_enabled):
+    transports = 0
+    if APPLICATION.OTP & usb_enabled:
+        transports |= TRANSPORT.OTP
+    if (APPLICATION.U2F | APPLICATION.FIDO2) & usb_enabled:
+        transports |= TRANSPORT.FIDO
+    if (APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
+        transports |= TRANSPORT.CCID
+    return Mode(transports)
+
+
+def has_mode(info, mode):
+    usb_supported = info.supported_applications[INTERFACE.USB]
+
+    can_switch = info.version >= (3, 0, 0)
+
+    return can_switch and TRANSPORT.has(usb_supported, mode.transports)
 
 
 @click.command()
@@ -122,24 +143,39 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
       Set the CCID only mode and use touch to eject the smart card:
       $ ykman mode CCID --touch-eject
     """
-    dev = ctx.obj["dev"]
+    info = ctx.obj["info"]
+    mgmt = ManagementApplication(ctx.obj["conn"])
+    usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+    my_mode = _mode_from_usb_enabled(usb_enabled)
+    usb_supported = info.supported_applications[INTERFACE.USB]
+    transports_supported = _mode_from_usb_enabled(usb_supported).transports
+    pid = ctx.obj["dev"].pid
+    if pid:
+        key_type = pid.get_type()
+    else:
+        key_type = None
+
     if autoeject_timeout:
         touch_eject = True
-    autoeject = autoeject_timeout if touch_eject else None
+    autoeject = autoeject_timeout if touch_eject else 0
 
     if mode is not None:
         if mode.transports != TRANSPORT.CCID:
-            autoeject = None
             if touch_eject:
                 ctx.fail(
                     "--touch-eject can only be used when setting" " CCID-only mode"
                 )
 
         if not force:
-            if mode == dev.mode:
+            if mode == my_mode:
                 click.echo("Mode is already {}, nothing to do...".format(mode))
                 ctx.exit()
-            elif not dev.has_mode(mode):
+            elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
+                click.echo(
+                    "Mode switching is not supported on this YubiKey!".format(mode)
+                )
+                ctx.fail("Use --force to attempt to set it anyway.")
+            elif not TRANSPORT.has(transports_supported, mode.transports):
                 click.echo("Mode {} is not supported on this YubiKey!".format(mode))
                 ctx.fail("Use --force to attempt to set it anyway.")
             force or click.confirm(
@@ -147,12 +183,11 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             )
 
         try:
-            dev.set_mode(mode, chalresp_timeout, autoeject)
-            if not dev.can_write_config:
-                click.echo(
-                    "Mode set! You must remove and re-insert your YubiKey "
-                    "for this change to take effect."
-                )
+            mgmt.set_mode(mode, chalresp_timeout, autoeject)
+            click.echo(
+                "Mode set! You must remove and re-insert your YubiKey "
+                "for this change to take effect."
+            )
         except ModeSwitchError as e:
             logger.debug("Failed to switch mode", exc_info=e)
             click.echo(
@@ -161,6 +196,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             )
 
     else:
-        click.echo("Current connection mode is: {}".format(dev.mode))
-        supported = ", ".join(t.name for t in TRANSPORT.split(dev.config.usb_supported))
+        click.echo("Current connection mode is: {}".format(my_mode))
+        mode = _mode_from_usb_enabled(info.supported_applications[INTERFACE.USB])
+        supported = ", ".join(t.name for t in TRANSPORT.split(mode.transports))
         click.echo("Supported USB interfaces are: {}".format(supported))

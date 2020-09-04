@@ -82,7 +82,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                 return dev, conn, info
             else:
                 conn.close()
-    elif TRANSPORT.has(transports, TRANSPORT.OTP):
+    if TRANSPORT.has(transports, TRANSPORT.OTP):
         for dev in list_hid():
             if dev.has_otp:
                 conn = dev.open_otp_connection()
@@ -91,7 +91,7 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
                     return dev, conn, info
                 else:
                     conn.close()
-    elif TRANSPORT.has(transports, TRANSPORT.FIDO):
+    if TRANSPORT.has(transports, TRANSPORT.FIDO):
         for dev in list_hid():
             if dev.has_ctap:
                 conn = dev.open_ctap_device()
