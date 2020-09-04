@@ -2,7 +2,7 @@ from __future__ import print_function, absolute_import
 
 import ctypes
 import platform
-from ctypes import wintypes
+from ctypes import wintypes, LibraryLoader, WinDLL
 from functools import partial
 
 from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
@@ -10,9 +10,10 @@ from ..yubikit.core.otp import OtpConnection
 
 
 # Load relevant DLLs
-hid = ctypes.windll.Hid
-setupapi = ctypes.windll.SetupAPI
-kernel32 = ctypes.windll.Kernel32
+windll = LibraryLoader(WinDLL)
+hid = windll.Hid
+setupapi = windll.SetupAPI
+kernel32 = windll.Kernel32
 
 
 # Various structs that are used in the Windows APIs we call
