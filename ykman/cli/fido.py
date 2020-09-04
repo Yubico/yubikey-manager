@@ -26,8 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from __future__ import absolute_import
-import click
-import logging
+
 from fido2.ctap1 import ApduError
 from fido2.ctap import CtapError
 from time import sleep
@@ -35,8 +34,10 @@ from .util import click_postpone_execution, prompt_for_touch, click_force_option
 from ..driver_ccid import SW
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
-from ..descriptor import get_descriptors
+from ..hid import list_devices as list_hid
 
+import click
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +303,7 @@ def reset(ctx, force):
     inserted, and requires a touch on the YubiKey.
     """
 
-    n_keys = len(list(get_descriptors()))
+    n_keys = len(d for d in list_hid() if d.has_ctap)
     if n_keys > 1:
         ctx.fail("Only one YubiKey can be connected to perform a reset.")
 
@@ -321,16 +322,15 @@ def reset(ctx, force):
         removed = False
         while True:
             sleep(0.1)
-            n_keys = len(list(get_descriptors()))
-            if not n_keys:
+            keys = [d for d in list_hid() if d.has_ctap]
+            if not keys:
                 removed = True
-            if removed and n_keys == 1:
-                return
+            if removed and len(keys) == 1:
+                return keys[1]
 
     def try_reset(controller_type):
         if not force:
-            prompt_re_insert_key()
-            dev = list(get_descriptors())[0].open_device(TRANSPORT.FIDO)
+            dev = prompt_re_insert_key()
             controller = controller_type(dev.driver)
             controller.reset(touch_callback=prompt_for_touch)
         else:

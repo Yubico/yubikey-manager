@@ -30,45 +30,44 @@ import os
 from setuptools import setup
 
 install_requires = [
-    'six', 'pyscard', 'pyusb', 'click',
-    'cryptography', 'pyopenssl', 'fido2 >= 0.7'
+    "six",
+    "pyscard",
+    "click",
+    "cryptography",
+    "pyopenssl",
+    "fido2 >= 0.7",
 ]
 if sys.version_info < (3, 4):
-    install_requires.append('enum34')
-if sys.platform == 'win32':
-    install_requires.append('pypiwin32')
+    install_requires.append("enum34")
+if sys.platform == "win32":
+    install_requires.append("pypiwin32")
 
-with open(
-    os.path.join(
-        os.path.dirname(__file__), 'ykman/VERSION')) as version_file:
+with open(os.path.join(os.path.dirname(__file__), "ykman/VERSION")) as version_file:
     version = version_file.read().strip()
 
 setup(
-    name='yubikey-manager',
+    name="yubikey-manager",
     version=version,
-    author='Dain Nilsson',
-    author_email='dain@yubico.com',
-    maintainer='Yubico Open Source Maintainers',
-    maintainer_email='ossmaint@yubico.com',
-    url='https://github.com/Yubico/yubikey-manager',
-    description='Tool for managing your YubiKey configuration.',
-    license='BSD 2 clause',
-    entry_points={
-        'console_scripts': ['ykman=ykman.cli.__main__:main'],
-    },
-    packages=[
-        'ykman', 'ykman.native', 'ykman.scancodes', 'ykman.cli'],
+    author="Dain Nilsson",
+    author_email="dain@yubico.com",
+    maintainer="Yubico Open Source Maintainers",
+    maintainer_email="ossmaint@yubico.com",
+    url="https://github.com/Yubico/yubikey-manager",
+    description="Tool for managing your YubiKey configuration.",
+    license="BSD 2 clause",
+    entry_points={"console_scripts": ["ykman=ykman.cli.__main__:main"]},
+    packages=["ykman", "ykman.native", "ykman.scancodes", "ykman.cli"],
     install_requires=install_requires,
-    package_data={'ykman': ['VERSION']},
+    package_data={"ykman": ["VERSION"]},
     include_package_data=True,
     classifiers=[
-        'License :: OSI Approved :: BSD License',
-        'Operating System :: OS Independent',
-        'Programming Language :: Python',
-        'Development Status :: 5 - Production/Stable',
-        'Environment :: X11 Applications :: Qt',
-        'Intended Audience :: End Users/Desktop',
-        'Topic :: Security :: Cryptography',
-        'Topic :: Utilities'
-    ]
+        "License :: OSI Approved :: BSD License",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python",
+        "Development Status :: 5 - Production/Stable",
+        "Environment :: X11 Applications :: Qt",
+        "Intended Audience :: End Users/Desktop",
+        "Topic :: Security :: Cryptography",
+        "Topic :: Utilities",
+    ],
 )
