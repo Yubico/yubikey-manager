@@ -48,55 +48,47 @@ class DEVICE_FLAG(BitflagEnum):
     EJECT = 0x80
 
 
-class _ManagementOtpBackend(object):
+class _ManagementOtpBackend(OtpApplication):
     def __init__(self, otp_connection):
-        self.app = OtpApplication(otp_connection)
-        self.version = tuple(self.app.read_status()[:3])
-
-    def close(self):
-        self.app.close()
+        super(_ManagementOtpBackend, self).__init__(otp_connection)
+        self.version = tuple(self.read_status()[:3])
 
     def set_mode(self, data):
-        self.app.transceive(SLOT_DEVICE_CONFIG, data)
+        self.transceive(SLOT_DEVICE_CONFIG, data)
 
     def read_config(self):
-        response = self.app.transceive(SLOT_YK4_CAPABILITIES)
+        response = self.transceive(SLOT_YK4_CAPABILITIES)
         r_len = response[0]
         if check_crc(response[: r_len + 1 + 2]):
             return response[: r_len + 1]
         raise BadResponseError("Invalid checksum")
 
     def write_config(self, config):
-        self.app.transceive(SLOT_YK4_SET_DEVICE_INFO, config)
+        self.transceive(SLOT_YK4_SET_DEVICE_INFO, config)
 
 
-class _ManagementIso7816Backend(object):
+class _ManagementIso7816Backend(Iso7816Application):
     def __init__(self, iso7816_connection):
-        self.app = Iso7816Application(AID.MGMT, iso7816_connection)
+        super(_ManagementIso7816Backend, self).__init__(AID.MGMT, iso7816_connection)
         self.version = tuple(
             int(d)
-            for d in VERSION_PATTERN.search(self.app.select().decode())
-            .group()
-            .split(".")
+            for d in VERSION_PATTERN.search(self.select().decode()).group().split(".")
         )
-
-    def close(self):
-        self.app.close()
 
     def set_mode(self, data):
         if self.version[0] == 3:
             from .otp import YkCfgApplication
 
-            ykcfg = YkCfgApplication(self.app.connection)
+            ykcfg = YkCfgApplication(self.connection)
             ykcfg.backend.write_update(SLOT_DEVICE_CONFIG, data)
         else:
-            self.app.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
+            self.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
 
     def read_config(self):
-        return self.app.send_apdu(0, INS_READ_CONFIG, 0, 0)
+        return self.send_apdu(0, INS_READ_CONFIG, 0, 0)
 
     def write_config(self, config):
-        self.app.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
+        self.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
 
 
 class _ManagementCtapBackend(object):

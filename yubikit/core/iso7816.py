@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import abc
 import struct
 from time import time
+from enum import IntEnum, unique
 
 from . import CommandError, ApplicationNotAvailableError
 
@@ -33,13 +34,29 @@ class ApduError(CommandError):
         return "APDU error: SW=0x{:04x}".format(self.sw)
 
 
+@unique
+class SW(IntEnum):
+    NO_INPUT_DATA = 0x6285
+    VERIFY_FAIL_NO_RETRY = 0x63C0
+    WRONG_LENGTH = 0x6700
+    SECURITY_CONDITION_NOT_SATISFIED = 0x6982
+    AUTH_METHOD_BLOCKED = 0x6983
+    DATA_INVALID = 0x6984
+    CONDITIONS_NOT_SATISFIED = 0x6985
+    COMMAND_NOT_ALLOWED = 0x6986
+    INCORRECT_PARAMETERS = 0x6A80
+    FILE_NOT_FOUND = 0x6A82
+    NO_SPACE = 0x6A84
+    INVALID_INSTRUCTION = 0x6D00
+    COMMAND_ABORTED = 0x6F00
+    OK = 0x9000
+
+
 INS_SELECT = 0xA4
 P1_SELECT = 0x04
 P2_SELECT = 0x00
-INS_SEND_REMAINING = 0xC0
 
-SW_SUCCESS = 0x9000
-SW_FILE_NOT_FOUND = 0x6A82
+INS_SEND_REMAINING = 0xC0
 SW1_HAS_MORE_DATA = 0x61
 
 SHORT_APDU_MAX_CHUNK = 0xFF
@@ -74,7 +91,7 @@ class Iso7816Application(object):
         try:
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, self.aid)
         except ApduError as e:
-            if e.sw == SW_FILE_NOT_FOUND:
+            if e.sw == SW.FILE_NOT_FOUND:
                 raise ApplicationNotAvailableError()
             raise
 
@@ -99,7 +116,7 @@ class Iso7816Application(object):
             buf += response
             response, sw = self.connection.transceive(get_data)
 
-        if sw != SW_SUCCESS:
+        if sw != SW.OK:
             raise ApduError(response, sw)
         buf += response
 

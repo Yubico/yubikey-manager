@@ -162,31 +162,27 @@ class PID(IntEnum):
 class YubiKeyDevice(abc.ABC):
     """YubiKey device reference"""
 
-    def __init__(self, fingerprint, pid):
+    def __init__(self, fingerprint):
         self._fingerprint = fingerprint
-        self._pid = PID(pid) if pid else None
-
-    @property
-    def pid(self):
-        return self._pid
 
     @property
     def fingerprint(self):
+        """Used to identify that device references from different enumerations represent
+        the same physical YubiKey. This fingerprint is not stable between sessions, or
+        after un-plugging, and re-plugging a device."""
         return self._fingerprint
 
     def __eq__(self, other):
-        if isinstance(other, type(self)):
-            return self.fingerprint == other.fingerprint
+        return isinstance(other, type(self)) and self.fingerprint == other.fingerprint
 
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __hash__(self):
+        return hash(self.fingerprint)
+
     def __repr__(self):
-        return "%s(pid=%s, fingerprint=%r)" % (
-            type(self).__name__,
-            self.pid,
-            self.fingerprint,
-        )
+        return "%s(fingerprint=%r)" % (type(self).__name__, self.fingerprint,)
 
 
 class CommandError(Exception):
@@ -323,7 +319,5 @@ class Tlv(bytes):
     def unpack(cls, tag, data):
         tlv = cls(data)
         if tlv.tag != tag:
-            raise ValueError(
-                "Wrong tag, got {:02x} expected {:02x}".format(tlv.tag, tag)
-            )
+            raise ValueError("Wrong tag, got %02x expected %02x" % (tlv.tag, tag))
         return tlv.value

@@ -36,8 +36,8 @@ from ..hid import list_devices as list_hid
 from ..scard import list_devices as list_ccid
 
 from ..otp import OtpController
+from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import FIPS_U2F_CMD
-from ..oath import OathController
 from ..device import is_fips_version, get_name, read_info
 from ..util import APPLICATION, TRANSPORT
 
@@ -124,8 +124,8 @@ def get_overall_fips_status(pid, info):
             with dev.open_iso7816_connection() as conn:
                 info2 = read_info(pid, conn)
                 if info2.serial == info.serial:
-                    app = OathController(OathApplication(conn))
-                    statuses["OATH"] = app.is_in_fips_mode
+                    app = OathApplication(conn)
+                    statuses["OATH"] = oath_in_fips_mode(app)
                     break
 
     statuses["FIDO U2F"] = False

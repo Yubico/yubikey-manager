@@ -305,6 +305,7 @@ class YkCfgApplication(object):
                 self._version = max(mgmt_version, otp_version)
             else:
                 self._version = mgmt_version or otp_version
+            app.enable_touch_workaround(self._version)
             self.backend = _YkCfgIso7816Backend(app)
         else:
             raise TypeError("Unsupported connection type")

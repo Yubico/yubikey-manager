@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from yubikit.core import YubiKeyDevice
+from yubikit.core import YubiKeyDevice, PID
 from fido2.hid import CtapHidDevice as _CtapHidDevice
 
 YUBICO_VID = 0x1050
@@ -28,7 +28,8 @@ class HidDevice(YubiKeyDevice):
     """YubiKey USB HID device"""
 
     def __init__(self, fingerprint, pid, open_otp=None, open_ctap=None):
-        super(HidDevice, self).__init__(fingerprint, pid)
+        super(HidDevice, self).__init__(fingerprint)
+        self.pid = PID(pid)
         self.open_otp = open_otp
         self.open_ctap = open_ctap
 

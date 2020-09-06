@@ -41,8 +41,9 @@ class ScardDevice(YubiKeyDevice):
     """YubiKey Smart card device"""
 
     def __init__(self, reader):
-        super(ScardDevice, self).__init__(reader.name, _pid_from_name(reader.name))
+        super(ScardDevice, self).__init__(reader.name)
         self.reader = reader
+        self.pid = _pid_from_name(reader.name)
 
     def open_iso7816_connection(self):
         """Open an ISO7816 connection"""
@@ -55,6 +56,7 @@ class ScardDevice(YubiKeyDevice):
 
     @property
     def has_fido(self):
+        # FIDO is only available from this device if we're connected over NFC.
         return YK_READER_NAME not in self.reader.name.lower()
 
     def open_ctap_device(self):
