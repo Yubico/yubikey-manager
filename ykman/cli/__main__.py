@@ -156,7 +156,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
             fail_multiple()
         if ccid_dev:
             fail_multiple()
-        ccid_dev = dev
+        ccid_dev = ccid
 
     if pid is None:
         ctx.fail("No YubiKey detected!")

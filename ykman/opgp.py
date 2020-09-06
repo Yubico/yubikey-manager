@@ -27,15 +27,11 @@
 
 from __future__ import absolute_import
 
-import six
-import time
-import struct
-import logging
-from .util import AID, Tlv, ensure_not_cve201715361_vulnerable_firmware_version
-from .driver_ccid import APDUError, SW, GP_INS_SELECT
-from enum import Enum, IntEnum, unique
-from binascii import b2a_hex
-from collections import namedtuple
+from .util import ensure_not_cve201715361_vulnerable_firmware_version
+
+from yubikit.core import Tlv
+from yubikit.core.iso7816 import ApduError, SW
+
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.backends import default_backend
@@ -47,6 +43,13 @@ from cryptography.hazmat.primitives.serialization import (
 )
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
+from enum import Enum, IntEnum, unique
+from binascii import b2a_hex
+from collections import namedtuple
+import six
+import time
+import struct
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -285,53 +288,30 @@ class Kdf(object):
 
 
 class OpgpController(object):
-    def __init__(self, driver):
-        self._driver = driver
-        # Use send_apdu instead of driver.select()
-        # to get OpenPGP specific error handling.
-        self.send_apdu(0, GP_INS_SELECT, 0x04, 0, AID.OPGP)
+    def __init__(self, app):
+        self._app = app
+        try:
+            app.select()
+        except ApduError as e:
+            if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
+                app.send_apdu(0, INS.ACTIVATE, 0, 0)
+                app.select()
+            else:
+                raise
         self._version = self._read_version()
 
     @property
     def version(self):
         return self._version
 
-    def send_apdu(self, cl, ins, p1, p2, data=b"", check=SW.OK):
-        try:
-            return self._driver.send_apdu(cl, ins, p1, p2, data, check)
-        except APDUError as e:
-            # If OpenPGP is in a terminated state send activate.
-            if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
-                self._driver.send_apdu(0, INS.ACTIVATE, 0, 0)
-                return self._driver.send_apdu(cl, ins, p1, p2, data, check)
-            raise
-
-    def send_cmd(self, cl, ins, p1=0, p2=0, data=b"", check=SW.OK):
-        while len(data) > 0xFF:
-            self._driver.send_apdu(0x10, ins, p1, p2, data[:0xFF])
-            data = data[0xFF:]
-        resp, sw = self._driver.send_apdu(0, ins, p1, p2, data, check=None)
-
-        while (sw >> 8) == SW.MORE_DATA:
-            more, sw = self._driver.send_apdu(
-                0, INS.SEND_REMAINING, 0, 0, b"", check=None
-            )
-            resp += more
-
-        if check is None:
-            return resp, sw
-        elif sw != check:
-            raise APDUError(resp, sw)
-        return resp
-
     def _get_data(self, do):
-        return self.send_cmd(0, INS.GET_DATA, do >> 8, do & 0xFF)
+        return self._app.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
 
     def _put_data(self, do, data):
-        self.send_cmd(0, INS.PUT_DATA, do >> 8, do & 0xFF, data)
+        self._app.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, data)
 
     def _select_certificate(self, key_slot):
-        self.send_cmd(
+        self._app.send_apdu(
             0,
             INS.SELECT_DATA,
             3 - key_slot.index,
@@ -340,7 +320,7 @@ class OpgpController(object):
         )
 
     def _read_version(self):
-        bcd_hex = b2a_hex(self.send_apdu(0, INS.GET_VERSION, 0, 0))
+        bcd_hex = b2a_hex(self._app.send_apdu(0, INS.GET_VERSION, 0, 0))
         return tuple(int(bcd_hex[i : i + 2]) for i in range(0, 6, 2))
 
     def get_openpgp_version(self):
@@ -355,18 +335,22 @@ class OpgpController(object):
         retries = self.get_remaining_pin_tries()
 
         for _ in range(retries.pin):
-            self.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN, check=None)
+            try:
+                self._app.send_apdu(0, INS.VERIFY, 0, PW1, INVALID_PIN)
+            except ApduError:
+                pass
         for _ in range(retries.admin):
-            self.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN, check=None)
+            try:
+                self._app.send_apdu(0, INS.VERIFY, 0, PW3, INVALID_PIN)
+            except ApduError:
+                pass
 
     def reset(self):
         if self.version < (1, 0, 6):
-            raise ValueError(
-                "Resetting OpenPGP data requires version 1.0.6 or " "later."
-            )
+            raise ValueError("Resetting OpenPGP data requires version 1.0.6 or later.")
         self._block_pins()
-        self.send_apdu(0, INS.TERMINATE, 0, 0)
-        self.send_apdu(0, INS.ACTIVATE, 0, 0)
+        self._app.send_apdu(0, INS.TERMINATE, 0, 0)
+        self._app.send_apdu(0, INS.ACTIVATE, 0, 0)
 
     def _get_kdf(self):
         try:
@@ -375,7 +359,7 @@ class OpgpController(object):
                 return None
             else:
                 return Kdf(data)
-        except APDUError:
+        except ApduError:
             return None
 
     def _verify(self, pw, pin):
@@ -384,8 +368,8 @@ class OpgpController(object):
             kdf = self._get_kdf()
             if kdf:
                 pin = kdf.process(pw, pin)
-            self.send_apdu(0, INS.VERIFY, 0, pw, pin)
-        except APDUError:
+            self._app.send_apdu(0, INS.VERIFY, 0, pw, pin)
+        except ApduError:
             pw_remaining = self.get_remaining_pin_tries()[pw - PW1]
             raise ValueError("Invalid PIN, {} tries remaining.".format(pw_remaining))
 
@@ -440,7 +424,7 @@ class OpgpController(object):
             raise ValueError(
                 "Setting PIN retry counters requires version " "4.3.1 or later."
             )
-        self.send_apdu(
+        self._app.send_apdu(
             0,
             INS.SET_PIN_RETRIES,
             0,
@@ -474,7 +458,7 @@ class OpgpController(object):
             self._put_data(key_slot.key_id, attributes)
 
         template = _get_key_template(key, key_slot, self.version < (4, 0, 0))
-        self.send_cmd(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, template)
+        self._app.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, template)
 
         if fingerprint is not None:
             self._put_data(key_slot.fingerprint, fingerprint)
@@ -495,7 +479,7 @@ class OpgpController(object):
             self._put_data(key_slot.key_id, attributes)
         elif key_size != 2048:
             raise ValueError("Unsupported key size!")
-        resp = self.send_cmd(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
+        resp = self._app.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
 
         data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
         numbers = rsa.RSAPublicNumbers(
@@ -514,7 +498,7 @@ class OpgpController(object):
 
         attributes = _format_ec_attributes(key_slot, curve_name)
         self._put_data(key_slot.key_id, attributes)
-        resp = self.send_cmd(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
+        resp = self._app.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
 
         data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
         pubkey_enc = data[0x86]
@@ -567,5 +551,5 @@ class OpgpController(object):
 
     def attest(self, key_slot):
         """Requires User PIN verification."""
-        self.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
+        self._app.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
         return self.read_certificate(key_slot)

@@ -39,6 +39,8 @@ from .util import (
     EnumChoice,
 )
 
+from yubikit.core.iso7816 import Iso7816Application
+from yubikit.core import AID
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,9 @@ def openpgp(ctx):
       $ ykman openpgp set-touch aut on
     """
     try:
-        ctx.obj["controller"] = OpgpController(ctx.obj["dev"].driver)
+        ctx.obj["controller"] = OpgpController(
+            Iso7816Application(AID.OPGP, ctx.obj["conn"])
+        )
     except APDUError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this " "YubiKey.")

@@ -47,7 +47,7 @@ from ..util import (
 )
 from binascii import a2b_hex, b2a_hex
 from .. import __version__
-from ..otp import OtpController, PrepareUploadFailed, SlotConfig
+from ..otp import OtpController, PrepareUploadFailed, SlotConfig, prepare_upload_key
 from ..device import is_fips_version
 from ..scancodes import KEYBOARD_LAYOUT
 from threading import Event
@@ -408,7 +408,7 @@ def yubiotp(
         upload = click.confirm("Upload credential to YubiCloud?", abort=False, err=True)
     if upload:
         try:
-            upload_url = controller.prepare_upload_key(
+            upload_url = prepare_upload_key(
                 key,
                 public_id,
                 private_id,

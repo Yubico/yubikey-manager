@@ -104,6 +104,57 @@ class PrepareUploadFailed(Exception):
         return [e.message() for e in self.errors]
 
 
+def prepare_upload_key(
+    key,
+    public_id,
+    private_id,
+    serial=None,
+    user_agent="python-yubikey-manager/" + __version__,
+):
+    modhex_public_id = modhex_encode(public_id)
+    data = {
+        "aes_key": b2a_hex(key).decode("utf-8"),
+        "serial": serial or 0,
+        "public_id": modhex_public_id,
+        "private_id": b2a_hex(private_id).decode("utf-8"),
+    }
+
+    httpconn = http_client.HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
+
+    try:
+        httpconn.request(
+            "POST",
+            UPLOAD_PATH,
+            body=json.dumps(data, indent=False, sort_keys=True).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": user_agent},
+        )
+    except Exception as e:
+        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
+        raise PrepareUploadFailed(None, None, [PrepareUploadError.CONNECTION_FAILED])
+
+    resp = httpconn.getresponse()
+    if resp.status == 200:
+        url = json.loads(resp.read().decode("utf-8"))["finish_url"]
+        return url
+    else:
+        resp_body = resp.read()
+        logger.debug("Upload failed with status %d: %s", resp.status, resp_body)
+        if resp.status == 404:
+            raise PrepareUploadFailed(
+                resp.status, resp_body, [PrepareUploadError.NOT_FOUND]
+            )
+        elif resp.status == 503:
+            raise PrepareUploadFailed(
+                resp.status, resp_body, [PrepareUploadError.SERVICE_UNAVAILABLE]
+            )
+        else:
+            try:
+                errors = json.loads(resp_body.decode("utf-8")).get("errors")
+            except Exception:
+                errors = []
+            raise PrepareUploadFailed(resp.status, resp_body, errors)
+
+
 class SlotConfig(object):
     def __init__(
         self,
@@ -181,59 +232,6 @@ class OtpController(object):
         self._app.write_configuration(
             slot, fixed, uid, key, ext, tkt, cfg, self.access_code, self.access_code,
         )
-
-    def prepare_upload_key(
-        self,
-        key,
-        public_id,
-        private_id,
-        serial=None,
-        user_agent="python-yubikey-manager/" + __version__,
-    ):
-        modhex_public_id = modhex_encode(public_id)
-        data = {
-            "aes_key": b2a_hex(key).decode("utf-8"),
-            "serial": serial or 0,
-            "public_id": modhex_public_id,
-            "private_id": b2a_hex(private_id).decode("utf-8"),
-        }
-
-        httpconn = http_client.HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
-
-        try:
-            httpconn.request(
-                "POST",
-                UPLOAD_PATH,
-                body=json.dumps(data, indent=False, sort_keys=True).encode("utf-8"),
-                headers={"Content-Type": "application/json", "User-Agent": user_agent},
-            )
-        except Exception as e:
-            logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
-            raise PrepareUploadFailed(
-                None, None, [PrepareUploadError.CONNECTION_FAILED]
-            )
-
-        resp = httpconn.getresponse()
-        if resp.status == 200:
-            url = json.loads(resp.read().decode("utf-8"))["finish_url"]
-            return url
-        else:
-            resp_body = resp.read()
-            logger.debug("Upload failed with status %d: %s", resp.status, resp_body)
-            if resp.status == 404:
-                raise PrepareUploadFailed(
-                    resp.status, resp_body, [PrepareUploadError.NOT_FOUND]
-                )
-            elif resp.status == 503:
-                raise PrepareUploadFailed(
-                    resp.status, resp_body, [PrepareUploadError.SERVICE_UNAVAILABLE]
-                )
-            else:
-                try:
-                    errors = json.loads(resp_body.decode("utf-8")).get("errors")
-                except Exception:
-                    errors = []
-                raise PrepareUploadFailed(resp.status, resp_body, errors)
 
     def program_static(
         self, slot, password, keyboard_layout=KEYBOARD_LAYOUT.MODHEX, config=None
