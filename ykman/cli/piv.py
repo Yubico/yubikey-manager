@@ -27,6 +27,19 @@
 
 from __future__ import absolute_import
 
+from yubikit.piv import (
+    PivApplication,
+    InvalidPinError,
+    KEY_TYPE,
+    OBJECT_ID,
+    SLOT,
+    PIN_POLICY,
+    TOUCH_POLICY,
+    DEFAULT_MANAGEMENT_KEY,
+)
+from yubikit.core.iso7816 import ApduError, SW
+from ..device import is_fips_version
+
 from ..util import (
     TRANSPORT,
     get_leaf_certificates,
@@ -35,23 +48,10 @@ from ..util import (
 )
 from ..piv import (
     PivController,
-    ALGO,
-    OBJ,
-    SLOT,
-    PIN_POLICY,
-    TOUCH_POLICY,
-    DEFAULT_MANAGEMENT_KEY,
     generate_random_management_key,
-)
-from ..piv import (
-    AuthenticationBlocked,
-    AuthenticationFailed,
     KeypairMismatch,
     UnsupportedAlgorithm,
-    WrongPin,
-    WrongPuk,
 )
-from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option,
     click_format_option,
@@ -134,9 +134,10 @@ def piv(ctx):
       $ ykman piv reset
     """
     try:
-        ctx.obj["controller"] = PivController(ctx.obj["dev"].driver)
-    except APDUError as e:
-        if e.sw == SW.NOT_FOUND:
+        app = PivApplication(ctx.obj["conn"])
+        ctx.obj["controller"] = PivController(app)
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
             ctx.fail("The PIV application can't be found on this YubiKey.")
         raise
 
@@ -161,16 +162,16 @@ def info(ctx):
     if controller.has_stored_key:
         click.echo("Management key is stored on the YubiKey, protected by PIN.")
     try:
-        chuid = b2a_hex(controller.get_data(OBJ.CHUID)).decode()
-    except APDUError as e:
-        if e.sw == SW.NOT_FOUND:
+        chuid = b2a_hex(controller.get_data(OBJECT_ID.CHUID)).decode()
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
             chuid = "No data available."
     click.echo("CHUID:\t" + chuid)
 
     try:
-        ccc = b2a_hex(controller.get_data(OBJ.CAPABILITY)).decode()
-    except APDUError as e:
-        if e.sw == SW.NOT_FOUND:
+        ccc = b2a_hex(controller.get_data(OBJECT_ID.CAPABILITY)).decode()
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
             ccc = "No data available."
     click.echo("CCC: \t" + ccc)
 
@@ -200,7 +201,7 @@ def info(ctx):
                 continue
 
             fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode("ascii")
-            algo = ALGO.from_public_key(cert.public_key())
+            key_type = KEY_TYPE.from_public_key(cert.public_key())
             serial = cert.serial_number
             try:
                 not_before = cert.not_valid_before
@@ -213,7 +214,7 @@ def info(ctx):
                 logger.debug("Failed reading not_valid_after", exc_info=e)
                 not_after = None
             # Print out everything
-            click.echo("\tAlgorithm:\t%s" % algo.name)
+            click.echo("\tAlgorithm:\t%s" % key_type.name)
             if print_dn:
                 click.echo("\tSubject DN:\t%s" % subject_dn)
                 click.echo("\tIssuer DN:\t%s" % issuer_dn)
@@ -264,8 +265,8 @@ def reset(ctx):
     "-a",
     "--algorithm",
     help="Algorithm to use in key generation.",
-    type=EnumChoice(ALGO),
-    default=ALGO.RSA2048.name,
+    type=EnumChoice(KEY_TYPE),
+    default=KEY_TYPE.RSA2048.name,
     show_default=True,
 )
 @click_format_option
@@ -294,12 +295,11 @@ def generate_key(
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
 
-    dev = ctx.obj["dev"]
     controller = ctx.obj["controller"]
 
     _ensure_authenticated(ctx, controller, pin, management_key)
 
-    _check_pin_policy(ctx, dev, controller, pin_policy)
+    _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
 
     try:
@@ -387,7 +387,7 @@ def import_certificate(ctx, slot, management_key, pin, cert, password, verify):
                 "{} slot.".format(slot.name)
             )
 
-        except APDUError as e:
+        except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
                 _verify_pin(ctx, controller, pin)
                 do_import(retry=False)
@@ -418,7 +418,6 @@ def import_key(
     SLOT        PIV slot to import the private key to.
     PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
-    dev = ctx.obj["dev"]
     controller = ctx.obj["controller"]
     _ensure_authenticated(ctx, controller, pin, management_key)
 
@@ -445,7 +444,7 @@ def import_key(
             continue
         break
 
-    _check_pin_policy(ctx, dev, controller, pin_policy)
+    _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
     _check_key_size(ctx, controller, private_key)
 
@@ -471,7 +470,7 @@ def attest(ctx, slot, certificate, format):
     controller = ctx.obj["controller"]
     try:
         cert = controller.attest(slot)
-    except APDUError as e:
+    except ApduError as e:
         logger.error("Attestation failed", exc_info=e)
         ctx.fail("Attestation failed.")
     certificate.write(cert.public_bytes(encoding=format))
@@ -495,8 +494,8 @@ def export_certificate(ctx, slot, format, certificate):
     controller = ctx.obj["controller"]
     try:
         cert = controller.read_certificate(slot)
-    except APDUError as e:
-        if e.sw == SW.NOT_FOUND:
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
             ctx.fail("No certificate found.")
         else:
             logger.error("Failed to read certificate from slot %s", slot, exc_info=e)
@@ -610,7 +609,7 @@ def generate_certificate(
             slot, public_key, subject, now, valid_to, touch_callback=prompt_for_touch
         )
 
-    except APDUError as e:
+    except ApduError as e:
         logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
         ctx.fail("Certificate generation failed.")
 
@@ -650,7 +649,7 @@ def generate_certificate_signing_request(
         csr = controller.generate_certificate_signing_request(
             slot, public_key, subject, touch_callback=prompt_for_touch
         )
-    except APDUError:
+    except ApduError:
         ctx.fail("Certificate Signing Request generation failed.")
 
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
@@ -708,14 +707,14 @@ def change_pin(ctx, pin, new_pin):
     try:
         controller.change_pin(pin, new_pin)
         click.echo("New PIN set.")
-
-    except AuthenticationBlocked as e:
-        logger.debug("PIN is blocked.", exc_info=e)
-        ctx.fail("PIN is blocked.")
-
-    except WrongPin as e:
-        logger.debug("Failed to change PIN, %d tries left", e.tries_left, exc_info=e)
-        ctx.fail("PIN change failed - %d tries left." % e.tries_left)
+    except InvalidPinError as e:
+        attempts = e.attempts_remaining
+        if attempts:
+            logger.debug("Failed to change PIN, %d tries left", attempts, exc_info=e)
+            ctx.fail("PIN change failed - %d tries left." % attempts)
+        else:
+            logger.debug("PIN is blocked.", exc_info=e)
+            ctx.fail("PIN is blocked.")
 
 
 @piv.command("change-puk")
@@ -752,14 +751,14 @@ def change_puk(ctx, puk, new_puk):
     try:
         controller.change_puk(puk, new_puk)
         click.echo("New PUK set.")
-
-    except AuthenticationBlocked as e:
-        logger.debug("PUK is blocked.", exc_info=e)
-        ctx.fail("PUK is blocked.")
-
-    except WrongPuk as e:
-        logger.debug("Failed to change PUK, %d tries left", e.tries_left, exc_info=e)
-        ctx.fail("PUK change failed - %d tries left." % e.tries_left)
+    except InvalidPinError as e:
+        attempts = e.attempts_remaining
+        if attempts:
+            logger.debug("Failed to change PUK, %d tries left", attempts, exc_info=e)
+            ctx.fail("PUK change failed - %d tries left." % attempts)
+        else:
+            logger.debug("PUK is blocked.", exc_info=e)
+            ctx.fail("PUK is blocked.")
 
 
 @piv.command("change-management-key")
@@ -875,7 +874,7 @@ def change_management_key(
 
     try:
         controller.set_mgm_key(new_management_key, touch=touch, store_on_device=protect)
-    except APDUError as e:
+    except ApduError as e:
         logger.error("Failed to change management key", exc_info=e)
         ctx.fail("Changing the management key failed.")
 
@@ -923,8 +922,8 @@ def read_object(ctx, pin, object_id):
     def do_read_object(retry=True):
         try:
             click.echo(controller.get_data(object_id), nl=False)
-        except APDUError as e:
-            if e.sw == SW.NOT_FOUND:
+        except ApduError as e:
+            if e.sw == SW.FILE_NOT_FOUND:
                 ctx.fail("No data found.")
             elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 _verify_pin(ctx, controller, pin)
@@ -962,7 +961,7 @@ def write_object(ctx, pin, management_key, object_id, data):
     def do_write_object(retry=True):
         try:
             controller.put_data(object_id, data.read())
-        except APDUError as e:
+        except ApduError as e:
             logger.debug("Failed writing object", exc_info=e)
             if e.sw == SW.INCORRECT_PARAMETERS:
                 ctx.fail("Something went wrong, is the object id valid?")
@@ -1033,10 +1032,12 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
     try:
         controller.verify(pin, touch_callback=prompt_for_touch)
         return True
-    except WrongPin as e:
-        ctx.fail("PIN verification failed, {} tries left.".format(e.tries_left))
-    except AuthenticationBlocked:
-        ctx.fail("PIN is blocked.")
+    except InvalidPinError as e:
+        attempts = e.attempts_remaining
+        if attempts > 0:
+            ctx.fail("PIN verification failed, {} tries left.".format(attempts))
+        else:
+            ctx.fail("PIN is blocked.")
     except Exception:
         ctx.fail("PIN verification failed.")
 
@@ -1052,8 +1053,6 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt, no_prompt=Fal
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
         controller.authenticate(management_key, touch_callback=prompt_for_touch)
-    except AuthenticationFailed:
-        ctx.fail("Incorrect management key.")
     except Exception as e:
         logger.error("Authentication with management key failed.", exc_info=e)
         ctx.fail("Authentication with management key failed.")
@@ -1062,15 +1061,15 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt, no_prompt=Fal
 def _check_key_size(ctx, controller, private_key):
     if (
         private_key.key_size == 1024
-        and ALGO.RSA1024 not in controller.supported_algorithms
+        and KEY_TYPE.RSA1024 not in controller.supported_algorithms
     ):
         ctx.fail("1024 is not a supported key size on this YubiKey.")
 
 
-def _check_pin_policy(ctx, dev, controller, pin_policy):
+def _check_pin_policy(ctx, controller, pin_policy):
     if pin_policy is not None and not controller.supports_pin_policies:
         ctx.fail("PIN policy is not supported by this YubiKey.")
-    if dev.is_fips and pin_policy == PIN_POLICY.NEVER:
+    if is_fips_version(controller.version) and pin_policy == PIN_POLICY.NEVER:
         ctx.fail("PIN policy NEVER is not supported by this YubiKey.")
 
 

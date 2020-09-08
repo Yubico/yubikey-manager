@@ -286,7 +286,7 @@ class OathApplication(Iso7816Application):
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
         resp = self.send_apdu(0, INS_VALIDATE, 0, 0, data)
         verification = _hmac_sha1(key, challenge)
-        if not constant_time.bytes_eq(Tlv.unpack(TAG_RESPONSE, resp), verification):
+        if not constant_time.bytes_eq(Tlv.unwrap(TAG_RESPONSE, resp), verification):
             raise BadResponseError(
                 "Response from validation does not match verification!"
             )
@@ -350,7 +350,7 @@ class OathApplication(Iso7816Application):
     def list_credentials(self):
         creds = []
         for tlv in Tlv.parse_list(self.send_apdu(0, INS_LIST, 0, 0)):
-            data = Tlv.unpack(TAG_NAME_LIST, tlv)
+            data = Tlv.unwrap(TAG_NAME_LIST, tlv)
             oath_type = OATH_TYPE(MASK_TYPE & six.indexbytes(data, 0))
             cred_id = data[1:]
             issuer, name, period = _parse_cred_id(cred_id, oath_type)
@@ -362,7 +362,7 @@ class OathApplication(Iso7816Application):
         return creds
 
     def calculate(self, credential_id, challenge):
-        resp = Tlv.unpack(
+        resp = Tlv.unwrap(
             TAG_RESPONSE,
             self.send_apdu(
                 0,
@@ -386,7 +386,7 @@ class OathApplication(Iso7816Application):
             self.send_apdu(0, INS_CALCULATE_ALL, 0, 1, Tlv(TAG_CHALLENGE, challenge))
         )
         while data:
-            cred_id = Tlv.unpack(TAG_NAME, data.pop(0))
+            cred_id = Tlv.unwrap(TAG_NAME, data.pop(0))
             tlv = data.pop(0)
             resp_tag = tlv.tag
             oath_type = OATH_TYPE.HOTP if resp_tag == TAG_HOTP else OATH_TYPE.TOTP
@@ -418,7 +418,7 @@ class OathApplication(Iso7816Application):
         else:  # HOTP
             challenge = b""
 
-        response = Tlv.unpack(
+        response = Tlv.unwrap(
             TAG_TRUNCATED,
             self.send_apdu(
                 0,

@@ -247,7 +247,7 @@ class Kdf(object):
     _fields = {
         b"\x81": ("kdf_algorithm", KdfAlgorithm),
         b"\x82": ("hash_algorithm", HashAlgorithm),
-        b"\x83": ("iteration_count", lambda data: struct.unpack(">I", data)[0]),
+        b"\x83": ("iteration_count", lambda data: struct.unwrap(">I", data)[0]),
         b"\x84": ("pw1_salt_bytes", bytes),
         b"\x85": ("pw2_salt_bytes", bytes),
         b"\x86": ("pw3_salt_bytes", bytes),
@@ -259,7 +259,7 @@ class Kdf(object):
 
     def __init__(self, data):
         for field_tag, (field_name, field_type) in self._fields.items():
-            tag, size = struct.unpack("cB", data[:2])
+            tag, size = struct.unwrap("cB", data[:2])
             setattr(self, field_name, field_type(data[2 : 2 + size]))
             data = data[2 + size :]
 
@@ -481,7 +481,7 @@ class OpgpController(object):
             raise ValueError("Unsupported key size!")
         resp = self._app.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
 
-        data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
+        data = Tlv.parse_dict(Tlv.unwrap(0x7F49, resp))
         numbers = rsa.RSAPublicNumbers(
             int_from_bytes(data[0x82], "big"), int_from_bytes(data[0x81], "big")
         )
@@ -500,7 +500,7 @@ class OpgpController(object):
         self._put_data(key_slot.key_id, attributes)
         resp = self._app.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
 
-        data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
+        data = Tlv.parse_dict(Tlv.unwrap(0x7F49, resp))
         pubkey_enc = data[0x86]
 
         self._put_data(key_slot.gen_time, struct.pack(">I", timestamp))
