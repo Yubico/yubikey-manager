@@ -61,7 +61,10 @@ def _parse_mode_string(ctx, param, mode):
     try:
         transports = set()
         if mode[0] in ["+", "-"]:
-            transports.update(TRANSPORT.split(ctx.obj["dev"].mode.transports))
+            info = ctx.obj["info"]
+            usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+            my_mode = _mode_from_usb_enabled(usb_enabled)
+            transports.update(TRANSPORT.split(my_mode.transports))
             for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
                 transport = _parse_transport_string(mod[1:])
                 if mod.startswith("+"):
@@ -149,7 +152,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     my_mode = _mode_from_usb_enabled(usb_enabled)
     usb_supported = info.supported_applications[INTERFACE.USB]
     transports_supported = _mode_from_usb_enabled(usb_supported).transports
-    pid = ctx.obj["dev"].pid
+    pid = ctx.obj["pid"]
     if pid:
         key_type = pid.get_type()
     else:

@@ -27,16 +27,20 @@
 
 from __future__ import absolute_import, print_function
 
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, ApplicationNotAvailableError
 
 import ykman.logging_setup
-import smartcard.pcsc.PCSCExceptions
 
 from .. import __version__
-from ..hid import list_devices as list_hid
 from ..scard import list_devices as list_ccid, list_readers
 from ..util import Cve201715361VulnerableError
-from ..device import read_info, get_name
+from ..device import (
+    read_info,
+    get_name,
+    list_all_devices,
+    scan_devices,
+    connect_to_device,
+)
 from .util import UpperCaseChoice, YkmanContextObject
 from .info import info
 from .mode import mode
@@ -70,50 +74,31 @@ def _disabled_transport(ctx, transports, cmd_name):
         "Command '{}' requires one of the following USB interfaces "
         "to be enabled: '{}'.".format(cmd_name, req)
     )
-    ctx.fail("Use 'ykman mode' to set the enabled USB interfaces.")
+    ctx.fail("Use 'ykman config usb' to set the enabled USB interfaces.")
 
 
 def _run_cmd_for_serial(ctx, cmd, transports, serial):
-    if TRANSPORT.has(transports, TRANSPORT.CCID):
-        for dev in list_ccid():
-            conn = dev.open_iso7816_connection()
-            info = read_info(dev.pid, conn)
-            if info.serial == serial:
-                return dev, conn, info
-            else:
-                conn.close()
-    if TRANSPORT.has(transports, TRANSPORT.OTP):
-        for dev in list_hid():
-            if dev.has_otp:
-                conn = dev.open_otp_connection()
-                info = read_info(dev.pid, conn)
-                if info.serial == serial:
-                    return dev, conn, info
-                else:
-                    conn.close()
-    if TRANSPORT.has(transports, TRANSPORT.FIDO):
-        for dev in list_hid():
-            if dev.has_ctap:
-                conn = dev.open_ctap_device()
-                info = read_info(dev.pid, conn)
-                if info.serial == serial:
-                    return dev, conn, info
-                else:
-                    conn.close()
-    ctx.fail(
-        "Failed connecting to a YubiKey with serial: {}. "
-        "Make sure the application has the required "
-        "permissions.".format(serial)
-    )
-
-    # TODO: Check other transports for serial, and if device supports transport.
-    # Serial not found, see if it's among other transports in USB enabled:
+    try:
+        return connect_to_device(serial, transports)
+    except ValueError:
+        try:
+            # Serial not found, see if it's among other transports in USB enabled:
+            conn = connect_to_device(serial, sum(TRANSPORT) ^ transports)[0]
+            conn.close()
+            _disabled_transport(ctx, transports, cmd)
+        except ValueError:
+            ctx.fail(
+                "Failed connecting to a YubiKey with serial: {}. "
+                "Make sure the application has the required "
+                "permissions.".format(serial)
+            )
 
 
-def _run_cmd_for_single(ctx, cmd, transports, reader=None):
-    if reader:
+def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
+    # Use a specific CCID reader
+    if reader_name:
         if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd in (fido.name, otp.name):
-            readers = list_ccid(reader)
+            readers = list_ccid(reader_name)
             if len(readers) == 1:
                 dev = readers[0]
                 if cmd == fido.name:
@@ -121,7 +106,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
                 else:
                     conn = dev.open_iso7816_connection()
                 info = read_info(dev.pid, conn)
-                return dev, conn, info
+                return conn, dev.pid, info
             elif len(readers) > 1:
                 ctx.fail("Multiple YubiKeys on external readers detected.")
             else:
@@ -129,66 +114,22 @@ def _run_cmd_for_single(ctx, cmd, transports, reader=None):
         else:
             ctx.fail("Not a CCID command.")
 
-    def fail_multiple():
-        ctx.fail(
-            "Multiple YubiKeys detected. Use --device SERIAL to specify "
-            "which one to use."
-        )
-
-    pid, otp_dev, ctap_dev, ccid_dev = None, None, None, None
-    for hid in list_hid():
-        if hid.pid == pid or pid is None:
-            pid = hid.pid
-        else:
-            fail_multiple()
-        if hid.has_otp:
-            if otp_dev:
-                fail_multiple()
-            otp_dev = hid
-        if hid.has_ctap:
-            if ctap_dev:
-                fail_multiple()
-            ctap_dev = hid
-    for ccid in list_ccid():
-        if ccid.pid == pid or pid is None:
-            pid = ccid.pid
-        else:
-            fail_multiple()
-        if ccid_dev:
-            fail_multiple()
-        ccid_dev = ccid
-
-    if pid is None:
+    # Find all connected devices
+    devices, _ = scan_devices()
+    n_devs = sum(devices.values())
+    if n_devs == 0:
         ctx.fail("No YubiKey detected!")
-
-    try:
-        if ccid_dev and TRANSPORT.has(transports, TRANSPORT.CCID):
-            dev = ccid_dev
-            conn = dev.open_iso7816_connection()
-        elif otp_dev and TRANSPORT.has(transports, TRANSPORT.OTP):
-            dev = otp_dev
-            conn = dev.open_otp_connection()
-        elif ctap_dev and TRANSPORT.has(transports, TRANSPORT.FIDO):
-            dev = ctap_dev
-            conn = dev.open_ctap_device()
-        else:
-            _disabled_transport(ctx, transports, cmd)
-    except Exception as e:
-        logger.error("Failed opening device", exc_info=e)
-        ctx.fail(
-            "Failed connecting to {} {}. "
-            "Make sure the application has the "
-            "required permissions.".format(
-                dev.pid.get_type().value, TRANSPORT.split(dev.pid.get_transports())
-            )
-        )
+    if n_devs > 1:
         ctx.fail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
             "which one to use."
         )
 
-    info = read_info(dev.pid, conn)
-    return dev, conn, info
+    # Only one connected device, check if any needed transports are available
+    pid = next(iter(devices.keys()))
+    if pid.get_transports() & transports:
+        return connect_to_device(None, transports)
+    _disabled_transport(ctx, transports, cmd)
 
 
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -265,11 +206,11 @@ def cli(ctx, device, log_level, log_file, reader):
                     resolve.items = _run_cmd_for_single(
                         ctx, subcmd.name, transports, reader
                     )
-                ctx.call_on_close(resolve.items[1].close)
+                ctx.call_on_close(resolve.items[0].close)
             return resolve.items
 
-        ctx.obj.add_resolver("dev", lambda: resolve()[0])
-        ctx.obj.add_resolver("conn", lambda: resolve()[1])
+        ctx.obj.add_resolver("conn", lambda: resolve()[0])
+        ctx.obj.add_resolver("pid", lambda: resolve()[1])
         ctx.obj.add_resolver("info", lambda: resolve()[2])
 
 
@@ -290,59 +231,25 @@ def list_keys(ctx, serials, readers):
     List connected YubiKeys.
     """
 
-    def _print_device(dev, info):
-        if serials:
-            if info.serial:
-                click.echo(info.serial)
-        else:
-            click.echo(
-                "{} ({}) [{}]{}".format(
-                    get_name(dev.pid.get_type(), info),
-                    "%d.%d.%d" % info.version if info.version else "unknown",
-                    dev.pid.name.split("_", 1)[1].replace("_", "+"),
-                    " Serial: {}".format(info.serial) if info.serial else "",
-                )
-            )
-
     if readers:
         for reader in list_readers():
             click.echo(reader.name)
         ctx.exit()
 
     # List all attached devices
-    handled_pids = set()
-    hid_devs = list_hid()
-    pids = {}
-
-    def handle(dev, get_connection):
-        if dev.pid not in handled_pids and pids.get(dev.pid, True):
-            try:
-                with get_connection(dev) as conn:
-                    info = read_info(dev.pid, conn)
-                pids[dev.pid] = True
-                _print_device(dev, info)
-            except Exception as e:
-                pids[dev.pid] = False
-                logger.error("Failed opening device", exc_info=e)
-
-    # Handle OTP devices
-    for dev in filter(lambda d: d.has_otp, hid_devs):
-        handle(dev, lambda d: d.open_otp_connection())
-    handled_pids.update({pid for pid, handled in pids.items() if handled})
-
-    # Handle CCID devices
-    try:
-        for dev in list_ccid():
-            handle(dev, lambda d: d.open_iso7816_connection())
-        handled_pids.update({pid for pid, handled in pids.items() if handled})
-    except smartcard.pcsc.PCSCExceptions.EstablishContextException as e:
-        logger.error("Failed to list devices", exc_info=e)
-        ctx.fail("Failed to establish CCID context. Is the pcscd service running?")
-
-    # Handle FIDO devices
-    for dev in filter(lambda d: d.has_ctap, hid_devs):
-        handle(dev, lambda d: d.open_ctap_device())
-    handled_pids.update({pid for pid, handled in pids.items() if handled})
+    for pid, dev_info in list_all_devices():
+        if serials:
+            if dev_info.serial:
+                click.echo(info.serial)
+        else:
+            click.echo(
+                "{} ({}) [{}]{}".format(
+                    get_name(pid.get_type(), dev_info),
+                    "%d.%d.%d" % dev_info.version if dev_info.version else "unknown",
+                    pid.name.split("_", 1)[1].replace("_", "+"),
+                    " Serial: {}".format(dev_info.serial) if dev_info.serial else "",
+                )
+            )
 
 
 COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
@@ -355,11 +262,17 @@ for cmd in COMMANDS:
 def main():
     try:
         cli(obj={})
+    except ApplicationNotAvailableError as e:
+        logger.error("Error", exc_info=e)
+        click.echo(
+            "The functionality required for this command is not enabled or not "
+            "available on this YubiKey."
+        )
+        return 1
     except ValueError as e:
         logger.error("Error", exc_info=e)
         click.echo("Error: " + str(e))
         return 1
-
     except Cve201715361VulnerableError as err:
         logger.error("Error", exc_info=err)
         click.echo("Error: " + str(err))

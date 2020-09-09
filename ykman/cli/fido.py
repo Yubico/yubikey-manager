@@ -339,7 +339,7 @@ def reset(ctx, force):
             controller = ctx.obj["controller"]
             controller.reset(touch_callback=prompt_for_touch)
 
-    if ctx.obj["dev"].is_fips:
+    if is_fips_version(ctx.obj["info"].version):
         if not force:
             destroy_input = click.prompt(
                 "WARNING! This is a YubiKey FIPS device. This command will "

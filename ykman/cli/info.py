@@ -181,7 +181,7 @@ def info(ctx, check_fips):
     Displays information about the attached YubiKey such as serial number,
     firmware version, applications, etc.
     """
-    pid = ctx.obj["dev"].pid
+    pid = ctx.obj["pid"]
     key_type = pid.get_type()
     transports = pid.get_transports()
     info = ctx.obj["info"]

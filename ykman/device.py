@@ -27,14 +27,17 @@
 
 from __future__ import absolute_import
 
-import logging
-
 from yubikit.core import AID, INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
 from yubikit.core.otp import OtpConnection
 from yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
 from yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
 from yubikit.otp import YkCfgApplication
 from fido2.ctap import CtapDevice
+from .hid import list_devices as list_hid
+from .scard import list_devices as list_ccid
+
+from collections import Counter
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,99 @@ NEO_APPLETS = {
 
 
 BASE_NEO_APPS = APPLICATION.OTP | APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
+
+
+def scan_devices():
+    """Scan for attached YubiKeys, without opening any connections.
+
+    Returns a dict mapping PID to device count, and a state object which can be used to
+    detect changes in attached devices.
+    """
+    # Scans all attached devices, without opening any connections.
+    merged = {}
+    hid_devs = list_hid()
+    ccid_devs = list_ccid()
+    merged.update(Counter(d.pid for d in filter(lambda d: d.has_otp, hid_devs)))
+    merged.update(Counter(d.pid for d in filter(lambda d: d.has_ctap, hid_devs)))
+    merged.update(Counter(d.pid for d in ccid_devs))
+    state = {d.fingerprint for d in hid_devs + ccid_devs}
+    return merged, state
+
+
+def list_all_devices():
+    """Connects to all attached YubiKeys and reads device info from them.
+
+    Returns a list of (PID, info) tuples for each connected device."""
+    # List all attached devices, returning pid and info for each.
+    handled_pids = set()
+    hid_devs = list_hid()
+    ccid_devs = list_ccid()
+    pids = {}
+    devices = []
+
+    def handle(dev, get_connection):
+        if dev.pid not in handled_pids and pids.get(dev.pid, True):
+            try:
+                with get_connection() as conn:
+                    info = read_info(dev.pid, conn)
+                pids[dev.pid] = True
+                devices.append((dev.pid, info))
+            except Exception as e:
+                pids[dev.pid] = False
+                logger.error("Failed opening device", exc_info=e)
+
+    # Handle OTP devices
+    for dev in filter(lambda d: d.has_otp, hid_devs):
+        handle(dev, dev.open_otp_connection)
+    handled_pids.update({pid for pid, handled in pids.items() if handled})
+
+    # Handle CCID devices
+    for dev in ccid_devs:
+        handle(dev, dev.open_iso7816_connection)
+    handled_pids.update({pid for pid, handled in pids.items() if handled})
+
+    # Handle FIDO devices
+    for dev in filter(lambda d: d.has_ctap, hid_devs):
+        handle(dev, dev.open_ctap_device)
+    handled_pids.update({pid for pid, handled in pids.items() if handled})
+
+    return devices
+
+
+def connect_to_device(serial=None, transports=sum(TRANSPORT)):
+    """Get a connection to a YubiKey using one of the provided transports.
+
+    Returns a tuple of (connection, pid, info) for the device.
+    """
+    if TRANSPORT.has(transports, TRANSPORT.CCID):
+        for dev in list_ccid():
+            conn = dev.open_iso7816_connection()
+            info = read_info(dev.pid, conn)
+            if serial and info.serial != serial:
+                conn.close()
+            else:
+                return conn, dev.pid, info
+    if TRANSPORT.has(transports, TRANSPORT.OTP):
+        for dev in list_hid():
+            if dev.has_otp:
+                conn = dev.open_otp_connection()
+                info = read_info(dev.pid, conn)
+                if serial and info.serial != serial:
+                    conn.close()
+                else:
+                    return conn, dev.pid, info
+    if TRANSPORT.has(transports, TRANSPORT.FIDO):
+        for dev in list_hid():
+            if dev.has_ctap:
+                conn = dev.open_ctap_device()
+                info = read_info(dev.pid, conn)
+                if serial and info.serial != serial:
+                    conn.close()
+                else:
+                    return conn, dev.pid, info
+    if serial:
+        raise ValueError("YubiKey with given serial not found")
+    raise ValueError("No YubiKey found for the given transports")
 
 
 def probe_applications(conn):
