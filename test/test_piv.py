@@ -3,7 +3,7 @@
 import ykman.piv as piv
 import unittest
 
-from ykman.piv import ALGO
+from yubikit.piv import KEY_TYPE
 
 
 class FakeController(object):
@@ -16,7 +16,6 @@ class FakeController(object):
 
 
 class TestPivFunctions(unittest.TestCase):
-
     def test_generate_random_management_key(self):
         output1 = piv.generate_random_management_key()
         output2 = piv.generate_random_management_key()
@@ -26,24 +25,24 @@ class TestPivFunctions(unittest.TestCase):
 
     def test_supported_algorithms(self):
         neo_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((3, 1, 1)))
-        self.assertNotIn(ALGO.TDES, neo_supported)
-        self.assertNotIn(ALGO.ECCP384, neo_supported)
+            FakeController((3, 1, 1))
+        )
+        self.assertNotIn(KEY_TYPE.ECCP384, neo_supported)
 
         fips_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((4, 4, 1)))
-        self.assertNotIn(ALGO.TDES, fips_supported)
-        self.assertNotIn(ALGO.RSA1024, fips_supported)
+            FakeController((4, 4, 1))
+        )
+        self.assertNotIn(KEY_TYPE.RSA1024, fips_supported)
 
         roca_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((4, 3, 4)))
-        self.assertNotIn(ALGO.TDES, roca_supported)
-        self.assertNotIn(ALGO.RSA1024, roca_supported)
-        self.assertNotIn(ALGO.RSA2048, roca_supported)
+            FakeController((4, 3, 4))
+        )
+        self.assertNotIn(KEY_TYPE.RSA1024, roca_supported)
+        self.assertNotIn(KEY_TYPE.RSA2048, roca_supported)
 
         yk5_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((5, 1, 0)))
+            FakeController((5, 1, 0))
+        )
         self.assertEqual(
-            set(yk5_supported),
-            set([a for a in ALGO if a != ALGO.TDES]),
+            set(yk5_supported), set(KEY_TYPE),
         )

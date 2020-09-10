@@ -8,6 +8,10 @@ from functools import partial
 from yubikit.core.otp import OtpConnection
 from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Load relevant DLLs
 windll = LibraryLoader(WinDLL)
@@ -325,7 +329,7 @@ def list_devices():
                             )
                         )
             except Exception as e:
-                print(e)
+                logger.debug("Failed opening HID device", exc_info=e)
                 continue
             finally:
                 kernel32.CloseHandle(device)

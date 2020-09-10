@@ -332,7 +332,7 @@ class OtpController(object):
         )
 
     def zap_slot(self, slot):
-        self._app.delete_slot(slot)
+        self._app.delete_slot(slot, self.access_code)
 
     def swap_slots(self):
         if self._app.version < (2, 3, 0):
@@ -362,7 +362,7 @@ class OtpController(object):
 
         ext, tkt, cfg = SlotConfig().get_flags()
         self._app.update_configuration(
-            slot, ext, tkt, cfg, self.access_code, new_code or _RESET_ACCESS_CODE,
+            slot, ext, tkt, cfg, new_code or _RESET_ACCESS_CODE, self.access_code
         )
         self.access_code = new_code
 

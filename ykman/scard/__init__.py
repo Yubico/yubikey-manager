@@ -49,10 +49,10 @@ class ScardDevice(YubiKeyDevice):
         """Open an ISO7816 connection"""
         try:
             return ScardIso7816Connection(self.reader.createConnection())
-        except CardConnectionException:
+        except CardConnectionException as e:
             if kill_scdaemon():
                 return ScardIso7816Connection(self.reader.createConnection())
-        raise Exception("Unable to connect to smart card")
+            raise e
 
     @property
     def has_fido(self):

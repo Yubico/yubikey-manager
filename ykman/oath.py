@@ -27,6 +27,7 @@
 
 from __future__ import absolute_import
 
+from yubikit.oath import OATH_TYPE
 from time import time
 import struct
 
@@ -39,13 +40,14 @@ def is_hidden(credential):
 
 
 def is_steam(credential):
-    return credential.issuer == "Steam"
+    return credential.oath_type == OATH_TYPE.TOTP and credential.issuer == "Steam"
 
 
-def calculate_steam(app, credential):
-    resp = app.calculate(credential.id, struct.pack(">q", int(time()) // 30))
-    offset = resp[-1] % 0x0F
-    code = struct.unpack_from(">I", resp[offset:])[0] & 0x7FFFFFFF
+def calculate_steam(app, credential, timestamp=None):
+    timestamp = int(timestamp or time())
+    resp = app.calculate(credential.id, struct.pack(">q", timestamp // 30))
+    offset = resp[-1] & 0x0F
+    code = struct.unpack(">I", resp[offset : offset + 4])[0] & 0x7FFFFFFF
     chars = []
     for i in range(5):
         chars.append(STEAM_CHAR_TABLE[code % len(STEAM_CHAR_TABLE)])

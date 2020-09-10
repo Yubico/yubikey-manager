@@ -410,8 +410,8 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     _ensure_not_invalid_options(ctx, enable, disable)
 
     info = ctx.obj["info"]
-    nfc_supported = info.supported_applications[INTERFACE.NFC]
-    nfc_enabled = info.config.enabled_applications[INTERFACE.NFC]
+    nfc_supported = info.supported_applications.get(INTERFACE.NFC)
+    nfc_enabled = info.config.enabled_applications.get(INTERFACE.NFC)
 
     if not nfc_supported:
         ctx.fail("NFC interface not available.")
@@ -460,7 +460,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     try:
         app.write_device_config(
             DeviceConfig({INTERFACE.NFC: nfc_enabled}, None, None, None),
-            True,
+            False,  # No need to reboot for NFC.
             lock_code,
         )
     except Exception as e:

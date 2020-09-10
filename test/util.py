@@ -20,7 +20,7 @@ PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def open_file(*relative_path):
-    return open(os.path.join(PKG_DIR, 'files', *relative_path), 'rb')
+    return open(os.path.join(PKG_DIR, "files", *relative_path), "rb")
 
 
 def ykman_cli(*argv, **kwargs):
@@ -52,17 +52,18 @@ def _sign_cert(key, builder):
 
     sig = key.sign(cert.tbs_certificate_bytes, ec.ECDSA(hashes.SHA256()))
 
-    seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
+    seq = Tlv.parse_list(Tlv.unwrap(0x30, cert.public_bytes(Encoding.DER)))
     # Replace signature, add unused bits = 0
-    seq[2] = Tlv(seq[2].tag, b'\0' + sig)
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
     # Re-assemble sequence
-    der = Tlv(0x30, b''.join(seq))
+    der = Tlv(0x30, b"".join(seq))
 
     return x509.load_der_x509_certificate(der, default_backend())
 
 
 def generate_self_signed_certificate(
-        common_name='Test', valid_from=None, valid_to=None):
+    common_name="Test", valid_from=None, valid_to=None
+):
 
     valid_from = valid_from if valid_from else datetime.datetime.utcnow()
     valid_to = valid_to if valid_to else valid_from + datetime.timedelta(days=1)
@@ -73,14 +74,16 @@ def generate_self_signed_certificate(
     builder = x509.CertificateBuilder()
     builder = builder.public_key(public_key)
     builder = builder.subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    )
 
     # Same as subject on self-signed certificates.
     builder = builder.issuer_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    )
 
     # x509.random_serial_number added in cryptography 1.6
-    serial = int_from_bytes(os.urandom(20), 'big') >> 1
+    serial = int_from_bytes(os.urandom(20), "big") >> 1
     builder = builder.serial_number(serial)
 
     builder = builder.not_valid_before(valid_from)

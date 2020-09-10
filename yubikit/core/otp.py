@@ -137,7 +137,7 @@ class OtpApplication(object):
         """Packs and sends one 70 byte frame"""
         # Format Frame
         buf = payload + struct.pack("<BH", slot, calculate_crc(payload)) + b"\0\0\0"
-        logger.debug("Preparing to send frame: %s", buf.hex())
+        logger.debug("Sending frame: %s", buf.hex())
 
         # Send frame
         prog_seq = self.connection.read_feature_report()[STATUS_OFFSET_PROG_SEQ]
@@ -180,6 +180,7 @@ class OtpApplication(object):
                 ):
                     # Sequence updated, return status.
                     # Note: If no valid configurations exist, prog_seq is reset to 0.
+                    logger.debug("Returning data: %s", report[1:-1].hex())
                     return report[1:-1]
                 elif needs_touch:
                     raise TimeoutError("Timed out waiting for touch")

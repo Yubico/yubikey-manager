@@ -51,6 +51,7 @@ from .piv import piv
 from .fido import fido
 from .config import config
 import click
+import time
 import logging
 import sys
 
@@ -59,6 +60,17 @@ logger = logging.getLogger(__name__)
 
 
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
+
+
+def retrying_connect(*args, attempts=10):
+    try:
+        return connect_to_device(*args)
+    except Exception as e:
+        if attempts > 0:
+            logger.error("Failed opening connection, retry in 0.5s", exc_info=e)
+            time.sleep(0.5)
+            return retrying_connect(*args, attempts=attempts - 1)
+        raise
 
 
 def print_version(ctx, param, value):
@@ -79,11 +91,11 @@ def _disabled_transport(ctx, transports, cmd_name):
 
 def _run_cmd_for_serial(ctx, cmd, transports, serial):
     try:
-        return connect_to_device(serial, transports)
+        return retrying_connect(serial, transports)
     except ValueError:
         try:
             # Serial not found, see if it's among other transports in USB enabled:
-            conn = connect_to_device(serial, sum(TRANSPORT) ^ transports)[0]
+            conn = retrying_connect(serial, sum(TRANSPORT) ^ transports)[0]
             conn.close()
             _disabled_transport(ctx, transports, cmd)
         except ValueError:
@@ -128,7 +140,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
     # Only one connected device, check if any needed transports are available
     pid = next(iter(devices.keys()))
     if pid.get_transports() & transports:
-        return connect_to_device(None, transports)
+        return retrying_connect(None, transports)
     _disabled_transport(ctx, transports, cmd)
 
 

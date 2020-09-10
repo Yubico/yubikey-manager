@@ -1,9 +1,11 @@
+from ykman.device import is_fips_version
 from ykman.util import is_cve201715361_vulnerable_firmware_version
+from yubikit.core import INTERFACE
 from . import _get_test_method_names
 
 
 def yubikey_condition(condition):
-    '''
+    """
     Apply this decorator to a function with the signature:
     `ykman.device.YubiKey => Boolean`.
 
@@ -11,22 +13,21 @@ def yubikey_condition(condition):
     methods. The decorated function should return `True` if the `YubiKey`
     argument matches the condition - and tests with this condition should run
     with that YubiKey - and `False` otherwise.
-    '''
+    """
+
     def decorate_method(method):
         method_conditions = (
-            getattr(method, '_yubikey_conditions')
-            if '_yubikey_conditions' in dir(method)
-            else set())
+            getattr(method, "_yubikey_conditions")
+            if "_yubikey_conditions" in dir(method)
+            else set()
+        )
         method_conditions.add(condition)
-        setattr(method, '_yubikey_conditions', method_conditions)
+        setattr(method, "_yubikey_conditions", method_conditions)
         return method
 
     def decorate_class(cls):
         for method_name in _get_test_method_names(cls):
-            setattr(
-                cls,
-                method_name,
-                decorate_method(getattr(cls, method_name)))
+            setattr(cls, method_name, decorate_method(getattr(cls, method_name)))
         return cls
 
     def decorate(method_or_class):
@@ -39,73 +40,76 @@ def yubikey_condition(condition):
 
 
 @yubikey_condition
-def is_fips(dev):
-    return dev.is_fips
+def is_fips(info):
+    return is_fips_version(info.version)
 
 
 @yubikey_condition
-def is_not_fips(dev):
-    return not dev.is_fips
+def is_not_fips(info):
+    return not is_fips_version(info.version)
 
 
 @yubikey_condition
-def is_neo(dev):
-    return dev.version < (4, 0, 0)
+def is_neo(info):
+    return info.version < (4, 0, 0)
 
 
 @yubikey_condition
-def is_not_neo(dev):
-    return dev.version >= (4, 0, 0)
+def is_not_neo(info):
+    return info.version >= (4, 0, 0)
 
 
 @yubikey_condition
-def supports_piv_attestation(dev):
-    return dev.version >= (4, 3, 0)
+def supports_piv_attestation(info):
+    return info.version >= (4, 3, 0)
 
 
 @yubikey_condition
-def not_supports_piv_attestation(dev):
-    return dev.version < (4, 3, 0)
+def not_supports_piv_attestation(info):
+    return info.version < (4, 3, 0)
 
 
 @yubikey_condition
-def supports_piv_pin_policies(dev):
-    return dev.version >= (4, 0, 0)
+def supports_piv_pin_policies(info):
+    return info.version >= (4, 0, 0)
 
 
 @yubikey_condition
-def supports_piv_touch_policies(dev):
-    return dev.version >= (4, 0, 0)
+def supports_piv_touch_policies(info):
+    return info.version >= (4, 0, 0)
 
 
 @yubikey_condition
-def is_roca(dev):
-    return is_cve201715361_vulnerable_firmware_version(dev.version)
+def is_roca(info):
+    return is_cve201715361_vulnerable_firmware_version(info.version)
 
 
 @yubikey_condition
-def is_not_roca(dev):
-    return not is_cve201715361_vulnerable_firmware_version(dev.version)
+def is_not_roca(info):
+    return not is_cve201715361_vulnerable_firmware_version(info.version)
 
 
 @yubikey_condition
-def can_write_config(dev):
-    return dev.can_write_config
+def can_write_config(info):
+    return info.version >= (5, 0, 0)
+
+
+@yubikey_condition
+def has_nfc(info):
+    return INTERFACE.NFC in info.supported_applications
 
 
 def version_min(min_version):
-    return yubikey_condition(lambda dev: dev.version >= min_version)
+    return yubikey_condition(lambda info: info.version >= min_version)
 
 
 def version_in_range(min_inclusive, max_inclusive):
     return yubikey_condition(
-        lambda dev:
-        min_inclusive <= dev.version <= max_inclusive
+        lambda info: min_inclusive <= info.version <= max_inclusive
     )
 
 
 def version_not_in_range(min_inclusive, max_inclusive):
     return yubikey_condition(
-        lambda dev:
-        dev.version < min_inclusive or dev.version > max_inclusive
+        lambda info: info.version < min_inclusive or info.version > max_inclusive
     )

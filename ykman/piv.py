@@ -28,7 +28,7 @@
 
 from __future__ import absolute_import
 
-from yubikit.core import Tlv
+from yubikit.core import Tlv, BadResponseError
 from yubikit.core.iso7816 import ApduError, SW
 from yubikit.piv import (
     SLOT,
@@ -129,9 +129,9 @@ def generate_random_management_key():
 class PivmanData(object):
     def __init__(self, raw_data=Tlv(0x80)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
-        self._flags = struct.unwrap(">B", data[0x81])[0] if 0x81 in data else None
+        self._flags = struct.unpack(">B", data[0x81])[0] if 0x81 in data else None
         self.salt = data.get(0x82)
-        self.pin_timestamp = struct.unwrap(">I", data[0x83]) if 0x83 in data else None
+        self.pin_timestamp = struct.unpack(">I", data[0x83]) if 0x83 in data else None
 
     def _get_flag(self, mask):
         return bool((self._flags or 0) & mask)
@@ -254,7 +254,7 @@ class PivController(object):
         self._app.unblock_pin(puk, new_pin)
 
     def set_pin_retries(self, pin_retries, puk_retries):
-        self._app.set_pin_Retries(pin_retries, puk_retries)
+        self._app.set_pin_attempts(pin_retries, puk_retries)
 
     def _use_derived_key(self, pin, touch=False):
         self.verify(pin)
@@ -508,7 +508,7 @@ class PivController(object):
                 certs[slot] = self.read_certificate(slot)
             except ApduError:
                 pass
-            except InvalidCertificate:
+            except BadResponseError:
                 certs[slot] = None
 
         return certs
@@ -635,13 +635,12 @@ class PivController(object):
     @property
     def supported_algorithms(self):
         return [
-            alg
-            for alg in KEY_TYPE
-            if not alg == KEY_TYPE.TDES
+            key_type
+            for key_type in KEY_TYPE
             if not (
-                KEY_TYPE.is_rsa(alg)
+                key_type.algorithm == ALGORITHM.RSA
                 and is_cve201715361_vulnerable_firmware_version(self.version)
             )
-            if not (alg == KEY_TYPE.ECCP384 and self.version < (4, 0, 0))
-            if not (alg == KEY_TYPE.RSA1024 and is_fips_version(self.version))
+            if not (key_type == KEY_TYPE.ECCP384 and self.version < (4, 0, 0))
+            if not (key_type == KEY_TYPE.RSA1024 and is_fips_version(self.version))
         ]

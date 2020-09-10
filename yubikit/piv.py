@@ -356,7 +356,7 @@ class PivApplication(Iso7816Application):
         counter = self.get_pin_attempts()
         while counter > 0:
             try:
-                self.verify("")
+                self.verify_pin("")
             except InvalidPinError as e:
                 counter = e.attempts_remaining
 
@@ -544,7 +544,12 @@ class PivApplication(Iso7816Application):
         cert_info = data.get(TAG_CERT_INFO)
         if cert_info and six.indexbytes(cert_info, 0) != 0:
             raise NotSupportedError("Compressed certificates are not supported")
-        return x509.load_der_x509_certificate(data[TAG_CERTIFICATE], default_backend())
+        try:
+            return x509.load_der_x509_certificate(
+                data.get(TAG_CERTIFICATE), default_backend()
+            )
+        except Exception as e:
+            raise BadResponseError("Invalid certificate", e)
 
     def put_certificate(self, slot, certificate):
         cert_data = certificate.public_bytes(Encoding.DER)

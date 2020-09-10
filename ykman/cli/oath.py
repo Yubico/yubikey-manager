@@ -385,7 +385,7 @@ def list(ctx, show_hidden, oath_type, period):
     "-s",
     "--single",
     is_flag=True,
-    help="Ensure only a single " "match, and output only the code.",
+    help="Ensure only a single match, and output only the code.",
 )
 def code(ctx, show_hidden, query, single):
     """
@@ -429,7 +429,10 @@ def code(ctx, show_hidden, query, single):
         ctx.fail("No matching credential found.")
 
     if single and creds:
-        click.echo(code.value)
+        if is_steam(cred):
+            click.echo(calculate_steam(app, cred))
+        else:
+            click.echo(code.value)
     else:
         outputs = []
         for cred in sorted(creds):
