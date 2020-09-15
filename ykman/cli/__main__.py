@@ -114,7 +114,7 @@ def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
             if len(readers) == 1:
                 dev = readers[0]
                 if cmd == fido.name:
-                    conn = dev.open_ctap_device()
+                    conn = dev.open_ctap_connection()
                 else:
                     conn = dev.open_iso7816_connection()
                 info = read_info(dev.pid, conn)

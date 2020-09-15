@@ -3,10 +3,9 @@ from __future__ import print_function, absolute_import
 import ctypes
 import platform
 from ctypes import wintypes, LibraryLoader, WinDLL
-from functools import partial
 
 from yubikit.core.otp import OtpConnection
-from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
+from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 
 import logging
 
@@ -284,20 +283,7 @@ def list_devices():
             if not result:
                 raise ctypes.WinError()
 
-            # This is a bit of a hack to work around a limitation of ctypes and
-            # "header" structures that are common in windows.  DevicePath is a
-            # ctypes array of length 1, but it is backed with a buffer that is much
-            # longer and contains a null terminated string.  So, we read the null
-            # terminated string off DevicePath here.  Per the comment above, the
-            # alignment of this struct varies depending on architecture, but
-            # in all cases the path string starts 1 DWORD into the structure.
-            #
-            # The path length is:
-            #   length of detail buffer - header length (1 DWORD)
-            path_len = detail_len - ctypes.sizeof(wintypes.DWORD) - 1
-            path = ctypes.string_at(
-                ctypes.addressof(interface_detail.DevicePath), path_len
-            )
+            path = ctypes.string_at(ctypes.addressof(interface_detail.DevicePath))
 
             device = kernel32.CreateFileA(
                 path,
@@ -312,22 +298,9 @@ def list_devices():
                 raise ctypes.WinError()
             try:
                 vid, pid = get_vid_pid(device)
-                if vid == YUBICO_VID:
-                    usage = get_usage(device)
-                    if usage == USAGE_OTP:
-                        devices.append(
-                            HidDevice(
-                                path, pid, open_otp=partial(WinHidOtpConnection, path)
-                            )
-                        )
-                    elif usage == USAGE_FIDO:
-                        devices.append(
-                            HidDevice(
-                                path,
-                                pid,
-                                open_ctap=partial(CtapHidDevice.open_path, path),
-                            )
-                        )
+                usage = get_usage(device)
+                if vid == YUBICO_VID and usage == USAGE_OTP:
+                    devices.append(OtpYubiKeyDevice(path, pid, WinHidOtpConnection))
             except Exception as e:
                 logger.debug("Failed opening HID device", exc_info=e)
                 continue

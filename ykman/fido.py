@@ -32,7 +32,7 @@ import time
 import logging
 from fido2.hid import CTAPHID
 from fido2.ctap1 import CTAP1, ApduError
-from fido2.ctap2 import CTAP2, PinProtocolV1, CredentialManagement
+from fido2.ctap2 import CTAP2, ClientPin, CredentialManagement
 from threading import Timer
 from enum import IntEnum, unique
 
@@ -74,7 +74,7 @@ class ResidentCredential(object):
 class Fido2Controller(object):
     def __init__(self, ctap_device):
         self.ctap = CTAP2(ctap_device)
-        self.pin = PinProtocolV1(self.ctap)
+        self.pin = ClientPin(self.ctap)
         self._info = self.ctap.get_info()
         self._pin = self._info.options["clientPin"]
 

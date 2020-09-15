@@ -34,7 +34,7 @@ from .util import click_postpone_execution, prompt_for_touch, click_force_option
 from ..driver_ccid import SW
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
-from ..hid import list_devices as list_hid
+from ..hid import list_ctap_devices
 from ..device import is_fips_version
 
 import click
@@ -305,7 +305,7 @@ def reset(ctx, force):
     inserted, and requires a touch on the YubiKey.
     """
 
-    n_keys = len(d for d in list_hid() if d.has_ctap)
+    n_keys = len(list_ctap_devices())
     if n_keys > 1:
         ctx.fail("Only one YubiKey can be connected to perform a reset.")
 
@@ -324,7 +324,7 @@ def reset(ctx, force):
         removed = False
         while True:
             sleep(0.1)
-            keys = [d for d in list_hid() if d.has_ctap]
+            keys = list_ctap_devices()
             if not keys:
                 removed = True
             if removed and len(keys) == 1:

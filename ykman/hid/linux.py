@@ -1,13 +1,14 @@
 from __future__ import absolute_import
 
-from yubikit.core import bytes2int
 from yubikit.core.otp import OtpConnection
-from .base import HidDevice, CtapHidDevice, YUBICO_VID, USAGE_OTP, USAGE_FIDO
+from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 
-from functools import partial
 import glob
 import fcntl
 import struct
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 GET_REPORT = 0xC0094807
@@ -38,7 +39,7 @@ class HidrawConnection(OtpConnection):
 def get_info(dev):
     buf = bytearray(4 + 2 + 2)
     fcntl.ioctl(dev, GET_INFO, buf, True)
-    return struct.unpack(">IHH", buf)
+    return struct.unpack("<IHH", buf)
 
 
 def get_descriptor(dev):
@@ -58,11 +59,11 @@ def get_usage(dev):
         typ, size = 0xFC & head, 0x03 & head
         value, buf = buf[:size], buf[size:]
         if typ == 4:  # Usage page
-            usage_page = bytes2int(value)
+            usage_page = struct.unpack("<I", value.ljust(4, b"\0"))[0]
             if usage is not None:
                 return usage_page, usage
         elif typ == 8:  # Usage
-            usage = bytes2int(value)
+            usage = struct.unpack("<I", value.ljust(4, b"\0"))[0]
             if usage_page is not None:
                 return usage_page, usage
 
@@ -71,20 +72,16 @@ def list_devices():
     devices = []
     for hidraw in glob.glob("/dev/hidraw*"):
         usage = None
-        with open(hidraw, "rb") as f:
-            bustype, vid, pid = get_info(f)
-            if vid == YUBICO_VID:
-                usage = get_usage(f)
-        if usage == USAGE_OTP:
-            devices.append(
-                HidDevice(hidraw, pid, open_otp=partial(HidrawConnection, hidraw))
-            )
-        elif usage == USAGE_FIDO:
-            devices.append(
-                HidDevice(
-                    hidraw, pid, open_ctap=partial(CtapHidDevice.open_path, hidraw)
-                )
-            )
+        try:
+            with open(hidraw, "rb") as f:
+                bustype, vid, pid = get_info(f)
+                if vid == YUBICO_VID:
+                    usage = get_usage(f)
+        except Exception as e:
+            logger.debug("Failed opening HID device", exc_info=e)
+            continue
 
-    # TODO: Merge devices
+        if usage == USAGE_OTP:
+            devices.append(OtpYubiKeyDevice(hidraw, pid, HidrawConnection))
+
     return devices

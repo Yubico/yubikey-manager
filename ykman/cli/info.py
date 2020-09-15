@@ -32,7 +32,7 @@ from yubikit.core.iso7816 import ApduError
 from yubikit.otp import YkCfgApplication
 from yubikit.oath import OathApplication
 
-from ..hid import list_devices as list_hid
+from ..hid import list_otp_devices, list_ctap_devices
 from ..scard import list_devices as list_ccid
 
 from ..otp import OtpController
@@ -106,12 +106,10 @@ def get_overall_fips_status(pid, info):
 
     usb_enabled = info.config.enabled_applications[INTERFACE.USB]
 
-    hid_devices = list_hid()
-
     statuses["OTP"] = False
     if usb_enabled & APPLICATION.OTP:
-        for dev in hid_devices:
-            if dev.pid == pid and dev.has_otp:
+        for dev in list_otp_devices():
+            if dev.pid == pid:
                 with dev.open_otp_connection() as conn:
                     app = YkCfgApplication(conn)
                     if app.get_serial() == info.serial:
@@ -130,9 +128,9 @@ def get_overall_fips_status(pid, info):
 
     statuses["FIDO U2F"] = False
     if usb_enabled & APPLICATION.U2F:
-        for dev in hid_devices:
-            if dev.pid == pid and dev.has_ctap:
-                with dev.open_ctap_device() as ctap:
+        for dev in list_ctap_devices():
+            if dev.pid == pid:
+                with dev.open_ctap_connection() as ctap:
                     info2 = read_info(pid, ctap)
                     if info2.serial == info.serial:
                         try:

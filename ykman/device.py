@@ -33,8 +33,8 @@ from yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduErro
 from yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
 from yubikit.otp import YkCfgApplication
 from fido2.ctap import CtapDevice
-from .hid import list_devices as list_hid
-from .scard import list_devices as list_ccid
+from .hid import list_otp_devices, list_ctap_devices
+from .scard import list_devices as list_ccid_devices
 
 from collections import Counter
 import logging
@@ -69,12 +69,13 @@ def scan_devices():
     """
     # Scans all attached devices, without opening any connections.
     merged = {}
-    hid_devs = list_hid()
-    ccid_devs = list_ccid()
-    merged.update(Counter(d.pid for d in filter(lambda d: d.has_otp, hid_devs)))
-    merged.update(Counter(d.pid for d in filter(lambda d: d.has_ctap, hid_devs)))
+    otp_devs = list_otp_devices()
+    ctap_devs = list_ctap_devices()
+    ccid_devs = list_ccid_devices()
+    merged.update(Counter(d.pid for d in otp_devs))
+    merged.update(Counter(d.pid for d in ctap_devs))
     merged.update(Counter(d.pid for d in ccid_devs))
-    state = {d.fingerprint for d in hid_devs + ccid_devs}
+    state = {d.fingerprint for d in otp_devs + ctap_devs + ccid_devs}
     return merged, state
 
 
@@ -84,8 +85,9 @@ def list_all_devices():
     Returns a list of (PID, info) tuples for each connected device."""
     # List all attached devices, returning pid and info for each.
     handled_pids = set()
-    hid_devs = list_hid()
-    ccid_devs = list_ccid()
+    otp_devs = list_otp_devices()
+    ctap_devs = list_ctap_devices()
+    ccid_devs = list_ccid_devices()
     pids = {}
     devices = []
 
@@ -101,7 +103,7 @@ def list_all_devices():
                 logger.error("Failed opening device", exc_info=e)
 
     # Handle OTP devices
-    for dev in filter(lambda d: d.has_otp, hid_devs):
+    for dev in otp_devs:
         handle(dev, dev.open_otp_connection)
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
@@ -111,8 +113,8 @@ def list_all_devices():
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     # Handle FIDO devices
-    for dev in filter(lambda d: d.has_ctap, hid_devs):
-        handle(dev, dev.open_ctap_device)
+    for dev in ctap_devs:
+        handle(dev, dev.open_ctap_connection)
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     return devices
@@ -124,7 +126,7 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
     Returns a tuple of (connection, pid, info) for the device.
     """
     if TRANSPORT.has(transports, TRANSPORT.CCID):
-        for dev in list_ccid():
+        for dev in list_ccid_devices():
             conn = dev.open_iso7816_connection()
             info = read_info(dev.pid, conn)
             if serial and info.serial != serial:
@@ -132,23 +134,21 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
             else:
                 return conn, dev.pid, info
     if TRANSPORT.has(transports, TRANSPORT.OTP):
-        for dev in list_hid():
-            if dev.has_otp:
-                conn = dev.open_otp_connection()
-                info = read_info(dev.pid, conn)
-                if serial and info.serial != serial:
-                    conn.close()
-                else:
-                    return conn, dev.pid, info
+        for dev in list_otp_devices():
+            conn = dev.open_otp_connection()
+            info = read_info(dev.pid, conn)
+            if serial and info.serial != serial:
+                conn.close()
+            else:
+                return conn, dev.pid, info
     if TRANSPORT.has(transports, TRANSPORT.FIDO):
-        for dev in list_hid():
-            if dev.has_ctap:
-                conn = dev.open_ctap_device()
-                info = read_info(dev.pid, conn)
-                if serial and info.serial != serial:
-                    conn.close()
-                else:
-                    return conn, dev.pid, info
+        for dev in list_ctap_devices():
+            conn = dev.open_ctap_connection()
+            info = read_info(dev.pid, conn)
+            if serial and info.serial != serial:
+                conn.close()
+            else:
+                return conn, dev.pid, info
     if serial:
         raise ValueError("YubiKey with given serial not found")
     raise ValueError("No YubiKey found for the given transports")

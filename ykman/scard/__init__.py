@@ -56,12 +56,13 @@ class ScardDevice(YubiKeyDevice):
 
     @property
     def has_fido(self):
+        # TODO: Check using ATR?
         # FIDO is only available from this device if we're connected over NFC.
         return YK_READER_NAME not in self.reader.name.lower()
 
-    def open_ctap_device(self):
+    def open_ctap_connection(self):
         """Open a python-fido2 CtapDevice"""
-        return CtapPcscDevice(self.reader.createConnection(), self.reader.name)
+        return CtapPcscConnection(self.reader.createConnection(), self.reader.name)
 
 
 class ScardIso7816Connection(Iso7816Connection):
@@ -78,6 +79,14 @@ class ScardIso7816Connection(Iso7816Connection):
         data, sw1, sw2 = self.connection.transmit(list(apdu))
         logger.debug("RECV: %s SW=%02x%02x", data, sw1, sw2)
         return bytes(bytearray(data)), sw1 << 8 | sw2
+
+
+class CtapPcscConnection(CtapPcscDevice):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        self.close()
 
 
 def kill_scdaemon():
