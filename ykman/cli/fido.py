@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from __future__ import absolute_import
+from binascii import b2a_hex
 import click
 import logging
 from fido2.ctap1 import ApduError
@@ -119,7 +120,9 @@ def list_creds(ctx, pin):
 
     try:
         for cred in controller.get_resident_credentials(pin):
-            click.echo('{} ({})'.format(cred.user_name, cred.rp_id))
+            click.echo('{} {} {}'.format(
+                cred.rp_id, b2a_hex(cred.user_id).decode('ascii'),
+                cred.user_name))
     except CtapError as e:
         if e.code == CtapError.ERR.PIN_INVALID:
             ctx.fail('Wrong PIN.')
@@ -151,16 +154,20 @@ def delete(ctx, query, pin, force):
             cred for cred in controller.get_resident_credentials(pin)
             if query.lower() in cred.user_name.lower() or
             query.lower() in cred.rp_id.lower() or
-            query.lower() in '{} ({})'.format(
-                cred.user_name, cred.rp_id).lower()
+            b2a_hex(cred.user_id).decode('ascii').lower().startswith(
+                query.lower()) or
+            query.lower() in '{} {} {}'.format(
+                cred.rp_id, b2a_hex(cred.user_id).decode('ascii'),
+                cred.user_name).lower()
         ]
         if len(hits) == 0:
             ctx.fail('No matches, nothing to be done.')
         elif len(hits) == 1:
             cred = hits[0]
             if force or click.confirm(
-                    'Delete credential {} ({})?'.format(
-                        cred.user_name, cred.rp_id)):
+                    'Delete credential {} {} {}?'.format(
+                        cred.rp_id, b2a_hex(cred.user_id).decode('ascii'),
+                        cred.user_name)):
                 controller.delete_resident_credential(
                     cred.credential_id, pin)
         else:
