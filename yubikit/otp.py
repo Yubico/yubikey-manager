@@ -248,10 +248,10 @@ class _YkCfgOtpBackend(object):
         self.app.close()
 
     def write_update(self, slot, data):
-        return self.app.transceive(slot, data)
+        return self.app.send_and_receive(slot, data)
 
-    def transceive(self, slot, data, expected_len, event=None, on_keepalive=None):
-        response = self.app.transceive(slot, data, event, on_keepalive)
+    def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
+        response = self.app.send_and_receive(slot, data, event, on_keepalive)
         if check_crc(response[: expected_len + 2]):
             return response[:expected_len]
         raise BadResponseError("Invalid CRC")
@@ -270,7 +270,7 @@ class _YkCfgIso7816Backend(object):
     def write_update(self, slot, data):
         return self.app.send_apdu(0, INS_CONFIG, slot, 0, data)
 
-    def transceive(self, slot, data, expected_len, event=None, on_keepalive=None):
+    def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
         response = self.app.send_apdu(0, INS_CONFIG, slot, 0, data)
         if expected_len == len(response):
             return response
@@ -293,7 +293,7 @@ class YkCfgApplication(object):
                 mgmt_version = mgmt.version
                 if mgmt_version < (4, 0, 0):
                     # Workaround to "de-select" on NEO
-                    connection.transceive(b"\xa4\x04\x00\x08")
+                    connection.send_and_receive(b"\xa4\x04\x00\x08")
             except ApduError:
                 pass  # Not available, get version from status
 
@@ -318,7 +318,9 @@ class YkCfgApplication(object):
         return self._version
 
     def get_serial(self):
-        return bytes2int(self.backend.transceive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4))
+        return bytes2int(
+            self.backend.send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4)
+        )
 
     def get_config_state(self):
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
@@ -371,7 +373,7 @@ class YkCfgApplication(object):
         challenge = challenge.ljust(
             HMAC_CHALLENGE_SIZE, b"\1" if challenge.endswith(b"\0") else b"\0"
         )
-        return self.backend.transceive(
+        return self.backend.send_and_receive(
             (CONFIG_SLOT.CHAL_HMAC_1, CONFIG_SLOT.CHAL_HMAC_2)[slot - 1],
             challenge,
             HMAC_RESPONSE_SIZE,

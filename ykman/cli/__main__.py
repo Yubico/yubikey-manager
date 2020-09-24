@@ -63,14 +63,16 @@ CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_wi
 
 
 def retrying_connect(*args, attempts=10):
-    try:
-        return connect_to_device(*args)
-    except Exception as e:
-        if attempts > 0:
-            logger.error("Failed opening connection, retry in 0.5s", exc_info=e)
-            time.sleep(0.5)
-            return retrying_connect(*args, attempts=attempts - 1)
-        raise
+    while True:
+        try:
+            return connect_to_device(*args)
+        except Exception as e:
+            if attempts:
+                attempts -= 1
+                logger.error("Failed opening connection, retry in 0.5s", exc_info=e)
+                time.sleep(0.5)
+            else:
+                raise
 
 
 def print_version(ctx, param, value):

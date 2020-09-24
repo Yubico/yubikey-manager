@@ -127,28 +127,37 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
     """
     if TRANSPORT.has(transports, TRANSPORT.CCID):
         for dev in list_ccid_devices():
-            conn = dev.open_iso7816_connection()
-            info = read_info(dev.pid, conn)
-            if serial and info.serial != serial:
-                conn.close()
-            else:
-                return conn, dev.pid, info
+            try:
+                conn = dev.open_iso7816_connection()
+                info = read_info(dev.pid, conn)
+                if serial and info.serial != serial:
+                    conn.close()
+                else:
+                    return conn, dev.pid, info
+            except Exception as e:
+                logger.debug("Error connecting", exc_info=e)
     if TRANSPORT.has(transports, TRANSPORT.OTP):
         for dev in list_otp_devices():
-            conn = dev.open_otp_connection()
-            info = read_info(dev.pid, conn)
-            if serial and info.serial != serial:
-                conn.close()
-            else:
-                return conn, dev.pid, info
+            try:
+                conn = dev.open_otp_connection()
+                info = read_info(dev.pid, conn)
+                if serial and info.serial != serial:
+                    conn.close()
+                else:
+                    return conn, dev.pid, info
+            except Exception as e:
+                logger.debug("Error connecting", exc_info=e)
     if TRANSPORT.has(transports, TRANSPORT.FIDO):
         for dev in list_ctap_devices():
-            conn = dev.open_ctap_connection()
-            info = read_info(dev.pid, conn)
-            if serial and info.serial != serial:
-                conn.close()
-            else:
-                return conn, dev.pid, info
+            try:
+                conn = dev.open_ctap_connection()
+                info = read_info(dev.pid, conn)
+                if serial and info.serial != serial:
+                    conn.close()
+                else:
+                    return conn, dev.pid, info
+            except Exception as e:
+                logger.debug("Error connecting", exc_info=e)
     if serial:
         raise ValueError("YubiKey with given serial not found")
     raise ValueError("No YubiKey found for the given transports")
@@ -184,7 +193,7 @@ def read_info(pid, conn):
             if key_type == YUBIKEY.NEO:
                 try:
                     # Workaround to "de-select" the Management Applet
-                    conn.transceive(b"\xa4\x04\x00\x08")
+                    conn.send_and_receive(b"\xa4\x04\x00\x08")
                     ykcfg = YkCfgApplication(conn)
                     serial = ykcfg.get_serial()
                 except Exception as e:

@@ -386,4 +386,4 @@ class OtpController(object):
     @property
     def is_in_fips_mode(self):
         # TODO: Expose this in a better way?
-        return self._app.backend.transceive(0x14, b"", 1) == b"\1"
+        return self._app.backend.send_and_receive(0x14, b"", 1) == b"\1"

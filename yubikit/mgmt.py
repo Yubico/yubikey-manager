@@ -54,17 +54,17 @@ class _ManagementOtpBackend(OtpApplication):
         self.version = tuple(self.read_status()[:3])
 
     def set_mode(self, data):
-        self.transceive(SLOT_DEVICE_CONFIG, data)
+        self.send_and_receive(SLOT_DEVICE_CONFIG, data)
 
     def read_config(self):
-        response = self.transceive(SLOT_YK4_CAPABILITIES)
+        response = self.send_and_receive(SLOT_YK4_CAPABILITIES)
         r_len = response[0]
         if check_crc(response[: r_len + 1 + 2]):
             return response[: r_len + 1]
         raise BadResponseError("Invalid checksum")
 
     def write_config(self, config):
-        self.transceive(SLOT_YK4_SET_DEVICE_INFO, config)
+        self.send_and_receive(SLOT_YK4_SET_DEVICE_INFO, config)
 
 
 class _ManagementIso7816Backend(Iso7816Application):

@@ -26,11 +26,11 @@ class OtpConnection(abc.ABC):
         self.close()
 
     @abc.abstractmethod
-    def read_feature_report(self):
+    def receive(self):
         """Reads an 8 byte feature report"""
 
     @abc.abstractmethod
-    def write_feature_report(self, data):
+    def send(self, data):
         """Writes an 8 byte feature report"""
 
 
@@ -92,7 +92,7 @@ class OtpApplication(object):
     def close(self):
         self.connection.close()
 
-    def transceive(self, slot, data=None, event=None, on_keepalive=None):
+    def send_and_receive(self, slot, data=None, event=None, on_keepalive=None):
         """Sends a command to the YubiKey, and reads the response.
 
         If the command results in a configuration update, the programming sequence
@@ -120,14 +120,13 @@ class OtpApplication(object):
         @return status bytes (first 3 bytes are the firmware version)
         @throws IOException in case of communication error
         """
-        return self.connection.read_feature_report()[1:-1]
+        return self.connection.receive()[1:-1]
 
     def _await_ready_to_write(self):
         """Sleep for up to ~1s waiting for the WRITE flag to be unset"""
         for _ in range(20):
             if (
-                self.connection.read_feature_report()[FEATURE_RPT_DATA_SIZE]
-                & SLOT_WRITE_FLAG
+                self.connection.receive()[FEATURE_RPT_DATA_SIZE] & SLOT_WRITE_FLAG
             ) == 0:
                 return
             sleep(0.05)
@@ -140,14 +139,14 @@ class OtpApplication(object):
         logger.debug("Sending frame: %s", buf.hex())
 
         # Send frame
-        prog_seq = self.connection.read_feature_report()[STATUS_OFFSET_PROG_SEQ]
+        prog_seq = self.connection.receive()[STATUS_OFFSET_PROG_SEQ]
         seq = 0
         while buf:
             report, buf = buf[:FEATURE_RPT_DATA_SIZE], buf[FEATURE_RPT_DATA_SIZE:]
             if _should_send(report, seq):
                 report += struct.pack(">B", 0x80 | seq)
                 self._await_ready_to_write()
-                self.connection.write_feature_report(report)
+                self.connection.send(report)
             seq += 1
 
         return prog_seq
@@ -159,7 +158,7 @@ class OtpApplication(object):
         needs_touch = False
 
         while True:
-            report = self.connection.read_feature_report()
+            report = self.connection.receive()
             statusByte = report[FEATURE_RPT_DATA_SIZE]
             if (statusByte & RESP_PENDING_FLAG) != 0:  # Response packet
                 if seq == (statusByte & SEQUENCE_MASK):
@@ -201,4 +200,4 @@ class OtpApplication(object):
 
     def _reset_state(self):
         """Reset the state of YubiKey from reading"""
-        self.connection.write_feature_report(b"\xff".rjust(FEATURE_RPT_SIZE, b"\0"))
+        self.connection.send(b"\xff".rjust(FEATURE_RPT_SIZE, b"\0"))

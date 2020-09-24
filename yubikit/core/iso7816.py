@@ -5,7 +5,7 @@ import struct
 from time import time
 from enum import IntEnum, unique
 
-from . import CommandError, ApplicationNotAvailableError
+from . import INTERFACE, CommandError, ApplicationNotAvailableError
 
 
 class Iso7816Connection(abc.ABC):
@@ -18,8 +18,13 @@ class Iso7816Connection(abc.ABC):
     def __exit__(self, typ, value, traceback):
         self.close()
 
+    @property
     @abc.abstractmethod
-    def transceive(self, apdu):
+    def interface(self):
+        """Get the interface type of the connection (USB or NFC)"""
+
+    @abc.abstractmethod
+    def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response"""
 
 
@@ -85,7 +90,9 @@ class Iso7816Application(object):
         self.connection.close()
 
     def enable_touch_workaround(self, version):
-        self._touch_workaround = (4, 2, 0) <= version <= (4, 2, 6)
+        self._touch_workaround = self.connection.interface == INTERFACE.USB and (
+            (4, 2, 0,) <= version <= (4, 2, 6)
+        )
 
     def select(self):
         try:
@@ -101,20 +108,22 @@ class Iso7816Application(object):
             and self._last_long_resp > 0
             and time() - self._last_long_resp < 2
         ):
-            self.connection.transceive(
+            self.connection.send_and_receive(
                 _encode_apdu(0, 0, 0, 0)
             )  # Dummy APDU, returns error
             self._last_long_resp = 0
 
         # Read first response APDU
-        response, sw = self.connection.transceive(_encode_apdu(cla, ins, p1, p2, data))
+        response, sw = self.connection.send_and_receive(
+            _encode_apdu(cla, ins, p1, p2, data)
+        )
 
         # Read full response
         buf = b""
         get_data = _encode_apdu(0, self._ins_send_remaining, 0, 0)
         while sw >> 8 == SW1_HAS_MORE_DATA:
             buf += response
-            response, sw = self.connection.transceive(get_data)
+            response, sw = self.connection.send_and_receive(get_data)
 
         if sw != SW.OK:
             raise ApduError(response, sw)

@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from yubikit.core import TRANSPORT, YUBIKEY, YubiKeyDevice
+from yubikit.core import TRANSPORT, INTERFACE, YUBIKEY, YubiKeyDevice
 from yubikit.core.iso7816 import Iso7816Connection
 
 from smartcard import System
@@ -69,11 +69,17 @@ class ScardIso7816Connection(Iso7816Connection):
     def __init__(self, connection):
         self.connection = connection
         connection.connect()
+        atr = connection.getATR()
+        self._interface = INTERFACE.USB if atr[1] & 0xF0 == 0xF0 else INTERFACE.NFC
+
+    @property
+    def interface(self):
+        return self._interface
 
     def close(self):
         self.connection.disconnect()
 
-    def transceive(self, apdu):
+    def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
         logger.debug("SEND: %s", apdu.hex())
         data, sw1, sw2 = self.connection.transmit(list(apdu))

@@ -182,14 +182,14 @@ class WinHidOtpConnection(OtpConnection):
             kernel32.CloseHandle(self.handle)
             self.handle = None
 
-    def read_feature_report(self):
+    def receive(self):
         buf = ctypes.create_string_buffer(9)
         result = hid.HidD_GetFeature(self.handle, buf, ctypes.sizeof(buf))
         if not result:
             raise ctypes.WinError()
         return buf.raw[1:]
 
-    def write_feature_report(self, data):
+    def send(self, data):
         buf = ctypes.create_string_buffer(b"\0" + bytes(data))
         result = hid.HidD_SetFeature(self.handle, buf, ctypes.sizeof(buf))
         if not result:
@@ -225,8 +225,6 @@ def get_usage(device):
 
 
 def list_devices():
-    devices = []
-
     hid_guid = GUID()
     hid.HidD_GetHidGuid(ctypes.byref(hid_guid))
 
@@ -238,6 +236,7 @@ def list_devices():
         interface_info = DeviceInterfaceData()
         interface_info.cbSize = ctypes.sizeof(DeviceInterfaceData)
 
+        devices = []
         while True:
             result = setupapi.SetupDiEnumDeviceInterfaces(
                 collection,
@@ -306,7 +305,6 @@ def list_devices():
                 continue
             finally:
                 kernel32.CloseHandle(device)
+        return devices
     finally:
         setupapi.SetupDiDestroyDeviceInfoList(collection)
-
-    return devices

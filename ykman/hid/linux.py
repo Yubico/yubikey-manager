@@ -25,12 +25,12 @@ class HidrawConnection(OtpConnection):
     def close(self):
         self.handle.close()
 
-    def read_feature_report(self):
+    def receive(self):
         buf = bytearray(1 + 8)
         fcntl.ioctl(self.handle, GET_REPORT, buf, True)
         return buf[1:]
 
-    def write_feature_report(self, data):
+    def send(self, data):
         buf = bytearray([9])
         buf.extend(data)
         fcntl.ioctl(self.handle, SET_REPORT, buf, True)
