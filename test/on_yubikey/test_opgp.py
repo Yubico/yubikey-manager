@@ -5,8 +5,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from ykman.opgp import OpgpController, KEY_SLOT
-from yubikit.core import AID, TRANSPORT
-from yubikit.core.iso7816 import ApduError, Iso7816Application
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import ApduError, SmartCardProtocol
 from .framework import device_test_suite, yubikey_conditions
 
 E = 65537
@@ -21,7 +21,7 @@ def additional_tests(open_device):
     class OpgpTestCase(unittest.TestCase):
         def setUp(self):
             self.conn = open_device()[0]
-            self.controller = OpgpController(Iso7816Application(AID.OPGP, self.conn))
+            self.controller = OpgpController(SmartCardProtocol(self.conn))
 
         def tearDown(self):
             self.conn.close()
@@ -29,13 +29,13 @@ def additional_tests(open_device):
         def reconnect(self):
             self.conn.close()
             self.conn = open_device()[0]
-            self.controller = OpgpController(Iso7816Application(AID.OPGP, self.conn))
+            self.controller = OpgpController(SmartCardProtocol(self.conn))
 
     class KeyManagement(OpgpTestCase):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                controller = OpgpController(Iso7816Application(AID.OPGP, conn))
+                controller = OpgpController(SmartCardProtocol(conn))
                 controller.reset()
 
         def test_generate_requires_admin(self):

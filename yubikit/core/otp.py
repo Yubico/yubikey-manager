@@ -85,7 +85,7 @@ def _should_send(packet, seq):
     return seq in (0, 9) or any(packet)
 
 
-class OtpApplication(object):
+class OtpProtocol(object):
     def __init__(self, otp_connection):
         self.connection = otp_connection
 

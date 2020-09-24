@@ -39,9 +39,9 @@ from .util import (
     EnumChoice,
 )
 from yubikit.core import TRANSPORT
-from yubikit.core.iso7816 import ApduError, SW
+from yubikit.core.smartcard import ApduError, SW
 from yubikit.oath import (
-    OathApplication,
+    OathSession,
     CredentialData,
     OATH_TYPE,
     HASH_ALGORITHM,
@@ -117,7 +117,7 @@ def oath(ctx, password):
       $ ykman oath set-password
     """
     try:
-        controller = OathApplication(ctx.obj["conn"])
+        controller = OathSession(ctx.obj["conn"])
         ctx.obj["controller"] = controller
         ctx.obj["settings"] = Settings("oath")
     except ApduError as e:

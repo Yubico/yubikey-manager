@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .util import click_postpone_execution, click_force_option, EnumChoice
 from yubikit.core import APPLICATION, INTERFACE
-from yubikit.mgmt import ManagementApplication, DeviceConfig, DEVICE_FLAG
+from yubikit.management import ManagementSession, DeviceConfig, DEVICE_FLAG
 from binascii import a2b_hex, b2a_hex
 import os
 import logging
@@ -91,7 +91,7 @@ def config(ctx):
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."
         )
-    ctx.obj["controller"] = ManagementApplication(ctx.obj["conn"])
+    ctx.obj["controller"] = ManagementSession(ctx.obj["conn"])
 
 
 @config.command("set-lock-code")

@@ -8,9 +8,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from yubikit.core.iso7816 import ApduError
+from yubikit.core.smartcard import ApduError
 from yubikit.piv import (
-    PivApplication,
+    PivSession,
     KEY_TYPE,
     PIN_POLICY,
     TOUCH_POLICY,
@@ -58,7 +58,7 @@ def additional_tests(open_device):
     class PivTestCase(unittest.TestCase):
         def setUp(self):
             self.conn = open_device()[0]
-            self.controller = PivController(PivApplication(self.conn))
+            self.controller = PivController(PivSession(self.conn))
 
         def tearDown(self):
             self.conn.close()
@@ -79,13 +79,13 @@ def additional_tests(open_device):
         def reconnect(self):
             self.conn.close()
             self.conn = open_device()[0]
-            self.controller = PivController(PivApplication(self.conn))
+            self.controller = PivController(PivSession(self.conn))
 
     class KeyManagement(PivTestCase):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                controller = PivController(PivApplication(conn))
+                controller = PivController(PivSession(conn))
                 controller.reset()
 
         def generate_key(self, slot, alg=KEY_TYPE.ECCP256, pin_policy=None):
@@ -291,7 +291,7 @@ def additional_tests(open_device):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                PivController(PivApplication(conn)).reset()
+                PivController(PivSession(conn)).reset()
 
         def test_authenticate_twice_does_not_throw(self):
             self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)

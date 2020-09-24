@@ -29,8 +29,8 @@ from __future__ import absolute_import
 
 from .util import ensure_not_cve201715361_vulnerable_firmware_version
 
-from yubikit.core import Tlv
-from yubikit.core.iso7816 import ApduError, SW
+from yubikit.core import AID, Tlv
+from yubikit.core.smartcard import ApduError, SW
 
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -288,14 +288,14 @@ class Kdf(object):
 
 
 class OpgpController(object):
-    def __init__(self, app):
-        self._app = app
+    def __init__(self, protocol):
+        self._app = protocol
         try:
-            app.select()
+            protocol.select(AID.OPGP)
         except ApduError as e:
             if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
-                app.send_apdu(0, INS.ACTIVATE, 0, 0)
-                app.select()
+                protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
+                protocol.select(AID.OPGP)
             else:
                 raise
         self._version = self._read_version()

@@ -6,7 +6,7 @@ from .core import (
     NotSupportedError,
     BadResponseError,
 )
-from .core.iso7816 import Iso7816Application
+from .core.smartcard import SmartCardProtocol
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hmac, hashes
@@ -259,11 +259,13 @@ def _format_code(credential, timestamp, truncated):
     )
 
 
-class OathApplication(Iso7816Application):
+class OathSession(object):
     def __init__(self, connection):
-        super(OathApplication, self).__init__(AID.OATH, connection, INS_SEND_REMAINING)
-        self._app_info, self._salt, self._challenge = _parse_select(self.select())
-        self.enable_touch_workaround(self.info.version)
+        self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
+        self._app_info, self._salt, self._challenge = _parse_select(
+            self.protocol.select(AID.OATH)
+        )
+        self.protocol.enable_touch_workaround(self.info.version)
 
     @property
     def info(self):
@@ -274,8 +276,10 @@ class OathApplication(Iso7816Application):
         return self._challenge is not None
 
     def reset(self):
-        self.send_apdu(0, INS_RESET, 0xDE, 0xAD)
-        self._app_info, self._salt, self._challenge = _parse_select(self.select())
+        self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
+        self._app_info, self._salt, self._challenge = _parse_select(
+            self.protocol.select(AID.OATH)
+        )
 
     def derive_key(self, password):
         return _derive_key(self._salt, password)
@@ -284,7 +288,7 @@ class OathApplication(Iso7816Application):
         response = _hmac_sha1(key, self._challenge)
         challenge = os.urandom(8)
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
-        resp = self.send_apdu(0, INS_VALIDATE, 0, 0, data)
+        resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
         verification = _hmac_sha1(key, challenge)
         if not constant_time.bytes_eq(Tlv.unwrap(TAG_RESPONSE, resp), verification):
             raise BadResponseError(
@@ -295,7 +299,7 @@ class OathApplication(Iso7816Application):
     def set_key(self, key):
         challenge = os.urandom(8)
         response = _hmac_sha1(key, challenge)
-        self.send_apdu(
+        self.protocol.send_apdu(
             0,
             INS_SET_CODE,
             0,
@@ -308,7 +312,7 @@ class OathApplication(Iso7816Application):
         )
 
     def unset_key(self):
-        self.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
+        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
 
     def put_credential(self, credential_data, touch_required=False):
         d = credential_data
@@ -326,7 +330,7 @@ class OathApplication(Iso7816Application):
         if d.counter > 0:
             data += Tlv(TAG_IMF, struct.pack(">I", d.counter))
 
-        self.send_apdu(0, INS_PUT, 0, 0, data)
+        self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
         return Credential(
             self.info.device_id,
             cred_id,
@@ -342,14 +346,14 @@ class OathApplication(Iso7816Application):
             raise NotSupportedError("Operation requires YubiKey 5.3.1 or later")
         issuer, name, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
-        self.send_apdu(
+        self.protocol.send_apdu(
             0, INS_RENAME, 0, 0, Tlv(TAG_NAME, credential_id) + Tlv(TAG_NAME, new_id)
         )
         return new_id
 
     def list_credentials(self):
         creds = []
-        for tlv in Tlv.parse_list(self.send_apdu(0, INS_LIST, 0, 0)):
+        for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
             data = Tlv.unwrap(TAG_NAME_LIST, tlv)
             oath_type = OATH_TYPE(MASK_TYPE & six.indexbytes(data, 0))
             cred_id = data[1:]
@@ -364,7 +368,7 @@ class OathApplication(Iso7816Application):
     def calculate(self, credential_id, challenge):
         resp = Tlv.unwrap(
             TAG_RESPONSE,
-            self.send_apdu(
+            self.protocol.send_apdu(
                 0,
                 INS_CALCULATE,
                 0,
@@ -375,7 +379,7 @@ class OathApplication(Iso7816Application):
         return resp[1:]
 
     def delete_credential(self, credential_id):
-        self.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
+        self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
 
     def calculate_all(self, timestamp=None):
         timestamp = int(timestamp or time())
@@ -383,7 +387,9 @@ class OathApplication(Iso7816Application):
 
         entries = {}
         data = Tlv.parse_list(
-            self.send_apdu(0, INS_CALCULATE_ALL, 0, 1, Tlv(TAG_CHALLENGE, challenge))
+            self.protocol.send_apdu(
+                0, INS_CALCULATE_ALL, 0, 1, Tlv(TAG_CHALLENGE, challenge)
+            )
         )
         while data:
             cred_id = Tlv.unwrap(TAG_NAME, data.pop(0))
@@ -420,7 +426,7 @@ class OathApplication(Iso7816Application):
 
         response = Tlv.unwrap(
             TAG_TRUNCATED,
-            self.send_apdu(
+            self.protocol.send_apdu(
                 0,
                 INS_CALCULATE,
                 0,

@@ -7,7 +7,7 @@ from .core import (
     NotSupportedError,
     BadResponseError,
 )
-from .core.iso7816 import Iso7816Application, ApduError, SW
+from .core.smartcard import SmartCardProtocol, ApduError, SW
 
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -338,12 +338,12 @@ def _parse_device_public_key(key_type, encoded):
             ).public_key(default_backend())
 
 
-class PivApplication(Iso7816Application):
+class PivSession(object):
     def __init__(self, connection):
-        super(PivApplication, self).__init__(AID.PIV, connection)
-        self.select()
-        self._version = tuple(self.send_apdu(0, INS_GET_VERSION, 0, 0))
-        self.enable_touch_workaround(self.version)
+        self.protocol = SmartCardProtocol(connection)
+        self.protocol.select(AID.PIV)
+        self._version = tuple(self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0))
+        self.protocol.enable_touch_workaround(self.version)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
@@ -369,12 +369,12 @@ class PivApplication(Iso7816Application):
                 counter = e.attempts_remaining
 
         # Reset
-        self.send_apdu(0, INS_RESET, 0, 0)
+        self.protocol.send_apdu(0, INS_RESET, 0, 0)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
     def authenticate(self, management_key):
-        response = self.send_apdu(
+        response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
             TDES,
@@ -390,7 +390,7 @@ class PivApplication(Iso7816Application):
         decryptor = cipher.decryptor()
         decrypted = decryptor.update(witness) + decryptor.finalize()
 
-        response = self.send_apdu(
+        response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
             TDES,
@@ -409,7 +409,7 @@ class PivApplication(Iso7816Application):
     def set_management_key(self, management_key):
         if len(management_key) != 24:
             raise ValueError("Management key must be 24 bytes")
-        self.send_apdu(
+        self.protocol.send_apdu(
             0,
             INS_SET_MGMKEY,
             0xFF,
@@ -419,7 +419,7 @@ class PivApplication(Iso7816Application):
 
     def verify_pin(self, pin):
         try:
-            self.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
+            self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
             self._current_pin_retries = self._max_pin_retries
         except ApduError as e:
             retries = _retries_from_sw(self.version, e.sw)
@@ -432,7 +432,7 @@ class PivApplication(Iso7816Application):
         if self.version >= (5, 3, 0):
             return self.get_pin_metadata().attempts_remaining
         try:
-            self.send_apdu(0, INS_VERIFY, 0, PIN_P2)
+            self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2)
             # Already verified, no way to know true count
             return self._current_pin_retries
         except ApduError as e:
@@ -452,7 +452,7 @@ class PivApplication(Iso7816Application):
         self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
 
     def set_pin_attempts(self, pin_attempts, puk_attempts):
-        self.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
+        self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
         self._max_pin_retries = pin_attempts
         self._current_pin_retries = pin_attempts
 
@@ -468,7 +468,7 @@ class PivApplication(Iso7816Application):
                 "Management key metadata requires version 5.3.0 or later."
             )
         data = Tlv.parse_dict(
-            self.send_apdu(0, INS_GET_METADATA, 0, SLOT.CARD_MANAGEMENT)
+            self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT.CARD_MANAGEMENT)
         )
         policy = data[TAG_METADATA_POLICY]
         return ManagementKeyMetadata(
@@ -484,7 +484,7 @@ class PivApplication(Iso7816Application):
                 "This method cannot be used for the card management key, use "
                 "get_management_key_metadata() instead"
             )
-        data = Tlv.parse_dict(self.send_apdu(0, INS_GET_METADATA, 0, slot))
+        data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, slot))
         policy = data[TAG_METADATA_POLICY]
         return SlotMetadata(
             KEY_TYPE(six.indexbytes(data[TAG_METADATA_ALGO], 0)),
@@ -525,13 +525,13 @@ class PivApplication(Iso7816Application):
             expected = TAG_OBJ_DATA
         return Tlv.unwrap(
             expected,
-            self.send_apdu(
+            self.protocol.send_apdu(
                 0, INS_GET_DATA, 0x3F, 0xFF, Tlv(TAG_OBJ_ID, int_to_bytes(object_id))
             ),
         )
 
     def put_object(self, object_id, data=None):
-        self.send_apdu(
+        self.protocol.send_apdu(
             0,
             INS_PUT_DATA,
             0x3F,
@@ -589,7 +589,7 @@ class PivApplication(Iso7816Application):
             data += Tlv(TAG_PIN_POLICY, six.int2byte(pin_policy))
         if touch_policy:
             data += Tlv(TAG_TOUCH_POLICY, six.int2byte(touch_policy))
-        self.send_apdu(0, INS_IMPORT_KEY, key_type, slot, data)
+        self.protocol.send_apdu(0, INS_IMPORT_KEY, key_type, slot, data)
         return key_type
 
     def generate_key(
@@ -610,18 +610,22 @@ class PivApplication(Iso7816Application):
             data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))
         if touch_policy:
             data += Tlv(TAG_TOUCH_POLICY, int_to_bytes(touch_policy))
-        response = self.send_apdu(0, INS_GENERATE_ASYMMETRIC, 0, slot, Tlv(0xAC, data))
+        response = self.protocol.send_apdu(
+            0, INS_GENERATE_ASYMMETRIC, 0, slot, Tlv(0xAC, data)
+        )
         return _parse_device_public_key(key_type, Tlv.unwrap(0x7F49, response))
 
     def attest_key(self, slot):
         if self.version < (4, 3, 0):
             raise NotSupportedError("Attestation requires YubiKey 4.3 or later")
-        response = self.send_apdu(0, INS_ATTEST, slot, 0)
+        response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
         return x509.load_der_x509_certificate(response, default_backend())
 
     def _change_reference(self, ins, p2, value1, value2):
         try:
-            self.send_apdu(0, ins, 0, p2, _pin_bytes(value1) + _pin_bytes(value2))
+            self.protocol.send_apdu(
+                0, ins, 0, p2, _pin_bytes(value1) + _pin_bytes(value2)
+            )
         except ApduError as e:
             retries = _retries_from_sw(self.version, e.sw)
             if retries is None:
@@ -633,7 +637,7 @@ class PivApplication(Iso7816Application):
     def _get_pin_puk_metadata(self, p2):
         if self.version < (5, 3, 0):
             raise NotSupportedError("PIN/PUK metadata requires version 5.3.0 or later.")
-        data = Tlv.parse_dict(self.send_apdu(0, INS_GET_METADATA, 0, p2))
+        data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, p2))
         attempts = data[TAG_METADATA_RETRIES]
         return PinMetadata(
             data[TAG_METADATA_IS_DEFAULT] != b"\0",
@@ -643,7 +647,7 @@ class PivApplication(Iso7816Application):
 
     def _use_private_key(self, slot, key_type, message, exponentiation):
         try:
-            response = self.send_apdu(
+            response = self.protocol.send_apdu(
                 0,
                 INS_AUTHENTICATE,
                 key_type,

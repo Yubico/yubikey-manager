@@ -1,10 +1,18 @@
 from __future__ import absolute_import
 
-from .core import AID, BitflagEnum, bytes2int, NotSupportedError, BadResponseError
-from .core.otp import check_crc, calculate_crc, OtpConnection, OtpApplication
-from .core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
+from .core import (
+    AID,
+    INTERFACE,
+    BitflagEnum,
+    bytes2int,
+    NotSupportedError,
+    BadResponseError,
+)
+from .core.otp import check_crc, calculate_crc, OtpConnection, OtpProtocol
+from .core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError
 
 import struct
+import re
 from enum import unique, IntEnum
 
 
@@ -240,18 +248,18 @@ class ConfigState(object):
         return self.flags & CFGSTATE.LED_INV != 0
 
 
-class _YkCfgOtpBackend(object):
-    def __init__(self, app):
-        self.app = app
+class _YubiOtpOtpBackend(object):
+    def __init__(self, protocol):
+        self.protocol = protocol
 
     def close(self):
-        self.app.close()
+        self.protocol.close()
 
     def write_update(self, slot, data):
-        return self.app.send_and_receive(slot, data)
+        return self.protocol.send_and_receive(slot, data)
 
     def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
-        response = self.app.send_and_receive(slot, data, event, on_keepalive)
+        response = self.protocol.send_and_receive(slot, data, event, on_keepalive)
         if check_crc(response[: expected_len + 2]):
             return response[:expected_len]
         raise BadResponseError("Invalid CRC")
@@ -260,53 +268,62 @@ class _YkCfgOtpBackend(object):
 INS_CONFIG = 0x01
 
 
-class _YkCfgIso7816Backend(object):
-    def __init__(self, app):
-        self.app = app
+class _YubiOtpSmartCardBackend(object):
+    def __init__(self, protocol):
+        self.protocol = protocol
 
     def close(self):
-        self.app.close()
+        self.protocol.close()
 
     def write_update(self, slot, data):
-        return self.app.send_apdu(0, INS_CONFIG, slot, 0, data)
+        return self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
 
     def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
-        response = self.app.send_apdu(0, INS_CONFIG, slot, 0, data)
+        response = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
         if expected_len == len(response):
             return response
         raise BadResponseError("Unexpected response length")
 
 
-class YkCfgApplication(object):
+MGMT_VERSION_PATTERN = re.compile(r"\b\d+.\d.\d\b")
+
+
+class YubiOtpSession(object):
     def __init__(self, connection):
         if isinstance(connection, OtpConnection):
-            app = OtpApplication(connection)
-            self._status = app.read_status()
+            protocol = OtpProtocol(connection)
+            self._status = protocol.read_status()
             self._version = tuple(self._status[:3])
-            self.backend = _YkCfgOtpBackend(app)
-        elif isinstance(connection, Iso7816Connection):
+            self.backend = _YubiOtpOtpBackend(protocol)
+        elif isinstance(connection, SmartCardConnection):
+            protocol = SmartCardProtocol(connection)
             mgmt_version = None
-            try:  # This version number is more reliable for NEO
-                from .mgmt import ManagementApplication
+            if connection.interface == INTERFACE.NFC:
+                # This version is more reliable over NFC
+                try:
+                    protocol.select(AID.MGMT)
+                    select_str = protocol.select(AID.MGMT).decode()
+                    mgmt_version = tuple(
+                        int(d)
+                        for d in MGMT_VERSION_PATTERN.search(select_str)
+                        .group()
+                        .split(".")
+                    )
+                    if mgmt_version < (4, 0, 0):
+                        # Workaround to "de-select" on NEO
+                        connection.send_and_receive(b"\xa4\x04\x00\x08")
+                except ApduError:
+                    pass  # Not available, get version from status
 
-                mgmt = ManagementApplication(connection)
-                mgmt_version = mgmt.version
-                if mgmt_version < (4, 0, 0):
-                    # Workaround to "de-select" on NEO
-                    connection.send_and_receive(b"\xa4\x04\x00\x08")
-            except ApduError:
-                pass  # Not available, get version from status
-
-            app = Iso7816Application(AID.OTP, connection)
-            self._status = app.select()
+            self._status = protocol.select(AID.OTP)
             otp_version = tuple(self._status[:3])
             if mgmt_version and mgmt_version[0] == 3:
                 # NEO reports the highest of these two
                 self._version = max(mgmt_version, otp_version)
             else:
                 self._version = mgmt_version or otp_version
-            app.enable_touch_workaround(self._version)
-            self.backend = _YkCfgIso7816Backend(app)
+            protocol.enable_touch_workaround(self._version)
+            self.backend = _YubiOtpSmartCardBackend(protocol)
         else:
             raise TypeError("Unsupported connection type")
 

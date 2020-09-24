@@ -29,9 +29,9 @@ from __future__ import absolute_import
 
 from yubikit.core import AID, INTERFACE, TRANSPORT, APPLICATION, FORM_FACTOR, YUBIKEY
 from yubikit.core.otp import OtpConnection
-from yubikit.core.iso7816 import Iso7816Connection, Iso7816Application, ApduError
-from yubikit.mgmt import ManagementApplication, DeviceInfo, DeviceConfig
-from yubikit.otp import YkCfgApplication
+from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError
+from yubikit.management import ManagementSession, DeviceInfo, DeviceConfig
+from yubikit.yubiotp import YubiOtpSession
 from fido2.ctap import CtapDevice
 from .hid import list_otp_devices, list_ctap_devices
 from .scard import list_devices as list_ccid_devices
@@ -109,7 +109,7 @@ def list_all_devices():
 
     # Handle CCID devices
     for dev in ccid_devs:
-        handle(dev, dev.open_iso7816_connection)
+        handle(dev, dev.open_smartcard_connection)
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     # Handle FIDO devices
@@ -128,7 +128,7 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
     if TRANSPORT.has(transports, TRANSPORT.CCID):
         for dev in list_ccid_devices():
             try:
-                conn = dev.open_iso7816_connection()
+                conn = dev.open_smartcard_connection()
                 info = read_info(dev.pid, conn)
                 if serial and info.serial != serial:
                     conn.close()
@@ -167,7 +167,7 @@ def probe_applications(conn):
     capa = TRANSPORT.CCID
     for aid, code in NEO_APPLETS.items():
         try:
-            Iso7816Application(aid, conn)
+            SmartCardProtocol(conn).select(aid)
             capa |= code
             logger.debug("Found applet: aid: %s , capability: %s", aid, code)
         except ApduError:
@@ -184,9 +184,9 @@ def read_info(pid, conn):
         transports = 0
 
     # Get for CCID
-    if isinstance(conn, Iso7816Connection):
+    if isinstance(conn, SmartCardConnection):
         try:
-            mgmt = ManagementApplication(conn)
+            mgmt = ManagementSession(conn)
             version = mgmt.version
             info = mgmt.read_device_info()
         except Exception:
@@ -194,10 +194,12 @@ def read_info(pid, conn):
                 try:
                     # Workaround to "de-select" the Management Applet
                     conn.send_and_receive(b"\xa4\x04\x00\x08")
-                    ykcfg = YkCfgApplication(conn)
+                    ykcfg = YubiOtpSession(conn)
                     serial = ykcfg.get_serial()
                 except Exception as e:
-                    logger.debug("Unable to read serial via OtpApplication", exc_info=e)
+                    logger.debug(
+                        "Unable to read serial via the OTP Application", exc_info=e
+                    )
                     serial = None
                 applications = probe_applications(conn)
                 if TRANSPORT.has(transports, TRANSPORT.FIDO) or version >= (3, 3, 0):
@@ -228,10 +230,10 @@ def read_info(pid, conn):
     # Get for OTP
     elif isinstance(conn, OtpConnection):
         try:
-            mgmt = ManagementApplication(conn)
+            mgmt = ManagementSession(conn)
             info = mgmt.read_device_info()
         except Exception:
-            ykcfg = YkCfgApplication(conn)
+            ykcfg = YubiOtpSession(conn)
             version = ykcfg.version
             try:
                 serial = ykcfg.get_serial()
@@ -272,7 +274,7 @@ def read_info(pid, conn):
     # Get for CTAP
     elif isinstance(conn, CtapDevice):
         try:
-            mgmt = ManagementApplication(conn)
+            mgmt = ManagementSession(conn)
             info = mgmt.read_device_info()
         except Exception:  # SKY 1 or NEO
             version = (3, 0, 0)  # Guess, no way to know

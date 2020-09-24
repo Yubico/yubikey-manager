@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
 from yubikit.core import TRANSPORT, INTERFACE, YUBIKEY, YubiKeyDevice
-from yubikit.core.iso7816 import Iso7816Connection
+from yubikit.core.smartcard import SmartCardConnection
 
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
@@ -45,18 +45,17 @@ class ScardDevice(YubiKeyDevice):
         self.reader = reader
         self.pid = _pid_from_name(reader.name)
 
-    def open_iso7816_connection(self):
-        """Open an ISO7816 connection"""
+    def open_smartcard_connection(self):
+        """Open a SmartCard connection"""
         try:
-            return ScardIso7816Connection(self.reader.createConnection())
+            return ScardSmartCardConnection(self.reader.createConnection())
         except CardConnectionException as e:
             if kill_scdaemon():
-                return ScardIso7816Connection(self.reader.createConnection())
+                return ScardSmartCardConnection(self.reader.createConnection())
             raise e
 
     @property
     def has_fido(self):
-        # TODO: Check using ATR?
         # FIDO is only available from this device if we're connected over NFC.
         return YK_READER_NAME not in self.reader.name.lower()
 
@@ -65,7 +64,7 @@ class ScardDevice(YubiKeyDevice):
         return CtapPcscConnection(self.reader.createConnection(), self.reader.name)
 
 
-class ScardIso7816Connection(Iso7816Connection):
+class ScardSmartCardConnection(SmartCardConnection):
     def __init__(self, connection):
         self.connection = connection
         connection.connect()

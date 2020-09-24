@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from yubikit.otp import YkCfgApplication
+from yubikit.yubiotp import YubiOtpSession
 from yubikit.core import INTERFACE, TRANSPORT, CommandError
 
 from .util import (
@@ -152,7 +152,7 @@ def otp(ctx, access_code):
       $ ykman otp static --generate 2 --length 38
     """
 
-    ctx.obj["controller"] = OtpController(YkCfgApplication(ctx.obj["conn"]))
+    ctx.obj["controller"] = OtpController(YubiOtpSession(ctx.obj["conn"]))
     if access_code is not None:
         if access_code == "":
             access_code = click.prompt(

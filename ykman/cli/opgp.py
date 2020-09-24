@@ -31,7 +31,6 @@ import logging
 import click
 from ..util import TRANSPORT, parse_certificates, parse_private_key
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
-from ..driver_ccid import APDUError, SW
 from .util import (
     click_force_option,
     click_format_option,
@@ -39,8 +38,7 @@ from .util import (
     EnumChoice,
 )
 
-from yubikit.core.iso7816 import Iso7816Application
-from yubikit.core import AID
+from yubikit.core.smartcard import SmartCardProtocol, ApduError, SW
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +92,8 @@ def openpgp(ctx):
       $ ykman openpgp set-touch aut on
     """
     try:
-        ctx.obj["controller"] = OpgpController(
-            Iso7816Application(AID.OPGP, ctx.obj["conn"])
-        )
-    except APDUError as e:
+        ctx.obj["controller"] = OpgpController(SmartCardProtocol(ctx.obj["conn"]))
+    except ApduError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this " "YubiKey.")
         logger.debug("Failed to load OpenPGP Application", exc_info=e)
@@ -219,7 +215,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
         try:
             controller.verify_admin(admin_pin)
             controller.set_touch(key, policy)
-        except APDUError as e:
+        except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 ctx.fail("Touch policy not allowed.")
             logger.debug("Failed to set touch policy", exc_info=e)

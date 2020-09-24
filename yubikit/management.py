@@ -14,8 +14,8 @@ from .core import (
     NotSupportedError,
     BadResponseError,
 )
-from .core.otp import check_crc, OtpConnection, OtpApplication
-from .core.iso7816 import Iso7816Connection, Iso7816Application
+from .core.otp import check_crc, OtpConnection, OtpProtocol
+from .core.smartcard import SmartCardConnection, SmartCardProtocol
 
 from fido2.ctap import CtapDevice
 
@@ -48,7 +48,7 @@ class DEVICE_FLAG(BitflagEnum):
     EJECT = 0x80
 
 
-class _ManagementOtpBackend(OtpApplication):
+class _ManagementOtpBackend(OtpProtocol):
     def __init__(self, otp_connection):
         super(_ManagementOtpBackend, self).__init__(otp_connection)
         self.version = tuple(self.read_status()[:3])
@@ -67,20 +67,22 @@ class _ManagementOtpBackend(OtpApplication):
         self.send_and_receive(SLOT_YK4_SET_DEVICE_INFO, config)
 
 
-class _ManagementIso7816Backend(Iso7816Application):
-    def __init__(self, iso7816_connection):
-        super(_ManagementIso7816Backend, self).__init__(AID.MGMT, iso7816_connection)
+class _ManagementSmartCardBackend(SmartCardProtocol):
+    def __init__(self, smartcard_connection):
+        super(_ManagementSmartCardBackend, self).__init__(smartcard_connection)
+        select_str = self.select(AID.MGMT).decode()
         self.version = tuple(
-            int(d)
-            for d in VERSION_PATTERN.search(self.select().decode()).group().split(".")
+            int(d) for d in VERSION_PATTERN.search(select_str).group().split(".")
         )
 
     def set_mode(self, data):
         if self.version[0] == 3:
-            from .otp import YkCfgApplication
-
-            ykcfg = YkCfgApplication(self.connection)
-            ykcfg.backend.write_update(SLOT_DEVICE_CONFIG, data)
+            # Use the OTP Application to set mode
+            self.select(AID.OTP)
+            self.send_apdu(0, 0x01, SLOT_DEVICE_CONFIG, 0, data)
+            # Workaround to "de-select" on NEO
+            self.connection.send_and_receive(b"\xa4\x04\x00\x08")
+            self.select(AID.MGMT)
         else:
             self.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
 
@@ -257,18 +259,18 @@ class Mode(object):
     __hash__ = None
 
 
-class ManagementApplication(object):
+class ManagementSession(object):
     def __init__(self, connection):
         if isinstance(connection, OtpConnection):
             self.backend = _ManagementOtpBackend(connection)
-        elif isinstance(connection, Iso7816Connection):
-            self.backend = _ManagementIso7816Backend(connection)
+        elif isinstance(connection, SmartCardConnection):
+            self.backend = _ManagementSmartCardBackend(connection)
         elif isinstance(connection, CtapDevice):
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")
         if self.version < (3, 0, 0):
-            raise NotSupportedError("ManagementApplication requires YubiKey 3 or later")
+            raise NotSupportedError("ManagementSession requires YubiKey 3 or later")
 
     def close(self):
         self.backend.close()

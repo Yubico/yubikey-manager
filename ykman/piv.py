@@ -29,7 +29,7 @@
 from __future__ import absolute_import
 
 from yubikit.core import Tlv, BadResponseError
-from yubikit.core.iso7816 import ApduError, SW
+from yubikit.core.smartcard import ApduError, SW
 from yubikit.piv import (
     SLOT,
     OBJECT_ID,

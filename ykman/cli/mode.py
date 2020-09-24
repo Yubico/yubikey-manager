@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from yubikit.core import TRANSPORT, INTERFACE, APPLICATION, YUBIKEY
-from yubikit.mgmt import ManagementApplication, Mode
+from yubikit.management import ManagementSession, Mode
 
 from .util import click_force_option
 from ..driver import ModeSwitchError
@@ -147,7 +147,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
       $ ykman mode CCID --touch-eject
     """
     info = ctx.obj["info"]
-    mgmt = ManagementApplication(ctx.obj["conn"])
+    mgmt = ManagementSession(ctx.obj["conn"])
     usb_enabled = info.config.enabled_applications[INTERFACE.USB]
     my_mode = _mode_from_usb_enabled(usb_enabled)
     usb_supported = info.supported_applications[INTERFACE.USB]

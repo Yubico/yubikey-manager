@@ -28,9 +28,9 @@
 from __future__ import absolute_import
 
 from yubikit.core import INTERFACE
-from yubikit.core.iso7816 import ApduError
-from yubikit.otp import YkCfgApplication
-from yubikit.oath import OathApplication
+from yubikit.core.smartcard import ApduError
+from yubikit.yubiotp import YubiOtpSession
+from yubikit.oath import OathSession
 
 from ..hid import list_otp_devices, list_ctap_devices
 from ..scard import list_devices as list_ccid
@@ -111,7 +111,7 @@ def get_overall_fips_status(pid, info):
         for dev in list_otp_devices():
             if dev.pid == pid:
                 with dev.open_otp_connection() as conn:
-                    app = YkCfgApplication(conn)
+                    app = YubiOtpSession(conn)
                     if app.get_serial() == info.serial:
                         statuses["OTP"] = OtpController(app).is_in_fips_mode
                         break
@@ -119,10 +119,10 @@ def get_overall_fips_status(pid, info):
     statuses["OATH"] = False
     if usb_enabled & APPLICATION.OATH:
         for dev in list_ccid():
-            with dev.open_iso7816_connection() as conn:
+            with dev.open_smartcard_connection() as conn:
                 info2 = read_info(pid, conn)
                 if info2.serial == info.serial:
-                    app = OathApplication(conn)
+                    app = OathSession(conn)
                     statuses["OATH"] = oath_in_fips_mode(app)
                     break
 

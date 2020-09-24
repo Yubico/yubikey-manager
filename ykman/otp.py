@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from yubikit.otp import TKTFLAG, CFGFLAG, EXTFLAG
+from yubikit.yubiotp import TKTFLAG, CFGFLAG, EXTFLAG
 
 import json
 import logging

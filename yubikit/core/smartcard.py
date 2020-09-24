@@ -8,7 +8,7 @@ from enum import IntEnum, unique
 from . import INTERFACE, CommandError, ApplicationNotAvailableError
 
 
-class Iso7816Connection(abc.ABC):
+class SmartCardConnection(abc.ABC):
     def close(self):
         """Close the device, releasing any held resources."""
 
@@ -78,10 +78,9 @@ def _encode_apdu(cla, ins, p1, p2, data=b""):
     return buf + data
 
 
-class Iso7816Application(object):
-    def __init__(self, aid, iso7816_connection, ins_send_remaining=INS_SEND_REMAINING):
-        self.aid = aid
-        self.connection = iso7816_connection
+class SmartCardProtocol(object):
+    def __init__(self, smartcard_connection, ins_send_remaining=INS_SEND_REMAINING):
+        self.connection = smartcard_connection
         self._ins_send_remaining = ins_send_remaining
         self._touch_workaround = False
         self._last_long_resp = 0
@@ -94,9 +93,9 @@ class Iso7816Application(object):
             (4, 2, 0,) <= version <= (4, 2, 6)
         )
 
-    def select(self):
+    def select(self, aid):
         try:
-            return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, self.aid)
+            return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
         except ApduError as e:
             if e.sw == SW.FILE_NOT_FOUND:
                 raise ApplicationNotAvailableError()

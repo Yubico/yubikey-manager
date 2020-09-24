@@ -28,7 +28,7 @@
 from __future__ import absolute_import
 
 from yubikit.piv import (
-    PivApplication,
+    PivSession,
     InvalidPinError,
     KEY_TYPE,
     OBJECT_ID,
@@ -37,7 +37,7 @@ from yubikit.piv import (
     TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY,
 )
-from yubikit.core.iso7816 import ApduError, SW
+from yubikit.core.smartcard import ApduError, SW
 from ..device import is_fips_version
 
 from ..util import (
@@ -134,7 +134,7 @@ def piv(ctx):
       $ ykman piv reset
     """
     try:
-        app = PivApplication(ctx.obj["conn"])
+        app = PivSession(ctx.obj["conn"])
         ctx.obj["controller"] = PivController(app)
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
