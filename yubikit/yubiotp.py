@@ -344,7 +344,7 @@ class YubiOtpSession(object):
             slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
         )
 
-    def write_configuration(
+    def put_configuration(
         self, slot, fixed, uid, key, ext, tkt, cfg, acc_code=None, cur_acc_code=None
     ):
         self._write_config(
@@ -372,7 +372,7 @@ class YubiOtpSession(object):
             cur_acc_code,
         )
 
-    def configure_ndef(self, slot, uri, cur_acc_code=None):
+    def set_ndef_configuration(self, slot, uri, cur_acc_code=None):
         self._write_config(
             (CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2)[slot - 1],
             _build_ndef_config(uri),
@@ -395,7 +395,7 @@ class YubiOtpSession(object):
             on_keepalive,
         )
 
-    def set_hmac_sha1_key(self, slot, secret, require_touch=False):
+    def put_hmac_sha1_key(self, slot, secret, require_touch=False):
         if self.version < (2, 2, 0):
             raise NotSupportedError("This operation requires YubiKey 2.2 or later")
         if not secret or len(secret) > HMAC_KEY_SIZE:
@@ -406,7 +406,7 @@ class YubiOtpSession(object):
         if require_touch:
             cfg_flags |= CFGFLAG.CHAL_BTN_TRIG
 
-        self.write_configuration(
+        self.put_configuration(
             slot,
             b"",
             secret[KEY_SIZE:],

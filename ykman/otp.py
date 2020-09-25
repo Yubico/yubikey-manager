@@ -229,7 +229,7 @@ class OtpController(object):
 
         ext, tkt, cfg = (config or SlotConfig()).get_flags()
 
-        self._app.write_configuration(
+        self._app.put_configuration(
             slot, fixed, uid, key, ext, tkt, cfg, self.access_code, self.access_code,
         )
 
@@ -253,7 +253,7 @@ class OtpController(object):
 
         pw_bytes = pw_bytes.ljust(38, b"\0")
         ext, tkt, cfg = (config or SlotConfig()).get_flags()
-        self._app.write_configuration(
+        self._app.put_configuration(
             slot,
             pw_bytes[:16],
             pw_bytes[16:22],
@@ -276,7 +276,7 @@ class OtpController(object):
         ext, tkt, cfg = (config or SlotConfig()).get_flags()
         if touch:
             cfg |= CFGFLAG.CHAL_BTN_TRIG
-        self._app.write_configuration(
+        self._app.put_configuration(
             slot,
             b"",
             key[16:],
@@ -319,7 +319,7 @@ class OtpController(object):
         if hotp8:
             cfg |= CFGFLAG.OATH_HOTP8
 
-        self._app.write_configuration(
+        self._app.put_configuration(
             slot,
             b"",
             key[16:] + struct.pack(">H", imf // 16),  # IMF stored as bytes 4-6 of uid
@@ -340,7 +340,7 @@ class OtpController(object):
         self._app.swap_slots()
 
     def configure_ndef_slot(self, slot, prefix="https://my.yubico.com/yk/#"):
-        self._app.configure_ndef(slot, prefix, self.access_code)
+        self._app.set_ndef_configuration(slot, prefix, self.access_code)
 
     @property
     def _has_update_access_code_bug(self):

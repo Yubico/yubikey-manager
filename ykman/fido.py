@@ -84,7 +84,9 @@ class Fido2Controller(object):
 
     def get_resident_credentials(self, pin):
         _credman = CredentialManagement(
-            self.ctap, self.pin.VERSION, self.pin.get_pin_token(pin)
+            self.ctap,
+            self.pin.protocol,
+            self.pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT),
         )
 
         for rp in _credman.enumerate_rps():
@@ -95,7 +97,9 @@ class Fido2Controller(object):
 
     def delete_resident_credential(self, credential_id, pin):
         _credman = CredentialManagement(
-            self.ctap, self.pin.VERSION, self.pin.get_pin_token(pin)
+            self.ctap,
+            self.pin.protocol,
+            self.pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT),
         )
 
         for cred in self.get_resident_credentials(pin):
