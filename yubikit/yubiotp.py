@@ -309,11 +309,8 @@ class YubiOtpSession(object):
                         .group()
                         .split(".")
                     )
-                    if mgmt_version < (4, 0, 0):
-                        # Workaround to "de-select" on NEO
-                        connection.send_and_receive(b"\xa4\x04\x00\x08")
                 except ApduError:
-                    pass  # Not available, get version from status
+                    pass  # Not available (probably NEO), get version from status
 
             self._status = protocol.select(AID.OTP)
             otp_version = tuple(self._status[:3])

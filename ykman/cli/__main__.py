@@ -207,7 +207,7 @@ def cli(ctx, device, log_level, log_file, reader):
             ctx.fail("--reader and list command can't be combined.")
         return
 
-    transports = getattr(subcmd, "transports", TRANSPORT.usb_transports())
+    transports = getattr(subcmd, "transports", sum(TRANSPORT))
     if transports:
 
         def resolve():

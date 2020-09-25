@@ -54,10 +54,6 @@ class TRANSPORT(BitflagEnum):
     FIDO = 0x02
     CCID = 0x04
 
-    @staticmethod
-    def usb_transports():
-        return TRANSPORT.OTP | TRANSPORT.CCID | TRANSPORT.FIDO
-
 
 @unique
 class AID(bytes, Enum):

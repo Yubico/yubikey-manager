@@ -9,6 +9,14 @@ USAGE_FIDO = (0xF1D0, 1)
 USAGE_OTP = (1, 6)
 
 
+class CtapHidConnection(CtapHidDevice):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        self.close()
+
+
 class CtapYubiKeyDevice(YubiKeyDevice):
     """YubiKey FIDO USB HID device"""
 
@@ -18,7 +26,7 @@ class CtapYubiKeyDevice(YubiKeyDevice):
         self.pid = PID(descriptor.pid)
 
     def open_ctap_connection(self):
-        return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
+        return CtapHidConnection(self.descriptor, open_connection(self.descriptor))
 
 
 class OtpYubiKeyDevice(YubiKeyDevice):

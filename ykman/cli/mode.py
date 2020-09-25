@@ -31,7 +31,6 @@ from yubikit.core import TRANSPORT, INTERFACE, APPLICATION, YUBIKEY
 from yubikit.management import ManagementSession, Mode
 
 from .util import click_force_option
-from ..driver import ModeSwitchError
 import logging
 import re
 import click
@@ -191,7 +190,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
                 "Mode set! You must remove and re-insert your YubiKey "
                 "for this change to take effect."
             )
-        except ModeSwitchError as e:
+        except Exception as e:
             logger.debug("Failed to switch mode", exc_info=e)
             click.echo(
                 "Failed to switch mode on the YubiKey. Make sure your "

@@ -29,9 +29,9 @@ from __future__ import absolute_import
 
 from fido2.ctap import CtapError
 from fido2.ctap1 import ApduError
+from yubikit.core.smartcard import SW
 from time import sleep
 from .util import click_postpone_execution, prompt_for_touch, click_force_option
-from ..driver_ccid import SW
 from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..hid import list_ctap_devices
@@ -333,7 +333,7 @@ def reset(ctx, force):
     def try_reset(controller_type):
         if not force:
             dev = prompt_re_insert_key()
-            controller = controller_type(dev.driver)
+            controller = controller_type(dev.open_ctap_connection())
             controller.reset(touch_callback=prompt_for_touch)
         else:
             controller = ctx.obj["controller"]
