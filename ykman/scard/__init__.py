@@ -10,6 +10,7 @@ from smartcard.pcsc.PCSCContext import PCSCContext
 from fido2.pcsc import CtapPcscDevice
 
 from time import sleep
+from binascii import b2a_hex as _b2a_hex
 import subprocess  # nosec
 
 import logging
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 YK_READER_NAME = "yubico yubikey"
+
+
+def b2a_hex(data):
+    return _b2a_hex(data).decode("ascii")
 
 
 # Figure out what the PID should be based on the reader name
@@ -80,9 +85,9 @@ class ScardSmartCardConnection(SmartCardConnection):
 
     def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
-        logger.debug("SEND: %s", apdu.hex())
+        logger.debug("SEND: %s", b2a_hex(apdu))
         data, sw1, sw2 = self.connection.transmit(list(apdu))
-        logger.debug("RECV: %s SW=%02x%02x", data, sw1, sw2)
+        logger.debug("RECV: %s SW=%02x%02x", b2a_hex(bytearray(data)), sw1, sw2)
         return bytes(bytearray(data)), sw1 << 8 | sw2
 
 
