@@ -10,10 +10,19 @@ from .core import (
 )
 from .core.otp import check_crc, calculate_crc, OtpConnection, OtpProtocol
 from .core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError
+from cryptography.hazmat.primitives.hashes import Hash, SHA1
+from cryptography.hazmat.backends import default_backend
 
 import struct
 import re
 from enum import unique, IntEnum
+
+
+# TODO: Use it or remove it
+@unique
+class SLOT(IntEnum):
+    ONE = 1
+    TWO = 2
 
 
 @unique
@@ -138,6 +147,10 @@ NDEF_DATA_SIZE = 54
 HMAC_KEY_SIZE = 20
 HMAC_CHALLENGE_SIZE = 64
 HMAC_RESPONSE_SIZE = 20
+SCAN_CODES_SIZE = FIXED_SIZE + UID_SIZE + KEY_SIZE
+
+
+DEFAULT_NDEF_URI = "https://my.yubico.com/yk/#"
 
 NDEF_URL_PREFIXES = (
     "http://www.",
@@ -203,6 +216,7 @@ def _build_update(ext, tkt, cfg, acc_code=None):
 
 
 def _build_ndef_config(uri):
+    uri = uri or DEFAULT_NDEF_URI
     for i, prefix in enumerate(NDEF_URL_PREFIXES):
         if uri.startswith(prefix):
             id_code = i + 1
@@ -227,6 +241,285 @@ class CFGSTATE(BitflagEnum):
     SLOT1_TOUCH = 0x04  # configuration 1 requires touch (from firmware 3.0)
     SLOT2_TOUCH = 0x08  # configuration 2 requires touch (from firmware 3.0)
     LED_INV = 0x10  # LED behavior is inverted (EXTFLAG_LED_INV mirror)
+
+
+def _shorten_hmac_key(key):
+    h = SHA1()  # nosec
+    if len(key) > h.block_size:
+        h = Hash(h, default_backend())
+        h.update(key)
+        key = h.finalize()
+    elif len(key) > HMAC_KEY_SIZE:
+        raise NotSupportedError(
+            "Key lengths > {} bytes not supported".format(HMAC_KEY_SIZE)
+        )
+    return key
+
+
+class SlotConfiguration(object):
+    def __init__(self):
+        self._fixed = b""
+        self._uid = b"\0" * UID_SIZE
+        self._key = b"\0" * KEY_SIZE
+        self._flags = {}
+
+        self._update_flags(EXTFLAG.SERIAL_API_VISIBLE, True)
+        self._update_flags(EXTFLAG.ALLOW_UPDATE, True)
+
+    def _update_flags(self, flag, value):
+        flag_key = type(flag)
+        flags = self._flags.get(flag_key, 0)
+        self._flags[flag_key] = flags | flag if value else flags & ~flag
+
+    def is_supported_by(self, version):
+        return True
+
+    def get_config(self, acc_code=None):
+        return _build_config(
+            self._fixed,
+            self._uid,
+            self._key,
+            self._flags.get(EXTFLAG, 0),
+            self._flags.get(TKTFLAG, 0),
+            self._flags.get(CFGFLAG, 0),
+            acc_code,
+        )
+
+    def serial_api_visible(self, value):
+        self._update_flags(EXTFLAG.SERIAL_API_VISIBLE, value)
+        return self
+
+    def serial_usb_visible(self, value):
+        self._update_flags(EXTFLAG.SERIAL_USB_VISIBLE, value)
+        return self
+
+    def allow_update(self, value):
+        self._update_flags(EXTFLAG.ALLOW_UPDATE, value)
+        return self
+
+    def dormant(self, value):
+        self._update_flags(EXTFLAG.DORMANT, value)
+        return self
+
+    def invert_led(self, value):
+        self._update_flags(EXTFLAG.LED_INV, value)
+        return self
+
+    def protect_slot2(self, value):
+        self._update_flags(TKTFLAG.PROTECT_CFG2, value)
+        return self
+
+
+class HmacSha1SlotConfiguration(SlotConfiguration):
+    def __init__(self, key):
+        super(HmacSha1SlotConfiguration, self).__init__()
+
+        key = _shorten_hmac_key(key)
+
+        # Key is packed into key and uid
+        self._key = key[:KEY_SIZE].ljust(KEY_SIZE, b"\0")
+        self._uid = key[KEY_SIZE:].ljust(UID_SIZE, b"\0")
+
+        self._update_flags(TKTFLAG.CHAL_RESP, True)
+        self._update_flags(CFGFLAG.CHAL_HMAC, True)
+        self._update_flags(CFGFLAG.HMAC_LT64, True)
+
+    def is_supported_by(self, version):
+        return version >= (2, 2, 0)
+
+    def require_touch(self, value):
+        self._update_flags(CFGFLAG.CHAL_BTN_TRIG, value)
+        return self
+
+    def lt64(self, value):
+        self._update_flags(CFGFLAG.HMAC_LT64, value)
+        return self
+
+
+class KeyboardSlotConfiguration(SlotConfiguration):
+    def __init__(self):
+        super(KeyboardSlotConfiguration, self).__init__()
+        self._update_flags(TKTFLAG.APPEND_CR, True)
+        self._update_flags(EXTFLAG.FAST_TRIG, True)
+
+    def append_cr(self, value):
+        self._update_flags(TKTFLAG.APPEND_CR, value)
+        return self
+
+    def fast_trigger(self, value):
+        self._update_flags(EXTFLAG.FAST_TRIG, value)
+        return self
+
+    def pacing(self, pacing_10ms=False, pacing_20ms=False):
+        self._update_flags(CFGFLAG.PACING_10MS, pacing_10ms)
+        self._update_flags(CFGFLAG.PACING_20MS, pacing_20ms)
+        return self
+
+    def use_numeric(self, value):
+        self._update_flags(EXTFLAG.USE_NUMERIC_KEYPAD, value)
+        return self
+
+
+class HotpSlotConfiguration(KeyboardSlotConfiguration):
+    def __init__(self, key):
+        super(HotpSlotConfiguration, self).__init__()
+
+        key = _shorten_hmac_key(key)
+
+        # Key is packed into key and uid
+        self._key = key[:KEY_SIZE].ljust(KEY_SIZE, b"\0")
+        self._uid = key[KEY_SIZE:].ljust(UID_SIZE, b"\0")
+
+        self._update_flags(TKTFLAG.OATH_HOTP, True)
+        self._update_flags(CFGFLAG.OATH_FIXED_MODHEX2, True)
+
+    def is_supported_by(self, version):
+        return version >= (2, 2, 0)
+
+    def digits8(self, value):
+        self._update_flags(CFGFLAG.OATH_HOTP8, value)
+        return self
+
+    def token_id(self, token_id, fixed_modhex1=False, fixed_modhex2=True):
+        if len(token_id) > FIXED_SIZE:
+            raise ValueError("token_id must be <= {} bytes".format(FIXED_SIZE))
+
+        self._fixed = token_id
+        self._update_flags(CFGFLAG.OATH_FIXED_MODHEX1, fixed_modhex1)
+        self._update_flags(CFGFLAG.OATH_FIXED_MODHEX2, fixed_modhex2)
+        return self
+
+    def imf(self, imf):
+        if not (imf % 16 == 0 or 0 <= imf <= 0xFFFF0):
+            raise ValueError(
+                "imf should be between {} and {}, evenly dividable by 16".format(
+                    0, 0xFFFF0
+                )
+            )
+        self._uid = self._uid[:4] + struct.pack(">H", imf >> 4)
+        return self
+
+
+class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
+    def __init__(self, scan_codes):
+        super(StaticPasswordSlotConfiguration, self).__init__()
+
+        if len(scan_codes) > SCAN_CODES_SIZE:
+            raise NotSupportedError("Password is too long")
+
+        # Scan codes are packed into fixed, key and uid
+        scan_codes = scan_codes.ljust(SCAN_CODES_SIZE, b"\0")
+        self._fixed = scan_codes[:FIXED_SIZE]
+        self._key = scan_codes[FIXED_SIZE : FIXED_SIZE + KEY_SIZE]
+        self._uid = scan_codes[FIXED_SIZE + KEY_SIZE :]
+
+        self._update_flags(CFGFLAG.SHORT_TICKET, True)
+
+    def is_supported_by(self, version):
+        return version >= (2, 2, 0)
+
+
+class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
+    def __init__(self, fixed, uid, key):
+        super(YubiOtpSlotConfiguration, self).__init__()
+
+        if len(fixed) > FIXED_SIZE:
+            raise ValueError("fixed must be <= {} bytes".format(FIXED_SIZE))
+
+        if len(uid) != UID_SIZE:
+            raise ValueError("uid must be {} bytes".format(UID_SIZE))
+
+        if len(key) != KEY_SIZE:
+            raise ValueError("key must be {} bytes".format(KEY_SIZE))
+
+        self._fixed = fixed
+        self._uid = uid
+        self._key = key
+
+    def tabs(self, before=False, after_first=False, after_second=False):
+        self._update_flags(TKTFLAG.TAB_FIRST, before)
+        self._update_flags(TKTFLAG.APPEND_TAB1, after_first)
+        self._update_flags(TKTFLAG.APPEND_TAB2, after_second)
+        return self
+
+    def delay(self, after_first=False, after_second=False):
+        self._update_flags(TKTFLAG.APPEND_DELAY1, after_first)
+        self._update_flags(TKTFLAG.APPEND_DELAY2, after_second)
+        return self
+
+    def send_reference(self, value):
+        self._update_flags(CFGFLAG.SEND_REF, value)
+        return self
+
+
+class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
+    def __init__(self, fixed, uid, key):
+        super(StaticTicketSlotConfiguration, self).__init__()
+
+        if len(fixed) > FIXED_SIZE:
+            raise ValueError("fixed must be <= {} bytes".format(FIXED_SIZE))
+
+        if len(uid) != UID_SIZE:
+            raise ValueError("uid must be {} bytes".format(UID_SIZE))
+
+        if len(key) != KEY_SIZE:
+            raise ValueError("key must be {} bytes".format(KEY_SIZE))
+
+        self._fixed = fixed
+        self._uid = uid
+        self._key = key
+
+        self._update_flags(CFGFLAG.STATIC_TICKET, True)
+
+    def short_ticket(self, value):
+        self._update_flags(CFGFLAG.SHORT_TICKET, value)
+        return self
+
+    def strong_password(self, upper_case=False, digit=False, special=False):
+        self._update_flags(CFGFLAG.STRONG_PW1, upper_case)
+        self._update_flags(CFGFLAG.STRONG_PW2, digit or special)
+        self._update_flags(CFGFLAG.SEND_REF, special)
+        return self
+
+    def manual_update(self, value):
+        self._update_flags(CFGFLAG.MAN_UPDATE, value)
+        return self
+
+
+class UpdateConfiguration(KeyboardSlotConfiguration):
+    def __init__(self):
+        super(UpdateConfiguration, self).__init__()
+
+        self._fixed = b"\0" * FIXED_SIZE
+        self._uid = b"\0" * UID_SIZE
+        self._key = b"\0" * KEY_SIZE
+
+    def is_supported_by(self, version):
+        return version >= (2, 2, 0)
+
+    def _update_flags(self, flag, value):
+        # NB: All EXT flags are allowed
+        if isinstance(flag, TKTFLAG):
+            if not TKTFLAG_UPDATE_MASK & flag:
+                raise ValueError("Unsupported TKT flag for update")
+        elif isinstance(flag, CFGFLAG):
+            if not CFGFLAG_UPDATE_MASK & flag:
+                raise ValueError("Unsupported CFG flag for update")
+        super(UpdateConfiguration, self)._update_flags(flag, value)
+
+    def protect_slot2(self, value):
+        raise ValueError("protect_slot2 cannot be applied to UpdateConfiguration")
+
+    def tabs(self, before=False, after_first=False, after_second=False):
+        self._update_flags(TKTFLAG.TAB_FIRST, before)
+        self._update_flags(TKTFLAG.APPEND_TAB1, after_first)
+        self._update_flags(TKTFLAG.APPEND_TAB2, after_second)
+        return self
+
+    def delay(self, after_first=False, after_second=False):
+        self._update_flags(TKTFLAG.APPEND_DELAY1, after_first)
+        self._update_flags(TKTFLAG.APPEND_DELAY2, after_second)
+        return self
 
 
 class ConfigState(object):
@@ -344,21 +637,32 @@ class YubiOtpSession(object):
             slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
         )
 
-    def put_configuration(
-        self, slot, fixed, uid, key, ext, tkt, cfg, acc_code=None, cur_acc_code=None
-    ):
+    def put_configuration(self, slot, configuration, acc_code=None, cur_acc_code=None):
+        if not configuration.is_supported_by(self.version):
+            raise NotSupportedError(
+                "This configuration is not supported on this YubiKey version"
+            )
         self._write_config(
             (CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2)[slot - 1],
-            _build_config(fixed, uid, key, ext, tkt, cfg, acc_code),
+            configuration.get_config(acc_code),
             cur_acc_code,
         )
 
     def update_configuration(
-        self, slot, ext, tkt, cfg, acc_code=None, cur_acc_code=None
+        self, slot, configuration, acc_code=None, cur_acc_code=None
     ):
+        if not configuration.is_supported_by(self.version):
+            raise NotSupportedError(
+                "This configuration is not supported on this YubiKey version"
+            )
+        if acc_code != cur_acc_code and (4, 3, 2) <= self.version < (4, 3, 6):
+            raise NotSupportedError(
+                "The access code cannot be updated on this YubiKey. "
+                "Instead, delete the slot and configure it anew."
+            )
         self._write_config(
             (CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2)[slot - 1],
-            _build_update(ext, tkt, cfg, acc_code),
+            configuration.get_config(acc_code),
             cur_acc_code,
         )
 
@@ -372,7 +676,7 @@ class YubiOtpSession(object):
             cur_acc_code,
         )
 
-    def set_ndef_configuration(self, slot, uri, cur_acc_code=None):
+    def set_ndef_configuration(self, slot, uri=None, cur_acc_code=None):
         self._write_config(
             (CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2)[slot - 1],
             _build_ndef_config(uri),
@@ -393,25 +697,4 @@ class YubiOtpSession(object):
             HMAC_RESPONSE_SIZE,
             event,
             on_keepalive,
-        )
-
-    def put_hmac_sha1_key(self, slot, secret, require_touch=False):
-        if self.version < (2, 2, 0):
-            raise NotSupportedError("This operation requires YubiKey 2.2 or later")
-        if not secret or len(secret) > HMAC_KEY_SIZE:
-            raise ValueError("Secret must be <= 20 bytes")
-        secret = secret.ljust(KEY_SIZE + UID_SIZE, b"\0")
-
-        cfg_flags = CFGFLAG.CHAL_HMAC | CFGFLAG.HMAC_LT64
-        if require_touch:
-            cfg_flags |= CFGFLAG.CHAL_BTN_TRIG
-
-        self.put_configuration(
-            slot,
-            b"",
-            secret[KEY_SIZE:],
-            secret[:KEY_SIZE],
-            EXTFLAG.SERIAL_API_VISIBLE | EXTFLAG.ALLOW_UPDATE,
-            TKTFLAG.CHAL_RESP,
-            cfg_flags,
         )

@@ -35,7 +35,7 @@ from yubikit.oath import OathSession
 from ..hid import list_otp_devices, list_ctap_devices
 from ..scard import list_devices as list_ccid
 
-from ..otp import OtpController
+from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import FIPS_U2F_CMD
 from ..device import is_fips_version, get_name, read_info
@@ -113,7 +113,7 @@ def get_overall_fips_status(pid, info):
                 with dev.open_otp_connection() as conn:
                     app = YubiOtpSession(conn)
                     if app.get_serial() == info.serial:
-                        statuses["OTP"] = OtpController(app).is_in_fips_mode
+                        statuses["OTP"] = otp_in_fips_mode(app)
                         break
 
     statuses["OATH"] = False

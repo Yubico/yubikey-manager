@@ -27,8 +27,16 @@
 
 from __future__ import absolute_import
 
-from yubikit.yubiotp import YubiOtpSession
+from yubikit.yubiotp import (
+    YubiOtpSession,
+    YubiOtpSlotConfiguration,
+    HmacSha1SlotConfiguration,
+    StaticPasswordSlotConfiguration,
+    HotpSlotConfiguration,
+    UpdateConfiguration,
+)
 from yubikit.core import INTERFACE, TRANSPORT, CommandError
+from ..scancodes import encode, KEYBOARD_LAYOUT
 
 from .util import (
     click_force_option,
@@ -44,13 +52,16 @@ from ..util import (
     modhex_encode,
     parse_key,
     parse_b32_key,
+    parse_totp_hash,
+    time_challenge,
+    format_code,
 )
 from binascii import a2b_hex, b2a_hex
 from .. import __version__
-from ..otp import OtpController, PrepareUploadFailed, SlotConfig, prepare_upload_key
 from ..device import is_fips_version
-from ..scancodes import KEYBOARD_LAYOUT
+from ..otp import PrepareUploadFailed, prepare_upload_key, is_in_fips_mode
 from threading import Event
+from time import time
 import logging
 import os
 import struct
@@ -96,17 +107,10 @@ def _failed_to_write_msg(ctx, exc_info):
     )
 
 
-def _confirm_slot_overwrite(controller, slot):
-    slot1, slot2 = controller.slot_status
-    if slot == 1 and slot1:
+def _confirm_slot_overwrite(slot_state, slot):
+    if slot_state.is_configured(slot):
         click.confirm(
-            "Slot 1 is already configured. Overwrite configuration?",
-            abort=True,
-            err=True,
-        )
-    if slot == 2 and slot2:
-        click.confirm(
-            "Slot 2 is already configured. Overwrite configuration?",
+            "Slot {} is already configured. Overwrite configuration?".format(slot),
             abort=True,
             err=True,
         )
@@ -152,7 +156,7 @@ def otp(ctx, access_code):
       $ ykman otp static --generate 2 --length 38
     """
 
-    ctx.obj["controller"] = OtpController(YubiOtpSession(ctx.obj["conn"]))
+    ctx.obj["session"] = YubiOtpSession(ctx.obj["conn"])
     if access_code is not None:
         if access_code == "":
             access_code = click.prompt(
@@ -164,7 +168,7 @@ def otp(ctx, access_code):
         except Exception as e:
             ctx.fail("Failed to parse access code: " + str(e))
 
-    ctx.obj["controller"].access_code = access_code
+    ctx.obj["access_code"] = access_code
 
 
 @otp.command()
@@ -173,17 +177,17 @@ def info(ctx):
     """
     Display status of YubiKey Slots.
     """
-    controller = ctx.obj["controller"]
-    slot1, slot2 = controller.slot_status
+    session = ctx.obj["session"]
+    state = session.get_config_state()
+    slot1 = state.is_configured(1)
+    slot2 = state.is_configured(2)
 
     click.echo("Slot 1: {}".format(slot1 and "programmed" or "empty"))
     click.echo("Slot 2: {}".format(slot2 and "programmed" or "empty"))
 
-    if is_fips_version(controller.version):
+    if is_fips_version(session.version):
         click.echo(
-            "FIPS Approved Mode: {}".format(
-                "Yes" if controller.is_in_fips_mode else "No"
-            )
+            "FIPS Approved Mode: {}".format("Yes" if is_in_fips_mode(session) else "No")
         )
 
 
@@ -196,10 +200,10 @@ def swap(ctx):
     """
     Swaps the two slot configurations.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     click.echo("Swapping slots...")
     try:
-        controller.swap_slots()
+        session.swap_slots()
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -215,18 +219,16 @@ def ndef(ctx, slot, prefix):
     The default prefix will be used if no prefix is specified.
     """
     info = ctx.obj["info"]
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
+    state = session.get_config_state()
     if INTERFACE.NFC not in info.supported_applications:
         ctx.fail("NFC interface not available.")
 
-    if not controller.slot_status[slot - 1]:
+    if not state.is_configured(slot):
         ctx.fail("Slot {} is empty.".format(slot))
 
     try:
-        if prefix:
-            controller.configure_ndef_slot(slot, prefix)
-        else:
-            controller.configure_ndef_slot(slot)
+        session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"])
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -239,8 +241,9 @@ def delete(ctx, slot, force):
     """
     Deletes the configuration of a slot.
     """
-    controller = ctx.obj["controller"]
-    if not force and not controller.slot_status[slot - 1]:
+    session = ctx.obj["session"]
+    state = session.get_config_state()
+    if not force and not state.is_configured(slot):
         ctx.fail("Not possible to delete an empty slot.")
     force or click.confirm(
         "Do you really want to delete" " the configuration of slot {}?".format(slot),
@@ -249,7 +252,7 @@ def delete(ctx, slot, force):
     )
     click.echo("Deleting the configuration of slot {}...".format(slot))
     try:
-        controller.zap_slot(slot)
+        session.delete_slot(slot, ctx.obj["access_code"])
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -334,7 +337,7 @@ def yubiotp(
     """
 
     info = ctx.obj["info"]
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
 
     if public_id and serial_public_id:
         ctx.fail("Invalid options: --public-id conflicts with " "--serial-public-id.")
@@ -352,7 +355,7 @@ def yubiotp(
 
     if not public_id:
         if serial_public_id:
-            serial = controller.serial
+            serial = session.get_serial()
             if serial is None:
                 ctx.fail("Serial number not set, public ID must be provided")
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
@@ -425,8 +428,13 @@ def yubiotp(
     )
 
     try:
-        controller.program_otp(
-            slot, key, public_id, private_id, SlotConfig(append_cr=not no_enter)
+        session.put_configuration(
+            slot,
+            YubiOtpSlotConfiguration(public_id, private_id, key).append_cr(
+                not no_enter
+            ),
+            ctx.obj["access_code"],
+            ctx.obj["access_code"],
         )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
@@ -469,7 +477,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     preferred keyboard layout.
     """
 
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
 
     if password and len(password) > 38:
         ctx.fail("Password too long (maximum length is 38 characters).")
@@ -481,11 +489,16 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     elif not password and generate:
         password = generate_static_pw(length, keyboard_layout)
 
+    scan_codes = encode(password, keyboard_layout)
+
     if not force:
-        _confirm_slot_overwrite(controller, slot)
+        _confirm_slot_overwrite(session.get_config_state(), slot)
     try:
-        controller.program_static(
-            slot, password, keyboard_layout, SlotConfig(append_cr=not no_enter)
+        session.put_configuration(
+            slot,
+            StaticPasswordSlotConfiguration(scan_codes).append_cr(not no_enter),
+            ctx.obj["access_code"],
+            ctx.obj["access_code"],
         )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
@@ -522,7 +535,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     If KEY is not given, an interactive prompt will ask for it.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
 
     if key:
         if generate:
@@ -564,7 +577,12 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
         err=True,
     )
     try:
-        controller.program_chalresp(slot, key, touch)
+        session.put_configuration(
+            slot,
+            HmacSha1SlotConfiguration(key).require_touch(touch),
+            ctx.obj["access_code"],
+            ctx.obj["access_code"],
+        )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -593,22 +611,27 @@ def calculate(ctx, slot, challenge, totp, digits):
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
     credential, and read the response. Supports output as a OATH-TOTP code.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
+
     if not challenge and not totp:
         ctx.fail("No challenge provided.")
 
     # Check that slot is not empty
-    slot1, slot2 = controller.slot_status
-    if (slot == 1 and not slot1) or (slot == 2 and not slot2):
+    if not session.get_config_state().is_configured(slot):
         ctx.fail("Cannot perform challenge-response on an empty slot.")
 
-    # Timestamp challenge should be int
-    if challenge and totp:
-        try:
-            challenge = int(challenge)
-        except Exception as e:
-            logger.error("Error", exc_info=e)
-            ctx.fail("Timestamp challenge for TOTP must be an integer.")
+    if totp:  # Challenge omitted or timestamp
+        if challenge is None:
+            challenge = time_challenge(time())
+        else:
+            try:
+                challenge = time_challenge(int(challenge))
+            except Exception as e:
+                logger.error("Error", exc_info=e)
+                ctx.fail("Timestamp challenge for TOTP must be an integer.")
+    else:  # Challenge is hex
+        challenge = a2b_hex(challenge)
+
     try:
         event = Event()
 
@@ -617,15 +640,13 @@ def calculate(ctx, slot, challenge, totp, digits):
                 prompt_for_touch()
                 on_keepalive.prompted = True
 
-        res = controller.calculate(
-            slot,
-            challenge,
-            totp=totp,
-            digits=int(digits),
-            event=event,
-            on_keepalive=on_keepalive,
-        )
-        click.echo(res)
+        response = session.calculate_hmac_sha1(slot, challenge, event, on_keepalive)
+        if totp:
+            value = format_code(parse_totp_hash(response), int(digits))
+        else:
+            value = b2a_hex(response)
+
+        click.echo(value)
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
@@ -651,9 +672,8 @@ def calculate(ctx, slot, challenge, totp, digits):
 def hotp(ctx, slot, key, digits, counter, no_enter, force):
     """
     Program an HMAC-SHA1 OATH-HOTP credential.
-
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     if not key:
         while True:
             key = click.prompt("Enter a secret key (base32)", err=True)
@@ -667,8 +687,14 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
         "Program a HOTP credential in slot {}?".format(slot), abort=True, err=True
     )
     try:
-        controller.program_hotp(
-            slot, key, counter, int(digits) == 8, SlotConfig(append_cr=not no_enter)
+        session.put_configuration(
+            slot,
+            HotpSlotConfiguration(key)
+            .imf(counter)
+            .digits8(int(digits) == 8)
+            .append_cr(not no_enter),
+            ctx.obj["access_code"],
+            ctx.obj["access_code"],
         )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
@@ -727,12 +753,12 @@ def settings(
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
 
     if (new_access_code is not None) and delete_access_code:
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
-    if not controller.slot_status[slot - 1]:
+    if not session.get_config_state().is_configured(slot):
         ctx.fail("Not possible to update settings on an empty slot.")
 
     if new_access_code is not None:
@@ -754,32 +780,25 @@ def settings(
     )
     click.echo("Updating settings for slot {}...".format(slot))
 
-    if pacing is not None:
-        pacing = int(pacing)
+    pacing_bits = int(pacing or "0") // 20
+    pacing_10ms = bool(pacing_bits & 1)
+    pacing_20ms = bool(pacing_bits & 2)
+
+    if delete_access_code:
+        new_access_code = None
 
     try:
-        controller.update_settings(
+        session.update_configuration(
             slot,
-            SlotConfig(
-                append_cr=enter, pacing=pacing, numeric_keypad=use_numeric_keypad
-            ),
+            UpdateConfiguration()
+            .append_cr(enter)
+            .use_numeric(use_numeric_keypad)
+            .pacing(pacing_10ms, pacing_20ms),
+            new_access_code,
+            ctx.obj["access_code"],
         )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
-
-    if new_access_code:
-        try:
-            controller.set_access_code(slot, new_access_code)
-        except Exception as e:
-            logger.error("Failed to set access code", exc_info=e)
-            ctx.fail("Failed to set access code: " + str(e))
-
-    if delete_access_code:
-        try:
-            controller.delete_access_code(slot)
-        except Exception as e:
-            logger.error("Failed to delete access code", exc_info=e)
-            ctx.fail("Failed to delete access code: " + str(e))
 
 
 otp.transports = TRANSPORT.OTP
