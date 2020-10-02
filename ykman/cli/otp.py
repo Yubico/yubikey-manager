@@ -28,6 +28,7 @@
 from __future__ import absolute_import
 
 from yubikit.yubiotp import (
+    SLOT,
     YubiOtpSession,
     YubiOtpSlotConfiguration,
     HmacSha1SlotConfiguration,
@@ -95,7 +96,7 @@ def parse_access_code_hex(access_code_hex):
 
 
 click_slot_argument = click.argument(
-    "slot", type=click.Choice(["1", "2"]), callback=lambda c, p, v: int(v)
+    "slot", type=click.Choice(["1", "2"]), callback=lambda c, p, v: SLOT(int(v))
 )
 
 

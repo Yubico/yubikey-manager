@@ -19,11 +19,18 @@ import re
 from enum import unique, IntEnum
 
 
-# TODO: Use it or remove it
 @unique
 class SLOT(IntEnum):
     ONE = 1
     TWO = 2
+
+    @staticmethod
+    def map(slot, one, two):
+        if slot == 1:
+            return one
+        elif slot == 2:
+            return two
+        raise ValueError("Invalid slot (must be 1 or 2)")
 
 
 @unique
@@ -644,7 +651,7 @@ class YubiOtpSession(object):
                 "This configuration is not supported on this YubiKey version"
             )
         self._write_config(
-            (CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2)[slot - 1],
+            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             configuration.get_config(acc_code),
             cur_acc_code,
         )
@@ -662,7 +669,7 @@ class YubiOtpSession(object):
                 "Instead, delete the slot and configure it anew."
             )
         self._write_config(
-            (CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2)[slot - 1],
+            SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
             configuration.get_config(acc_code),
             cur_acc_code,
         )
@@ -672,14 +679,14 @@ class YubiOtpSession(object):
 
     def delete_slot(self, slot, cur_acc_code=None):
         self._write_config(
-            (CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2)[slot - 1],
+            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             b"\0" * CONFIG_SIZE,
             cur_acc_code,
         )
 
     def set_ndef_configuration(self, slot, uri=None, cur_acc_code=None):
         self._write_config(
-            (CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2)[slot - 1],
+            SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
             _build_ndef_config(uri),
             cur_acc_code,
         )
@@ -693,7 +700,7 @@ class YubiOtpSession(object):
             HMAC_CHALLENGE_SIZE, b"\1" if challenge.endswith(b"\0") else b"\0"
         )
         return self.backend.send_and_receive(
-            (CONFIG_SLOT.CHAL_HMAC_1, CONFIG_SLOT.CHAL_HMAC_2)[slot - 1],
+            SLOT.map(slot, CONFIG_SLOT.CHAL_HMAC_1, CONFIG_SLOT.CHAL_HMAC_2),
             challenge,
             HMAC_RESPONSE_SIZE,
             event,
