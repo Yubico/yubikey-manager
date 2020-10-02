@@ -179,15 +179,19 @@ def info(ctx, check_fips):
     Displays information about the attached YubiKey such as serial number,
     firmware version, applications, etc.
     """
-    pid = ctx.obj["pid"]
-    key_type = pid.get_type()
-    transports = pid.get_transports()
     info = ctx.obj["info"]
-
+    pid = ctx.obj["pid"]
+    if pid is None:
+        transports = None
+        key_type = None
+    else:
+        transports = pid.get_transports()
+        key_type = pid.get_type()
     device_name = get_name(key_type, info)
 
     click.echo("Device type: {}".format(device_name))
-    click.echo("Serial number: {}".format(info.serial or "Not set or unreadable"))
+    if info.serial:
+        click.echo("Serial number: {}".format(info.serial))
     if info.version:
         f_version = ".".join(str(x) for x in info.version)
         click.echo("Firmware version: {}".format(f_version))
@@ -198,7 +202,12 @@ def info(ctx, check_fips):
 
     if info.form_factor:
         click.echo("Form factor: {!s}".format(info.form_factor))
-    click.echo("Enabled USB interfaces: {}".format(TRANSPORT.split(transports)))
+    if transports:
+        click.echo(
+            "Enabled USB interfaces: {}".format(
+                ", ".join(t.name for t in TRANSPORT.split(transports))
+            )
+        )
     if INTERFACE.NFC in info.supported_applications:
         f_nfc = (
             "enabled"

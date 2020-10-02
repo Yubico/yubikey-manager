@@ -183,6 +183,9 @@ class DeviceInfo(
         ],
     )
 ):
+    def has_interface(self, interface):
+        return interface in self.supported_applications
+
     @classmethod
     def parse(cls, encoded, default_version):
         if len(encoded) - 1 != encoded[0]:
@@ -195,14 +198,20 @@ class DeviceInfo(
         auto_eject_to = bytes2int(data.get(TAG.AUTO_EJECT_TIMEOUT, b"\0"))
         chal_resp_to = bytes2int(data.get(TAG.CHALRESP_TIMEOUT, b"\0"))
         flags = bytes2int(data.get(TAG.DEVICE_FLAGS, b"\0"))
-        supported = {
-            INTERFACE.USB: bytes2int(data.get(TAG.USB_SUPPORTED, b"\0")),
-            INTERFACE.NFC: bytes2int(data.get(TAG.NFC_SUPPORTED, b"\0")),
-        }
-        enabled = {
-            INTERFACE.USB: bytes2int(data.get(TAG.USB_ENABLED, b"\0")),
-            INTERFACE.NFC: bytes2int(data.get(TAG.NFC_ENABLED, b"\0")),
-        }
+
+        supported = {}
+        enabled = {}
+
+        if version == (4, 2, 4):  # Doesn't report correctly
+            supported[INTERFACE.USB] = 0x3F
+        else:
+            supported[INTERFACE.USB] = bytes2int(data.get(TAG.USB_SUPPORTED))
+        if TAG.USB_ENABLED in data:  # From YK 5.0.0
+            enabled[INTERFACE.USB] = bytes2int(data.get(TAG.USB_ENABLED))
+        if TAG.NFC_SUPPORTED in data:  # YK with NFC
+            supported[INTERFACE.NFC] = bytes2int(data[TAG.NFC_SUPPORTED])
+            enabled[INTERFACE.NFC] = bytes2int(data[TAG.NFC_ENABLED])
+
         return cls(
             DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags),
             serial,

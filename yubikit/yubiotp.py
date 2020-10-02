@@ -8,8 +8,9 @@ from .core import (
     NotSupportedError,
     BadResponseError,
 )
+from .core import ApplicationNotAvailableError
 from .core.otp import check_crc, calculate_crc, OtpConnection, OtpProtocol
-from .core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError
+from .core.smartcard import SmartCardConnection, SmartCardProtocol
 from cryptography.hazmat.primitives.hashes import Hash, SHA1
 from cryptography.hazmat.backends import default_backend
 
@@ -602,7 +603,7 @@ class YubiOtpSession(object):
                         .group()
                         .split(".")
                     )
-                except ApduError:
+                except ApplicationNotAvailableError:
                     pass  # Not available (probably NEO), get version from status
 
             self._status = protocol.select(AID.OTP)
