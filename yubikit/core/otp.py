@@ -85,6 +85,10 @@ def _should_send(packet, seq):
     return seq in (0, 9) or any(packet)
 
 
+def _format_frame(slot, payload):
+    return payload + struct.pack("<BH", slot, calculate_crc(payload)) + b"\0\0\0"
+
+
 class OtpProtocol(object):
     def __init__(self, otp_connection):
         self.connection = otp_connection
@@ -110,9 +114,13 @@ class OtpProtocol(object):
             raise ValueError("Payload too large for HID frame")
         if not on_keepalive:
             on_keepalive = lambda x: None  # noqa
-        return self._read_frame(
-            self._send_frame(slot, payload), event or Event(), on_keepalive
+        frame = _format_frame(slot, payload)
+        logger.debug("SEND: %s", frame.hex())
+        response = self._read_frame(
+            self._send_frame(frame), event or Event(), on_keepalive
         )
+        logger.debug("RECV: %s", response.hex())
+        return response
 
     def read_status(self):
         """Receive status bytes from YubiKey
@@ -132,13 +140,8 @@ class OtpProtocol(object):
             sleep(0.05)
         raise Exception("Timeout waiting for YubiKey to become ready to receive")
 
-    def _send_frame(self, slot, payload):
-        """Packs and sends one 70 byte frame"""
-        # Format Frame
-        buf = payload + struct.pack("<BH", slot, calculate_crc(payload)) + b"\0\0\0"
-        logger.debug("Sending frame: %s", buf.hex())
-
-        # Send frame
+    def _send_frame(self, buf):
+        """Sends a 70 byte frame"""
         prog_seq = self.connection.receive()[STATUS_OFFSET_PROG_SEQ]
         seq = 0
         while buf:
@@ -179,7 +182,6 @@ class OtpProtocol(object):
                 ):
                     # Sequence updated, return status.
                     # Note: If no valid configurations exist, prog_seq is reset to 0.
-                    logger.debug("Returning data: %s", report[1:-1].hex())
                     return report[1:-1]
                 elif needs_touch:
                     raise TimeoutError("Timed out waiting for touch")

@@ -115,12 +115,16 @@ def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
             readers = list_ccid(reader_name)
             if len(readers) == 1:
                 dev = readers[0]
-                if cmd == fido.name:
-                    conn = dev.open_ctap_connection()
-                else:
-                    conn = dev.open_smartcard_connection()
-                info = read_info(dev.pid, conn)
-                return conn, dev.pid, info
+                try:
+                    if cmd == fido.name:
+                        conn = dev.open_ctap_connection()
+                    else:
+                        conn = dev.open_smartcard_connection()
+                    info = read_info(dev.pid, conn)
+                    return conn, dev.pid, info
+                except Exception as e:
+                    logger.error("Failure connecting to card", exc_info=e)
+                    ctx.fail("Failed to connect: {}".format(e))
             elif len(readers) > 1:
                 ctx.fail("Multiple YubiKeys on external readers detected.")
             else:
