@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 import logging
 import click
-from ..util import TRANSPORT, parse_certificates, parse_private_key
+from ..util import parse_certificates, parse_private_key
 from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
 from .util import (
     click_force_option,
@@ -38,6 +38,7 @@ from .util import (
     EnumChoice,
 )
 
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardProtocol, ApduError, SW
 
 logger = logging.getLogger(__name__)

@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hmac, hashes
 from cryptography.hazmat.primitives import constant_time
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from six.moves.urllib.parse import unquote, urlparse, parse_qs
+from urllib.parse import unquote, urlparse, parse_qs
 from functools import total_ordering
 from enum import IntEnum, unique
 from collections import namedtuple
@@ -21,7 +21,6 @@ from base64 import b64encode, b32decode
 from time import time
 
 import struct
-import six
 import os
 import re
 
@@ -185,11 +184,11 @@ def _format_cred_id(issuer, name, oath_type, period=DEFAULT_PERIOD):
     if issuer:
         cred_id += issuer + ":"
     cred_id += name
-    return cred_id.encode("utf-8")
+    return cred_id.encode()
 
 
 def _parse_cred_id(cred_id, oath_type):
-    data = cred_id.decode("utf-8")
+    data = cred_id.decode()
     if oath_type == OATH_TYPE.TOTP:
         match = TOTP_ID_PATTERN.match(data)
         if match:
@@ -224,7 +223,7 @@ def _hmac_sha1(key, message):
 
 def _derive_key(salt, passphrase):
     kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())  # nosec
-    return kdf.derive(passphrase.encode("utf-8"))
+    return kdf.derive(passphrase.encode())
 
 
 def _hmac_shorten_key(key, algo):
@@ -250,7 +249,7 @@ def _format_code(credential, timestamp, truncated):
     else:  # HOTP
         valid_from = timestamp
         valid_to = float("Inf")
-    digits = six.indexbytes(truncated, 0)
+    digits = truncated[0]
 
     return Code(
         str(bytes2int(truncated[1:]) & 0x7FFFFFFF).rjust(digits, "0"),
@@ -355,7 +354,7 @@ class OathSession(object):
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
             data = Tlv.unwrap(TAG_NAME_LIST, tlv)
-            oath_type = OATH_TYPE(MASK_TYPE & six.indexbytes(data, 0))
+            oath_type = OATH_TYPE(MASK_TYPE & data[0])
             cred_id = data[1:]
             issuer, name, period = _parse_cred_id(cred_id, oath_type)
             creds.append(

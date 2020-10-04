@@ -27,8 +27,8 @@
 
 from __future__ import absolute_import
 
-import six
 import time
+import struct
 import logging
 from fido2.hid import CTAPHID
 from fido2.ctap1 import CTAP1, ApduError
@@ -147,16 +147,16 @@ class FipsU2fController(object):
     def change_pin(self, old_pin, new_pin):
         new_length = len(new_pin)
 
-        old_pin = old_pin.encode("utf-8")
-        new_pin = new_pin.encode("utf-8")
+        old_pin = old_pin.encode()
+        new_pin = new_pin.encode()
 
-        data = six.int2byte(new_length) + old_pin + new_pin
+        data = struct.pack("B", new_length) + old_pin + new_pin
 
         self.ctap.send_apdu(ins=FIPS_U2F_CMD.SET_PIN, data=data)
         return True
 
     def verify_pin(self, pin):
-        self.ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_PIN, data=pin.encode("utf-8"))
+        self.ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_PIN, data=pin.encode())
 
     def reset(self, touch_callback=None):
         if touch_callback:

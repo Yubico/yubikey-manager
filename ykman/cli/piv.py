@@ -27,6 +27,7 @@
 
 from __future__ import absolute_import
 
+from yubikit.core import TRANSPORT
 from yubikit.piv import (
     PivSession,
     InvalidPinError,
@@ -41,7 +42,6 @@ from yubikit.core.smartcard import ApduError, SW
 from ..device import is_fips_version
 
 from ..util import (
-    TRANSPORT,
     get_leaf_certificates,
     parse_private_key,
     parse_certificates,
@@ -63,7 +63,6 @@ from .util import (
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from binascii import b2a_hex, a2b_hex
 import click
 import datetime
 import logging
@@ -83,7 +82,7 @@ def click_parse_piv_slot(ctx, param, val):
 @click_callback()
 def click_parse_management_key(ctx, param, val):
     try:
-        key = a2b_hex(val)
+        key = bytes.fromhex(val)
         if key and len(key) != 24:
             raise ValueError(
                 "Management key must be exactly 24 bytes "
@@ -162,14 +161,14 @@ def info(ctx):
     if controller.has_stored_key:
         click.echo("Management key is stored on the YubiKey, protected by PIN.")
     try:
-        chuid = b2a_hex(controller.get_data(OBJECT_ID.CHUID)).decode()
+        chuid = controller.get_data(OBJECT_ID.CHUID).hex()
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             chuid = "No data available."
     click.echo("CHUID:\t" + chuid)
 
     try:
-        ccc = b2a_hex(controller.get_data(OBJECT_ID.CAPABILITY)).decode()
+        ccc = controller.get_data(OBJECT_ID.CAPABILITY).hex()
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             ccc = "No data available."
@@ -200,7 +199,7 @@ def info(ctx):
                 click.echo("\tMalformed certificate: {}".format(e))
                 continue
 
-            fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode("ascii")
+            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
             key_type = KEY_TYPE.from_public_key(cert.public_key())
             serial = cert.serial_number
             try:
@@ -846,9 +845,7 @@ def change_management_key(
 
             if not protect:
                 click.echo(
-                    "Generated management key: {}".format(
-                        b2a_hex(new_management_key).decode("utf-8")
-                    )
+                    "Generated management key: {}".format(new_management_key.hex())
                 )
 
         elif force:
@@ -868,7 +865,7 @@ def change_management_key(
 
     if new_management_key and type(new_management_key) is not bytes:
         try:
-            new_management_key = a2b_hex(new_management_key)
+            new_management_key = bytes.fromhex(new_management_key)
         except Exception:
             ctx.fail("New management key has the wrong format.")
 
@@ -979,7 +976,7 @@ def _prompt_management_key(
     if management_key == "":
         return DEFAULT_MANAGEMENT_KEY
     try:
-        return a2b_hex(management_key)
+        return bytes.fromhex(management_key)
     except Exception:
         ctx.fail("Management key has the wrong format.")
 

@@ -29,7 +29,6 @@ from __future__ import absolute_import
 import click
 import logging
 from threading import Timer
-from binascii import b2a_hex, a2b_hex
 from .util import (
     click_force_option,
     click_postpone_execution,
@@ -532,7 +531,7 @@ def set_password(ctx, new_password, remember):
     app.set_key(key)
     click.echo("Password updated.")
     if remember:
-        keys[device_id] = b2a_hex(key).decode()
+        keys[device_id] = key.hex()
         settings.write()
         click.echo("Password remembered")
     elif device_id in keys:
@@ -587,7 +586,7 @@ def ensure_validated(ctx, prompt="Enter your password", remember=False):
         keys = ctx.obj["settings"].setdefault("keys", {})
         if device_id in keys:
             try:
-                app.validate(a2b_hex(keys[device_id]))
+                app.validate(bytes.fromhex(keys[device_id]))
                 return
             except Exception as e:
                 logger.debug("Error", exc_info=e)
@@ -606,7 +605,7 @@ def _validate(ctx, key, remember):
         if remember:
             settings = ctx.obj["settings"]
             keys = settings.setdefault("keys", {})
-            keys[app.info.device_id] = b2a_hex(key).decode()
+            keys[app.info.device_id] = key.hex()
             settings.write()
             click.echo("Password remembered.")
     except Exception:

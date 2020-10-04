@@ -30,7 +30,6 @@ from __future__ import absolute_import
 from .util import click_postpone_execution, click_force_option, EnumChoice
 from yubikit.core import APPLICATION, INTERFACE
 from yubikit.management import ManagementSession, DeviceConfig, DEVICE_FLAG
-from binascii import a2b_hex, b2a_hex
 import os
 import logging
 import click
@@ -156,7 +155,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         new_lock_code = CLEAR_LOCK_CODE
 
     if generate:
-        new_lock_code = b2a_hex(os.urandom(16)).decode("utf-8")
+        new_lock_code = os.urandom(16).hex()
         click.echo("Using a randomly generated lock code: {}".format(new_lock_code))
         force or click.confirm(
             "Lock configuration with this lock code?", abort=True, err=True
@@ -482,7 +481,7 @@ def _ensure_not_invalid_options(ctx, enable, disable):
 
 def _parse_lock_code(ctx, lock_code):
     try:
-        lock_code = a2b_hex(lock_code)
+        lock_code = bytes.fromhex(lock_code)
         if lock_code and len(lock_code) != 16:
             ctx.fail(
                 "Lock code must be exactly 16 bytes " "(32 hexadecimal digits) long."

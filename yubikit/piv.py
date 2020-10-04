@@ -21,7 +21,6 @@ from collections import namedtuple
 from enum import Enum, IntEnum, unique, auto
 
 import logging
-import six
 import os
 import re
 
@@ -226,7 +225,7 @@ class InvalidPinError(CommandError):
 
 
 def _pin_bytes(pin):
-    pin = pin.encode("utf-8")
+    pin = pin.encode()
     if len(pin) > PIN_LEN:
         raise ValueError("PIN/PUK must be no longer than 8 bytes")
     return pin.ljust(PIN_LEN, b"\xff")
@@ -414,7 +413,7 @@ class PivSession(object):
             INS_SET_MGMKEY,
             0xFF,
             0xFF,  # 0xFE for touch, expose this?
-            six.int2byte(TDES) + Tlv(SLOT.CARD_MANAGEMENT, management_key),
+            int_to_bytes(TDES) + Tlv(SLOT.CARD_MANAGEMENT, management_key),
         )
 
     def verify_pin(self, pin):
@@ -473,7 +472,7 @@ class PivSession(object):
         policy = data[TAG_METADATA_POLICY]
         return ManagementKeyMetadata(
             data[TAG_METADATA_IS_DEFAULT] != b"\0",
-            TOUCH_POLICY(six.indexbytes(policy, INDEX_TOUCH_POLICY)),
+            TOUCH_POLICY(policy[INDEX_TOUCH_POLICY]),
         )
 
     def get_slot_metadata(self, slot):
@@ -487,10 +486,10 @@ class PivSession(object):
         data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, slot))
         policy = data[TAG_METADATA_POLICY]
         return SlotMetadata(
-            KEY_TYPE(six.indexbytes(data[TAG_METADATA_ALGO], 0)),
-            PIN_POLICY(six.indexbytes(policy, INDEX_PIN_POLICY)),
-            TOUCH_POLICY(six.indexbytes(policy, INDEX_TOUCH_POLICY)),
-            six.indexbytes(data[TAG_METADATA_ORIGIN], 0) == ORIGIN_GENERATED,
+            KEY_TYPE(data[TAG_METADATA_ALGO][0]),
+            PIN_POLICY(policy[INDEX_PIN_POLICY]),
+            TOUCH_POLICY(policy[INDEX_TOUCH_POLICY]),
+            data[TAG_METADATA_ORIGIN][0] == ORIGIN_GENERATED,
             data[TAG_METADATA_PUBLIC_KEY],
         )
 
@@ -542,7 +541,7 @@ class PivSession(object):
     def get_certificate(self, slot):
         data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
         cert_info = data.get(TAG_CERT_INFO)
-        if cert_info and six.indexbytes(cert_info, 0) != 0:
+        if cert_info and cert_info[0] != 0:
             raise NotSupportedError("Compressed certificates are not supported")
         try:
             return x509.load_der_x509_certificate(
@@ -586,9 +585,9 @@ class PivSession(object):
         else:
             data = Tlv(0x06, int_to_bytes(numbers.private_value, ln))
         if pin_policy:
-            data += Tlv(TAG_PIN_POLICY, six.int2byte(pin_policy))
+            data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))
         if touch_policy:
-            data += Tlv(TAG_TOUCH_POLICY, six.int2byte(touch_policy))
+            data += Tlv(TAG_TOUCH_POLICY, int_to_bytes(touch_policy))
         self.protocol.send_apdu(0, INS_IMPORT_KEY, key_type, slot, data)
         return key_type
 
@@ -641,8 +640,8 @@ class PivSession(object):
         attempts = data[TAG_METADATA_RETRIES]
         return PinMetadata(
             data[TAG_METADATA_IS_DEFAULT] != b"\0",
-            six.indexbytes(attempts, INDEX_RETRIES_TOTAL),
-            six.indexbytes(attempts, INDEX_RETRIES_REMAINING),
+            attempts[INDEX_RETRIES_TOTAL],
+            attempts[INDEX_RETRIES_REMAINING],
         )
 
     def _use_private_key(self, slot, key_type, message, exponentiation):

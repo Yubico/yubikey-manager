@@ -29,10 +29,10 @@ from __future__ import absolute_import
 
 from fido2.ctap import CtapError
 from fido2.ctap1 import ApduError
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW
 from time import sleep
 from .util import click_postpone_execution, prompt_for_touch, click_force_option
-from ..util import TRANSPORT
 from ..fido import Fido2Controller, FipsU2fController
 from ..hid import list_ctap_devices
 from ..device import is_fips_version

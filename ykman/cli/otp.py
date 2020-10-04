@@ -57,7 +57,6 @@ from ..util import (
     time_challenge,
     format_code,
 )
-from binascii import a2b_hex, b2a_hex
 from .. import __version__
 from ..device import is_fips_version
 from ..otp import PrepareUploadFailed, prepare_upload_key, is_in_fips_mode
@@ -76,7 +75,7 @@ logger = logging.getLogger(__name__)
 def parse_hex(length):
     @click_callback()
     def inner(ctx, param, val):
-        val = a2b_hex(val)
+        val = bytes.fromhex(val)
         if len(val) != length:
             raise ValueError("Must be exactly {} bytes.".format(length))
         return val
@@ -86,7 +85,7 @@ def parse_hex(length):
 
 def parse_access_code_hex(access_code_hex):
     try:
-        access_code = a2b_hex(access_code_hex)
+        access_code = bytes.fromhex(access_code_hex)
     except TypeError as e:
         raise ValueError(e)
     if len(access_code) != 6:
@@ -378,9 +377,7 @@ def yubiotp(
         if generate_private_id:
             private_id = os.urandom(6)
             click.echo(
-                "Using a randomly generated private ID: {}".format(
-                    b2a_hex(private_id).decode("ascii")
-                )
+                "Using a randomly generated private ID: {}".format(private_id.hex())
             )
         elif force:
             ctx.fail(
@@ -389,16 +386,12 @@ def yubiotp(
             )
         else:
             private_id = click.prompt("Enter private ID", err=True)
-            private_id = a2b_hex(private_id)
+            private_id = bytes.fromhex(private_id)
 
     if not key:
         if generate_key:
             key = os.urandom(16)
-            click.echo(
-                "Using a randomly generated secret key: {}".format(
-                    b2a_hex(key).decode("ascii")
-                )
-            )
+            click.echo("Using a randomly generated secret key: {}".format(key.hex()))
         elif force:
             ctx.fail(
                 "Secret key not given. Please remove the --force flag, or "
@@ -406,7 +399,7 @@ def yubiotp(
             )
         else:
             key = click.prompt("Enter secret key", err=True)
-            key = a2b_hex(key)
+            key = bytes.fromhex(key)
 
     if not upload and not force:
         upload = click.confirm("Upload credential to YubiCloud?", abort=False, err=True)
@@ -562,11 +555,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
         else:
             if generate:
                 key = os.urandom(20)
-                click.echo(
-                    "Using a randomly generated key: {}".format(
-                        b2a_hex(key).decode("ascii")
-                    )
-                )
+                click.echo("Using a randomly generated key: {}".format(key.hex()))
             else:
                 key = click.prompt("Enter a secret key", err=True)
                 key = parse_key(key)
@@ -631,7 +620,7 @@ def calculate(ctx, slot, challenge, totp, digits):
                 logger.error("Error", exc_info=e)
                 ctx.fail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
-        challenge = a2b_hex(challenge)
+        challenge = bytes.fromhex(challenge)
 
     try:
         event = Event()
@@ -645,7 +634,7 @@ def calculate(ctx, slot, challenge, totp, digits):
         if totp:
             value = format_code(parse_totp_hash(response), int(digits))
         else:
-            value = b2a_hex(response)
+            value = response.hex()
 
         click.echo(value)
     except CommandError as e:

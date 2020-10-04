@@ -232,7 +232,7 @@ def _build_ndef_config(uri):
             break
     else:
         id_code = 0
-    uri_bytes = uri.encode("utf8")
+    uri_bytes = uri.encode()
     data_len = 1 + len(uri_bytes)
     if data_len > NDEF_DATA_SIZE:
         raise ValueError("URI payload too large")

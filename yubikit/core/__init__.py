@@ -28,8 +28,6 @@
 from __future__ import absolute_import, unicode_literals
 
 from enum import Enum, IntEnum, unique, auto
-from binascii import b2a_hex
-import six
 import abc
 
 
@@ -207,24 +205,24 @@ def int2bytes(value, min_len=0):
         buf.append(value & 0xFF)
         value >>= 8
     buf.append(value)
-    return bytes(bytearray(reversed(buf))).rjust(min_len, b"\0")
+    return bytes(reversed(buf)).rjust(min_len, b"\0")
 
 
 def bytes2int(data):
-    return int(b2a_hex(data), 16)
+    return int.from_bytes(data, "big")
 
 
 def _tlv_parse_tag(data, offs=0):
-    t = six.indexbytes(data, offs)
+    t = data[offs]
     if t & 0x1F != 0x1F:
         return t, 1
     else:
-        t = t << 8 | six.indexbytes(data, offs + 1)
+        t = t << 8 | data[offs + 1]
         return t, 2
 
 
 def _tlv_parse_length(data, offs=0):
-    ln = six.indexbytes(data, offs)
+    ln = data[offs]
     offs += 1
     if ln > 0x80:
         n_bytes = ln - 0x80
@@ -253,7 +251,7 @@ class Tlv(bytes):
 
     def __repr__(self):
         return "{}(tag={:02x}, value={})".format(
-            self.__class__.__name__, self.tag, b2a_hex(self.value).decode("ascii")
+            self.__class__.__name__, self.tag, self.value.hex()
         )
 
     def __new__(cls, *args):

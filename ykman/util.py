@@ -28,7 +28,6 @@
 from __future__ import absolute_import
 
 
-import six
 import struct
 import re
 import logging
@@ -37,22 +36,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
 from base64 import b32decode
-from binascii import b2a_hex, a2b_hex
 from OpenSSL import crypto
 from .scancodes import KEYBOARD_LAYOUT
 from yubikit.core import Tlv
 
 
 logger = logging.getLogger(__name__)
-
-# TODO: Remove this
-from yubikit.core import AID, APPLICATION, TRANSPORT  # noqa
-
-PID = None
-YUBIKEY = None
-bytes2int = None
-int2bytes = None
-Mode = None
 
 
 PEM_IDENTIFIER = b"-----BEGIN"
@@ -83,11 +72,19 @@ class MissingLibrary(object):
         raise AttributeError(self._message)
 
 
-_HEX = b"0123456789abcdef"
-_MODHEX = b"cbdefghijklnrtuv"
-_MODHEX_TO_HEX = dict((_MODHEX[i], _HEX[i : i + 1]) for i in range(16))
-_HEX_TO_MODHEX = dict((_HEX[i], _MODHEX[i : i + 1]) for i in range(16))
+_MODHEX = "cbdefghijklnrtuv"
 DEFAULT_PW_CHAR_BLOCKLIST = ["\t", "\n", " "]
+
+
+def modhex_encode(data):
+    return "".join(_MODHEX[b >> 4] + _MODHEX[b & 0xF] for b in data)
+
+
+def modhex_decode(string):
+    return bytes(
+        _MODHEX.index(string[i]) << 4 | _MODHEX.index(string[i + 1])
+        for i in range(0, len(string), 2)
+    )
 
 
 def ensure_not_cve201715361_vulnerable_firmware_version(f_version):
@@ -97,16 +94,6 @@ def ensure_not_cve201715361_vulnerable_firmware_version(f_version):
 
 def is_cve201715361_vulnerable_firmware_version(f_version):
     return (4, 2, 0) <= f_version < (4, 3, 5)
-
-
-def modhex_decode(value):
-    if isinstance(value, six.text_type):
-        value = value.encode("ascii")
-    return a2b_hex(b"".join(_MODHEX_TO_HEX[c] for c in value))
-
-
-def modhex_encode(value):
-    return b"".join(_HEX_TO_MODHEX[c] for c in b2a_hex(value)).decode("ascii")
 
 
 def generate_static_pw(
@@ -130,7 +117,7 @@ def format_code(code, digits=6, steam=False):
 
 
 def parse_totp_hash(resp):
-    offs = six.indexbytes(resp, -1) & 0xF
+    offs = resp[-1] & 0xF
     return parse_truncated(resp[offs : offs + 4])
 
 
@@ -162,7 +149,7 @@ def time_challenge(timestamp, period=30):
 def parse_key(val):
     val = val.upper()
     if re.match(r"^([0-9A-F]{2})+$", val):  # hex
-        return a2b_hex(val)
+        return bytes.fromhex(val)
     else:
         # Key should be b32 encoded
         return parse_b32_key(val)

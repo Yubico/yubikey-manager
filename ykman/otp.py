@@ -29,11 +29,10 @@ from __future__ import absolute_import
 
 import json
 import logging
-from enum import Enum
-from six.moves import http_client
 from . import __version__
 from .util import modhex_encode
-from binascii import b2a_hex
+from enum import Enum
+from http.client import HTTPSConnection
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +97,13 @@ def prepare_upload_key(
 ):
     modhex_public_id = modhex_encode(public_id)
     data = {
-        "aes_key": b2a_hex(key).decode("utf-8"),
+        "aes_key": key.hex(),
         "serial": serial or 0,
         "public_id": modhex_public_id,
-        "private_id": b2a_hex(private_id).decode("utf-8"),
+        "private_id": private_id.hex(),
     }
 
-    httpconn = http_client.HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
+    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
 
     try:
         httpconn.request(

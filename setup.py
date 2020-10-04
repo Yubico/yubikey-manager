@@ -30,15 +30,12 @@ import os
 from setuptools import setup, find_packages
 
 install_requires = [
-    "six",
     "pyscard",
     "click",
     "cryptography",
     "pyopenssl",
     "fido2 >= 0.9",
 ]
-if sys.version_info < (3, 4):
-    install_requires.append("enum34")
 if sys.platform == "win32":
     install_requires.append("pypiwin32")
 
@@ -65,7 +62,6 @@ setup(
         "Operating System :: OS Independent",
         "Programming Language :: Python",
         "Development Status :: 5 - Production/Stable",
-        "Environment :: X11 Applications :: Qt",
         "Intended Audience :: End Users/Desktop",
         "Topic :: Security :: Cryptography",
         "Topic :: Utilities",

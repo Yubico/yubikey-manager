@@ -27,7 +27,7 @@
 
 from __future__ import absolute_import
 
-from yubikit.core import INTERFACE
+from yubikit.core import INTERFACE, APPLICATION, TRANSPORT
 from yubikit.core.smartcard import ApduError
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
@@ -39,7 +39,6 @@ from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import FIPS_U2F_CMD
 from ..device import is_fips_version, get_name, read_info
-from ..util import APPLICATION, TRANSPORT
 
 import click
 import logging

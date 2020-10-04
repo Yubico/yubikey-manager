@@ -44,9 +44,7 @@ from cryptography.hazmat.primitives.serialization import (
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 from enum import Enum, IntEnum, unique
-from binascii import b2a_hex
 from collections import namedtuple
-import six
 import time
 import struct
 import logging
@@ -320,16 +318,16 @@ class OpgpController(object):
         )
 
     def _read_version(self):
-        bcd_hex = b2a_hex(self._app.send_apdu(0, INS.GET_VERSION, 0, 0))
+        bcd_hex = self._app.send_apdu(0, INS.GET_VERSION, 0, 0).hex()
         return tuple(int(bcd_hex[i : i + 2]) for i in range(0, 6, 2))
 
     def get_openpgp_version(self):
         data = self._get_data(DO.AID)
-        return (six.indexbytes(data, 6), six.indexbytes(data, 7))
+        return data[6], data[7]
 
     def get_remaining_pin_tries(self):
         data = self._get_data(DO.PW_STATUS)
-        return PinRetries(*six.iterbytes(data[4:7]))
+        return PinRetries(*data[4:7])
 
     def _block_pins(self):
         retries = self.get_remaining_pin_tries()
@@ -404,7 +402,7 @@ class OpgpController(object):
         if key_slot == KEY_SLOT.ATT and not self.supports_attestation:
             raise ValueError("Attestation key not available on this device.")
         data = self._get_data(key_slot.uif)
-        return TOUCH_MODE(six.indexbytes(data, 0))
+        return TOUCH_MODE(data[0])
 
     def set_touch(self, key_slot, mode):
         """Requires Admin PIN verification."""
