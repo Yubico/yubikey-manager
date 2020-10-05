@@ -27,18 +27,8 @@
 
 from __future__ import absolute_import, unicode_literals
 
-from enum import Enum, IntEnum, unique, auto
+from enum import Enum, IntEnum, IntFlag, unique, auto
 import abc
-
-
-class BitflagEnum(IntEnum):
-    @classmethod
-    def split(cls, flags):
-        return [c for c in cls if c & flags]
-
-    @staticmethod
-    def has(flags, check):
-        return flags & check == check
 
 
 class INTERFACE(Enum):
@@ -47,7 +37,7 @@ class INTERFACE(Enum):
 
 
 @unique
-class TRANSPORT(BitflagEnum):
+class TRANSPORT(IntFlag):
     OTP = 0x01
     FIDO = 0x02
     CCID = 0x04
@@ -64,7 +54,7 @@ class AID(bytes, Enum):
 
 
 @unique
-class APPLICATION(BitflagEnum):
+class APPLICATION(IntFlag):
     OTP = 0x01
     U2F = 0x02
     OPGP = 0x08
@@ -122,7 +112,7 @@ class YUBIKEY(Enum):
     YK4 = "YubiKey 4"
 
     def get_pid(self, transports):
-        suffix = "_".join(t.name for t in TRANSPORT.split(transports))
+        suffix = "_".join(t.name for t in TRANSPORT if t in TRANSPORT(transports))
         return PID[self.name + "_" + suffix]
 
 
@@ -150,7 +140,7 @@ class PID(IntEnum):
         return YUBIKEY[self.name.split("_", 1)[0]]
 
     def get_transports(self):
-        return sum(TRANSPORT[x] for x in self.name.split("_")[1:])
+        return TRANSPORT(sum(TRANSPORT[x] for x in self.name.split("_")[1:]))
 
 
 class YubiKeyDevice(abc.ABC):

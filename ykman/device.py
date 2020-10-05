@@ -127,7 +127,8 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
 
     Returns a tuple of (connection, pid, info) for the device.
     """
-    if TRANSPORT.has(transports, TRANSPORT.CCID):
+    transports = TRANSPORT(transports)
+    if TRANSPORT.CCID in transports:
         for dev in list_ccid_devices():
             try:
                 conn = dev.open_smartcard_connection()
@@ -139,7 +140,7 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
             except Exception as e:
                 logger.debug("Error connecting", exc_info=e)
 
-    if TRANSPORT.has(transports, TRANSPORT.OTP):
+    if TRANSPORT.OTP in transports:
         for dev in list_otp_devices():
             try:
                 conn = dev.open_otp_connection()
@@ -151,7 +152,7 @@ def connect_to_device(serial=None, transports=sum(TRANSPORT)):
             except Exception as e:
                 logger.debug("Error connecting", exc_info=e)
 
-    if TRANSPORT.has(transports, TRANSPORT.FIDO):
+    if TRANSPORT.FIDO in transports:
         for dev in list_ctap_devices():
             try:
                 conn = dev.open_ctap_connection()

@@ -3,7 +3,6 @@ from __future__ import absolute_import
 from .core import (
     AID,
     INTERFACE,
-    BitflagEnum,
     bytes2int,
     NotSupportedError,
     BadResponseError,
@@ -16,7 +15,7 @@ from cryptography.hazmat.backends import default_backend
 
 import struct
 import re
-from enum import unique, IntEnum
+from enum import unique, IntEnum, IntFlag
 
 
 @unique
@@ -57,7 +56,7 @@ class CONFIG_SLOT(IntEnum):
     CHAL_HMAC_2 = 0x38  # Write 64 byte challenge to slot 2, get HMAC-SHA1 response
 
 
-class TKTFLAG(BitflagEnum):
+class TKTFLAG(IntFlag):
     # Yubikey 1 and above
     TAB_FIRST = 0x01  # Send TAB before first part
     APPEND_TAB1 = 0x02  # Send TAB after first part
@@ -77,7 +76,7 @@ class TKTFLAG(BitflagEnum):
     CHAL_RESP = 0x40  # Challenge-response enabled (both must be set)
 
 
-class CFGFLAG(BitflagEnum):
+class CFGFLAG(IntFlag):
     # Yubikey 1 and above
     SEND_REF = 0x01  # Send reference string (0..F) before data
     PACING_10MS = 0x04  # Add 10ms intra-key pacing
@@ -108,7 +107,7 @@ class CFGFLAG(BitflagEnum):
     CHAL_BTN_TRIG = 0x08  # Challenge-response operation requires button press
 
 
-class EXTFLAG(BitflagEnum):
+class EXTFLAG(IntFlag):
     SERIAL_BTN_VISIBLE = 0x01  # Serial number visible at startup (button press)
     SERIAL_USB_VISIBLE = 0x02  # Serial number visible in USB iSerial field
     SERIAL_API_VISIBLE = 0x04  # Serial number visible via API call
@@ -242,7 +241,7 @@ def _build_ndef_config(uri):
 
 
 @unique
-class CFGSTATE(BitflagEnum):
+class CFGSTATE(IntFlag):
     # Bits in touch_level
     SLOT1_VALID = 0x01  # configuration 1 is valid (from firmware 2.1)
     SLOT2_VALID = 0x02  # configuration 2 is valid (from firmware 2.1)

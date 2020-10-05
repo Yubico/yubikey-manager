@@ -8,6 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError
 from yubikit.piv import (
     PivSession,
@@ -19,7 +20,7 @@ from yubikit.piv import (
 )
 from ykman.piv import PivController
 from ykman.piv import KeypairMismatch
-from ykman.util import TRANSPORT, parse_certificates, parse_private_key
+from ykman.util import parse_certificates, parse_private_key
 from .framework import device_test_suite, yubikey_conditions
 from ..util import open_file
 

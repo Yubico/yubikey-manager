@@ -4,7 +4,6 @@ from .core import (
     bytes2int,
     int2bytes,
     Tlv,
-    BitflagEnum,
     AID,
     PID,
     INTERFACE,
@@ -19,7 +18,7 @@ from .core.smartcard import SmartCardConnection, SmartCardProtocol
 
 from fido2.ctap import CtapDevice
 
-from enum import IntEnum, unique
+from enum import IntEnum, IntFlag, unique
 from collections import namedtuple
 import re
 import struct
@@ -43,7 +42,7 @@ CTAP_WRITE_CONFIG = CTAP_VENDOR_FIRST + 3
 
 
 @unique
-class DEVICE_FLAG(BitflagEnum):
+class DEVICE_FLAG(IntFlag):
     REMOTE_WAKEUP = 0x40
     EJECT = 0x80
 
@@ -236,16 +235,13 @@ class Mode(object):
     def __init__(self, transports):
         try:
             self.code = self._modes.index(transports)
-            self._transports = transports
+            self._transports = TRANSPORT(transports)
         except ValueError:
             raise ValueError("Invalid mode!")
 
     @property
     def transports(self):
         return self._transports
-
-    def has_transport(self, transport):
-        return TRANSPORT.has(self._transports, transport)
 
     def __eq__(self, other):
         return other is not None and self.code == other.code
@@ -254,7 +250,7 @@ class Mode(object):
         return other is None or self.code != other.code
 
     def __str__(self):
-        return "+".join((t.name for t in TRANSPORT.split(self._transports)))
+        return "+".join(t.name for t in TRANSPORT if t in self.transports)
 
     @classmethod
     def from_code(cls, code):
@@ -310,11 +306,11 @@ class ManagementSession(object):
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
             usb_enabled = 0
-            if mode.has_transport(TRANSPORT.OTP):
+            if TRANSPORT.OTP in mode.transports:
                 usb_enabled |= APPLICATION.OTP
-            if mode.has_transport(TRANSPORT.CCID):
+            if TRANSPORT.CCID in mode.transports:
                 usb_enabled |= APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
-            if mode.has_transport(TRANSPORT.FIDO):
+            if TRANSPORT.FIDO in mode.transports:
                 usb_enabled |= APPLICATION.U2F | APPLICATION.FIDO2
             self.write_device_config(
                 DeviceConfig(

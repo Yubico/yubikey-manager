@@ -58,25 +58,25 @@ def _parse_mode_string(ctx, param, mode):
         pass  # Not a numeric mode, parse string
 
     try:
-        transports = set()
+        transports = TRANSPORT(0)
         if mode[0] in ["+", "-"]:
             info = ctx.obj["info"]
             usb_enabled = info.config.enabled_applications[INTERFACE.USB]
             my_mode = _mode_from_usb_enabled(usb_enabled)
-            transports.update(TRANSPORT.split(my_mode.transports))
+            transports |= my_mode.transports
             for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
                 transport = _parse_transport_string(mod[1:])
                 if mod.startswith("+"):
-                    transports.add(transport)
+                    transports |= transport
                 else:
-                    transports.discard(transport)
+                    transports ^= transport
         else:
             for t in filter(None, re.split(r"[+]+", mode.upper())):
-                transports.add(_parse_transport_string(t))
+                transports |= _parse_transport_string(t)
     except ValueError:
         ctx.fail("Invalid mode string: {}".format(mode))
 
-    return Mode(sum(transports))
+    return Mode(transports)
 
 
 def _mode_from_usb_enabled(usb_enabled):
@@ -88,14 +88,6 @@ def _mode_from_usb_enabled(usb_enabled):
     if (APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
         transports |= TRANSPORT.CCID
     return Mode(transports)
-
-
-def has_mode(info, mode):
-    usb_supported = info.supported_applications[INTERFACE.USB]
-
-    can_switch = info.version >= (3, 0, 0)
-
-    return can_switch and TRANSPORT.has(usb_supported, mode.transports)
 
 
 @click.command()
@@ -177,7 +169,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
                     "Mode switching is not supported on this YubiKey!".format(mode)
                 )
                 ctx.fail("Use --force to attempt to set it anyway.")
-            elif not TRANSPORT.has(transports_supported, mode.transports):
+            elif mode.transports not in transports_supported:
                 click.echo("Mode {} is not supported on this YubiKey!".format(mode))
                 ctx.fail("Use --force to attempt to set it anyway.")
             force or click.confirm(
@@ -200,5 +192,5 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     else:
         click.echo("Current connection mode is: {}".format(my_mode))
         mode = _mode_from_usb_enabled(info.supported_applications[INTERFACE.USB])
-        supported = ", ".join(t.name for t in TRANSPORT.split(mode.transports))
+        supported = ", ".join(t.name for t in TRANSPORT if t in mode.transports)
         click.echo("Supported USB interfaces are: {}".format(supported))

@@ -204,7 +204,7 @@ def info(ctx, check_fips):
     if transports:
         click.echo(
             "Enabled USB interfaces: {}".format(
-                ", ".join(t.name for t in TRANSPORT.split(transports))
+                ", ".join(t.name for t in TRANSPORT if t in TRANSPORT(transports))
             )
         )
     if INTERFACE.NFC in info.supported_applications:
