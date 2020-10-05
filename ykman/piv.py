@@ -68,12 +68,6 @@ OBJECT_ID_PIVMAN_DATA = 0x5FFF00
 OBJECT_ID_PIVMAN_PROTECTED_DATA = OBJECT_ID.PRINTED  # Use slot for printed information.
 
 
-class BadFormat(Exception):
-    def __init__(self, message, bad_value):
-        super(BadFormat, self).__init__(message)
-        self.bad_value = bad_value
-
-
 class InvalidCertificate(Exception):
     def __init__(self, slot):
         super(InvalidCertificate, self).__init__(
@@ -112,9 +106,7 @@ def _dummy_key(algorithm):
         return ec.generate_private_key(ec.SECP256R1(), default_backend())
     if algorithm == KEY_TYPE.ECCP384:
         return ec.generate_private_key(ec.SECP384R1(), default_backend())
-    raise UnsupportedAlgorithm(
-        "Unsupported algorithm: %s" % algorithm, algorithm_id=algorithm
-    )
+    raise ValueError("Invalid algorithm")
 
 
 def _derive_key(pin, salt):
@@ -296,11 +288,10 @@ class PivController(object):
                 )
 
         if len(new_key) != 24:
-            raise BadFormat(
+            raise ValueError(
                 "Management key must be exactly 24 bytes long, was: {}".format(
                     len(new_key)
-                ),
-                new_key,
+                )
             )
 
         if store_on_device or (not store_on_device and self.has_stored_key):

@@ -58,7 +58,7 @@ class KEY_TYPE(IntEnum):
                 return cls.ECCP256
             elif curve_name == "secp384r1":
                 return cls.ECCP384
-        raise ValueError("Unsupported key type: %s" % type(key), key=key)
+        raise ValueError("Unsupported key type: %s" % type(key))
 
 
 @unique
@@ -309,7 +309,9 @@ def _check_key_support(version, key_type, pin_policy, touch_policy):
         if touch_policy != TOUCH_POLICY.DEFAULT or pin_policy != PIN_POLICY.DEFAULT:
             raise NotSupportedError("PIN/Touch policy requires YubiKey 4 or later")
     if touch_policy == TOUCH_POLICY.CACHED and version < (4, 3, 0):
-        raise NotSupportedError("Cached touch policy requires YubiKey 4 or later")
+        raise NotSupportedError("Cached touch policy requires YubiKey 4.3 or later")
+    if key_type == KEY_TYPE.RSA1024 and (4, 4, 0) <= version < (4, 5, 0):
+        raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
 
 
 def _parse_device_public_key(key_type, encoded):

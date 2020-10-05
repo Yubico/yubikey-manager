@@ -50,7 +50,6 @@ from ..piv import (
     PivController,
     generate_random_management_key,
     KeypairMismatch,
-    UnsupportedAlgorithm,
 )
 from .util import (
     click_force_option,
@@ -62,6 +61,7 @@ from .util import (
 )
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.backends import default_backend
 import click
 import datetime
@@ -301,12 +301,7 @@ def generate_key(
     _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
 
-    try:
-        public_key = controller.generate_key(slot, algorithm, pin_policy, touch_policy)
-    except UnsupportedAlgorithm:
-        ctx.fail(
-            "Algorithm {} is not supported by this " "YubiKey.".format(algorithm.name)
-        )
+    public_key = controller.generate_key(slot, algorithm, pin_policy, touch_policy)
 
     key_encoding = format
     public_key_output.write(
@@ -443,9 +438,17 @@ def import_key(
             continue
         break
 
+    if isinstance(private_key, rsa.RSAPrivateKey):
+        _check_key_size(ctx, controller, private_key)
+    elif isinstance(private_key, ec.EllipticCurvePrivateKey):
+        curve = private_key.curve.name
+        if curve not in ("secp256r1", "secp384r1"):
+            ctx.fail("Unsupported EC curve for import: " + curve)
+    else:
+        ctx.fail("Unsupported key type for import")
+
     _check_pin_policy(ctx, controller, pin_policy)
     _check_touch_policy(ctx, controller, touch_policy)
-    _check_key_size(ctx, controller, private_key)
 
     controller.import_key(slot, private_key, pin_policy, touch_policy)
 
