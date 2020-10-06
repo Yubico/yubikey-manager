@@ -35,6 +35,7 @@ install_requires = [
     "cryptography",
     "pyopenssl",
     "fido2 >= 0.9",
+    "dataclasses;python_version<'3.7'",
 ]
 if sys.platform == "win32":
     install_requires.append("pypiwin32")

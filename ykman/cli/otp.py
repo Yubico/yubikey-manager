@@ -791,4 +791,4 @@ def settings(
         _failed_to_write_msg(ctx, e)
 
 
-otp.transports = TRANSPORT.OTP
+otp.transports = TRANSPORT.OTP  # type: ignore

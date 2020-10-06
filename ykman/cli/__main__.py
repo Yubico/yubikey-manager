@@ -262,7 +262,7 @@ def list_keys(ctx, serials, readers):
         else:
             click.echo(
                 "{} ({}) [{}]{}".format(
-                    get_name(pid.get_type(), dev_info),
+                    get_name(dev_info, pid.get_type()),
                     "%d.%d.%d" % dev_info.version if dev_info.version else "unknown",
                     pid.name.split("_", 1)[1].replace("_", "+"),
                     " Serial: {}".format(dev_info.serial) if dev_info.serial else "",

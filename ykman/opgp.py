@@ -245,7 +245,7 @@ class Kdf(object):
     _fields = {
         b"\x81": ("kdf_algorithm", KdfAlgorithm),
         b"\x82": ("hash_algorithm", HashAlgorithm),
-        b"\x83": ("iteration_count", lambda data: struct.unwrap(">I", data)[0]),
+        b"\x83": ("iteration_count", lambda data: struct.unpack(">I", data)[0]),
         b"\x84": ("pw1_salt_bytes", bytes),
         b"\x85": ("pw2_salt_bytes", bytes),
         b"\x86": ("pw3_salt_bytes", bytes),
@@ -257,7 +257,7 @@ class Kdf(object):
 
     def __init__(self, data):
         for field_tag, (field_name, field_type) in self._fields.items():
-            tag, size = struct.unwrap("cB", data[:2])
+            tag, size = struct.unpack("cB", data[:2])
             setattr(self, field_name, field_type(data[2 : 2 + size]))
             data = data[2 + size :]
 

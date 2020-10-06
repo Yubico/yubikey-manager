@@ -3,6 +3,7 @@ from __future__ import absolute_import
 from .core import (
     AID,
     INTERFACE,
+    Version,
     bytes2int,
     NotSupportedError,
     BadResponseError,
@@ -13,9 +14,14 @@ from .core.smartcard import SmartCardConnection, SmartCardProtocol
 from cryptography.hazmat.primitives.hashes import Hash, SHA1
 from cryptography.hazmat.backends import default_backend
 
+import abc
 import struct
-import re
+from threading import Event
 from enum import unique, IntEnum, IntFlag
+from typing import TypeVar, Optional, Union, Callable
+
+
+T = TypeVar("T")
 
 
 @unique
@@ -24,7 +30,7 @@ class SLOT(IntEnum):
     TWO = 2
 
     @staticmethod
-    def map(slot, one, two):
+    def map(slot: "SLOT", one: T, two: T) -> T:
         if slot == 1:
             return one
         elif slot == 2:
@@ -156,6 +162,7 @@ HMAC_CHALLENGE_SIZE = 64
 HMAC_RESPONSE_SIZE = 20
 SCAN_CODES_SIZE = FIXED_SIZE + UID_SIZE + KEY_SIZE
 
+SHA1_BLOCK_SIZE = 64
 
 DEFAULT_NDEF_URI = "https://my.yubico.com/yk/#"
 
@@ -250,10 +257,9 @@ class CFGSTATE(IntFlag):
     LED_INV = 0x10  # LED behavior is inverted (EXTFLAG_LED_INV mirror)
 
 
-def _shorten_hmac_key(key):
-    h = SHA1()  # nosec
-    if len(key) > h.block_size:
-        h = Hash(h, default_backend())
+def _shorten_hmac_key(key: bytes) -> bytes:
+    if len(key) > SHA1_BLOCK_SIZE:
+        h = Hash(SHA1(), default_backend())  # nosec
         h.update(key)
         key = h.finalize()
     elif len(key) > HMAC_KEY_SIZE:
@@ -263,7 +269,10 @@ def _shorten_hmac_key(key):
     return key
 
 
-class SlotConfiguration(object):
+Cfg = TypeVar("Cfg", bound="SlotConfiguration")
+
+
+class SlotConfiguration:
     def __init__(self):
         self._fixed = b""
         self._uid = b"\0" * UID_SIZE
@@ -273,15 +282,15 @@ class SlotConfiguration(object):
         self._update_flags(EXTFLAG.SERIAL_API_VISIBLE, True)
         self._update_flags(EXTFLAG.ALLOW_UPDATE, True)
 
-    def _update_flags(self, flag, value):
+    def _update_flags(self, flag: IntFlag, value: bool) -> None:
         flag_key = type(flag)
         flags = self._flags.get(flag_key, 0)
         self._flags[flag_key] = flags | flag if value else flags & ~flag
 
-    def is_supported_by(self, version):
+    def is_supported_by(self, version: Version) -> bool:
         return True
 
-    def get_config(self, acc_code=None):
+    def get_config(self, acc_code: Optional[bytes] = None) -> bytes:
         return _build_config(
             self._fixed,
             self._uid,
@@ -292,33 +301,33 @@ class SlotConfiguration(object):
             acc_code,
         )
 
-    def serial_api_visible(self, value):
+    def serial_api_visible(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.SERIAL_API_VISIBLE, value)
         return self
 
-    def serial_usb_visible(self, value):
+    def serial_usb_visible(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.SERIAL_USB_VISIBLE, value)
         return self
 
-    def allow_update(self, value):
+    def allow_update(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.ALLOW_UPDATE, value)
         return self
 
-    def dormant(self, value):
+    def dormant(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.DORMANT, value)
         return self
 
-    def invert_led(self, value):
+    def invert_led(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.LED_INV, value)
         return self
 
-    def protect_slot2(self, value):
+    def protect_slot2(self: Cfg, value: bool) -> Cfg:
         self._update_flags(TKTFLAG.PROTECT_CFG2, value)
         return self
 
 
 class HmacSha1SlotConfiguration(SlotConfiguration):
-    def __init__(self, key):
+    def __init__(self, key: bytes):
         super(HmacSha1SlotConfiguration, self).__init__()
 
         key = _shorten_hmac_key(key)
@@ -334,11 +343,11 @@ class HmacSha1SlotConfiguration(SlotConfiguration):
     def is_supported_by(self, version):
         return version >= (2, 2, 0)
 
-    def require_touch(self, value):
+    def require_touch(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.CHAL_BTN_TRIG, value)
         return self
 
-    def lt64(self, value):
+    def lt64(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.HMAC_LT64, value)
         return self
 
@@ -349,26 +358,26 @@ class KeyboardSlotConfiguration(SlotConfiguration):
         self._update_flags(TKTFLAG.APPEND_CR, True)
         self._update_flags(EXTFLAG.FAST_TRIG, True)
 
-    def append_cr(self, value):
+    def append_cr(self: Cfg, value: bool) -> Cfg:
         self._update_flags(TKTFLAG.APPEND_CR, value)
         return self
 
-    def fast_trigger(self, value):
+    def fast_trigger(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.FAST_TRIG, value)
         return self
 
-    def pacing(self, pacing_10ms=False, pacing_20ms=False):
+    def pacing(self: Cfg, pacing_10ms: bool = False, pacing_20ms: bool = False) -> Cfg:
         self._update_flags(CFGFLAG.PACING_10MS, pacing_10ms)
         self._update_flags(CFGFLAG.PACING_20MS, pacing_20ms)
         return self
 
-    def use_numeric(self, value):
+    def use_numeric(self: Cfg, value: bool) -> Cfg:
         self._update_flags(EXTFLAG.USE_NUMERIC_KEYPAD, value)
         return self
 
 
 class HotpSlotConfiguration(KeyboardSlotConfiguration):
-    def __init__(self, key):
+    def __init__(self, key: bytes):
         super(HotpSlotConfiguration, self).__init__()
 
         key = _shorten_hmac_key(key)
@@ -383,11 +392,16 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
     def is_supported_by(self, version):
         return version >= (2, 2, 0)
 
-    def digits8(self, value):
+    def digits8(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.OATH_HOTP8, value)
         return self
 
-    def token_id(self, token_id, fixed_modhex1=False, fixed_modhex2=True):
+    def token_id(
+        self: Cfg,
+        token_id: bytes,
+        fixed_modhex1: bool = False,
+        fixed_modhex2: bool = True,
+    ) -> Cfg:
         if len(token_id) > FIXED_SIZE:
             raise ValueError("token_id must be <= {} bytes".format(FIXED_SIZE))
 
@@ -396,7 +410,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
         self._update_flags(CFGFLAG.OATH_FIXED_MODHEX2, fixed_modhex2)
         return self
 
-    def imf(self, imf):
+    def imf(self: Cfg, imf: int) -> Cfg:
         if not (imf % 16 == 0 or 0 <= imf <= 0xFFFF0):
             raise ValueError(
                 "imf should be between {} and {}, evenly dividable by 16".format(
@@ -408,7 +422,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
 
 
 class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
-    def __init__(self, scan_codes):
+    def __init__(self, scan_codes: bytes):
         super(StaticPasswordSlotConfiguration, self).__init__()
 
         if len(scan_codes) > SCAN_CODES_SIZE:
@@ -427,7 +441,7 @@ class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
 
 
 class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
-    def __init__(self, fixed, uid, key):
+    def __init__(self, fixed: bytes, uid: bytes, key: bytes):
         super(YubiOtpSlotConfiguration, self).__init__()
 
         if len(fixed) > FIXED_SIZE:
@@ -443,24 +457,29 @@ class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
         self._uid = uid
         self._key = key
 
-    def tabs(self, before=False, after_first=False, after_second=False):
+    def tabs(
+        self: Cfg,
+        before: bool = False,
+        after_first: bool = False,
+        after_second: bool = False,
+    ) -> Cfg:
         self._update_flags(TKTFLAG.TAB_FIRST, before)
         self._update_flags(TKTFLAG.APPEND_TAB1, after_first)
         self._update_flags(TKTFLAG.APPEND_TAB2, after_second)
         return self
 
-    def delay(self, after_first=False, after_second=False):
+    def delay(self: Cfg, after_first: bool = False, after_second: bool = False) -> Cfg:
         self._update_flags(TKTFLAG.APPEND_DELAY1, after_first)
         self._update_flags(TKTFLAG.APPEND_DELAY2, after_second)
         return self
 
-    def send_reference(self, value):
+    def send_reference(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.SEND_REF, value)
         return self
 
 
 class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
-    def __init__(self, fixed, uid, key):
+    def __init__(self, fixed: bytes, uid: bytes, key: bytes):
         super(StaticTicketSlotConfiguration, self).__init__()
 
         if len(fixed) > FIXED_SIZE:
@@ -478,17 +497,19 @@ class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
 
         self._update_flags(CFGFLAG.STATIC_TICKET, True)
 
-    def short_ticket(self, value):
+    def short_ticket(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.SHORT_TICKET, value)
         return self
 
-    def strong_password(self, upper_case=False, digit=False, special=False):
+    def strong_password(
+        self: Cfg, upper_case: bool = False, digit: bool = False, special: bool = False
+    ) -> Cfg:
         self._update_flags(CFGFLAG.STRONG_PW1, upper_case)
         self._update_flags(CFGFLAG.STRONG_PW2, digit or special)
         self._update_flags(CFGFLAG.SEND_REF, special)
         return self
 
-    def manual_update(self, value):
+    def manual_update(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.MAN_UPDATE, value)
         return self
 
@@ -514,41 +535,66 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
                 raise ValueError("Unsupported CFG flag for update")
         super(UpdateConfiguration, self)._update_flags(flag, value)
 
-    def protect_slot2(self, value):
+    def protect_slot2(self: Cfg, value):
         raise ValueError("protect_slot2 cannot be applied to UpdateConfiguration")
 
-    def tabs(self, before=False, after_first=False, after_second=False):
+    def tabs(
+        self: Cfg,
+        before: bool = False,
+        after_first: bool = False,
+        after_second: bool = False,
+    ) -> Cfg:
         self._update_flags(TKTFLAG.TAB_FIRST, before)
         self._update_flags(TKTFLAG.APPEND_TAB1, after_first)
         self._update_flags(TKTFLAG.APPEND_TAB2, after_second)
         return self
 
-    def delay(self, after_first=False, after_second=False):
+    def delay(self: Cfg, after_first: bool = False, after_second: bool = False) -> Cfg:
         self._update_flags(TKTFLAG.APPEND_DELAY1, after_first)
         self._update_flags(TKTFLAG.APPEND_DELAY2, after_second)
         return self
 
 
-class ConfigState(object):
-    def __init__(self, version, touch_level):
+class ConfigState:
+    def __init__(self, version: Version, touch_level: int):
         self.version = version
         self.flags = sum(CFGSTATE) & touch_level
 
-    def is_configured(self, slot):
+    def is_configured(self, slot: SLOT) -> bool:
         if self.version < (2, 1, 0):
             raise NotSupportedError("Configuration state requires YubiKey 2.1 or later")
         return self.flags & (CFGSTATE.SLOT1_VALID, CFGSTATE.SLOT2_VALID)[slot - 1] != 0
 
-    def requires_touch(self, slot):
+    def requires_touch(self, slot: SLOT) -> bool:
         if self.version < (3, 0, 0):
             raise NotSupportedError("Touch state requires YubiKey 3.0 or later")
         return self.flags & (CFGSTATE.SLOT1_TOUCH, CFGSTATE.SLOT2_TOUCH)[slot - 1] != 0
 
-    def is_led_inverted(self):
+    def is_led_inverted(self) -> bool:
         return self.flags & CFGSTATE.LED_INV != 0
 
 
-class _YubiOtpOtpBackend(object):
+class _Backend(abc.ABC):
+    version: Version
+
+    def close(self) -> None:
+        ...
+
+    def write_update(self, slot: CONFIG_SLOT, data: bytes) -> None:
+        ...
+
+    def send_and_receive(
+        self,
+        slot: CONFIG_SLOT,
+        data: bytes,
+        expected_len: int,
+        event: Optional[Event] = None,
+        on_keepalive: Optional[Callable[[int], None]] = None,
+    ) -> bytes:
+        ...
+
+
+class _YubiOtpOtpBackend(_Backend):
     def __init__(self, protocol):
         self.protocol = protocol
 
@@ -568,7 +614,7 @@ class _YubiOtpOtpBackend(object):
 INS_CONFIG = 0x01
 
 
-class _YubiOtpSmartCardBackend(object):
+class _YubiOtpSmartCardBackend(_Backend):
     def __init__(self, protocol):
         self.protocol = protocol
 
@@ -585,58 +631,50 @@ class _YubiOtpSmartCardBackend(object):
         raise BadResponseError("Unexpected response length")
 
 
-MGMT_VERSION_PATTERN = re.compile(r"\b\d+.\d.\d\b")
-
-
-class YubiOtpSession(object):
-    def __init__(self, connection):
+class YubiOtpSession:
+    def __init__(self, connection: Union[OtpConnection, SmartCardConnection]):
         if isinstance(connection, OtpConnection):
-            protocol = OtpProtocol(connection)
-            self._status = protocol.read_status()
-            self._version = tuple(self._status[:3])
-            self.backend = _YubiOtpOtpBackend(protocol)
+            otp_protocol = OtpProtocol(connection)
+            self._status = otp_protocol.read_status()
+            self._version = Version.from_bytes(self._status)
+            self.backend: _Backend = _YubiOtpOtpBackend(otp_protocol)
         elif isinstance(connection, SmartCardConnection):
-            protocol = SmartCardProtocol(connection)
+            card_protocol = SmartCardProtocol(connection)
             mgmt_version = None
             if connection.interface == INTERFACE.NFC:
                 # This version is more reliable over NFC
                 try:
-                    protocol.select(AID.MGMT)
-                    select_str = protocol.select(AID.MGMT).decode()
-                    mgmt_version = tuple(
-                        int(d)
-                        for d in MGMT_VERSION_PATTERN.search(select_str)
-                        .group()
-                        .split(".")
-                    )
+                    card_protocol.select(AID.MGMT)
+                    select_str = card_protocol.select(AID.MGMT).decode()
+                    mgmt_version = Version.from_string(select_str)
                 except ApplicationNotAvailableError:
                     pass  # Not available (probably NEO), get version from status
 
-            self._status = protocol.select(AID.OTP)
-            otp_version = tuple(self._status[:3])
+            self._status = card_protocol.select(AID.OTP)
+            otp_version = Version.from_bytes(self._status)
             if mgmt_version and mgmt_version[0] == 3:
                 # NEO reports the highest of these two
                 self._version = max(mgmt_version, otp_version)
             else:
                 self._version = mgmt_version or otp_version
-            protocol.enable_touch_workaround(self._version)
-            self.backend = _YubiOtpSmartCardBackend(protocol)
+            card_protocol.enable_touch_workaround(self._version)
+            self.backend = _YubiOtpSmartCardBackend(card_protocol)
         else:
             raise TypeError("Unsupported connection type")
 
-    def close(self):
+    def close(self) -> None:
         self.backend.close()
 
     @property
-    def version(self):
+    def version(self) -> Version:
         return self._version
 
-    def get_serial(self):
+    def get_serial(self) -> int:
         return bytes2int(
             self.backend.send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4)
         )
 
-    def get_config_state(self):
+    def get_config_state(self) -> ConfigState:
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
 
     def _write_config(self, slot, config, cur_acc_code):
@@ -644,7 +682,13 @@ class YubiOtpSession(object):
             slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
         )
 
-    def put_configuration(self, slot, configuration, acc_code=None, cur_acc_code=None):
+    def put_configuration(
+        self,
+        slot: SLOT,
+        configuration: SlotConfiguration,
+        acc_code: Optional[bytes] = None,
+        cur_acc_code: Optional[bytes] = None,
+    ) -> None:
         if not configuration.is_supported_by(self.version):
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
@@ -656,8 +700,12 @@ class YubiOtpSession(object):
         )
 
     def update_configuration(
-        self, slot, configuration, acc_code=None, cur_acc_code=None
-    ):
+        self,
+        slot: SLOT,
+        configuration: SlotConfiguration,
+        acc_code: Optional[bytes] = None,
+        cur_acc_code: Optional[bytes] = None,
+    ) -> None:
         if not configuration.is_supported_by(self.version):
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
@@ -673,24 +721,35 @@ class YubiOtpSession(object):
             cur_acc_code,
         )
 
-    def swap_slots(self):
+    def swap_slots(self) -> None:
         self._write_config(CONFIG_SLOT.SWAP, b"", None)
 
-    def delete_slot(self, slot, cur_acc_code=None):
+    def delete_slot(self, slot: SLOT, cur_acc_code: Optional[bytes] = None) -> None:
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             b"\0" * CONFIG_SIZE,
             cur_acc_code,
         )
 
-    def set_ndef_configuration(self, slot, uri=None, cur_acc_code=None):
+    def set_ndef_configuration(
+        self,
+        slot: SLOT,
+        uri: Optional[str] = None,
+        cur_acc_code: Optional[bytes] = None,
+    ) -> None:
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
             _build_ndef_config(uri),
             cur_acc_code,
         )
 
-    def calculate_hmac_sha1(self, slot, challenge, event=None, on_keepalive=None):
+    def calculate_hmac_sha1(
+        self,
+        slot: SLOT,
+        challenge: bytes,
+        event: Optional[Event] = None,
+        on_keepalive: Optional[Callable[[int], None]] = None,
+    ) -> bytes:
         if self.version < (2, 2, 0):
             raise NotSupportedError("This operation requires YubiKey 2.2 or later")
 

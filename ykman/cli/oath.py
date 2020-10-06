@@ -291,7 +291,7 @@ def uri(ctx, uri, touch, force):
     # Steam is a special case where we allow the otpauth
     # URI to contain a 'digits' value of '5'.
     if data.digits == 5 and is_steam(data):
-        data = data._replace(digits=6)
+        data.digits = 6
 
     _add_cred(ctx, data, touch, force)
 
@@ -635,4 +635,4 @@ def _error_multiple_hits(ctx, hits):
     ctx.exit(1)
 
 
-oath.transports = TRANSPORT.CCID
+oath.transports = TRANSPORT.CCID  # type: ignore

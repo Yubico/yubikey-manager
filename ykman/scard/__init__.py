@@ -41,11 +41,10 @@ class ScardDevice(YubiKeyDevice):
     """YubiKey Smart card device"""
 
     def __init__(self, reader):
-        super(ScardDevice, self).__init__(reader.name)
+        super(ScardDevice, self).__init__(reader.name, _pid_from_name(reader.name))
         self.reader = reader
-        self.pid = _pid_from_name(reader.name)
 
-    def open_smartcard_connection(self):
+    def open_smartcard_connection(self) -> SmartCardConnection:
         """Open a SmartCard connection"""
         try:
             return ScardSmartCardConnection(self.reader.createConnection())
@@ -55,13 +54,13 @@ class ScardDevice(YubiKeyDevice):
             raise e
 
     @property
-    def has_fido(self):
+    def has_fido(self) -> bool:
         # FIDO is only available from this device if we're connected over NFC.
         return YK_READER_NAME not in self.reader.name.lower()
 
-    def open_ctap_connection(self):
+    def open_ctap_connection(self) -> CtapPcscDevice:
         """Open a python-fido2 CtapDevice"""
-        return CtapPcscConnection(self.reader.createConnection(), self.reader.name)
+        return CtapPcscDevice(self.reader.createConnection(), self.reader.name)
 
 
 class ScardSmartCardConnection(SmartCardConnection):
@@ -84,14 +83,6 @@ class ScardSmartCardConnection(SmartCardConnection):
         data, sw1, sw2 = self.connection.transmit(list(apdu))
         logger.debug("RECV: %s SW=%02x%02x", bytes(data).hex(), sw1, sw2)
         return bytes(data), sw1 << 8 | sw2
-
-
-class CtapPcscConnection(CtapPcscDevice):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, value, traceback):
-        self.close()
 
 
 def kill_scdaemon():

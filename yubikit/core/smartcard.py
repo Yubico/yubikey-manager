@@ -5,33 +5,25 @@ import struct
 from time import time
 from enum import IntEnum, unique
 
-from . import INTERFACE, CommandError, ApplicationNotAvailableError
+from . import Version, INTERFACE, Connection, CommandError, ApplicationNotAvailableError
+from typing import Tuple
 
 
-class SmartCardConnection(abc.ABC):
-    def close(self):
-        """Close the device, releasing any held resources."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, value, traceback):
-        self.close()
-
+class SmartCardConnection(Connection):
     @property
     @abc.abstractmethod
-    def interface(self):
+    def interface(self) -> INTERFACE:
         """Get the interface type of the connection (USB or NFC)"""
 
     @abc.abstractmethod
-    def send_and_receive(self, apdu):
+    def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
         """Sends a command APDU and returns the response"""
 
 
 class ApduError(CommandError):
     """Thrown when an APDU response has the wrong SW code"""
 
-    def __init__(self, data, sw):
+    def __init__(self, data: bytes, sw: int):
         self.data = data
         self.sw = sw
 
@@ -78,22 +70,26 @@ def _encode_apdu(cla, ins, p1, p2, data=b""):
     return buf + data
 
 
-class SmartCardProtocol(object):
-    def __init__(self, smartcard_connection, ins_send_remaining=INS_SEND_REMAINING):
+class SmartCardProtocol:
+    def __init__(
+        self,
+        smartcard_connection: SmartCardConnection,
+        ins_send_remaining: int = INS_SEND_REMAINING,
+    ):
         self.connection = smartcard_connection
         self._ins_send_remaining = ins_send_remaining
         self._touch_workaround = False
-        self._last_long_resp = 0
+        self._last_long_resp = 0.0
 
-    def close(self):
+    def close(self) -> None:
         self.connection.close()
 
-    def enable_touch_workaround(self, version):
+    def enable_touch_workaround(self, version: Version) -> None:
         self._touch_workaround = self.connection.interface == INTERFACE.USB and (
             (4, 2, 0,) <= version <= (4, 2, 6)
         )
 
-    def select(self, aid):
+    def select(self, aid: bytes) -> bytes:
         try:
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
         except ApduError as e:
@@ -101,7 +97,9 @@ class SmartCardProtocol(object):
                 raise ApplicationNotAvailableError()
             raise
 
-    def send_apdu(self, cla, ins, p1, p2, data=b""):
+    def send_apdu(
+        self, cla: int, ins: int, p1: int, p2: int, data: bytes = b""
+    ) -> bytes:
         if (
             self._touch_workaround
             and self._last_long_resp > 0

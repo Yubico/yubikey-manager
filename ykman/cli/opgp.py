@@ -418,4 +418,4 @@ def import_attestation_key(ctx, private_key, admin_pin):
         ctx.fail("Failed to import attestation key.")
 
 
-openpgp.transports = TRANSPORT.CCID
+openpgp.transports = TRANSPORT.CCID  # type: ignore

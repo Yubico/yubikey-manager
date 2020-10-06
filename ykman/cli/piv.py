@@ -1085,4 +1085,4 @@ def _check_touch_policy(ctx, controller, touch_policy):
             )
 
 
-piv.transports = TRANSPORT.CCID
+piv.transports = TRANSPORT.CCID  # type: ignore

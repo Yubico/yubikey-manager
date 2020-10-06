@@ -27,8 +27,29 @@
 
 from __future__ import absolute_import, unicode_literals
 
+from collections import namedtuple
 from enum import Enum, IntEnum, IntFlag, unique, auto
+from typing import List, Dict, Tuple, TypeVar, Optional, Type, Hashable
+import re
 import abc
+
+
+_VERSION_STRING_PATTERN = re.compile(r"\b(?P<major>\d+).(?P<minor>\d).(?P<patch>\d)\b")
+
+
+class Version(namedtuple("Version", ["major", "minor", "patch"])):
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "Version":
+        return cls(*data)
+
+    @classmethod
+    def from_string(cls, data: str) -> "Version":
+        m = _VERSION_STRING_PATTERN.search(data)
+        if m:
+            return cls(
+                int(m.group("major")), int(m.group("minor")), int(m.group("patch")),
+            )
+        raise ValueError("No version found in string")
 
 
 class INTERFACE(Enum):
@@ -97,7 +118,7 @@ class FORM_FACTOR(IntEnum):
             return "Unknown"
 
     @classmethod
-    def from_code(cls, code):
+    def from_code(cls, code: int) -> "FORM_FACTOR":
         if code and not isinstance(code, int):
             raise ValueError("Invalid form factor code: {}".format(code))
         return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
@@ -111,7 +132,7 @@ class YUBIKEY(Enum):
     YKP = "YubiKey Plus"
     YK4 = "YubiKey 4"
 
-    def get_pid(self, transports):
+    def get_pid(self, transports: TRANSPORT) -> "PID":
         suffix = "_".join(t.name for t in TRANSPORT if t in TRANSPORT(transports))
         return PID[self.name + "_" + suffix]
 
@@ -146,11 +167,17 @@ class PID(IntEnum):
 class YubiKeyDevice(abc.ABC):
     """YubiKey device reference"""
 
-    def __init__(self, fingerprint):
+    def __init__(self, fingerprint: Hashable, pid: Optional[PID]):
         self._fingerprint = fingerprint
+        self._pid = pid
 
     @property
-    def fingerprint(self):
+    def pid(self) -> Optional[PID]:
+        """Return the PID of the YubiKey, if available."""
+        return self._pid
+
+    @property
+    def fingerprint(self) -> Hashable:
         """Used to identify that device references from different enumerations represent
         the same physical YubiKey. This fingerprint is not stable between sessions, or
         after un-plugging, and re-plugging a device."""
@@ -159,14 +186,28 @@ class YubiKeyDevice(abc.ABC):
     def __eq__(self, other):
         return isinstance(other, type(self)) and self.fingerprint == other.fingerprint
 
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
     def __hash__(self):
         return hash(self.fingerprint)
 
     def __repr__(self):
-        return "%s(fingerprint=%r)" % (type(self).__name__, self.fingerprint,)
+        return "%s(pid=%04x, fingerprint=%r)" % (
+            type(self).__name__,
+            self.pid,
+            self.fingerprint,
+        )
+
+
+class Connection(abc.ABC):
+    """A connection to a YubiKey"""
+
+    def close(self) -> None:
+        """Close the device, releasing any held resources."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        self.close()
 
 
 class CommandError(Exception):
@@ -189,7 +230,7 @@ class NotSupportedError(ValueError):
     """Attempting an action that is not supported on this YubiKey"""
 
 
-def int2bytes(value, min_len=0):
+def int2bytes(value: int, min_len: int = 0) -> bytes:
     buf = []
     while value > 0xFF:
         buf.append(value & 0xFF)
@@ -198,7 +239,7 @@ def int2bytes(value, min_len=0):
     return bytes(reversed(buf)).rjust(min_len, b"\0")
 
 
-def bytes2int(data):
+def bytes2int(data: bytes) -> int:
     return int.from_bytes(data, "big")
 
 
@@ -222,18 +263,21 @@ def _tlv_parse_length(data, offs=0):
     return ln, n_bytes + 1
 
 
+T_Tlv = TypeVar("T_Tlv", bound="Tlv")
+
+
 class Tlv(bytes):
     @property
-    def tag(self):
+    def tag(self) -> int:
         return _tlv_parse_tag(self)[0]
 
     @property
-    def length(self):
+    def length(self) -> int:
         _, offs = _tlv_parse_tag(self)
         return _tlv_parse_length(self, offs)[0]
 
     @property
-    def value(self):
+    def value(self) -> bytes:
         ln = self.length
         if ln == 0:
             return b""
@@ -283,12 +327,12 @@ class Tlv(bytes):
         return super(Tlv, cls).__new__(cls, bytes(data))
 
     @classmethod
-    def parse_from(cls, data):
+    def parse_from(cls: Type[T_Tlv], data: bytes) -> Tuple[T_Tlv, bytes]:
         tlv = cls(data)
         return tlv, data[len(tlv) :]
 
     @classmethod
-    def parse_list(cls, data):
+    def parse_list(cls: Type[T_Tlv], data: bytes) -> List[T_Tlv]:
         res = []
         while data:
             tlv, data = cls.parse_from(data)
@@ -296,11 +340,11 @@ class Tlv(bytes):
         return res
 
     @classmethod
-    def parse_dict(cls, data):
+    def parse_dict(cls: Type[T_Tlv], data: bytes) -> Dict[int, bytes]:
         return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
 
     @classmethod
-    def unwrap(cls, tag, data):
+    def unwrap(cls: Type[T_Tlv], tag: int, data: bytes) -> bytes:
         tlv = cls(data)
         if tlv.tag != tag:
             raise ValueError("Wrong tag, got %02x expected %02x" % (tlv.tag, tag))

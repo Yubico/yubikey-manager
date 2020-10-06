@@ -1,24 +1,25 @@
 from .core import (
     int2bytes,
     bytes2int,
+    Version,
     Tlv,
     AID,
     NotSupportedError,
     BadResponseError,
 )
-from .core.smartcard import SmartCardProtocol
+from .core.smartcard import SmartCardConnection, SmartCardProtocol
 
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hmac, hashes
-from cryptography.hazmat.primitives import constant_time
+from cryptography.hazmat.primitives import hmac, hashes, constant_time
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from urllib.parse import unquote, urlparse, parse_qs
 from functools import total_ordering
 from enum import IntEnum, unique
-from collections import namedtuple
+from dataclasses import dataclass
 from base64 import b64encode, b32decode
 from time import time
+from typing import Optional, List, Mapping
 
 import struct
 import os
@@ -57,6 +58,7 @@ MASK_TYPE = 0xF0
 
 DEFAULT_PERIOD = 30
 DEFAULT_DIGITS = 6
+DEFAULT_IMF = 0
 CHALLENGE_LEN = 8
 HMAC_MINIMUM_KEY_SIZE = 14
 
@@ -77,47 +79,49 @@ class OATH_TYPE(IntEnum):
 PROP_REQUIRE_TOUCH = 0x02
 
 
-def parse_b32_key(key):
+def parse_b32_key(key: str):
     key = key.upper().replace(" ", "")
     key += "=" * (-len(key) % 8)  # Support unpadded
     return b32decode(key)
 
 
-class OathApplicationInfo(namedtuple("OathApplicationInfo", ["version", "device_id"])):
-    __slots__ = ()
+@dataclass
+class OathApplicationInfo:
+    version: Version
+    device_id: str
 
 
 def _parse_select(response):
     data = Tlv.parse_dict(response)
     return (
-        OathApplicationInfo(tuple(data[TAG_VERSION]), _get_device_id(data[TAG_NAME])),
+        OathApplicationInfo(
+            Version.from_bytes(data[TAG_VERSION]), _get_device_id(data[TAG_NAME])
+        ),
         data.get(TAG_NAME),
         data.get(TAG_CHALLENGE),
     )
 
 
-class CredentialData(
-    namedtuple(
-        "CredentialData",
-        [
-            "name",
-            "oath_type",
-            "hash_algorithm",
-            "secret",
-            "digits",
-            "period",
-            "counter",
-            "issuer",
-        ],
-    )
-):
-    __slots__ = ()
+@dataclass
+class CredentialData:
+    name: str
+    oath_type: OATH_TYPE
+    hash_algorithm: HASH_ALGORITHM
+    secret: bytes
+    digits: int = DEFAULT_DIGITS
+    period: int = DEFAULT_PERIOD
+    counter: int = DEFAULT_IMF
+    issuer: Optional[str] = None
 
     @classmethod
-    def parse_uri(cls, uri):
+    def parse_uri(cls, uri: str) -> "CredentialData":
         parsed = urlparse(uri.strip())
         if parsed.scheme != "otpauth":
             raise ValueError("Invalid URI scheme")
+
+        if parsed.hostname is None:
+            raise ValueError("Missing OATH type")
+        oath_type = OATH_TYPE[parsed.hostname.upper()]
 
         params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
         issuer = None
@@ -127,41 +131,41 @@ class CredentialData(
 
         return cls(
             name=name,
-            oath_type=OATH_TYPE[parsed.hostname.upper()],
+            oath_type=oath_type,
             hash_algorithm=HASH_ALGORITHM[params.get("algorithm", "SHA1").upper()],
             secret=parse_b32_key(params["secret"]),
             digits=int(params.get("digits", DEFAULT_DIGITS)),
             period=int(params.get("period", DEFAULT_PERIOD)),
-            counter=int(params.get("counter", 0)),
+            counter=int(params.get("counter", DEFAULT_IMF)),
             issuer=params.get("issuer", issuer),
         )
 
-    def get_id(self):
+    def get_id(self) -> bytes:
         return _format_cred_id(self.issuer, self.name, self.oath_type, self.period)
 
 
-class Code(namedtuple("Code", ["value", "valid_from", "valid_to"])):
-    __slots__ = ()
+@dataclass
+class Code:
+    value: str
+    valid_from: int
+    valid_to: int
 
 
 @total_ordering
-class _CredentialOrdering(object):
-    __slots__ = ()
+@dataclass(order=False, frozen=True)
+class Credential:
+    device_id: str
+    id: bytes
+    issuer: Optional[str]
+    name: str
+    oath_type: OATH_TYPE
+    period: int
+    touch_required: Optional[bool]
 
     def __lt__(self, other):
         a = ((self.issuer or self.name).lower(), self.name.lower())
         b = ((other.issuer or other.name).lower(), other.name.lower())
         return a < b
-
-
-class Credential(
-    _CredentialOrdering,
-    namedtuple(
-        "Credential",
-        ["device_id", "id", "issuer", "name", "oath_type", "period", "touch_required"],
-    ),
-):
-    __slots__ = ()
 
     def __eq__(self, other):
         return (
@@ -169,9 +173,6 @@ class Credential(
             and self.device_id == other.device_id
             and self.id == other.id
         )
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
 
     def __hash__(self):
         return hash((self.device_id, self.id))
@@ -258,8 +259,8 @@ def _format_code(credential, timestamp, truncated):
     )
 
 
-class OathSession(object):
-    def __init__(self, connection):
+class OathSession:
+    def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
         self._app_info, self._salt, self._challenge = _parse_select(
             self.protocol.select(AID.OATH)
@@ -267,23 +268,23 @@ class OathSession(object):
         self.protocol.enable_touch_workaround(self.info.version)
 
     @property
-    def info(self):
+    def info(self) -> OathApplicationInfo:
         return self._app_info
 
     @property
-    def locked(self):
+    def locked(self) -> bool:
         return self._challenge is not None
 
-    def reset(self):
+    def reset(self) -> None:
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         self._app_info, self._salt, self._challenge = _parse_select(
             self.protocol.select(AID.OATH)
         )
 
-    def derive_key(self, password):
+    def derive_key(self, password: str) -> bytes:
         return _derive_key(self._salt, password)
 
-    def validate(self, key):
+    def validate(self, key: bytes) -> None:
         response = _hmac_sha1(key, self._challenge)
         challenge = os.urandom(8)
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
@@ -295,7 +296,7 @@ class OathSession(object):
             )
         self._challenge = None
 
-    def set_key(self, key):
+    def set_key(self, key: bytes) -> None:
         challenge = os.urandom(8)
         response = _hmac_sha1(key, challenge)
         self.protocol.send_apdu(
@@ -310,10 +311,12 @@ class OathSession(object):
             ),
         )
 
-    def unset_key(self):
+    def unset_key(self) -> None:
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
 
-    def put_credential(self, credential_data, touch_required=False):
+    def put_credential(
+        self, credential_data: CredentialData, touch_required: bool = False
+    ) -> Credential:
         d = credential_data
         cred_id = d.get_id()
         secret = _hmac_shorten_key(d.secret, d.hash_algorithm)
@@ -340,7 +343,9 @@ class OathSession(object):
             touch_required,
         )
 
-    def rename_credential(self, credential_id, name, issuer=None):
+    def rename_credential(
+        self, credential_id: bytes, name: str, issuer: Optional[str] = None
+    ) -> bytes:
         if self.info.version < (5, 3, 1):
             raise NotSupportedError("Operation requires YubiKey 5.3.1 or later")
         issuer, name, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
@@ -350,7 +355,7 @@ class OathSession(object):
         )
         return new_id
 
-    def list_credentials(self):
+    def list_credentials(self) -> List[Credential]:
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
             data = Tlv.unwrap(TAG_NAME_LIST, tlv)
@@ -364,7 +369,7 @@ class OathSession(object):
             )
         return creds
 
-    def calculate(self, credential_id, challenge):
+    def calculate(self, credential_id: bytes, challenge: bytes) -> bytes:
         resp = Tlv.unwrap(
             TAG_RESPONSE,
             self.protocol.send_apdu(
@@ -377,10 +382,12 @@ class OathSession(object):
         )
         return resp[1:]
 
-    def delete_credential(self, credential_id):
+    def delete_credential(self, credential_id: bytes) -> None:
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
 
-    def calculate_all(self, timestamp=None):
+    def calculate_all(
+        self, timestamp: Optional[int] = None
+    ) -> Mapping[Credential, Optional[Code]]:
         timestamp = int(timestamp or time())
         challenge = _get_challenge(timestamp, DEFAULT_PERIOD)
 
@@ -413,7 +420,9 @@ class OathSession(object):
 
         return entries
 
-    def calculate_code(self, credential, timestamp=None):
+    def calculate_code(
+        self, credential: Credential, timestamp: Optional[int] = None
+    ) -> Code:
         if credential.device_id != self.info.device_id:
             raise ValueError("Credential does not belong to this YubiKey")
 

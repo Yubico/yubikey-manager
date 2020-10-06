@@ -17,11 +17,6 @@ from .util import open_file
 import unittest
 
 
-if not getattr(unittest.TestCase, "assertRegex", None):
-    # Python 2.7 can use assertRegexpMatches
-    unittest.TestCase.assertRegex = unittest.TestCase.assertRegexpMatches
-
-
 class TestUtilityFunctions(unittest.TestCase):
     def test_bytes2int(self):
         self.assertEqual(0x57, bytes2int(b"\x57"))

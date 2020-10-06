@@ -2,7 +2,8 @@ from __future__ import print_function, absolute_import
 
 import ctypes
 import platform
-from ctypes import wintypes, LibraryLoader, WinDLL
+from ctypes import WinDLL  # type: ignore
+from ctypes import wintypes, LibraryLoader
 
 from yubikit.core.otp import OtpConnection
 from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP

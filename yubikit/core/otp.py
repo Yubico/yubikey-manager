@@ -1,12 +1,13 @@
 from __future__ import absolute_import
 
-from . import CommandError, TimeoutError
+from . import Connection, CommandError, TimeoutError
 
 import abc
 import struct
+import logging
 from time import sleep
 from threading import Event
-import logging
+from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -15,35 +16,20 @@ class CommandRejectedError(CommandError):
     """The issues command was rejected by the YubiKey"""
 
 
-class OtpConnection(abc.ABC):
-    def close(self):
-        """Close the device, releasing any held resources."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, value, traceback):
-        self.close()
-
+class OtpConnection(Connection):
     @abc.abstractmethod
-    def receive(self):
+    def receive(self) -> bytes:
         """Reads an 8 byte feature report"""
 
     @abc.abstractmethod
-    def send(self, data):
+    def send(self, data: bytes) -> None:
         """Writes an 8 byte feature report"""
-
-
-class OtpDevice(abc.ABC):
-    @abc.abstractmethod
-    def open_otp_connection(self):
-        """Open an OTP connection"""
 
 
 CRC_OK_RESIDUAL = 0xF0B8
 
 
-def calculate_crc(data):
+def calculate_crc(data: bytes) -> int:
     crc = 0xFFFF
     for index in range(len(data)):
         crc ^= data[index]
@@ -55,7 +41,7 @@ def calculate_crc(data):
     return crc & 0xFFFF
 
 
-def check_crc(data):
+def check_crc(data: bytes) -> bool:
     return calculate_crc(data) == CRC_OK_RESIDUAL
 
 
@@ -89,14 +75,20 @@ def _format_frame(slot, payload):
     return payload + struct.pack("<BH", slot, calculate_crc(payload)) + b"\0\0\0"
 
 
-class OtpProtocol(object):
-    def __init__(self, otp_connection):
+class OtpProtocol:
+    def __init__(self, otp_connection: OtpConnection):
         self.connection = otp_connection
 
-    def close(self):
+    def close(self) -> None:
         self.connection.close()
 
-    def send_and_receive(self, slot, data=None, event=None, on_keepalive=None):
+    def send_and_receive(
+        self,
+        slot: int,
+        data: Optional[bytes] = None,
+        event: Optional[Event] = None,
+        on_keepalive: Optional[Callable[[int], None]] = None,
+    ) -> bytes:
         """Sends a command to the YubiKey, and reads the response.
 
         If the command results in a configuration update, the programming sequence
@@ -122,7 +114,7 @@ class OtpProtocol(object):
         logger.debug("RECV: %s", response.hex())
         return response
 
-    def read_status(self):
+    def read_status(self) -> bytes:
         """Receive status bytes from YubiKey
 
         @return status bytes (first 3 bytes are the firmware version)

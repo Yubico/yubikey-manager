@@ -13,17 +13,18 @@ from ykman.device import list_all_devices, connect_to_device
 
 _skip = True
 
-_test_serials = os.environ.get("DESTRUCTIVE_TEST_YUBIKEY_SERIALS")
+_test_serials_env = os.environ.get("DESTRUCTIVE_TEST_YUBIKEY_SERIALS")
+_test_serials = set()
 _serials_present = set()
 _device_info = {}
 _no_prompt = os.environ.get("DESTRUCTIVE_TEST_DO_NOT_PROMPT") == "TRUE"
 _versions = {}
 
-if _test_serials is not None:
+if _test_serials_env is not None:
     start_time = time.time()
     print("Initiating device discovery...")
 
-    _test_serials = set(int(s) for s in _test_serials.split(","))
+    _test_serials = set(int(s) for s in _test_serials_env.split(","))
 
     for pid, info in list_all_devices():
         print("{:.3f} {}".format(time.time() - start_time, info.serial))

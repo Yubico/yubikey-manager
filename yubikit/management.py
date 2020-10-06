@@ -3,6 +3,7 @@ from __future__ import absolute_import
 from .core import (
     bytes2int,
     int2bytes,
+    Version,
     Tlv,
     AID,
     PID,
@@ -19,11 +20,10 @@ from .core.smartcard import SmartCardConnection, SmartCardProtocol
 from fido2.ctap import CtapDevice
 
 from enum import IntEnum, IntFlag, unique
-from collections import namedtuple
-import re
+from dataclasses import dataclass
+from typing import Optional, Union, Mapping
+import abc
 import struct
-
-VERSION_PATTERN = re.compile(r"\b\d+.\d.\d\b")
 
 
 SLOT_DEVICE_CONFIG = 0x11
@@ -47,52 +47,66 @@ class DEVICE_FLAG(IntFlag):
     EJECT = 0x80
 
 
-class _ManagementOtpBackend(OtpProtocol):
+class _Backend(abc.ABC):
+    version: Version
+
+    def close(self) -> None:
+        ...
+
+    def set_mode(self, data: bytes) -> None:
+        ...
+
+    def read_config(self) -> bytes:
+        ...
+
+    def write_config(self, config: bytes) -> None:
+        ...
+
+
+class _ManagementOtpBackend(_Backend):
     def __init__(self, otp_connection):
-        super(_ManagementOtpBackend, self).__init__(otp_connection)
-        self.version = tuple(self.read_status()[:3])
+        self.protocol = OtpProtocol(otp_connection)
+        self.version = Version.from_bytes(self.protocol.read_status())
 
     def set_mode(self, data):
-        self.send_and_receive(SLOT_DEVICE_CONFIG, data)
+        self.protocol.send_and_receive(SLOT_DEVICE_CONFIG, data)
 
     def read_config(self):
-        response = self.send_and_receive(SLOT_YK4_CAPABILITIES)
+        response = self.protocol.send_and_receive(SLOT_YK4_CAPABILITIES)
         r_len = response[0]
         if check_crc(response[: r_len + 1 + 2]):
             return response[: r_len + 1]
         raise BadResponseError("Invalid checksum")
 
     def write_config(self, config):
-        self.send_and_receive(SLOT_YK4_SET_DEVICE_INFO, config)
+        self.protocol.send_and_receive(SLOT_YK4_SET_DEVICE_INFO, config)
 
 
-class _ManagementSmartCardBackend(SmartCardProtocol):
+class _ManagementSmartCardBackend(_Backend):
     def __init__(self, smartcard_connection):
-        super(_ManagementSmartCardBackend, self).__init__(smartcard_connection)
-        select_str = self.select(AID.MGMT).decode()
-        self.version = tuple(
-            int(d) for d in VERSION_PATTERN.search(select_str).group().split(".")
-        )
+        self.protocol = SmartCardProtocol(smartcard_connection)
+        select_str = self.protocol.select(AID.MGMT).decode()
+        self.version = Version.from_string(select_str)
 
     def set_mode(self, data):
         if self.version[0] == 3:
             # Use the OTP Application to set mode
-            self.select(AID.OTP)
-            self.send_apdu(0, 0x01, SLOT_DEVICE_CONFIG, 0, data)
+            self.protocol.select(AID.OTP)
+            self.protocol.send_apdu(0, 0x01, SLOT_DEVICE_CONFIG, 0, data)
             # Workaround to "de-select" on NEO
-            self.connection.send_and_receive(b"\xa4\x04\x00\x08")
-            self.select(AID.MGMT)
+            self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
+            self.protocol.select(AID.MGMT)
         else:
-            self.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
+            self.protocol.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
 
     def read_config(self):
-        return self.send_apdu(0, INS_READ_CONFIG, 0, 0)
+        return self.protocol.send_apdu(0, INS_READ_CONFIG, 0, 0)
 
     def write_config(self, config):
-        self.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
+        self.protocol.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
 
 
-class _ManagementCtapBackend(object):
+class _ManagementCtapBackend(_Backend):
     def __init__(self, ctap_device):
         self.ctap = ctap_device
         version = ctap_device.device_version
@@ -131,20 +145,19 @@ class TAG(IntEnum):
     NFC_ENABLED = 0x0E
 
 
-class DeviceConfig(
-    namedtuple(
-        "DeviceConfig",
-        [
-            "enabled_applications",
-            "auto_eject_timeout",
-            "challenge_response_timeout",
-            "device_flags",
-        ],
-    )
-):
-    __slots__ = ()
+@dataclass
+class DeviceConfig:
+    enabled_applications: Mapping[INTERFACE, APPLICATION]
+    auto_eject_timeout: Optional[int]
+    challenge_response_timeout: Optional[int]
+    device_flags: Optional[DEVICE_FLAG]
 
-    def get_bytes(self, reboot, cur_lock_code=None, new_lock_code=None):
+    def get_bytes(
+        self,
+        reboot: bool,
+        cur_lock_code: Optional[bytes] = None,
+        new_lock_code: Optional[bytes] = None,
+    ) -> bytes:
         buf = b""
         if reboot:
             buf += Tlv(TAG.REBOOT)
@@ -169,47 +182,46 @@ class DeviceConfig(
         return int2bytes(len(buf)) + buf
 
 
-class DeviceInfo(
-    namedtuple(
-        "DeviceInfo",
-        [
-            "config",
-            "serial",
-            "version",
-            "form_factor",
-            "supported_applications",
-            "is_locked",
-        ],
-    )
-):
-    def has_interface(self, interface):
+@dataclass
+class DeviceInfo:
+    config: DeviceConfig
+    serial: Optional[int]
+    version: Version
+    form_factor: FORM_FACTOR
+    supported_applications: Mapping[INTERFACE, APPLICATION]
+    is_locked: bool
+
+    def has_interface(self, interface: INTERFACE) -> bool:
         return interface in self.supported_applications
 
     @classmethod
-    def parse(cls, encoded, default_version):
+    def parse(cls, encoded: bytes, default_version: Version) -> "DeviceInfo":
         if len(encoded) - 1 != encoded[0]:
             raise BadResponseError("Invalid length")
         data = Tlv.parse_dict(encoded[1:])
         locked = data.get(TAG.CONFIG_LOCK) == b"\1"
         serial = bytes2int(data.get(TAG.SERIAL, b"\0")) or None
         form_factor = FORM_FACTOR.from_code(bytes2int(data.get(TAG.FORM_FACTOR, b"\0")))
-        version = tuple(data.get(TAG.VERSION, default_version))
+        if TAG.VERSION in data:
+            version = Version.from_bytes(data[TAG.VERSION])
+        else:
+            version = default_version
         auto_eject_to = bytes2int(data.get(TAG.AUTO_EJECT_TIMEOUT, b"\0"))
         chal_resp_to = bytes2int(data.get(TAG.CHALRESP_TIMEOUT, b"\0"))
-        flags = bytes2int(data.get(TAG.DEVICE_FLAGS, b"\0"))
+        flags = DEVICE_FLAG(bytes2int(data.get(TAG.DEVICE_FLAGS, b"\0")))
 
         supported = {}
         enabled = {}
 
         if version == (4, 2, 4):  # Doesn't report correctly
-            supported[INTERFACE.USB] = 0x3F
+            supported[INTERFACE.USB] = APPLICATION(0x3F)
         else:
-            supported[INTERFACE.USB] = bytes2int(data.get(TAG.USB_SUPPORTED))
+            supported[INTERFACE.USB] = APPLICATION(bytes2int(data[TAG.USB_SUPPORTED]))
         if TAG.USB_ENABLED in data:  # From YK 5.0.0
-            enabled[INTERFACE.USB] = bytes2int(data.get(TAG.USB_ENABLED))
+            enabled[INTERFACE.USB] = APPLICATION(bytes2int(data[TAG.USB_ENABLED]))
         if TAG.NFC_SUPPORTED in data:  # YK with NFC
-            supported[INTERFACE.NFC] = bytes2int(data[TAG.NFC_SUPPORTED])
-            enabled[INTERFACE.NFC] = bytes2int(data[TAG.NFC_ENABLED])
+            supported[INTERFACE.NFC] = APPLICATION(bytes2int(data[TAG.NFC_SUPPORTED]))
+            enabled[INTERFACE.NFC] = APPLICATION(bytes2int(data[TAG.NFC_ENABLED]))
 
         return cls(
             DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags),
@@ -221,53 +233,48 @@ class DeviceInfo(
         )
 
 
-class Mode(object):
-    _modes = [
-        TRANSPORT.OTP,  # 0x00
-        TRANSPORT.CCID,  # 0x01
-        TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
-        TRANSPORT.FIDO,  # 0x03
-        TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
-        TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
-        TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
-    ]
+_MODES = [
+    TRANSPORT.OTP,  # 0x00
+    TRANSPORT.CCID,  # 0x01
+    TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
+    TRANSPORT.FIDO,  # 0x03
+    TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
+    TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
+    TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
+]
 
-    def __init__(self, transports):
+
+@dataclass(init=False, repr=False)
+class Mode:
+    code: int
+    transports: TRANSPORT
+
+    def __init__(self, transports: TRANSPORT):
         try:
-            self.code = self._modes.index(transports)
-            self._transports = TRANSPORT(transports)
+            self.code = _MODES.index(transports)
+            self.transports = TRANSPORT(transports)
         except ValueError:
             raise ValueError("Invalid mode!")
 
-    @property
-    def transports(self):
-        return self._transports
-
-    def __eq__(self, other):
-        return other is not None and self.code == other.code
-
-    def __ne__(self, other):
-        return other is None or self.code != other.code
-
-    def __str__(self):
+    def __repr__(self):
         return "+".join(t.name for t in TRANSPORT if t in self.transports)
 
     @classmethod
-    def from_code(cls, code):
+    def from_code(cls, code: int) -> "Mode":
         code = code & 0b00000111
-        return cls(cls._modes[code])
+        return cls(_MODES[code])
 
     @classmethod
-    def from_pid(cls, pid):
+    def from_pid(cls, pid: PID) -> "Mode":
         return cls(PID(pid).get_transports())
 
-    __hash__ = None
 
-
-class ManagementSession(object):
-    def __init__(self, connection):
+class ManagementSession:
+    def __init__(
+        self, connection: Union[OtpConnection, SmartCardConnection, CtapDevice]
+    ):
         if isinstance(connection, OtpConnection):
-            self.backend = _ManagementOtpBackend(connection)
+            self.backend: _Backend = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
             self.backend = _ManagementSmartCardBackend(connection)
         elif isinstance(connection, CtapDevice):
@@ -277,21 +284,25 @@ class ManagementSession(object):
         if self.version < (3, 0, 0):
             raise NotSupportedError("ManagementSession requires YubiKey 3 or later")
 
-    def close(self):
+    def close(self) -> None:
         self.backend.close()
 
     @property
-    def version(self):
+    def version(self) -> Version:
         return self.backend.version
 
-    def read_device_info(self):
+    def read_device_info(self) -> DeviceInfo:
         if self.version < (4, 1, 0):
             raise NotSupportedError("Operation requires YubiKey 4.1 or later")
         return DeviceInfo.parse(self.backend.read_config(), self.version)
 
     def write_device_config(
-        self, config=None, reboot=False, cur_lock_code=None, new_lock_code=None
-    ):
+        self,
+        config: Optional[DeviceConfig] = None,
+        reboot: bool = False,
+        cur_lock_code: Optional[bytes] = None,
+        new_lock_code: Optional[bytes] = None,
+    ) -> None:
         if self.version < (5, 0, 0):
             raise NotSupportedError("Operation requires YubiKey 5 or later")
 
@@ -300,12 +311,14 @@ class ManagementSession(object):
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
         )
 
-    def set_mode(self, mode, chalresp_timeout=0, auto_eject_timeout=0):
+    def set_mode(
+        self, mode: Mode, chalresp_timeout: int = 0, auto_eject_timeout: int = 0
+    ) -> None:
         if self.version < (3, 0, 0):
             raise NotSupportedError("Changing mode requires YubiKey 3 or later")
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
-            usb_enabled = 0
+            usb_enabled = APPLICATION(0)
             if TRANSPORT.OTP in mode.transports:
                 usb_enabled |= APPLICATION.OTP
             if TRANSPORT.CCID in mode.transports:

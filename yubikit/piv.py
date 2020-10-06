@@ -1,24 +1,28 @@
 from __future__ import absolute_import
 
 from .core import (
+    Version,
     Tlv,
     AID,
     CommandError,
     NotSupportedError,
     BadResponseError,
 )
-from .core.smartcard import SmartCardProtocol, ApduError, SW
+from .core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
-from cryptography.hazmat.primitives import asymmetric, hashes
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
 from cryptography.hazmat.backends import default_backend
 
-from collections import namedtuple
+from dataclasses import dataclass
 from enum import Enum, IntEnum, unique, auto
+from typing import Optional, Union, cast
 
 import logging
 import os
@@ -50,9 +54,9 @@ class KEY_TYPE(IntEnum):
 
     @classmethod
     def from_public_key(cls, key):
-        if isinstance(key, asymmetric.rsa.RSAPublicKey):
+        if isinstance(key, rsa.RSAPublicKey):
             return getattr(cls, "RSA%d" % key.key_size)
-        elif isinstance(key, asymmetric.ec.EllipticCurvePublicKey):
+        elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
             if curve_name == "secp256r1":
                 return cls.ECCP256
@@ -243,27 +247,26 @@ def _retries_from_sw(version, sw):
     return None
 
 
-class PinMetadata(
-    namedtuple(
-        "PinMetadata", ["default_value", "total_attempts", "attempts_remaining"],
-    )
-):
-    __slots__ = ()
+@dataclass
+class PinMetadata:
+    default_value: bool
+    total_attempts: int
+    attempts_remaining: int
 
 
-class ManagementKeyMetadata(
-    namedtuple("ManagementKeyMetadata", ["default_value", "touch_policy"])
-):
-    __slots__ = ()
+@dataclass
+class ManagementKeyMetadata:
+    default_value: bool
+    touch_policy: TOUCH_POLICY
 
 
-class SlotMetadata(
-    namedtuple(
-        "SlotMetadata",
-        ["key_type", "pin_policy", "touch_policy", "generated", "public_key_encoded"],
-    )
-):
-    __slots__ = ()
+@dataclass
+class SlotMetadata:
+    key_type: KEY_TYPE
+    pin_policy: PIN_POLICY
+    touch_policy: TOUCH_POLICY
+    generated: bool
+    public_key_encoded: bytes
 
     @property
     def public_key(self):
@@ -282,9 +285,7 @@ def _pad_message(key_type, message, hash_algorithm, padding):
     elif key_type.algorithm == ALGORITHM.RSA:
         # Sign with a dummy key, then encrypt the signature to get the padded message
         e = 65537
-        dummy = asymmetric.rsa.generate_private_key(
-            e, key_type.bit_len, default_backend()
-        )
+        dummy = rsa.generate_private_key(e, key_type.bit_len, default_backend())
         signature = dummy.sign(message, padding, hash_algorithm)
         # Raw (textbook) RSA encrypt
         n = dummy.public_key().public_numbers().n
@@ -295,7 +296,7 @@ def _pad_message(key_type, message, hash_algorithm, padding):
 
 def _unpad_message(padded, padding):
     e = 65537
-    dummy = asymmetric.rsa.generate_private_key(e, len(padded) * 8, default_backend())
+    dummy = rsa.generate_private_key(e, len(padded) * 8, default_backend())
     # Raw (textbook) RSA encrypt
     n = dummy.public_key().public_numbers().n
     encrypted = int_to_bytes(pow(int_from_bytes(padded, "big"), e, n), len(padded))
@@ -319,40 +320,38 @@ def _parse_device_public_key(key_type, encoded):
     if key_type.algorithm == ALGORITHM.RSA:
         modulus = int_from_bytes(data[0x81], "big")
         exponent = int_from_bytes(data[0x82], "big")
-        return asymmetric.rsa.RSAPublicNumbers(exponent, modulus).public_key(
-            default_backend()
-        )
+        return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
     else:
         if key_type == KEY_TYPE.ECCP256:
-            curve = asymmetric.ec.SECP256R1
+            curve = ec.SECP256R1
         else:
-            curve = asymmetric.ec.SECP384R1
+            curve = ec.SECP384R1
 
         try:
             # Added in cryptography 2.5
-            return asymmetric.ec.EllipticCurvePublicKey.from_encoded_point(
-                curve(), data[0x86]
-            )
+            return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
         except AttributeError:
-            return asymmetric.ec.EllipticCurvePublicNumbers.from_encoded_point(
+            return ec.EllipticCurvePublicNumbers.from_encoded_point(
                 curve(), data[0x86]
             ).public_key(default_backend())
 
 
-class PivSession(object):
-    def __init__(self, connection):
+class PivSession:
+    def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.PIV)
-        self._version = tuple(self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0))
+        self._version = Version.from_bytes(
+            self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0)
+        )
         self.protocol.enable_touch_workaround(self.version)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
     @property
-    def version(self):
+    def version(self) -> Version:
         return self._version
 
-    def reset(self):
+    def reset(self) -> None:
         # Block PIN
         counter = self.get_pin_attempts()
         while counter > 0:
@@ -374,7 +373,7 @@ class PivSession(object):
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
-    def authenticate(self, management_key):
+    def authenticate(self, management_key: bytes) -> None:
         response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
@@ -407,7 +406,7 @@ class PivSession(object):
         if not bytes_eq(expected, encrypted):
             raise BadResponseError("Device response is incorrect")
 
-    def set_management_key(self, management_key):
+    def set_management_key(self, management_key: bytes) -> None:
         if len(management_key) != 24:
             raise ValueError("Management key must be 24 bytes")
         self.protocol.send_apdu(
@@ -418,7 +417,7 @@ class PivSession(object):
             int_to_bytes(TDES) + Tlv(SLOT.CARD_MANAGEMENT, management_key),
         )
 
-    def verify_pin(self, pin):
+    def verify_pin(self, pin: str) -> None:
         try:
             self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
             self._current_pin_retries = self._max_pin_retries
@@ -429,7 +428,7 @@ class PivSession(object):
             self._current_pin_retries = retries
             raise InvalidPinError(retries)
 
-    def get_pin_attempts(self):
+    def get_pin_attempts(self) -> int:
         if self.version >= (5, 3, 0):
             return self.get_pin_metadata().attempts_remaining
         try:
@@ -443,27 +442,27 @@ class PivSession(object):
             self._current_pin_retries = retries
             return retries
 
-    def change_pin(self, old_pin, new_pin):
+    def change_pin(self, old_pin: str, new_pin: str) -> None:
         self._change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)
 
-    def change_puk(self, old_puk, new_puk):
+    def change_puk(self, old_puk: str, new_puk: str) -> None:
         self._change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk)
 
-    def unblock_pin(self, puk, new_pin):
+    def unblock_pin(self, puk: str, new_pin: str) -> None:
         self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
 
-    def set_pin_attempts(self, pin_attempts, puk_attempts):
+    def set_pin_attempts(self, pin_attempts: int, puk_attempts: int) -> None:
         self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
         self._max_pin_retries = pin_attempts
         self._current_pin_retries = pin_attempts
 
-    def get_pin_metadata(self):
+    def get_pin_metadata(self) -> PinMetadata:
         return self._get_pin_puk_metadata(PIN_P2)
 
-    def get_puk_metadata(self):
+    def get_puk_metadata(self) -> PinMetadata:
         return self._get_pin_puk_metadata(PUK_P2)
 
-    def get_management_key_metadata(self):
+    def get_management_key_metadata(self) -> ManagementKeyMetadata:
         if self.version < (5, 3, 0):
             raise NotSupportedError(
                 "Management key metadata requires version 5.3.0 or later."
@@ -477,7 +476,7 @@ class PivSession(object):
             TOUCH_POLICY(policy[INDEX_TOUCH_POLICY]),
         )
 
-    def get_slot_metadata(self, slot):
+    def get_slot_metadata(self, slot: SLOT) -> SlotMetadata:
         if self.version < (5, 3, 0):
             raise NotSupportedError("Slot metadata requires version 5.3.0 or later.")
         elif slot == SLOT.CARD_MANAGEMENT:
@@ -495,12 +494,21 @@ class PivSession(object):
             data[TAG_METADATA_PUBLIC_KEY],
         )
 
-    def sign(self, slot, key_type, message, hash_algorithm, padding=None):
+    def sign(
+        self,
+        slot: SLOT,
+        key_type: KEY_TYPE,
+        message: bytes,
+        hash_algorithm: hashes.HashAlgorithm,
+        padding: Optional[AsymmetricPadding] = None,
+    ) -> bytes:
         key_type = KEY_TYPE(key_type)
         padded = _pad_message(key_type, message, hash_algorithm, padding)
         return self._use_private_key(slot, key_type, padded, False)
 
-    def decrypt(self, slot, cipher_text, padding):
+    def decrypt(
+        self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
+    ) -> bytes:
         if len(cipher_text) == 1024 // 8:
             key_type = KEY_TYPE.RSA1024
         elif len(cipher_text) == 2048 // 8:
@@ -510,7 +518,9 @@ class PivSession(object):
         padded = self._use_private_key(slot, key_type, cipher_text, False)
         return _unpad_message(padded, padding)
 
-    def calculate_secret(self, slot, peer_public_key):
+    def calculate_secret(
+        self, slot: SLOT, peer_public_key: ec.EllipticCurvePublicKey
+    ) -> bytes:
         key_type = KEY_TYPE.from_public_key(peer_public_key)
         if key_type.algorithm != ALGORITHM.EC:
             raise ValueError("Unsupported key type")
@@ -519,9 +529,9 @@ class PivSession(object):
         )
         return self._use_private_key(slot, key_type, data, True)
 
-    def get_object(self, object_id):
+    def get_object(self, object_id: int) -> bytes:
         if object_id == OBJECT_ID.DISCOVERY:
-            expected = OBJECT_ID.DISCOVERY
+            expected: int = OBJECT_ID.DISCOVERY
         else:
             expected = TAG_OBJ_DATA
         return Tlv.unwrap(
@@ -531,7 +541,7 @@ class PivSession(object):
             ),
         )
 
-    def put_object(self, object_id, data=None):
+    def put_object(self, object_id: int, data: Optional[bytes] = None) -> None:
         self.protocol.send_apdu(
             0,
             INS_PUT_DATA,
@@ -540,40 +550,44 @@ class PivSession(object):
             Tlv(TAG_OBJ_ID, int_to_bytes(object_id)) + Tlv(TAG_OBJ_DATA, data or b""),
         )
 
-    def get_certificate(self, slot):
+    def get_certificate(self, slot: SLOT) -> x509.Certificate:
         data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
         cert_info = data.get(TAG_CERT_INFO)
         if cert_info and cert_info[0] != 0:
             raise NotSupportedError("Compressed certificates are not supported")
         try:
             return x509.load_der_x509_certificate(
-                data.get(TAG_CERTIFICATE), default_backend()
+                data[TAG_CERTIFICATE], default_backend()
             )
         except Exception as e:
             raise BadResponseError("Invalid certificate", e)
 
-    def put_certificate(self, slot, certificate):
+    def put_certificate(self, slot: SLOT, certificate: x509.Certificate) -> None:
         cert_data = certificate.public_bytes(Encoding.DER)
         data = (
             Tlv(TAG_CERTIFICATE, cert_data) + Tlv(TAG_CERT_INFO, b"\0") + Tlv(TAG_LRC)
         )
         self.put_object(OBJECT_ID.from_slot(slot), data)
 
-    def delete_certificate(self, slot):
+    def delete_certificate(self, slot: SLOT) -> None:
         self.put_object(OBJECT_ID.from_slot(slot))
 
     def put_key(
         self,
-        slot,
-        private_key,
-        pin_policy=PIN_POLICY.DEFAULT,
-        touch_policy=TOUCH_POLICY.DEFAULT,
-    ):
+        slot: SLOT,
+        private_key: Union[
+            rsa.RSAPrivateKeyWithSerialization,
+            ec.EllipticCurvePrivateKeyWithSerialization,
+        ],
+        pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
+        touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
+    ) -> None:
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
         _check_key_support(self.version, key_type, pin_policy, touch_policy)
         ln = key_type.bit_len // 8
         numbers = private_key.private_numbers()
         if key_type.algorithm == ALGORITHM.RSA:
+            numbers = cast(rsa.RSAPrivateNumbers, numbers)
             if numbers.public_numbers.e != 65537:
                 raise ValueError("RSA exponent must be 65537")
             ln //= 2
@@ -585,6 +599,7 @@ class PivSession(object):
                 + Tlv(0x05, int_to_bytes(numbers.iqmp, ln))
             )
         else:
+            numbers = cast(ec.EllipticCurvePrivateNumbers, numbers)
             data = Tlv(0x06, int_to_bytes(numbers.private_value, ln))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))
@@ -595,18 +610,18 @@ class PivSession(object):
 
     def generate_key(
         self,
-        slot,
-        key_type,
-        pin_policy=PIN_POLICY.DEFAULT,
-        touch_policy=TOUCH_POLICY.DEFAULT,
-    ):
+        slot: SLOT,
+        key_type: KEY_TYPE,
+        pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
+        touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
+    ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
         key_type = KEY_TYPE(key_type)
         _check_key_support(self.version, key_type, pin_policy, touch_policy)
         if key_type.algorithm == ALGORITHM.RSA and (
             (4, 2, 0) <= self.version < (4, 3, 5)
         ):
             raise NotSupportedError("RSA key generation not supported on this YubiKey")
-        data = Tlv(TAG_GEN_ALGORITHM, int_to_bytes(key_type))
+        data: bytes = Tlv(TAG_GEN_ALGORITHM, int_to_bytes(key_type))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))
         if touch_policy:
@@ -616,7 +631,7 @@ class PivSession(object):
         )
         return _parse_device_public_key(key_type, Tlv.unwrap(0x7F49, response))
 
-    def attest_key(self, slot):
+    def attest_key(self, slot: SLOT) -> x509.Certificate:
         if self.version < (4, 3, 0):
             raise NotSupportedError("Attestation requires YubiKey 4.3 or later")
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)

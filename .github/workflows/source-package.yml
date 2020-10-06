@@ -17,9 +17,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-add-repository -y ppa:yubico/stable
           sudo apt-get update
-          sudo apt-get install -qq libykpers-1-1 swig libpcsclite-dev
+          sudo apt-get install -qq swig libpcsclite-dev
           python -m pip install --upgrade pip
           pip install tox
           pip install .

@@ -439,4 +439,4 @@ def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
         ctx.fail("PIN must be over {} characters long".format(min_length))
 
 
-fido.transports = TRANSPORT.FIDO
+fido.transports = TRANSPORT.FIDO  # type: ignore

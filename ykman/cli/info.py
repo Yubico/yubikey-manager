@@ -186,7 +186,7 @@ def info(ctx, check_fips):
     else:
         transports = pid.get_transports()
         key_type = pid.get_type()
-    device_name = get_name(key_type, info)
+    device_name = get_name(info, key_type)
 
     click.echo("Device type: {}".format(device_name))
     if info.serial:

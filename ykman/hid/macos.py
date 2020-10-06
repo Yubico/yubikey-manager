@@ -91,8 +91,8 @@ K_IO_HID_REPORT_TYPE_FEATURE = 2
 K_IO_RETURN_SUCCESS = 0
 
 # Load relevant libraries
-iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library("IOKit"))
-cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library("IOKit"))  # type: ignore
+cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))  # type: ignore
 
 # Declare C function prototypes
 cf.CFSetGetValues.restype = None

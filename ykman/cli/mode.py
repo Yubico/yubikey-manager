@@ -165,9 +165,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
                 click.echo("Mode is already {}, nothing to do...".format(mode))
                 ctx.exit()
             elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
-                click.echo(
-                    "Mode switching is not supported on this YubiKey!".format(mode)
-                )
+                click.echo("Mode switching is not supported on this YubiKey!")
                 ctx.fail("Use --force to attempt to set it anyway.")
             elif mode.transports not in transports_supported:
                 click.echo("Mode {} is not supported on this YubiKey!".format(mode))

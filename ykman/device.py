@@ -29,11 +29,14 @@ from __future__ import absolute_import
 
 from yubikit.core import (
     AID,
+    PID,
     INTERFACE,
     TRANSPORT,
     APPLICATION,
     FORM_FACTOR,
     YUBIKEY,
+    Version,
+    Connection,
     NotSupportedError,
     ApplicationNotAvailableError,
 )
@@ -49,12 +52,13 @@ from .hid import list_otp_devices, list_ctap_devices
 from .scard import list_devices as list_ccid_devices
 
 from collections import Counter
+from typing import Dict, Mapping, List, Tuple, Optional, Hashable
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def is_fips_version(version):
+def is_fips_version(version: Version) -> bool:
     """True if a given firmware version indicates a YubiKey FIPS"""
     return (4, 4, 0) <= version < (4, 5, 0)
 
@@ -62,35 +66,37 @@ def is_fips_version(version):
 BASE_NEO_APPS = APPLICATION.OTP | APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
 
 
-def scan_devices():
+def scan_devices() -> Tuple[Mapping[PID, int], Hashable]:
     """Scan for attached YubiKeys, without opening any connections.
 
     Returns a dict mapping PID to device count, and a state object which can be used to
     detect changes in attached devices.
     """
     # Scans all attached devices, without opening any connections.
-    merged = {}
     otp_devs = list_otp_devices()
     ctap_devs = list_ctap_devices()
     ccid_devs = list_ccid_devices()
-    merged.update(Counter(d.pid for d in otp_devs))
-    merged.update(Counter(d.pid for d in ctap_devs))
-    merged.update(Counter(d.pid for d in ccid_devs))
-    state = {d.fingerprint for d in otp_devs + ctap_devs + ccid_devs}
+
+    # Avoid counting devices twice over different interfaces.
+    merged: Dict[PID, int] = {}
+    merged.update(Counter(d.pid for d in otp_devs if d.pid is not None))
+    merged.update(Counter(d.pid for d in ctap_devs if d.pid is not None))
+    merged.update(Counter(d.pid for d in ccid_devs if d.pid is not None))
+
+    state = tuple(
+        {d.fingerprint for devs in (otp_devs, ctap_devs, ccid_devs) for d in devs}
+    )
     return merged, state
 
 
-def list_all_devices():
+def list_all_devices() -> List[Tuple[PID, DeviceInfo]]:
     """Connects to all attached YubiKeys and reads device info from them.
 
     Returns a list of (PID, info) tuples for each connected device.
     """
     # List all attached devices, returning pid and info for each.
     handled_pids = set()
-    otp_devs = list_otp_devices()
-    ctap_devs = list_ctap_devices()
-    ccid_devs = list_ccid_devices()
-    pids = {}
+    pids: Dict[PID, bool] = {}
     devices = []
 
     def handle(dev, get_connection):
@@ -105,24 +111,26 @@ def list_all_devices():
                 logger.error("Failed opening device", exc_info=e)
 
     # Handle OTP devices
-    for dev in otp_devs:
-        handle(dev, dev.open_otp_connection)
+    for otp in list_otp_devices():
+        handle(otp, otp.open_otp_connection)
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     # Handle CCID devices
-    for dev in ccid_devs:
-        handle(dev, dev.open_smartcard_connection)
+    for ccid in list_ccid_devices():
+        handle(ccid, ccid.open_smartcard_connection)
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     # Handle FIDO devices
-    for dev in ctap_devs:
-        handle(dev, dev.open_ctap_connection)
+    for ctap in list_ctap_devices():
+        handle(ctap, ctap.open_ctap_connection)
     handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     return devices
 
 
-def connect_to_device(serial=None, transports=sum(TRANSPORT)):
+def connect_to_device(
+    serial: Optional[int] = None, transports: TRANSPORT = TRANSPORT(sum(TRANSPORT))
+) -> Tuple[Connection, PID, DeviceInfo]:
     """Get a connection to a YubiKey using one of the provided transports.
 
     Returns a tuple of (connection, pid, info) for the device.
@@ -234,7 +242,7 @@ def _read_info_ccid(conn, key_type, transports):
             )
 
     # Assume U2F on devices >= 3.3.0
-    if TRANSPORT.has(transports, TRANSPORT.FIDO) or version >= (3, 3, 0):
+    if TRANSPORT.FIDO in transports or version >= (3, 3, 0):
         applications |= APPLICATION.U2F
 
     return DeviceInfo(
@@ -270,7 +278,7 @@ def _read_info_otp(conn, key_type, transports):
 
     if key_type == YUBIKEY.NEO:
         usb_supported = BASE_NEO_APPS
-        if TRANSPORT.has(transports, TRANSPORT.FIDO) or version >= (3, 3, 0):
+        if TRANSPORT.FIDO in transports or version >= (3, 3, 0):
             usb_supported |= APPLICATION.U2F
         applications = {
             INTERFACE.USB: usb_supported,
@@ -307,11 +315,11 @@ def _read_info_ctap(conn, key_type, transports):
     except Exception:  # SKY 1 or NEO
         version = (3, 0, 0)  # Guess, no way to know
         enabled_apps = {INTERFACE.USB: APPLICATION.U2F}
-        if TRANSPORT.has(transports, TRANSPORT.CCID):
+        if TRANSPORT.CCID in transports:
             enabled_apps[INTERFACE.USB] |= (
                 APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH
             )
-        if TRANSPORT.has(transports, TRANSPORT.OTP):
+        if TRANSPORT.OTP in transports:
             enabled_apps[INTERFACE.USB] |= APPLICATION.OTP
 
         supported_apps = {INTERFACE.USB: APPLICATION.U2F}
@@ -335,14 +343,14 @@ def _read_info_ctap(conn, key_type, transports):
         )
 
 
-def read_info(pid, conn):
+def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
     """Read out a DeviceInfo object from a YubiKey, or attempt to synthesize one."""
     if pid:
         key_type = pid.get_type()
         transports = pid.get_transports()
     else:  # No PID for NFC connections
         key_type = None
-        transports = 0
+        transports = TRANSPORT(0)
 
     if isinstance(conn, SmartCardConnection):
         info = _read_info_ccid(conn, key_type, transports)
@@ -362,13 +370,13 @@ def read_info(pid, conn):
         if usb_enabled == (APPLICATION.OTP | APPLICATION.U2F | TRANSPORT.CCID):
             # YubiKey Edge, hide unusable CCID interface
             usb_enabled = APPLICATION.OTP | APPLICATION.U2F
-            info = info._replace(supported_applications={INTERFACE.USB: usb_enabled},)
+            info.supported_applications = {INTERFACE.USB: usb_enabled}
 
-        if not TRANSPORT.has(transports, TRANSPORT.OTP):
+        if TRANSPORT.OTP not in transports:
             usb_enabled &= ~APPLICATION.OTP
-        if not TRANSPORT.has(transports, TRANSPORT.FIDO):
+        if TRANSPORT.FIDO not in transports:
             usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
-        if not TRANSPORT.has(transports, TRANSPORT.CCID):
+        if TRANSPORT.CCID not in transports:
             usb_enabled &= ~(
                 TRANSPORT.CCID | APPLICATION.OATH | APPLICATION.OPGP | APPLICATION.PIV
             )
@@ -384,16 +392,12 @@ def read_info(pid, conn):
             info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version >= (5, 2, 4)
         )
     ):
-        info = info._replace(
-            supported_applications={
-                INTERFACE.USB: info.supported_applications[INTERFACE.USB]
-            },
-            config=info.config._replace(
-                enabled_applications={
-                    INTERFACE.USB: info.config.enabled_applications[INTERFACE.USB]
-                }
-            ),
-        )
+        info.supported_applications = {
+            INTERFACE.USB: info.supported_applications[INTERFACE.USB]
+        }
+        info.config.enabled_applications = {
+            INTERFACE.USB: info.config.enabled_applications[INTERFACE.USB]
+        }
 
     return info
 
@@ -402,7 +406,7 @@ def _fido_only(applications):
     return applications & ~(APPLICATION.U2F | APPLICATION.FIDO2) == 0
 
 
-def get_name(key_type, info):
+def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
     """Determine the product name of a YubiKey"""
     usb_supported = info.supported_applications[INTERFACE.USB]
     if not key_type:
@@ -416,7 +420,7 @@ def get_name(key_type, info):
     device_name = key_type.value
 
     if key_type == YUBIKEY.SKY:
-        if not APPLICATION.has(usb_supported, APPLICATION.FIDO2):
+        if APPLICATION.FIDO2 not in usb_supported:
             device_name = "FIDO U2F Security Key"  # SKY 1
         if info.has_interface(INTERFACE.NFC):
             device_name = "Security Key NFC"
