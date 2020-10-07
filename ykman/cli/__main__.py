@@ -52,6 +52,7 @@ import click
 import time
 import logging
 import sys
+import os
 
 
 logger = logging.getLogger(__name__)
@@ -180,8 +181,15 @@ def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
     metavar="NAME",
     default=None,
 )
+@click.option(
+    "--arg-file",
+    default=None,
+    type=click.File("r"),
+    metavar="FILE",
+    help="Reads additional CLI options from a file of line separated KEY=VALUE pairs.",
+)
 @click.pass_context
-def cli(ctx, device, log_level, log_file, reader):
+def cli(ctx, device, log_level, log_file, reader, arg_file):
     """
     Configure your YubiKey via the command line.
 
@@ -199,6 +207,16 @@ def cli(ctx, device, log_level, log_file, reader):
 
     if log_level:
         ykman.logging_setup.setup(log_level, log_file=log_file)
+
+    if arg_file:
+        logger.debug("Reading arguments from file: %s", arg_file)
+        # Patch os.environ to not update the real environment (these may be sensitive)
+        os.environ = dict(os.environ)
+        for line in arg_file.read().splitlines():
+            if line.startswith("YKMAN_") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ[k] = v
+                logger.debug("Read argument '%s'", k)
 
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
