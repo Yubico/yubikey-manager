@@ -577,7 +577,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
 @otp.command()
 @click_slot_argument
-@click.argument("challenge", required=False)
+@click.argument("challenge", envvar="YKMAN_OTP_CALCULATE_CHALLENGE", required=False)
 @click.option(
     "-T",
     "--totp",
@@ -602,7 +602,7 @@ def calculate(ctx, slot, challenge, totp, digits):
     session = ctx.obj["session"]
 
     if not challenge and not totp:
-        ctx.fail("No challenge provided.")
+        challenge = click.prompt("Enter a challenge (hex)", err=True)
 
     # Check that slot is not empty
     if not session.get_config_state().is_configured(slot):

@@ -277,7 +277,7 @@ for cmd in COMMANDS:
 
 def main():
     try:
-        cli(obj={})
+        cli(auto_envvar_prefix="YKMAN", obj={})
     except ApplicationNotAvailableError as e:
         logger.error("Error", exc_info=e)
         click.echo(

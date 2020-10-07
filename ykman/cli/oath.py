@@ -178,7 +178,12 @@ def reset(ctx):
 
 @oath.command()
 @click.argument("name")
-@click.argument("secret", callback=click_parse_b32_key, required=False)
+@click.argument(
+    "secret",
+    callback=click_parse_b32_key,
+    required=False,
+    envvar="YKMAN_OATH_ADD_SECRET",
+)
 @click.option(
     "-o",
     "--oath-type",
@@ -264,7 +269,9 @@ def add(
 
 
 @oath.command()
-@click.argument("uri", callback=click_parse_uri, required=False)
+@click.argument(
+    "uri", callback=click_parse_uri, required=False, envvar="YKMAN_OATH_URI_URI"
+)
 @click_touch_option
 @click_force_option
 @click.pass_context
