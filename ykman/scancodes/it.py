@@ -27,9 +27,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import unicode_literals
-
-
 """Scancode map for IT Italian (AZERTY) keyboard layout"""
 
 SHIFT = 0x80

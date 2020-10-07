@@ -1,13 +1,27 @@
-from __future__ import print_function, absolute_import
+# Original work Copyright 2016 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Modified work Copyright 2020 Yubico AB. All Rights Reserved.
+# This file, with modifications, is licensed under the above Apache License.
 
-import ctypes
-import platform
+from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
+from yubikit.core.otp import OtpConnection
+
 from ctypes import WinDLL  # type: ignore
 from ctypes import wintypes, LibraryLoader
-
-from yubikit.core.otp import OtpConnection
-from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
-
+import ctypes
+import platform
 import logging
 
 logger = logging.getLogger(__name__)

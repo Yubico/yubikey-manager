@@ -26,8 +26,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from __future__ import absolute_import
-
 from yubikit.core import Tlv, BadResponseError
 from yubikit.core.smartcard import ApduError, SW
 from yubikit.piv import (

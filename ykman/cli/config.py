@@ -25,8 +25,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
-
 from .util import click_postpone_execution, click_force_option, EnumChoice
 from yubikit.core import APPLICATION, INTERFACE
 from yubikit.management import ManagementSession, DeviceConfig, DEVICE_FLAG

@@ -25,8 +25,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
-
 from .util import ensure_not_cve201715361_vulnerable_firmware_version
 
 from yubikit.core import AID, Tlv

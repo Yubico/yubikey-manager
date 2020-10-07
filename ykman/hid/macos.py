@@ -1,4 +1,4 @@
-# Copyright 2016 Google Inc. All Rights Reserved.
+# Original work Copyright 2016 Google Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,17 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modified work Copyright 2020 Yubico AB. All Rights Reserved.
+# This file, with modifications, is licensed under the above Apache License.
 
-"""Implements HID device interface on MacOS using IOKit and HIDManager."""
-
-from __future__ import absolute_import
+from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
+from yubikit.core.otp import OtpConnection
 
 import ctypes
 import ctypes.util
 import logging
-
-from yubikit.core.otp import OtpConnection
-from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 
 logger = logging.getLogger(__name__)
 
