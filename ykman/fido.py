@@ -68,6 +68,10 @@ class ResidentCredential(object):
     def user_name(self):
         return self._raw_credential[CredentialManagement.RESULT.USER]["name"]
 
+    @property
+    def user_id(self):
+        return self._raw_credential[CredentialManagement.RESULT.USER]["id"]
+
 
 class Fido2Controller(object):
     def __init__(self, ctap_device):
