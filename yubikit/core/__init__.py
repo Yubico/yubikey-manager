@@ -27,9 +27,8 @@
 
 from __future__ import absolute_import, unicode_literals
 
-from collections import namedtuple
 from enum import Enum, IntEnum, IntFlag, unique, auto
-from typing import List, Dict, Tuple, TypeVar, Optional, Type, Hashable
+from typing import List, Dict, Tuple, TypeVar, Optional, Type, Hashable, NamedTuple
 import re
 import abc
 
@@ -37,7 +36,11 @@ import abc
 _VERSION_STRING_PATTERN = re.compile(r"\b(?P<major>\d+).(?P<minor>\d).(?P<patch>\d)\b")
 
 
-class Version(namedtuple("Version", ["major", "minor", "patch"])):
+class Version(NamedTuple):
+    major: int
+    minor: int
+    patch: int
+
     @classmethod
     def from_bytes(cls, data: bytes) -> "Version":
         return cls(*data)
