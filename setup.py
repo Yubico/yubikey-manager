@@ -34,8 +34,9 @@ install_requires = [
     "click",
     "cryptography",
     "pyopenssl",
-    "fido2 >= 0.9",
     "dataclasses;python_version<'3.7'",
+    # TODO: Replace below with "fido2 >=0.9, <1.0",
+    "fido2 @ https://api.github.com/repos/Yubico/python-fido2/tarball/master",
 ]
 if sys.platform == "win32":
     install_requires.append("pypiwin32")
