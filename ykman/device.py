@@ -47,13 +47,21 @@ from yubikit.management import ManagementSession, DeviceInfo, DeviceConfig
 from yubikit.yubiotp import YubiOtpSession
 from fido2.ctap import CtapDevice
 from .hid import list_otp_devices, list_ctap_devices
-from .scard import list_devices as list_ccid_devices
+from .scard import list_devices as _list_ccid_devices
 
 from collections import Counter
 from typing import Dict, Mapping, List, Tuple, Optional, Hashable
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def list_ccid_devices():
+    try:
+        return _list_ccid_devices()
+    except Exception as e:
+        logger.error("Unable to list CCID devices", exc_info=e)
+        return []
 
 
 def is_fips_version(version: Version) -> bool:
