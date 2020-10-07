@@ -1,3 +1,11 @@
+* Version 4.0.0 (unreleased)
+ ** Drop support for Python < 3.6
+ ** Dropped reliance on libusb and libykpersonalize
+ ** Support the "fido" and "otp" subcommands over NFC (using the --reader flag)
+ ** Major changes to the underlying "library" code:
+  *** New "yubikit" package added for custom development and advanced scripting
+  *** Type hints added for a large part of the "public" API
+
 * Version 3.1.2 (unreleased)
  ** OpenPGP: Add support for KDF enabled YubiKeys
  ** Static password: Add support for FR, IT and BEPO keyboard layouts
