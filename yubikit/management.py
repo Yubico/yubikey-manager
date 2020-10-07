@@ -91,7 +91,7 @@ class _Backend(abc.ABC):
 class _ManagementOtpBackend(_Backend):
     def __init__(self, otp_connection):
         self.protocol = OtpProtocol(otp_connection)
-        self.version = Version.from_bytes(self.protocol.read_status())
+        self.version = Version.from_bytes(self.protocol.read_status()[:3])
 
     def set_mode(self, data):
         self.protocol.send_and_receive(SLOT_DEVICE_CONFIG, data)
