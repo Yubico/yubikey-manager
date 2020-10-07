@@ -10,12 +10,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# usb_ioctl.h
+USB_GET_REPORT = 0xC0094807
+USB_SET_REPORT = 0xC0094806
 
-GET_REPORT = 0xC0094807
-SET_REPORT = 0xC0094806
-GET_INFO = 0x80084803
-GET_DESC_SIZE = 0x80044801
-GET_DESC = 0x90044802
+# hidraw.h
+HIDIOCGRAWINFO = 0x80084803
+HIDIOCGRDESCSIZE = 0x80044801
+HIDIOCGRDESC = 0x90044802
 
 
 class HidrawConnection(OtpConnection):
@@ -27,27 +29,27 @@ class HidrawConnection(OtpConnection):
 
     def receive(self):
         buf = bytearray(1 + 8)
-        fcntl.ioctl(self.handle, GET_REPORT, buf, True)
+        fcntl.ioctl(self.handle, USB_GET_REPORT, buf, True)
         return buf[1:]
 
     def send(self, data):
         buf = bytearray([9])
         buf.extend(data)
-        fcntl.ioctl(self.handle, SET_REPORT, buf, True)
+        fcntl.ioctl(self.handle, USB_SET_REPORT, buf, True)
 
 
 def get_info(dev):
     buf = bytearray(4 + 2 + 2)
-    fcntl.ioctl(dev, GET_INFO, buf, True)
+    fcntl.ioctl(dev, HIDIOCGRAWINFO, buf, True)
     return struct.unpack("<IHH", buf)
 
 
 def get_descriptor(dev):
     buf = bytearray(4)
-    fcntl.ioctl(dev, GET_DESC_SIZE, buf, True)
+    fcntl.ioctl(dev, HIDIOCGRDESCSIZE, buf, True)
     size = struct.unpack("<I", buf)[0]
     buf += bytearray(size)
-    fcntl.ioctl(dev, GET_DESC, buf, True)
+    fcntl.ioctl(dev, HIDIOCGRDESC, buf, True)
     return buf[4:]
 
 
