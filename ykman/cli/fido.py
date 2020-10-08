@@ -30,7 +30,12 @@ from fido2.ctap1 import ApduError
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW
 from time import sleep
-from .util import click_postpone_execution, prompt_for_touch, click_force_option
+from .util import (
+    click_postpone_execution,
+    click_prompt,
+    prompt_for_touch,
+    click_force_option,
+)
 from ..fido import Fido2Controller, FipsU2fController
 from ..hid import list_ctap_devices
 from ..device import is_fips_version
@@ -216,13 +221,12 @@ def set_pin(ctx, pin, new_pin, u2f):
         )
 
     def prompt_new_pin():
-        return click.prompt(
+        return click_prompt(
             "Enter your new PIN",
             default="",
             hide_input=True,
             show_default=False,
             confirmation_prompt=True,
-            err=True,
         )
 
     def change_pin(pin, new_pin):
@@ -345,7 +349,7 @@ def reset(ctx, force):
 
     if is_fips_version(ctx.obj["info"].version):
         if not force:
-            destroy_input = click.prompt(
+            destroy_input = click_prompt(
                 "WARNING! This is a YubiKey FIPS device. This command will "
                 "also overwrite the U2F attestation key; this action cannot be "
                 "undone and this YubiKey will no longer be a FIPS compliant "
@@ -353,7 +357,6 @@ def reset(ctx, force):
                 'To proceed, please enter the text "OVERWRITE"',
                 default="",
                 show_default=False,
-                err=True,
             )
             if destroy_input != "OVERWRITE":
                 ctx.fail("Reset aborted by user.")
@@ -432,9 +435,7 @@ def unlock(ctx, pin):
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
-    return click.prompt(
-        prompt, default="", hide_input=True, show_default=False, err=True
-    )
+    return click_prompt(prompt, default="", hide_input=True, show_default=False)
 
 
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):

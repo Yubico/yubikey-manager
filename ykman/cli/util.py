@@ -165,6 +165,21 @@ def click_parse_b32_key(ctx, param, val):
     return parse_b32_key(val)
 
 
+def click_prompt(prompt, err=True, **kwargs):
+    """Replacement for click.prompt to better work when piping input to the command.
+
+    Note that we change the default of err to be True, since that's how we typically
+    use it.
+    """
+    if not sys.stdin.isatty():  # Piped from stdin, see if there is data
+        line = sys.stdin.readline()
+        if line:
+            return line.rstrip("\n")
+
+    # No piped data, use standard prompt
+    return click.prompt(prompt, err=err, **kwargs)
+
+
 def prompt_for_touch():
     try:
         click.echo("Touch your YubiKey...", err=True)

@@ -33,6 +33,7 @@ from .util import (
     click_postpone_execution,
     click_callback,
     click_parse_b32_key,
+    click_prompt,
     prompt_for_touch,
     EnumChoice,
 )
@@ -244,7 +245,7 @@ def add(
 
     if not secret:
         while True:
-            secret = click.prompt("Enter a secret key (base32)", err=True)
+            secret = click_prompt("Enter a secret key (base32)")
             try:
                 secret = parse_b32_key(secret)
                 break
@@ -277,7 +278,7 @@ def uri(ctx, uri, touch, force):
 
     if not uri:
         while True:
-            uri = click.prompt("Enter an OATH URI", err=True)
+            uri = click_prompt("Enter an OATH URI")
             try:
                 uri = CredentialData.parse_uri(uri)
                 break
@@ -515,11 +516,8 @@ def set_password(ctx, new_password, remember):
     """
     ensure_validated(ctx, prompt="Enter your current password")
     if not new_password:
-        new_password = click.prompt(
-            "Enter your new password",
-            hide_input=True,
-            confirmation_prompt=True,
-            err=True,
+        new_password = click_prompt(
+            "Enter your new password", hide_input=True, confirmation_prompt=True
         )
 
     app = ctx.obj["controller"]
@@ -592,7 +590,7 @@ def ensure_validated(ctx, prompt="Enter your password", remember=False):
                 del keys[device_id]
 
         # Prompt for password
-        password = click.prompt(prompt, hide_input=True, err=True)
+        password = click_prompt(prompt, hide_input=True)
         key = app.derive_key(password)
         _validate(ctx, key, remember)
 

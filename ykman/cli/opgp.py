@@ -33,6 +33,7 @@ from .util import (
     click_force_option,
     click_format_option,
     click_postpone_execution,
+    click_prompt,
     EnumChoice,
 )
 
@@ -204,7 +205,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
         ctx.fail("Attestation is not supported by this YubiKey.")
 
     if admin_pin is None:
-        admin_pin = click.prompt("Enter admin PIN", hide_input=True, err=True)
+        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
 
     if force or click.confirm(
         "Set touch policy of {} key to {}?".format(key.value.lower(), policy_name),
@@ -241,7 +242,7 @@ def set_pin_retries(
     controller = ctx.obj["controller"]
 
     if admin_pin is None:
-        admin_pin = click.prompt("Enter admin PIN", hide_input=True, err=True)
+        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
 
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
@@ -285,9 +286,7 @@ def attest(ctx, key, certificate, pin, format):
     controller = ctx.obj["controller"]
 
     if not pin:
-        pin = click.prompt(
-            "Enter PIN", default="", hide_input=True, show_default=False, err=True
-        )
+        pin = click_prompt("Enter PIN", default="", hide_input=True, show_default=False)
 
     try:
         cert = controller.read_certificate(key)
@@ -344,7 +343,7 @@ def delete_certificate(ctx, key, admin_pin):
     """
     controller = ctx.obj["controller"]
     if admin_pin is None:
-        admin_pin = click.prompt("Enter admin PIN", hide_input=True, err=True)
+        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
     try:
         controller.verify_admin(admin_pin)
         controller.delete_certificate(key)
@@ -369,7 +368,7 @@ def import_certificate(ctx, key, cert, admin_pin):
     controller = ctx.obj["controller"]
 
     if admin_pin is None:
-        admin_pin = click.prompt("Enter admin PIN", hide_input=True, err=True)
+        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
 
     try:
         certs = parse_certificates(cert.read(), password=None)
@@ -402,7 +401,7 @@ def import_attestation_key(ctx, private_key, admin_pin):
     controller = ctx.obj["controller"]
 
     if admin_pin is None:
-        admin_pin = click.prompt("Enter admin PIN", hide_input=True, err=True)
+        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
     try:
         private_key = parse_private_key(private_key.read(), password=None)
     except Exception as e:

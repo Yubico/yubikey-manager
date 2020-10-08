@@ -42,6 +42,7 @@ from .util import (
     click_callback,
     click_parse_b32_key,
     click_postpone_execution,
+    click_prompt,
     prompt_for_touch,
     EnumChoice,
 )
@@ -157,9 +158,7 @@ def otp(ctx, access_code):
     ctx.obj["session"] = YubiOtpSession(ctx.obj["conn"])
     if access_code is not None:
         if access_code == "":
-            access_code = click.prompt(
-                "Enter access code", show_default=False, err=True
-            )
+            access_code = click_prompt("Enter access code", show_default=False)
 
         try:
             access_code = parse_access_code_hex(access_code)
@@ -364,7 +363,7 @@ def yubiotp(
                 "add the --serial-public-id flag or --public-id option."
             )
         else:
-            public_id = click.prompt("Enter public ID", err=True)
+            public_id = click_prompt("Enter public ID")
 
     try:
         public_id = modhex_decode(public_id)
@@ -383,7 +382,7 @@ def yubiotp(
                 "add the --generate-private-id flag or --private-id option."
             )
         else:
-            private_id = click.prompt("Enter private ID", err=True)
+            private_id = click_prompt("Enter private ID")
             private_id = bytes.fromhex(private_id)
 
     if not key:
@@ -396,7 +395,7 @@ def yubiotp(
                 "add the --generate-key flag or --key option."
             )
         else:
-            key = click.prompt("Enter secret key", err=True)
+            key = click_prompt("Enter secret key")
             key = bytes.fromhex(key)
 
     if not upload and not force:
@@ -477,7 +476,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
         ctx.fail("Provide a length for the generated password.")
 
     if not password and not generate:
-        password = click.prompt("Enter a static password", err=True)
+        password = click_prompt("Enter a static password")
     elif not password and generate:
         password = generate_static_pw(length, keyboard_layout)
 
@@ -544,7 +543,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             )
         elif totp:
             while True:
-                key = click.prompt("Enter a secret key (base32)", err=True)
+                key = click_prompt("Enter a secret key (base32)")
                 try:
                     key = parse_b32_key(key)
                     break
@@ -555,7 +554,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
                 key = os.urandom(20)
                 click.echo("Using a randomly generated key: {}".format(key.hex()))
             else:
-                key = click.prompt("Enter a secret key", err=True)
+                key = click_prompt("Enter a secret key")
                 key = parse_key(key)
 
     cred_type = "TOTP" if totp else "challenge-response"
@@ -602,7 +601,7 @@ def calculate(ctx, slot, challenge, totp, digits):
     session = ctx.obj["session"]
 
     if not challenge and not totp:
-        ctx.fail("No challenge provided.")
+        challenge = click_prompt("Enter a challenge (hex)")
 
     # Check that slot is not empty
     if not session.get_config_state().is_configured(slot):
@@ -664,7 +663,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     session = ctx.obj["session"]
     if not key:
         while True:
-            key = click.prompt("Enter a secret key (base32)", err=True)
+            key = click_prompt("Enter a secret key (base32)")
             try:
                 key = parse_b32_key(key)
                 break
@@ -751,9 +750,7 @@ def settings(
 
     if new_access_code is not None:
         if new_access_code == "":
-            new_access_code = click.prompt(
-                "Enter new access code", show_default=False, err=True
-            )
+            new_access_code = click_prompt("Enter new access code", show_default=False)
 
         try:
             new_access_code = parse_access_code_hex(new_access_code)

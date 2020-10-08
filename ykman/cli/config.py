@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .util import click_postpone_execution, click_force_option, EnumChoice
+from .util import click_postpone_execution, click_force_option, click_prompt, EnumChoice
 from yubikit.core import APPLICATION, INTERFACE
 from yubikit.management import ManagementSession, DeviceConfig, DEVICE_FLAG
 import os
@@ -52,9 +52,7 @@ class ApplicationsChoice(EnumChoice):
 
 
 def prompt_lock_code(prompt="Enter your lock code"):
-    return click.prompt(
-        prompt, default="", hide_input=True, show_default=False, err=True
-    )
+    return click_prompt(prompt, default="", hide_input=True, show_default=False)
 
 
 @click.group()

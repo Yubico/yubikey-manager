@@ -54,6 +54,7 @@ from .util import (
     click_format_option,
     click_postpone_execution,
     click_callback,
+    click_prompt,
     prompt_for_touch,
     EnumChoice,
 )
@@ -345,12 +346,11 @@ def import_certificate(ctx, slot, management_key, pin, cert, password, verify):
             certs = parse_certificates(data, password)
         except (ValueError, TypeError):
             if password is None:
-                password = click.prompt(
+                password = click_prompt(
                     "Enter password to decrypt certificate",
                     default="",
                     hide_input=True,
                     show_default=False,
-                    err=True,
                 )
                 continue
             else:
@@ -422,12 +422,11 @@ def import_key(
             private_key = parse_private_key(data, password)
         except (ValueError, TypeError):
             if password is None:
-                password = click.prompt(
+                password = click_prompt(
                     "Enter password to decrypt key",
                     default="",
                     hide_input=True,
                     show_default=False,
-                    err=True,
                 )
                 continue
             else:
@@ -689,13 +688,12 @@ def change_pin(ctx, pin, new_pin):
     if not pin:
         pin = _prompt_pin(ctx, prompt="Enter your current PIN")
     if not new_pin:
-        new_pin = click.prompt(
+        new_pin = click_prompt(
             "Enter your new PIN",
             default="",
             hide_input=True,
             show_default=False,
             confirmation_prompt=True,
-            err=True,
         )
 
     if not _valid_pin_length(pin):
@@ -733,13 +731,12 @@ def change_puk(ctx, puk, new_puk):
     if not puk:
         puk = _prompt_pin(ctx, prompt="Enter your current PUK")
     if not new_puk:
-        new_puk = click.prompt(
+        new_puk = click_prompt(
             "Enter your new PUK",
             default="",
             hide_input=True,
             show_default=False,
             confirmation_prompt=True,
-            err=True,
         )
 
     if not _valid_pin_length(puk):
@@ -857,11 +854,10 @@ def change_management_key(
             )
 
         else:
-            new_management_key = click.prompt(
+            new_management_key = click_prompt(
                 "Enter your new management key",
                 hide_input=True,
                 confirmation_prompt=True,
-                err=True,
             )
 
     if new_management_key and type(new_management_key) is not bytes:
@@ -889,12 +885,10 @@ def unblock_pin(ctx, puk, new_pin):
     """
     controller = ctx.obj["controller"]
     if not puk:
-        puk = click.prompt(
-            "Enter PUK", default="", show_default=False, hide_input=True, err=True
-        )
+        puk = click_prompt("Enter PUK", default="", show_default=False, hide_input=True)
     if not new_pin:
-        new_pin = click.prompt(
-            "Enter a new PIN", default="", show_default=False, hide_input=True, err=True
+        new_pin = click_prompt(
+            "Enter a new PIN", default="", show_default=False, hide_input=True
         )
     controller.unblock_pin(puk, new_pin)
 
@@ -971,8 +965,8 @@ def write_object(ctx, pin, management_key, object_id, data):
 def _prompt_management_key(
     ctx, prompt="Enter a management key [blank to use default key]"
 ):
-    management_key = click.prompt(
-        prompt, default="", hide_input=True, show_default=False, err=True
+    management_key = click_prompt(
+        prompt, default="", hide_input=True, show_default=False
     )
     if management_key == "":
         return DEFAULT_MANAGEMENT_KEY
@@ -983,9 +977,7 @@ def _prompt_management_key(
 
 
 def _prompt_pin(ctx, prompt="Enter PIN"):
-    return click.prompt(
-        prompt, default="", hide_input=True, show_default=False, err=True
-    )
+    return click_prompt(prompt, default="", hide_input=True, show_default=False)
 
 
 def _valid_pin_length(pin):
