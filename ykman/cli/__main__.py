@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, ApplicationNotAvailableError
+from yubikit.core import USB_INTERFACE, ApplicationNotAvailableError
 
 import ykman.logging_setup
 
@@ -80,8 +80,8 @@ def print_version(ctx, param, value):
     ctx.exit()
 
 
-def _disabled_transport(ctx, transports, cmd_name):
-    req = ", ".join((t.name for t in TRANSPORT if t & transports))
+def _disabled_interface(ctx, interfaces, cmd_name):
+    req = ", ".join((t.name for t in USB_INTERFACE if t & interfaces))
     click.echo(
         "Command '{}' requires one of the following USB interfaces "
         "to be enabled: '{}'.".format(cmd_name, req)
@@ -89,15 +89,15 @@ def _disabled_transport(ctx, transports, cmd_name):
     ctx.fail("Use 'ykman config usb' to set the enabled USB interfaces.")
 
 
-def _run_cmd_for_serial(ctx, cmd, transports, serial):
+def _run_cmd_for_serial(ctx, cmd, interfaces, serial):
     try:
-        return retrying_connect(serial, transports)
+        return retrying_connect(serial, interfaces)
     except ValueError:
         try:
-            # Serial not found, see if it's among other transports in USB enabled:
-            conn = retrying_connect(serial, sum(TRANSPORT) ^ transports)[0]
+            # Serial not found, see if it's among other interfaces in USB enabled:
+            conn = retrying_connect(serial, sum(USB_INTERFACE) ^ interfaces)[0]
             conn.close()
-            _disabled_transport(ctx, transports, cmd)
+            _disabled_interface(ctx, interfaces, cmd)
         except ValueError:
             ctx.fail(
                 "Failed connecting to a YubiKey with serial: {}. "
@@ -106,10 +106,10 @@ def _run_cmd_for_serial(ctx, cmd, transports, serial):
             )
 
 
-def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
+def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
     # Use a specific CCID reader
     if reader_name:
-        if TRANSPORT.has(transports, TRANSPORT.CCID) or cmd in (fido.name, otp.name):
+        if USB_INTERFACE.CCID in interfaces or cmd in (fido.name, otp.name):
             readers = list_ccid(reader_name)
             if len(readers) == 1:
                 dev = readers[0]
@@ -141,11 +141,11 @@ def _run_cmd_for_single(ctx, cmd, transports, reader_name=None):
             "which one to use."
         )
 
-    # Only one connected device, check if any needed transports are available
+    # Only one connected device, check if any needed interfaces are available
     pid = next(iter(devices.keys()))
-    if pid.get_transports() & transports:
-        return retrying_connect(None, transports)
-    _disabled_transport(ctx, transports, cmd)
+    if pid.get_interfaces() & interfaces:
+        return retrying_connect(None, interfaces)
+    _disabled_interface(ctx, interfaces, cmd)
 
 
 @click.group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -209,18 +209,18 @@ def cli(ctx, device, log_level, log_file, reader):
             ctx.fail("--reader and list command can't be combined.")
         return
 
-    transports = getattr(subcmd, "transports", sum(TRANSPORT))
-    if transports:
+    interfaces = getattr(subcmd, "interfaces", USB_INTERFACE(sum(USB_INTERFACE)))
+    if interfaces:
 
         def resolve():
             if not getattr(resolve, "items", None):
                 if device is not None:
                     resolve.items = _run_cmd_for_serial(
-                        ctx, subcmd.name, transports, device
+                        ctx, subcmd.name, interfaces, device
                     )
                 else:
                     resolve.items = _run_cmd_for_single(
-                        ctx, subcmd.name, transports, reader
+                        ctx, subcmd.name, interfaces, reader
                     )
                 ctx.call_on_close(resolve.items[0].close)
             return resolve.items
@@ -256,7 +256,7 @@ def list_keys(ctx, serials, readers):
     for pid, dev_info in list_all_devices():
         if serials:
             if dev_info.serial:
-                click.echo(info.serial)
+                click.echo(dev_info.serial)
         else:
             click.echo(
                 "{} ({}) [{}]{}".format(

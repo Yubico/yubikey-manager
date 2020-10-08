@@ -8,7 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import ApduError
 from yubikit.piv import (
     PivSession,
@@ -54,7 +54,7 @@ def sign(controller, slot, key_type, message):
     return controller._app.sign(slot, key_type, message, hashes.SHA256())
 
 
-@device_test_suite(TRANSPORT.CCID)
+@device_test_suite(USB_INTERFACE.CCID)
 def additional_tests(open_device):
     class PivTestCase(unittest.TestCase):
         def setUp(self):

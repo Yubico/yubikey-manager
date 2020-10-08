@@ -32,10 +32,10 @@ from .core import (
     Tlv,
     AID,
     PID,
-    INTERFACE,
+    TRANSPORT,
     APPLICATION,
     FORM_FACTOR,
-    TRANSPORT,
+    USB_INTERFACE,
     NotSupportedError,
     BadResponseError,
 )
@@ -172,7 +172,7 @@ class TAG(IntEnum):
 
 @dataclass
 class DeviceConfig:
-    enabled_applications: Mapping[INTERFACE, APPLICATION]
+    enabled_applications: Mapping[TRANSPORT, APPLICATION]
     auto_eject_timeout: Optional[int]
     challenge_response_timeout: Optional[int]
     device_flags: Optional[DEVICE_FLAG]
@@ -188,10 +188,10 @@ class DeviceConfig:
             buf += Tlv(TAG.REBOOT)
         if cur_lock_code:
             buf += Tlv(TAG.UNLOCK, cur_lock_code)
-        usb_enabled = self.enabled_applications.get(INTERFACE.USB)
+        usb_enabled = self.enabled_applications.get(TRANSPORT.USB)
         if usb_enabled is not None:
             buf += Tlv(TAG.USB_ENABLED, int2bytes(usb_enabled, 2))
-        nfc_enabled = self.enabled_applications.get(INTERFACE.NFC)
+        nfc_enabled = self.enabled_applications.get(TRANSPORT.NFC)
         if nfc_enabled is not None:
             buf += Tlv(TAG.NFC_ENABLED, int2bytes(nfc_enabled, 2))
         if self.auto_eject_timeout is not None:
@@ -213,11 +213,11 @@ class DeviceInfo:
     serial: Optional[int]
     version: Version
     form_factor: FORM_FACTOR
-    supported_applications: Mapping[INTERFACE, APPLICATION]
+    supported_applications: Mapping[TRANSPORT, APPLICATION]
     is_locked: bool
 
-    def has_interface(self, interface: INTERFACE) -> bool:
-        return interface in self.supported_applications
+    def has_transport(self, transport: TRANSPORT) -> bool:
+        return transport in self.supported_applications
 
     @classmethod
     def parse(cls, encoded: bytes, default_version: Version) -> "DeviceInfo":
@@ -239,14 +239,14 @@ class DeviceInfo:
         enabled = {}
 
         if version == (4, 2, 4):  # Doesn't report correctly
-            supported[INTERFACE.USB] = APPLICATION(0x3F)
+            supported[TRANSPORT.USB] = APPLICATION(0x3F)
         else:
-            supported[INTERFACE.USB] = APPLICATION(bytes2int(data[TAG.USB_SUPPORTED]))
+            supported[TRANSPORT.USB] = APPLICATION(bytes2int(data[TAG.USB_SUPPORTED]))
         if TAG.USB_ENABLED in data:  # From YK 5.0.0
-            enabled[INTERFACE.USB] = APPLICATION(bytes2int(data[TAG.USB_ENABLED]))
+            enabled[TRANSPORT.USB] = APPLICATION(bytes2int(data[TAG.USB_ENABLED]))
         if TAG.NFC_SUPPORTED in data:  # YK with NFC
-            supported[INTERFACE.NFC] = APPLICATION(bytes2int(data[TAG.NFC_SUPPORTED]))
-            enabled[INTERFACE.NFC] = APPLICATION(bytes2int(data[TAG.NFC_ENABLED]))
+            supported[TRANSPORT.NFC] = APPLICATION(bytes2int(data[TAG.NFC_SUPPORTED]))
+            enabled[TRANSPORT.NFC] = APPLICATION(bytes2int(data[TAG.NFC_ENABLED]))
 
         return cls(
             DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags),
@@ -259,30 +259,30 @@ class DeviceInfo:
 
 
 _MODES = [
-    TRANSPORT.OTP,  # 0x00
-    TRANSPORT.CCID,  # 0x01
-    TRANSPORT.OTP | TRANSPORT.CCID,  # 0x02
-    TRANSPORT.FIDO,  # 0x03
-    TRANSPORT.OTP | TRANSPORT.FIDO,  # 0x04
-    TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x05
-    TRANSPORT.OTP | TRANSPORT.FIDO | TRANSPORT.CCID,  # 0x06
+    USB_INTERFACE.OTP,  # 0x00
+    USB_INTERFACE.CCID,  # 0x01
+    USB_INTERFACE.OTP | USB_INTERFACE.CCID,  # 0x02
+    USB_INTERFACE.FIDO,  # 0x03
+    USB_INTERFACE.OTP | USB_INTERFACE.FIDO,  # 0x04
+    USB_INTERFACE.FIDO | USB_INTERFACE.CCID,  # 0x05
+    USB_INTERFACE.OTP | USB_INTERFACE.FIDO | USB_INTERFACE.CCID,  # 0x06
 ]
 
 
 @dataclass(init=False, repr=False)
 class Mode:
     code: int
-    transports: TRANSPORT
+    interfaces: USB_INTERFACE
 
-    def __init__(self, transports: TRANSPORT):
+    def __init__(self, interfaces: USB_INTERFACE):
         try:
-            self.code = _MODES.index(transports)
-            self.transports = TRANSPORT(transports)
+            self.code = _MODES.index(interfaces)
+            self.interfaces = USB_INTERFACE(interfaces)
         except ValueError:
             raise ValueError("Invalid mode!")
 
     def __repr__(self):
-        return "+".join(t.name for t in TRANSPORT if t in self.transports)
+        return "+".join(t.name for t in USB_INTERFACE if t in self.interfaces)
 
     @classmethod
     def from_code(cls, code: int) -> "Mode":
@@ -291,7 +291,7 @@ class Mode:
 
     @classmethod
     def from_pid(cls, pid: PID) -> "Mode":
-        return cls(PID(pid).get_transports())
+        return cls(PID(pid).get_interfaces())
 
 
 class ManagementSession:
@@ -344,15 +344,15 @@ class ManagementSession:
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
             usb_enabled = APPLICATION(0)
-            if TRANSPORT.OTP in mode.transports:
+            if USB_INTERFACE.OTP in mode.interfaces:
                 usb_enabled |= APPLICATION.OTP
-            if TRANSPORT.CCID in mode.transports:
+            if USB_INTERFACE.CCID in mode.interfaces:
                 usb_enabled |= APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
-            if TRANSPORT.FIDO in mode.transports:
+            if USB_INTERFACE.FIDO in mode.interfaces:
                 usb_enabled |= APPLICATION.U2F | APPLICATION.FIDO2
             self.write_device_config(
                 DeviceConfig(
-                    {INTERFACE.USB: usb_enabled},
+                    {TRANSPORT.USB: usb_enabled},
                     auto_eject_timeout,
                     chalresp_timeout,
                     None,

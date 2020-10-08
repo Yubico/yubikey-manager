@@ -53,13 +53,13 @@ class Version(NamedTuple):
         raise ValueError("No version found in string")
 
 
-class INTERFACE(Enum):
+class TRANSPORT(Enum):
     USB = auto()
     NFC = auto()
 
 
 @unique
-class TRANSPORT(IntFlag):
+class USB_INTERFACE(IntFlag):
     OTP = 0x01
     FIDO = 0x02
     CCID = 0x04
@@ -133,8 +133,10 @@ class YUBIKEY(Enum):
     YKP = "YubiKey Plus"
     YK4 = "YubiKey 4"
 
-    def get_pid(self, transports: TRANSPORT) -> "PID":
-        suffix = "_".join(t.name for t in TRANSPORT if t in TRANSPORT(transports))
+    def get_pid(self, interfaces: USB_INTERFACE) -> "PID":
+        suffix = "_".join(
+            t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
+        )
         return PID[self.name + "_" + suffix]
 
 
@@ -161,8 +163,8 @@ class PID(IntEnum):
     def get_type(self):
         return YUBIKEY[self.name.split("_", 1)[0]]
 
-    def get_transports(self):
-        return TRANSPORT(sum(TRANSPORT[x] for x in self.name.split("_")[1:]))
+    def get_interfaces(self):
+        return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
 
 
 class YubiKeyDevice(abc.ABC):

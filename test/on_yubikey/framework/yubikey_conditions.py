@@ -1,6 +1,6 @@
 from ykman.device import is_fips_version
 from ykman.util import is_cve201715361_vulnerable_firmware_version
-from yubikit.core import INTERFACE
+from yubikit.core import TRANSPORT
 from . import _get_test_method_names
 
 
@@ -96,7 +96,7 @@ def can_write_config(info):
 
 @yubikey_condition
 def has_nfc(info):
-    return INTERFACE.NFC in info.supported_applications
+    return info.has_transport(TRANSPORT.NFC)
 
 
 def version_min(min_version):

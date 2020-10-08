@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, INTERFACE, YUBIKEY, YubiKeyDevice
+from yubikit.core import TRANSPORT, USB_INTERFACE, YUBIKEY, YubiKeyDevice
 from yubikit.core.smartcard import SmartCardConnection
 
 from smartcard import System
@@ -49,16 +49,16 @@ def _pid_from_name(name):
     if YK_READER_NAME not in name.lower():
         return None
 
-    transports = 0
-    for t in TRANSPORT:
-        if t.name in name:
-            transports += t
+    interfaces = USB_INTERFACE(0)
+    for iface in USB_INTERFACE:
+        if iface.name in name:
+            interfaces |= iface
 
     if "U2F" in name:
-        transports += TRANSPORT.FIDO
+        interfaces |= USB_INTERFACE.FIDO
 
     key_type = YUBIKEY.NEO if "NEO" in name else YUBIKEY.YK4
-    return key_type.get_pid(transports)
+    return key_type.get_pid(interfaces)
 
 
 class ScardDevice(YubiKeyDevice):
@@ -92,11 +92,11 @@ class ScardSmartCardConnection(SmartCardConnection):
         self.connection = connection
         connection.connect()
         atr = connection.getATR()
-        self._interface = INTERFACE.USB if atr[1] & 0xF0 == 0xF0 else INTERFACE.NFC
+        self._transport = TRANSPORT.USB if atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
 
     @property
-    def interface(self):
-        return self._interface
+    def transport(self):
+        return self._transport
 
     def close(self):
         self.connection.disconnect()

@@ -2,7 +2,7 @@ import struct
 import unittest
 
 from fido2.hid import CTAPHID
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from ykman.fido import FIPS_U2F_CMD
 from .framework import device_test_suite, yubikey_conditions
 
@@ -12,7 +12,7 @@ P1 = 0
 P2 = 0
 
 
-@device_test_suite(TRANSPORT.FIDO)
+@device_test_suite(USB_INTERFACE.FIDO)
 def additional_tests(open_device):
     @yubikey_conditions.is_fips
     class TestFipsU2fCommands(unittest.TestCase):

@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import INTERFACE, APPLICATION, TRANSPORT
+from yubikit.core import TRANSPORT, APPLICATION, USB_INTERFACE
 from yubikit.core.smartcard import ApduError
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
@@ -46,10 +46,10 @@ logger = logging.getLogger(__name__)
 
 
 def print_app_status_table(supported_apps, enabled_apps):
-    usb_supported = supported_apps.get(INTERFACE.USB, 0)
-    usb_enabled = enabled_apps.get(INTERFACE.USB, 0)
-    nfc_supported = supported_apps.get(INTERFACE.NFC, 0)
-    nfc_enabled = enabled_apps.get(INTERFACE.NFC, 0)
+    usb_supported = supported_apps.get(TRANSPORT.USB, 0)
+    usb_enabled = enabled_apps.get(TRANSPORT.USB, 0)
+    nfc_supported = supported_apps.get(TRANSPORT.NFC, 0)
+    nfc_enabled = enabled_apps.get(TRANSPORT.NFC, 0)
     rows = []
     for app in APPLICATION:
         if app & usb_supported:
@@ -101,7 +101,7 @@ def print_app_status_table(supported_apps, enabled_apps):
 def get_overall_fips_status(pid, info):
     statuses = {}
 
-    usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
 
     statuses["OTP"] = False
     if usb_enabled & APPLICATION.OTP:
@@ -179,10 +179,10 @@ def info(ctx, check_fips):
     info = ctx.obj["info"]
     pid = ctx.obj["pid"]
     if pid is None:
-        transports = None
+        interfaces = None
         key_type = None
     else:
-        transports = pid.get_transports()
+        interfaces = pid.get_interfaces()
         key_type = pid.get_type()
     device_name = get_name(info, key_type)
 
@@ -194,24 +194,26 @@ def info(ctx, check_fips):
         click.echo("Firmware version: {}".format(f_version))
     else:
         click.echo(
-            "Firmware version: Uncertain, re-run with only one " "YubiKey connected"
+            "Firmware version: Uncertain, re-run with only one YubiKey connected"
         )
 
     if info.form_factor:
         click.echo("Form factor: {!s}".format(info.form_factor))
-    if transports:
+    if interfaces:
         click.echo(
             "Enabled USB interfaces: {}".format(
-                ", ".join(t.name for t in TRANSPORT if t in TRANSPORT(transports))
+                ", ".join(
+                    t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
+                )
             )
         )
-    if INTERFACE.NFC in info.supported_applications:
+    if TRANSPORT.NFC in info.supported_applications:
         f_nfc = (
             "enabled"
-            if info.config.enabled_applications.get(INTERFACE.NFC)
+            if info.config.enabled_applications.get(TRANSPORT.NFC)
             else "disabled"
         )
-        click.echo("NFC interface is {}.".format(f_nfc))
+        click.echo("NFC transport is {}.".format(f_nfc))
     if info.is_locked:
         click.echo("Configured applications are protected by a lock code.")
     click.echo()

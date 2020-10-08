@@ -27,7 +27,7 @@
 
 from fido2.ctap import CtapError
 from fido2.ctap1 import ApduError
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import SW
 from time import sleep
 from .util import (
@@ -444,4 +444,4 @@ def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
         ctx.fail("PIN must be over {} characters long".format(min_length))
 
 
-fido.transports = TRANSPORT.FIDO  # type: ignore
+fido.interfaces = USB_INTERFACE.FIDO  # type: ignore

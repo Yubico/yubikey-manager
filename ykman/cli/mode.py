@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, INTERFACE, APPLICATION, YUBIKEY
+from yubikit.core import USB_INTERFACE, TRANSPORT, APPLICATION, YUBIKEY
 from yubikit.management import ManagementSession, Mode
 
 from .util import click_force_option
@@ -37,10 +37,10 @@ import click
 logger = logging.getLogger(__name__)
 
 
-def _parse_transport_string(transport):
-    for t in TRANSPORT:
-        if t.name.startswith(transport):
-            return t
+def _parse_interface_string(interface):
+    for iface in USB_INTERFACE:
+        if iface.name.startswith(interface):
+            return iface
     raise ValueError()
 
 
@@ -56,36 +56,36 @@ def _parse_mode_string(ctx, param, mode):
         pass  # Not a numeric mode, parse string
 
     try:
-        transports = TRANSPORT(0)
+        interfaces = USB_INTERFACE(0)
         if mode[0] in ["+", "-"]:
             info = ctx.obj["info"]
-            usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+            usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
             my_mode = _mode_from_usb_enabled(usb_enabled)
-            transports |= my_mode.transports
+            interfaces |= my_mode.interfaces
             for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
-                transport = _parse_transport_string(mod[1:])
+                interface = _parse_interface_string(mod[1:])
                 if mod.startswith("+"):
-                    transports |= transport
+                    interfaces |= interface
                 else:
-                    transports ^= transport
+                    interfaces ^= interface
         else:
             for t in filter(None, re.split(r"[+]+", mode.upper())):
-                transports |= _parse_transport_string(t)
+                interfaces |= _parse_interface_string(t)
     except ValueError:
         ctx.fail("Invalid mode string: {}".format(mode))
 
-    return Mode(transports)
+    return Mode(interfaces)
 
 
 def _mode_from_usb_enabled(usb_enabled):
-    transports = 0
+    interfaces = 0
     if APPLICATION.OTP & usb_enabled:
-        transports |= TRANSPORT.OTP
+        interfaces |= USB_INTERFACE.OTP
     if (APPLICATION.U2F | APPLICATION.FIDO2) & usb_enabled:
-        transports |= TRANSPORT.FIDO
+        interfaces |= USB_INTERFACE.FIDO
     if (APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
-        transports |= TRANSPORT.CCID
-    return Mode(transports)
+        interfaces |= USB_INTERFACE.CCID
+    return Mode(interfaces)
 
 
 @click.command()
@@ -137,10 +137,10 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
     info = ctx.obj["info"]
     mgmt = ManagementSession(ctx.obj["conn"])
-    usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
     my_mode = _mode_from_usb_enabled(usb_enabled)
-    usb_supported = info.supported_applications[INTERFACE.USB]
-    transports_supported = _mode_from_usb_enabled(usb_supported).transports
+    usb_supported = info.supported_applications[TRANSPORT.USB]
+    interfaces_supported = _mode_from_usb_enabled(usb_supported).interfaces
     pid = ctx.obj["pid"]
     if pid:
         key_type = pid.get_type()
@@ -152,7 +152,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     autoeject = autoeject_timeout if touch_eject else 0
 
     if mode is not None:
-        if mode.transports != TRANSPORT.CCID:
+        if mode.interfaces != USB_INTERFACE.CCID:
             if touch_eject:
                 ctx.fail(
                     "--touch-eject can only be used when setting" " CCID-only mode"
@@ -165,7 +165,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
                 click.echo("Mode switching is not supported on this YubiKey!")
                 ctx.fail("Use --force to attempt to set it anyway.")
-            elif mode.transports not in transports_supported:
+            elif mode.interfaces not in interfaces_supported:
                 click.echo("Mode {} is not supported on this YubiKey!".format(mode))
                 ctx.fail("Use --force to attempt to set it anyway.")
             force or click.confirm(
@@ -187,6 +187,6 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     else:
         click.echo("Current connection mode is: {}".format(my_mode))
-        mode = _mode_from_usb_enabled(info.supported_applications[INTERFACE.USB])
-        supported = ", ".join(t.name for t in TRANSPORT if t in mode.transports)
+        mode = _mode_from_usb_enabled(info.supported_applications[TRANSPORT.USB])
+        supported = ", ".join(t.name for t in USB_INTERFACE if t in mode.interfaces)
         click.echo("Supported USB interfaces are: {}".format(supported))

@@ -27,7 +27,7 @@
 
 from .core import (
     AID,
-    INTERFACE,
+    TRANSPORT,
     Version,
     bytes2int,
     NotSupportedError,
@@ -666,7 +666,7 @@ class YubiOtpSession:
         elif isinstance(connection, SmartCardConnection):
             card_protocol = SmartCardProtocol(connection)
             mgmt_version = None
-            if connection.interface == INTERFACE.NFC:
+            if connection.transport == TRANSPORT.NFC:
                 # This version is more reliable over NFC
                 try:
                     card_protocol.select(AID.MGMT)

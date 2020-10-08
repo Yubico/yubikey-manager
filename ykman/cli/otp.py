@@ -34,7 +34,7 @@ from yubikit.yubiotp import (
     HotpSlotConfiguration,
     UpdateConfiguration,
 )
-from yubikit.core import INTERFACE, TRANSPORT, CommandError
+from yubikit.core import TRANSPORT, USB_INTERFACE, CommandError
 from ..scancodes import encode, KEYBOARD_LAYOUT
 
 from .util import (
@@ -218,7 +218,7 @@ def ndef(ctx, slot, prefix):
     info = ctx.obj["info"]
     session = ctx.obj["session"]
     state = session.get_config_state()
-    if INTERFACE.NFC not in info.supported_applications:
+    if TRANSPORT.NFC not in info.supported_applications:
         ctx.fail("NFC interface not available.")
 
     if not state.is_configured(slot):
@@ -786,4 +786,4 @@ def settings(
         _failed_to_write_msg(ctx, e)
 
 
-otp.transports = TRANSPORT.OTP  # type: ignore
+otp.interfaces = USB_INTERFACE.OTP  # type: ignore

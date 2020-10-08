@@ -37,7 +37,7 @@ from .util import (
     EnumChoice,
 )
 
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import SmartCardProtocol, ApduError, SW
 
 logger = logging.getLogger(__name__)
@@ -415,4 +415,4 @@ def import_attestation_key(ctx, private_key, admin_pin):
         ctx.fail("Failed to import attestation key.")
 
 
-openpgp.transports = TRANSPORT.CCID  # type: ignore
+openpgp.interfaces = USB_INTERFACE.CCID  # type: ignore

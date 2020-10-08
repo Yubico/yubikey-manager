@@ -28,8 +28,8 @@
 from yubikit.core import (
     AID,
     PID,
-    INTERFACE,
     TRANSPORT,
+    USB_INTERFACE,
     APPLICATION,
     FORM_FACTOR,
     YUBIKEY,
@@ -135,14 +135,15 @@ def list_all_devices() -> List[Tuple[PID, DeviceInfo]]:
 
 
 def connect_to_device(
-    serial: Optional[int] = None, transports: TRANSPORT = TRANSPORT(sum(TRANSPORT))
+    serial: Optional[int] = None,
+    interfaces: USB_INTERFACE = USB_INTERFACE(sum(USB_INTERFACE)),
 ) -> Tuple[Connection, PID, DeviceInfo]:
-    """Get a connection to a YubiKey using one of the provided transports.
+    """Get a connection to a YubiKey using one of the provided interfaces.
 
     Returns a tuple of (connection, pid, info) for the device.
     """
-    transports = TRANSPORT(transports)
-    if TRANSPORT.CCID in transports:
+    interfaces = USB_INTERFACE(interfaces)
+    if USB_INTERFACE.CCID in interfaces:
         for dev in list_ccid_devices():
             try:
                 conn = dev.open_smartcard_connection()
@@ -154,7 +155,7 @@ def connect_to_device(
             except Exception as e:
                 logger.debug("Error connecting", exc_info=e)
 
-    if TRANSPORT.OTP in transports:
+    if USB_INTERFACE.OTP in interfaces:
         for dev in list_otp_devices():
             try:
                 conn = dev.open_otp_connection()
@@ -166,7 +167,7 @@ def connect_to_device(
             except Exception as e:
                 logger.debug("Error connecting", exc_info=e)
 
-    if TRANSPORT.FIDO in transports:
+    if USB_INTERFACE.FIDO in interfaces:
         for dev in list_ctap_devices():
             try:
                 conn = dev.open_ctap_connection()
@@ -180,7 +181,7 @@ def connect_to_device(
 
     if serial:
         raise ValueError("YubiKey with given serial not found")
-    raise ValueError("No YubiKey found for the given transports")
+    raise ValueError("No YubiKey found with the given interface(s)")
 
 
 def _otp_read_data(conn):
@@ -206,7 +207,7 @@ SCAN_APPLETS = {
 }
 
 
-def _read_info_ccid(conn, key_type, transports):
+def _read_info_ccid(conn, key_type, interfaces):
     try:
         mgmt = ManagementSession(conn)
         version = mgmt.version
@@ -220,7 +221,7 @@ def _read_info_ccid(conn, key_type, transports):
         version = None
 
     # Synthesize data
-    applications = TRANSPORT.CCID
+    applications = USB_INTERFACE.CCID
 
     # Try to read serial (and version if needed) from OTP application
     try:
@@ -248,14 +249,14 @@ def _read_info_ccid(conn, key_type, transports):
             )
 
     # Assume U2F on devices >= 3.3.0
-    if TRANSPORT.FIDO in transports or version >= (3, 3, 0):
+    if USB_INTERFACE.FIDO in interfaces or version >= (3, 3, 0):
         applications |= APPLICATION.U2F
 
     return DeviceInfo(
         config=DeviceConfig(
             enabled_applications={
-                INTERFACE.USB: applications,
-                INTERFACE.NFC: applications,
+                TRANSPORT.USB: applications,
+                TRANSPORT.NFC: applications,
             },
             auto_eject_timeout=0,
             challenge_response_timeout=0,
@@ -265,14 +266,14 @@ def _read_info_ccid(conn, key_type, transports):
         version=version,
         form_factor=FORM_FACTOR.UNKNOWN,
         supported_applications={
-            INTERFACE.USB: applications,
-            INTERFACE.NFC: applications,
+            TRANSPORT.USB: applications,
+            TRANSPORT.NFC: applications,
         },
         is_locked=False,
     )
 
 
-def _read_info_otp(conn, key_type, transports):
+def _read_info_otp(conn, key_type, interfaces):
     try:
         mgmt = ManagementSession(conn)
         return mgmt.read_device_info()
@@ -284,19 +285,19 @@ def _read_info_otp(conn, key_type, transports):
 
     if key_type == YUBIKEY.NEO:
         usb_supported = BASE_NEO_APPS
-        if TRANSPORT.FIDO in transports or version >= (3, 3, 0):
+        if USB_INTERFACE.FIDO in interfaces or version >= (3, 3, 0):
             usb_supported |= APPLICATION.U2F
         applications = {
-            INTERFACE.USB: usb_supported,
-            INTERFACE.NFC: usb_supported,
+            TRANSPORT.USB: usb_supported,
+            TRANSPORT.NFC: usb_supported,
         }
     elif key_type == YUBIKEY.YKP:
         applications = {
-            INTERFACE.USB: APPLICATION.OTP | INTERFACE.U2F,
+            TRANSPORT.USB: APPLICATION.OTP | TRANSPORT.U2F,
         }
     else:
         applications = {
-            INTERFACE.USB: APPLICATION.OTP,
+            TRANSPORT.USB: APPLICATION.OTP,
         }
 
     return DeviceInfo(
@@ -314,25 +315,25 @@ def _read_info_otp(conn, key_type, transports):
     )
 
 
-def _read_info_ctap(conn, key_type, transports):
+def _read_info_ctap(conn, key_type, interfaces):
     try:
         mgmt = ManagementSession(conn)
         return mgmt.read_device_info()
     except Exception:  # SKY 1 or NEO
         version = (3, 0, 0)  # Guess, no way to know
-        enabled_apps = {INTERFACE.USB: APPLICATION.U2F}
-        if TRANSPORT.CCID in transports:
-            enabled_apps[INTERFACE.USB] |= (
+        enabled_apps = {TRANSPORT.USB: APPLICATION.U2F}
+        if USB_INTERFACE.CCID in interfaces:
+            enabled_apps[TRANSPORT.USB] |= (
                 APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH
             )
-        if TRANSPORT.OTP in transports:
-            enabled_apps[INTERFACE.USB] |= APPLICATION.OTP
+        if USB_INTERFACE.OTP in interfaces:
+            enabled_apps[TRANSPORT.USB] |= APPLICATION.OTP
 
-        supported_apps = {INTERFACE.USB: APPLICATION.U2F}
+        supported_apps = {TRANSPORT.USB: APPLICATION.U2F}
         if key_type == YUBIKEY.NEO:
-            supported_apps[INTERFACE.USB] |= BASE_NEO_APPS
-            supported_apps[INTERFACE.NFC] = supported_apps[INTERFACE.USB]
-            enabled_apps[INTERFACE.NFC] = supported_apps[INTERFACE.NFC]
+            supported_apps[TRANSPORT.USB] |= BASE_NEO_APPS
+            supported_apps[TRANSPORT.NFC] = supported_apps[TRANSPORT.USB]
+            enabled_apps[TRANSPORT.NFC] = supported_apps[TRANSPORT.NFC]
 
         return DeviceInfo(
             config=DeviceConfig(
@@ -353,40 +354,43 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
     """Read out a DeviceInfo object from a YubiKey, or attempt to synthesize one."""
     if pid:
         key_type = pid.get_type()
-        transports = pid.get_transports()
+        interfaces = pid.get_interfaces()
     else:  # No PID for NFC connections
         key_type = None
-        transports = TRANSPORT(0)
+        interfaces = USB_INTERFACE(0)
 
     if isinstance(conn, SmartCardConnection):
-        info = _read_info_ccid(conn, key_type, transports)
+        info = _read_info_ccid(conn, key_type, interfaces)
     elif isinstance(conn, OtpConnection):
-        info = _read_info_otp(conn, key_type, transports)
+        info = _read_info_otp(conn, key_type, interfaces)
     elif isinstance(conn, CtapDevice):
-        info = _read_info_ctap(conn, key_type, transports)
+        info = _read_info_ctap(conn, key_type, interfaces)
 
     logger.debug("Read info: %s", info)
 
     # Set usb_enabled if missing (pre YubiKey 5)
     if (
-        info.has_interface(INTERFACE.USB)
-        and INTERFACE.USB not in info.config.enabled_applications
+        info.has_transport(TRANSPORT.USB)
+        and TRANSPORT.USB not in info.config.enabled_applications
     ):
-        usb_enabled = info.supported_applications[INTERFACE.USB]
-        if usb_enabled == (APPLICATION.OTP | APPLICATION.U2F | TRANSPORT.CCID):
+        usb_enabled = info.supported_applications[TRANSPORT.USB]
+        if usb_enabled == (APPLICATION.OTP | APPLICATION.U2F | USB_INTERFACE.CCID):
             # YubiKey Edge, hide unusable CCID interface
             usb_enabled = APPLICATION.OTP | APPLICATION.U2F
-            info.supported_applications = {INTERFACE.USB: usb_enabled}
+            info.supported_applications = {TRANSPORT.USB: usb_enabled}
 
-        if TRANSPORT.OTP not in transports:
+        if USB_INTERFACE.OTP not in interfaces:
             usb_enabled &= ~APPLICATION.OTP
-        if TRANSPORT.FIDO not in transports:
+        if USB_INTERFACE.FIDO not in interfaces:
             usb_enabled &= ~(APPLICATION.U2F | APPLICATION.FIDO2)
-        if TRANSPORT.CCID not in transports:
+        if USB_INTERFACE.CCID not in interfaces:
             usb_enabled &= ~(
-                TRANSPORT.CCID | APPLICATION.OATH | APPLICATION.OPGP | APPLICATION.PIV
+                USB_INTERFACE.CCID
+                | APPLICATION.OATH
+                | APPLICATION.OPGP
+                | APPLICATION.PIV
             )
-        info.config.enabled_applications[INTERFACE.USB] = usb_enabled
+        info.config.enabled_applications[TRANSPORT.USB] = usb_enabled
 
     # Workaround for invalid configurations.
     # Assume all form factors except USB_A_KEYCHAIN and
@@ -399,10 +403,10 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
         )
     ):
         info.supported_applications = {
-            INTERFACE.USB: info.supported_applications[INTERFACE.USB]
+            TRANSPORT.USB: info.supported_applications[TRANSPORT.USB]
         }
         info.config.enabled_applications = {
-            INTERFACE.USB: info.config.enabled_applications[INTERFACE.USB]
+            TRANSPORT.USB: info.config.enabled_applications[TRANSPORT.USB]
         }
 
     return info
@@ -414,7 +418,7 @@ def _fido_only(applications):
 
 def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
     """Determine the product name of a YubiKey"""
-    usb_supported = info.supported_applications[INTERFACE.USB]
+    usb_supported = info.supported_applications[TRANSPORT.USB]
     if not key_type:
         if info.serial is None and _fido_only(usb_supported):
             key_type = YUBIKEY.SKY
@@ -428,7 +432,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
     if key_type == YUBIKEY.SKY:
         if APPLICATION.FIDO2 not in usb_supported:
             device_name = "FIDO U2F Security Key"  # SKY 1
-        if info.has_interface(INTERFACE.NFC):
+        if info.has_transport(TRANSPORT.NFC):
             device_name = "Security Key NFC"
     elif key_type == YUBIKEY.YK4:
         if usb_supported == APPLICATION.OTP | APPLICATION.U2F:
@@ -442,7 +446,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         elif info.version >= (5, 1, 0):
             device_name = "YubiKey 5"
             if info.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
-                if info.has_interface(INTERFACE.NFC):
+                if info.has_transport(TRANSPORT.NFC):
                     device_name += " NFC"
                 else:
                     device_name += "A"
@@ -450,7 +454,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 device_name += " Nano"
             elif info.form_factor == FORM_FACTOR.USB_C_KEYCHAIN:
                 device_name += "C"
-                if info.has_interface(INTERFACE.NFC):
+                if info.has_transport(TRANSPORT.NFC):
                     device_name += " NFC"
             elif info.form_factor == FORM_FACTOR.USB_C_NANO:
                 device_name += "C Nano"

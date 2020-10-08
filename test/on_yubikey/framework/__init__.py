@@ -7,7 +7,7 @@ import test.util
 import unittest
 import time
 
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from ykman.device import list_all_devices, connect_to_device
 
 
@@ -100,7 +100,7 @@ def partial_with_retry(func, *partial_args, **partial_kwargs):
     return wrap_func
 
 
-def _specialize_ykman_cli(serial, _transports):
+def _specialize_ykman_cli(serial, _interfaces):
     """
     Creates a specialized version of ykman_cli preset with the serial number of
     the given device.
@@ -112,16 +112,16 @@ def _specialize_ykman_cli(serial, _transports):
     return f
 
 
-def _specialize_open_device(serial, transport):
+def _specialize_open_device(serial, interface):
     """
     Creates a specialized version of open_device which will open the given
-    device using the given transport(s).
+    device using the given interface(s).
     """
     assert isinstance(
-        transport, TRANSPORT
-    ), "_specialize_open_device accepts only one transport at a time."
+        interface, USB_INTERFACE
+    ), "_specialize_open_device accepts only one interface at a time."
     return partial_with_retry(
-        connect_to_device, serial=serial, transports=transport, default_retry_count=1
+        connect_to_device, serial=serial, interfaces=interface, default_retry_count=1
     )
 
 
@@ -146,45 +146,45 @@ def _delete_inapplicable_test_methods(info, test_class):
     return test_class
 
 
-def _add_suffix_to_class_name(transport, info, test_class):
+def _add_suffix_to_class_name(interface, info, test_class):
     setattr(test_class, "_original_test_name", test_class.__qualname__)
-    transport_part = (
-        "_{}".format(transport.name) if isinstance(transport, TRANSPORT) else ""
+    interface_part = (
+        "_{}".format(interface.name) if isinstance(interface, USB_INTERFACE) else ""
     )
     fw_version = ".".join(str(v) for v in info.version)
     test_class.__qualname__ = "{}{}_{}_{}".format(
-        test_class._original_test_name, transport_part, fw_version, info.serial
+        test_class._original_test_name, interface_part, fw_version, info.serial
     )
     return test_class
 
 
 def _create_test_classes_for_device(
-    transport, info, create_test_classes, create_test_class_context
+    interface, info, create_test_classes, create_test_class_context
 ):
     """
-    Create test classes for the given device via the given transport.
+    Create test classes for the given device via the given interface.
 
-    A suffix with the transport, device firmware version and device serial
+    A suffix with the interface, device firmware version and device serial
     number is added to the name of each test class returned by
     create_test_classes.
 
     Each test class is filtered to contain only the tests applicable to the
     device for that test class.
 
-    :param transport: the ykman.util.TRANSPORT to use when opening the device
+    :param interface: the ykman.util.USB_INTERFACE to use when opening the device
     :param dev: the ykman.device.YubiKey whose serial number to use when
             opening the device.
     :param create_test_classes: the additional_tests function that was
             decorated with @device_test_suite or @cli_test_suite.
     :param create_test_class_context: a function which, given a
-            ykman.device.Yubikey and a ykman.util.TRANSPORT, returns a
+            ykman.device.Yubikey and a ykman.util.USB_INTERFACE, returns a
             specialized open_device or ykman_cli function for that device and
-            transport.
+            interface.
     """
-    context = create_test_class_context(info.serial, transport)
+    context = create_test_class_context(info.serial, interface)
     for test_class in create_test_classes(context):
         _delete_inapplicable_test_methods(info, test_class)
-        _add_suffix_to_class_name(transport, info, test_class)
+        _add_suffix_to_class_name(interface, info, test_class)
         yield test_class
 
 
@@ -195,24 +195,24 @@ def _get_test_method_names(test_class):
 
 
 def _multiply_test_classes_by_devices(
-    transports_and_serials, create_test_classes, create_test_class_context,
+    interfaces_and_serials, create_test_classes, create_test_class_context,
 ):
     """
     Instantiate device-specific versions of test classes for each combination
-    of the given transports and the available devices.
+    of the given interfaces and the available devices.
 
     Each test class returned by create_test_classes is instantiated for each
-    combination of transport and device.
+    combination of interface and device.
 
-    :param transports_and_serials: a sequence of (ykman.util.TRANSPORT,
+    :param interfaces_and_serials: a sequence of (ykman.util.USB_INTERFACE,
             ykman.device.YubiKey) pairs, for each of which to instantiate each
             test.
     :param create_test_classes: the additional_tests function that was
             decorated with @device_test_suite or @cli_test_suite.
     :param create_test_class_context: a function which, given a
-            ykman.device.Yubikey and a ykman.util.TRANSPORT, returns a
+            ykman.device.Yubikey and a ykman.util.USB_INTERFACE, returns a
             specialized open_device or ykman_cli function for that device and
-            transport.
+            interface.
     :returns: an iterable of instantiated tests and a dict with original test
             class names mapped to sets of test method names that were
             instantiated.
@@ -221,10 +221,10 @@ def _multiply_test_classes_by_devices(
     tests = []
     covered_test_names = {}
 
-    for (transport, serial) in transports_and_serials:
+    for (interface, serial) in interfaces_and_serials:
         info = _device_info[serial]
         for test_class in _create_test_classes_for_device(
-            transport, info, create_test_classes, create_test_class_context
+            interface, info, create_test_classes, create_test_class_context
         ):
             orig_name = test_class._original_test_name
             test_names = _get_test_method_names(test_class)
@@ -248,18 +248,18 @@ def _make_skips_for_uncovered_tests(create_test_classes, covered_test_names):
             yield original_test_class(uncovered_test_name)
 
 
-def _make_test_suite_decorator(transports_and_serials, create_test_class_context):
+def _make_test_suite_decorator(interfaces_and_serials, create_test_class_context):
     """
     Create a decorator that will instantiate device-specific versions of the
     test classes returned by the decorated function.
 
-    :param transports_and_serials: a sequence of (ykman.util.TRANSPORT,
+    :param interfaces_and_serials: a sequence of (ykman.util.USB_INTERFACE,
             ykman.device.YubiKey) pairs, for each of which to instantiate each
             test.
     :param create_test_class_context: a function which, given a
-            ykman.device.Yubikey and a ykman.util.TRANSPORT, returns a
+            ykman.device.Yubikey and a ykman.util.USB_INTERFACE, returns a
             specialized open_device or ykman_cli function for that device and
-            transport.
+            interface.
     :returns: a decorator that transforms an additional_tests function into the
             format expected by unittest test discovery.
     """
@@ -278,7 +278,7 @@ def _make_test_suite_decorator(transports_and_serials, create_test_class_context
                 )
             )
             (tests, covered_test_names) = _multiply_test_classes_by_devices(
-                transports_and_serials, create_test_classes, create_test_class_context
+                interfaces_and_serials, create_test_classes, create_test_class_context
             )
 
             skipped_tests = _make_skips_for_uncovered_tests(
@@ -301,7 +301,7 @@ def _make_test_suite_decorator(transports_and_serials, create_test_class_context
     return decorate
 
 
-def device_test_suite(transports):
+def device_test_suite(interfaces):
     """
     Transform an additional_tests function into the format expected by unittest
     test discovery.
@@ -309,30 +309,30 @@ def device_test_suite(transports):
     The decorated function must take one parameter, which will receive a
     specialized ykman.descriptor.open_device function as an argument. This
     open_device function opens a specific YubiKey device via a specific
-    transport, and can be used as if that YubiKey is the only one connected.
+    interface, and can be used as if that YubiKey is the only one connected.
     The tests defined in the decorated function should use this argument to
     open a YubiKey.
 
-    Each test class is instantiated once per device and transport, with an
+    Each test class is instantiated once per device and interface, with an
     open_device argument function specialized for that combination of device
-    and transport.
+    and interface.
 
     The test methods in the annotated function can be decorated with conditions
     from the yubikey_conditions module. These condition decorators will ensure
     that the decorated test is not run with YubiKey devices that do not match
     the conditions.
 
-    :param transports: the ykman.util.TRANSPORTs to use to open YubiKey devices.
+    :param interfaces: the ykman.util.USB_INTERFACEs to use to open YubiKey devices.
     :returns: a decorator that transforms an additional_tests function into the
             format expected by unittest test discovery.
     """
-    if not (isinstance(transports, TRANSPORT) or isinstance(transports, int)):
+    if not (isinstance(interfaces, USB_INTERFACE) or isinstance(interfaces, int)):
         raise ValueError(
-            "Argument to @device_test_suite must be a TRANSPORT value."
+            "Argument to @device_test_suite must be a USB_INTERFACE value."
         )  # noqa: E501
 
     return _make_test_suite_decorator(
-        ((t, s) for t in TRANSPORT if t & transports for s in _test_serials or []),
+        ((t, s) for t in USB_INTERFACE if t & interfaces for s in _test_serials or []),
         _specialize_open_device,
     )
 
@@ -359,7 +359,7 @@ def cli_test_suite(additional_tests):
             unittest test discovery.
     """
     return _make_test_suite_decorator(
-        ((sum(TRANSPORT), s) for s in _test_serials or []), _specialize_ykman_cli
+        ((sum(USB_INTERFACE), s) for s in _test_serials or []), _specialize_ykman_cli
     )(additional_tests)
 
 

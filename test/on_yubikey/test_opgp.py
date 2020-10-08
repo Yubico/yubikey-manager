@@ -5,7 +5,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from ykman.opgp import OpgpController, KEY_SLOT
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import ApduError, SmartCardProtocol
 from .framework import device_test_suite, yubikey_conditions
 
@@ -16,7 +16,7 @@ DEFAULT_ADMIN_PIN = "12345678"
 NON_DEFAULT_ADMIN_PIN = "87654321"
 
 
-@device_test_suite(TRANSPORT.CCID)
+@device_test_suite(USB_INTERFACE.CCID)
 def additional_tests(open_device):
     class OpgpTestCase(unittest.TestCase):
         def setUp(self):

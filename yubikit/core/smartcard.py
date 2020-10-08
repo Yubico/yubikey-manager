@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Version, INTERFACE, Connection, CommandError, ApplicationNotAvailableError
+from . import Version, TRANSPORT, Connection, CommandError, ApplicationNotAvailableError
 from time import time
 from enum import IntEnum, unique
 from typing import Tuple
@@ -36,8 +36,8 @@ import struct
 class SmartCardConnection(Connection):
     @property
     @abc.abstractmethod
-    def interface(self) -> INTERFACE:
-        """Get the interface type of the connection (USB or NFC)"""
+    def transport(self) -> TRANSPORT:
+        """Get the transport type of the connection (USB or NFC)"""
 
     @abc.abstractmethod
     def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
@@ -109,7 +109,7 @@ class SmartCardProtocol:
         self.connection.close()
 
     def enable_touch_workaround(self, version: Version) -> None:
-        self._touch_workaround = self.connection.interface == INTERFACE.USB and (
+        self._touch_workaround = self.connection.transport == TRANSPORT.USB and (
             (4, 2, 0,) <= version <= (4, 2, 6)
         )
 

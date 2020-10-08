@@ -37,7 +37,7 @@ from .util import (
     prompt_for_touch,
     EnumChoice,
 )
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import ApduError, SW
 from yubikit.oath import (
     OathSession,
@@ -632,4 +632,4 @@ def _error_multiple_hits(ctx, hits):
     ctx.exit(1)
 
 
-oath.transports = TRANSPORT.CCID  # type: ignore
+oath.interfaces = USB_INTERFACE.CCID  # type: ignore

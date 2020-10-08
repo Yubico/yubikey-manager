@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT
+from yubikit.core import USB_INTERFACE
 from yubikit.piv import (
     PivSession,
     InvalidPinError,
@@ -1075,4 +1075,4 @@ def _check_touch_policy(ctx, controller, touch_policy):
             )
 
 
-piv.transports = TRANSPORT.CCID  # type: ignore
+piv.interfaces = USB_INTERFACE.CCID  # type: ignore

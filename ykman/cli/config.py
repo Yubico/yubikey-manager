@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .util import click_postpone_execution, click_force_option, click_prompt, EnumChoice
-from yubikit.core import APPLICATION, INTERFACE
+from yubikit.core import APPLICATION, TRANSPORT
 from yubikit.management import ManagementSession, DeviceConfig, DEVICE_FLAG
 import os
 import logging
@@ -63,13 +63,13 @@ def config(ctx):
     Enable/Disable applications.
 
     The applications may be enabled and disabled independently
-    over different interfaces (USB and NFC). The configuration may
+    over different transports (USB and NFC). The configuration may
     also be protected by a lock code.
 
     Examples:
 
     \b
-      Disable PIV over the NFC interface:
+      Disable PIV over NFC:
       $ ykman config nfc --disable PIV
 
     \b
@@ -281,12 +281,12 @@ def usb(
 
     info = ctx.obj["info"]
 
-    usb_supported = info.supported_applications[INTERFACE.USB]
-    usb_enabled = info.config.enabled_applications[INTERFACE.USB]
+    usb_supported = info.supported_applications[TRANSPORT.USB]
+    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
     flags = info.config.device_flags
 
     if not usb_supported:
-        ctx.fail("USB interface not supported.")
+        ctx.fail("USB not supported.")
 
     if list_enabled:
         _list_apps(ctx, usb_enabled)
@@ -309,7 +309,7 @@ def usb(
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
-    f_confirm = "{}{}{}{}{}{}Configure USB interface?".format(
+    f_confirm = "{}{}{}{}{}{}Configure USB?".format(
         "Enable {}.\n".format(", ".join([str(app) for app in enable]))
         if enable
         else "",
@@ -347,7 +347,7 @@ def usb(
     try:
         app.write_device_config(
             DeviceConfig(
-                {INTERFACE.USB: usb_enabled},
+                {TRANSPORT.USB: usb_enabled},
                 autoeject_timeout,
                 chalresp_timeout,
                 flags,
@@ -405,11 +405,11 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     _ensure_not_invalid_options(ctx, enable, disable)
 
     info = ctx.obj["info"]
-    nfc_supported = info.supported_applications.get(INTERFACE.NFC)
-    nfc_enabled = info.config.enabled_applications.get(INTERFACE.NFC)
+    nfc_supported = info.supported_applications.get(TRANSPORT.NFC)
+    nfc_enabled = info.config.enabled_applications.get(TRANSPORT.NFC)
 
     if not nfc_supported:
-        ctx.fail("NFC interface not available.")
+        ctx.fail("NFC not available.")
 
     if list_enabled:
         _list_apps(ctx, nfc_enabled)
@@ -425,7 +425,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
         else:
             ctx.fail("{} not supported over NFC.".format(app.name))
 
-    f_confirm = "{}{}Configure NFC interface?".format(
+    f_confirm = "{}{}Configure NFC?".format(
         "Enable {}.\n".format(", ".join([str(app) for app in enable]))
         if enable
         else "",
@@ -454,7 +454,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     app = ctx.obj["controller"]
     try:
         app.write_device_config(
-            DeviceConfig({INTERFACE.NFC: nfc_enabled}, None, None, None),
+            DeviceConfig({TRANSPORT.NFC: nfc_enabled}, None, None, None),
             False,  # No need to reboot for NFC.
             lock_code,
         )
