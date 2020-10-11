@@ -75,7 +75,10 @@ class KEY_TYPE(IntEnum):
 
     @property
     def bit_len(self):
-        return int(re.search(r"\d+$", self.name).group())
+        match = re.search(r"\d+$", self.name)
+        if match:
+            return int(match.group())
+        raise ValueError("No bit_len")
 
     @classmethod
     def from_public_key(cls, key):
@@ -295,12 +298,12 @@ class SlotMetadata:
 
     @property
     def public_key(self):
-        return _parse_device_public_key(self.public_key_encoded)
+        return _parse_device_public_key(self.key_type, self.public_key_encoded)
 
 
 def _pad_message(key_type, message, hash_algorithm, padding):
     if key_type.algorithm == ALGORITHM.EC:
-        h = hashes.Hash(hash_algorithm)
+        h = hashes.Hash(hash_algorithm, default_backend())
         h.update(message)
         hashed = h.finalize()
         byte_len = key_type.bit_len // 8
@@ -559,12 +562,20 @@ class PivSession:
             expected: int = OBJECT_ID.DISCOVERY
         else:
             expected = TAG_OBJ_DATA
-        return Tlv.unwrap(
-            expected,
-            self.protocol.send_apdu(
-                0, INS_GET_DATA, 0x3F, 0xFF, Tlv(TAG_OBJ_ID, int_to_bytes(object_id))
-            ),
-        )
+
+        try:
+            return Tlv.unwrap(
+                expected,
+                self.protocol.send_apdu(
+                    0,
+                    INS_GET_DATA,
+                    0x3F,
+                    0xFF,
+                    Tlv(TAG_OBJ_ID, int_to_bytes(object_id)),
+                ),
+            )
+        except ValueError as e:
+            raise BadResponseError("Malformed object data", e)
 
     def put_object(self, object_id: int, data: Optional[bytes] = None) -> None:
         self.protocol.send_apdu(
@@ -576,10 +587,15 @@ class PivSession:
         )
 
     def get_certificate(self, slot: SLOT) -> x509.Certificate:
-        data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
+        try:
+            data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
+        except ValueError:
+            raise BadResponseError("Malformed certificate data object")
+
         cert_info = data.get(TAG_CERT_INFO)
         if cert_info and cert_info[0] != 0:
             raise NotSupportedError("Compressed certificates are not supported")
+
         try:
             return x509.load_der_x509_certificate(
                 data[TAG_CERTIFICATE], default_backend()

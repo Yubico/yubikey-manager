@@ -33,7 +33,7 @@ import abc
 import struct
 
 
-class SmartCardConnection(Connection):
+class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
     @property
     @abc.abstractmethod
     def transport(self) -> TRANSPORT:

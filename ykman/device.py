@@ -39,18 +39,18 @@ from yubikit.core import (
     ApplicationNotAvailableError,
 )
 from yubikit.core.otp import OtpConnection
+from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
 )
 from yubikit.management import ManagementSession, DeviceInfo, DeviceConfig
 from yubikit.yubiotp import YubiOtpSession
-from fido2.ctap import CtapDevice
 from .hid import list_otp_devices, list_ctap_devices
 from .scard import list_devices as _list_ccid_devices
 
 from collections import Counter
-from typing import Dict, Mapping, List, Tuple, Optional, Hashable
+from typing import Dict, Mapping, List, Tuple, Optional, Hashable, Iterable, Type
 import logging
 
 logger = logging.getLogger(__name__)
@@ -71,28 +71,39 @@ def is_fips_version(version: Version) -> bool:
 
 BASE_NEO_APPS = APPLICATION.OTP | APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
 
+CONNECTION_TYPE_MAPPING = {
+    USB_INTERFACE.CCID: SmartCardConnection,
+    USB_INTERFACE.OTP: OtpConnection,
+    USB_INTERFACE.FIDO: FidoConnection,
+}
+
+CONNECTION_LIST_MAPPING = {
+    SmartCardConnection: list_ccid_devices,
+    OtpConnection: list_otp_devices,
+    FidoConnection: list_ctap_devices,
+}
+
+
+def get_connection_types(usb_interfaces: USB_INTERFACE) -> Iterable[Type[Connection]]:
+    """Get a list of Connection types valid for the given USB interfaces."""
+    return [
+        ct for iface, ct in CONNECTION_TYPE_MAPPING.items() if iface in usb_interfaces
+    ]
+
 
 def scan_devices() -> Tuple[Mapping[PID, int], Hashable]:
-    """Scan for attached YubiKeys, without opening any connections.
+    """Scan USB for attached YubiKeys, without opening any connections.
 
     Returns a dict mapping PID to device count, and a state object which can be used to
     detect changes in attached devices.
     """
-    # Scans all attached devices, without opening any connections.
-    otp_devs = list_otp_devices()
-    ctap_devs = list_ctap_devices()
-    ccid_devs = list_ccid_devices()
-
-    # Avoid counting devices twice over different interfaces.
+    fingerprints = set()
     merged: Dict[PID, int] = {}
-    merged.update(Counter(d.pid for d in otp_devs if d.pid is not None))
-    merged.update(Counter(d.pid for d in ctap_devs if d.pid is not None))
-    merged.update(Counter(d.pid for d in ccid_devs if d.pid is not None))
-
-    state = tuple(
-        {d.fingerprint for devs in (otp_devs, ctap_devs, ccid_devs) for d in devs}
-    )
-    return merged, state
+    for list_devs in CONNECTION_LIST_MAPPING.values():
+        devs = list_devs()
+        merged.update(Counter(d.pid for d in devs if d.pid is not None))
+        fingerprints.update({d.fingerprint for d in devs})
+    return merged, tuple(fingerprints)
 
 
 def list_all_devices() -> List[Tuple[PID, DeviceInfo]]:
@@ -100,77 +111,34 @@ def list_all_devices() -> List[Tuple[PID, DeviceInfo]]:
 
     Returns a list of (PID, info) tuples for each connected device.
     """
-    # List all attached devices, returning pid and info for each.
     handled_pids = set()
     pids: Dict[PID, bool] = {}
     devices = []
 
-    def handle(dev, get_connection):
-        if dev.pid not in handled_pids and pids.get(dev.pid, True):
-            try:
-                with get_connection() as conn:
-                    info = read_info(dev.pid, conn)
-                pids[dev.pid] = True
-                devices.append((dev.pid, info))
-            except Exception as e:
-                pids[dev.pid] = False
-                logger.error("Failed opening device", exc_info=e)
-
-    # Handle OTP devices
-    for otp in list_otp_devices():
-        handle(otp, otp.open_otp_connection)
-    handled_pids.update({pid for pid, handled in pids.items() if handled})
-
-    # Handle CCID devices
-    for ccid in list_ccid_devices():
-        handle(ccid, ccid.open_smartcard_connection)
-    handled_pids.update({pid for pid, handled in pids.items() if handled})
-
-    # Handle FIDO devices
-    for ctap in list_ctap_devices():
-        handle(ctap, ctap.open_ctap_connection)
-    handled_pids.update({pid for pid, handled in pids.items() if handled})
+    for connection_type, list_devs in CONNECTION_LIST_MAPPING.items():
+        for dev in list_devs():
+            if dev.pid not in handled_pids and pids.get(dev.pid, True):
+                try:
+                    with dev.open_connection(connection_type) as conn:
+                        info = read_info(dev.pid, conn)
+                    pids[dev.pid] = True
+                    devices.append((dev.pid, info))
+                except Exception as e:
+                    pids[dev.pid] = False
+                    logger.error("Failed opening device", exc_info=e)
+        handled_pids.update({pid for pid, handled in pids.items() if handled})
 
     return devices
 
 
 def connect_to_device(
     serial: Optional[int] = None,
-    interfaces: USB_INTERFACE = USB_INTERFACE(sum(USB_INTERFACE)),
+    connection_types: Iterable[Type[Connection]] = CONNECTION_LIST_MAPPING.keys(),
 ) -> Tuple[Connection, PID, DeviceInfo]:
-    """Get a connection to a YubiKey using one of the provided interfaces.
-
-    Returns a tuple of (connection, pid, info) for the device.
-    """
-    interfaces = USB_INTERFACE(interfaces)
-    if USB_INTERFACE.CCID in interfaces:
-        for dev in list_ccid_devices():
+    for connection_type in connection_types:
+        for dev in CONNECTION_LIST_MAPPING[connection_type]():
             try:
-                conn = dev.open_smartcard_connection()
-                info = read_info(dev.pid, conn)
-                if serial and info.serial != serial:
-                    conn.close()
-                else:
-                    return conn, dev.pid, info
-            except Exception as e:
-                logger.debug("Error connecting", exc_info=e)
-
-    if USB_INTERFACE.OTP in interfaces:
-        for dev in list_otp_devices():
-            try:
-                conn = dev.open_otp_connection()
-                info = read_info(dev.pid, conn)
-                if serial and info.serial != serial:
-                    conn.close()
-                else:
-                    return conn, dev.pid, info
-            except Exception as e:
-                logger.debug("Error connecting", exc_info=e)
-
-    if USB_INTERFACE.FIDO in interfaces:
-        for dev in list_ctap_devices():
-            try:
-                conn = dev.open_ctap_connection()
+                conn = dev.open_connection(connection_type)
                 info = read_info(dev.pid, conn)
                 if serial and info.serial != serial:
                     conn.close()
@@ -363,7 +331,7 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
         info = _read_info_ccid(conn, key_type, interfaces)
     elif isinstance(conn, OtpConnection):
         info = _read_info_otp(conn, key_type, interfaces)
-    elif isinstance(conn, CtapDevice):
+    elif isinstance(conn, FidoConnection):
         info = _read_info_ctap(conn, key_type, interfaces)
 
     logger.debug("Read info: %s", info)

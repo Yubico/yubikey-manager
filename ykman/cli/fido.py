@@ -28,6 +28,7 @@
 from fido2.ctap import CtapError
 from fido2.ctap1 import ApduError
 from yubikit.core import USB_INTERFACE
+from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
 from time import sleep
 from .util import (
@@ -341,7 +342,7 @@ def reset(ctx, force):
     def try_reset(controller_type):
         if not force:
             dev = prompt_re_insert_key()
-            controller = controller_type(dev.open_ctap_connection())
+            controller = controller_type(dev.open_connection(FidoConnection))
             controller.reset(touch_callback=prompt_for_touch)
         else:
             controller = ctx.obj["controller"]

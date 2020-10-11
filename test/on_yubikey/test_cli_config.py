@@ -16,7 +16,7 @@ def additional_tests(ykman_cli):
         try:
             return _ykman_cli(*args)
         finally:
-            time.sleep(1.0)
+            time.sleep(1.5)
 
     ykman_cli = _ykman_cli_sleep
 

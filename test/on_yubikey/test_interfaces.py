@@ -2,7 +2,7 @@ import unittest
 
 from .framework import DestructiveYubikeyTestCase, exactly_one_yubikey_present
 from yubikit.core import USB_INTERFACE
-from ykman.device import connect_to_device
+from ykman.device import connect_to_device, get_connection_types
 from time import sleep
 
 
@@ -13,7 +13,7 @@ class TestInterfaces(DestructiveYubikeyTestCase):
     def try_connection(self, interface):
         for _ in range(8):
             try:
-                conn = connect_to_device(None, interface)[0]
+                conn = connect_to_device(None, get_connection_types(interface))[0]
                 conn.close()
                 return
             except Exception:

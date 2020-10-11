@@ -8,7 +8,7 @@ import unittest
 import time
 
 from yubikit.core import USB_INTERFACE
-from ykman.device import list_all_devices, connect_to_device
+from ykman.device import list_all_devices, connect_to_device, get_connection_types
 
 
 _skip = True
@@ -117,11 +117,15 @@ def _specialize_open_device(serial, interface):
     Creates a specialized version of open_device which will open the given
     device using the given interface(s).
     """
-    assert isinstance(
-        interface, USB_INTERFACE
+    assert (
+        interface.name
     ), "_specialize_open_device accepts only one interface at a time."
+
     return partial_with_retry(
-        connect_to_device, serial=serial, interfaces=interface, default_retry_count=1
+        connect_to_device,
+        serial=serial,
+        connection_types=get_connection_types(interface),
+        default_retry_count=1,
     )
 
 

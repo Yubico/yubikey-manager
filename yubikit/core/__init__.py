@@ -26,7 +26,17 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from enum import Enum, IntEnum, IntFlag, unique, auto
-from typing import List, Dict, Tuple, TypeVar, Optional, Type, Hashable, NamedTuple
+from typing import (
+    Type,
+    List,
+    Dict,
+    Tuple,
+    TypeVar,
+    Union,
+    Optional,
+    Hashable,
+    NamedTuple,
+)
 import re
 import abc
 
@@ -167,12 +177,42 @@ class PID(IntEnum):
         return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
 
 
+class Connection(abc.ABC):
+    """A connection to a YubiKey"""
+
+    def close(self) -> None:
+        """Close the device, releasing any held resources."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        self.close()
+
+
+T_Connection = TypeVar("T_Connection", bound=Connection)
+
+
 class YubiKeyDevice(abc.ABC):
     """YubiKey device reference"""
 
-    def __init__(self, fingerprint: Hashable, pid: Optional[PID]):
+    def __init__(self, transport: TRANSPORT, fingerprint: Hashable, pid: Optional[PID]):
+        self._transport = transport
         self._fingerprint = fingerprint
         self._pid = pid
+
+    @property
+    def transport(self) -> TRANSPORT:
+        """Get the transport used to communicate with this YubiKey"""
+        return self._transport
+
+    def supports_connection(self, connection_type: Type[T_Connection]) -> bool:
+        """Check if a YubiKeyDevice supports a specific Connection type"""
+        return False
+
+    def open_connection(self, connection_type: Type[T_Connection]) -> T_Connection:
+        """Opens a connection to the YubiKey"""
+        raise ValueError("Unsupported Connection type")
 
     @property
     def pid(self) -> Optional[PID]:
@@ -198,19 +238,6 @@ class YubiKeyDevice(abc.ABC):
             self.pid,
             self.fingerprint,
         )
-
-
-class Connection(abc.ABC):
-    """A connection to a YubiKey"""
-
-    def close(self) -> None:
-        """Close the device, releasing any held resources."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, value, traceback):
-        self.close()
 
 
 class CommandError(Exception):
@@ -246,24 +273,19 @@ def bytes2int(data: bytes) -> int:
     return int.from_bytes(data, "big")
 
 
-def _tlv_parse_tag(data, offs=0):
-    t = data[offs]
-    if t & 0x1F != 0x1F:
-        return t, 1
-    else:
-        t = t << 8 | data[offs + 1]
-        return t, 2
+def _tlv_parse(data):
+    tag, rest = data[0], data[1:]
+    if tag & 0x1F == 0x1F:
+        tag, rest = tag << 8 | rest[0], rest[1:]
 
-
-def _tlv_parse_length(data, offs=0):
-    ln = data[offs]
-    offs += 1
+    ln, rest = rest[0], rest[1:]
     if ln > 0x80:
         n_bytes = ln - 0x80
-        ln = bytes2int(data[offs : offs + n_bytes])
-    else:
-        n_bytes = 0
-    return ln, n_bytes + 1
+        ln, rest = bytes2int(rest[:n_bytes]), rest[n_bytes:]
+
+    value, rest = rest[:ln], rest[ln:]
+
+    return tag, ln, value, rest
 
 
 T_Tlv = TypeVar("T_Tlv", bound="Tlv")
@@ -272,67 +294,64 @@ T_Tlv = TypeVar("T_Tlv", bound="Tlv")
 class Tlv(bytes):
     @property
     def tag(self) -> int:
-        return _tlv_parse_tag(self)[0]
+        return self._tag
 
     @property
     def length(self) -> int:
-        _, offs = _tlv_parse_tag(self)
-        return _tlv_parse_length(self, offs)[0]
+        return len(self) - self._value_offset
 
     @property
     def value(self) -> bytes:
-        ln = self.length
-        if ln == 0:
-            return b""
-        return bytes(self[-ln:])
+        return self[self._value_offset :]
+
+    def __new__(cls, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
+        """This allows creation by passing either binary data, or tag and value."""
+        if isinstance(tag_or_data, int):  # Tag and (optional) value
+            tag = tag_or_data
+
+            # Pack into Tlv
+            buf = bytearray()
+            if tag <= 0xFF:
+                buf.append(tag)
+            else:
+                tag_1 = tag >> 8
+                if tag_1 > 0xFF or tag_1 & 0x1F != 0x1F:
+                    raise ValueError("Unsupported tag value")
+                tag_2 = tag & 0xFF
+                buf.extend([tag_1, tag_2])
+            value = value or b""
+            length = len(value)
+            if length < 0x80:
+                buf.append(length)
+            else:
+                ln_bytes = int2bytes(length)
+                buf.append(0x80 | len(ln_bytes))
+                buf.extend(ln_bytes)
+            buf.extend(value)
+            data = bytes(buf)
+        else:  # Binary TLV data
+            if value is not None:
+                raise ValueError("value can only be provided if tag_or_data is a tag")
+            data = tag_or_data
+
+        # mypy thinks this is wrong
+        return super(Tlv, cls).__new__(cls, data)  # type: ignore
+
+    def __init__(self, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
+        self._tag, ln, value, rest = _tlv_parse(self)
+        if rest:
+            raise ValueError("Incorrect TLV length")
+        self._value_offset = len(self) - ln
 
     def __repr__(self):
         return "{}(tag={:02x}, value={})".format(
             self.__class__.__name__, self.tag, self.value.hex()
         )
 
-    def __new__(cls, *args):
-        if len(args) == 1:
-            data = args[0]
-            if isinstance(data, int):  # Called with tag only, blank value
-                tag = data
-                value = b""
-            else:  # Called with binary TLV data
-                tag, tag_ln = _tlv_parse_tag(data)
-                ln, ln_ln = _tlv_parse_length(data, tag_ln)
-                offs = tag_ln + ln_ln
-                value = data[offs : offs + ln]
-        elif len(args) == 2:  # Called with tag and value.
-            (tag, value) = args
-        else:
-            raise TypeError(
-                "{}() takes at most 2 arguments ({} given)".format(cls, len(args))
-            )
-
-        data = bytearray([])
-        if tag <= 0xFF:
-            data.append(tag)
-        else:
-            tag_1 = tag >> 8
-            if tag_1 > 0xFF or tag_1 & 0x1F != 0x1F:
-                raise ValueError("Unsupported tag value")
-            tag_2 = tag & 0xFF
-            data.extend([tag_1, tag_2])
-        length = len(value)
-        if length < 0x80:
-            data.append(length)
-        elif length < 0xFF:
-            data.extend([0x81, length])
-        else:
-            data.extend([0x82, length >> 8, length & 0xFF])
-        data += value
-
-        return super(Tlv, cls).__new__(cls, bytes(data))
-
     @classmethod
     def parse_from(cls: Type[T_Tlv], data: bytes) -> Tuple[T_Tlv, bytes]:
-        tlv = cls(data)
-        return tlv, data[len(tlv) :]
+        tag, ln, value, rest = _tlv_parse(data)
+        return cls(data[: len(data) - len(rest)]), rest
 
     @classmethod
     def parse_list(cls: Type[T_Tlv], data: bytes) -> List[T_Tlv]:

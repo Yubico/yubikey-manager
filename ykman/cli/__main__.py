@@ -26,6 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import USB_INTERFACE, ApplicationNotAvailableError
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
 
 import ykman.logging_setup
 
@@ -37,6 +39,7 @@ from ..device import (
     get_name,
     list_all_devices,
     scan_devices,
+    get_connection_types,
     connect_to_device,
 )
 from .util import UpperCaseChoice, YkmanContextObject
@@ -60,10 +63,10 @@ logger = logging.getLogger(__name__)
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
 
 
-def retrying_connect(*args, attempts=10):
+def retrying_connect(serial, interfaces, attempts=10):
     while True:
         try:
-            return connect_to_device(*args)
+            return connect_to_device(serial, get_connection_types(interfaces))
         except Exception as e:
             if attempts:
                 attempts -= 1
@@ -115,9 +118,9 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
                 dev = readers[0]
                 try:
                     if cmd == fido.name:
-                        conn = dev.open_ctap_connection()
+                        conn = dev.open_connection(FidoConnection)
                     else:
-                        conn = dev.open_smartcard_connection()
+                        conn = dev.open_connection(SmartCardConnection)
                     info = read_info(dev.pid, conn)
                     return conn, dev.pid, info
                 except Exception as e:

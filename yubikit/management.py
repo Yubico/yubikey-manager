@@ -40,9 +40,8 @@ from .core import (
     BadResponseError,
 )
 from .core.otp import check_crc, OtpConnection, OtpProtocol
+from .core.fido import FidoConnection
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
-
-from fido2.ctap import CtapDevice
 
 from enum import IntEnum, IntFlag, unique
 from dataclasses import dataclass
@@ -296,13 +295,13 @@ class Mode:
 
 class ManagementSession:
     def __init__(
-        self, connection: Union[OtpConnection, SmartCardConnection, CtapDevice]
+        self, connection: Union[OtpConnection, SmartCardConnection, FidoConnection]
     ):
         if isinstance(connection, OtpConnection):
             self.backend: _Backend = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
             self.backend = _ManagementSmartCardBackend(connection)
-        elif isinstance(connection, CtapDevice):
+        elif isinstance(connection, FidoConnection):
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")

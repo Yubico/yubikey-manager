@@ -41,7 +41,7 @@ class CommandRejectedError(CommandError):
     """The issues command was rejected by the YubiKey"""
 
 
-class OtpConnection(Connection):
+class OtpConnection(Connection, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def receive(self) -> bytes:
         """Reads an 8 byte feature report"""

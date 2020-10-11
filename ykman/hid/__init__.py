@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .base import OtpYubiKeyDevice
-from yubikit.core import YubiKeyDevice, PID
+from yubikit.core import YubiKeyDevice, PID, TRANSPORT
 from fido2.hid import list_descriptors, open_connection, CtapHidDevice
 from typing import List, Callable
 import sys
@@ -49,11 +49,18 @@ class CtapYubiKeyDevice(YubiKeyDevice):
     """YubiKey FIDO USB HID device"""
 
     def __init__(self, descriptor):
-        super(CtapYubiKeyDevice, self).__init__(descriptor.path, PID(descriptor.pid))
+        super(CtapYubiKeyDevice, self).__init__(
+            TRANSPORT.USB, descriptor.path, PID(descriptor.pid)
+        )
         self.descriptor = descriptor
 
-    def open_ctap_connection(self) -> CtapHidDevice:
-        return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
+    def supports_connection(self, connection_type):
+        return issubclass(CtapHidDevice, connection_type)
+
+    def open_connection(self, connection_type):
+        if self.supports_connection(connection_type):
+            return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
+        return super(OtpYubiKeyDevice, self).open_connection(connection_type)
 
 
 def list_ctap_devices() -> List[CtapYubiKeyDevice]:

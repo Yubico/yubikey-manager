@@ -65,26 +65,36 @@ class ScardDevice(YubiKeyDevice):
     """YubiKey Smart card device"""
 
     def __init__(self, reader):
-        super(ScardDevice, self).__init__(reader.name, _pid_from_name(reader.name))
+        # Base transport on reader name: NFC readers will have a different name
+        if YK_READER_NAME in reader.name.lower():
+            transport = TRANSPORT.USB
+        else:
+            transport = TRANSPORT.NFC
+        super(ScardDevice, self).__init__(
+            transport, reader.name, _pid_from_name(reader.name)
+        )
         self.reader = reader
 
-    def open_smartcard_connection(self) -> SmartCardConnection:
-        """Open a SmartCard connection"""
+    def supports_connection(self, connection_type):
+        if issubclass(CtapPcscDevice, connection_type):
+            return self.transport == TRANSPORT.NFC
+        return issubclass(ScardSmartCardConnection, connection_type)
+
+    def open_connection(self, connection_type):
+        if issubclass(ScardSmartCardConnection, connection_type):
+            return self._open_smartcard_connection()
+        elif issubclass(CtapPcscDevice, connection_type):
+            if self.transport == TRANSPORT.NFC:
+                return CtapPcscDevice(self.reader.createConnection(), self.reader.name)
+        return super(ScardDevice, self).open_connection(connection_type)
+
+    def _open_smartcard_connection(self) -> SmartCardConnection:
         try:
             return ScardSmartCardConnection(self.reader.createConnection())
         except CardConnectionException as e:
             if kill_scdaemon():
                 return ScardSmartCardConnection(self.reader.createConnection())
             raise e
-
-    @property
-    def has_fido(self) -> bool:
-        # FIDO is only available from this device if we're connected over NFC.
-        return YK_READER_NAME not in self.reader.name.lower()
-
-    def open_ctap_connection(self) -> CtapPcscDevice:
-        """Open a python-fido2 CtapDevice"""
-        return CtapPcscDevice(self.reader.createConnection(), self.reader.name)
 
 
 class ScardSmartCardConnection(SmartCardConnection):

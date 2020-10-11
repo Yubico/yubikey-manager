@@ -602,12 +602,15 @@ class ConfigState:
 class _Backend(abc.ABC):
     version: Version
 
+    @abc.abstractmethod
     def close(self) -> None:
         ...
 
+    @abc.abstractmethod
     def write_update(self, slot: CONFIG_SLOT, data: bytes) -> None:
         ...
 
+    @abc.abstractmethod
     def send_and_receive(
         self,
         slot: CONFIG_SLOT,

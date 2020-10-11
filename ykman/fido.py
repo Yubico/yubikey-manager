@@ -28,6 +28,7 @@
 import time
 import struct
 import logging
+from yubikit.core.fido import FidoConnection
 from fido2.hid import CTAPHID
 from fido2.ctap1 import CTAP1, ApduError
 from fido2.ctap2 import CTAP2, ClientPin, CredentialManagement
@@ -131,6 +132,15 @@ class Fido2Controller(object):
 
     @property
     def is_fips(self):
+        return False
+
+
+def is_in_fips_mode(fido_connection: FidoConnection) -> bool:
+    try:
+        ctap = CTAP1(fido_connection)
+        ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
+        return True
+    except ApduError:
         return False
 
 

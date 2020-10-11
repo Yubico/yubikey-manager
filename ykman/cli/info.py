@@ -26,17 +26,19 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import TRANSPORT, APPLICATION, USB_INTERFACE
-from yubikit.core.smartcard import ApduError
+from yubikit.core.otp import OtpConnection
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 
 from ..hid import list_otp_devices, list_ctap_devices
 from ..scard import list_devices as list_ccid
 
+from ..device import is_fips_version, get_name, read_info
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
-from ..fido import FIPS_U2F_CMD
-from ..device import is_fips_version, get_name, read_info
+from ..fido import is_in_fips_mode as ctap_in_fips_mode
 
 import click
 import logging
@@ -107,7 +109,7 @@ def get_overall_fips_status(pid, info):
     if usb_enabled & APPLICATION.OTP:
         for dev in list_otp_devices():
             if dev.pid == pid:
-                with dev.open_otp_connection() as conn:
+                with dev.open_connection(OtpConnection) as conn:
                     app = YubiOtpSession(conn)
                     if app.get_serial() == info.serial:
                         statuses["OTP"] = otp_in_fips_mode(app)
@@ -116,7 +118,7 @@ def get_overall_fips_status(pid, info):
     statuses["OATH"] = False
     if usb_enabled & APPLICATION.OATH:
         for dev in list_ccid():
-            with dev.open_smartcard_connection() as conn:
+            with dev.open_connection(SmartCardConnection) as conn:
                 info2 = read_info(pid, conn)
                 if info2.serial == info.serial:
                     app = OathSession(conn)
@@ -127,14 +129,10 @@ def get_overall_fips_status(pid, info):
     if usb_enabled & APPLICATION.U2F:
         for dev in list_ctap_devices():
             if dev.pid == pid:
-                with dev.open_ctap_connection() as ctap:
-                    info2 = read_info(pid, ctap)
+                with dev.open_connection(FidoConnection) as conn:
+                    info2 = read_info(pid, conn)
                     if info2.serial == info.serial:
-                        try:
-                            ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
-                            statuses["FIDO U2F"] = True
-                        except ApduError:
-                            pass
+                        statuses["FIDO U2F"] = ctap_in_fips_mode(conn)
                         break
 
     return statuses
