@@ -74,15 +74,19 @@ class DEVICE_FLAG(IntFlag):
 class _Backend(abc.ABC):
     version: Version
 
+    @abc.abstractmethod
     def close(self) -> None:
         ...
 
+    @abc.abstractmethod
     def set_mode(self, data: bytes) -> None:
         ...
 
+    @abc.abstractmethod
     def read_config(self) -> bytes:
         ...
 
+    @abc.abstractmethod
     def write_config(self, config: bytes) -> None:
         ...
 
@@ -91,6 +95,9 @@ class _ManagementOtpBackend(_Backend):
     def __init__(self, otp_connection):
         self.protocol = OtpProtocol(otp_connection)
         self.version = Version.from_bytes(self.protocol.read_status()[:3])
+
+    def close(self):
+        self.protocol.close()
 
     def set_mode(self, data):
         self.protocol.send_and_receive(SLOT_DEVICE_CONFIG, data)
@@ -112,6 +119,9 @@ class _ManagementSmartCardBackend(_Backend):
         select_str = self.protocol.select(AID.MGMT).decode()
         self.version = Version.from_string(select_str)
 
+    def close(self):
+        self.protocol.close()
+
     def set_mode(self, data):
         if self.version[0] == 3:
             # Use the OTP Application to set mode
@@ -131,12 +141,12 @@ class _ManagementSmartCardBackend(_Backend):
 
 
 class _ManagementCtapBackend(_Backend):
-    def __init__(self, ctap_device):
-        self.ctap = ctap_device
-        version = ctap_device.device_version
+    def __init__(self, fido_connection):
+        self.ctap = fido_connection
+        version = fido_connection.device_version
         if version[0] < 4:  # Prior to YK4 this was not firmware version
             version = (3, 0, 0)  # Guess
-        self.version = version
+        self.version = Version(*version)
 
     def close(self):
         self.ctap.close()

@@ -125,14 +125,17 @@ def parse_truncated(resp):
 def hmac_shorten_key(key, algo):
     if algo.upper() == "SHA1":
         h = hashes.SHA1()  # nosec
+        block_size = 64
     elif algo.upper() == "SHA256":
         h = hashes.SHA256()
+        block_size = 64
     elif algo.upper() == "SHA512":
         h = hashes.SHA512()
+        block_size = 128
     else:
         raise ValueError("Unsupported algorithm!")
 
-    if len(key) > h.block_size:
+    if len(key) > block_size:
         h = hashes.Hash(h, default_backend())
         h.update(key)
         key = h.finalize()

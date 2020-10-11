@@ -78,7 +78,7 @@ def _parse_mode_string(ctx, param, mode):
 
 
 def _mode_from_usb_enabled(usb_enabled):
-    interfaces = 0
+    interfaces = USB_INTERFACE(0)
     if APPLICATION.OTP & usb_enabled:
         interfaces |= USB_INTERFACE.OTP
     if (APPLICATION.U2F | APPLICATION.FIDO2) & usb_enabled:
