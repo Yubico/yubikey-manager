@@ -101,20 +101,22 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(Tlv(b"\xfe\6foobar"), Tlv(0xFE, b"foobar"))
 
         tlv1 = Tlv(b"\0\5hello")
-        tlv2 = Tlv(0xFF, b"")
+        tlv2 = Tlv(0xFE, b"")
         tlv3 = Tlv(0x12, b"hi" * 200)
 
         self.assertEqual(b"\0\5hello", tlv1)
-        self.assertEqual(b"\xff\0", tlv2)
+        self.assertEqual(b"\xfe\0", tlv2)
         self.assertEqual(b"\x12\x82\x01\x90" + b"hi" * 200, tlv3)
 
         self.assertEqual(
-            b"\0\5hello\xff\0\x12\x82\x01\x90" + b"hi" * 200, tlv1 + tlv2 + tlv3
+            b"\0\5hello\xfe\0\x12\x82\x01\x90" + b"hi" * 200, tlv1 + tlv2 + tlv3
         )
 
     def test_is_pkcs12(self):
-        self.assertFalse(is_pkcs12("just a string"))
-        self.assertFalse(is_pkcs12(None))
+        with self.assertRaises(TypeError):
+            is_pkcs12("just a string")
+        with self.assertRaises(TypeError):
+            is_pkcs12(None)
 
         with open_file("rsa_2048_key.pem") as rsa_2048_key_pem:
             self.assertFalse(is_pkcs12(rsa_2048_key_pem.read()))

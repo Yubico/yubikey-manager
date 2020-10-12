@@ -274,16 +274,23 @@ def bytes2int(data: bytes) -> int:
 
 
 def _tlv_parse(data):
-    tag, rest = data[0], data[1:]
-    if tag & 0x1F == 0x1F:
-        tag, rest = tag << 8 | rest[0], rest[1:]
+    try:
+        tag, rest = data[0], data[1:]
+        if tag & 0x1F == 0x1F:  # Long form
+            tag, rest = tag << 8 | rest[0], rest[1:]
+            while tag & 0x80 == 0x80:  # Additional bytes
+                tag, rest = tag << 8 | rest[0], rest[1:]
 
-    ln, rest = rest[0], rest[1:]
-    if ln > 0x80:
-        n_bytes = ln - 0x80
-        ln, rest = bytes2int(rest[:n_bytes]), rest[n_bytes:]
+        ln, rest = rest[0], rest[1:]
+        if ln == 0x80:
+            raise ValueError("Indefinite length not supported")
+        if ln > 0x80:
+            n_bytes = ln - 0x80
+            ln, rest = bytes2int(rest[:n_bytes]), rest[n_bytes:]
 
-    value, rest = rest[:ln], rest[ln:]
+        value, rest = rest[:ln], rest[ln:]
+    except IndexError:
+        raise ValueError("Invalid encoding of tag/length")
 
     return tag, ln, value, rest
 
@@ -311,14 +318,7 @@ class Tlv(bytes):
 
             # Pack into Tlv
             buf = bytearray()
-            if tag <= 0xFF:
-                buf.append(tag)
-            else:
-                tag_1 = tag >> 8
-                if tag_1 > 0xFF or tag_1 & 0x1F != 0x1F:
-                    raise ValueError("Unsupported tag value")
-                tag_2 = tag & 0xFF
-                buf.extend([tag_1, tag_2])
+            buf.extend(int2bytes(tag))
             value = value or b""
             length = len(value)
             if length < 0x80:
