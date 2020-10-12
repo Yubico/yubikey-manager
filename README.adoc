@@ -1,7 +1,8 @@
 == YubiKey Manager CLI
 image:https://github.com/Yubico/yubikey-manager/workflows/build/badge.svg["Build Status", link="https://github.com/Yubico/yubikey-manager/actions"]
 
-Python library and command line tool for configuring a YubiKey. If you're looking for the full graphical application, which also includes the command line tool, it's https://developers.yubico.com/yubikey-manager-qt/[here].
+Python 3.6 (or later) library and command line tool for configuring a YubiKey.
+If you're looking for the full graphical application, which also includes the command line tool, it's https://developers.yubico.com/yubikey-manager-qt/[here].
 
 === Usage
 For more usage information and examples, see the https://support.yubico.com/support/solutions/articles/15000012643-yubikey-manager-cli-ykman-user-guide[YubiKey Manager CLI User Manual].
@@ -68,7 +69,7 @@ To install from source, see the link:doc/development.adoc[development] instructi
 
 === Bash completion
 
-Experimental Bash completion for the command line tool is available, but not 
+Experimental Bash completion for the command line tool is available, but not
 enabled by default. To enable it, run this command once:
 
     $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
