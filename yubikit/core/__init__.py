@@ -366,7 +366,7 @@ class Tlv(bytes):
         return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
 
     @classmethod
-    def unwrap(cls: Type[T_Tlv], tag: int, data: bytes) -> bytes:
+    def unpack(cls: Type[T_Tlv], tag: int, data: bytes) -> bytes:
         tlv = cls(data)
         if tlv.tag != tag:
             raise ValueError("Wrong tag, got %02x expected %02x" % (tlv.tag, tag))

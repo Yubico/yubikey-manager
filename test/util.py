@@ -52,7 +52,7 @@ def _sign_cert(key, builder):
 
     sig = key.sign(cert.tbs_certificate_bytes, ec.ECDSA(hashes.SHA256()))
 
-    seq = Tlv.parse_list(Tlv.unwrap(0x30, cert.public_bytes(Encoding.DER)))
+    seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
     # Replace signature, add unused bits = 0
     seq[2] = Tlv(seq[2].tag, b"\0" + sig)
     # Re-assemble sequence

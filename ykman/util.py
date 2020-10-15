@@ -272,7 +272,7 @@ def is_pkcs12(data):
     See: https://tools.ietf.org/html/rfc7292.
     """
     try:
-        header = Tlv.parse_list(Tlv.unwrap(0x30, data))[0]
+        header = Tlv.parse_list(Tlv.unpack(0x30, data))[0]
         return header.tag == 0x02 and header.value == b"\x03"
     except ValueError:
         return False

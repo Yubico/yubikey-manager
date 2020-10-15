@@ -409,7 +409,7 @@ class PivSession:
             SLOT.CARD_MANAGEMENT,
             Tlv(TAG_DYN_AUTH, Tlv(TAG_AUTH_WITNESS)),
         )
-        witness = Tlv.unwrap(TAG_AUTH_WITNESS, Tlv.unwrap(TAG_DYN_AUTH, response))
+        witness = Tlv.unpack(TAG_AUTH_WITNESS, Tlv.unpack(TAG_DYN_AUTH, response))
         challenge = os.urandom(8)
 
         backend = default_backend()
@@ -428,7 +428,7 @@ class PivSession:
                 Tlv(TAG_AUTH_WITNESS, decrypted) + Tlv(TAG_AUTH_CHALLENGE, challenge),
             ),
         )
-        encrypted = Tlv.unwrap(TAG_AUTH_RESPONSE, Tlv.unwrap(TAG_DYN_AUTH, response))
+        encrypted = Tlv.unpack(TAG_AUTH_RESPONSE, Tlv.unpack(TAG_DYN_AUTH, response))
         encryptor = cipher.encryptor()
         expected = encryptor.update(challenge) + encryptor.finalize()
         if not bytes_eq(expected, encrypted):
@@ -564,7 +564,7 @@ class PivSession:
             expected = TAG_OBJ_DATA
 
         try:
-            return Tlv.unwrap(
+            return Tlv.unpack(
                 expected,
                 self.protocol.send_apdu(
                     0,
@@ -670,7 +670,7 @@ class PivSession:
         response = self.protocol.send_apdu(
             0, INS_GENERATE_ASYMMETRIC, 0, slot, Tlv(0xAC, data)
         )
-        return _parse_device_public_key(key_type, Tlv.unwrap(0x7F49, response))
+        return _parse_device_public_key(key_type, Tlv.unpack(0x7F49, response))
 
     def attest_key(self, slot: SLOT) -> x509.Certificate:
         if self.version < (4, 3, 0):
@@ -720,7 +720,7 @@ class PivSession:
                     ),
                 ),
             )
-            return Tlv.unwrap(TAG_AUTH_RESPONSE, Tlv.unwrap(TAG_DYN_AUTH, response,),)
+            return Tlv.unpack(TAG_AUTH_RESPONSE, Tlv.unpack(TAG_DYN_AUTH, response,),)
         except ApduError as e:
             if e.sw == SW.INCORRECT_PARAMETERS:
                 raise e  # TODO: Different error, No key?

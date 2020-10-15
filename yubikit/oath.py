@@ -290,7 +290,7 @@ class OathSession:
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
         resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
         verification = _hmac_sha1(key, challenge)
-        if not constant_time.bytes_eq(Tlv.unwrap(TAG_RESPONSE, resp), verification):
+        if not constant_time.bytes_eq(Tlv.unpack(TAG_RESPONSE, resp), verification):
             raise BadResponseError(
                 "Response from validation does not match verification!"
             )
@@ -358,7 +358,7 @@ class OathSession:
     def list_credentials(self) -> List[Credential]:
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
-            data = Tlv.unwrap(TAG_NAME_LIST, tlv)
+            data = Tlv.unpack(TAG_NAME_LIST, tlv)
             oath_type = OATH_TYPE(MASK_TYPE & data[0])
             cred_id = data[1:]
             issuer, name, period = _parse_cred_id(cred_id, oath_type)
@@ -370,7 +370,7 @@ class OathSession:
         return creds
 
     def calculate(self, credential_id: bytes, challenge: bytes) -> bytes:
-        resp = Tlv.unwrap(
+        resp = Tlv.unpack(
             TAG_RESPONSE,
             self.protocol.send_apdu(
                 0,
@@ -398,7 +398,7 @@ class OathSession:
             )
         )
         while data:
-            cred_id = Tlv.unwrap(TAG_NAME, data.pop(0))
+            cred_id = Tlv.unpack(TAG_NAME, data.pop(0))
             tlv = data.pop(0)
             resp_tag = tlv.tag
             oath_type = OATH_TYPE.HOTP if resp_tag == TAG_HOTP else OATH_TYPE.TOTP
@@ -432,7 +432,7 @@ class OathSession:
         else:  # HOTP
             challenge = b""
 
-        response = Tlv.unwrap(
+        response = Tlv.unpack(
             TAG_TRUNCATED,
             self.protocol.send_apdu(
                 0,

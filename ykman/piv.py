@@ -558,7 +558,7 @@ class PivController(object):
         if touch_callback is not None:
             touch_timer.cancel()
 
-        seq = Tlv.parse_list(Tlv.unwrap(0x30, cert.public_bytes(Encoding.DER)))
+        seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
         # Replace signature, add unused bits = 0
         seq[2] = Tlv(seq[2].tag, b"\0" + sig)
         # Re-assemble sequence
@@ -570,7 +570,7 @@ class PivController(object):
         key_type = KEY_TYPE.from_public_key(public_key)
         dummy_key = _dummy_key(key_type)
         csr = builder.sign(dummy_key, hashes.SHA256(), default_backend())
-        seq = Tlv.parse_list(Tlv.unwrap(0x30, csr.public_bytes(Encoding.DER)))
+        seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
 
         # Replace public key
         pub_format = (
