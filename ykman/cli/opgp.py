@@ -79,7 +79,7 @@ def int_in_range(minval, maxval):
 @click_postpone_execution
 def openpgp(ctx):
     """
-    Manage OpenPGP Application.
+    Manage the OpenPGP Application.
 
     Examples:
 
@@ -95,7 +95,7 @@ def openpgp(ctx):
         ctx.obj["controller"] = OpgpController(SmartCardProtocol(ctx.obj["conn"]))
     except ApduError as e:
         if e.sw == SW.NOT_FOUND:
-            ctx.fail("The OpenPGP application can't be found on this " "YubiKey.")
+            ctx.fail("The OpenPGP application can't be found on this YubiKey.")
         logger.debug("Failed to load OpenPGP Application", exc_info=e)
         ctx.fail("Failed to load OpenPGP Application")
 
@@ -151,7 +151,7 @@ def reset(ctx):
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
     """
-    click.echo("Resetting OpenPGP data, don't remove your YubiKey...")
+    click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     ctx.obj["controller"].reset()
     click.echo("Success! All data has been cleared and default PINs are set.")
     echo_default_pins()
@@ -246,9 +246,7 @@ def set_pin_retries(
 
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
-        click.echo(
-            "WARNING: Setting PIN retries will reset the values for all " "3 PINs!"
-        )
+        click.echo("WARNING: Setting PIN retries will reset the values for all 3 PINs!")
     if force or click.confirm(
         "Set PIN retry counters to: {} {} {}?".format(
             pin_retries, reset_code_retries, admin_pin_retries
@@ -299,7 +297,7 @@ def attest(ctx, key, certificate, pin, format):
     ):
         touch_policy = controller.get_touch(KEY_SLOT.ATT)
         if touch_policy in [TOUCH_MODE.ON, TOUCH_MODE.FIXED]:
-            click.echo("Touch your YubiKey...")
+            click.echo("Touch the YubiKey sensor...")
         try:
             controller.verify_pin(pin)
             cert = controller.attest(key)

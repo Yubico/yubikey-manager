@@ -33,7 +33,7 @@ from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 
 from ..hid import list_otp_devices, list_ctap_devices
-from ..scard import list_devices as list_ccid
+from ..pcsc import list_devices as list_ccid
 
 from ..device import is_fips_version, get_name, read_info
 from ..otp import is_in_fips_mode as otp_in_fips_mode

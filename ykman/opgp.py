@@ -414,11 +414,11 @@ class OpgpController(object):
         """Requires Admin PIN verification."""
         if self.version < (1, 0, 7):  # For YubiKey NEO
             raise ValueError(
-                "Setting PIN retry counters requires version " "1.0.7 or later."
+                "Setting PIN retry counters requires version 1.0.7 or later."
             )
         if (4, 0, 0) <= self.version < (4, 3, 1):  # For YubiKey 4
             raise ValueError(
-                "Setting PIN retry counters requires version " "4.3.1 or later."
+                "Setting PIN retry counters requires version 4.3.1 or later."
             )
         self._app.send_apdu(
             0,

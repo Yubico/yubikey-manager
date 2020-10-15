@@ -32,7 +32,7 @@ from yubikit.core.smartcard import SmartCardConnection
 import ykman.logging_setup
 
 from .. import __version__
-from ..scard import list_devices as list_ccid, list_readers
+from ..pcsc import list_devices as list_ccid, list_readers
 from ..util import Cve201715361VulnerableError
 from ..device import (
     read_info,
@@ -179,7 +179,7 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
 @click.option(
     "-r",
     "--reader",
-    help="Use an external smart card reader. Conflicts with --device and " "list.",
+    help="Use an external smart card reader. Conflicts with --device and list.",
     metavar="NAME",
     default=None,
 )

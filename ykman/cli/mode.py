@@ -112,7 +112,7 @@ def _mode_from_usb_enabled(usb_enabled):
     type=int,
     default=0,
     metavar="SECONDS",
-    help="Sets the timeout when waiting for touch for challenge " "response.",
+    help="Sets the timeout when waiting for touch for challenge response.",
 )
 @click_force_option
 @click.pass_context
@@ -154,9 +154,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     if mode is not None:
         if mode.interfaces != USB_INTERFACE.CCID:
             if touch_eject:
-                ctx.fail(
-                    "--touch-eject can only be used when setting" " CCID-only mode"
-                )
+                ctx.fail("--touch-eject can only be used when setting CCID-only mode")
 
         if not force:
             if mode == my_mode:

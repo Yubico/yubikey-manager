@@ -96,10 +96,10 @@ def click_parse_uri(ctx, param, val):
 @click.group()
 @click.pass_context
 @click_postpone_execution
-@click.option("-p", "--password", help="Provide a password to unlock the " "YubiKey.")
+@click.option("-p", "--password", help="Provide a password to unlock the YubiKey.")
 def oath(ctx, password):
     """
-    Manage OATH Application.
+    Manage the OATH Application.
 
     Examples:
 
@@ -174,7 +174,7 @@ def reset(ctx):
         del keys[old_id]
         settings.write()
 
-    click.echo("Success! All OATH credentials have been cleared from your YubiKey.")
+    click.echo("Success! All OATH credentials have been cleared from the YubiKey.")
 
 
 @oath.command()
@@ -238,7 +238,7 @@ def add(
     """
     Add a new credential.
 
-    This will add a new credential to your YubiKey.
+    This will add a new credential to the YubiKey.
     """
 
     digits = int(digits)
@@ -273,7 +273,7 @@ def uri(ctx, uri, touch, force):
     """
     Add a new credential from URI.
 
-    Use a URI to add a new credential to your YubiKey.
+    Use a URI to add a new credential to the YubiKey.
     """
 
     if not uri:
@@ -340,10 +340,10 @@ def _add_cred(ctx, data, touch, force):
         app.put_credential(data, touch)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            ctx.fail("No space left on your YubiKey for OATH credentials.")
+            ctx.fail("No space left on the YubiKey for OATH credentials.")
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
-            ctx.fail("The command failed. Is there enough space on your YubiKey?")
+            ctx.fail("The command failed. Is there enough space on the YubiKey?")
         else:
             raise
 
@@ -357,7 +357,7 @@ def list(ctx, show_hidden, oath_type, period):
     """
     List all credentials.
 
-    List all credentials stored on your YubiKey.
+    List all credentials stored on the YubiKey.
     """
     ensure_validated(ctx)
     controller = ctx.obj["controller"]
@@ -390,7 +390,7 @@ def code(ctx, show_hidden, query, single):
     """
     Generate codes.
 
-    Generate codes from credentials stored on your YubiKey.
+    Generate codes from credentials stored on the YubiKey.
     Provide a query string to match one or more specific credentials.
     Touch and HOTP credentials require a single match to be triggered.
     """
@@ -464,7 +464,7 @@ def delete(ctx, query, force):
     """
     Delete a credential.
 
-    Delete a credential from your YubiKey.
+    Delete a credential from the YubiKey.
     Provide a query string to match the credential to delete.
     """
 
@@ -512,12 +512,12 @@ def set_password(ctx, new_password, remember):
     Password protect the OATH credentials.
 
     Allows you to set a password that will be required to access the OATH
-    credentials stored on your YubiKey.
+    credentials stored on the YubiKey.
     """
-    ensure_validated(ctx, prompt="Enter your current password")
+    ensure_validated(ctx, prompt="Enter the current password")
     if not new_password:
         new_password = click_prompt(
-            "Enter your new password", hide_input=True, confirmation_prompt=True
+            "Enter the new password", hide_input=True, confirmation_prompt=True
         )
 
     app = ctx.obj["controller"]
@@ -549,7 +549,7 @@ def remember_password(ctx, forget, clear_all):
     """
     Manage local password storage.
 
-    Store your YubiKeys password on this computer to avoid having to enter it
+    Store the YubiKeys password on this computer to avoid having to enter it
     on each use, or delete stored passwords.
     """
     app = ctx.obj["controller"]
@@ -569,7 +569,7 @@ def remember_password(ctx, forget, clear_all):
         ensure_validated(ctx, remember=True)
 
 
-def ensure_validated(ctx, prompt="Enter your password", remember=False):
+def ensure_validated(ctx, prompt="Enter the password", remember=False):
     app = ctx.obj["controller"]
     device_id = app.info.device_id
     if app.locked:

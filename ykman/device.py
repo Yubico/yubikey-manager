@@ -47,7 +47,7 @@ from yubikit.core.smartcard import (
 from yubikit.management import ManagementSession, DeviceInfo, DeviceConfig
 from yubikit.yubiotp import YubiOtpSession
 from .hid import list_otp_devices, list_ctap_devices
-from .scard import list_devices as _list_ccid_devices
+from .pcsc import list_devices as _list_ccid_devices
 
 from collections import Counter
 from typing import Dict, Mapping, List, Tuple, Optional, Hashable, Iterable, Type

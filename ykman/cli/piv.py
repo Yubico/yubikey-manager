@@ -113,7 +113,7 @@ click_touch_policy_option = click.option(
 @click_postpone_execution
 def piv(ctx):
     """
-    Manage PIV Application.
+    Manage the PIV Application.
 
     Examples:
 
@@ -144,7 +144,7 @@ def piv(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of PIV application.
+    Display general status of the PIV application.
     """
     controller = ctx.obj["controller"]
     click.echo("PIV version: %d.%d.%d" % controller.version)
@@ -234,20 +234,20 @@ def info(ctx):
 @click.confirmation_option(
     "-f",
     "--force",
-    prompt="WARNING! This will delete "
-    "all stored PIV data and restore factory settings. Proceed?",
+    prompt="WARNING! This will delete all stored PIV data and restore factory settings."
+    " Proceed?",
 )
 def reset(ctx):
     """
     Reset all PIV data.
 
     This action will wipe all data and restore factory settings for
-    the PIV application on your YubiKey.
+    the PIV application on the YubiKey.
     """
 
     click.echo("Resetting PIV data...")
     ctx.obj["controller"].reset()
-    click.echo("Success! All PIV data have been cleared from your YubiKey.")
+    click.echo("Success! All PIV data have been cleared from the YubiKey.")
     click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
     click.echo("\tPIN:\t123456")
     click.echo("\tPUK:\t12345678")
@@ -326,9 +326,9 @@ def generate_key(
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
 def import_certificate(ctx, slot, management_key, pin, cert, password, verify):
     """
-    Import a X.509 certificate.
+    Import an X.509 certificate.
 
-    Write a certificate to one of the slots on the YubiKey.
+    Write a certificate to one of the PIV slots on the YubiKey.
 
     \b
     SLOT            PIV slot to import the certificate to.
@@ -404,7 +404,7 @@ def import_key(
     """
     Import a private key.
 
-    Write a private key to one of the slots on the YubiKey.
+    Write a private key to one of the PIV slots on the YubiKey.
 
     \b
     SLOT        PIV slot to import the private key to.
@@ -457,7 +457,7 @@ def import_key(
 @click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
 def attest(ctx, slot, certificate, format):
     """
-    Generate a attestation certificate for a key.
+    Generate an attestation certificate for a key pair.
 
     Attestation is used to show that an asymmetric key was generated on the
     YubiKey and therefore doesn't exist outside the device.
@@ -482,9 +482,9 @@ def attest(ctx, slot, certificate, format):
 @click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
 def export_certificate(ctx, slot, format, certificate):
     """
-    Export a X.509 certificate.
+    Export an X.509 certificate.
 
-    Reads a certificate from one of the slots on the YubiKey.
+    Reads a certificate from one of the PIV slots on the YubiKey.
 
     \b
     SLOT        PIV slot to read certificate from.
@@ -507,7 +507,7 @@ def export_certificate(ctx, slot, format, certificate):
 @click_management_key_option
 def set_chuid(ctx, management_key, pin):
     """
-    Generate and set a CHUID on the YubiKey.
+    Generate and set a CHUID (Cardholder Unique Identifier) on the YubiKey.
     """
     controller = ctx.obj["controller"]
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -520,7 +520,7 @@ def set_chuid(ctx, management_key, pin):
 @click_management_key_option
 def set_ccc(ctx, management_key, pin):
     """
-    Generate and set a CCC on the YubiKey.
+    Generate and set a CCC (Card Capability Container) on the YubiKey.
     """
     controller = ctx.obj["controller"]
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -536,24 +536,26 @@ def set_ccc(ctx, management_key, pin):
 @click_force_option
 def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     """
-    Set the number of PIN and PUK retries.
+    Set the number of PIN and PUK retry attempts.
     NOTE: This will reset the PIN and PUK to their factory defaults.
     """
     controller = ctx.obj["controller"]
     _ensure_authenticated(
         ctx, controller, pin, management_key, require_pin_and_key=True, no_prompt=force
     )
-    click.echo("WARNING: This will reset the PIN and PUK to the factory " "defaults!")
+    click.echo("WARNING: This will reset the PIN and PUK to the factory defaults!")
     force or click.confirm(
-        "Set PIN and PUK retry counters to: {} {}?".format(pin_retries, puk_retries),
+        "Set the number of PIN and PUK retry attempts to: {} {}?".format(
+            pin_retries, puk_retries
+        ),
         abort=True,
         err=True,
     )
     try:
         controller.set_pin_retries(pin_retries, puk_retries)
-        click.echo("Default PINs are set.")
-        click.echo("PIN:    123456")
-        click.echo("PUK:    12345678")
+        click.echo("Default PINs are set:")
+        click.echo("\tPIN:\t123456")
+        click.echo("\tPUK:\t12345678")
     except Exception as e:
         logger.error("Failed to set PIN retries", exc_info=e)
         ctx.fail("Setting pin retries failed.")
@@ -586,7 +588,7 @@ def generate_certificate(
     Generate a self-signed X.509 certificate.
 
     A self-signed certificate is generated and written to one of the slots on
-    the YubiKey. A private key need to exist in the slot.
+    the YubiKey. A private key must already be present in the corresponding key slot.
 
     \b
     SLOT            PIV slot where private key is stored.
@@ -631,7 +633,8 @@ def generate_certificate_signing_request(
     """
     Generate a Certificate Signing Request (CSR).
 
-    A private key need to exist in the slot.
+    A private key must already be present in the corresponding key slot.
+
 
     \b
     SLOT        PIV slot where the private key is stored.
@@ -663,7 +666,7 @@ def delete_certificate(ctx, slot, management_key, pin):
     """
     Delete a certificate.
 
-    Delete a certificate from a slot on the YubiKey.
+    Delete a certificate from a PIV slot on the YubiKey.
     """
     controller = ctx.obj["controller"]
     _ensure_authenticated(ctx, controller, pin, management_key)
@@ -679,17 +682,17 @@ def change_pin(ctx, pin, new_pin):
     Change the PIN code.
 
     The PIN must be between 6 and 8 characters long, and supports any type of
-    alphanumeric characters. For cross-platform compatibility,
-    numeric digits are recommended.
+    alphanumeric characters. For cross-platform compatibility, numeric PINs are
+    recommended.
     """
 
     controller = ctx.obj["controller"]
 
     if not pin:
-        pin = _prompt_pin(ctx, prompt="Enter your current PIN")
+        pin = _prompt_pin(ctx, prompt="Enter the current PIN")
     if not new_pin:
         new_pin = click_prompt(
-            "Enter your new PIN",
+            "Enter the new PIN",
             default="",
             hide_input=True,
             show_default=False,
@@ -708,7 +711,9 @@ def change_pin(ctx, pin, new_pin):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug("Failed to change PIN, %d tries left", attempts, exc_info=e)
+            logger.debug(
+                "Failed to change the PIN, %d tries left", attempts, exc_info=e
+            )
             ctx.fail("PIN change failed - %d tries left." % attempts)
         else:
             logger.debug("PIN is blocked.", exc_info=e)
@@ -729,10 +734,10 @@ def change_puk(ctx, puk, new_puk):
     """
     controller = ctx.obj["controller"]
     if not puk:
-        puk = _prompt_pin(ctx, prompt="Enter your current PUK")
+        puk = _prompt_pin(ctx, prompt="Enter the current PUK")
     if not new_puk:
         new_puk = click_prompt(
-            "Enter your new PUK",
+            "Enter the new PUK",
             default="",
             hide_input=True,
             show_default=False,
@@ -783,7 +788,7 @@ def change_puk(ctx, puk, new_puk):
     "-p",
     "--protect",
     is_flag=True,
-    help="Store new management key on your YubiKey, protected by PIN."
+    help="Store new management key on the YubiKey, protected by PIN."
     " A random key will be used if no key is provided.",
 )
 @click.option(
@@ -813,13 +818,12 @@ def change_management_key(
         pin,
         management_key,
         require_pin_and_key=protect,
-        mgm_key_prompt="Enter your current management key "
-        "[blank to use default key]",
+        mgm_key_prompt="Enter the current management key [blank to use default key]",
         no_prompt=force,
     )
 
     if new_management_key and generate:
-        ctx.fail("Invalid options: --new-management-key conflicts with " "--generate")
+        ctx.fail("Invalid options: --new-management-key conflicts with --generate")
 
     # Touch not supported on NEO.
     if touch and controller.version < (4, 0, 0):
@@ -855,7 +859,7 @@ def change_management_key(
 
         else:
             new_management_key = click_prompt(
-                "Enter your new management key",
+                "Enter the new management key",
                 hide_input=True,
                 confirmation_prompt=True,
             )
@@ -901,7 +905,7 @@ def unblock_pin(ctx, puk, new_pin):
 )
 def read_object(ctx, pin, object_id):
     """
-    Read arbitrary PIV object.
+    Read an arbitrary PIV object.
 
     Read PIV object by providing the object id.
 

@@ -175,7 +175,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     else:
         if lock_code:
             ctx.fail(
-                "There is no current lock code set. " "Use --new-lock-code to set one."
+                "There is no current lock code set. Use --new-lock-code to set one."
             )
         else:
             if new_lock_code:
@@ -329,11 +329,9 @@ def usb(
     is_locked = info.is_locked
 
     if force and is_locked and not lock_code:
-        ctx.fail("Configuration is locked - please supply the --lock-code " "option.")
+        ctx.fail("Configuration is locked - please supply the --lock-code option.")
     if lock_code and not is_locked:
-        ctx.fail(
-            "Configuration is not locked - please remove the " "--lock-code option."
-        )
+        ctx.fail("Configuration is not locked - please remove the --lock-code option.")
 
     force or click.confirm(f_confirm, abort=True, err=True)
 
@@ -437,11 +435,9 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     is_locked = info.is_locked
 
     if force and is_locked and not lock_code:
-        ctx.fail("Configuration is locked - please supply the --lock-code " "option.")
+        ctx.fail("Configuration is locked - please supply the --lock-code option.")
     if lock_code and not is_locked:
-        ctx.fail(
-            "Configuration is not locked - please remove the " "--lock-code option."
-        )
+        ctx.fail("Configuration is not locked - please remove the --lock-code option.")
 
     force or click.confirm(f_confirm, abort=True, err=True)
 
@@ -479,9 +475,7 @@ def _parse_lock_code(ctx, lock_code):
     try:
         lock_code = bytes.fromhex(lock_code)
         if lock_code and len(lock_code) != 16:
-            ctx.fail(
-                "Lock code must be exactly 16 bytes " "(32 hexadecimal digits) long."
-            )
+            ctx.fail("Lock code must be exactly 16 bytes (32 hexadecimal digits) long.")
         return lock_code
     except Exception:
         ctx.fail("Lock code has the wrong format.")

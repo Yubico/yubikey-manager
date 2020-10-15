@@ -126,7 +126,7 @@ def _confirm_slot_overwrite(slot_state, slot):
 )
 def otp(ctx, access_code):
     """
-    Manage OTP Application.
+    Manage the OTP Application.
 
     The YubiKey provides two keyboard-based slots which can each be configured
     with a credential. Several credential types are supported.
@@ -158,7 +158,7 @@ def otp(ctx, access_code):
     ctx.obj["session"] = YubiOtpSession(ctx.obj["conn"])
     if access_code is not None:
         if access_code == "":
-            access_code = click_prompt("Enter access code", show_default=False)
+            access_code = click_prompt("Enter the access code", show_default=False)
 
         try:
             access_code = parse_access_code_hex(access_code)
@@ -172,7 +172,7 @@ def otp(ctx, access_code):
 @click.pass_context
 def info(ctx):
     """
-    Display status of YubiKey Slots.
+    Display general status of the YubiKey OTP slots.
     """
     session = ctx.obj["session"]
     state = session.get_config_state()
@@ -189,9 +189,7 @@ def info(ctx):
 
 
 @otp.command()
-@click.confirmation_option(
-    "-f", "--force", prompt="Swap the two slots of the " "YubiKey?"
-)
+@click.confirmation_option("-f", "--force", prompt="Swap the two slots of the YubiKey?")
 @click.pass_context
 def swap(ctx):
     """
@@ -211,15 +209,17 @@ def swap(ctx):
 @click.option("-p", "--prefix", help="Added before the NDEF payload. Typically a URI.")
 def ndef(ctx, slot, prefix):
     """
-    Select slot configuration to use for NDEF.
+    Configure a slot to be used over NDEF (NFC).
 
-    The default prefix will be used if no prefix is specified.
+    The default prefix will be used if no prefix is specified:
+
+        "https://my.yubico.com/yk/#"
     """
     info = ctx.obj["info"]
     session = ctx.obj["session"]
     state = session.get_config_state()
-    if TRANSPORT.NFC not in info.supported_applications:
-        ctx.fail("NFC interface not available.")
+    if not info.has_transport(TRANSPORT.NFC):
+        ctx.fail("This YubiKey does not support NFC.")
 
     if not state.is_configured(slot):
         ctx.fail("Slot {} is empty.".format(slot))
@@ -236,18 +236,18 @@ def ndef(ctx, slot, prefix):
 @click.pass_context
 def delete(ctx, slot, force):
     """
-    Deletes the configuration of a slot.
+    Deletes the configuration stored in a slot.
     """
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
         ctx.fail("Not possible to delete an empty slot.")
     force or click.confirm(
-        "Do you really want to delete" " the configuration of slot {}?".format(slot),
+        "Do you really want to delete the configuration of slot {}?".format(slot),
         abort=True,
         err=True,
     )
-    click.echo("Deleting the configuration of slot {}...".format(slot))
+    click.echo("Deleting the configuration in slot {}...".format(slot))
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
     except CommandError as e:
@@ -282,7 +282,7 @@ def delete(ctx, slot, force):
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter " "keystroke after emitting the OTP.",
+    help="Don't send an Enter keystroke after emitting the OTP.",
 )
 @click.option(
     "-S",
@@ -310,8 +310,7 @@ def delete(ctx, slot, force):
     "--upload",
     is_flag=True,
     required=False,
-    help="Upload credential to YubiCloud (opens in browser). "
-    "Conflicts with --force.",
+    help="Upload credential to YubiCloud (opens in browser). Conflicts with --force.",
 )
 @click_force_option
 @click.pass_context
@@ -330,19 +329,16 @@ def yubiotp(
 ):
     """
     Program a Yubico OTP credential.
-
     """
 
     info = ctx.obj["info"]
     session = ctx.obj["session"]
 
     if public_id and serial_public_id:
-        ctx.fail("Invalid options: --public-id conflicts with " "--serial-public-id.")
+        ctx.fail("Invalid options: --public-id conflicts with --serial-public-id.")
 
     if private_id and generate_private_id:
-        ctx.fail(
-            "Invalid options: --private-id conflicts with " "--generate-public-id."
-        )
+        ctx.fail("Invalid options: --private-id conflicts with --generate-public-id.")
 
     if upload and force:
         ctx.fail("Invalid options: --upload conflicts with --force.")
@@ -453,7 +449,7 @@ def yubiotp(
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter " "keystroke after outputting the password.",
+    help="Don't send an Enter keystroke after outputting the password.",
 )
 @click_force_option
 @click.pass_context
@@ -462,7 +458,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     Configure a static password.
 
     To avoid problems with different keyboard layouts, the following characters
-    are allowed by default: cbdefghijklnrtuv
+    (upper and lower case) are allowed by default: cbdefghijklnrtuv
 
     Use the --keyboard-layout option to allow more characters based on
     preferred keyboard layout.
@@ -502,7 +498,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     "-t",
     "--touch",
     is_flag=True,
-    help="Require touch" " on YubiKey to generate response.",
+    help="Require touch on the YubiKey to generate a response.",
 )
 @click.option(
     "-T",
@@ -581,14 +577,14 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     "-T",
     "--totp",
     is_flag=True,
-    help="Generate a TOTP code, " "use the current time as challenge.",
+    help="Generate a TOTP code, use the current time if challenge is omitted.",
 )
 @click.option(
     "-d",
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="Number of digits in generated TOTP code (default is 6).",
+    help="Number of digits in generated TOTP code (default: 6).",
 )
 @click.pass_context
 def calculate(ctx, slot, challenge, totp, digits):
@@ -652,7 +648,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter " "keystroke after outputting the code.",
+    help="Don't send an Enter keystroke after outputting the code.",
 )
 @click_force_option
 @click.pass_context
@@ -714,8 +710,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     type=click.Choice(["0", "20", "40", "60"]),
     default="0",
     show_default=True,
-    help="Throttle output speed by "
-    "adding a delay (in ms) between characters emitted.",
+    help="Throttle output speed by adding a delay (in ms) between characters emitted.",
 )
 @click.option(
     "--use-numeric-keypad",

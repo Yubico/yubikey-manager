@@ -56,7 +56,7 @@ PIN_MIN_LENGTH = 4
 @click_postpone_execution
 def fido(ctx):
     """
-    Manage FIDO applications.
+    Manage the FIDO applications.
 
     Examples:
 
@@ -211,9 +211,7 @@ def set_pin(ctx, pin, new_pin, u2f):
     is_fips = controller.is_fips
 
     if is_fips and not u2f:
-        ctx.fail(
-            "This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f " "option."
-        )
+        ctx.fail("This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f option.")
 
     if u2f and not is_fips:
         ctx.fail(
@@ -414,7 +412,7 @@ def unlock(ctx, pin):
     controller = ctx.obj["controller"]
     if not controller.is_fips:
         ctx.fail(
-            "This is not a YubiKey FIPS, and therefore" " does not support a U2F PIN."
+            "This is not a YubiKey FIPS, and therefore does not support a U2F PIN."
         )
 
     if pin is None:
