@@ -145,7 +145,7 @@ iokit.IOHIDDeviceGetReport.argtypes = [
     IO_HID_DEVICE_REF,
     IO_HID_REPORT_TYPE,
     CF_INDEX,
-    ctypes.POINTER(ctypes.c_uint8),
+    ctypes.c_void_p,
     ctypes.POINTER(CF_INDEX),
 ]
 
@@ -199,10 +199,9 @@ class MacHidOtpConnection(OtpConnection):
         return buf.raw[:]
 
     def send(self, data):
-        buf = ctypes.create_string_buffer(b"\0" + bytes(data))
-
+        buf = bytes(data)
         result = iokit.IOHIDDeviceSetReport(
-            self.handle, K_IO_HID_REPORT_TYPE_FEATURE, 0, buf, ctypes.sizeof(buf),
+            self.handle, K_IO_HID_REPORT_TYPE_FEATURE, 0, buf, len(buf),
         )
 
         # Non-zero status indicates failure
