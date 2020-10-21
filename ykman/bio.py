@@ -39,12 +39,23 @@ logger = logging.getLogger(__name__)
 
 @unique
 class INS(IntEnum):
-    CLEAR_LOGS = 0x20
-    DUMP_SLE = 0x21
-    DUMP_STM = 0x22
+    DEBUG = 0x20
+    # SLE = 0x21
+    # STM = 0x22
     SLE_VERSION = 0x0C
     STM_VERSION = 0x0D
-    GET_RESPONSE = 0xC0
+
+
+INS_GET_RESPONSE = 0xC0
+
+
+@unique
+class P1(IntEnum):
+    DUMP_STM = 0x21
+    DUMP_SLE = 0x22
+    CLEAR_LOGS = 0x28
+    OPEN = 0x2A
+    CLOSE = 0x2B
 
 
 class BioController(object):
@@ -53,7 +64,7 @@ class BioController(object):
         driver.select(AID.MGR)
 
     def clear_logs(self):
-        self.send_cmd(INS.CLEAR_LOGS, 8)
+        self.send_cmd(INS.DEBUG, P1.CLEAR_LOGS)
 
     def read_sle_version(self):
         return self.send_cmd(INS.SLE_VERSION).decode('utf8')
@@ -69,7 +80,7 @@ class BioController(object):
 
         while (sw >> 8) == SW.MORE_DATA:
             more, sw = self._driver.send_apdu(
-                0, INS.GET_RESPONSE, 0, 0, b'', check=None
+                0, INS_GET_RESPONSE, 0, 0, b'', check=None
             )
             resp += more
 
@@ -84,7 +95,7 @@ class BioController(object):
         resp = b''
 
         while True:
-            data = self.send_cmd(INS.DUMP_SLE)
+            data = self.send_cmd(INS.DEBUG, P1.DUMP_SLE)
             if not data:
                 break
             resp += data
@@ -98,12 +109,12 @@ class BioController(object):
         return lines
 
     def dump_stm(self):
-        self.send_cmd(INS.DUMP_STM)
+        # self.send_cmd(INS.DUMP_STM)  # No longer needed
         resp = b''
 
         while True:
             try:
-                data = self.send_cmd(INS.DUMP_STM, 1)
+                data = self.send_cmd(INS.DEBUG, P1.DUMP_STM)
             except APDUError as e:
                 # Once done, we'll get an empty response with SW = MORE_DATA, which
                 # causes a GET_RESPONSE that results in this error. So we just stop.
