@@ -166,7 +166,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
 
     The touch policy is used to require user interaction for all
     operations using the private key on the YubiKey. The touch policy is set
-    indivdually for each key slot. To see the current touch policy, run
+    individually for each key slot. To see the current touch policy, run
 
     \b
         $ ykman openpgp info
