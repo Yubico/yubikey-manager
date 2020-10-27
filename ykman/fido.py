@@ -110,7 +110,7 @@ class Fido2Controller(object):
                 _credman.delete_cred(credential_id)
 
     def get_pin_retries(self):
-        return self.pin.get_pin_retries()
+        return self.pin.get_pin_retries()[0]
 
     def set_pin(self, pin):
         self.pin.set_pin(pin)
