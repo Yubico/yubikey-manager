@@ -256,16 +256,16 @@ def list_keys(ctx, serials, readers):
         ctx.exit()
 
     # List all attached devices
-    for pid, dev_info in list_all_devices():
+    for dev, dev_info in list_all_devices():
         if serials:
             if dev_info.serial:
                 click.echo(dev_info.serial)
         else:
             click.echo(
                 "{} ({}) [{}]{}".format(
-                    get_name(dev_info, pid.get_type()),
+                    get_name(dev_info, dev.pid.get_type()),
                     "%d.%d.%d" % dev_info.version if dev_info.version else "unknown",
-                    pid.name.split("_", 1)[1].replace("_", "+"),
+                    dev.pid.name.split("_", 1)[1].replace("_", "+"),
                     " Serial: {}".format(dev_info.serial) if dev_info.serial else "",
                 )
             )

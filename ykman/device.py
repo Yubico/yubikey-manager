@@ -35,6 +35,7 @@ from yubikit.core import (
     YUBIKEY,
     Version,
     Connection,
+    YubiKeyDevice,
     NotSupportedError,
     ApplicationNotAvailableError,
 )
@@ -106,10 +107,10 @@ def scan_devices() -> Tuple[Mapping[PID, int], Hashable]:
     return merged, tuple(fingerprints)
 
 
-def list_all_devices() -> List[Tuple[PID, DeviceInfo]]:
+def list_all_devices() -> List[Tuple[YubiKeyDevice, DeviceInfo]]:
     """Connects to all attached YubiKeys and reads device info from them.
 
-    Returns a list of (PID, info) tuples for each connected device.
+    Returns a list of (device, info) tuples for each connected device.
     """
     handled_pids = set()
     pids: Dict[PID, bool] = {}
@@ -122,7 +123,7 @@ def list_all_devices() -> List[Tuple[PID, DeviceInfo]]:
                     with dev.open_connection(connection_type) as conn:
                         info = read_info(dev.pid, conn)
                     pids[dev.pid] = True
-                    devices.append((dev.pid, info))
+                    devices.append((dev, info))
                 except Exception as e:
                     pids[dev.pid] = False
                     logger.error("Failed opening device", exc_info=e)
