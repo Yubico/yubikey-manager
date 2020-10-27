@@ -49,18 +49,29 @@ from yubikit.management import ManagementSession, DeviceInfo, DeviceConfig
 from yubikit.yubiotp import YubiOtpSession
 from .hid import list_otp_devices, list_ctap_devices
 from .pcsc import list_devices as _list_ccid_devices
+from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
 from collections import Counter
 from typing import Dict, Mapping, List, Tuple, Optional, Hashable, Iterable, Type
+import sys
 import logging
 
 logger = logging.getLogger(__name__)
+
+_pcsc_missing = False
 
 
 def list_ccid_devices():
     try:
         return _list_ccid_devices()
     except Exception as e:
+        global _pcsc_missing
+        if not _pcsc_missing and isinstance(e, EstablishContextException):
+            _pcsc_missing = True
+            print(
+                "WARNING: PCSC not available. Smart card protocols will not function.",
+                file=sys.stderr,
+            )
         logger.error("Unable to list CCID devices", exc_info=e)
         return []
 
