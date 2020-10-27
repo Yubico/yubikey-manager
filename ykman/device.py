@@ -202,6 +202,9 @@ def _read_info_ccid(conn, key_type, interfaces):
         logger.debug("Unable to select OTP application")
         serial = None
 
+    if version is None:
+        version = (3, 0, 0)  # Guess, no way to know
+
     # Scan for remaining applications
     protocol = SmartCardProtocol(conn)
     for aid, code in SCAN_APPLETS.items():
