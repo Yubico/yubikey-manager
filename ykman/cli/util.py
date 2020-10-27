@@ -31,6 +31,7 @@ import sys
 from ..util import parse_b32_key
 from collections import OrderedDict, MutableMapping
 from cryptography.hazmat.primitives import serialization
+from threading import Timer
 
 
 class UpperCaseChoice(click.Choice):
@@ -185,3 +186,14 @@ def prompt_for_touch():
         click.echo("Touch your YubiKey...", err=True)
     except Exception:
         sys.stderr.write("Touch your YubiKey...\n")
+
+
+class PromptTimeout:
+    def __init__(self, timeout=0.5):
+        self.timer = Timer(timeout, prompt_for_touch)
+
+    def __enter__(self):
+        self.timer.start()
+
+    def __exit__(self, typ, value, traceback):
+        self.timer.cancel()

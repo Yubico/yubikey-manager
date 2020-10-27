@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import USB_INTERFACE
+from yubikit.core import USB_INTERFACE, NotSupportedError
 from yubikit.piv import (
     PivSession,
     InvalidPinError,
@@ -37,7 +37,6 @@ from yubikit.piv import (
     DEFAULT_MANAGEMENT_KEY,
 )
 from yubikit.core.smartcard import ApduError, SW
-from ..device import is_fips_version
 
 from ..util import (
     get_leaf_certificates,
@@ -45,9 +44,18 @@ from ..util import (
     parse_certificates,
 )
 from ..piv import (
-    PivController,
+    get_pivman_data,
+    get_pivman_protected_data,
+    pivman_set_mgm_key,
+    pivman_change_pin,
+    derive_management_key,
     generate_random_management_key,
-    KeypairMismatch,
+    generate_chuid,
+    generate_ccc,
+    list_certificates,
+    check_key,
+    generate_self_signed_certificate,
+    generate_csr,
 )
 from .util import (
     click_force_option,
@@ -55,12 +63,11 @@ from .util import (
     click_postpone_execution,
     click_callback,
     click_prompt,
-    prompt_for_touch,
+    PromptTimeout,
     EnumChoice,
 )
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.backends import default_backend
 import click
 import datetime
@@ -132,8 +139,9 @@ def piv(ctx):
       $ ykman piv reset
     """
     try:
-        app = PivSession(ctx.obj["conn"])
-        ctx.obj["controller"] = PivController(app)
+        session = PivSession(ctx.obj["conn"])
+        ctx.obj["session"] = session
+        ctx.obj["pivman_data"] = get_pivman_data(session)
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             ctx.fail("The PIV application can't be found on this YubiKey.")
@@ -146,34 +154,35 @@ def info(ctx):
     """
     Display general status of the PIV application.
     """
-    controller = ctx.obj["controller"]
-    click.echo("PIV version: %d.%d.%d" % controller.version)
+    session = ctx.obj["session"]
+    pivman = ctx.obj["pivman_data"]
+    click.echo("PIV version: %d.%d.%d" % session.version)
 
     # Largest possible number of PIN tries to get back is 15
-    tries = controller.get_pin_tries()
+    tries = session.get_pin_attempts()
     tries = "15 or more." if tries == 15 else tries
     click.echo("PIN tries remaining: %s" % tries)
-    if controller.puk_blocked:
+    if pivman.puk_blocked:
         click.echo("PUK blocked.")
-    if controller.has_derived_key:
+    if pivman.has_derived_key:
         click.echo("Management key is derived from PIN.")
-    if controller.has_stored_key:
+    if pivman.has_stored_key:
         click.echo("Management key is stored on the YubiKey, protected by PIN.")
     try:
-        chuid = controller.get_data(OBJECT_ID.CHUID).hex()
+        chuid = session.get_object(OBJECT_ID.CHUID).hex()
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             chuid = "No data available."
     click.echo("CHUID:\t" + chuid)
 
     try:
-        ccc = controller.get_data(OBJECT_ID.CAPABILITY).hex()
+        ccc = session.get_object(OBJECT_ID.CAPABILITY).hex()
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             ccc = "No data available."
     click.echo("CCC: \t" + ccc)
 
-    for (slot, cert) in controller.list_certificates().items():
+    for (slot, cert) in list_certificates(session).items():
         click.echo("Slot %02x:" % slot)
 
         if isinstance(cert, x509.Certificate):
@@ -246,7 +255,7 @@ def reset(ctx):
     """
 
     click.echo("Resetting PIV data...")
-    ctx.obj["controller"].reset()
+    ctx.obj["session"].reset()
     click.echo("Success! All PIV data have been cleared from the YubiKey.")
     click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
     click.echo("\tPIN:\t123456")
@@ -293,14 +302,13 @@ def generate_key(
     PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
     """
 
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
 
-    _ensure_authenticated(ctx, controller, pin, management_key)
-
-    _check_pin_policy(ctx, controller, pin_policy)
-    _check_touch_policy(ctx, controller, touch_policy)
-
-    public_key = controller.generate_key(slot, algorithm, pin_policy, touch_policy)
+    try:
+        public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
+    except NotSupportedError as e:
+        ctx.fail(e.message)
 
     key_encoding = format
     public_key_output.write(
@@ -334,8 +342,8 @@ def import_certificate(ctx, slot, management_key, pin, cert, password, verify):
     SLOT            PIV slot to import the certificate to.
     CERTIFICATE     File containing the certificate. Use '-' to use stdin.
     """
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(ctx, controller, pin, management_key)
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
 
     data = cert.read()
 
@@ -368,23 +376,24 @@ def import_certificate(ctx, slot, management_key, pin, cert, password, verify):
         cert_to_import = certs[0]
 
     def do_import(retry=True):
-        try:
-            controller.import_certificate(
-                slot, cert_to_import, verify=verify, touch_callback=prompt_for_touch
-            )
+        if verify:
+            try:
+                with PromptTimeout():
+                    if not check_key(session, slot, cert_to_import.public_key()):
+                        ctx.fail(
+                            "This certificate is not tied to the private key in the "
+                            "{} slot.".format(slot.name)
+                        )
+            except ApduError as e:
+                if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
+                    pivman = ctx.obj["pivman_data"]
+                    _verify_pin(ctx, session, pivman, pin)
+                    do_import(retry=False)
+                else:
+                    raise
 
-        except KeypairMismatch:
-            ctx.fail(
-                "This certificate is not tied to the private key in the "
-                "{} slot.".format(slot.name)
-            )
-
-        except ApduError as e:
-            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
-                _verify_pin(ctx, controller, pin)
-                do_import(retry=False)
-            else:
-                raise
+        session.put_certificate(slot, cert_to_import)
+        session.put_object(OBJECT_ID.CHUID, generate_chuid())
 
     do_import()
 
@@ -410,8 +419,8 @@ def import_key(
     SLOT        PIV slot to import the private key to.
     PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(ctx, controller, pin, management_key)
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
 
     data = private_key.read()
 
@@ -435,19 +444,10 @@ def import_key(
             continue
         break
 
-    if isinstance(private_key, rsa.RSAPrivateKey):
-        _check_key_size(ctx, controller, private_key)
-    elif isinstance(private_key, ec.EllipticCurvePrivateKey):
-        curve = private_key.curve.name
-        if curve not in ("secp256r1", "secp384r1"):
-            ctx.fail("Unsupported EC curve for import: " + curve)
-    else:
-        ctx.fail("Unsupported key type for import")
-
-    _check_pin_policy(ctx, controller, pin_policy)
-    _check_touch_policy(ctx, controller, touch_policy)
-
-    controller.import_key(slot, private_key, pin_policy, touch_policy)
+    try:
+        session.put_key(slot, private_key, pin_policy, touch_policy)
+    except NotSupportedError as e:
+        ctx.fail(e.message)
 
 
 @piv.command()
@@ -466,9 +466,9 @@ def attest(ctx, slot, certificate, format):
     SLOT        PIV slot with a private key to attest.
     CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     try:
-        cert = controller.attest(slot)
+        cert = session.attest_key(slot)
     except ApduError as e:
         logger.error("Attestation failed", exc_info=e)
         ctx.fail("Attestation failed.")
@@ -490,9 +490,9 @@ def export_certificate(ctx, slot, format, certificate):
     SLOT        PIV slot to read certificate from.
     CERTIFICATE File to write certificate to. Use '-' to use stdout.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     try:
-        cert = controller.read_certificate(slot)
+        cert = session.get_certificate(slot)
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             ctx.fail("No certificate found.")
@@ -509,9 +509,9 @@ def set_chuid(ctx, management_key, pin):
     """
     Generate and set a CHUID (Cardholder Unique Identifier) on the YubiKey.
     """
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(ctx, controller, pin, management_key)
-    controller.update_chuid()
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    session.put_object(OBJECT_ID.CHUID, generate_chuid())
 
 
 @piv.command("set-ccc")
@@ -522,9 +522,9 @@ def set_ccc(ctx, management_key, pin):
     """
     Generate and set a CCC (Card Capability Container) on the YubiKey.
     """
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(ctx, controller, pin, management_key)
-    controller.update_ccc()
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    session.put_object(OBJECT_ID.CAPABILITY, generate_ccc())
 
 
 @piv.command("set-pin-retries")
@@ -539,9 +539,9 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     Set the number of PIN and PUK retry attempts.
     NOTE: This will reset the PIN and PUK to their factory defaults.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     _ensure_authenticated(
-        ctx, controller, pin, management_key, require_pin_and_key=True, no_prompt=force
+        ctx, pin, management_key, require_pin_and_key=True, no_prompt=force
     )
     click.echo("WARNING: This will reset the PIN and PUK to the factory defaults!")
     force or click.confirm(
@@ -552,7 +552,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         err=True,
     )
     try:
-        controller.set_pin_retries(pin_retries, puk_retries)
+        session.set_pin_attempts(pin_retries, puk_retries)
         click.echo("Default PINs are set:")
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
@@ -594,10 +594,8 @@ def generate_certificate(
     SLOT            PIV slot where private key is stored.
     PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
     """
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(
-        ctx, controller, pin, management_key, require_pin_and_key=True
-    )
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(data, default_backend())
@@ -606,10 +604,12 @@ def generate_certificate(
     valid_to = now + datetime.timedelta(days=valid_days)
 
     try:
-        controller.generate_self_signed_certificate(
-            slot, public_key, subject, now, valid_to, touch_callback=prompt_for_touch
-        )
-
+        with PromptTimeout():
+            cert = generate_self_signed_certificate(
+                session, slot, public_key, subject, now, valid_to
+            )
+            session.put_certificate(slot, cert)
+            session.put_object(OBJECT_ID.CHUID, generate_chuid())
     except ApduError as e:
         logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
         ctx.fail("Certificate generation failed.")
@@ -641,16 +641,16 @@ def generate_certificate_signing_request(
     PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
     CSR         File to write CSR to. Use '-' to use stdout.
     """
-    controller = ctx.obj["controller"]
-    _verify_pin(ctx, controller, pin)
+    session = ctx.obj["session"]
+    pivman = ctx.obj["pivman_data"]
+    _verify_pin(ctx, session, pivman, pin)
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(data, default_backend())
 
     try:
-        csr = controller.generate_certificate_signing_request(
-            slot, public_key, subject, touch_callback=prompt_for_touch
-        )
+        with PromptTimeout():
+            csr = generate_csr(session, slot, public_key, subject)
     except ApduError:
         ctx.fail("Certificate Signing Request generation failed.")
 
@@ -668,9 +668,10 @@ def delete_certificate(ctx, slot, management_key, pin):
 
     Delete a certificate from a PIV slot on the YubiKey.
     """
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(ctx, controller, pin, management_key)
-    controller.delete_certificate(slot)
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    session.delete_certificate(slot)
+    session.put_object(OBJECT_ID.CHUID, generate_chuid())
 
 
 @piv.command("change-pin")
@@ -686,7 +687,7 @@ def change_pin(ctx, pin, new_pin):
     recommended.
     """
 
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
 
     if not pin:
         pin = _prompt_pin(ctx, prompt="Enter the current PIN")
@@ -706,7 +707,7 @@ def change_pin(ctx, pin, new_pin):
         ctx.fail("New PIN must be between 6 and 8 characters long.")
 
     try:
-        controller.change_pin(pin, new_pin)
+        pivman_change_pin(session, pin, new_pin)
         click.echo("New PIN set.")
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -732,7 +733,7 @@ def change_puk(ctx, puk, new_puk):
     The PUK must be between 6 and 8 characters long, and supports any type of
     alphanumeric characters.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     if not puk:
         puk = _prompt_pin(ctx, prompt="Enter the current PUK")
     if not new_puk:
@@ -751,7 +752,7 @@ def change_puk(ctx, puk, new_puk):
         ctx.fail("New PUK must be between 6 and 8 characters long.")
 
     try:
-        controller.change_puk(puk, new_puk)
+        session.change_puk(puk, new_puk)
         click.echo("New PUK set.")
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -810,11 +811,11 @@ def change_management_key(
     This key is required for administrative tasks, such as generating key pairs.
     A random key may be generated and stored on the YubiKey, protected by PIN.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
+    pivman = ctx.obj["pivman_data"]
 
     pin_verified = _ensure_authenticated(
         ctx,
-        controller,
         pin,
         management_key,
         require_pin_and_key=protect,
@@ -826,13 +827,13 @@ def change_management_key(
         ctx.fail("Invalid options: --new-management-key conflicts with --generate")
 
     # Touch not supported on NEO.
-    if touch and controller.version < (4, 0, 0):
+    if touch and session.version < (4, 0, 0):
         ctx.fail("Require touch not supported on this YubiKey.")
 
     # If an old stored key needs to be cleared, the PIN is needed.
-    if not pin_verified and controller.has_stored_key:
+    if not pin_verified and pivman.has_stored_key:
         if pin:
-            _verify_pin(ctx, controller, pin, no_prompt=force)
+            _verify_pin(ctx, session, pivman, pin, no_prompt=force)
         elif not force:
             click.confirm(
                 "The current management key is stored on the YubiKey"
@@ -871,7 +872,9 @@ def change_management_key(
             ctx.fail("New management key has the wrong format.")
 
     try:
-        controller.set_mgm_key(new_management_key, touch=touch, store_on_device=protect)
+        pivman_set_mgm_key(
+            session, new_management_key, touch=touch, store_on_device=protect
+        )
     except ApduError as e:
         logger.error("Failed to change management key", exc_info=e)
         ctx.fail("Changing the management key failed.")
@@ -887,14 +890,14 @@ def unblock_pin(ctx, puk, new_pin):
 
     Reset the PIN using the PUK code.
     """
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
     if not puk:
         puk = click_prompt("Enter PUK", default="", show_default=False, hide_input=True)
     if not new_pin:
         new_pin = click_prompt(
             "Enter a new PIN", default="", show_default=False, hide_input=True
         )
-    controller.unblock_pin(puk, new_pin)
+    session.unblock_pin(puk, new_pin)
 
 
 @piv.command("read-object")
@@ -913,16 +916,17 @@ def read_object(ctx, pin, object_id):
     OBJECT-ID       Id of PIV object in HEX.
     """
 
-    controller = ctx.obj["controller"]
+    session = ctx.obj["session"]
+    pivman = ctx.obj["pivman_data"]
 
     def do_read_object(retry=True):
         try:
-            click.echo(controller.get_data(object_id), nl=False)
+            click.echo(session.get_object(object_id), nl=False)
         except ApduError as e:
             if e.sw == SW.FILE_NOT_FOUND:
                 ctx.fail("No data found.")
             elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                _verify_pin(ctx, controller, pin)
+                _verify_pin(ctx, session, pivman, pin)
                 do_read_object(retry=False)
             else:
                 raise
@@ -951,12 +955,12 @@ def write_object(ctx, pin, management_key, object_id, data):
     DATA           File containing the data to be written. Use '-' to use stdin.
     """
 
-    controller = ctx.obj["controller"]
-    _ensure_authenticated(ctx, controller, pin, management_key)
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
 
     def do_write_object(retry=True):
         try:
-            controller.put_data(object_id, data.read())
+            session.put_object(object_id, data.read())
         except ApduError as e:
             logger.debug("Failed writing object", exc_info=e)
             if e.sw == SW.INCORRECT_PARAMETERS:
@@ -990,33 +994,31 @@ def _valid_pin_length(pin):
 
 def _ensure_authenticated(
     ctx,
-    controller,
     pin=None,
     management_key=None,
     require_pin_and_key=False,
     mgm_key_prompt=None,
     no_prompt=False,
 ):
-
     pin_verified = False
+    session = ctx.obj["session"]
+    pivman = ctx.obj["pivman_data"]
 
-    if controller.has_protected_key:
+    if pivman.has_protected_key:
         if not management_key:
-            pin_verified = _verify_pin(ctx, controller, pin, no_prompt=no_prompt)
+            pin_verified = _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
         else:
             _authenticate(
-                ctx, controller, management_key, mgm_key_prompt, no_prompt=no_prompt
+                ctx, session, management_key, mgm_key_prompt, no_prompt=no_prompt
             )
     else:
         if require_pin_and_key:
-            pin_verified = _verify_pin(ctx, controller, pin, no_prompt=no_prompt)
-        _authenticate(
-            ctx, controller, management_key, mgm_key_prompt, no_prompt=no_prompt
-        )
+            pin_verified = _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
+        _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=no_prompt)
     return pin_verified
 
 
-def _verify_pin(ctx, controller, pin, no_prompt=False):
+def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     if not pin:
         if no_prompt:
             ctx.fail("PIN required.")
@@ -1024,7 +1026,17 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
             pin = _prompt_pin(ctx)
 
     try:
-        controller.verify(pin, touch_callback=prompt_for_touch)
+        session.verify_pin(pin)
+        if pivman.has_derived_key:
+            with PromptTimeout():
+                session.authenticate(derive_management_key(pin, pivman.salt))
+            session.verify_pin(pin)  # Ensure verify was the last thing we did
+        elif pivman.has_stored_key:
+            pivman_prot = get_pivman_protected_data(session)
+            with PromptTimeout():
+                session.authenticate(pivman_prot.key)
+            session.verify_pin(pin)  # Ensure verify was the last thing we did
+
         return True
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -1036,7 +1048,7 @@ def _verify_pin(ctx, controller, pin, no_prompt=False):
         ctx.fail("PIN verification failed.")
 
 
-def _authenticate(ctx, controller, management_key, mgm_key_prompt, no_prompt=False):
+def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False):
     if not management_key:
         if no_prompt:
             ctx.fail("Management key required.")
@@ -1046,37 +1058,11 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt, no_prompt=Fal
             else:
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
-        controller.authenticate(management_key, touch_callback=prompt_for_touch)
+        with PromptTimeout():
+            session.authenticate(management_key)
     except Exception as e:
         logger.error("Authentication with management key failed.", exc_info=e)
         ctx.fail("Authentication with management key failed.")
-
-
-def _check_key_size(ctx, controller, private_key):
-    if (
-        private_key.key_size == 1024
-        and KEY_TYPE.RSA1024 not in controller.supported_algorithms
-    ):
-        ctx.fail("1024 is not a supported key size on this YubiKey.")
-
-
-def _check_pin_policy(ctx, controller, pin_policy):
-    if pin_policy is not None and not controller.supports_pin_policies:
-        ctx.fail("PIN policy is not supported by this YubiKey.")
-    if is_fips_version(controller.version) and pin_policy == PIN_POLICY.NEVER:
-        ctx.fail("PIN policy NEVER is not supported by this YubiKey.")
-
-
-def _check_touch_policy(ctx, controller, touch_policy):
-    if touch_policy is not None:
-        if len(controller.supported_touch_policies) == 0:
-            ctx.fail("Touch policy is not supported by this YubiKey.")
-        elif touch_policy not in controller.supported_touch_policies:
-            ctx.fail(
-                "Touch policy {} not supported by this YubiKey.".format(
-                    touch_policy.name
-                )
-            )
 
 
 piv.interfaces = USB_INTERFACE.CCID  # type: ignore

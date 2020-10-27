@@ -3,10 +3,9 @@ from __future__ import unicode_literals
 import datetime
 import random
 import unittest
-from binascii import a2b_hex
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, padding
 
 from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import ApduError
@@ -18,8 +17,14 @@ from yubikit.piv import (
     SLOT,
     InvalidPinError,
 )
-from ykman.piv import PivController
-from ykman.piv import KeypairMismatch
+from ykman.piv import (
+    check_key,
+    get_pivman_data,
+    get_pivman_protected_data,
+    generate_self_signed_certificate,
+    generate_csr,
+    pivman_set_mgm_key,
+)
 from ykman.util import parse_certificates, parse_private_key
 from .framework import device_test_suite, yubikey_conditions
 from ..util import open_file
@@ -29,10 +34,10 @@ DEFAULT_PIN = "123456"
 NON_DEFAULT_PIN = "654321"
 DEFAULT_PUK = "12345678"
 NON_DEFAULT_PUK = "87654321"
-DEFAULT_MANAGEMENT_KEY = a2b_hex(
+DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
     "010203040506070801020304050607080102030405060708"
 )  # noqa: E501
-NON_DEFAULT_MANAGEMENT_KEY = a2b_hex(
+NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
     "010103040506070801020304050607080102030405060708"
 )  # noqa: E501
 
@@ -50,8 +55,8 @@ def get_test_key():
         return parse_private_key(f.read(), None)
 
 
-def sign(controller, slot, key_type, message):
-    return controller._app.sign(slot, key_type, message, hashes.SHA256())
+def sign(session, slot, key_type, message):
+    return session.sign(slot, key_type, message, hashes.SHA256(), padding.PKCS1v15())
 
 
 @device_test_suite(USB_INTERFACE.CCID)
@@ -59,39 +64,41 @@ def additional_tests(open_device):
     class PivTestCase(unittest.TestCase):
         def setUp(self):
             self.conn = open_device()[0]
-            self.controller = PivController(PivSession(self.conn))
+            self.session = PivSession(self.conn)
 
         def tearDown(self):
             self.conn.close()
 
         def assertMgmKeyIs(self, key):
-            self.controller.authenticate(key)
+            self.session.authenticate(key)
 
         def assertMgmKeyIsNot(self, key):
             with self.assertRaises(ApduError):
-                self.controller.authenticate(key)
+                self.session.authenticate(key)
 
         def assertStoredMgmKeyEquals(self, key):
-            self.assertEqual(self.controller._pivman_protected_data.key, key)
+            pivman_prot = get_pivman_protected_data(self.session)
+            self.assertEqual(pivman_prot.key, key)
 
         def assertStoredMgmKeyNotEquals(self, key):
-            self.assertNotEqual(self.controller._pivman_protected_data.key, key)
+            pivman_prot = get_pivman_protected_data(self.session)
+            self.assertNotEqual(pivman_prot.key, key)
 
         def reconnect(self):
             self.conn.close()
             self.conn = open_device()[0]
-            self.controller = PivController(PivSession(self.conn))
+            self.session = PivSession(self.conn)
 
     class KeyManagement(PivTestCase):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                controller = PivController(PivSession(conn))
-                controller.reset()
+                session = PivSession(conn)
+                session.reset()
 
         def generate_key(self, slot, alg=KEY_TYPE.ECCP256, pin_policy=None):
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            public_key = self.controller.generate_key(
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            public_key = self.session.generate_key(
                 slot, alg, pin_policy=pin_policy, touch_policy=TOUCH_POLICY.NEVER
             )
             self.reconnect()
@@ -102,21 +109,19 @@ def additional_tests(open_device):
             self.generate_key(SLOT.AUTHENTICATION)
 
             with self.assertRaises(ApduError):
-                self.controller.delete_certificate(SLOT.AUTHENTICATION)
+                self.session.delete_certificate(SLOT.AUTHENTICATION)
 
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.delete_certificate(SLOT.AUTHENTICATION)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.delete_certificate(SLOT.AUTHENTICATION)
 
         def test_generate_csr_works(self):
             public_key = self.generate_key(SLOT.AUTHENTICATION)
-            if self.controller.version < (4, 0, 0):
+            if self.session.version < (4, 0, 0):
                 # NEO always has PIN policy "ONCE"
-                self.controller.verify(DEFAULT_PIN)
+                self.session.verify_pin(DEFAULT_PIN)
 
-            self.controller.verify(DEFAULT_PIN)
-            csr = self.controller.generate_certificate_signing_request(
-                SLOT.AUTHENTICATION, public_key, "alice"
-            )
+            self.session.verify_pin(DEFAULT_PIN)
+            csr = generate_csr(self.session, SLOT.AUTHENTICATION, public_key, "alice")
 
             self.assertEqual(
                 csr.public_key().public_bytes(
@@ -137,30 +142,28 @@ def additional_tests(open_device):
 
         def test_generate_self_signed_certificate_requires_authentication(self):
             public_key = self.generate_key(SLOT.AUTHENTICATION)
-            if self.controller.version < (4, 0, 0):
+            if self.session.version < (4, 0, 0):
                 # NEO always has PIN policy "ONCE"
-                self.controller.verify(DEFAULT_PIN)
+                self.session.verify_pin(DEFAULT_PIN)
 
             with self.assertRaises(ApduError):
-                self.controller.generate_self_signed_certificate(
-                    SLOT.AUTHENTICATION, public_key, "alice", now(), now()
+                generate_self_signed_certificate(
+                    self.session, SLOT.AUTHENTICATION, public_key, "alice", now(), now()
                 )
 
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.generate_self_signed_certificate(
-                SLOT.AUTHENTICATION, public_key, "alice", now(), now()
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.verify_pin(DEFAULT_PIN)
+            generate_self_signed_certificate(
+                self.session, SLOT.AUTHENTICATION, public_key, "alice", now(), now()
             )
 
         def _test_generate_self_signed_certificate(self, slot):
             public_key = self.generate_key(slot)
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.generate_self_signed_certificate(
-                slot, public_key, "alice", now(), now()
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.verify_pin(DEFAULT_PIN)
+            cert = generate_self_signed_certificate(
+                self.session, slot, public_key, "alice", now(), now()
             )
-
-            cert = self.controller.read_certificate(slot)
 
             self.assertEqual(
                 cert.public_key().public_bytes(
@@ -187,99 +190,96 @@ def additional_tests(open_device):
 
         def test_generate_key_requires_authentication(self):
             with self.assertRaises(ApduError):
-                self.controller.generate_key(
+                self.session.generate_key(
                     SLOT.AUTHENTICATION,
                     KEY_TYPE.ECCP256,
                     touch_policy=TOUCH_POLICY.NEVER,
                 )
 
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.generate_key(
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.generate_key(
                 SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, touch_policy=TOUCH_POLICY.NEVER
             )
 
-        def test_import_certificate_requires_authentication(self):
+        def test_put_certificate_requires_authentication(self):
             cert = get_test_cert()
             with self.assertRaises(ApduError):
-                self.controller.import_certificate(
-                    SLOT.AUTHENTICATION, cert, verify=False
-                )
+                self.session.put_certificate(SLOT.AUTHENTICATION, cert)
 
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.import_certificate(SLOT.AUTHENTICATION, cert, verify=False)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.put_certificate(SLOT.AUTHENTICATION, cert)
 
-        def _test_import_key_pairing(self, alg1, alg2):
+        def _test_put_key_pairing(self, alg1, alg2):
             # Set up a key in the slot and create a certificate for it
             public_key = self.generate_key(
                 SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER
             )
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.generate_self_signed_certificate(
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            cert = generate_self_signed_certificate(
+                self.session,
                 SLOT.AUTHENTICATION,
                 public_key,
                 "test",
                 datetime.datetime.now(),
                 datetime.datetime.now(),
             )
-            cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
-            self.controller.delete_certificate(SLOT.AUTHENTICATION)
+            self.session.put_certificate(SLOT.AUTHENTICATION, cert)
+            self.assertTrue(
+                check_key(self.session, SLOT.AUTHENTICATION, cert.public_key())
+            )
 
-            # Importing the correct certificate should work
-            self.controller.import_certificate(SLOT.AUTHENTICATION, cert, verify=True)
+            cert2 = self.session.get_certificate(SLOT.AUTHENTICATION)
+            self.assertEqual(cert, cert2)
+
+            self.session.delete_certificate(SLOT.AUTHENTICATION)
 
             # Overwrite the key with one of the same type
             self.generate_key(
                 SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER
             )
-            # Importing the same certificate should not work with the new key
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            with self.assertRaises(KeypairMismatch):
-                self.controller.import_certificate(
-                    SLOT.AUTHENTICATION, cert, verify=True
-                )
+            self.assertFalse(
+                check_key(self.session, SLOT.AUTHENTICATION, cert.public_key())
+            )
 
             # Overwrite the key with one of a different type
             self.generate_key(
                 SLOT.AUTHENTICATION, alg=alg2, pin_policy=PIN_POLICY.NEVER
             )
-            # Importing the same certificate should not work with the new key
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            with self.assertRaises(KeypairMismatch):
-                self.controller.import_certificate(
-                    SLOT.AUTHENTICATION, cert, verify=True
-                )
+            self.assertFalse(
+                check_key(self.session, SLOT.AUTHENTICATION, cert.public_key())
+            )
 
         @yubikey_conditions.is_not_fips
         @yubikey_conditions.is_not_roca
-        def test_import_certificate_verifies_key_pairing_rsa1024(self):
-            self._test_import_key_pairing(KEY_TYPE.RSA1024, KEY_TYPE.ECCP256)
+        def test_put_certificate_verifies_key_pairing_rsa1024(self):
+            self._test_put_key_pairing(KEY_TYPE.RSA1024, KEY_TYPE.ECCP256)
 
         @yubikey_conditions.is_not_roca
-        def test_import_certificate_verifies_key_pairing_rsa2048(self):
-            self._test_import_key_pairing(KEY_TYPE.RSA2048, KEY_TYPE.ECCP256)
+        def test_put_certificate_verifies_key_pairing_rsa2048(self):
+            self._test_put_key_pairing(KEY_TYPE.RSA2048, KEY_TYPE.ECCP256)
 
-        def test_import_certificate_verifies_key_pairing_eccp256(self):
-            self._test_import_key_pairing(KEY_TYPE.ECCP256, KEY_TYPE.ECCP384)
+        def test_put_certificate_verifies_key_pairing_eccp256(self):
+            self._test_put_key_pairing(KEY_TYPE.ECCP256, KEY_TYPE.ECCP384)
 
-        def test_import_certificate_verifies_key_pairing_eccp384(self):
-            self._test_import_key_pairing(KEY_TYPE.ECCP384, KEY_TYPE.ECCP256)
+        def test_put_certificate_verifies_key_pairing_eccp384(self):
+            self._test_put_key_pairing(KEY_TYPE.ECCP384, KEY_TYPE.ECCP256)
 
-        def test_import_key_requires_authentication(self):
+        def test_put_key_requires_authentication(self):
             private_key = get_test_key()
             with self.assertRaises(ApduError):
-                self.controller.import_key(SLOT.AUTHENTICATION, private_key)
+                self.session.put_key(SLOT.AUTHENTICATION, private_key)
 
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.import_key(SLOT.AUTHENTICATION, private_key)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.put_key(SLOT.AUTHENTICATION, private_key)
 
-        def test_read_certificate_does_not_require_authentication(self):
+        def test_get_certificate_does_not_require_authentication(self):
             cert = get_test_cert()
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.import_certificate(SLOT.AUTHENTICATION, cert, verify=False)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.put_certificate(SLOT.AUTHENTICATION, cert)
 
             self.reconnect()
 
-            cert = self.controller.read_certificate(SLOT.AUTHENTICATION)
+            cert = self.session.get_certificate(SLOT.AUTHENTICATION)
             self.assertIsNotNone(cert)
 
     class ManagementKeyReadOnly(PivTestCase):
@@ -292,31 +292,34 @@ def additional_tests(open_device):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                PivController(PivSession(conn)).reset()
+                PivSession(conn).reset()
 
         def test_authenticate_twice_does_not_throw(self):
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
 
         def test_reset_resets_has_stored_key_flag(self):
-            self.assertFalse(self.controller.has_stored_key)
+            pivman = get_pivman_data(self.session)
+            self.assertFalse(pivman.has_stored_key)
 
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.set_mgm_key(None, store_on_device=True)
+            self.session.verify_pin(DEFAULT_PIN)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            pivman_set_mgm_key(self.session, None, store_on_device=True)
 
-            self.assertTrue(self.controller.has_stored_key)
+            pivman = get_pivman_data(self.session)
+            self.assertTrue(pivman.has_stored_key)
 
             self.reconnect()
-            self.controller.reset()
+            self.session.reset()
 
-            self.assertFalse(self.controller.has_stored_key)
+            pivman = get_pivman_data(self.session)
+            self.assertFalse(pivman.has_stored_key)
 
         # Should this really fail?
         def disabled_test_reset_while_verified_throws_nice_ValueError(self):
-            self.controller.verify(DEFAULT_PIN)
+            self.session.verify_pin(DEFAULT_PIN)
             with self.assertRaises(ValueError) as cm:
-                self.controller.reset()
+                self.session.reset()
             self.assertTrue(
                 "Cannot read remaining tries from status word: 9000"
                 in str(cm.exception)
@@ -324,16 +327,16 @@ def additional_tests(open_device):
 
         def test_set_mgm_key_does_not_change_key_if_not_authenticated(self):
             with self.assertRaises(ApduError):
-                self.controller.set_mgm_key(NON_DEFAULT_MANAGEMENT_KEY)
+                self.session.set_management_key(NON_DEFAULT_MANAGEMENT_KEY)
             self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
         @yubikey_conditions.version_min((3, 5, 0))
         def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(
             self,
         ):  # noqa: E501
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
             with self.assertRaises(ApduError):
-                self.controller.set_mgm_key(None, store_on_device=True)
+                pivman_set_mgm_key(self.session, None, store_on_device=True)
 
             self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
@@ -345,46 +348,49 @@ def additional_tests(open_device):
 
         def setUp(self):
             PivTestCase.setUp(self)
-            self.controller.reset()
+            self.session.reset()
 
         def test_set_mgm_key_changes_mgm_key(self):
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.set_mgm_key(NON_DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.set_management_key(NON_DEFAULT_MANAGEMENT_KEY)
 
             self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
             self.assertMgmKeyIs(NON_DEFAULT_MANAGEMENT_KEY)
 
         def test_set_stored_mgm_key_succeeds_if_pin_is_verified(self):
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.set_mgm_key(
-                NON_DEFAULT_MANAGEMENT_KEY, store_on_device=True
+            self.session.verify_pin(DEFAULT_PIN)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            pivman_set_mgm_key(
+                self.session, NON_DEFAULT_MANAGEMENT_KEY, store_on_device=True
             )
 
             self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
             self.assertMgmKeyIs(NON_DEFAULT_MANAGEMENT_KEY)
             self.assertStoredMgmKeyEquals(NON_DEFAULT_MANAGEMENT_KEY)
-            self.assertMgmKeyIs(self.controller._pivman_protected_data.key)
+
+            pivman_prot = get_pivman_protected_data(self.session)
+            self.assertMgmKeyIs(pivman_prot.key)
 
         def test_set_stored_random_mgm_key_succeeds_if_pin_is_verified(self):
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.set_mgm_key(None, store_on_device=True)
+            self.session.verify_pin(DEFAULT_PIN)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            pivman_set_mgm_key(self.session, None, store_on_device=True)
 
             self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
             self.assertMgmKeyIsNot(NON_DEFAULT_MANAGEMENT_KEY)
-            self.assertMgmKeyIs(self.controller._pivman_protected_data.key)
+            pivman_prot = get_pivman_protected_data(self.session)
+            self.assertMgmKeyIs(pivman_prot.key)
             self.assertStoredMgmKeyNotEquals(DEFAULT_MANAGEMENT_KEY)
             self.assertStoredMgmKeyNotEquals(NON_DEFAULT_MANAGEMENT_KEY)
 
     class Operations(PivTestCase):
         def setUp(self):
             PivTestCase.setUp(self)
-            self.controller.reset()
+            self.session.reset()
 
         def generate_key(self, pin_policy=None):
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            public_key = self.controller.generate_key(
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            public_key = self.session.generate_key(
                 SLOT.AUTHENTICATION,
                 KEY_TYPE.ECCP256,
                 pin_policy=pin_policy,
@@ -398,24 +404,24 @@ def additional_tests(open_device):
             self.generate_key(pin_policy=PIN_POLICY.ALWAYS)
 
             with self.assertRaises(ApduError):
-                sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+                sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
 
-            self.controller.verify(DEFAULT_PIN)
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            self.session.verify_pin(DEFAULT_PIN)
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
             with self.assertRaises(ApduError):
-                sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+                sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
 
-            self.controller.verify(DEFAULT_PIN)
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            self.session.verify_pin(DEFAULT_PIN)
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
         @yubikey_conditions.is_not_fips
         @yubikey_conditions.supports_piv_pin_policies
         def test_sign_with_pin_policy_never_does_not_require_pin(self):
             self.generate_key(pin_policy=PIN_POLICY.NEVER)
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
         @yubikey_conditions.is_fips
@@ -427,25 +433,25 @@ def additional_tests(open_device):
             self.generate_key(pin_policy=PIN_POLICY.ONCE)
 
             with self.assertRaises(ApduError):
-                sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+                sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
 
-            self.controller.verify(DEFAULT_PIN)
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            self.session.verify_pin(DEFAULT_PIN)
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
             self.reconnect()
 
             with self.assertRaises(ApduError):
-                sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+                sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
 
-            self.controller.verify(DEFAULT_PIN)
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            self.session.verify_pin(DEFAULT_PIN)
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
-            sig = sign(self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
+            sig = sign(self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
             self.assertIsNotNone(sig)
 
         def test_signature_can_be_verified_by_public_key(self):
@@ -453,9 +459,9 @@ def additional_tests(open_device):
 
             signed_data = bytes(random.randint(0, 255) for i in range(32))
 
-            self.controller.verify(DEFAULT_PIN)
+            self.session.verify_pin(DEFAULT_PIN)
             sig = sign(
-                self.controller, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, signed_data,
+                self.session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, signed_data,
             )
             self.assertIsNotNone(sig)
 
@@ -464,77 +470,74 @@ def additional_tests(open_device):
     class UnblockPin(PivTestCase):
         def setUp(self):
             super().setUp()
-            self.controller.reset()
+            self.session.reset()
 
         def block_pin(self):
-            while self.controller.get_pin_tries() > 0:
+            while self.session.get_pin_attempts() > 0:
                 try:
-                    self.controller.verify(NON_DEFAULT_PIN)
+                    self.session.verify_pin(NON_DEFAULT_PIN)
                 except Exception:
                     pass
 
         def test_unblock_pin_requires_no_previous_authentication(self):
-            self.controller.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
+            self.session.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
 
         def test_unblock_pin_with_wrong_puk_throws_WrongPuk(self):
             with self.assertRaises(InvalidPinError):
-                self.controller.unblock_pin(NON_DEFAULT_PUK, NON_DEFAULT_PIN)
+                self.session.unblock_pin(NON_DEFAULT_PUK, NON_DEFAULT_PIN)
 
         def test_unblock_pin_resets_pin_and_retries(self):
-            self.controller.reset()
-            self.reconnect()
-
-            self.controller.verify(DEFAULT_PIN, NON_DEFAULT_PIN)
+            self.session.reset()
             self.reconnect()
 
             self.block_pin()
 
             with self.assertRaises(InvalidPinError):
-                self.controller.verify(DEFAULT_PIN)
+                self.session.verify_pin(DEFAULT_PIN)
 
-            self.controller.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
+            self.session.unblock_pin(DEFAULT_PUK, NON_DEFAULT_PIN)
 
-            self.assertEqual(self.controller.get_pin_tries(), 3)
-            self.controller.verify(NON_DEFAULT_PIN)
+            self.assertEqual(self.session.get_pin_attempts(), 3)
+            self.session.verify_pin(NON_DEFAULT_PIN)
 
         def test_set_pin_retries_requires_pin_and_mgm_key(self):
             # Fails with no authentication
             with self.assertRaises(ApduError):
-                self.controller.set_pin_retries(4, 4)
+                self.session.set_pin_attempts(4, 4)
 
             # Fails with only PIN
-            self.controller.verify(DEFAULT_PIN)
+            self.session.verify_pin(DEFAULT_PIN)
             with self.assertRaises(ApduError):
-                self.controller.set_pin_retries(4, 4)
+                self.session.set_pin_attempts(4, 4)
 
             self.reconnect()
 
             # Fails with only management key
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
             with self.assertRaises(ApduError):
-                self.controller.set_pin_retries(4, 4)
+                self.session.set_pin_attempts(4, 4)
 
             # Succeeds with both PIN and management key
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.set_pin_retries(4, 4)
+            self.session.verify_pin(DEFAULT_PIN)
+            self.session.set_pin_attempts(4, 4)
 
         def test_set_pin_retries_sets_pin_and_puk_tries(self):
             pin_tries = 9
             puk_tries = 7
 
-            self.controller.verify(DEFAULT_PIN)
-            self.controller.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.controller.set_pin_retries(pin_tries, puk_tries)
+            self.session.verify_pin(DEFAULT_PIN)
+            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.set_pin_attempts(pin_tries, puk_tries)
 
-            c1 = self.controller
+            c1 = self.session
             self.reconnect()
-            c2 = self.controller
+            c2 = self.session
 
             self.assertNotEqual(c1, c2)
 
-            self.assertEqual(self.controller.get_pin_tries(), pin_tries)
+            self.assertEqual(self.session.get_pin_attempts(), pin_tries)
             with self.assertRaises(InvalidPinError) as ctx:
-                self.controller.change_puk(NON_DEFAULT_PUK, DEFAULT_PUK)
+                self.session.change_puk(NON_DEFAULT_PUK, DEFAULT_PUK)
             self.assertEqual(ctx.exception.attempts_remaining, puk_tries - 1)
 
     return [

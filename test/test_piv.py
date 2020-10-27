@@ -3,16 +3,8 @@
 import ykman.piv as piv
 import unittest
 
-from yubikit.piv import KEY_TYPE
-
-
-class FakeController(object):
-    def __init__(self, version):
-        self.version = version
-
-    @property
-    def is_fips(self):
-        return piv.PivController.is_fips.fget(self)
+from yubikit.core import NotSupportedError
+from yubikit.piv import KEY_TYPE, PIN_POLICY, TOUCH_POLICY, check_key_support
 
 
 class TestPivFunctions(unittest.TestCase):
@@ -24,25 +16,23 @@ class TestPivFunctions(unittest.TestCase):
         self.assertNotEqual(output1, output2)
 
     def test_supported_algorithms(self):
-        neo_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((3, 1, 1))
-        )
-        self.assertNotIn(KEY_TYPE.ECCP384, neo_supported)
+        with self.assertRaises(NotSupportedError):
+            check_key_support(
+                (3, 1, 1), KEY_TYPE.ECCP384, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+            )
 
-        fips_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((4, 4, 1))
-        )
-        self.assertNotIn(KEY_TYPE.RSA1024, fips_supported)
+        with self.assertRaises(NotSupportedError):
+            check_key_support(
+                (4, 4, 1), KEY_TYPE.RSA1024, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+            )
 
-        roca_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((4, 3, 4))
-        )
-        self.assertNotIn(KEY_TYPE.RSA1024, roca_supported)
-        self.assertNotIn(KEY_TYPE.RSA2048, roca_supported)
+        for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.RSA2048):
+            with self.assertRaises(NotSupportedError):
+                check_key_support(
+                    (4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                )
 
-        yk5_supported = piv.PivController.supported_algorithms.fget(
-            FakeController((5, 1, 0))
-        )
-        self.assertEqual(
-            set(yk5_supported), set(KEY_TYPE),
-        )
+        for key_type in KEY_TYPE:
+            check_key_support(
+                (5, 1, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+            )

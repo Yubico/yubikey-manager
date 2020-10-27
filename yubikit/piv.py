@@ -331,16 +331,38 @@ def _unpad_message(padded, padding):
     return dummy.decrypt(encrypted, padding)
 
 
-def _check_key_support(version, key_type, pin_policy, touch_policy):
+def check_key_support(
+    version: Version,
+    key_type: KEY_TYPE,
+    pin_policy: PIN_POLICY,
+    touch_policy: TOUCH_POLICY,
+    generate: bool = True,
+) -> None:
+    """Check if a key type is supported by a specific YubiKey firmware version.
+
+    This method will return None if the key (with PIN and touch policies) is supported,
+    or it will raise a NotSupportedError if it is not.
+    """
     if version < (4, 0, 0):
         if key_type == KEY_TYPE.ECCP384:
             raise NotSupportedError("ECCP384 requires YubiKey 4 or later")
         if touch_policy != TOUCH_POLICY.DEFAULT or pin_policy != PIN_POLICY.DEFAULT:
             raise NotSupportedError("PIN/Touch policy requires YubiKey 4 or later")
-    if touch_policy == TOUCH_POLICY.CACHED and version < (4, 3, 0):
+
+    if version < (4, 3, 0) and touch_policy == TOUCH_POLICY.CACHED:
         raise NotSupportedError("Cached touch policy requires YubiKey 4.3 or later")
-    if key_type == KEY_TYPE.RSA1024 and (4, 4, 0) <= version < (4, 5, 0):
-        raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
+
+    # ROCA
+    if (4, 2, 0) <= version < (4, 3, 5):
+        if generate and key_type.algorithm == ALGORITHM.RSA:
+            raise NotSupportedError("RSA key generation not supported on this YubiKey")
+
+    # FIPS
+    if (4, 4, 0) <= version < (4, 5, 0):
+        if key_type == KEY_TYPE.RSA1024:
+            raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
+        if pin_policy == PIN_POLICY.NEVER:
+            raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
 
 
 def _parse_device_public_key(key_type, encoded):
@@ -434,14 +456,16 @@ class PivSession:
         if not bytes_eq(expected, encrypted):
             raise BadResponseError("Device response is incorrect")
 
-    def set_management_key(self, management_key: bytes) -> None:
+    def set_management_key(
+        self, management_key: bytes, require_touch: bool = False
+    ) -> None:
         if len(management_key) != 24:
             raise ValueError("Management key must be 24 bytes")
         self.protocol.send_apdu(
             0,
             INS_SET_MGMKEY,
             0xFF,
-            0xFF,  # 0xFE for touch, expose this?
+            0xFE if require_touch else 0xFF,
             int_to_bytes(TDES) + Tlv(SLOT.CARD_MANAGEMENT, management_key),
         )
 
@@ -624,13 +648,13 @@ class PivSession:
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
     ) -> None:
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
-        _check_key_support(self.version, key_type, pin_policy, touch_policy)
+        check_key_support(self.version, key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
         numbers = private_key.private_numbers()
         if key_type.algorithm == ALGORITHM.RSA:
             numbers = cast(rsa.RSAPrivateNumbers, numbers)
             if numbers.public_numbers.e != 65537:
-                raise ValueError("RSA exponent must be 65537")
+                raise NotSupportedError("RSA exponent must be 65537")
             ln //= 2
             data = (
                 Tlv(0x01, int_to_bytes(numbers.p, ln))
@@ -657,11 +681,7 @@ class PivSession:
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
     ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
         key_type = KEY_TYPE(key_type)
-        _check_key_support(self.version, key_type, pin_policy, touch_policy)
-        if key_type.algorithm == ALGORITHM.RSA and (
-            (4, 2, 0) <= self.version < (4, 3, 5)
-        ):
-            raise NotSupportedError("RSA key generation not supported on this YubiKey")
+        check_key_support(self.version, key_type, pin_policy, touch_policy, True)
         data: bytes = Tlv(TAG_GEN_ALGORITHM, int_to_bytes(key_type))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))

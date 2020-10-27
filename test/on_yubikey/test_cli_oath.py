@@ -105,7 +105,7 @@ def additional_tests(ykman_cli):
         def test_oath_reset(self):
             output = ykman_cli("oath", "reset", "-f")
             self.assertIn(
-                "Success! All OATH credentials have been cleared from your YubiKey",
+                "Success! All OATH credentials have been cleared from the YubiKey",
                 output,
             )
 
