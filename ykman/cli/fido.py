@@ -336,7 +336,7 @@ def reset(ctx, force):
             if not keys:
                 removed = True
             if removed and len(keys) == 1:
-                return keys[1]
+                return keys[0]
 
     def try_reset(controller_type):
         if not force:
