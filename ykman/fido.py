@@ -32,7 +32,7 @@ from yubikit.core.fido import FidoConnection
 from fido2.hid import CTAPHID
 from fido2.ctap1 import CTAP1, ApduError
 from fido2.ctap2 import CTAP2, ClientPin, CredentialManagement
-from threading import Timer
+from threading import Timer, Event
 from enum import IntEnum, unique
 
 
@@ -120,15 +120,15 @@ class Fido2Controller(object):
         self.pin.change_pin(old_pin, new_pin)
 
     def reset(self, touch_callback=None):
-        if touch_callback:
-            touch_timer = Timer(0.500, touch_callback)
-            touch_timer.start()
-        try:
-            self.ctap.reset()
-            self._pin = False
-        finally:
-            if touch_callback:
-                touch_timer.cancel()
+        event = Event()
+
+        def on_keepalive(status):
+            if not hasattr(on_keepalive, "prompted") and status == 2:
+                touch_callback()
+                on_keepalive.prompted = True
+
+        self.ctap.reset(event, on_keepalive)
+        self._pin = False
 
     @property
     def is_fips(self):
