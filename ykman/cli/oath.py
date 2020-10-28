@@ -34,6 +34,7 @@ from .util import (
     click_callback,
     click_parse_b32_key,
     click_prompt,
+    ykman_group,
     prompt_for_touch,
     EnumChoice,
 )
@@ -93,7 +94,7 @@ def click_parse_uri(ctx, param, val):
         raise click.BadParameter("URI seems to have the wrong format.")
 
 
-@click.group()
+@ykman_group(USB_INTERFACE.CCID)
 @click.pass_context
 @click_postpone_execution
 @click.option("-p", "--password", help="Provide a password to unlock the YubiKey.")
@@ -630,6 +631,3 @@ def _error_multiple_hits(ctx, hits):
     for cred in hits:
         click.echo(_string_id(cred), err=True)
     ctx.exit(1)
-
-
-oath.interfaces = USB_INTERFACE.CCID  # type: ignore

@@ -58,6 +58,7 @@ from ..piv import (
     generate_csr,
 )
 from .util import (
+    ykman_group,
     click_force_option,
     click_format_option,
     click_postpone_execution,
@@ -115,7 +116,7 @@ click_touch_policy_option = click.option(
 )
 
 
-@click.group()
+@ykman_group(USB_INTERFACE.CCID)
 @click.pass_context
 @click_postpone_execution
 def piv(ctx):
@@ -1063,6 +1064,3 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
     except Exception as e:
         logger.error("Authentication with management key failed.", exc_info=e)
         ctx.fail("Authentication with management key failed.")
-
-
-piv.interfaces = USB_INTERFACE.CCID  # type: ignore

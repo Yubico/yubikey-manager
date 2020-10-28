@@ -34,6 +34,7 @@ from .util import (
     click_format_option,
     click_postpone_execution,
     click_prompt,
+    ykman_group,
     EnumChoice,
 )
 
@@ -74,7 +75,7 @@ def int_in_range(minval, maxval):
     return inner
 
 
-@click.group()
+@ykman_group(USB_INTERFACE.CCID)
 @click.pass_context
 @click_postpone_execution
 def openpgp(ctx):
@@ -411,6 +412,3 @@ def import_attestation_key(ctx, private_key, admin_pin):
     except Exception as e:
         logger.debug("Failed to import", exc_info=e)
         ctx.fail("Failed to import attestation key.")
-
-
-openpgp.interfaces = USB_INTERFACE.CCID  # type: ignore

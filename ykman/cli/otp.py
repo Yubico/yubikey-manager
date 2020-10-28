@@ -38,6 +38,7 @@ from yubikit.core import TRANSPORT, USB_INTERFACE, CommandError
 from ..scancodes import encode, KEYBOARD_LAYOUT
 
 from .util import (
+    ykman_group,
     click_force_option,
     click_callback,
     click_parse_b32_key,
@@ -115,7 +116,7 @@ def _confirm_slot_overwrite(slot_state, slot):
         )
 
 
-@click.group()
+@ykman_group(USB_INTERFACE.OTP)
 @click.pass_context
 @click_postpone_execution
 @click.option(
@@ -779,6 +780,3 @@ def settings(
         )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
-
-
-otp.interfaces = USB_INTERFACE.OTP  # type: ignore

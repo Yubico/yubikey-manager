@@ -76,6 +76,15 @@ class EnumChoice(UpperCaseChoice):
         return self.choices_enum[name]
 
 
+def ykman_group(interfaces):
+    def wrap(f):
+        command = click.group()(f)
+        command.interfaces = interfaces
+        return command
+
+    return wrap
+
+
 def click_callback(invoke_on_missing=False):
     def wrap(f):
         @functools.wraps(f)

@@ -36,6 +36,7 @@ from .util import (
     click_prompt,
     prompt_for_touch,
     click_force_option,
+    ykman_group,
 )
 from ..fido import Fido2Controller, FipsU2fController
 from ..hid import list_ctap_devices
@@ -51,7 +52,7 @@ FIPS_PIN_MIN_LENGTH = 6
 PIN_MIN_LENGTH = 4
 
 
-@click.group()
+@ykman_group(USB_INTERFACE.FIDO)
 @click.pass_context
 @click_postpone_execution
 def fido(ctx):
@@ -441,6 +442,3 @@ def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
     min_length = FIPS_PIN_MIN_LENGTH if is_fips else PIN_MIN_LENGTH
     if not pin or len(pin) < min_length:
         ctx.fail("PIN must be over {} characters long".format(min_length))
-
-
-fido.interfaces = USB_INTERFACE.FIDO  # type: ignore
