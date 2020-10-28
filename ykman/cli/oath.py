@@ -27,7 +27,6 @@
 
 import click
 import logging
-from threading import Timer
 from .util import (
     click_force_option,
     click_postpone_execution,
@@ -36,6 +35,7 @@ from .util import (
     click_prompt,
     ykman_group,
     prompt_for_touch,
+    PromptTimeout,
     EnumChoice,
 )
 from yubikit.core import USB_INTERFACE
@@ -409,12 +409,10 @@ def code(ctx, show_hidden, query, single):
             prompt_for_touch()
         try:
             if cred.oath_type == OATH_TYPE.HOTP:
-                # HOTP might require touch, we don't know.
-                # Assume yes after 500ms.
-                hotp_touch_timer = Timer(0.500, prompt_for_touch)
-                hotp_touch_timer.start()
-                code = app.calculate_code(cred)
-                hotp_touch_timer.cancel()
+                with PromptTimeout():
+                    # HOTP might require touch, we don't know.
+                    # Assume yes after 500ms.
+                    code = app.calculate_code(cred)
             elif code is None:
                 code = app.calculate_code(cred)
         except ApduError as e:
