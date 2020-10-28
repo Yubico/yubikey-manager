@@ -63,14 +63,20 @@ logger = logging.getLogger(__name__)
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
 
 
-def retrying_connect(serial, interfaces, attempts=10):
+def retrying_connect(serial, interfaces, attempts=10, state=None):
     while True:
         try:
             return connect_to_device(serial, get_connection_types(interfaces))
         except Exception as e:
-            if attempts:
+            logger.error("Failed opening connection", exc_info=e)
+            while attempts:
                 attempts -= 1
-                logger.error("Failed opening connection, retry in 0.5s", exc_info=e)
+                _, new_state = scan_devices()
+                if new_state != state:
+                    state = new_state
+                    logger.debug("State changed, re-try connect...")
+                    break
+                logger.debug("Sleep...")
                 time.sleep(0.5)
             else:
                 raise
@@ -98,7 +104,7 @@ def _run_cmd_for_serial(ctx, cmd, interfaces, serial):
     except ValueError:
         try:
             # Serial not found, see if it's among other interfaces in USB enabled:
-            conn = retrying_connect(serial, sum(USB_INTERFACE) ^ interfaces)[0]
+            conn = connect_to_device(serial)[0]
             conn.close()
             _disabled_interface(ctx, interfaces, cmd)
         except ValueError:
@@ -134,7 +140,7 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
             ctx.fail("Not a CCID command.")
 
     # Find all connected devices
-    devices, _ = scan_devices()
+    devices, state = scan_devices()
     n_devs = sum(devices.values())
     if n_devs == 0:
         ctx.fail("No YubiKey detected!")
@@ -147,7 +153,7 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
     # Only one connected device, check if any needed interfaces are available
     pid = next(iter(devices.keys()))
     if pid.get_interfaces() & interfaces:
-        return retrying_connect(None, interfaces)
+        return retrying_connect(None, interfaces, state=state)
     _disabled_interface(ctx, interfaces, cmd)
 
 
