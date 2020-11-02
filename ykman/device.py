@@ -361,6 +361,8 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
         info = _read_info_otp(conn, key_type, interfaces)
     elif isinstance(conn, FidoConnection):
         info = _read_info_ctap(conn, key_type, interfaces)
+    else:
+        raise TypeError("Invalid connection type")
 
     logger.debug("Read info: %s", info)
 

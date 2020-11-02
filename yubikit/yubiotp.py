@@ -672,8 +672,8 @@ class YubiOtpSession:
             if connection.transport == TRANSPORT.NFC:
                 # This version is more reliable over NFC
                 try:
-                    card_protocol.select(AID.MGMT)
-                    select_str = card_protocol.select(AID.MGMT).decode()
+                    card_protocol.select(AID.MANAGEMENT)
+                    select_str = card_protocol.select(AID.MANAGEMENT).decode()
                     mgmt_version = Version.from_string(select_str)
                 except ApplicationNotAvailableError:
                     pass  # Not available (probably NEO), get version from status
