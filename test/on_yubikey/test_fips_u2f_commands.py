@@ -1,15 +1,10 @@
-import struct
 import unittest
 
-from fido2.hid import CTAPHID
+from fido2.ctap1 import ApduError
 from yubikit.core import USB_INTERFACE
-from ykman.fido import FIPS_U2F_CMD
+from yubikit.core.smartcard import SW
+from ykman.fido import fips_change_pin, fips_verify_pin, fips_reset, is_in_fips_mode
 from .framework import device_test_suite, yubikey_conditions
-
-
-HID_CMD = 0x03
-P1 = 0
-P2 = 0
 
 
 @device_test_suite(USB_INTERFACE.FIDO)
@@ -22,92 +17,46 @@ def additional_tests(open_device):
         def tearDown(self):
             self.conn.close()
 
-        def test_echo_command(self):
-            res = self.conn.call(
-                CTAPHID.MSG,
-                struct.pack(">HBBBH6s", FIPS_U2F_CMD.ECHO, P1, P2, 0, 6, b"012345"),
-            )
-
-            self.assertEqual(res, b"012345\x90\x00")
-
         def test_pin_commands(self):
             # Assumes PIN is 012345 or not set at beginning of test
-            # Sets PIN to 012345
 
-            verify_res1 = self.conn.call(
-                CTAPHID.MSG,
-                struct.pack(
-                    ">HBBBH6s", FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b"012345"
-                ),
-            )
+            # Make sure PIN is 012345
+            try:
+                fips_verify_pin(self.conn, "012345")
+                fips_change_pin(self.conn, "012345", "012345")
+            except ApduError as e:
+                if e.code == SW.VERIFY_FAIL_NO_RETRY:
+                    self.skipTest("PIN set to something other than 012345")
+                elif e.code == SW.AUTH_METHOD_BLOCKED:
+                    self.skipTest("PIN blocked")
+                elif e.code == SW.COMMAND_NOT_ALLOWED:
+                    fips_change_pin(self.conn, None, "012345")
 
-            if verify_res1 == b"\x63\xc0":
-                self.skipTest("PIN set to something other than 012345")
+            # Verify with correct PIN
+            fips_verify_pin(self.conn, "012345")
 
-            if verify_res1 == b"\x69\x83":
-                self.skipTest("PIN blocked")
+            # Change the PIN, verify, then change back
+            fips_change_pin(self.conn, "012345", "012012")
+            fips_verify_pin(self.conn, "012012")
+            fips_change_pin(self.conn, "012012", "012345")
 
-            if verify_res1 == b"\x90\x00":
-                res = self.conn.call(
-                    CTAPHID.MSG,
-                    struct.pack(
-                        ">HBBBHB6s6s",
-                        FIPS_U2F_CMD.SET_PIN,
-                        P1,
-                        P2,
-                        0,
-                        13,
-                        6,
-                        b"012345",
-                        b"012345",
-                    ),
-                )
-            else:
-                res = self.conn.call(
-                    CTAPHID.MSG,
-                    struct.pack(
-                        ">HBBBHB6s", FIPS_U2F_CMD.SET_PIN, P1, P2, 0, 7, 6, b"012345",
-                    ),
-                )
+            # Verify with incorrect PIN
+            with self.assertRaises(ApduError) as cm:
+                fips_verify_pin(self.conn, "543210")
+            self.assertEqual(SW.VERIFY_FAIL_NO_RETRY, cm.exception.code)
 
-            verify_res2 = self.conn.call(
-                CTAPHID.MSG,
-                struct.pack(
-                    ">HBBBH6s", FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b"543210"
-                ),
-            )
-
-            verify_res3 = self.conn.call(
-                CTAPHID.MSG,
-                struct.pack(
-                    ">HBBBH6s", FIPS_U2F_CMD.VERIFY_PIN, P1, P2, 0, 6, b"012345"
-                ),
-            )
-
-            # OK/not set
-            self.assertIn(verify_res1, [b"\x90\x00", b"\x69\x86"])
-
-            self.assertEqual(res, b"\x90\x00")  # Success
-            self.assertEqual(verify_res2, b"\x63\xc0")  # Incorrect PIN
-            self.assertEqual(verify_res3, b"\x90\x00")  # Success
+            # Verify with correct PIN
+            fips_verify_pin(self.conn, "012345")
 
         def test_reset_command(self):
-            res = self.conn.call(
-                CTAPHID.MSG, struct.pack(">HBB", FIPS_U2F_CMD.RESET, P1, P2)
-            )
-
-            # 0x6985: Touch required
-            # 0x6986: Power cycle required
-            # 0x9000: Success
-            self.assertIn(res, [b"\x69\x85", b"\x69\x86", b"\x90\x00"])
+            try:
+                fips_reset(self.conn)
+            except ApduError as e:
+                self.assertIn(
+                    e.code, [SW.COMMAND_NOT_ALLOWED, SW.CONDITIONS_NOT_SATISFIED]
+                )
 
         def test_verify_fips_mode_command(self):
-            res = self.conn.call(
-                CTAPHID.MSG, struct.pack(">HBB", FIPS_U2F_CMD.VERIFY_FIPS_MODE, P1, P2),
-            )
-
-            # 0x6a81: Function not supported (PIN not set - not FIPS Mode)
-            # 0x9000: Success (PIN set - FIPS Approved Mode)
-            self.assertIn(res, [b"\x6a\x81", b"\x90\x00"])
+            is_in_fips_mode(self.conn)
 
     return [TestFipsU2fCommands]

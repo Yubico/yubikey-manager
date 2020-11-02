@@ -27,178 +27,73 @@
 
 import time
 import struct
-import logging
 from yubikit.core.fido import FidoConnection
-from fido2.hid import CTAPHID
-from fido2.ctap1 import CTAP1, ApduError
-from fido2.ctap2 import CTAP2, ClientPin, CredentialManagement
-from threading import Timer, Event
-from enum import IntEnum, unique
+from yubikit.core.smartcard import SW
+from fido2.ctap1 import Ctap1, ApduError
+
+from typing import Optional
 
 
-logger = logging.getLogger(__name__)
+U2F_VENDOR_FIRST = 0x40
 
-SW_CONDITIONS_NOT_SATISFIED = 0x6985
-
-
-@unique
-class FIPS_U2F_CMD(IntEnum):
-    ECHO = CTAPHID.VENDOR_FIRST
-    WRITE_CONFIG = CTAPHID.VENDOR_FIRST + 1
-    APP_VERSION = CTAPHID.VENDOR_FIRST + 2
-    VERIFY_PIN = CTAPHID.VENDOR_FIRST + 3
-    SET_PIN = CTAPHID.VENDOR_FIRST + 4
-    RESET = CTAPHID.VENDOR_FIRST + 5
-    VERIFY_FIPS_MODE = CTAPHID.VENDOR_FIRST + 6
-
-
-class ResidentCredential(object):
-    def __init__(self, raw_credential, raw_rp):
-        self._raw_credential = raw_credential
-        self._raw_rp = raw_rp
-
-    @property
-    def credential_id(self):
-        return self._raw_credential[CredentialManagement.RESULT.CREDENTIAL_ID]
-
-    @property
-    def rp_id(self):
-        return self._raw_rp[CredentialManagement.RESULT.RP]["id"]
-
-    @property
-    def user_name(self):
-        return self._raw_credential[CredentialManagement.RESULT.USER]["name"]
-
-    @property
-    def user_id(self):
-        return self._raw_credential[CredentialManagement.RESULT.USER]["id"]
-
-
-class Fido2Controller(object):
-    def __init__(self, ctap_device):
-        self.ctap = CTAP2(ctap_device)
-        self.pin = ClientPin(self.ctap)
-        self._info = self.ctap.get_info()
-        self._pin = self._info.options["clientPin"]
-
-    @property
-    def has_pin(self):
-        return self._pin
-
-    def get_resident_credentials(self, pin):
-        _credman = CredentialManagement(
-            self.ctap,
-            self.pin.protocol,
-            self.pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT),
-        )
-
-        for rp in _credman.enumerate_rps():
-            for cred in _credman.enumerate_creds(
-                rp[CredentialManagement.RESULT.RP_ID_HASH]
-            ):
-                yield ResidentCredential(cred, rp)
-
-    def delete_resident_credential(self, credential_id, pin):
-        _credman = CredentialManagement(
-            self.ctap,
-            self.pin.protocol,
-            self.pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT),
-        )
-
-        for cred in self.get_resident_credentials(pin):
-            if credential_id == cred.credential_id:
-                _credman.delete_cred(credential_id)
-
-    def get_pin_retries(self):
-        return self.pin.get_pin_retries()[0]
-
-    def set_pin(self, pin):
-        self.pin.set_pin(pin)
-        self._pin = True
-
-    def change_pin(self, old_pin, new_pin):
-        self.pin.change_pin(old_pin, new_pin)
-
-    def reset(self, touch_callback=None):
-        event = Event()
-
-        def on_keepalive(status):
-            if not hasattr(on_keepalive, "prompted") and status == 2:
-                touch_callback()
-                on_keepalive.prompted = True
-
-        self.ctap.reset(event, on_keepalive)
-        self._pin = False
-
-    @property
-    def is_fips(self):
-        return False
+# FIPS specific INS values
+INS_FIPS_VERIFY_PIN = U2F_VENDOR_FIRST + 3
+INS_FIPS_SET_PIN = U2F_VENDOR_FIRST + 4
+INS_FIPS_RESET = U2F_VENDOR_FIRST + 5
+INS_FIPS_VERIFY_FIPS_MODE = U2F_VENDOR_FIRST + 6
 
 
 def is_in_fips_mode(fido_connection: FidoConnection) -> bool:
+    """Check if a YubiKey FIPS is in FIPS approved mode."""
     try:
-        ctap = CTAP1(fido_connection)
-        ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
+        ctap = Ctap1(fido_connection)
+        ctap.send_apdu(ins=INS_FIPS_VERIFY_FIPS_MODE)
         return True
-    except ApduError:
-        return False
-
-
-class FipsU2fController(object):
-    def __init__(self, ctap_device):
-        self.ctap = CTAP1(ctap_device)
-
-    @property
-    def has_pin(self):
-        # We don't know, but the change and set commands are the same here.
-        return True
-
-    def set_pin(self, pin):
-        raise NotImplementedError("Use the change_pin method instead.")
-
-    def change_pin(self, old_pin, new_pin):
-        new_length = len(new_pin)
-
-        old_pin = old_pin.encode()
-        new_pin = new_pin.encode()
-
-        data = struct.pack("B", new_length) + old_pin + new_pin
-
-        self.ctap.send_apdu(ins=FIPS_U2F_CMD.SET_PIN, data=data)
-        return True
-
-    def verify_pin(self, pin):
-        self.ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_PIN, data=pin.encode())
-
-    def reset(self, touch_callback=None):
-        if touch_callback:
-            touch_timer = Timer(0.500, touch_callback)
-            touch_timer.start()
-
-        try:
-            while True:
-                try:
-                    self.ctap.send_apdu(ins=FIPS_U2F_CMD.RESET)
-                    self._pin = False
-                    return True
-                except ApduError as e:
-                    if e.code == SW_CONDITIONS_NOT_SATISFIED:
-                        time.sleep(0.5)
-                    else:
-                        raise e
-
-        finally:
-            if touch_callback:
-                touch_timer.cancel()
-
-    @property
-    def is_fips(self):
-        return True
-
-    @property
-    def is_in_fips_mode(self):
-        try:
-            self.ctap.send_apdu(ins=FIPS_U2F_CMD.VERIFY_FIPS_MODE)
-            return True
-        except ApduError:
+    except ApduError as e:
+        # 0x6a81: Function not supported (PIN not set - not FIPS Mode)
+        if e.code == SW.FUNCTION_NOT_SUPPORTED:
             return False
+        raise
+
+
+def fips_change_pin(
+    fido_connection: FidoConnection, old_pin: Optional[str], new_pin: str
+):
+    """Change the PIN on a YubiKey FIPS.
+
+    If no PIN is set, pass None or an empty string as old_pin.
+    """
+    ctap = Ctap1(fido_connection)
+
+    old_pin_bytes = old_pin.encode() if old_pin else b""
+    new_pin_bytes = new_pin.encode()
+    new_length = len(new_pin_bytes)
+
+    data = struct.pack("B", new_length) + old_pin_bytes + new_pin_bytes
+
+    ctap.send_apdu(ins=INS_FIPS_SET_PIN, data=data)
+
+
+def fips_verify_pin(fido_connection: FidoConnection, pin: str):
+    """Unlock the YubiKey FIPS U2F module for credential creation."""
+    ctap = Ctap1(fido_connection)
+    ctap.send_apdu(ins=INS_FIPS_VERIFY_PIN, data=pin.encode())
+
+
+def fips_reset(fido_connection: FidoConnection):
+    """Reset the FIDO module of a YubiKey FIPS.
+
+    Note: This action is only permitted immediately after YubiKey FIPS power-up. It
+    also requires the user to touch the flashing button on the YubiKey, and will halt
+    until that happens, or the command times out.
+    """
+    ctap = Ctap1(fido_connection)
+    while True:
+        try:
+            ctap.send_apdu(ins=INS_FIPS_RESET)
+            return
+        except ApduError as e:
+            if e.code == SW.CONDITIONS_NOT_SATISFIED:
+                time.sleep(0.5)
+            else:
+                raise e

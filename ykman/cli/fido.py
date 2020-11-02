@@ -27,6 +27,7 @@
 
 from fido2.ctap import CtapError
 from fido2.ctap1 import ApduError
+from fido2.ctap2 import Ctap2, ClientPin, CredentialManagement
 from yubikit.core import USB_INTERFACE
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
@@ -34,11 +35,11 @@ from time import sleep
 from .util import (
     click_postpone_execution,
     click_prompt,
-    prompt_for_touch,
     click_force_option,
     ykman_group,
+    PromptTimeout,
 )
-from ..fido import Fido2Controller, FipsU2fController
+from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
 from ..device import is_fips_version
 
@@ -70,20 +71,11 @@ def fido(ctx):
       $ ykman fido set-pin --pin 123456 --new-pin 654321
 
     """
-    info = ctx.obj["info"]
     conn = ctx.obj["conn"]
-    if is_fips_version(info.version):
-        try:
-            ctx.obj["controller"] = FipsU2fController(conn)
-        except Exception as e:
-            logger.debug("Failed to load FipsU2fController", exc_info=e)
-            ctx.fail("Failed to load FIDO Application.")
-    else:
-        try:
-            ctx.obj["controller"] = Fido2Controller(conn)
-        except Exception as e:
-            logger.debug("Failed to load Fido2Controller", exc_info=e)
-            ctx.fail("Failed to load FIDO 2 Application.")
+    try:
+        ctx.obj["ctap2"] = Ctap2(conn)
+    except (ValueError, CtapError) as e:
+        logger.debug("FIDO device does not support CTAP2: %s", e)
 
 
 @fido.command()
@@ -92,20 +84,20 @@ def info(ctx):
     """
     Display status of FIDO2 application.
     """
-    controller = ctx.obj["controller"]
+    conn = ctx.obj["conn"]
+    ctap2 = ctx.obj.get("ctap2")
 
-    if controller.is_fips:
+    if is_fips_version(ctx.obj["info"].version):
         click.echo(
-            "FIPS Approved Mode: {}".format(
-                "Yes" if controller.is_in_fips_mode else "No"
-            )
+            "FIPS Approved Mode: {}".format("Yes" if is_in_fips_mode(conn) else "No")
         )
-    else:
-        if controller.has_pin:
+    elif ctap2:
+        if ctap2.info.options.get("clientPin"):
+            client_pin = ClientPin(ctap2)
             try:
                 click.echo(
                     "PIN is set, with {} tries left.".format(
-                        controller.get_pin_retries()
+                        client_pin.get_pin_retries()
                     )
                 )
             except CtapError as e:
@@ -113,6 +105,46 @@ def info(ctx):
                     click.echo("PIN is blocked.")
         else:
             click.echo("PIN is not set.")
+    else:
+        click.echo("PIN is not supported.")
+
+
+def _init_credman(ctx, pin):
+    ctap2 = ctx.obj.get("ctap2")
+
+    if not ctap2:
+        ctx.fail("Listing credentials not supported.")
+    elif not ctap2.info.options.get("clientPin"):
+        ctx.fail("No PIN is set.")
+
+    if pin is None:
+        pin = _prompt_current_pin(prompt="Enter your PIN")
+
+    client_pin = ClientPin(ctap2)
+    try:
+        token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
+    except CtapError as e:
+        if e.code == CtapError.ERR.PIN_INVALID:
+            ctx.fail("Wrong PIN.")
+        else:
+            raise
+
+    return CredentialManagement(ctap2, client_pin.protocol, token)
+
+
+def _gen_creds(credman):
+    for rp in credman.enumerate_rps():
+        for cred in credman.enumerate_creds(rp[CredentialManagement.RESULT.RP_ID_HASH]):
+            yield (
+                rp[CredentialManagement.RESULT.RP]["id"],
+                cred[CredentialManagement.RESULT.CREDENTIAL_ID],
+                cred[CredentialManagement.RESULT.USER]["id"],
+                cred[CredentialManagement.RESULT.USER]["name"],
+            )
+
+
+def _format_cred(rp_id, user_id, user_name):
+    return "{} {} {}".format(rp_id, user_id.hex(), user_name)
 
 
 @fido.command("list")
@@ -122,25 +154,10 @@ def list_creds(ctx, pin):
     """
     List resident credentials.
     """
-    controller = ctx.obj["controller"]
+    credman = _init_credman(ctx, pin)
 
-    if not controller.has_pin:
-        ctx.fail("No PIN set.")
-
-    if controller.has_pin and pin is None:
-        pin = _prompt_current_pin(prompt="Enter your PIN")
-
-    try:
-        for cred in controller.get_resident_credentials(pin):
-            click.echo(
-                "{} {} {}".format(cred.rp_id, cred.user_id.hex(), cred.user_name)
-            )
-    except CtapError as e:
-        if e.code == CtapError.ERR.PIN_INVALID:
-            ctx.fail("Wrong PIN.")
-    except Exception as e:
-        logger.debug("Failed to list resident credentials", exc_info=e)
-        ctx.fail("Failed to list resident credentials.")
+    for (rp_id, _, user_id, user_name) in _gen_creds(credman):
+        click.echo(_format_cred(rp_id, user_id, user_name))
 
 
 @fido.command()
@@ -152,42 +169,30 @@ def delete(ctx, query, pin, force):
     """
     Delete a resident credential.
     """
-    controller = ctx.obj["controller"]
+    credman = _init_credman(ctx, pin)
 
-    if not controller.has_pin:
-        ctx.fail("No PIN set.")
-
-    if controller.has_pin and pin is None:
-        pin = _prompt_current_pin(prompt="Enter your PIN")
-
-    try:
-        hits = [
-            cred
-            for cred in controller.get_resident_credentials(pin)
-            if query.lower() in cred.user_name.lower()
-            or query.lower() in cred.rp_id.lower()
-            or cred.user_id.hex().lower().startswith(query.lower())
-            or query.lower()
-            in "{} {} {}".format(cred.rp_id, cred.user_id.hex(), cred.user_name).lower()
-        ]
-        if len(hits) == 0:
-            ctx.fail("No matches, nothing to be done.")
-        elif len(hits) == 1:
-            cred = hits[0]
-            if force or click.confirm(
-                "Delete credential {} {} {}?".format(
-                    cred.rp_id, cred.user_id.hex(), cred.user_name
-                )
-            ):
-                controller.delete_resident_credential(cred.credential_id, pin)
-        else:
-            ctx.fail("Multiple matches, make the query more specific.")
-    except CtapError as e:
-        if e.code == CtapError.ERR.PIN_INVALID:
-            ctx.fail("Wrong PIN.")
-    except Exception as e:
-        logger.debug("Failed to delete resident credential", exc_info=e)
-        ctx.fail("Failed to delete resident credential.")
+    hits = [
+        (rp_id, cred_id, user_id, user_name)
+        for (rp_id, cred_id, user_id, user_name) in _gen_creds(credman)
+        if query.lower() in user_name.lower()
+        or query.lower() in rp_id.lower()
+        or user_id.hex().startswith(query.lower())
+        or query.lower() in _format_cred(rp_id, user_id, user_name)
+    ]
+    if len(hits) == 0:
+        ctx.fail("No matches, nothing to be done.")
+    elif len(hits) == 1:
+        (rp_id, cred_id, user_id, user_name) = hits[0]
+        if force or click.confirm(
+            "Delete credential {}?".format(_format_cred(rp_id, user_id, user_name))
+        ):
+            try:
+                credman.delete_cred(cred_id)
+            except CtapError as e:
+                logger.debug("Failed to delete resident credential", exc_info=e)
+                ctx.fail("Failed to delete resident credential.")
+    else:
+        ctx.fail("Multiple matches, make the query more specific.")
 
 
 @fido.command("set-pin")
@@ -208,17 +213,22 @@ def set_pin(ctx, pin, new_pin, u2f):
     6 characters long.
     """
 
-    controller = ctx.obj["controller"]
-    is_fips = controller.is_fips
+    is_fips = is_fips_version(ctx.obj["info"].version)
 
     if is_fips and not u2f:
         ctx.fail("This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f option.")
 
     if u2f and not is_fips:
         ctx.fail(
-            "This is not a YubiKey FIPS, and therefore does not support a "
-            "U2F PIN. To set the FIDO2 PIN, remove the --u2f option."
+            "This is not a YubiKey FIPS, and therefore does not support a U2F PIN. "
+            "To set the FIDO2 PIN, remove the --u2f option."
         )
+
+    if is_fips:
+        conn = ctx.obj["conn"]
+    else:
+        ctap2 = ctx.obj.get("ctap2")
+        client_pin = ClientPin(ctap2)
 
     def prompt_new_pin():
         return click_prompt(
@@ -237,17 +247,17 @@ def set_pin(ctx, pin, new_pin, u2f):
             if is_fips:
                 try:
                     # Failing this with empty current PIN does not cost a retry
-                    controller.change_pin(old_pin=pin or "", new_pin=new_pin)
+                    fips_change_pin(conn, pin or "", new_pin)
                 except ApduError as e:
                     if e.code == SW.WRONG_LENGTH:
                         pin = _prompt_current_pin()
                         _fail_if_not_valid_pin(ctx, pin, is_fips)
-                        controller.change_pin(old_pin=pin, new_pin=new_pin)
+                        fips_change_pin(conn, pin, new_pin)
                     else:
                         raise
 
             else:
-                controller.change_pin(old_pin=pin, new_pin=new_pin)
+                client_pin.change_pin(pin, new_pin)
 
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_INVALID:
@@ -277,23 +287,25 @@ def set_pin(ctx, pin, new_pin, u2f):
     def set_pin(new_pin):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         try:
-            controller.set_pin(new_pin)
+            client_pin.set_pin(new_pin)
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 ctx.fail("PIN is too long.")
             logger.error("Failed to set PIN", exc_info=e)
             ctx.fail("Failed to set PIN")
 
-    if pin and not controller.has_pin:
-        ctx.fail("There is no current PIN set. Use --new-pin to set one.")
-
-    if controller.has_pin and pin is None and not is_fips:
-        pin = _prompt_current_pin()
+    if not is_fips:
+        if ctap2.info.options.get("clientPin"):
+            if not pin:
+                pin = _prompt_current_pin()
+        else:
+            if pin:
+                ctx.fail("There is no current PIN set. Use --new-pin to set one.")
 
     if not new_pin:
         new_pin = prompt_new_pin()
 
-    if controller.has_pin:
+    if is_fips or ctap2.info.options.get("clientPin"):
         change_pin(pin, new_pin)
     else:
         set_pin(new_pin)
@@ -317,11 +329,12 @@ def reset(ctx, force):
     if n_keys > 1:
         ctx.fail("Only one YubiKey can be connected to perform a reset.")
 
+    is_fips = is_fips_version(ctx.obj["info"].version)
+
     if not force:
         if not click.confirm(
-            "WARNING! This will delete all FIDO credentials, "
-            "including FIDO U2F credentials, and restore "
-            "factory settings. Proceed?",
+            "WARNING! This will delete all FIDO credentials, including FIDO U2F "
+            "credentials, and restore factory settings. Proceed?",
             err=True,
         ):
             ctx.abort()
@@ -331,29 +344,29 @@ def reset(ctx, force):
 
         removed = False
         while True:
-            sleep(0.1)
+            sleep(0.5)
             keys = list_ctap_devices()
             if not keys:
                 removed = True
             if removed and len(keys) == 1:
                 return keys[0]
 
-    def try_reset(controller_type):
+    def try_reset():
         if not force:
             dev = prompt_re_insert_key()
-            controller = controller_type(dev.open_connection(FidoConnection))
-            controller.reset(touch_callback=prompt_for_touch)
-        else:
-            controller = ctx.obj["controller"]
-            controller.reset(touch_callback=prompt_for_touch)
+            conn = dev.open_connection(FidoConnection)
+        with PromptTimeout():
+            if is_fips:
+                fips_reset(conn)
+            else:
+                Ctap2(conn).reset()
 
-    if is_fips_version(ctx.obj["info"].version):
+    if is_fips:
         if not force:
             destroy_input = click_prompt(
-                "WARNING! This is a YubiKey FIPS device. This command will "
-                "also overwrite the U2F attestation key; this action cannot be "
-                "undone and this YubiKey will no longer be a FIPS compliant "
-                "device.\n"
+                "WARNING! This is a YubiKey FIPS device. This command will also "
+                "overwrite the U2F attestation key; this action cannot be undone and "
+                "this YubiKey will no longer be a FIPS compliant device.\n"
                 'To proceed, please enter the text "OVERWRITE"',
                 default="",
                 show_default=False,
@@ -362,13 +375,13 @@ def reset(ctx, force):
                 ctx.fail("Reset aborted by user.")
 
         try:
-            try_reset(FipsU2fController)
+            try_reset()
 
         except ApduError as e:
             if e.code == SW.COMMAND_NOT_ALLOWED:
                 ctx.fail(
-                    "Reset failed. Reset must be triggered within 5 seconds"
-                    " after the YubiKey is inserted."
+                    "Reset failed. Reset must be triggered within 5 seconds after the "
+                    "YubiKey is inserted."
                 )
             else:
                 logger.error("Reset failed", exc_info=e)
@@ -380,17 +393,16 @@ def reset(ctx, force):
 
     else:
         try:
-            try_reset(Fido2Controller)
+            try_reset()
         except CtapError as e:
             if e.code == CtapError.ERR.ACTION_TIMEOUT:
                 ctx.fail(
-                    "Reset failed. You need to touch your"
-                    " YubiKey to confirm the reset."
+                    "Reset failed. You need to touch your YubiKey to confirm the reset."
                 )
             elif e.code == CtapError.ERR.NOT_ALLOWED:
                 ctx.fail(
-                    "Reset failed. Reset must be triggered within 5 seconds"
-                    " after the YubiKey is inserted."
+                    "Reset failed. Reset must be triggered within 5 seconds after the "
+                    "YubiKey is inserted."
                 )
             else:
                 logger.error(e)
@@ -410,8 +422,8 @@ def unlock(ctx, pin):
     Unlock the YubiKey FIPS and allow U2F registration.
     """
 
-    controller = ctx.obj["controller"]
-    if not controller.is_fips:
+    conn = ctx.obj["conn"]
+    if not is_fips_version(ctx.obj["info"].version):
         ctx.fail(
             "This is not a YubiKey FIPS, and therefore does not support a U2F PIN."
         )
@@ -421,7 +433,7 @@ def unlock(ctx, pin):
 
     _fail_if_not_valid_pin(ctx, pin, True)
     try:
-        controller.verify_pin(pin)
+        fips_verify_pin(conn, pin)
     except ApduError as e:
         if e.code == SW.VERIFY_FAIL_NO_RETRY:
             ctx.fail("Wrong PIN.")
