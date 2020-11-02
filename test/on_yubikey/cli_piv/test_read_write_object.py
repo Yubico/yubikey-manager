@@ -47,7 +47,9 @@ def additional_tests(ykman_cli):
                 "-",
                 input=data,
             )
-            output_data = ykman_cli.with_bytes_output("piv", "read-object", "0x5f0001")
+            output_data = ykman_cli.with_bytes_output(
+                "piv", "read-object", "0x5f0001", "-"
+            )
             self.assertEqual(data, output_data)
 
         def test_read_write_read_is_noop(self):
@@ -64,7 +66,7 @@ def additional_tests(ykman_cli):
             )
 
             output1 = ykman_cli.with_bytes_output(
-                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION)
+                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
             )
             self.assertEqual(output1, data)
 
@@ -79,13 +81,13 @@ def additional_tests(ykman_cli):
             )
 
             output2 = ykman_cli.with_bytes_output(
-                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION)
+                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
             )
             self.assertEqual(output2, data)
 
         def test_read_write_certificate_as_object(self):
             with self.assertRaises(SystemExit):
-                ykman_cli("piv", "read-object", hex(OBJECT_ID.AUTHENTICATION))
+                ykman_cli("piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-")
 
             cert = generate_self_signed_certificate()
             cert_bytes_der = cert.public_bytes(encoding=serialization.Encoding.DER)
@@ -103,7 +105,7 @@ def additional_tests(ykman_cli):
             )
 
             output1 = ykman_cli.with_bytes_output(
-                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION)
+                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
             )
             output_cert_bytes = Tlv.parse_dict(output1)[0x70]
             self.assertEqual(output_cert_bytes, cert_bytes_der)

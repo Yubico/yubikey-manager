@@ -907,7 +907,8 @@ def unblock_pin(ctx, puk, new_pin):
 @click.argument(
     "object-id", callback=lambda ctx, param, value: int(value, 16), metavar="OBJECT-ID"
 )
-def read_object(ctx, pin, object_id):
+@click.argument("output", type=click.File("wb"), metavar="OUTPUT")
+def read_object(ctx, pin, object_id, output):
     """
     Read an arbitrary PIV object.
 
@@ -915,6 +916,7 @@ def read_object(ctx, pin, object_id):
 
     \b
     OBJECT-ID       Id of PIV object in HEX.
+    OUTPUT          File to write object to. Use '-' to use stdout.
     """
 
     session = ctx.obj["session"]
@@ -922,7 +924,7 @@ def read_object(ctx, pin, object_id):
 
     def do_read_object(retry=True):
         try:
-            click.echo(session.get_object(object_id), nl=False)
+            output.write(session.get_object(object_id))
         except ApduError as e:
             if e.sw == SW.FILE_NOT_FOUND:
                 ctx.fail("No data found.")
@@ -959,7 +961,7 @@ def write_object(ctx, pin, management_key, object_id, data):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
-    def do_write_object(retry=True):
+    def do_write_object():
         try:
             session.put_object(object_id, data.read())
         except ApduError as e:
