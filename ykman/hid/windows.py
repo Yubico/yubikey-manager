@@ -316,7 +316,7 @@ def list_devices():
                 if vid == YUBICO_VID and usage == USAGE_OTP:
                     devices.append(OtpYubiKeyDevice(path, pid, WinHidOtpConnection))
             except Exception as e:
-                logger.debug("Failed opening HID device", exc_info=e)
+                logger.debug("Failed reading HID descriptor: %s", e)
                 continue
             finally:
                 kernel32.CloseHandle(device)

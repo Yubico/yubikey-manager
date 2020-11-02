@@ -8,7 +8,7 @@ import unittest
 import time
 
 from yubikit.core import USB_INTERFACE
-from ykman.device import list_all_devices, connect_to_device, get_connection_types
+from ykman import list_all_devices, connect_to_device, get_connection_types
 
 
 _skip = True
@@ -26,7 +26,7 @@ if _test_serials_env is not None:
 
     _test_serials = set(int(s) for s in _test_serials_env.split(","))
 
-    for pid, info in list_all_devices():
+    for _, info in list_all_devices():
         print("{:.3f} {}".format(time.time() - start_time, info.serial))
         _serials_present.add(info.serial)
         _device_info[info.serial] = info

@@ -33,8 +33,6 @@ from .core import (
     AID,
     PID,
     TRANSPORT,
-    APPLICATION,
-    FORM_FACTOR,
     USB_INTERFACE,
     NotSupportedError,
     BadResponseError,
@@ -66,9 +64,61 @@ CTAP_WRITE_CONFIG = CTAP_VENDOR_FIRST + 3
 
 
 @unique
+class APPLICATION(IntFlag):
+    """YubiKey Application identifiers."""
+
+    OTP = 0x01
+    U2F = 0x02
+    OPENPGP = 0x08
+    PIV = 0x10
+    OATH = 0x20
+    FIDO2 = 0x200
+
+    def __str__(self):
+        if self == APPLICATION.U2F:
+            return "FIDO U2F"
+        elif self == APPLICATION.OPENPGP:
+            return "OpenPGP"
+        else:
+            return self.name
+
+
+@unique
 class DEVICE_FLAG(IntFlag):
     REMOTE_WAKEUP = 0x40
     EJECT = 0x80
+
+
+@unique
+class FORM_FACTOR(IntEnum):
+    """YubiKey device form factors."""
+
+    UNKNOWN = 0x00
+    USB_A_KEYCHAIN = 0x01
+    USB_A_NANO = 0x02
+    USB_C_KEYCHAIN = 0x03
+    USB_C_NANO = 0x04
+    USB_C_LIGHTNING = 0x05
+
+    def __str__(self):
+        if self == FORM_FACTOR.USB_A_KEYCHAIN:
+            return "Keychain (USB-A)"
+        elif self == FORM_FACTOR.USB_A_NANO:
+            return "Nano (USB-A)"
+        elif self == FORM_FACTOR.USB_C_KEYCHAIN:
+            return "Keychain (USB-C)"
+        elif self == FORM_FACTOR.USB_C_NANO:
+            return "Nano (USB-C)"
+        elif self == FORM_FACTOR.USB_C_LIGHTNING:
+            return "Keychain (USB-C, Lightning)"
+        elif self == FORM_FACTOR.UNKNOWN:
+            return "Unknown"
+
+    @classmethod
+    def from_code(cls, code: int) -> "FORM_FACTOR":
+        if code and not isinstance(code, int):
+            raise ValueError("Invalid form factor code: {}".format(code))
+        return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
 
 
 class _Backend(abc.ABC):
@@ -356,7 +406,7 @@ class ManagementSession:
             if USB_INTERFACE.OTP in mode.interfaces:
                 usb_enabled |= APPLICATION.OTP
             if USB_INTERFACE.CCID in mode.interfaces:
-                usb_enabled |= APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
+                usb_enabled |= APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPENPGP
             if USB_INTERFACE.FIDO in mode.interfaces:
                 usb_enabled |= APPLICATION.U2F | APPLICATION.FIDO2
             self.write_device_config(

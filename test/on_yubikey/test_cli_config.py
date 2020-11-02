@@ -39,7 +39,7 @@ def additional_tests(ykman_cli):
             self.assertNotIn("FIDO U2F", output)
 
         def test_disable_openpgp(self):
-            ykman_cli("config", "usb", "--disable", "OPGP", "-f")
+            ykman_cli("config", "usb", "--disable", "OPENPGP", "-f")
             output = ykman_cli("config", "usb", "--list")
             self.assertNotIn("OpenPGP", output)
 
@@ -83,7 +83,7 @@ def additional_tests(ykman_cli):
                     "-d",
                     "OATH",
                     "-d",
-                    "OPGP",
+                    "OPENPGP",
                     "PIV",
                     "-d",
                     "OTP",
@@ -134,7 +134,7 @@ def additional_tests(ykman_cli):
             self.assertNotIn("FIDO U2F", output)
 
         def test_disable_openpgp(self):
-            ykman_cli("config", "nfc", "--disable", "OPGP", "-f")
+            ykman_cli("config", "nfc", "--disable", "OPENPGP", "-f")
             output = ykman_cli("config", "nfc", "--list")
             self.assertNotIn("OpenPGP", output)
 

@@ -25,8 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import USB_INTERFACE, TRANSPORT, APPLICATION, YUBIKEY
-from yubikit.management import ManagementSession, Mode
+from yubikit.core import USB_INTERFACE, TRANSPORT, YUBIKEY
+from yubikit.management import ManagementSession, Mode, APPLICATION
 
 from .util import click_force_option
 import logging
@@ -83,7 +83,7 @@ def _mode_from_usb_enabled(usb_enabled):
         interfaces |= USB_INTERFACE.OTP
     if (APPLICATION.U2F | APPLICATION.FIDO2) & usb_enabled:
         interfaces |= USB_INTERFACE.FIDO
-    if (APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
+    if (APPLICATION.OPENPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
         interfaces |= USB_INTERFACE.CCID
     return Mode(interfaces)
 

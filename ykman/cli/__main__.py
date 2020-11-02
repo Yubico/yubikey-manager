@@ -235,7 +235,7 @@ def cli(ctx, device, log_level, log_file, reader):
             return resolve.items
 
         ctx.obj.add_resolver("conn", lambda: resolve()[0])
-        ctx.obj.add_resolver("pid", lambda: resolve()[1])
+        ctx.obj.add_resolver("pid", lambda: resolve()[1].pid)
         ctx.obj.add_resolver("info", lambda: resolve()[2])
 
 

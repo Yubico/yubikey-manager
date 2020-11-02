@@ -25,9 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from yubikit.core import TRANSPORT
+from yubikit.management import ManagementSession, DeviceConfig, APPLICATION, DEVICE_FLAG
 from .util import click_postpone_execution, click_force_option, click_prompt, EnumChoice
-from yubikit.core import APPLICATION, TRANSPORT
-from yubikit.management import ManagementSession, DeviceConfig, DEVICE_FLAG
 import os
 import logging
 import click
@@ -37,18 +37,6 @@ logger = logging.getLogger(__name__)
 
 
 CLEAR_LOCK_CODE = "0" * 32
-
-
-class ApplicationsChoice(EnumChoice):
-    """
-    Special version of EnumChoice that accepts openpgp as OPGP
-    """
-
-    def convert(self, value, param, ctx):
-        if value.lower() == "openpgp":
-            return super(ApplicationsChoice, self).convert("OPGP", param, ctx)
-        else:
-            return super(ApplicationsChoice, self).convert(value, param, ctx)
 
 
 def prompt_lock_code(prompt="Enter your lock code"):
@@ -192,14 +180,14 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     "-e",
     "--enable",
     multiple=True,
-    type=ApplicationsChoice(APPLICATION),
+    type=EnumChoice(APPLICATION),
     help="Enable applications.",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
-    type=ApplicationsChoice(APPLICATION),
+    type=EnumChoice(APPLICATION),
     help="Disable applications.",
 )
 @click.option(
@@ -365,14 +353,14 @@ def usb(
     "-e",
     "--enable",
     multiple=True,
-    type=ApplicationsChoice(APPLICATION),
+    type=EnumChoice(APPLICATION),
     help="Enable applications.",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
-    type=ApplicationsChoice(APPLICATION),
+    type=EnumChoice(APPLICATION),
     help="Disable applications.",
 )
 @click.option("-a", "--enable-all", is_flag=True, help="Enable all applications.")

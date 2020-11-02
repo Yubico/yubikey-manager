@@ -287,11 +287,11 @@ class OpgpController(object):
     def __init__(self, protocol):
         self._app = protocol
         try:
-            protocol.select(AID.OPGP)
+            protocol.select(AID.OPENPGP)
         except ApduError as e:
             if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
                 protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
-                protocol.select(AID.OPGP)
+                protocol.select(AID.OPENPGP)
             else:
                 raise
         self._version = self._read_version()

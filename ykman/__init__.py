@@ -25,6 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from .device import (  # noqa
+    scan_devices,
+    list_all_devices,
+    connect_to_device,
+    get_name,
+    get_connection_types,
+)
+
 import os
 
 

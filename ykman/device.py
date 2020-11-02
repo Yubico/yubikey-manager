@@ -30,8 +30,6 @@ from yubikit.core import (
     PID,
     TRANSPORT,
     USB_INTERFACE,
-    APPLICATION,
-    FORM_FACTOR,
     YUBIKEY,
     Version,
     Connection,
@@ -45,14 +43,20 @@ from yubikit.core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
 )
-from yubikit.management import ManagementSession, DeviceInfo, DeviceConfig
+from yubikit.management import (
+    ManagementSession,
+    DeviceInfo,
+    DeviceConfig,
+    APPLICATION,
+    FORM_FACTOR,
+)
 from yubikit.yubiotp import YubiOtpSession
 from .hid import list_otp_devices, list_ctap_devices
 from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
 from collections import Counter
-from typing import Dict, Mapping, List, Tuple, Optional, Hashable, Iterable, Type
+from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type
 import sys
 import logging
 
@@ -81,7 +85,9 @@ def is_fips_version(version: Version) -> bool:
     return (4, 4, 0) <= version < (4, 5, 0)
 
 
-BASE_NEO_APPS = APPLICATION.OTP | APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPGP
+BASE_NEO_APPS = (
+    APPLICATION.OTP | APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPENPGP
+)
 
 CONNECTION_TYPE_MAPPING = {
     USB_INTERFACE.CCID: SmartCardConnection,
@@ -103,7 +109,7 @@ def get_connection_types(usb_interfaces: USB_INTERFACE) -> Iterable[Type[Connect
     ]
 
 
-def scan_devices() -> Tuple[Mapping[PID, int], Hashable]:
+def scan_devices() -> Tuple[Mapping[PID, int], int]:
     """Scan USB for attached YubiKeys, without opening any connections.
 
     Returns a dict mapping PID to device count, and a state object which can be used to
@@ -115,7 +121,7 @@ def scan_devices() -> Tuple[Mapping[PID, int], Hashable]:
         devs = list_devs()
         merged.update(Counter(d.pid for d in devs if d.pid is not None))
         fingerprints.update({d.fingerprint for d in devs})
-    return merged, tuple(fingerprints)
+    return merged, hash(tuple(fingerprints))
 
 
 def list_all_devices() -> List[Tuple[YubiKeyDevice, DeviceInfo]]:
@@ -146,7 +152,14 @@ def list_all_devices() -> List[Tuple[YubiKeyDevice, DeviceInfo]]:
 def connect_to_device(
     serial: Optional[int] = None,
     connection_types: Iterable[Type[Connection]] = CONNECTION_LIST_MAPPING.keys(),
-) -> Tuple[Connection, PID, DeviceInfo]:
+) -> Tuple[Connection, YubiKeyDevice, DeviceInfo]:
+    """Looks for a YubiKey to connect to.
+
+    :param serial: Used to filter devices by serial number, if present.
+    :param connection_types: Filter connection types.
+    :return: An open connection to the device, the device reference, and the device
+        information read from the device.
+    """
     for connection_type in connection_types:
         for dev in CONNECTION_LIST_MAPPING[connection_type]():
             try:
@@ -155,7 +168,7 @@ def connect_to_device(
                 if serial and info.serial != serial:
                     conn.close()
                 else:
-                    return conn, dev.pid, info
+                    return conn, dev, info
             except Exception as e:
                 logger.debug("Error connecting", exc_info=e)
 
@@ -182,7 +195,7 @@ SCAN_APPLETS = {
     AID.FIDO: APPLICATION.U2F,
     AID_U2F_YUBICO: APPLICATION.U2F,
     AID.PIV: APPLICATION.PIV,
-    AID.OPGP: APPLICATION.OPGP,
+    AID.OPENPGP: APPLICATION.OPENPGP,
     AID.OATH: APPLICATION.OATH,
 }
 
@@ -307,7 +320,7 @@ def _read_info_ctap(conn, key_type, interfaces):
         enabled_apps = {TRANSPORT.USB: APPLICATION.U2F}
         if USB_INTERFACE.CCID in interfaces:
             enabled_apps[TRANSPORT.USB] |= (
-                APPLICATION.OPGP | APPLICATION.PIV | APPLICATION.OATH
+                APPLICATION.OPENPGP | APPLICATION.PIV | APPLICATION.OATH
             )
         if USB_INTERFACE.OTP in interfaces:
             enabled_apps[TRANSPORT.USB] |= APPLICATION.OTP
@@ -336,7 +349,7 @@ def _read_info_ctap(conn, key_type, interfaces):
 def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
     """Read out a DeviceInfo object from a YubiKey, or attempt to synthesize one."""
     if pid:
-        key_type = pid.get_type()
+        key_type: Optional[YUBIKEY] = pid.get_type()
         interfaces = pid.get_interfaces()
     else:  # No PID for NFC connections
         key_type = None
@@ -370,7 +383,7 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
             usb_enabled &= ~(
                 USB_INTERFACE.CCID
                 | APPLICATION.OATH
-                | APPLICATION.OPGP
+                | APPLICATION.OPENPGP
                 | APPLICATION.PIV
             )
         info.config.enabled_applications[TRANSPORT.USB] = usb_enabled

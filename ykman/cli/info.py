@@ -25,10 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, APPLICATION, USB_INTERFACE
+from yubikit.core import TRANSPORT, USB_INTERFACE
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import APPLICATION
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 

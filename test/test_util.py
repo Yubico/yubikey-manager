@@ -1,6 +1,7 @@
 #  vim: set fileencoding=utf-8 :
 
-from yubikit.core import FORM_FACTOR, Tlv, bytes2int
+from yubikit.core import Tlv, bytes2int
+from yubikit.management import FORM_FACTOR
 from ykman.util import (
     format_code,
     generate_static_pw,

@@ -45,6 +45,8 @@ _VERSION_STRING_PATTERN = re.compile(r"\b(?P<major>\d+).(?P<minor>\d).(?P<patch>
 
 
 class Version(NamedTuple):
+    """3-digit version tuple."""
+
     major: int
     minor: int
     patch: int
@@ -64,12 +66,16 @@ class Version(NamedTuple):
 
 
 class TRANSPORT(Enum):
+    """YubiKey physical connection transports."""
+
     USB = auto()
     NFC = auto()
 
 
 @unique
 class USB_INTERFACE(IntFlag):
+    """YubiKey USB interface identifiers."""
+
     OTP = 0x01
     FIDO = 0x02
     CCID = 0x04
@@ -77,71 +83,25 @@ class USB_INTERFACE(IntFlag):
 
 @unique
 class AID(bytes, Enum):
+    """YubiKey Application smart card AID values."""
+
     OTP = b"\xa0\x00\x00\x05\x27\x20\x01"
     MGMT = b"\xa0\x00\x00\x05\x27\x47\x11\x17"
-    OPGP = b"\xd2\x76\x00\x01\x24\x01"
+    OPENPGP = b"\xd2\x76\x00\x01\x24\x01"
     OATH = b"\xa0\x00\x00\x05\x27\x21\x01"
     PIV = b"\xa0\x00\x00\x03\x08"
     FIDO = b"\xa0\x00\x00\x06\x47\x2f\x00\x01"
 
 
 @unique
-class APPLICATION(IntFlag):
-    OTP = 0x01
-    U2F = 0x02
-    OPGP = 0x08
-    PIV = 0x10
-    OATH = 0x20
-    FIDO2 = 0x200
-
-    def __str__(self):
-        if self == APPLICATION.U2F:
-            return "FIDO U2F"
-        elif self == APPLICATION.FIDO2:
-            return "FIDO2"
-        elif self == APPLICATION.OPGP:
-            return "OpenPGP"
-        else:
-            return self.name
-
-
-@unique
-class FORM_FACTOR(IntEnum):
-    UNKNOWN = 0x00
-    USB_A_KEYCHAIN = 0x01
-    USB_A_NANO = 0x02
-    USB_C_KEYCHAIN = 0x03
-    USB_C_NANO = 0x04
-    USB_C_LIGHTNING = 0x05
-
-    def __str__(self):
-        if self == FORM_FACTOR.USB_A_KEYCHAIN:
-            return "Keychain (USB-A)"
-        elif self == FORM_FACTOR.USB_A_NANO:
-            return "Nano (USB-A)"
-        elif self == FORM_FACTOR.USB_C_KEYCHAIN:
-            return "Keychain (USB-C)"
-        elif self == FORM_FACTOR.USB_C_NANO:
-            return "Nano (USB-C)"
-        elif self == FORM_FACTOR.USB_C_LIGHTNING:
-            return "Keychain (USB-C, Lightning)"
-        elif self == FORM_FACTOR.UNKNOWN:
-            return "Unknown"
-
-    @classmethod
-    def from_code(cls, code: int) -> "FORM_FACTOR":
-        if code and not isinstance(code, int):
-            raise ValueError("Invalid form factor code: {}".format(code))
-        return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
-
-
-@unique
 class YUBIKEY(Enum):
+    """YubiKey hardware platforms."""
+
     YKS = "YubiKey Standard"
     NEO = "YubiKey NEO"
     SKY = "Security Key by Yubico"
     YKP = "YubiKey Plus"
-    YK4 = "YubiKey 4"
+    YK4 = "YubiKey 4"  # This includes YubiKey 5
 
     def get_pid(self, interfaces: USB_INTERFACE) -> "PID":
         suffix = "_".join(
@@ -152,6 +112,8 @@ class YUBIKEY(Enum):
 
 @unique
 class PID(IntEnum):
+    """USB Product ID values for YubiKey devices."""
+
     YKS_OTP = 0x0010
     NEO_OTP = 0x0110
     NEO_OTP_CCID = 0x0111
@@ -170,10 +132,10 @@ class PID(IntEnum):
     YK4_OTP_FIDO_CCID = 0x0407
     YKP_OTP_FIDO = 0x0410
 
-    def get_type(self):
+    def get_type(self) -> YUBIKEY:
         return YUBIKEY[self.name.split("_", 1)[0]]
 
-    def get_interfaces(self):
+    def get_interfaces(self) -> USB_INTERFACE:
         return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
 
 
