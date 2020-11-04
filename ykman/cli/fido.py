@@ -27,7 +27,13 @@
 
 from fido2.ctap import CtapError
 from fido2.ctap1 import ApduError
-from fido2.ctap2 import Ctap2, ClientPin, CredentialManagement
+from fido2.ctap2 import (
+    Ctap2,
+    ClientPin,
+    CredentialManagement,
+    FPBioEnrollment,
+    CaptureError,
+)
 from yubikit.core import USB_INTERFACE
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
@@ -454,3 +460,117 @@ def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
     min_length = FIPS_PIN_MIN_LENGTH if is_fips else PIN_MIN_LENGTH
     if not pin or len(pin) < min_length:
         ctx.fail("PIN must be over {} characters long".format(min_length))
+
+
+def _init_bio(ctx, pin):
+    ctap2 = ctx.obj.get("ctap2")
+
+    if not ctap2:  # TODO or "bioEnroll" not in ctap2.info.options:
+        ctx.fail("Biometrics is not supported on this YubiKey.")
+    elif not ctap2.info.options.get("clientPin"):
+        ctx.fail("No PIN is set.")
+
+    if pin is None:
+        pin = _prompt_current_pin(prompt="Enter your PIN")
+
+    client_pin = ClientPin(ctap2)
+    try:
+        token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.BIO_ENROLL)
+    except CtapError as e:
+        if e.code == CtapError.ERR.PIN_INVALID:
+            ctx.fail("Wrong PIN.")
+        else:
+            raise
+
+    return FPBioEnrollment(ctap2, client_pin.protocol, token)
+
+
+def _format_fp(template_id, name):
+    return "{}{}".format(template_id.hex(), " ({})".format(name) if name else "")
+
+
+@fido.command("list-fingerprints")
+@click.pass_context
+@click.option("-P", "--pin", help="PIN code.")
+def bio_list(ctx, pin):
+    """
+    List registred fingerprint.
+
+    Lists fingerprints by ID and (if available) label.
+    """
+    bio = _init_bio(ctx, pin)
+
+    for t_id, name in bio.enumerate_enrollments().items():
+        click.echo("ID: {}".format(_format_fp(t_id, name)))
+
+
+@fido.command("delete-fingerprint")
+@click.pass_context
+@click.argument("template_id", metavar="ID")
+@click.option("-P", "--pin", help="PIN code.")
+@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
+def bio_delete(ctx, template_id, pin, force):
+    """
+    Delete a fingerprint.
+
+    Delete a fingerprint from the YubiKey by its ID, which can be seen by running
+    bio-list.
+    """
+    bio = _init_bio(ctx, pin)
+    enrollments = bio.enumerate_enrollments()
+
+    key = bytes.fromhex(template_id)
+    if key not in enrollments:
+        ctx.fail("No fingerprint matching ID={}".format(template_id))
+
+    name = enrollments[key]
+    if force or click.confirm("Delete fingerprint {}?".format(_format_fp(key, name))):
+        try:
+            bio.remove_enrollment(key)
+        except CtapError as e:
+            logger.debug("Failed to delete fingerprint template", exc_info=e)
+            ctx.fail("Failed to delete fingerprint.")
+
+
+@fido.command("rename-fingerprint")
+@click.pass_context
+@click.argument("template_id", metavar="ID")
+@click.argument("name")
+@click.option("-P", "--pin", help="PIN code.")
+def bio_rename(ctx, template_id, name, pin):
+    """
+    Set the label for a fingerprint.
+    """
+    if len(name) >= 16:
+        ctx.fail("Fingerprint label must be <= 15 characters.")
+
+    bio = _init_bio(ctx, pin)
+    enrollments = bio.enumerate_enrollments()
+
+    key = bytes.fromhex(template_id)
+    if key not in enrollments:
+        ctx.fail("No fingerprint matching ID={}.".format(template_id))
+
+    bio.set_name(key, name)
+
+
+@fido.command("enroll-fingerprint")
+@click.pass_context
+@click.argument("name")
+@click.option("-P", "--pin", help="PIN code.")
+def bio_enroll(ctx, name, pin):
+    """
+    Enroll a new fingerprint.
+    """
+    bio = _init_bio(ctx, pin)
+
+    enroller = bio.enroll()
+    template_id = None
+    while template_id is None:
+        click.echo("Press your fingerprint against the sensor now...")
+        try:
+            template_id = enroller.capture()
+            click.echo("{} more scans needed.".format(enroller.remaining))
+        except CaptureError as e:
+            click.echo(e)
+    bio.set_name(template_id, name)
