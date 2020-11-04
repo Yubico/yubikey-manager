@@ -25,12 +25,19 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT
-from yubikit.management import ManagementSession, DeviceConfig, APPLICATION, DEVICE_FLAG
+from yubikit.core import TRANSPORT, USB_INTERFACE, YUBIKEY
+from yubikit.management import (
+    ManagementSession,
+    DeviceConfig,
+    APPLICATION,
+    DEVICE_FLAG,
+    Mode,
+)
 from .util import click_postpone_execution, click_force_option, click_prompt, EnumChoice
 import os
-import logging
+import re
 import click
+import logging
 
 
 logger = logging.getLogger(__name__)
@@ -467,3 +474,153 @@ def _parse_lock_code(ctx, lock_code):
         return lock_code
     except Exception:
         ctx.fail("Lock code has the wrong format.")
+
+
+# MODE
+
+
+def _parse_interface_string(interface):
+    for iface in USB_INTERFACE:
+        if iface.name.startswith(interface):
+            return iface
+    raise ValueError()
+
+
+def _parse_mode_string(ctx, param, mode):
+    try:
+        mode_int = int(mode)
+        return Mode.from_code(mode_int)
+    except IndexError:
+        ctx.fail("Invalid mode: {}".format(mode_int))
+    except ValueError:
+        pass  # Not a numeric mode, parse string
+
+    try:
+        interfaces = USB_INTERFACE(0)
+        if mode[0] in ["+", "-"]:
+            info = ctx.obj["info"]
+            usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
+            my_mode = _mode_from_usb_enabled(usb_enabled)
+            interfaces |= my_mode.interfaces
+            for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
+                interface = _parse_interface_string(mod[1:])
+                if mod.startswith("+"):
+                    interfaces |= interface
+                else:
+                    interfaces ^= interface
+        else:
+            for t in filter(None, re.split(r"[+]+", mode.upper())):
+                interfaces |= _parse_interface_string(t)
+    except ValueError:
+        ctx.fail("Invalid mode string: {}".format(mode))
+
+    return Mode(interfaces)
+
+
+def _mode_from_usb_enabled(usb_enabled):
+    interfaces = USB_INTERFACE(0)
+    if APPLICATION.OTP & usb_enabled:
+        interfaces |= USB_INTERFACE.OTP
+    if (APPLICATION.U2F | APPLICATION.FIDO2) & usb_enabled:
+        interfaces |= USB_INTERFACE.FIDO
+    if (APPLICATION.OPENPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
+        interfaces |= USB_INTERFACE.CCID
+    return Mode(interfaces)
+
+
+@config.command()
+@click.argument("mode", callback=_parse_mode_string)
+@click.option(
+    "--touch-eject",
+    is_flag=True,
+    help="When set, the button "
+    "toggles the state of the smartcard between ejected and inserted "
+    "(CCID mode only).",
+)
+@click.option(
+    "--autoeject-timeout",
+    required=False,
+    type=int,
+    default=0,
+    metavar="SECONDS",
+    help="When set, the smartcard will automatically eject after the "
+    "given time. Implies --touch-eject (CCID mode only).",
+)
+@click.option(
+    "--chalresp-timeout",
+    required=False,
+    type=int,
+    default=0,
+    metavar="SECONDS",
+    help="Sets the timeout when waiting for touch for challenge response.",
+)
+@click_force_option
+@click.pass_context
+def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
+    """
+    Manage connection modes (USB Interfaces).
+
+    This command is generaly used with YubiKeys prior to the 5 series.
+    Use "ykman config usb" for more granular control on YubiKey 5 and later.
+
+    Get the current connection mode of the YubiKey, or set it to MODE.
+
+    MODE can be a string, such as "OTP+FIDO+CCID", or a shortened form: "o+f+c".
+    It can also be a mode number.
+
+    Examples:
+
+    \b
+      Set the OTP and FIDO mode:
+      $ ykman config mode OTP+FIDO
+
+    \b
+      Set the CCID only mode and use touch to eject the smart card:
+      $ ykman config mode CCID --touch-eject
+    """
+    info = ctx.obj["info"]
+    mgmt = ctx.obj["controller"]
+    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
+    my_mode = _mode_from_usb_enabled(usb_enabled)
+    usb_supported = info.supported_applications[TRANSPORT.USB]
+    interfaces_supported = _mode_from_usb_enabled(usb_supported).interfaces
+    pid = ctx.obj["pid"]
+    if pid:
+        key_type = pid.get_type()
+    else:
+        key_type = None
+
+    if autoeject_timeout:
+        touch_eject = True
+    autoeject = autoeject_timeout if touch_eject else 0
+
+    if mode.interfaces != USB_INTERFACE.CCID:
+        if touch_eject:
+            ctx.fail("--touch-eject can only be used when setting CCID-only mode")
+
+    if not force:
+        if mode == my_mode:
+            click.echo("Mode is already {}, nothing to do...".format(mode))
+            ctx.exit()
+        elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
+            click.echo("Mode switching is not supported on this YubiKey!")
+            ctx.fail("Use --force to attempt to set it anyway.")
+        elif mode.interfaces not in interfaces_supported:
+            click.echo("Mode {} is not supported on this YubiKey!".format(mode))
+            ctx.fail("Use --force to attempt to set it anyway.")
+        force or click.confirm(
+            "Set mode of YubiKey to {}?".format(mode), abort=True, err=True
+        )
+
+    try:
+        mgmt.set_mode(mode, chalresp_timeout, autoeject)
+        click.echo(
+            "Mode set! You must remove and re-insert your YubiKey "
+            "for this change to take effect."
+        )
+    except Exception as e:
+        logger.debug("Failed to switch mode", exc_info=e)
+        click.echo(
+            "Failed to switch mode on the YubiKey. Make sure your "
+            "YubiKey does not have an access code set."
+        )

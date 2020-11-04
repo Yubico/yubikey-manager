@@ -42,15 +42,15 @@ from ..device import (
     get_connection_types,
     connect_to_device,
 )
-from .util import UpperCaseChoice, YkmanContextObject
+from .util import UpperCaseChoice, YkmanContextObject, YkmanGroup
 from .info import info
-from .mode import mode
 from .otp import otp
 from .opgp import openpgp
 from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
+from .aliases import apply_aliases
 import click
 import time
 import logging
@@ -157,7 +157,7 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
     _disabled_interface(ctx, interfaces, cmd)
 
 
-@click.group(context_settings=CLICK_CONTEXT_SETTINGS)
+@click.group(cls=YkmanGroup, context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option(
     "-v",
     "--version",
@@ -277,7 +277,7 @@ def list_keys(ctx, serials, readers):
             )
 
 
-COMMANDS = (list_keys, info, mode, otp, openpgp, oath, piv, fido, config)
+COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config)
 
 
 for cmd in COMMANDS:
@@ -285,6 +285,7 @@ for cmd in COMMANDS:
 
 
 def main():
+    apply_aliases()
     try:
         cli(obj={})
     except ApplicationNotAvailableError as e:

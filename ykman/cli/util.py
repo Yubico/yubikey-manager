@@ -76,13 +76,30 @@ class EnumChoice(UpperCaseChoice):
         return self.choices_enum[name]
 
 
-def ykman_group(interfaces):
-    def wrap(f):
-        command = click.group()(f)
-        command.interfaces = interfaces
-        return command
+class YkmanGroup(click.Group):
+    """
+    Subclass of click.Group which takes an interfaces value to define what type of
+    connection(s) it supports, and lists sub commands before sub groups in its help
+    output.
 
-    return wrap
+    Usage example:
+    @click.group(cls=YkmanGroup, interfaces=USB_INTERFACE.CCID)
+    def my_command():
+        ...
+    """
+
+    def __init__(self, name=None, commands=None, **attrs):
+        self.interfaces = attrs.pop("interfaces", None)
+        click.Group.__init__(self, name, commands, **attrs)
+
+    def list_commands(self, ctx):
+        return sorted(
+            self.commands, key=lambda c: (isinstance(self.commands[c], click.Group), c)
+        )
+
+
+def ykman_group(interfaces, *args, **kwargs):
+    return click.group(cls=YkmanGroup, *args, interfaces=interfaces, **kwargs)
 
 
 def click_callback(invoke_on_missing=False):

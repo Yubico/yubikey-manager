@@ -164,7 +164,58 @@ def echo_default_pins():
     click.echo("Admin PIN:   12345678")
 
 
-@openpgp.command("set-touch")
+@openpgp.group("access")
+def access():
+    """Manage PIN, Reset Code, and Admin PIN."""
+
+
+@access.command("set-retries")
+@click.argument("pin-retries", type=click.IntRange(1, 99), metavar="PIN-RETRIES")
+@click.argument(
+    "reset-code-retries", type=click.IntRange(1, 99), metavar="RESET-CODE-RETRIES"
+)
+@click.argument(
+    "admin-pin-retries", type=click.IntRange(1, 99), metavar="ADMIN-PIN-RETRIES"
+)
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click_force_option
+@click.pass_context
+def set_pin_retries(
+    ctx, admin_pin, pin_retries, reset_code_retries, admin_pin_retries, force
+):
+    """
+    Set PIN, Reset Code and Admin PIN retries.
+    """
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
+
+    resets_pins = controller.version < (4, 0, 0)
+    if resets_pins:
+        click.echo("WARNING: Setting PIN retries will reset the values for all 3 PINs!")
+    if force or click.confirm(
+        "Set PIN retry counters to: {} {} {}?".format(
+            pin_retries, reset_code_retries, admin_pin_retries
+        ),
+        abort=True,
+        err=True,
+    ):
+
+        controller.verify_admin(admin_pin)
+        controller.set_pin_retries(pin_retries, reset_code_retries, admin_pin_retries)
+
+        if resets_pins:
+            click.echo("Default PINs are set.")
+            echo_default_pins()
+
+
+@openpgp.group("keys")
+def keys():
+    """Manage OpenPGP key slots."""
+
+
+@keys.command("set-touch")
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("policy", metavar="POLICY", type=EnumChoice(TOUCH_MODE))
 @click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
@@ -223,48 +274,41 @@ def set_touch(ctx, key, policy, admin_pin, force):
             ctx.fail("Failed to set touch policy.")
 
 
-@openpgp.command("set-pin-retries")
-@click.argument("pin-retries", type=click.IntRange(1, 99), metavar="PIN-RETRIES")
-@click.argument(
-    "reset-code-retries", type=click.IntRange(1, 99), metavar="RESET-CODE-RETRIES"
-)
-@click.argument(
-    "admin-pin-retries", type=click.IntRange(1, 99), metavar="ADMIN-PIN-RETRIES"
-)
+@keys.command("import")
 @click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
-@click_force_option
 @click.pass_context
-def set_pin_retries(
-    ctx, admin_pin, pin_retries, reset_code_retries, admin_pin_retries, force
-):
+@click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
+@click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
+def import_key(ctx, key, private_key, admin_pin):
     """
-    Set PIN, Reset Code and Admin PIN retries.
+    Import a private key (ONLY SUPPORTS ATTESTATION KEY).
+
+    Import a private key for OpenPGP attestation.
+
+    \b
+    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
     controller = ctx.obj["controller"]
 
+    if key != KEY_SLOT.ATT:
+        ctx.fail("Importing keys is only supported for the Attestation slot.")
+
     if admin_pin is None:
         admin_pin = click_prompt("Enter admin PIN", hide_input=True)
-
-    resets_pins = controller.version < (4, 0, 0)
-    if resets_pins:
-        click.echo("WARNING: Setting PIN retries will reset the values for all 3 PINs!")
-    if force or click.confirm(
-        "Set PIN retry counters to: {} {} {}?".format(
-            pin_retries, reset_code_retries, admin_pin_retries
-        ),
-        abort=True,
-        err=True,
-    ):
-
+    try:
+        private_key = parse_private_key(private_key.read(), password=None)
+    except Exception as e:
+        logger.debug("Failed to parse", exc_info=e)
+        ctx.fail("Failed to parse private key.")
+    try:
         controller.verify_admin(admin_pin)
-        controller.set_pin_retries(pin_retries, reset_code_retries, admin_pin_retries)
+        controller.import_key(key, private_key)
+    except Exception as e:
+        logger.debug("Failed to import", exc_info=e)
+        ctx.fail("Failed to import attestation key.")
 
-        if resets_pins:
-            click.echo("Default PINs are set.")
-            echo_default_pins()
 
-
-@openpgp.command()
+@keys.command()
 @click.pass_context
 @click.option("-P", "--pin", help="PIN code.")
 @click_format_option
@@ -308,7 +352,14 @@ def attest(ctx, key, certificate, pin, format):
             ctx.fail("Attestation failed")
 
 
-@openpgp.command("export-certificate")
+@openpgp.group("certificates")
+def certificates():
+    """
+    Manage certificates in the OpenPGP card application.
+    """
+
+
+@certificates.command("export")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click_format_option
@@ -329,7 +380,7 @@ def export_certificate(ctx, key, format, certificate):
     certificate.write(cert.public_bytes(encoding=format))
 
 
-@openpgp.command("delete-certificate")
+@certificates.command("delete")
 @click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
@@ -351,7 +402,7 @@ def delete_certificate(ctx, key, admin_pin):
         ctx.fail("Failed to delete certificate.")
 
 
-@openpgp.command("import-certificate")
+@certificates.command("import")
 @click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
@@ -382,33 +433,3 @@ def import_certificate(ctx, key, cert, admin_pin):
     except Exception as e:
         logger.debug("Failed to import", exc_info=e)
         ctx.fail("Failed to import certificate")
-
-
-@openpgp.command("import-attestation-key")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
-@click.pass_context
-@click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
-def import_attestation_key(ctx, private_key, admin_pin):
-    """
-    Import a private attestation key.
-
-    Import a private key for OpenPGP attestation.
-
-    \b
-    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
-    """
-    controller = ctx.obj["controller"]
-
-    if admin_pin is None:
-        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
-    try:
-        private_key = parse_private_key(private_key.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
-        ctx.fail("Failed to parse private key.")
-    try:
-        controller.verify_admin(admin_pin)
-        controller.import_key(KEY_SLOT.ATT, private_key)
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
-        ctx.fail("Failed to import attestation key.")

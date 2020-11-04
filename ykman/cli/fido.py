@@ -115,93 +115,115 @@ def info(ctx):
         click.echo("PIN is not supported.")
 
 
-def _init_credman(ctx, pin):
-    ctap2 = ctx.obj.get("ctap2")
-
-    if not ctap2:
-        ctx.fail("Listing credentials not supported.")
-    elif not ctap2.info.options.get("clientPin"):
-        ctx.fail("No PIN is set.")
-
-    if pin is None:
-        pin = _prompt_current_pin(prompt="Enter your PIN")
-
-    client_pin = ClientPin(ctap2)
-    try:
-        token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
-    except CtapError as e:
-        if e.code == CtapError.ERR.PIN_INVALID:
-            ctx.fail("Wrong PIN.")
-        else:
-            raise
-
-    return CredentialManagement(ctap2, client_pin.protocol, token)
-
-
-def _gen_creds(credman):
-    for rp in credman.enumerate_rps():
-        for cred in credman.enumerate_creds(rp[CredentialManagement.RESULT.RP_ID_HASH]):
-            yield (
-                rp[CredentialManagement.RESULT.RP]["id"],
-                cred[CredentialManagement.RESULT.CREDENTIAL_ID],
-                cred[CredentialManagement.RESULT.USER]["id"],
-                cred[CredentialManagement.RESULT.USER]["name"],
-            )
-
-
-def _format_cred(rp_id, user_id, user_name):
-    return "{} {} {}".format(rp_id, user_id.hex(), user_name)
-
-
-@fido.command("list")
+@fido.command("reset")
+@click_force_option
 @click.pass_context
-@click.option("-P", "--pin", help="PIN code.")
-def list_creds(ctx, pin):
+def reset(ctx, force):
     """
-    List resident credentials.
+    Reset all FIDO applications.
+
+    This action will wipe all FIDO credentials, including FIDO U2F credentials,
+    on the YubiKey and remove the PIN code.
+
+    The reset must be triggered immediately after the YubiKey is
+    inserted, and requires a touch on the YubiKey.
     """
-    credman = _init_credman(ctx, pin)
 
-    for (rp_id, _, user_id, user_name) in _gen_creds(credman):
-        click.echo(_format_cred(rp_id, user_id, user_name))
+    n_keys = len(list_ctap_devices())
+    if n_keys > 1:
+        ctx.fail("Only one YubiKey can be connected to perform a reset.")
 
+    is_fips = is_fips_version(ctx.obj["info"].version)
 
-@fido.command()
-@click.pass_context
-@click.argument("query")
-@click.option("-P", "--pin", help="PIN code.")
-@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
-def delete(ctx, query, pin, force):
-    """
-    Delete a resident credential.
-    """
-    credman = _init_credman(ctx, pin)
-
-    hits = [
-        (rp_id, cred_id, user_id, user_name)
-        for (rp_id, cred_id, user_id, user_name) in _gen_creds(credman)
-        if query.lower() in user_name.lower()
-        or query.lower() in rp_id.lower()
-        or user_id.hex().startswith(query.lower())
-        or query.lower() in _format_cred(rp_id, user_id, user_name)
-    ]
-    if len(hits) == 0:
-        ctx.fail("No matches, nothing to be done.")
-    elif len(hits) == 1:
-        (rp_id, cred_id, user_id, user_name) = hits[0]
-        if force or click.confirm(
-            "Delete credential {}?".format(_format_cred(rp_id, user_id, user_name))
+    if not force:
+        if not click.confirm(
+            "WARNING! This will delete all FIDO credentials, including FIDO U2F "
+            "credentials, and restore factory settings. Proceed?",
+            err=True,
         ):
-            try:
-                credman.delete_cred(cred_id)
-            except CtapError as e:
-                logger.debug("Failed to delete resident credential", exc_info=e)
-                ctx.fail("Failed to delete resident credential.")
+            ctx.abort()
+
+    def prompt_re_insert_key():
+        click.echo("Remove and re-insert your YubiKey to perform the reset...")
+
+        removed = False
+        while True:
+            sleep(0.5)
+            keys = list_ctap_devices()
+            if not keys:
+                removed = True
+            if removed and len(keys) == 1:
+                return keys[0]
+
+    def try_reset():
+        if not force:
+            dev = prompt_re_insert_key()
+            conn = dev.open_connection(FidoConnection)
+        with PromptTimeout():
+            if is_fips:
+                fips_reset(conn)
+            else:
+                Ctap2(conn).reset()
+
+    if is_fips:
+        if not force:
+            destroy_input = click_prompt(
+                "WARNING! This is a YubiKey FIPS device. This command will also "
+                "overwrite the U2F attestation key; this action cannot be undone and "
+                "this YubiKey will no longer be a FIPS compliant device.\n"
+                'To proceed, please enter the text "OVERWRITE"',
+                default="",
+                show_default=False,
+            )
+            if destroy_input != "OVERWRITE":
+                ctx.fail("Reset aborted by user.")
+
+        try:
+            try_reset()
+
+        except ApduError as e:
+            if e.code == SW.COMMAND_NOT_ALLOWED:
+                ctx.fail(
+                    "Reset failed. Reset must be triggered within 5 seconds after the "
+                    "YubiKey is inserted."
+                )
+            else:
+                logger.error("Reset failed", exc_info=e)
+                ctx.fail("Reset failed.")
+
+        except Exception as e:
+            logger.error("Reset failed", exc_info=e)
+            ctx.fail("Reset failed.")
+
     else:
-        ctx.fail("Multiple matches, make the query more specific.")
+        try:
+            try_reset()
+        except CtapError as e:
+            if e.code == CtapError.ERR.ACTION_TIMEOUT:
+                ctx.fail(
+                    "Reset failed. You need to touch your YubiKey to confirm the reset."
+                )
+            elif e.code == CtapError.ERR.NOT_ALLOWED:
+                ctx.fail(
+                    "Reset failed. Reset must be triggered within 5 seconds after the "
+                    "YubiKey is inserted."
+                )
+            else:
+                logger.error(e)
+                ctx.fail("Reset failed.")
+        except Exception as e:
+            logger.error(e)
+            ctx.fail("Reset failed.")
 
 
-@fido.command("set-pin")
+@fido.group("access")
+def access():
+    """
+    Manage the PIN for FIDO.
+    """
+
+
+@access.command("set-pin")
 @click.pass_context
 @click.option("-P", "--pin", help="Current PIN code.")
 @click.option("-n", "--new-pin", help="A new PIN.")
@@ -317,108 +339,7 @@ def set_pin(ctx, pin, new_pin, u2f):
         set_pin(new_pin)
 
 
-@fido.command("reset")
-@click_force_option
-@click.pass_context
-def reset(ctx, force):
-    """
-    Reset all FIDO applications.
-
-    This action will wipe all FIDO credentials, including FIDO U2F credentials,
-    on the YubiKey and remove the PIN code.
-
-    The reset must be triggered immediately after the YubiKey is
-    inserted, and requires a touch on the YubiKey.
-    """
-
-    n_keys = len(list_ctap_devices())
-    if n_keys > 1:
-        ctx.fail("Only one YubiKey can be connected to perform a reset.")
-
-    is_fips = is_fips_version(ctx.obj["info"].version)
-
-    if not force:
-        if not click.confirm(
-            "WARNING! This will delete all FIDO credentials, including FIDO U2F "
-            "credentials, and restore factory settings. Proceed?",
-            err=True,
-        ):
-            ctx.abort()
-
-    def prompt_re_insert_key():
-        click.echo("Remove and re-insert your YubiKey to perform the reset...")
-
-        removed = False
-        while True:
-            sleep(0.5)
-            keys = list_ctap_devices()
-            if not keys:
-                removed = True
-            if removed and len(keys) == 1:
-                return keys[0]
-
-    def try_reset():
-        if not force:
-            dev = prompt_re_insert_key()
-            conn = dev.open_connection(FidoConnection)
-        with PromptTimeout():
-            if is_fips:
-                fips_reset(conn)
-            else:
-                Ctap2(conn).reset()
-
-    if is_fips:
-        if not force:
-            destroy_input = click_prompt(
-                "WARNING! This is a YubiKey FIPS device. This command will also "
-                "overwrite the U2F attestation key; this action cannot be undone and "
-                "this YubiKey will no longer be a FIPS compliant device.\n"
-                'To proceed, please enter the text "OVERWRITE"',
-                default="",
-                show_default=False,
-            )
-            if destroy_input != "OVERWRITE":
-                ctx.fail("Reset aborted by user.")
-
-        try:
-            try_reset()
-
-        except ApduError as e:
-            if e.code == SW.COMMAND_NOT_ALLOWED:
-                ctx.fail(
-                    "Reset failed. Reset must be triggered within 5 seconds after the "
-                    "YubiKey is inserted."
-                )
-            else:
-                logger.error("Reset failed", exc_info=e)
-                ctx.fail("Reset failed.")
-
-        except Exception as e:
-            logger.error("Reset failed", exc_info=e)
-            ctx.fail("Reset failed.")
-
-    else:
-        try:
-            try_reset()
-        except CtapError as e:
-            if e.code == CtapError.ERR.ACTION_TIMEOUT:
-                ctx.fail(
-                    "Reset failed. You need to touch your YubiKey to confirm the reset."
-                )
-            elif e.code == CtapError.ERR.NOT_ALLOWED:
-                ctx.fail(
-                    "Reset failed. Reset must be triggered within 5 seconds after the "
-                    "YubiKey is inserted."
-                )
-            else:
-                logger.error(e)
-                ctx.fail("Reset failed.")
-        except Exception as e:
-            logger.error(e)
-            ctx.fail("Reset failed.")
-
-
-@fido.command("unlock")
+@access.command("unlock")
 @click.pass_context
 @click.option("-P", "--pin", help="Current PIN code.")
 def unlock(ctx, pin):
@@ -462,6 +383,118 @@ def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
         ctx.fail("PIN must be over {} characters long".format(min_length))
 
 
+def _gen_creds(credman):
+    for rp in credman.enumerate_rps():
+        for cred in credman.enumerate_creds(rp[CredentialManagement.RESULT.RP_ID_HASH]):
+            yield (
+                rp[CredentialManagement.RESULT.RP]["id"],
+                cred[CredentialManagement.RESULT.CREDENTIAL_ID],
+                cred[CredentialManagement.RESULT.USER]["id"],
+                cred[CredentialManagement.RESULT.USER]["name"],
+            )
+
+
+def _format_cred(rp_id, user_id, user_name):
+    return "{} {} {}".format(rp_id, user_id.hex(), user_name)
+
+
+@fido.group("credentials")
+def creds():
+    """
+    Manage resident (discoverable) credentials.
+
+    This command lets you manage credentials stored on your YubiKey.
+
+    \b
+    Examples:
+
+    \b
+      List stored credentials (providing PIN via argument):
+      $ ykman fido credentials --pin 123456 list
+
+    \b
+      Delete a stored credential by user name (PIN will be prompted for):
+      $ ykman fido credentials delete example_user
+    """
+
+
+def _init_credman(ctx, pin):
+    ctap2 = ctx.obj.get("ctap2")
+
+    if not ctap2:
+        ctx.fail("Listing credentials not supported.")
+    elif not ctap2.info.options.get("clientPin"):
+        ctx.fail("No PIN is set.")
+
+    if pin is None:
+        pin = _prompt_current_pin(prompt="Enter your PIN")
+
+    client_pin = ClientPin(ctap2)
+    try:
+        token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
+    except CtapError as e:
+        if e.code == CtapError.ERR.PIN_INVALID:
+            ctx.fail("Wrong PIN.")
+        else:
+            raise
+
+    return CredentialManagement(ctap2, client_pin.protocol, token)
+
+
+@creds.command("list")
+@click.pass_context
+@click.option("-P", "--pin", help="PIN code.")
+def creds_list(ctx, pin):
+    """
+    List resident credentials.
+    """
+    creds = _init_credman(ctx, pin)
+    for (rp_id, _, user_id, user_name) in _gen_creds(creds):
+        click.echo(_format_cred(rp_id, user_id, user_name))
+
+
+@creds.command("delete")
+@click.pass_context
+@click.argument("query")
+@click.option("-P", "--pin", help="PIN code.")
+@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
+def creds_delete(ctx, query, pin, force):
+    """
+    Delete a resident credential.
+    """
+    credman = _init_credman(ctx, pin)
+
+    hits = [
+        (rp_id, cred_id, user_id, user_name)
+        for (rp_id, cred_id, user_id, user_name) in _gen_creds(credman)
+        if query.lower() in user_name.lower()
+        or query.lower() in rp_id.lower()
+        or user_id.hex().startswith(query.lower())
+        or query.lower() in _format_cred(rp_id, user_id, user_name)
+    ]
+    if len(hits) == 0:
+        ctx.fail("No matches, nothing to be done.")
+    elif len(hits) == 1:
+        (rp_id, cred_id, user_id, user_name) = hits[0]
+        if force or click.confirm(
+            "Delete credential {}?".format(_format_cred(rp_id, user_id, user_name))
+        ):
+            try:
+                credman.delete_cred(cred_id)
+            except CtapError as e:
+                logger.debug("Failed to delete resident credential", exc_info=e)
+                ctx.fail("Failed to delete resident credential.")
+    else:
+        ctx.fail("Multiple matches, make the query more specific.")
+
+
+@fido.group("fingerprints")
+def bio():
+    """
+    Manage fingerprints.
+    """
+
+
 def _init_bio(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
 
@@ -482,14 +515,14 @@ def _init_bio(ctx, pin):
         else:
             raise
 
-    return FPBioEnrollment(ctap2, client_pin.protocol, token)
+    ctx.obj["bio"] = FPBioEnrollment(ctap2, client_pin.protocol, token)
 
 
 def _format_fp(template_id, name):
     return "{}{}".format(template_id.hex(), " ({})".format(name) if name else "")
 
 
-@fido.command("list-fingerprints")
+@bio.command("list")
 @click.pass_context
 @click.option("-P", "--pin", help="PIN code.")
 def bio_list(ctx, pin):
@@ -504,7 +537,51 @@ def bio_list(ctx, pin):
         click.echo("ID: {}".format(_format_fp(t_id, name)))
 
 
-@fido.command("delete-fingerprint")
+@bio.command("add")
+@click.pass_context
+@click.argument("name")
+@click.option("-P", "--pin", help="PIN code.")
+def bio_enroll(ctx, name, pin):
+    """
+    Add a new fingerprint.
+    """
+    bio = _init_bio(ctx, pin)
+
+    enroller = bio.enroll()
+    template_id = None
+    while template_id is None:
+        click.echo("Press your fingerprint against the sensor now...")
+        try:
+            template_id = enroller.capture()
+            click.echo("{} more scans needed.".format(enroller.remaining))
+        except CaptureError as e:
+            click.echo(e)
+    bio.set_name(template_id, name)
+
+
+@bio.command("rename")
+@click.pass_context
+@click.argument("template_id", metavar="ID")
+@click.argument("name")
+@click.option("-P", "--pin", help="PIN code.")
+def bio_rename(ctx, template_id, name, pin):
+    """
+    Set the label for a fingerprint.
+    """
+    if len(name) >= 16:
+        ctx.fail("Fingerprint label must be <= 15 characters.")
+
+    bio = _init_bio(ctx, pin)
+    enrollments = bio.enumerate_enrollments()
+
+    key = bytes.fromhex(template_id)
+    if key not in enrollments:
+        ctx.fail("No fingerprint matching ID={}.".format(template_id))
+
+    bio.set_name(key, name)
+
+
+@bio.command("delete")
 @click.pass_context
 @click.argument("template_id", metavar="ID")
 @click.option("-P", "--pin", help="PIN code.")
@@ -530,47 +607,3 @@ def bio_delete(ctx, template_id, pin, force):
         except CtapError as e:
             logger.debug("Failed to delete fingerprint template", exc_info=e)
             ctx.fail("Failed to delete fingerprint.")
-
-
-@fido.command("rename-fingerprint")
-@click.pass_context
-@click.argument("template_id", metavar="ID")
-@click.argument("name")
-@click.option("-P", "--pin", help="PIN code.")
-def bio_rename(ctx, template_id, name, pin):
-    """
-    Set the label for a fingerprint.
-    """
-    if len(name) >= 16:
-        ctx.fail("Fingerprint label must be <= 15 characters.")
-
-    bio = _init_bio(ctx, pin)
-    enrollments = bio.enumerate_enrollments()
-
-    key = bytes.fromhex(template_id)
-    if key not in enrollments:
-        ctx.fail("No fingerprint matching ID={}.".format(template_id))
-
-    bio.set_name(key, name)
-
-
-@fido.command("enroll-fingerprint")
-@click.pass_context
-@click.argument("name")
-@click.option("-P", "--pin", help="PIN code.")
-def bio_enroll(ctx, name, pin):
-    """
-    Enroll a new fingerprint.
-    """
-    bio = _init_bio(ctx, pin)
-
-    enroller = bio.enroll()
-    template_id = None
-    while template_id is None:
-        click.echo("Press your fingerprint against the sensor now...")
-        try:
-            template_id = enroller.capture()
-            click.echo("{} more scans needed.".format(enroller.remaining))
-        except CaptureError as e:
-            click.echo(e)
-    bio.set_name(template_id, name)

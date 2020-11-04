@@ -81,9 +81,25 @@ logger = logging.getLogger(__name__)
 @click_callback()
 def click_parse_piv_slot(ctx, param, val):
     try:
-        return SLOT(int(val, 16))
-    except Exception:
-        raise ValueError(val)
+        return SLOT[val.upper().replace("-", "_")]
+    except KeyError:
+        try:
+            return SLOT(int(val, 16))
+        except Exception:
+            raise ValueError(val)
+
+
+@click_callback()
+def click_parse_piv_object(ctx, param, val):
+    if val.upper() == "CCC":
+        return OBJECT_ID.CAPABILITY
+    try:
+        return OBJECT_ID[val.upper().replace("-", "_")]
+    except KeyError:
+        try:
+            return int(val, 16)
+        except Exception:
+            raise ValueError(val)
 
 
 @click_callback()
@@ -101,6 +117,9 @@ def click_parse_management_key(ctx, param, val):
 
 
 click_slot_argument = click.argument("slot", callback=click_parse_piv_slot)
+click_object_argument = click.argument(
+    "object_id", callback=click_parse_piv_object, metavar="OBJECT"
+)
 click_management_key_option = click.option(
     "-m",
     "--management-key",
@@ -264,271 +283,12 @@ def reset(ctx):
     click.echo("\tManagement Key:\t010203040506070801020304050607080102030405060708")
 
 
-@piv.command("generate-key")
-@click.pass_context
-@click_slot_argument
-@click_management_key_option
-@click_pin_option
-@click.option(
-    "-a",
-    "--algorithm",
-    help="Algorithm to use in key generation.",
-    type=EnumChoice(KEY_TYPE),
-    default=KEY_TYPE.RSA2048.name,
-    show_default=True,
-)
-@click_format_option
-@click_pin_policy_option
-@click_touch_policy_option
-@click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
-def generate_key(
-    ctx,
-    slot,
-    public_key_output,
-    management_key,
-    pin,
-    algorithm,
-    format,
-    pin_policy,
-    touch_policy,
-):
-    """
-    Generate an asymmetric key pair.
-
-    The private key is generated on the YubiKey, and written to one of the
-    slots.
-
-    \b
-    SLOT        PIV slot where private key should be stored.
-    PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
-    """
-
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
-
-    try:
-        public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
-    except NotSupportedError as e:
-        ctx.fail(e.message)
-
-    key_encoding = format
-    public_key_output.write(
-        public_key.public_bytes(
-            encoding=key_encoding,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-    )
+@piv.group()
+def access():
+    """Manage PIN, PUK and Management Key."""
 
 
-@piv.command("import-certificate")
-@click.pass_context
-@click_slot_argument
-@click_management_key_option
-@click_pin_option
-@click.option("-p", "--password", help="A password may be needed to decrypt the data.")
-@click.option(
-    "-v",
-    "--verify",
-    is_flag=True,
-    help="Verify that the certificate matches the private key in the slot.",
-)
-@click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
-def import_certificate(ctx, slot, management_key, pin, cert, password, verify):
-    """
-    Import an X.509 certificate.
-
-    Write a certificate to one of the PIV slots on the YubiKey.
-
-    \b
-    SLOT            PIV slot to import the certificate to.
-    CERTIFICATE     File containing the certificate. Use '-' to use stdin.
-    """
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
-
-    data = cert.read()
-
-    while True:
-        if password is not None:
-            password = password.encode()
-        try:
-            certs = parse_certificates(data, password)
-        except (ValueError, TypeError):
-            if password is None:
-                password = click_prompt(
-                    "Enter password to decrypt certificate",
-                    default="",
-                    hide_input=True,
-                    show_default=False,
-                )
-                continue
-            else:
-                password = None
-                click.echo("Wrong password.")
-            continue
-        break
-
-    if len(certs) > 1:
-        #  If multiple certs, only import leaf.
-        #  Leaf is the cert with a subject that is not an issuer in the chain.
-        leafs = get_leaf_certificates(certs)
-        cert_to_import = leafs[0]
-    else:
-        cert_to_import = certs[0]
-
-    def do_import(retry=True):
-        if verify:
-            try:
-                with PromptTimeout():
-                    if not check_key(session, slot, cert_to_import.public_key()):
-                        ctx.fail(
-                            "This certificate is not tied to the private key in the "
-                            "{} slot.".format(slot.name)
-                        )
-            except ApduError as e:
-                if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
-                    pivman = ctx.obj["pivman_data"]
-                    _verify_pin(ctx, session, pivman, pin)
-                    do_import(retry=False)
-                else:
-                    raise
-
-        session.put_certificate(slot, cert_to_import)
-        session.put_object(OBJECT_ID.CHUID, generate_chuid())
-
-    do_import()
-
-
-@piv.command("import-key")
-@click.pass_context
-@click_slot_argument
-@click_pin_option
-@click_management_key_option
-@click_pin_policy_option
-@click_touch_policy_option
-@click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
-@click.option("-p", "--password", help="Password used to decrypt the private key.")
-def import_key(
-    ctx, slot, management_key, pin, private_key, pin_policy, touch_policy, password
-):
-    """
-    Import a private key.
-
-    Write a private key to one of the PIV slots on the YubiKey.
-
-    \b
-    SLOT        PIV slot to import the private key to.
-    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
-    """
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
-
-    data = private_key.read()
-
-    while True:
-        if password is not None:
-            password = password.encode()
-        try:
-            private_key = parse_private_key(data, password)
-        except (ValueError, TypeError):
-            if password is None:
-                password = click_prompt(
-                    "Enter password to decrypt key",
-                    default="",
-                    hide_input=True,
-                    show_default=False,
-                )
-                continue
-            else:
-                password = None
-                click.echo("Wrong password.")
-            continue
-        break
-
-    try:
-        session.put_key(slot, private_key, pin_policy, touch_policy)
-    except NotSupportedError as e:
-        ctx.fail(e.message)
-
-
-@piv.command()
-@click.pass_context
-@click_slot_argument
-@click_format_option
-@click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
-def attest(ctx, slot, certificate, format):
-    """
-    Generate an attestation certificate for a key pair.
-
-    Attestation is used to show that an asymmetric key was generated on the
-    YubiKey and therefore doesn't exist outside the device.
-
-    \b
-    SLOT        PIV slot with a private key to attest.
-    CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
-    """
-    session = ctx.obj["session"]
-    try:
-        cert = session.attest_key(slot)
-    except ApduError as e:
-        logger.error("Attestation failed", exc_info=e)
-        ctx.fail("Attestation failed.")
-    certificate.write(cert.public_bytes(encoding=format))
-
-
-@piv.command("export-certificate")
-@click.pass_context
-@click_slot_argument
-@click_format_option
-@click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
-def export_certificate(ctx, slot, format, certificate):
-    """
-    Export an X.509 certificate.
-
-    Reads a certificate from one of the PIV slots on the YubiKey.
-
-    \b
-    SLOT        PIV slot to read certificate from.
-    CERTIFICATE File to write certificate to. Use '-' to use stdout.
-    """
-    session = ctx.obj["session"]
-    try:
-        cert = session.get_certificate(slot)
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            ctx.fail("No certificate found.")
-        else:
-            logger.error("Failed to read certificate from slot %s", slot, exc_info=e)
-    certificate.write(cert.public_bytes(encoding=format))
-
-
-@piv.command("set-chuid")
-@click.pass_context
-@click_pin_option
-@click_management_key_option
-def set_chuid(ctx, management_key, pin):
-    """
-    Generate and set a CHUID (Cardholder Unique Identifier) on the YubiKey.
-    """
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
-    session.put_object(OBJECT_ID.CHUID, generate_chuid())
-
-
-@piv.command("set-ccc")
-@click.pass_context
-@click_pin_option
-@click_management_key_option
-def set_ccc(ctx, management_key, pin):
-    """
-    Generate and set a CCC (Card Capability Container) on the YubiKey.
-    """
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
-    session.put_object(OBJECT_ID.CAPABILITY, generate_ccc())
-
-
-@piv.command("set-pin-retries")
+@access.command("set-retries")
 @click.pass_context
 @click.argument("pin-retries", type=click.IntRange(1, 255), metavar="PIN-RETRIES")
 @click.argument("puk-retries", type=click.IntRange(1, 255), metavar="PUK-RETRIES")
@@ -562,120 +322,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         ctx.fail("Setting pin retries failed.")
 
 
-@piv.command("generate-certificate")
-@click.pass_context
-@click_slot_argument
-@click_management_key_option
-@click_pin_option
-@click.argument("public-key", type=click.File("rb"), metavar="PUBLIC-KEY")
-@click.option(
-    "-s",
-    "--subject",
-    help="Subject common name (CN) for the certificate.",
-    required=True,
-)
-@click.option(
-    "-d",
-    "--valid-days",
-    help="Number of days until the certificate expires.",
-    type=click.INT,
-    default=365,
-    show_default=True,
-)
-def generate_certificate(
-    ctx, slot, management_key, pin, public_key, subject, valid_days
-):
-    """
-    Generate a self-signed X.509 certificate.
-
-    A self-signed certificate is generated and written to one of the slots on
-    the YubiKey. A private key must already be present in the corresponding key slot.
-
-    \b
-    SLOT            PIV slot where private key is stored.
-    PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
-    """
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
-
-    data = public_key.read()
-    public_key = serialization.load_pem_public_key(data, default_backend())
-
-    now = datetime.datetime.utcnow()
-    valid_to = now + datetime.timedelta(days=valid_days)
-
-    try:
-        with PromptTimeout():
-            cert = generate_self_signed_certificate(
-                session, slot, public_key, subject, now, valid_to
-            )
-            session.put_certificate(slot, cert)
-            session.put_object(OBJECT_ID.CHUID, generate_chuid())
-    except ApduError as e:
-        logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
-        ctx.fail("Certificate generation failed.")
-
-
-@piv.command("generate-csr")
-@click.pass_context
-@click_slot_argument
-@click_pin_option
-@click.argument("public-key", type=click.File("rb"), metavar="PUBLIC-KEY")
-@click.argument("csr-output", type=click.File("wb"), metavar="CSR")
-@click.option(
-    "-s",
-    "--subject",
-    help="Subject common name (CN) for the requested certificate.",
-    required=True,
-)
-def generate_certificate_signing_request(
-    ctx, slot, pin, public_key, csr_output, subject
-):
-    """
-    Generate a Certificate Signing Request (CSR).
-
-    A private key must already be present in the corresponding key slot.
-
-
-    \b
-    SLOT        PIV slot where the private key is stored.
-    PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
-    CSR         File to write CSR to. Use '-' to use stdout.
-    """
-    session = ctx.obj["session"]
-    pivman = ctx.obj["pivman_data"]
-    _verify_pin(ctx, session, pivman, pin)
-
-    data = public_key.read()
-    public_key = serialization.load_pem_public_key(data, default_backend())
-
-    try:
-        with PromptTimeout():
-            csr = generate_csr(session, slot, public_key, subject)
-    except ApduError:
-        ctx.fail("Certificate Signing Request generation failed.")
-
-    csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
-
-
-@piv.command("delete-certificate")
-@click.pass_context
-@click_slot_argument
-@click_management_key_option
-@click_pin_option
-def delete_certificate(ctx, slot, management_key, pin):
-    """
-    Delete a certificate.
-
-    Delete a certificate from a PIV slot on the YubiKey.
-    """
-    session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
-    session.delete_certificate(slot)
-    session.put_object(OBJECT_ID.CHUID, generate_chuid())
-
-
-@piv.command("change-pin")
+@access.command("change-pin")
 @click.pass_context
 @click.option("-P", "--pin", help="Current PIN code.")
 @click.option("-n", "--new-pin", help="A new PIN.")
@@ -722,7 +369,7 @@ def change_pin(ctx, pin, new_pin):
             ctx.fail("PIN is blocked.")
 
 
-@piv.command("change-puk")
+@access.command("change-puk")
 @click.pass_context
 @click.option("-p", "--puk", help="Current PUK code.")
 @click.option("-n", "--new-puk", help="A new PUK code.")
@@ -765,7 +412,7 @@ def change_puk(ctx, puk, new_puk):
             ctx.fail("PUK is blocked.")
 
 
-@piv.command("change-management-key")
+@access.command("change-management-key")
 @click.pass_context
 @click_pin_option
 @click.option(
@@ -881,15 +528,13 @@ def change_management_key(
         ctx.fail("Changing the management key failed.")
 
 
-@piv.command("unblock-pin")
+@access.command("unblock-pin")
 @click.pass_context
 @click.option("-p", "--puk", required=False)
 @click.option("-n", "--new-pin", required=False, metavar="NEW-PIN")
 def unblock_pin(ctx, puk, new_pin):
     """
-    Unblock the PIN.
-
-    Reset the PIN using the PUK code.
+    Unblock the PIN (using PUK).
     """
     session = ctx.obj["session"]
     if not puk:
@@ -901,21 +546,404 @@ def unblock_pin(ctx, puk, new_pin):
     session.unblock_pin(puk, new_pin)
 
 
-@piv.command("read-object")
+@piv.group()
+def keys():
+    """
+    Manage private keys.
+    """
+
+
+@keys.command("generate")
+@click.pass_context
+@click_management_key_option
+@click_pin_option
+@click.option(
+    "-a",
+    "--algorithm",
+    help="Algorithm to use in key generation.",
+    type=EnumChoice(KEY_TYPE),
+    default=KEY_TYPE.RSA2048.name,
+    show_default=True,
+)
+@click_format_option
+@click_pin_policy_option
+@click_touch_policy_option
+@click_slot_argument
+@click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
+def generate_key(
+    ctx,
+    slot,
+    public_key_output,
+    management_key,
+    pin,
+    algorithm,
+    format,
+    pin_policy,
+    touch_policy,
+):
+    """
+    Generate an asymmetric key pair.
+
+    The private key is generated on the YubiKey, and written to one of the slots.
+
+    \b
+    SLOT        PIV slot of the private key.
+    PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
+    """
+
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+
+    try:
+        public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
+    except NotSupportedError as e:
+        ctx.fail(e.message)
+
+    key_encoding = format
+    public_key_output.write(
+        public_key.public_bytes(
+            encoding=key_encoding,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+
+
+@keys.command("import")
+@click.pass_context
+@click_pin_option
+@click_management_key_option
+@click_pin_policy_option
+@click_touch_policy_option
+@click_slot_argument
+@click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
+@click.option("-p", "--password", help="Password used to decrypt the private key.")
+def import_key(
+    ctx, management_key, pin, slot, private_key, pin_policy, touch_policy, password
+):
+    """
+    Import a private key from file.
+
+    Write a private key to one of the PIV slots on the YubiKey.
+
+    \b
+    SLOT        PIV slot of the private key.
+    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
+    """
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+
+    data = private_key.read()
+
+    while True:
+        if password is not None:
+            password = password.encode()
+        try:
+            private_key = parse_private_key(data, password)
+        except (ValueError, TypeError):
+            if password is None:
+                password = click_prompt(
+                    "Enter password to decrypt key",
+                    default="",
+                    hide_input=True,
+                    show_default=False,
+                )
+                continue
+            else:
+                password = None
+                click.echo("Wrong password.")
+            continue
+        break
+
+    try:
+        session.put_key(slot, private_key, pin_policy, touch_policy)
+    except NotSupportedError as e:
+        ctx.fail(e.message)
+
+
+@keys.command()
+@click.pass_context
+@click_format_option
+@click_slot_argument
+@click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
+def attest(ctx, slot, certificate, format):
+    """
+    Generate an attestation certificate for a key pair.
+
+    Attestation is used to show that an asymmetric key was generated on the
+    YubiKey and therefore doesn't exist outside the device.
+
+    \b
+    SLOT        PIV slot of the private key.
+    CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
+    """
+    session = ctx.obj["session"]
+    try:
+        cert = session.attest_key(slot)
+    except ApduError as e:
+        logger.error("Attestation failed", exc_info=e)
+        ctx.fail("Attestation failed.")
+    certificate.write(cert.public_bytes(encoding=format))
+
+
+@piv.group("certificates")
+def cert():
+    """
+    Manage certificates.
+    """
+
+
+@cert.command("import")
+@click.pass_context
+@click_management_key_option
+@click_pin_option
+@click.option("-p", "--password", help="A password may be needed to decrypt the data.")
+@click.option(
+    "-v",
+    "--verify",
+    is_flag=True,
+    help="Verify that the certificate matches the private key in the slot.",
+)
+@click_slot_argument
+@click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
+def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
+    """
+    Import an X.509 certificate.
+
+    Write a certificate to one of the PIV slots on the YubiKey.
+
+    \b
+    SLOT            PIV slot of the certificate.
+    CERTIFICATE     File containing the certificate. Use '-' to use stdin.
+    """
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+
+    data = cert.read()
+
+    while True:
+        if password is not None:
+            password = password.encode()
+        try:
+            certs = parse_certificates(data, password)
+        except (ValueError, TypeError):
+            if password is None:
+                password = click_prompt(
+                    "Enter password to decrypt certificate",
+                    default="",
+                    hide_input=True,
+                    show_default=False,
+                )
+                continue
+            else:
+                password = None
+                click.echo("Wrong password.")
+            continue
+        break
+
+    if len(certs) > 1:
+        #  If multiple certs, only import leaf.
+        #  Leaf is the cert with a subject that is not an issuer in the chain.
+        leafs = get_leaf_certificates(certs)
+        cert_to_import = leafs[0]
+    else:
+        cert_to_import = certs[0]
+
+    def do_import(retry=True):
+        if verify:
+            try:
+                with PromptTimeout():
+                    if not check_key(session, slot, cert_to_import.public_key()):
+                        ctx.fail(
+                            "This certificate is not tied to the private key in the "
+                            "{} slot.".format(slot.name)
+                        )
+            except ApduError as e:
+                if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
+                    pivman = ctx.obj["pivman_data"]
+                    _verify_pin(ctx, session, pivman, pin)
+                    do_import(retry=False)
+                else:
+                    raise
+
+        session.put_certificate(slot, cert_to_import)
+        session.put_object(OBJECT_ID.CHUID, generate_chuid())
+
+    do_import()
+
+
+@cert.command("export")
+@click.pass_context
+@click_format_option
+@click_slot_argument
+@click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
+def export_certificate(ctx, format, slot, certificate):
+    """
+    Export an X.509 certificate.
+
+    Reads a certificate from one of the PIV slots on the YubiKey.
+
+    \b
+    SLOT            PIV slot of the certificate.
+    CERTIFICATE File to write certificate to. Use '-' to use stdout.
+    """
+    session = ctx.obj["session"]
+    try:
+        cert = session.get_certificate(slot)
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
+            ctx.fail("No certificate found.")
+        else:
+            logger.error("Failed to read certificate from slot %s", slot, exc_info=e)
+    certificate.write(cert.public_bytes(encoding=format))
+
+
+@cert.command("generate")
+@click.pass_context
+@click_management_key_option
+@click_pin_option
+@click_slot_argument
+@click.argument("public-key", type=click.File("rb"), metavar="PUBLIC-KEY")
+@click.option(
+    "-s",
+    "--subject",
+    help="Subject common name (CN) for the certificate.",
+    required=True,
+)
+@click.option(
+    "-d",
+    "--valid-days",
+    help="Number of days until the certificate expires.",
+    type=click.INT,
+    default=365,
+    show_default=True,
+)
+def generate_certificate(
+    ctx, management_key, pin, slot, public_key, subject, valid_days
+):
+    """
+    Generate a self-signed X.509 certificate.
+
+    A self-signed certificate is generated and written to one of the slots on
+    the YubiKey. A private key must already be present in the corresponding key slot.
+
+    \b
+    SLOT            PIV slot of the certificate.
+    PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
+    """
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
+
+    data = public_key.read()
+    public_key = serialization.load_pem_public_key(data, default_backend())
+
+    now = datetime.datetime.utcnow()
+    valid_to = now + datetime.timedelta(days=valid_days)
+
+    try:
+        with PromptTimeout():
+            cert = generate_self_signed_certificate(
+                session, slot, public_key, subject, now, valid_to
+            )
+            session.put_certificate(slot, cert)
+            session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    except ApduError as e:
+        logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
+        ctx.fail("Certificate generation failed.")
+
+
+@cert.command("request")
+@click.pass_context
+@click_pin_option
+@click_slot_argument
+@click.argument("public-key", type=click.File("rb"), metavar="PUBLIC-KEY")
+@click.argument("csr-output", type=click.File("wb"), metavar="CSR")
+@click.option(
+    "-s",
+    "--subject",
+    help="Subject common name (CN) for the requested certificate.",
+    required=True,
+)
+def generate_certificate_signing_request(
+    ctx, pin, slot, public_key, csr_output, subject
+):
+    """
+    Generate a Certificate Signing Request (CSR).
+
+    A private key must already be present in the corresponding key slot.
+
+    \b
+    SLOT            PIV slot of the certificate.
+    PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
+    CSR         File to write CSR to. Use '-' to use stdout.
+    """
+    session = ctx.obj["session"]
+    pivman = ctx.obj["pivman_data"]
+    _verify_pin(ctx, session, pivman, pin)
+
+    data = public_key.read()
+    public_key = serialization.load_pem_public_key(data, default_backend())
+
+    try:
+        with PromptTimeout():
+            csr = generate_csr(session, slot, public_key, subject)
+    except ApduError:
+        ctx.fail("Certificate Signing Request generation failed.")
+
+    csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
+
+
+@cert.command("delete")
+@click.pass_context
+@click_management_key_option
+@click_pin_option
+@click_slot_argument
+def delete_certificate(ctx, management_key, pin, slot):
+    """
+    Delete a certificate.
+
+    Delete a certificate from a PIV slot on the YubiKey.
+
+    \b
+    SLOT            PIV slot of the certificate.
+    """
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    session.delete_certificate(slot)
+    session.put_object(OBJECT_ID.CHUID, generate_chuid())
+
+
+@piv.group("objects")
+def objects():
+    """
+    Manage PIV data objects.
+
+    Examples:
+
+    \b
+      Write the contents of a file to data object with ID: abc123:
+      $ ykman piv objects import abc123 myfile.txt
+
+    \b
+      Read the contents of the data object with ID: abc123 into a file:
+      $ ykman piv objects export abc123 myfile.txt
+
+    \b
+      Generate a random value for CHUID:
+      $ ykman piv objects generate chuid
+    """
+
+
+@objects.command("export")
 @click_pin_option
 @click.pass_context
-@click.argument(
-    "object-id", callback=lambda ctx, param, value: int(value, 16), metavar="OBJECT-ID"
-)
+@click_object_argument
 @click.argument("output", type=click.File("wb"), metavar="OUTPUT")
 def read_object(ctx, pin, object_id, output):
     """
-    Read an arbitrary PIV object.
-
-    Read PIV object by providing the object id.
+    Export an arbitrary PIV data object.
 
     \b
-    OBJECT-ID       Id of PIV object in HEX.
+    OBJECT          Name of PIV data object, or ID in HEX.
     OUTPUT          File to write object to. Use '-' to use stdout.
     """
 
@@ -937,13 +965,11 @@ def read_object(ctx, pin, object_id, output):
     do_read_object()
 
 
-@piv.command("write-object")
+@objects.command("import")
 @click_pin_option
 @click_management_key_option
 @click.pass_context
-@click.argument(
-    "object-id", callback=lambda ctx, param, value: int(value, 16), metavar="OBJECT-ID"
-)
+@click_object_argument
 @click.argument("data", type=click.File("rb"), metavar="DATA")
 def write_object(ctx, pin, management_key, object_id, data):
     """
@@ -954,7 +980,7 @@ def write_object(ctx, pin, management_key, object_id, data):
     the range 5f0000 - 5fffff.
 
     \b
-    OBJECT-ID      Id of PIV object in HEX.
+    OBJECT         Name of PIV data object, or ID in HEX.
     DATA           File containing the data to be written. Use '-' to use stdin.
     """
 
@@ -971,6 +997,34 @@ def write_object(ctx, pin, management_key, object_id, data):
             raise
 
     do_write_object()
+
+
+@objects.command("generate")
+@click_pin_option
+@click_management_key_option
+@click.pass_context
+@click_object_argument
+def generate_object(ctx, pin, management_key, object_id):
+    """
+    Generate and write data for a supported data object.
+
+    \b
+    OBJECT         Name of PIV data object, or ID in HEX.
+
+    \b
+    Supported data objects are:
+      "CHUID" (Card Holder Unique ID)
+      "CCC"   (Card Capability Container)
+    """
+
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    if OBJECT_ID.CHUID == object_id:
+        session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    elif OBJECT_ID.CAPABILITY == object_id:
+        session.put_object(OBJECT_ID.CAPABILITY, generate_ccc())
+    else:
+        ctx.fail("Unsupported object ID for generate.")
 
 
 def _prompt_management_key(
