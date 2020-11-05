@@ -45,7 +45,7 @@ from ..device import (
 from .util import UpperCaseChoice, YkmanContextObject, YkmanGroup
 from .info import info
 from .otp import otp
-from .opgp import openpgp
+from .openpgp import openpgp
 from .oath import oath
 from .piv import piv
 from .fido import fido

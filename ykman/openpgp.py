@@ -283,7 +283,7 @@ class Kdf(object):
         return digest.finalize()
 
 
-class OpgpController(object):
+class OpenPgpController(object):
     def __init__(self, protocol):
         self._app = protocol
         try:

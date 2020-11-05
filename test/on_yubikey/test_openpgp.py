@@ -4,7 +4,7 @@ import unittest
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from ykman.opgp import OpgpController, KEY_SLOT
+from ykman.openpgp import OpenPgpController, KEY_SLOT
 from yubikit.core import USB_INTERFACE
 from yubikit.core.smartcard import ApduError, SmartCardProtocol
 from .framework import device_test_suite, yubikey_conditions
@@ -18,10 +18,10 @@ NON_DEFAULT_ADMIN_PIN = "87654321"
 
 @device_test_suite(USB_INTERFACE.CCID)
 def additional_tests(open_device):
-    class OpgpTestCase(unittest.TestCase):
+    class OpenPgpTestCase(unittest.TestCase):
         def setUp(self):
             self.conn = open_device()[0]
-            self.controller = OpgpController(SmartCardProtocol(self.conn))
+            self.controller = OpenPgpController(SmartCardProtocol(self.conn))
 
         def tearDown(self):
             self.conn.close()
@@ -29,13 +29,13 @@ def additional_tests(open_device):
         def reconnect(self):
             self.conn.close()
             self.conn = open_device()[0]
-            self.controller = OpgpController(SmartCardProtocol(self.conn))
+            self.controller = OpenPgpController(SmartCardProtocol(self.conn))
 
-    class KeyManagement(OpgpTestCase):
+    class KeyManagement(OpenPgpTestCase):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                controller = OpgpController(SmartCardProtocol(conn))
+                controller = OpenPgpController(SmartCardProtocol(conn))
                 controller.reset()
 
         def test_generate_requires_admin(self):
@@ -108,4 +108,4 @@ def additional_tests(open_device):
             self.controller.verify_admin(DEFAULT_ADMIN_PIN)
             self.controller.import_key(KEY_SLOT.ENC, priv)
 
-    return [OpgpTestCase, KeyManagement]
+    return [OpenPgpTestCase, KeyManagement]

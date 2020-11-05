@@ -28,7 +28,7 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..opgp import OpgpController, KEY_SLOT, TOUCH_MODE
+from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE
 from .util import (
     click_force_option,
     click_format_option,
@@ -93,7 +93,7 @@ def openpgp(ctx):
       $ ykman openpgp set-touch aut on
     """
     try:
-        ctx.obj["controller"] = OpgpController(SmartCardProtocol(ctx.obj["conn"]))
+        ctx.obj["controller"] = OpenPgpController(SmartCardProtocol(ctx.obj["conn"]))
     except ApduError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this YubiKey.")
