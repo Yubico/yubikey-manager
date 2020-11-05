@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.utils import int_from_bytes
 from cryptography.x509.oid import NameOID
 from ykman.cli.__main__ import cli
+from ykman.cli.aliases import apply_aliases
 from ykman.util import Tlv
 
 
@@ -38,8 +39,9 @@ def ykman_cli_bytes(*argv, **kwargs):
 
 
 def ykman_cli_raw(*argv, **kwargs):
+    argv = apply_aliases(["ykman"] + [str(a) for a in argv])
     runner = CliRunner()
-    result = runner.invoke(cli, list(argv), obj={}, **kwargs)
+    result = runner.invoke(cli, argv[1:], obj={}, **kwargs)
     return result
 
 

@@ -25,7 +25,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import sys
 import click
 
 """
@@ -72,14 +71,15 @@ def _find_match(data, selection):
             return i
 
 
-def apply_aliases():
+def apply_aliases(argv):
     for (alias, replacement) in _aliases:
-        i = _find_match(sys.argv, alias)
+        i = _find_match(argv, alias)
         if i is not None:
-            sys.argv = sys.argv[:i] + replacement + sys.argv[i + len(alias) :]
+            argv = argv[:i] + replacement + argv[i + len(alias) :]
             click.echo(
                 "WARNING: The use of this command is deprecated and will be removed!\n"
-                "Replace with: ykman " + " ".join(sys.argv[1:]) + "\n",
+                "Replace with: ykman " + " ".join(argv[1:]) + "\n",
                 err=True,
             )
-            return
+            break  # Only handle first match
+    return argv

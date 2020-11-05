@@ -285,7 +285,8 @@ for cmd in COMMANDS:
 
 
 def main():
-    apply_aliases()
+    sys.argv = apply_aliases(sys.argv)
+
     try:
         cli(obj={})
     except ApplicationNotAvailableError as e:
