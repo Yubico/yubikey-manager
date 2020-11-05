@@ -515,7 +515,7 @@ def _init_bio(ctx, pin):
         else:
             raise
 
-    ctx.obj["bio"] = FPBioEnrollment(ctap2, client_pin.protocol, token)
+    return FPBioEnrollment(ctap2, client_pin.protocol, token)
 
 
 def _format_fp(template_id, name):
