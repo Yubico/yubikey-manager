@@ -461,6 +461,10 @@ def creds_list(ctx, pin):
 def creds_delete(ctx, query, pin, force):
     """
     Delete a resident credential.
+
+    \b
+    QUERY       A unique substring match of a credentials RP ID, user ID (hex) or name,
+                or credential ID.
     """
     credman = _init_credman(ctx, pin)
 
@@ -544,6 +548,9 @@ def bio_list(ctx, pin):
 def bio_enroll(ctx, name, pin):
     """
     Add a new fingerprint.
+
+    \b
+    NAME        A short readable name for the fingerprint (eg. "Left thumb").
     """
     bio = _init_bio(ctx, pin)
 
@@ -567,6 +574,10 @@ def bio_enroll(ctx, name, pin):
 def bio_rename(ctx, template_id, name, pin):
     """
     Set the label for a fingerprint.
+
+    \b
+    ID          The ID of the fingerprint to rename (as shown in "list").
+    NAME        A short readable name for the fingerprint (eg. "Left thumb").
     """
     if len(name) >= 16:
         ctx.fail("Fingerprint label must be <= 15 characters.")

@@ -61,7 +61,7 @@ def _pid_from_name(name):
     return key_type.get_pid(interfaces)
 
 
-class ScardDevice(YubiKeyDevice):
+class ScardYubiKeyDevice(YubiKeyDevice):
     """YubiKey Smart card device"""
 
     def __init__(self, reader):
@@ -70,7 +70,7 @@ class ScardDevice(YubiKeyDevice):
             transport = TRANSPORT.USB
         else:
             transport = TRANSPORT.NFC
-        super(ScardDevice, self).__init__(
+        super(ScardYubiKeyDevice, self).__init__(
             transport, reader.name, _pid_from_name(reader.name)
         )
         self.reader = reader
@@ -86,7 +86,7 @@ class ScardDevice(YubiKeyDevice):
         elif issubclass(CtapPcscDevice, connection_type):
             if self.transport == TRANSPORT.NFC:
                 return CtapPcscDevice(self.reader.createConnection(), self.reader.name)
-        return super(ScardDevice, self).open_connection(connection_type)
+        return super(ScardYubiKeyDevice, self).open_connection(connection_type)
 
     def _open_smartcard_connection(self) -> SmartCardConnection:
         try:
@@ -161,5 +161,5 @@ def list_devices(name_filter=None):
     devices = []
     for reader in list_readers():
         if name_filter.lower() in reader.name.lower():
-            devices.append(ScardDevice(reader))
+            devices.append(ScardYubiKeyDevice(reader))
     return devices
