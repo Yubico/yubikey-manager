@@ -103,12 +103,14 @@ def info(ctx):
             try:
                 click.echo(
                     "PIN is set, with {} tries left.".format(
-                        client_pin.get_pin_retries()
+                        client_pin.get_pin_retries()[0]
                     )
                 )
             except CtapError as e:
                 if e.code == CtapError.ERR.PIN_BLOCKED:
                     click.echo("PIN is blocked.")
+                else:
+                    raise
         else:
             click.echo("PIN is not set.")
     else:
@@ -182,13 +184,13 @@ def reset(ctx, force):
             try_reset()
 
         except ApduError as e:
+            logger.error("Reset failed", exc_info=e)
             if e.code == SW.COMMAND_NOT_ALLOWED:
                 ctx.fail(
                     "Reset failed. Reset must be triggered within 5 seconds after the "
                     "YubiKey is inserted."
                 )
             else:
-                logger.error("Reset failed", exc_info=e)
                 ctx.fail("Reset failed.")
 
         except Exception as e:
@@ -199,6 +201,7 @@ def reset(ctx, force):
         try:
             try_reset()
         except CtapError as e:
+            logger.error(e)
             if e.code == CtapError.ERR.ACTION_TIMEOUT:
                 ctx.fail(
                     "Reset failed. You need to touch your YubiKey to confirm the reset."
@@ -209,8 +212,7 @@ def reset(ctx, force):
                     "YubiKey is inserted."
                 )
             else:
-                logger.error(e)
-                ctx.fail("Reset failed.")
+                ctx.fail("Reset failed: %s" % e.code.name)
         except Exception as e:
             logger.error(e)
             ctx.fail("Reset failed.")
@@ -288,39 +290,40 @@ def set_pin(ctx, pin, new_pin, u2f):
                 client_pin.change_pin(pin, new_pin)
 
         except CtapError as e:
+            logger.error("Failed to change PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_INVALID:
                 ctx.fail("Wrong PIN.")
-            if e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
+            elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
                 ctx.fail(
                     "PIN authentication is currently blocked. "
                     "Remove and re-insert the YubiKey."
                 )
-            if e.code == CtapError.ERR.PIN_BLOCKED:
+            elif e.code == CtapError.ERR.PIN_BLOCKED:
                 ctx.fail("PIN is blocked.")
-            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            elif e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 ctx.fail("New PIN is too long.")
-            logger.error("Failed to change PIN", exc_info=e)
-            ctx.fail("Failed to change PIN.")
+            else:
+                ctx.fail("Failed to change PIN: %s" % e.code.name)
 
         except ApduError as e:
+            logger.error("Failed to change PIN", exc_info=e)
             if e.code == SW.VERIFY_FAIL_NO_RETRY:
                 ctx.fail("Wrong PIN.")
-
-            if e.code == SW.AUTH_METHOD_BLOCKED:
+            elif e.code == SW.AUTH_METHOD_BLOCKED:
                 ctx.fail("PIN is blocked.")
-
-            logger.error("Failed to change PIN", exc_info=e)
-            ctx.fail("Failed to change PIN.")
+            else:
+                ctx.fail("Failed to change PIN: SW=%04x" % e.code)
 
     def set_pin(new_pin):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         try:
             client_pin.set_pin(new_pin)
         except CtapError as e:
+            logger.error("Failed to set PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 ctx.fail("PIN is too long.")
-            logger.error("Failed to set PIN", exc_info=e)
-            ctx.fail("Failed to set PIN")
+            else:
+                ctx.fail("Failed to set PIN: %s" % e.code.name)
 
     if not is_fips:
         if ctap2.info.options.get("clientPin"):
@@ -362,15 +365,15 @@ def unlock(ctx, pin):
     try:
         fips_verify_pin(conn, pin)
     except ApduError as e:
+        logger.error("PIN verification failed", exc_info=e)
         if e.code == SW.VERIFY_FAIL_NO_RETRY:
             ctx.fail("Wrong PIN.")
-        if e.code == SW.AUTH_METHOD_BLOCKED:
+        elif e.code == SW.AUTH_METHOD_BLOCKED:
             ctx.fail("PIN is blocked.")
-        if e.code == SW.COMMAND_NOT_ALLOWED:
+        elif e.code == SW.COMMAND_NOT_ALLOWED:
             ctx.fail("PIN is not set.")
-
-        logger.error("PIN verification failed", exc_info=e)
-        ctx.fail("PIN verification failed.")
+        else:
+            ctx.fail("PIN verification failed: %s" % e.code.name)
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
@@ -486,7 +489,7 @@ def creds_delete(ctx, query, pin, force):
             try:
                 credman.delete_cred(cred_id)
             except CtapError as e:
-                logger.debug("Failed to delete resident credential", exc_info=e)
+                logger.error("Failed to delete resident credential", exc_info=e)
                 ctx.fail("Failed to delete resident credential.")
     else:
         ctx.fail("Multiple matches, make the query more specific.")
@@ -563,6 +566,9 @@ def bio_enroll(ctx, name, pin):
             click.echo("{} more scans needed.".format(enroller.remaining))
         except CaptureError as e:
             click.echo(e)
+        except CtapError as e:
+            logger.error("Failed to add fingerprint template", exc_info=e)
+            ctx.fail("Failed to add fingerprint: %s" % e.code.name)
     bio.set_name(template_id, name)
 
 
@@ -616,5 +622,5 @@ def bio_delete(ctx, template_id, pin, force):
         try:
             bio.remove_enrollment(key)
         except CtapError as e:
-            logger.debug("Failed to delete fingerprint template", exc_info=e)
-            ctx.fail("Failed to delete fingerprint.")
+            logger.error("Failed to delete fingerprint template", exc_info=e)
+            ctx.fail("Failed to delete fingerprint: %s" % e.code.name)
