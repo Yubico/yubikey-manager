@@ -177,45 +177,49 @@ class OtpProtocol:
         seq = 0
         needs_touch = False
 
-        while True:
-            report = self.connection.receive()
-            statusByte = report[FEATURE_RPT_DATA_SIZE]
-            if (statusByte & RESP_PENDING_FLAG) != 0:  # Response packet
-                if seq == (statusByte & SEQUENCE_MASK):
-                    # Correct sequence
-                    response += report[:FEATURE_RPT_DATA_SIZE]
-                    seq += 1
-                elif 0 == (statusByte & SEQUENCE_MASK):
-                    # Transmission complete
-                    self._reset_state()
-                    return response
-            elif statusByte == 0:  # Status response
-                next_prog_seq = report[STATUS_OFFSET_PROG_SEQ]
-                if response:
-                    raise Exception("Incomplete transfer")
-                elif next_prog_seq == prog_seq + 1 or (
-                    next_prog_seq == 0
-                    and report[STATUS_OFFSET_TOUCH_LOW] & CONFIG_STATUS_MASK == 0
-                ):
-                    # Sequence updated, return status.
-                    # Note: If no valid configurations exist, prog_seq is reset to 0.
-                    return report[1:-1]
-                elif needs_touch:
-                    raise TimeoutError("Timed out waiting for touch")
-                else:
-                    raise CommandRejectedError("No data")
-            else:  # Need to wait
-                if (statusByte & RESP_TIMEOUT_WAIT_FLAG) != 0:
-                    on_keepalive(STATUS_UPNEEDED)
-                    needs_touch = True
-                    timeout = 0.1
-                else:
-                    on_keepalive(STATUS_PROCESSING)
-                    timeout = 0.02
-                sleep(timeout)
-                if event.wait(timeout):
-                    self._reset_state()
-                    raise TimeoutError("Command cancelled by Event")
+        try:
+            while True:
+                report = self.connection.receive()
+                statusByte = report[FEATURE_RPT_DATA_SIZE]
+                if (statusByte & RESP_PENDING_FLAG) != 0:  # Response packet
+                    if seq == (statusByte & SEQUENCE_MASK):
+                        # Correct sequence
+                        response += report[:FEATURE_RPT_DATA_SIZE]
+                        seq += 1
+                    elif 0 == (statusByte & SEQUENCE_MASK):
+                        # Transmission complete
+                        self._reset_state()
+                        return response
+                elif statusByte == 0:  # Status response
+                    next_prog_seq = report[STATUS_OFFSET_PROG_SEQ]
+                    if response:
+                        raise Exception("Incomplete transfer")
+                    elif next_prog_seq == prog_seq + 1 or (
+                        next_prog_seq == 0
+                        and report[STATUS_OFFSET_TOUCH_LOW] & CONFIG_STATUS_MASK == 0
+                    ):  # Note: If no valid configurations exist, prog_seq resets to 0.
+                        # Sequence updated, return status.
+                        return report[1:-1]
+                    elif needs_touch:
+                        raise TimeoutError("Timed out waiting for touch")
+                    else:
+                        raise CommandRejectedError("No data")
+                else:  # Need to wait
+                    if (statusByte & RESP_TIMEOUT_WAIT_FLAG) != 0:
+                        on_keepalive(STATUS_UPNEEDED)
+                        needs_touch = True
+                        timeout = 0.1
+                    else:
+                        on_keepalive(STATUS_PROCESSING)
+                        timeout = 0.02
+                    sleep(timeout)
+                    if event.wait(timeout):
+                        self._reset_state()
+                        raise TimeoutError("Command cancelled by Event")
+        except KeyboardInterrupt:
+            logger.debug("Keyboard interrupt, reset state...")
+            self._reset_state()
+            raise
 
     def _reset_state(self):
         """Reset the state of YubiKey from reading"""
