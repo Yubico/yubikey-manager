@@ -28,7 +28,7 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE
+from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info
 from .util import (
     click_force_option,
     click_format_option,
@@ -39,7 +39,7 @@ from .util import (
 )
 
 from yubikit.core import USB_INTERFACE
-from yubikit.core.smartcard import SmartCardProtocol, ApduError, SW
+from yubikit.core.smartcard import ApduError, SW
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def openpgp(ctx):
       $ ykman openpgp set-touch aut on
     """
     try:
-        ctx.obj["controller"] = OpenPgpController(SmartCardProtocol(ctx.obj["conn"]))
+        ctx.obj["controller"] = OpenPgpController(ctx.obj["conn"])
     except ApduError as e:
         if e.sw == SW.NOT_FOUND:
             ctx.fail("The OpenPGP application can't be found on this YubiKey.")
@@ -108,32 +108,7 @@ def info(ctx):
     Display status of OpenPGP application.
     """
     controller = ctx.obj["controller"]
-    click.echo("OpenPGP version: %d.%d" % controller.get_openpgp_version())
-    click.echo("Application version: %d.%d.%d" % controller.version)
-    click.echo()
-    retries = controller.get_remaining_pin_tries()
-    click.echo("PIN tries remaining: {}".format(retries.pin))
-    click.echo("Reset code tries remaining: {}".format(retries.reset))
-    click.echo("Admin PIN tries remaining: {}".format(retries.admin))
-    # Touch only available on YK4 and later
-    if controller.version >= (4, 2, 6):
-        click.echo()
-        click.echo("Touch policies")
-        click.echo(
-            "Signature key           {!s}".format(controller.get_touch(KEY_SLOT.SIG))
-        )
-        click.echo(
-            "Encryption key          {!s}".format(controller.get_touch(KEY_SLOT.ENC))
-        )
-        click.echo(
-            "Authentication key      {!s}".format(controller.get_touch(KEY_SLOT.AUT))
-        )
-        if controller.supports_attestation:
-            click.echo(
-                "Attestation key         {!s}".format(
-                    controller.get_touch(KEY_SLOT.ATT)
-                )
-            )
+    click.echo(get_openpgp_info(controller))
 
 
 @openpgp.command()

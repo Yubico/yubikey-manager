@@ -598,6 +598,15 @@ class ConfigState:
     def is_led_inverted(self) -> bool:
         return self.flags & CFGSTATE.LED_INV != 0
 
+    def __repr__(self):
+        return "ConfigState(configured: %s, requires_touch: %s, led_inverted: %s)" % (
+            (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO)),
+            (self.requires_touch(SLOT.ONE), self.requires_touch(SLOT.TWO))
+            if self.version[0] > 3
+            else None,
+            self.is_led_inverted(),
+        )
+
 
 class _Backend(abc.ABC):
     version: Version

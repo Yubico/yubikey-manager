@@ -50,11 +50,12 @@ from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
+from ..diagnostics import get_diagnostics
 from .aliases import apply_aliases
 import click
 import time
-import logging
 import sys
+import logging
 
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,12 @@ def print_version(ctx, param, value):
         return
     click.echo("YubiKey Manager (ykman) version: {}".format(__version__))
     ctx.exit()
+
+
+def print_diagnostics(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    ctx.exit(get_diagnostics())
 
 
 def _disabled_interface(ctx, interfaces, cmd_name):
@@ -165,8 +172,15 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
     callback=print_version,
     expose_value=False,
     is_eager=True,
+    help="Show version information about the app",
 )
-@click.option("-d", "--device", type=int, metavar="SERIAL")
+@click.option(
+    "-d",
+    "--device",
+    type=int,
+    metavar="SERIAL",
+    help="Specify which YubiKey to interact with by serial number.",
+)
 @click.option(
     "-l",
     "--log-level",
@@ -188,6 +202,14 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
     help="Use an external smart card reader. Conflicts with --device and list.",
     metavar="NAME",
     default=None,
+)
+@click.option(
+    "--diagnose",
+    is_flag=True,
+    callback=print_diagnostics,
+    expose_value=False,
+    is_eager=True,
+    help="Show diagnostics information useful for troubleshooting.",
 )
 @click.pass_context
 def cli(ctx, device, log_level, log_file, reader):
@@ -213,11 +235,13 @@ def cli(ctx, device, log_level, log_file, reader):
         ctx.fail("--reader and --device options can't be combined.")
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
-    if subcmd == list_keys:
+    # Commands that don't directly act on a key
+    if subcmd in (list_keys,):
         if reader:
-            ctx.fail("--reader and list command can't be combined.")
+            ctx.fail("--reader can't be used with this command.")
         return
 
+    # Commands which need a YubiKey to act on
     interfaces = getattr(subcmd, "interfaces", USB_INTERFACE(sum(USB_INTERFACE)))
     if interfaces:
 

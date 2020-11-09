@@ -31,6 +31,7 @@ from .device import (  # noqa
     connect_to_device,
     get_name,
     get_connection_types,
+    read_info,
 )
 
 import os

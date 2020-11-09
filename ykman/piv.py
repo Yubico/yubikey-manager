@@ -302,7 +302,7 @@ def check_key(
 
 
 def generate_chuid() -> bytes:
-    """Generates a CHUID (Cardholder Unique Identifier)"""
+    """Generates a CHUID (Cardholder Unique Identifier)."""
     # Non-Federal Issuer FASC-N
     # [9999-9999-999999-0-1-0000000000300001]
     FASC_N = (
@@ -322,7 +322,7 @@ def generate_chuid() -> bytes:
 
 
 def generate_ccc() -> bytes:
-    """Generates a CCC (Card Capability Container)"""
+    """Generates a CCC (Card Capability Container)."""
     return (
         Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
         + Tlv(0xF1, b"\x21")
@@ -338,6 +338,93 @@ def generate_ccc() -> bytes:
         + Tlv(0xFD)
         + Tlv(TAG_LRC)
     )
+
+
+def get_piv_info(session: PivSession) -> str:
+    """Get human readable information about the PIV configuration."""
+    pivman = get_pivman_data(session)
+    lines = []
+
+    lines.append("PIV version: %d.%d.%d" % session.version)
+
+    # Largest possible number of PIN tries to get back is 15
+    tries = session.get_pin_attempts()
+    tries_str = "15 or more." if tries == 15 else tries
+    lines.append("PIN tries remaining: %s" % tries_str)
+    if pivman.puk_blocked:
+        lines.append("PUK blocked.")
+    if pivman.has_derived_key:
+        lines.append("Management key is derived from PIN.")
+    if pivman.has_stored_key:
+        lines.append("Management key is stored on the YubiKey, protected by PIN.")
+    try:
+        chuid = session.get_object(OBJECT_ID.CHUID).hex()
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
+            chuid = "No data available."
+    lines.append("CHUID:\t" + chuid)
+
+    try:
+        ccc = session.get_object(OBJECT_ID.CAPABILITY).hex()
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
+            ccc = "No data available."
+    lines.append("CCC: \t" + ccc)
+
+    for (slot, cert) in list_certificates(session).items():
+        lines.append("Slot %02x:" % slot)
+
+        if isinstance(cert, x509.Certificate):
+            try:
+                # Try to read out full DN, fallback to only CN.
+                # Support for DN was added in crytography 2.5
+                subject_dn = cert.subject.rfc4514_string()
+                issuer_dn = cert.issuer.rfc4514_string()
+                print_dn = True
+            except AttributeError:
+                print_dn = False
+                logger.debug("Failed to read DN, falling back to only CNs")
+                cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+                subject_cn = cn[0].value if cn else "None"
+                cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+                issuer_cn = cn[0].value if cn else "None"
+            except ValueError as e:
+                # Malformed certificates may throw ValueError
+                logger.debug("Failed parsing certificate", exc_info=e)
+                lines.append("\tMalformed certificate: {}".format(e))
+                continue
+
+            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+            key_type = KEY_TYPE.from_public_key(cert.public_key())
+            serial = cert.serial_number
+            try:
+                not_before: Optional[datetime] = cert.not_valid_before
+            except ValueError as e:
+                logger.debug("Failed reading not_valid_before", exc_info=e)
+                not_before = None
+            try:
+                not_after: Optional[datetime] = cert.not_valid_after
+            except ValueError as e:
+                logger.debug("Failed reading not_valid_after", exc_info=e)
+                not_after = None
+            # Print out everything
+            lines.append("\tAlgorithm:\t%s" % key_type.name)
+            if print_dn:
+                lines.append("\tSubject DN:\t%s" % subject_dn)
+                lines.append("\tIssuer DN:\t%s" % issuer_dn)
+            else:
+                lines.append("\tSubject CN:\t%s" % subject_cn)
+                lines.append("\tIssuer CN:\t%s" % issuer_cn)
+            lines.append("\tSerial:\t\t%s" % serial)
+            lines.append("\tFingerprint:\t%s" % fingerprint)
+            if not_before:
+                lines.append("\tNot before:\t%s" % not_before)
+            if not_after:
+                lines.append("\tNot after:\t%s" % not_after)
+        else:
+            lines.append("\tError: Failed to parse certificate.")
+
+    return "\n".join(lines)
 
 
 def sign_certificate_builder(

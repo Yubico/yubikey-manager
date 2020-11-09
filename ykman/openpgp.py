@@ -28,7 +28,7 @@
 from .util import ensure_not_cve201715361_vulnerable_firmware_version
 
 from yubikit.core import AID, Tlv
-from yubikit.core.smartcard import ApduError, SW
+from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 
 from cryptography import x509
 from cryptography.utils import int_to_bytes, int_from_bytes
@@ -284,7 +284,8 @@ class Kdf(object):
 
 
 class OpenPgpController(object):
-    def __init__(self, protocol):
+    def __init__(self, connection: SmartCardConnection):
+        protocol = SmartCardProtocol(connection)
         self._app = protocol
         try:
             protocol.select(AID.OPENPGP)
@@ -549,3 +550,36 @@ class OpenPgpController(object):
         """Requires User PIN verification."""
         self._app.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
         return self.read_certificate(key_slot)
+
+
+def get_openpgp_info(controller: OpenPgpController) -> str:
+    """Get human readable information about the OpenPGP configuration."""
+    lines = []
+    lines.append("OpenPGP version: %d.%d" % controller.get_openpgp_version())
+    lines.append("Application version: %d.%d.%d" % controller.version)
+    lines.append("")
+    retries = controller.get_remaining_pin_tries()
+    lines.append("PIN tries remaining: {}".format(retries.pin))
+    lines.append("Reset code tries remaining: {}".format(retries.reset))
+    lines.append("Admin PIN tries remaining: {}".format(retries.admin))
+    # Touch only available on YK4 and later
+    if controller.version >= (4, 2, 6):
+        lines.append("")
+        lines.append("Touch policies")
+        lines.append(
+            "Signature key           {!s}".format(controller.get_touch(KEY_SLOT.SIG))
+        )
+        lines.append(
+            "Encryption key          {!s}".format(controller.get_touch(KEY_SLOT.ENC))
+        )
+        lines.append(
+            "Authentication key      {!s}".format(controller.get_touch(KEY_SLOT.AUT))
+        )
+        if controller.supports_attestation:
+            lines.append(
+                "Attestation key         {!s}".format(
+                    controller.get_touch(KEY_SLOT.ATT)
+                )
+            )
+
+    return "\n".join(lines)

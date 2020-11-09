@@ -44,6 +44,7 @@ from ..util import (
     parse_certificates,
 )
 from ..piv import (
+    get_piv_info,
     get_pivman_data,
     get_pivman_protected_data,
     pivman_set_mgm_key,
@@ -52,7 +53,6 @@ from ..piv import (
     generate_random_management_key,
     generate_chuid,
     generate_ccc,
-    list_certificates,
     check_key,
     generate_self_signed_certificate,
     generate_csr,
@@ -67,8 +67,7 @@ from .util import (
     PromptTimeout,
     EnumChoice,
 )
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import click
 import datetime
@@ -174,88 +173,7 @@ def info(ctx):
     """
     Display general status of the PIV application.
     """
-    session = ctx.obj["session"]
-    pivman = ctx.obj["pivman_data"]
-    click.echo("PIV version: %d.%d.%d" % session.version)
-
-    # Largest possible number of PIN tries to get back is 15
-    tries = session.get_pin_attempts()
-    tries = "15 or more." if tries == 15 else tries
-    click.echo("PIN tries remaining: %s" % tries)
-    if pivman.puk_blocked:
-        click.echo("PUK blocked.")
-    if pivman.has_derived_key:
-        click.echo("Management key is derived from PIN.")
-    if pivman.has_stored_key:
-        click.echo("Management key is stored on the YubiKey, protected by PIN.")
-    try:
-        chuid = session.get_object(OBJECT_ID.CHUID).hex()
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            chuid = "No data available."
-    click.echo("CHUID:\t" + chuid)
-
-    try:
-        ccc = session.get_object(OBJECT_ID.CAPABILITY).hex()
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            ccc = "No data available."
-    click.echo("CCC: \t" + ccc)
-
-    for (slot, cert) in list_certificates(session).items():
-        click.echo("Slot %02x:" % slot)
-
-        if isinstance(cert, x509.Certificate):
-            try:
-                # Try to read out full DN, fallback to only CN.
-                # Support for DN was added in crytography 2.5
-                subject_dn = cert.subject.rfc4514_string()
-                issuer_dn = cert.issuer.rfc4514_string()
-                print_dn = True
-            except AttributeError:
-                print_dn = False
-                logger.debug("Failed to read DN, falling back to only CNs")
-                subject_cn = cert.subject.get_attributes_for_oid(
-                    x509.NameOID.COMMON_NAME
-                )
-                subject_cn = subject_cn[0].value if subject_cn else "None"
-                issuer_cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-                issuer_cn = issuer_cn[0].value if issuer_cn else "None"
-            except ValueError as e:
-                # Malformed certificates may throw ValueError
-                logger.debug("Failed parsing certificate", exc_info=e)
-                click.echo("\tMalformed certificate: {}".format(e))
-                continue
-
-            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-            key_type = KEY_TYPE.from_public_key(cert.public_key())
-            serial = cert.serial_number
-            try:
-                not_before = cert.not_valid_before
-            except ValueError as e:
-                logger.debug("Failed reading not_valid_before", exc_info=e)
-                not_before = None
-            try:
-                not_after = cert.not_valid_after
-            except ValueError as e:
-                logger.debug("Failed reading not_valid_after", exc_info=e)
-                not_after = None
-            # Print out everything
-            click.echo("\tAlgorithm:\t%s" % key_type.name)
-            if print_dn:
-                click.echo("\tSubject DN:\t%s" % subject_dn)
-                click.echo("\tIssuer DN:\t%s" % issuer_dn)
-            else:
-                click.echo("\tSubject CN:\t%s" % subject_cn)
-                click.echo("\tIssuer CN:\t%s" % issuer_cn)
-            click.echo("\tSerial:\t\t%s" % serial)
-            click.echo("\tFingerprint:\t%s" % fingerprint)
-            if not_before:
-                click.echo("\tNot before:\t%s" % not_before)
-            if not_after:
-                click.echo("\tNot after:\t%s" % not_after)
-        else:
-            click.echo("\tError: Failed to parse certificate.")
+    click.echo(get_piv_info(ctx.obj["session"]))
 
 
 @piv.command()
