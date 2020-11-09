@@ -42,7 +42,7 @@ from ..device import (
     get_connection_types,
     connect_to_device,
 )
-from .util import UpperCaseChoice, YkmanContextObject, YkmanGroup
+from .util import UpperCaseChoice, YkmanContextObject, ykman_group
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -52,6 +52,7 @@ from .fido import fido
 from .config import config
 from ..diagnostics import get_diagnostics
 from .aliases import apply_aliases
+from .apdu import apdu
 import click
 import time
 import sys
@@ -164,7 +165,7 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
     _disabled_interface(ctx, interfaces, cmd)
 
 
-@click.group(cls=YkmanGroup, context_settings=CLICK_CONTEXT_SETTINGS)
+@ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option(
     "-v",
     "--version",
@@ -301,7 +302,7 @@ def list_keys(ctx, serials, readers):
             )
 
 
-COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config)
+COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
 
 
 for cmd in COMMANDS:

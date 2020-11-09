@@ -29,6 +29,7 @@ import functools
 import click
 import sys
 from ..util import parse_b32_key
+from yubikit.core import USB_INTERFACE
 from collections import OrderedDict, MutableMapping
 from cryptography.hazmat.primitives import serialization
 from threading import Timer
@@ -76,17 +77,14 @@ class EnumChoice(UpperCaseChoice):
         return self.choices_enum[name]
 
 
-class YkmanGroup(click.Group):
-    """
-    Subclass of click.Group which takes an interfaces value to define what type of
-    connection(s) it supports, and lists sub commands before sub groups in its help
-    output.
+class _YkmanCommand(click.Command):
+    def __init__(self, name=None, **attrs):
+        self.interfaces = attrs.pop("interfaces", None)
+        click.Command.__init__(self, name, **attrs)
 
-    Usage example:
-    @click.group(cls=YkmanGroup, interfaces=USB_INTERFACE.CCID)
-    def my_command():
-        ...
-    """
+
+class _YkmanGroup(click.Group):
+    """click.Group which returns commands before subgroups in list_commands."""
 
     def __init__(self, name=None, commands=None, **attrs):
         self.interfaces = attrs.pop("interfaces", None)
@@ -98,8 +96,12 @@ class YkmanGroup(click.Group):
         )
 
 
-def ykman_group(interfaces, *args, **kwargs):
-    return click.group(cls=YkmanGroup, *args, interfaces=interfaces, **kwargs)
+def ykman_group(interfaces=USB_INTERFACE(sum(USB_INTERFACE)), *args, **kwargs):
+    return click.group(cls=_YkmanGroup, *args, interfaces=interfaces, **kwargs)
+
+
+def ykman_command(interfaces, *args, **kwargs):
+    return click.command(cls=_YkmanCommand, *args, interfaces=interfaces, **kwargs)
 
 
 def click_callback(invoke_on_missing=False):
