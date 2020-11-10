@@ -31,7 +31,7 @@ def mgmt_info(conn):
 def piv_info(conn):
     try:
         piv = PivSession(conn)
-        return ["\t%s" % l for l in get_piv_info(piv).splitlines() if l]
+        return ["\tPIV"] + ["\t\t%s" % l for l in get_piv_info(piv).splitlines() if l]
     except Exception as e:
         return ["\tPIV not accessible %s" % e]
 
@@ -39,7 +39,9 @@ def piv_info(conn):
 def openpgp_info(conn):
     try:
         openpgp = OpenPgpController(conn)
-        return ["\t%s" % l for l in get_openpgp_info(openpgp).splitlines() if l]
+        return ["\tOpenPGP"] + [
+            "\t\t%s" % l for l in get_openpgp_info(openpgp).splitlines() if l
+        ]
     except Exception as e:
         return ["\tOpenPGP not accessible %s" % e]
 
@@ -48,8 +50,9 @@ def oath_info(conn):
     try:
         oath = OathSession(conn)
         return [
-            "\tOATH version: %s" % ".".join("%d" % d for d in oath.info.version),
-            "\tPassword protected: %s" % oath.locked,
+            "\tOATH",
+            "\t\tOath version: %s" % ".".join("%d" % d for d in oath.info.version),
+            "\t\tPassword protected: %s" % oath.locked,
         ]
     except Exception as e:
         return ["\tOATH not accessible %s" % e]
@@ -71,8 +74,10 @@ def ccid_info():
             lines.append("\t%s (connect: %s)" % (reader.name, result))
         lines.append("")
     except Exception as e:
-        lines.append("Failed connecting to PC/SC: %s" % e)
-        return lines
+        return [
+            "PC/SC failure: %s" % e,
+            "",
+        ]
 
     lines.append("Detected YubiKeys over PC/SC:")
     for dev in list_ccid_devices():
@@ -84,7 +89,7 @@ def ccid_info():
                 lines.extend(oath_info(conn))
                 lines.extend(openpgp_info(conn))
         except Exception as e:
-            lines.append("\tFailed connecting to PC/SC: %s" % e)
+            lines.append("\tPC/SC connection failure: %s" % e)
         lines.append("")
 
     lines.append("")
@@ -101,9 +106,9 @@ def otp_info():
             otp = YubiOtpSession(conn)
             try:
                 config = otp.get_config_state()
-                lines.append("\t%r" % config)
+                lines.append("\tOTP: %r" % config)
             except ValueError as e:
-                lines.append("\tCouldn't read state: %s" % e)
+                lines.append("\tCouldn't read OTP state: %s" % e)
         lines.append("")
     lines.append("")
     return lines
@@ -118,7 +123,7 @@ def fido_info():
             lines.extend(mgmt_info(conn))
             try:
                 ctap2 = Ctap2(conn)
-                lines.append("\tCTAP2 INFO: %r" % ctap2.info.data)
+                lines.append("\tCtap2Info: %r" % ctap2.info.data)
             except (ValueError, CtapError) as e:
                 lines.append("\tCouldn't get info: %s" % e)
         lines.append("")
