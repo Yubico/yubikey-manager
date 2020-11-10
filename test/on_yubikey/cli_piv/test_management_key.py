@@ -21,6 +21,7 @@ def additional_tests(ykman_cli):
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     "-P",
                     DEFAULT_PIN,
@@ -32,6 +33,7 @@ def additional_tests(ykman_cli):
         def test_change_management_key_protect_random(self):
             ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 "-p",
                 "-P",
@@ -48,6 +50,7 @@ def additional_tests(ykman_cli):
                 # Should fail - wrong current key
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     "-p",
                     "-P",
@@ -57,11 +60,12 @@ def additional_tests(ykman_cli):
                 )
 
             # Should succeed - PIN as key
-            ykman_cli("piv", "change-management-key", "-p", "-P", DEFAULT_PIN)
+            ykman_cli("piv", "access", "change-management-key", "-p", "-P", DEFAULT_PIN)
 
         def test_change_management_key_protect_prompt(self):
             ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 "-p",
                 "-P",
@@ -77,6 +81,7 @@ def additional_tests(ykman_cli):
                 # Should fail - wrong current key
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     "-p",
                     "-P",
@@ -86,11 +91,16 @@ def additional_tests(ykman_cli):
                 )
 
             # Should succeed - PIN as key
-            ykman_cli("piv", "change-management-key", "-p", "-P", DEFAULT_PIN)
+            ykman_cli("piv", "access", "change-management-key", "-p", "-P", DEFAULT_PIN)
 
         def test_change_management_key_no_protect_generate(self):
             output = ykman_cli(
-                "piv", "change-management-key", "-m", DEFAULT_MANAGEMENT_KEY, "-g"
+                "piv",
+                "access",
+                "change-management-key",
+                "-m",
+                DEFAULT_MANAGEMENT_KEY,
+                "-g",
             )
             self.assertRegex(
                 output,
@@ -103,6 +113,7 @@ def additional_tests(ykman_cli):
         def test_change_management_key_no_protect_arg(self):
             output = ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
@@ -116,6 +127,7 @@ def additional_tests(ykman_cli):
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     "-m",
                     DEFAULT_MANAGEMENT_KEY,
@@ -125,6 +137,7 @@ def additional_tests(ykman_cli):
 
             output = ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 "-m",
                 NON_DEFAULT_MANAGEMENT_KEY,
@@ -141,6 +154,7 @@ def additional_tests(ykman_cli):
             ):
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     "-m",
                     DEFAULT_MANAGEMENT_KEY,
@@ -151,6 +165,7 @@ def additional_tests(ykman_cli):
         def test_change_management_key_no_protect_prompt(self):
             output = ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 input=old_new_new(DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_MANAGEMENT_KEY),
             )
@@ -161,6 +176,7 @@ def additional_tests(ykman_cli):
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     input=old_new_new(
                         DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_MANAGEMENT_KEY
@@ -169,6 +185,7 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 input=old_new_new(NON_DEFAULT_MANAGEMENT_KEY, DEFAULT_MANAGEMENT_KEY),
             )
@@ -178,6 +195,7 @@ def additional_tests(ykman_cli):
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
+                    "access",
                     "change-management-key",
                     "-m",
                     DEFAULT_MANAGEMENT_KEY,

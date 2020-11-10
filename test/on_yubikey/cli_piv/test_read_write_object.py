@@ -3,9 +3,11 @@ import unittest
 
 from cryptography.hazmat.primitives import serialization
 from ..framework import cli_test_suite
+from ...util import generate_self_signed_certificate
 from yubikit.core import Tlv
 from yubikit.piv import OBJECT_ID, SLOT
-from ...util import generate_self_signed_certificate
+import contextlib
+import io
 
 
 DEFAULT_MANAGEMENT_KEY = "010203040506070801020304050607080102030405060708"
@@ -40,7 +42,8 @@ def additional_tests(ykman_cli):
             )
             ykman_cli(
                 "piv",
-                "write-object",
+                "objects",
+                "import",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
                 "0x5f0001",
@@ -48,7 +51,7 @@ def additional_tests(ykman_cli):
                 input=data,
             )
             output_data = ykman_cli.with_bytes_output(
-                "piv", "read-object", "0x5f0001", "-"
+                "piv", "objects", "export", "0x5f0001", "-"
             )
             self.assertEqual(data, output_data)
 
@@ -57,7 +60,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "write-object",
+                "objects",
+                "import",
                 hex(OBJECT_ID.AUTHENTICATION),
                 "-",
                 "-m",
@@ -66,13 +70,14 @@ def additional_tests(ykman_cli):
             )
 
             output1 = ykman_cli.with_bytes_output(
-                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
+                "piv", "objects", "export", hex(OBJECT_ID.AUTHENTICATION), "-"
             )
             self.assertEqual(output1, data)
 
             ykman_cli(
                 "piv",
-                "write-object",
+                "objects",
+                "import",
                 hex(OBJECT_ID.AUTHENTICATION),
                 "-",
                 "-m",
@@ -81,13 +86,38 @@ def additional_tests(ykman_cli):
             )
 
             output2 = ykman_cli.with_bytes_output(
-                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
+                "piv", "objects", "export", hex(OBJECT_ID.AUTHENTICATION), "-"
             )
             self.assertEqual(output2, data)
 
+        def test_read_write_aliases(self):
+            data = os.urandom(32)
+
+            with io.StringIO() as buf:
+                with contextlib.redirect_stderr(buf):
+                    ykman_cli(
+                        "piv",
+                        "write-object",
+                        hex(OBJECT_ID.AUTHENTICATION),
+                        "-",
+                        "-m",
+                        DEFAULT_MANAGEMENT_KEY,
+                        input=data,
+                    )
+
+                    output1 = ykman_cli.with_bytes_output(
+                        "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
+                    )
+                err = buf.getvalue()
+            self.assertEqual(output1, data)
+            self.assertIn("piv objects import", err)
+            self.assertIn("piv objects export", err)
+
         def test_read_write_certificate_as_object(self):
             with self.assertRaises(SystemExit):
-                ykman_cli("piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-")
+                ykman_cli(
+                    "piv", "objects", "export", hex(OBJECT_ID.AUTHENTICATION), "-"
+                )
 
             cert = generate_self_signed_certificate()
             cert_bytes_der = cert.public_bytes(encoding=serialization.Encoding.DER)
@@ -96,7 +126,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "write-object",
+                "objects",
+                "import",
                 hex(OBJECT_ID.AUTHENTICATION),
                 "-",
                 "-m",
@@ -105,14 +136,15 @@ def additional_tests(ykman_cli):
             )
 
             output1 = ykman_cli.with_bytes_output(
-                "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
+                "piv", "objects", "export", hex(OBJECT_ID.AUTHENTICATION), "-"
             )
             output_cert_bytes = Tlv.parse_dict(output1)[0x70]
             self.assertEqual(output_cert_bytes, cert_bytes_der)
 
             output2 = ykman_cli.with_bytes_output(
                 "piv",
-                "export-certificate",
+                "certificates",
+                "export",
                 hex(SLOT.AUTHENTICATION),
                 "-",
                 "--format",

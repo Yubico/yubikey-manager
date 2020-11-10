@@ -6,7 +6,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from ykman.openpgp import OpenPgpController, KEY_SLOT
 from yubikit.core import USB_INTERFACE
-from yubikit.core.smartcard import ApduError, SmartCardProtocol
+from yubikit.core.smartcard import ApduError
 from .framework import device_test_suite, yubikey_conditions
 
 E = 65537
@@ -21,7 +21,7 @@ def additional_tests(open_device):
     class OpenPgpTestCase(unittest.TestCase):
         def setUp(self):
             self.conn = open_device()[0]
-            self.controller = OpenPgpController(SmartCardProtocol(self.conn))
+            self.controller = OpenPgpController(self.conn)
 
         def tearDown(self):
             self.conn.close()
@@ -29,13 +29,13 @@ def additional_tests(open_device):
         def reconnect(self):
             self.conn.close()
             self.conn = open_device()[0]
-            self.controller = OpenPgpController(SmartCardProtocol(self.conn))
+            self.controller = OpenPgpController(self.conn)
 
     class KeyManagement(OpenPgpTestCase):
         @classmethod
         def setUpClass(cls):
             with open_device()[0] as conn:
-                controller = OpenPgpController(SmartCardProtocol(conn))
+                controller = OpenPgpController(conn)
                 controller.reset()
 
         def test_generate_requires_admin(self):

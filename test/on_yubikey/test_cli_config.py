@@ -1,5 +1,7 @@
 import time
 import unittest
+import contextlib
+import io
 from .framework import cli_test_suite, yubikey_conditions
 
 
@@ -90,13 +92,13 @@ def additional_tests(ykman_cli):
                 )
 
         def test_mode_command(self):
-            ykman_cli("mode", "ccid", "-f")
+            ykman_cli("config", "mode", "ccid", "-f")
             output = ykman_cli("config", "usb", "--list")
             self.assertNotIn("FIDO U2F", output)
             self.assertNotIn("FIDO2", output)
             self.assertNotIn("OTP", output)
 
-            ykman_cli("mode", "otp", "-f")
+            ykman_cli("config", "mode", "otp", "-f")
             output = ykman_cli("config", "usb", "--list")
             self.assertNotIn("FIDO U2F", output)
             self.assertNotIn("FIDO2", output)
@@ -104,12 +106,26 @@ def additional_tests(ykman_cli):
             self.assertNotIn("PIV", output)
             self.assertNotIn("OATH", output)
 
-            ykman_cli("mode", "fido", "-f")
+            ykman_cli("config", "mode", "fido", "-f")
             output = ykman_cli("config", "usb", "--list")
             self.assertNotIn("OTP", output)
             self.assertNotIn("OATH", output)
             self.assertNotIn("PIV", output)
             self.assertNotIn("OpenPGP", output)
+
+            # Prevent communication errors in other tests
+            time.sleep(1)
+
+        def test_mode_alias(self):
+            with io.StringIO() as buf:
+                with contextlib.redirect_stderr(buf):
+                    ykman_cli("mode", "ccid", "-f")
+                    output = ykman_cli("config", "usb", "--list")
+                    self.assertNotIn("FIDO U2F", output)
+                    self.assertNotIn("FIDO2", output)
+                    self.assertNotIn("OTP", output)
+                err = buf.getvalue()
+            self.assertIn("config mode ccid", err)
 
             # Prevent communication errors in other tests
             time.sleep(1)

@@ -32,6 +32,7 @@ Command line aliases to support commands which have moved.
 """
 
 _aliases = (
+    (["config", "mode"], None),  # Avoid next line for "config mode".
     (["mode"], ["config", "mode"]),
     (["fido", "delete"], ["fido", "credentials", "delete"]),
     (["fido", "list"], ["fido", "credentials", "list"]),
@@ -75,11 +76,13 @@ def apply_aliases(argv):
     for (alias, replacement) in _aliases:
         i = _find_match(argv, alias)
         if i is not None:
-            argv = argv[:i] + replacement + argv[i + len(alias) :]
-            click.echo(
-                "WARNING: The use of this command is deprecated and will be removed!\n"
-                "Replace with: ykman " + " ".join(argv[1:]) + "\n",
-                err=True,
-            )
+            if replacement is not None:
+                argv = argv[:i] + replacement + argv[i + len(alias) :]
+                click.echo(
+                    "WARNING: "
+                    "The use of this command is deprecated and will be removed!\n"
+                    "Replace with: ykman " + " ".join(argv[1:]) + "\n",
+                    err=True,
+                )
             break  # Only handle first match
     return argv

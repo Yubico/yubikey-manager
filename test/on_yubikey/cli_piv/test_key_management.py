@@ -37,7 +37,7 @@ def additional_tests(ykman_cli):
         @yubikey_conditions.is_not_roca
         def test_generate_key_default(self):
             output = ykman_cli(
-                "piv", "generate-key", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
+                "piv", "keys", "generate", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
             )
             self.assertIn("BEGIN PUBLIC KEY", output)
 
@@ -45,7 +45,7 @@ def additional_tests(ykman_cli):
         def test_generate_key_default_cve201715361(self):
             with self.assertRaises(Cve201715361VulnerableError):
                 ykman_cli(
-                    "piv", "generate-key", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
+                    "piv", "keys", "generate", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
                 )
 
         @yubikey_conditions.is_not_roca
@@ -53,7 +53,8 @@ def additional_tests(ykman_cli):
         def test_generate_key_rsa1024(self):
             output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "RSA1024",
@@ -67,7 +68,8 @@ def additional_tests(ykman_cli):
         def test_generate_key_rsa2048(self):
             output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "RSA2048",
@@ -83,7 +85,8 @@ def additional_tests(ykman_cli):
             with self.assertRaises(Cve201715361VulnerableError):
                 ykman_cli(
                     "piv",
-                    "generate-key",
+                    "keys",
+                    "generate",
                     "9a",
                     "-a",
                     "RSA1024",
@@ -97,7 +100,8 @@ def additional_tests(ykman_cli):
             with self.assertRaises(Cve201715361VulnerableError):
                 ykman_cli(
                     "piv",
-                    "generate-key",
+                    "keys",
+                    "generate",
                     "9a",
                     "-a",
                     "RSA2048",
@@ -109,7 +113,8 @@ def additional_tests(ykman_cli):
         def test_generate_key_eccp256(self):
             output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -122,7 +127,8 @@ def additional_tests(ykman_cli):
         def test_import_key_eccp256(self):
             ykman_cli(
                 "piv",
-                "import-key",
+                "keys",
+                "import",
                 "9a",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
@@ -134,7 +140,8 @@ def additional_tests(ykman_cli):
         def test_generate_key_eccp384(self):
             output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP384",
@@ -148,7 +155,8 @@ def additional_tests(ykman_cli):
         def test_generate_key_pin_policy_always(self):
             output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "--pin-policy",
                 "ALWAYS",
@@ -165,7 +173,8 @@ def additional_tests(ykman_cli):
             for pin_policy in ["ALWAYS", "always"]:
                 ykman_cli(
                     "piv",
-                    "import-key",
+                    "keys",
+                    "import",
                     "9a",
                     "--pin-policy",
                     pin_policy,
@@ -179,7 +188,8 @@ def additional_tests(ykman_cli):
         def test_generate_key_touch_policy_always(self):
             output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "--touch-policy",
                 "ALWAYS",
@@ -196,7 +206,8 @@ def additional_tests(ykman_cli):
             for touch_policy in ["ALWAYS", "always"]:
                 ykman_cli(
                     "piv",
-                    "import-key",
+                    "keys",
+                    "import",
                     "9a",
                     "--touch-policy",
                     touch_policy,
@@ -210,7 +221,8 @@ def additional_tests(ykman_cli):
         def test_attest_key(self):
             ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -224,7 +236,8 @@ def additional_tests(ykman_cli):
         def _test_generate_csr(self, algo):
             ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 algo,
@@ -234,7 +247,8 @@ def additional_tests(ykman_cli):
             )
             output = ykman_cli(
                 "piv",
-                "generate-csr",
+                "certificates",
+                "request",
                 "9a",
                 self.tmp.name,
                 "-s",
@@ -258,7 +272,8 @@ def additional_tests(ykman_cli):
             # Set up a key in the slot and create a certificate for it
             public_key_pem = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -271,7 +286,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "generate-certificate",
+                "certificates",
+                "generate",
                 "9a",
                 "-",
                 "-m",
@@ -283,12 +299,13 @@ def additional_tests(ykman_cli):
                 input=public_key_pem,
             )
 
-            ykman_cli("piv", "export-certificate", "9a", self.tmp.name)
+            ykman_cli("piv", "certificates", "export", "9a", self.tmp.name)
 
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
-                    "import-certificate",
+                    "certificates",
+                    "import",
                     "--verify",
                     "9a",
                     self.tmp.name,
@@ -298,7 +315,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "import-certificate",
+                "certificates",
+                "import",
                 "--verify",
                 "9a",
                 self.tmp.name,
@@ -309,7 +327,8 @@ def additional_tests(ykman_cli):
             )
             ykman_cli(
                 "piv",
-                "import-certificate",
+                "certificates",
+                "import",
                 "--verify",
                 "9a",
                 self.tmp.name,
@@ -322,7 +341,8 @@ def additional_tests(ykman_cli):
             # Set up a key in the slot and create a certificate for it
             public_key_pem = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -335,7 +355,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "generate-certificate",
+                "certificates",
+                "generate",
                 "9a",
                 "-",
                 "-m",
@@ -347,12 +368,13 @@ def additional_tests(ykman_cli):
                 input=public_key_pem,
             )
 
-            cert_pem = ykman_cli("piv", "export-certificate", "9a", "-")
+            cert_pem = ykman_cli("piv", "certificates", "export", "9a", "-")
 
             # Overwrite the key with a new one
             ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -367,7 +389,8 @@ def additional_tests(ykman_cli):
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
-                    "import-certificate",
+                    "certificates",
+                    "import",
                     "--verify",
                     "9a",
                     "-",
@@ -382,7 +405,8 @@ def additional_tests(ykman_cli):
             # Set up a key in the slot and create a certificate for it
             public_key_pem = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -395,7 +419,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "generate-certificate",
+                "certificates",
+                "generate",
                 "9a",
                 "-",
                 "-m",
@@ -407,12 +432,13 @@ def additional_tests(ykman_cli):
                 input=public_key_pem,
             )
 
-            cert_pem = ykman_cli("piv", "export-certificate", "9a", "-")
+            cert_pem = ykman_cli("piv", "certificates", "export", "9a", "-")
 
             # Overwrite the key with a new one
             ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 "9a",
                 "-a",
                 "ECCP256",
@@ -427,7 +453,8 @@ def additional_tests(ykman_cli):
             with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
-                    "import-certificate",
+                    "certificates",
+                    "import",
                     "--verify",
                     "9a",
                     "-",
@@ -440,7 +467,8 @@ def additional_tests(ykman_cli):
 
             ykman_cli(
                 "piv",
-                "import-certificate",
+                "certificates",
+                "import",
                 "9a",
                 "-",
                 "-m",
@@ -452,7 +480,7 @@ def additional_tests(ykman_cli):
 
         @yubikey_conditions.supports_piv_attestation
         def test_export_attestation_certificate(self):
-            output = ykman_cli("piv", "export-certificate", "f9", "-")
+            output = ykman_cli("piv", "certificates", "export", "f9", "-")
             self.assertIn("BEGIN CERTIFICATE", output)
 
     return [KeyManagement]

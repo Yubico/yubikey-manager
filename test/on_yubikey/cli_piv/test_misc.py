@@ -23,7 +23,8 @@ def additional_tests(ykman_cli):
         def test_export_invalid_certificate_fails(self):
             ykman_cli(
                 "piv",
-                "write-object",
+                "objects",
+                "import",
                 hex(OBJECT_ID.AUTHENTICATION),
                 "-",
                 "-m",
@@ -33,13 +34,14 @@ def additional_tests(ykman_cli):
 
             with self.assertRaises(SystemExit):
                 ykman_cli(
-                    "piv", "export-certificate", hex(OBJECT_ID.AUTHENTICATION), "-"
+                    "piv", "certificates", "export", hex(OBJECT_ID.AUTHENTICATION), "-"
                 )
 
         def test_info_with_invalid_certificate_does_not_crash(self):
             ykman_cli(
                 "piv",
-                "write-object",
+                "objects",
+                "import",
                 hex(OBJECT_ID.AUTHENTICATION),
                 "-",
                 "-m",

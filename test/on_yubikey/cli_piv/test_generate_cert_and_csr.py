@@ -35,6 +35,7 @@ def additional_tests(ykman_cli):
             ykman_cli("piv", "reset", "-f")
             ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 "-P",
                 DEFAULT_PIN,
@@ -47,7 +48,8 @@ def additional_tests(ykman_cli):
         def _test_generate_self_signed(self, slot, algo):
             pubkey_output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 slot,
                 "-a",
                 algo,
@@ -57,7 +59,8 @@ def additional_tests(ykman_cli):
             )
             ykman_cli(
                 "piv",
-                "generate-certificate",
+                "certificates",
+                "generate",
                 slot,
                 "-m",
                 NON_DEFAULT_MANAGEMENT_KEY,
@@ -68,7 +71,7 @@ def additional_tests(ykman_cli):
                 "-",
                 input=pubkey_output,
             )
-            output = ykman_cli("piv", "export-certificate", slot, "-")
+            output = ykman_cli("piv", "certificates", "export", slot, "-")
             cert = x509.load_pem_x509_certificate(output.encode(), default_backend())
             _verify_cert(cert, cert.public_key())
             fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode("ascii")
@@ -112,7 +115,8 @@ def additional_tests(ykman_cli):
             subject_input = "subject-" + algo
             pubkey_output = ykman_cli(
                 "piv",
-                "generate-key",
+                "keys",
+                "generate",
                 slot,
                 "-a",
                 algo,
@@ -122,7 +126,8 @@ def additional_tests(ykman_cli):
             )
             csr_output = ykman_cli(
                 "piv",
-                "generate-csr",
+                "certificates",
+                "request",
                 slot,
                 "-P",
                 DEFAULT_PIN,
@@ -177,6 +182,7 @@ def additional_tests(ykman_cli):
             ykman_cli("piv", "reset", "-f")
             ykman_cli(
                 "piv",
+                "access",
                 "change-management-key",
                 "-p",
                 "-P",
@@ -187,11 +193,12 @@ def additional_tests(ykman_cli):
 
         def _test_generate_self_signed(self, slot, algo):
             pubkey_output = ykman_cli(
-                "piv", "generate-key", slot, "-a", algo, "-P", DEFAULT_PIN, "-"
+                "piv", "keys", "generate", slot, "-a", algo, "-P", DEFAULT_PIN, "-"
             )
             ykman_cli(
                 "piv",
-                "generate-certificate",
+                "certificates",
+                "generate",
                 slot,
                 "-P",
                 DEFAULT_PIN,
@@ -200,7 +207,7 @@ def additional_tests(ykman_cli):
                 "-",
                 input=pubkey_output,
             )
-            output = ykman_cli("piv", "export-certificate", slot, "-")
+            output = ykman_cli("piv", "certificates", "export", slot, "-")
             cert = x509.load_pem_x509_certificate(output.encode(), default_backend())
             _verify_cert(cert, cert.public_key())
             fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode("ascii")
@@ -243,11 +250,12 @@ def additional_tests(ykman_cli):
         def _test_generate_csr(self, slot, algo):
             subject_input = "subject-" + algo
             pubkey_output = ykman_cli(
-                "piv", "generate-key", slot, "-a", algo, "-P", DEFAULT_PIN, "-"
+                "piv", "keys", "generate", slot, "-a", algo, "-P", DEFAULT_PIN, "-"
             )
             csr_output = ykman_cli(
                 "piv",
-                "generate-csr",
+                "certificates",
+                "request",
                 slot,
                 "-P",
                 DEFAULT_PIN,
