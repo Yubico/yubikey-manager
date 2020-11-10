@@ -30,7 +30,8 @@ import click
 import sys
 from ..util import parse_b32_key
 from yubikit.core import USB_INTERFACE
-from collections import OrderedDict, MutableMapping
+from collections import OrderedDict
+from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
 from threading import Timer
 
