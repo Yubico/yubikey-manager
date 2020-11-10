@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
-import os
+import re
 from setuptools import setup, find_packages
 
 install_requires = [
@@ -41,8 +41,10 @@ install_requires = [
 if sys.platform == "win32":
     install_requires.append("pypiwin32")
 
-with open(os.path.join(os.path.dirname(__file__), "ykman/VERSION")) as version_file:
-    version = version_file.read().strip()
+with open("ykman/__init__.py", "r") as f:
+    match = re.search(r"(?m)^__version__\s*=\s*['\"](.+)['\"]$", f.read())
+    version = match.group(1)  # type: ignore
+
 
 setup(
     name="yubikey-manager",

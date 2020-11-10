@@ -1,11 +1,7 @@
 include COPYING
+include README.adoc
 include NEWS
 include ChangeLog
-include resources/*
 include doc/*.adoc
-recursive-include test *
-include README.adoc
 include man/*
-include ykman/VERSION
-recursive-exclude *.pyc
-recursive-exclude test *.pyc
+recursive-include test *.py
