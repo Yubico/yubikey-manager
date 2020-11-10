@@ -1,7 +1,11 @@
 * Version 4.0.0 (unreleased)
  ** Drop support for Python < 3.6
- ** Dropped reliance on libusb and libykpersonalize
+ ** Drop reliance on libusb and libykpersonalize
  ** Support the "fido" and "otp" subcommands over NFC (using the --reader flag)
+ ** New "ykman --diagnose" command to aid in troubleshooting.
+ ** New "ykman apdu" command for sending raw APDUs over the smart card interface.
+ ** Restructuring of subcommands, with aliases for old versions (to be removed
+    in a future release).
  ** Major changes to the underlying "library" code:
   *** New "yubikit" package added for custom development and advanced scripting
   *** Type hints added for a large part of the "public" API
