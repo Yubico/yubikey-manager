@@ -36,11 +36,10 @@ from .core import (
 from .core import ApplicationNotAvailableError
 from .core.otp import check_crc, calculate_crc, OtpConnection, OtpProtocol
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
-from cryptography.hazmat.primitives.hashes import Hash, SHA1
-from cryptography.hazmat.backends import default_backend
 
 import abc
 import struct
+from hashlib import sha1
 from threading import Event
 from enum import unique, IntEnum, IntFlag
 from typing import TypeVar, Optional, Union, Callable
@@ -284,9 +283,7 @@ class CFGSTATE(IntFlag):
 
 def _shorten_hmac_key(key: bytes) -> bytes:
     if len(key) > SHA1_BLOCK_SIZE:
-        h = Hash(SHA1(), default_backend())  # nosec
-        h.update(key)
-        key = h.finalize()
+        key = sha1(key).digest()  # nosec
     elif len(key) > HMAC_KEY_SIZE:
         raise NotSupportedError(
             "Key lengths > {} bytes not supported".format(HMAC_KEY_SIZE)

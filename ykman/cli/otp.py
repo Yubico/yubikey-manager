@@ -35,7 +35,7 @@ from yubikit.yubiotp import (
     UpdateConfiguration,
 )
 from yubikit.core import TRANSPORT, USB_INTERFACE, CommandError
-from ..scancodes import encode, KEYBOARD_LAYOUT
+from yubikit.core.otp import modhex_encode, modhex_decode
 
 from .util import (
     ykman_group,
@@ -47,19 +47,19 @@ from .util import (
     prompt_for_touch,
     EnumChoice,
 )
-from ..util import (
-    generate_static_pw,
-    modhex_decode,
-    modhex_encode,
-    parse_key,
-    parse_b32_key,
-    parse_totp_hash,
-    time_challenge,
-    format_code,
-)
 from .. import __version__
 from ..device import is_fips_version
-from ..otp import PrepareUploadFailed, prepare_upload_key, is_in_fips_mode
+from ..scancodes import encode, KEYBOARD_LAYOUT
+from ..otp import (
+    PrepareUploadFailed,
+    prepare_upload_key,
+    is_in_fips_mode,
+    generate_static_pw,
+    parse_oath_key,
+    parse_b32_key,
+    time_challenge,
+    format_oath_code,
+)
 from threading import Event
 from time import time
 import logging
@@ -531,7 +531,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
         elif totp:
             key = parse_b32_key(key)
         else:
-            key = parse_key(key)
+            key = parse_oath_key(key)
     else:
         if force and not generate:
             ctx.fail(
@@ -552,7 +552,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
                 click.echo("Using a randomly generated key: {}".format(key.hex()))
             else:
                 key = click_prompt("Enter a secret key")
-                key = parse_key(key)
+                key = parse_oath_key(key)
 
     cred_type = "TOTP" if totp else "challenge-response"
     force or click.confirm(
@@ -626,7 +626,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 
         response = session.calculate_hmac_sha1(slot, challenge, event, on_keepalive)
         if totp:
-            value = format_code(parse_totp_hash(response), int(digits))
+            value = format_oath_code(response, int(digits))
         else:
             value = response.hex()
 

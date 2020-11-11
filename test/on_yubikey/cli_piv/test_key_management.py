@@ -4,7 +4,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from ykman.util import Cve201715361VulnerableError
+from yubikit.core import NotSupportedError
 from ..framework import cli_test_suite, yubikey_conditions
 from .util import DEFAULT_PIN, DEFAULT_MANAGEMENT_KEY
 import tempfile
@@ -43,7 +43,7 @@ def additional_tests(ykman_cli):
 
         @yubikey_conditions.is_roca
         def test_generate_key_default_cve201715361(self):
-            with self.assertRaises(Cve201715361VulnerableError):
+            with self.assertRaises(NotSupportedError):
                 ykman_cli(
                     "piv", "keys", "generate", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
                 )
@@ -82,7 +82,7 @@ def additional_tests(ykman_cli):
         @yubikey_conditions.is_not_fips
         @yubikey_conditions.is_roca
         def test_generate_key_rsa1024_cve201715361(self):
-            with self.assertRaises(Cve201715361VulnerableError):
+            with self.assertRaises(NotSupportedError):
                 ykman_cli(
                     "piv",
                     "keys",
@@ -97,7 +97,7 @@ def additional_tests(ykman_cli):
 
         @yubikey_conditions.is_roca
         def test_generate_key_rsa2048_cve201715361(self):
-            with self.assertRaises(Cve201715361VulnerableError):
+            with self.assertRaises(NotSupportedError):
                 ykman_cli(
                     "piv",
                     "keys",

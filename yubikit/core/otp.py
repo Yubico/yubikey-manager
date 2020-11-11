@@ -70,6 +70,22 @@ def check_crc(data: bytes) -> bool:
     return calculate_crc(data) == CRC_OK_RESIDUAL
 
 
+_MODHEX = "cbdefghijklnrtuv"
+
+
+def modhex_encode(data: bytes) -> str:
+    """Encode a bytes-like object using Modhex (modified hexadecimal) encoding."""
+    return "".join(_MODHEX[b >> 4] + _MODHEX[b & 0xF] for b in data)
+
+
+def modhex_decode(string: str) -> bytes:
+    """Decode the Modhex (modified hexadecimal) string."""
+    return bytes(
+        _MODHEX.index(string[i]) << 4 | _MODHEX.index(string[i + 1])
+        for i in range(0, len(string), 2)
+    )
+
+
 FEATURE_RPT_SIZE = 8
 FEATURE_RPT_DATA_SIZE = FEATURE_RPT_SIZE - 1
 

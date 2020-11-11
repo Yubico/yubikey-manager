@@ -25,16 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import struct
-import re
 import logging
-import random
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from base64 import b32decode
 from OpenSSL import crypto
-from .scancodes import KEYBOARD_LAYOUT
 from yubikit.core import Tlv
 
 
@@ -42,123 +37,6 @@ logger = logging.getLogger(__name__)
 
 
 PEM_IDENTIFIER = b"-----BEGIN"
-
-
-class Cve201715361VulnerableError(Exception):
-    """Thrown if on-chip RSA key generation is attempted on a YubiKey vulnerable
-    to CVE-2017-15361."""
-
-    def __init__(self, f_version):
-        self.f_version = f_version
-
-    def __str__(self):
-        return (
-            "On-chip RSA key generation on this YubiKey has been blocked.\n"
-            "Please see https://yubi.co/ysa201701 for details."
-        )
-
-
-parse_tlvs = Tlv.parse_list  # Deprecated, use Tlv.parse_list directly
-
-
-class MissingLibrary(object):
-    def __init__(self, message):
-        self._message = message
-
-    def __getattr__(self, name):
-        raise AttributeError(self._message)
-
-
-_MODHEX = "cbdefghijklnrtuv"
-DEFAULT_PW_CHAR_BLOCKLIST = ["\t", "\n", " "]
-
-
-def modhex_encode(data):
-    return "".join(_MODHEX[b >> 4] + _MODHEX[b & 0xF] for b in data)
-
-
-def modhex_decode(string):
-    return bytes(
-        _MODHEX.index(string[i]) << 4 | _MODHEX.index(string[i + 1])
-        for i in range(0, len(string), 2)
-    )
-
-
-def ensure_not_cve201715361_vulnerable_firmware_version(f_version):
-    if is_cve201715361_vulnerable_firmware_version(f_version):
-        raise Cve201715361VulnerableError(f_version)
-
-
-def is_cve201715361_vulnerable_firmware_version(f_version):
-    return (4, 2, 0) <= f_version < (4, 3, 5)
-
-
-def generate_static_pw(
-    length, keyboard_layout=KEYBOARD_LAYOUT.MODHEX, blocklist=DEFAULT_PW_CHAR_BLOCKLIST
-):
-    chars = [k for k in keyboard_layout.value.keys() if k not in blocklist]
-    sr = random.SystemRandom()
-    return "".join([sr.choice(chars) for _ in range(length)])
-
-
-def format_code(code, digits=6, steam=False):
-    STEAM_CHAR_TABLE = "23456789BCDFGHJKMNPQRTVWXY"
-    if steam:
-        chars = []
-        for i in range(5):
-            chars.append(STEAM_CHAR_TABLE[code % len(STEAM_CHAR_TABLE)])
-            code //= len(STEAM_CHAR_TABLE)
-        return "".join(chars)
-    else:
-        return ("%%0%dd" % digits) % (code % 10 ** digits)
-
-
-def parse_totp_hash(resp):
-    offs = resp[-1] & 0xF
-    return parse_truncated(resp[offs : offs + 4])
-
-
-def parse_truncated(resp):
-    return struct.unpack(">I", resp)[0] & 0x7FFFFFFF
-
-
-def hmac_shorten_key(key, algo):
-    if algo.upper() == "SHA1":
-        h = hashes.SHA1()  # nosec
-        block_size = 64
-    elif algo.upper() == "SHA256":
-        h = hashes.SHA256()
-        block_size = 64
-    elif algo.upper() == "SHA512":
-        h = hashes.SHA512()
-        block_size = 128
-    else:
-        raise ValueError("Unsupported algorithm!")
-
-    if len(key) > block_size:
-        h = hashes.Hash(h, default_backend())
-        h.update(key)
-        key = h.finalize()
-    return key
-
-
-def time_challenge(timestamp, period=30):
-    return struct.pack(">q", int(timestamp // period))
-
-
-def parse_key(val):
-    val = val.upper()
-    if re.match(r"^([0-9A-F]{2})+$", val):  # hex
-        return bytes.fromhex(val)
-    else:
-        # Key should be b32 encoded
-        return parse_b32_key(val)
-
-
-def parse_b32_key(key):
-    key = key.upper().replace(" ", "")
-    key += "=" * (-len(key) % 8)  # Support unpadded
-    return b32decode(key)
 
 
 def parse_private_key(data, password):

@@ -33,7 +33,6 @@ import ykman.logging_setup
 
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
-from ..util import Cve201715361VulnerableError
 from ..device import (
     read_info,
     get_name,
@@ -325,10 +324,6 @@ def main():
         logger.error("Error", exc_info=e)
         click.echo("Error: " + str(e))
         return 1
-    except Cve201715361VulnerableError as err:
-        logger.error("Error", exc_info=err)
-        click.echo("Error: " + str(err))
-        return 2
 
 
 if __name__ == "__main__":

@@ -25,12 +25,20 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import json
-import logging
 from . import __version__
-from .util import modhex_encode
+from .scancodes import KEYBOARD_LAYOUT
+from yubikit.core.otp import modhex_encode
+from yubikit.yubiotp import YubiOtpSession
+from yubikit.oath import parse_b32_key
 from enum import Enum
 from http.client import HTTPSConnection
+from typing import Iterable
+
+import re
+import json
+import struct
+import random
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +145,42 @@ def prepare_upload_key(
             raise PrepareUploadFailed(resp.status, resp_body, errors)
 
 
-def is_in_fips_mode(session):
-    """
-    Check if the OTP application of a FIPS YubiKey is in FIPS approved mode.
-    """
-    return session.backend.send_and_receive(0x14, b"", 1) == b"\1"
+def is_in_fips_mode(session: YubiOtpSession) -> bool:
+    """Check if the OTP application of a FIPS YubiKey is in FIPS approved mode."""
+    return session.backend.send_and_receive(0x14, b"", 1) == b"\1"  # type: ignore
+
+
+DEFAULT_PW_CHAR_BLOCKLIST = ["\t", "\n", " "]
+
+
+def generate_static_pw(
+    length: int,
+    keyboard_layout: KEYBOARD_LAYOUT = KEYBOARD_LAYOUT.MODHEX,
+    blocklist: Iterable[str] = DEFAULT_PW_CHAR_BLOCKLIST,
+) -> str:
+    """Generate a random password."""
+    chars = [k for k in keyboard_layout.value.keys() if k not in blocklist]
+    sr = random.SystemRandom()
+    return "".join([sr.choice(chars) for _ in range(length)])
+
+
+def parse_oath_key(val: str) -> bytes:
+    """Parse a secret key encoded as either Hex or Base32."""
+    val = val.upper()
+    if re.match(r"^([0-9A-F]{2})+$", val):  # hex
+        return bytes.fromhex(val)
+    else:
+        # Key should be b32 encoded
+        return parse_b32_key(val)
+
+
+def format_oath_code(response: bytes, digits: int = 6) -> str:
+    """Formats an OATH code from a hash response."""
+    offs = response[-1] & 0xF
+    code = struct.unpack_from(">I", response[offs:])[0] & 0x7FFFFFFF
+    return ("%%0%dd" % digits) % (code % 10 ** digits)
+
+
+def time_challenge(timestamp: int, period: int = 30) -> bytes:
+    """Formats a HMAC-SHA1 challenge based on an OATH timestamp and period."""
+    return struct.pack(">q", int(timestamp // period))

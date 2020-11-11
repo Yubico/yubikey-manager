@@ -21,24 +21,26 @@ Usage: ykman [OPTIONS] COMMAND [ARGS]...
     $ ykman --device 0123456 info
 
 Options:
-  -v, --version
-  -d, --device SERIAL
+  -v, --version                   Show version information about the app
+  -d, --device SERIAL             Specify which YubiKey to interact with by serial number.
   -l, --log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
                                   Enable logging at given verbosity level.
-  --log-file FILE                 Write logs to the given FILE instead of standard error; ignored unless --log-level is also set.
+  --log-file FILE                 Write logs to the given FILE instead of standard error; ignored
+                                  unless --log-level is also set.
+
   -r, --reader NAME               Use an external smart card reader. Conflicts with --device and list.
+  --diagnose                      Show diagnostics information useful for troubleshooting.
   -h, --help                      Show this message and exit.
 
 Commands:
-  config   Enable/Disable applications.
-  fido     Manage FIDO applications.
   info     Show general information.
   list     List connected YubiKeys.
-  mode     Manage connection modes (USB Interfaces).
-  oath     Manage OATH Application.
-  openpgp  Manage OpenPGP Application.
-  otp      Manage OTP Application.
-  piv      Manage PIV Application.
+  config   Enable/Disable applications.
+  fido     Manage the FIDO applications.
+  oath     Manage the OATH Application.
+  openpgp  Manage the OpenPGP Application.
+  otp      Manage the OTP Application.
+  piv      Manage the PIV Application.
 ....
 
 === Installation
@@ -61,8 +63,9 @@ The command line tool is installed together with the GUI version of https://deve
 
     $ pip install yubikey-manager
 
-In order for the pip package to work, https://developers.yubico.com/yubikey-personalization/[ykpers] and http://libusb.info/[libusb] need to be installed on your system as well.
-https://pyscard.sourceforge.io/[Pyscard] is also needed in some form, and if it's not installed pip builds it using http://www.swig.org/[swig] and potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
+Some of the libraries used by yubikey-manager have C-extensions, and may require
+additional dependencies to build, such as http://www.swig.org/[swig] and
+potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
 
 ==== Source
 To install from source, see the link:doc/development.adoc[development] instructions.

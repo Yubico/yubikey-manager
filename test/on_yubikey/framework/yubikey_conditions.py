@@ -1,5 +1,4 @@
 from ykman.device import is_fips_version
-from ykman.util import is_cve201715361_vulnerable_firmware_version
 from yubikit.core import TRANSPORT
 from . import _get_test_method_names
 
@@ -81,12 +80,12 @@ def supports_piv_touch_policies(info):
 
 @yubikey_condition
 def is_roca(info):
-    return is_cve201715361_vulnerable_firmware_version(info.version)
+    return (4, 2, 0) <= info.version < (4, 3, 5)
 
 
 @yubikey_condition
 def is_not_roca(info):
-    return not is_cve201715361_vulnerable_firmware_version(info.version)
+    return not (4, 2, 0) <= info.version < (4, 3, 5)
 
 
 @yubikey_condition

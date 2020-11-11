@@ -25,9 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .util import ensure_not_cve201715361_vulnerable_firmware_version
-
-from yubikit.core import AID, Tlv
+from yubikit.core import AID, Tlv, NotSupportedError
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 
 from cryptography import x509
@@ -465,7 +463,8 @@ class OpenPgpController(object):
 
     def generate_rsa_key(self, key_slot, key_size, timestamp=None):
         """Requires Admin PIN verification."""
-        ensure_not_cve201715361_vulnerable_firmware_version(self.version)
+        if (4, 2, 0) <= self.version < (4, 3, 5):
+            raise NotSupportedError("RSA key generation not supported on this YubiKey")
 
         if timestamp is None:
             timestamp = int(time.time())

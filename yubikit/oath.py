@@ -9,10 +9,6 @@ from .core import (
 )
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hmac, hashes, constant_time
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
 from urllib.parse import unquote, urlparse, parse_qs
 from functools import total_ordering
 from enum import IntEnum, unique
@@ -21,6 +17,8 @@ from base64 import b64encode, b32decode
 from time import time
 from typing import Optional, List, Mapping
 
+import hmac
+import hashlib
 import struct
 import os
 import re
@@ -210,30 +208,24 @@ def _parse_cred_id(cred_id, oath_type):
 
 
 def _get_device_id(salt):
-    h = hashes.Hash(hashes.SHA256(), default_backend())
-    h.update(salt)
-    d = h.finalize()[:16]
+    d = hashlib.sha256(salt).digest()[:16]
     return b64encode(d).replace(b"=", b"").decode()
 
 
 def _hmac_sha1(key, message):
-    h = hmac.HMAC(key, hashes.SHA1(), default_backend())  # nosec
-    h.update(message)
-    return h.finalize()
+    return hmac.new(key, message, "sha1").digest()
 
 
 def _derive_key(salt, passphrase):
-    kdf = PBKDF2HMAC(hashes.SHA1(), 16, salt, 1000, default_backend())  # nosec
-    return kdf.derive(passphrase.encode())
+    return hashlib.pbkdf2_hmac("sha1", passphrase.encode(), salt, 1000, 16)
 
 
 def _hmac_shorten_key(key, algo):
-    h = getattr(hashes, algo.name)()
+    h = hashlib.new(algo.name)
 
     if len(key) > h.block_size:
-        h = hashes.Hash(h, default_backend())
         h.update(key)
-        key = h.finalize()
+        key = h.digest()
     return key
 
 
@@ -290,7 +282,7 @@ class OathSession:
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
         resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
         verification = _hmac_sha1(key, challenge)
-        if not constant_time.bytes_eq(Tlv.unpack(TAG_RESPONSE, resp), verification):
+        if not hmac.compare_digest(Tlv.unpack(TAG_RESPONSE, resp), verification):
             raise BadResponseError(
                 "Response from validation does not match verification!"
             )
