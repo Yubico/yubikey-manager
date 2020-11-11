@@ -140,6 +140,39 @@ class CredentialData(object):
             counter=int(params.get('counter', 0))
         )
 
+    @classmethod
+    def from_pskc(cls, pskc_key):
+
+        def _get_oath_type(pskc_algo):
+            if 'hotp' in pskc_algo.lower():
+                return OATH_TYPE.HOTP
+            elif 'totp' in pskc_algo.lower():
+                return OATH_TYPE.TOTP
+            else:
+                raise ValueError('Unsupported PSKC algorithm!')
+
+        def _get_algo(pskc_algo_suite):
+            if 'sha1' in pskc_algo_suite.lower():
+                return ALGO.SHA1
+            elif 'sha256' in pskc_algo_suite.lower():
+                return ALGO.SHA256
+            elif 'sha512' in pskc_algo_suite.lower():
+                return ALGO.SHA512
+
+        return cls(
+            secret=pskc_key.secret,
+            issuer=pskc_key.issuer,
+            # TODO: Look over what we want as the name here.
+            name=pskc_key.friendly_name or pskc_key.userid or pskc_key.issuer,
+            oath_type=_get_oath_type(pskc_key.algorithm),
+            algorithm=_get_algo(
+                pskc_key.algorithm_suite) \
+            if pskc_key.algorithm_suite else ALGO.SHA1,
+            digits=pskc_key.response_length or 6,
+            period=pskc_key.time_interval or 30,
+            counter=pskc_key.counter or 0
+        )
+
     def make_key(self):
         key = self.name
         if self.issuer:
