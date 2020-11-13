@@ -74,7 +74,7 @@ def fido(ctx):
 
     \b
       Change the FIDO2 PIN from 123456 to 654321:
-      $ ykman fido set-pin --pin 123456 --new-pin 654321
+      $ ykman fido access change-pin --pin 123456 --new-pin 654321
 
     """
     conn = ctx.obj["conn"]
@@ -225,14 +225,14 @@ def access():
     """
 
 
-@access.command("set-pin")
+@access.command("change-pin")
 @click.pass_context
 @click.option("-P", "--pin", help="Current PIN code.")
 @click.option("-n", "--new-pin", help="A new PIN.")
 @click.option(
     "-u", "--u2f", is_flag=True, help="Set FIDO U2F PIN instead of FIDO2 PIN."
 )
-def set_pin(ctx, pin, new_pin, u2f):
+def change_pin(ctx, pin, new_pin, u2f):
     """
     Set or change the PIN code.
 
@@ -413,7 +413,7 @@ def creds():
 
     \b
       List stored credentials (providing PIN via argument):
-      $ ykman fido credentials --pin 123456 list
+      $ ykman fido credentials list --pin 123456
 
     \b
       Delete a stored credential by user name (PIN will be prompted for):
