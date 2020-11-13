@@ -64,7 +64,7 @@ from .util import (
     click_postpone_execution,
     click_callback,
     click_prompt,
-    PromptTimeout,
+    prompt_timeout,
     EnumChoice,
 )
 from cryptography.hazmat.primitives import serialization
@@ -669,7 +669,7 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
     def do_import(retry=True):
         if verify:
             try:
-                with PromptTimeout():
+                with prompt_timeout():
                     if not check_key(session, slot, cert_to_import.public_key()):
                         ctx.fail(
                             "This certificate is not tied to the private key in the "
@@ -758,7 +758,7 @@ def generate_certificate(
     valid_to = now + datetime.timedelta(days=valid_days)
 
     try:
-        with PromptTimeout():
+        with prompt_timeout():
             cert = generate_self_signed_certificate(
                 session, slot, public_key, subject, now, valid_to
             )
@@ -802,7 +802,7 @@ def generate_certificate_signing_request(
     public_key = serialization.load_pem_public_key(data, default_backend())
 
     try:
-        with PromptTimeout():
+        with prompt_timeout():
             csr = generate_csr(session, slot, public_key, subject)
     except ApduError:
         ctx.fail("Certificate Signing Request generation failed.")
@@ -1003,12 +1003,12 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     try:
         session.verify_pin(pin)
         if pivman.has_derived_key:
-            with PromptTimeout():
+            with prompt_timeout():
                 session.authenticate(derive_management_key(pin, pivman.salt))
             session.verify_pin(pin)  # Ensure verify was the last thing we did
         elif pivman.has_stored_key:
             pivman_prot = get_pivman_protected_data(session)
-            with PromptTimeout():
+            with prompt_timeout():
                 session.authenticate(pivman_prot.key)
             session.verify_pin(pin)  # Ensure verify was the last thing we did
 
@@ -1033,7 +1033,7 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             else:
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
-        with PromptTimeout():
+        with prompt_timeout():
             session.authenticate(management_key)
     except Exception as e:
         logger.error("Authentication with management key failed.", exc_info=e)

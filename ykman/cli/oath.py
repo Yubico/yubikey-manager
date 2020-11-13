@@ -35,7 +35,7 @@ from .util import (
     click_prompt,
     ykman_group,
     prompt_for_touch,
-    PromptTimeout,
+    prompt_timeout,
     EnumChoice,
 )
 from yubikit.core import USB_INTERFACE
@@ -409,7 +409,7 @@ def code(ctx, show_hidden, query, single):
             prompt_for_touch()
         try:
             if cred.oath_type == OATH_TYPE.HOTP:
-                with PromptTimeout():
+                with prompt_timeout():
                     # HOTP might require touch, we don't know.
                     # Assume yes after 500ms.
                     code = app.calculate_code(cred)

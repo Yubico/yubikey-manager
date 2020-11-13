@@ -43,7 +43,7 @@ from .util import (
     click_prompt,
     click_force_option,
     ykman_group,
-    PromptTimeout,
+    prompt_timeout,
 )
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
@@ -161,7 +161,7 @@ def reset(ctx, force):
         if not force:
             dev = prompt_re_insert_key()
             conn = dev.open_connection(FidoConnection)
-        with PromptTimeout():
+        with prompt_timeout():
             if is_fips:
                 fips_reset(conn)
             else:

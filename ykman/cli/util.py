@@ -33,6 +33,7 @@ from yubikit.oath import parse_b32_key
 from collections import OrderedDict
 from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
+from contextlib import contextmanager
 from threading import Timer
 
 
@@ -217,12 +218,10 @@ def prompt_for_touch():
         sys.stderr.write("Touch your YubiKey...\n")
 
 
-class PromptTimeout:
-    def __init__(self, timeout=0.5):
-        self.timer = Timer(timeout, prompt_for_touch)
-
-    def __enter__(self):
-        self.timer.start()
-
-    def __exit__(self, typ, value, traceback):
-        self.timer.cancel()
+@contextmanager
+def prompt_timeout(timeout=0.5):
+    timer = Timer(timeout, prompt_for_touch)
+    try:
+        yield timer.start()
+    finally:
+        timer.cancel()
