@@ -114,7 +114,7 @@ def click_callback(invoke_on_missing=False):
                 return None
             try:
                 return f(ctx, param, val)
-            except Exception as e:
+            except ValueError as e:
                 ctx.fail('Invalid value for "{}": {}'.format(param.name, str(e)))
 
         return inner

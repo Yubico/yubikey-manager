@@ -31,37 +31,80 @@ import click
 Command line aliases to support commands which have moved.
 """
 
+
+ignore = None
+
+
+def replace(*args):
+    def inner(argv, alias, match_at):
+        return argv[:match_at] + list(args) + argv[match_at + len(alias) :]
+
+    return inner
+
+
+def oath_access_remember(argv, alias, match_at):
+    args = ["oath", "access"]
+    for flag in ("-c", "--clear-all"):
+        if flag in argv:
+            argv.remove(flag)
+            args.extend(["forget", "--all"])
+            break
+    else:
+        for flag in ("-F", "--forget"):
+            if flag in argv:
+                argv.remove(flag)
+                args.append("forget")
+                break
+        else:
+            args.append("remember")
+    argv = argv[:match_at] + args + argv[match_at + len(alias) :]
+    return argv
+
+
 _aliases = (
-    (["config", "mode"], None),  # Avoid next line for "config mode".
-    (["mode"], ["config", "mode"]),
-    (["fido", "delete"], ["fido", "credentials", "delete"]),
-    (["fido", "list"], ["fido", "credentials", "list"]),
-    (["fido", "set-pin"], ["fido", "access", "change-pin"]),
-    (["fido", "unlock"], ["fido", "access", "unlock"]),
-    (["piv", "change-pin"], ["piv", "access", "change-pin"]),
-    (["piv", "change-puk"], ["piv", "access", "change-puk"]),
-    (["piv", "change-management-key"], ["piv", "access", "change-management-key"]),
-    (["piv", "set-pin-retries"], ["piv", "access", "set-retries"]),
-    (["piv", "unblock-pin"], ["piv", "access", "unblock-pin"]),
-    (["piv", "attest"], ["piv", "keys", "attest"]),
-    (["piv", "import-key"], ["piv", "keys", "import"]),
-    (["piv", "generate-key"], ["piv", "keys", "generate"]),
-    (["piv", "import-certificate"], ["piv", "certificates", "import"]),
-    (["piv", "export-certificate"], ["piv", "certificates", "export"]),
-    (["piv", "generate-certificate"], ["piv", "certificates", "generate"]),
-    (["piv", "delete-certificate"], ["piv", "certificates", "delete"]),
-    (["piv", "generate-csr"], ["piv", "certificates", "request"]),
-    (["piv", "read-object"], ["piv", "objects", "export"]),
-    (["piv", "write-object"], ["piv", "objects", "import"]),
-    (["piv", "set-chuid"], ["piv", "objects", "generate", "chuid"]),
-    (["piv", "set-ccc"], ["piv", "objects", "generate", "ccc"]),
-    (["openpgp", "set-pin-retries"], ["openpgp", "access", "set-retries"]),
-    (["openpgp", "import-certificate"], ["openpgp", "certificates", "import"]),
-    (["openpgp", "export-certificate"], ["openpgp", "certificates", "export"]),
-    (["openpgp", "delete-certificate"], ["openpgp", "certificates", "delete"]),
-    (["openpgp", "attest"], ["openpgp", "keys", "attest"]),
-    (["openpgp", "import-attestation-key"], ["openpgp", "keys", "import", "att"]),
-    (["openpgp", "set-touch"], ["openpgp", "keys", "set-touch"]),
+    (["config", "mode"], ignore),  # Avoid match on next line
+    (["mode"], replace("config", "mode")),
+    (["fido", "delete"], replace("fido", "credentials", "delete")),
+    (["fido", "list"], replace("fido", "credentials", "list")),
+    (["fido", "set-pin"], replace("fido", "access", "change-pin")),
+    (["fido", "unlock"], replace("fido", "access", "unlock")),
+    (["piv", "change-pin"], replace("piv", "access", "change-pin")),
+    (["piv", "change-puk"], replace("piv", "access", "change-puk")),
+    (
+        ["piv", "change-management-key"],
+        replace("piv", "access", "change-management-key"),
+    ),
+    (["piv", "set-pin-retries"], replace("piv", "access", "set-retries")),
+    (["piv", "unblock-pin"], replace("piv", "access", "unblock-pin")),
+    (["piv", "attest"], replace("piv", "keys", "attest")),
+    (["piv", "import-key"], replace("piv", "keys", "import")),
+    (["piv", "generate-key"], replace("piv", "keys", "generate")),
+    (["piv", "import-certificate"], replace("piv", "certificates", "import")),
+    (["piv", "export-certificate"], replace("piv", "certificates", "export")),
+    (["piv", "generate-certificate"], replace("piv", "certificates", "generate")),
+    (["piv", "delete-certificate"], replace("piv", "certificates", "delete")),
+    (["piv", "generate-csr"], replace("piv", "certificates", "request")),
+    (["piv", "read-object"], replace("piv", "objects", "export")),
+    (["piv", "write-object"], replace("piv", "objects", "import")),
+    (["piv", "set-chuid"], replace("piv", "objects", "generate", "chuid")),
+    (["piv", "set-ccc"], replace("piv", "objects", "generate", "ccc")),
+    (["openpgp", "set-pin-retries"], replace("openpgp", "access", "set-retries")),
+    (["openpgp", "import-certificate"], replace("openpgp", "certificates", "import")),
+    (["openpgp", "export-certificate"], replace("openpgp", "certificates", "export")),
+    (["openpgp", "delete-certificate"], replace("openpgp", "certificates", "delete")),
+    (["openpgp", "attest"], replace("openpgp", "keys", "attest")),
+    (
+        ["openpgp", "import-attestation-key"],
+        replace("openpgp", "keys", "import", "att"),
+    ),
+    (["openpgp", "set-touch"], replace("openpgp", "keys", "set-touch")),
+    (["oath", "add"], replace("oath", "accounts", "add")),
+    (["oath", "code"], replace("oath", "accounts", "code")),
+    (["oath", "delete"], replace("oath", "accounts", "delete")),
+    (["oath", "list"], replace("oath", "accounts", "list")),
+    (["oath", "uri"], replace("oath", "accounts", "uri")),
+    (["oath", "set-password"], replace("oath", "access", "change")),
+    (["oath", "remember-password"], oath_access_remember),
 )
 
 
@@ -73,11 +116,11 @@ def _find_match(data, selection):
 
 
 def apply_aliases(argv):
-    for (alias, replacement) in _aliases:
+    for (alias, f) in _aliases:
         i = _find_match(argv, alias)
         if i is not None:
-            if replacement is not None:
-                argv = argv[:i] + replacement + argv[i + len(alias) :]
+            if f:
+                argv = f(argv, alias, i)
                 click.echo(
                     "WARNING: "
                     "The use of this command is deprecated and will be removed!\n"
