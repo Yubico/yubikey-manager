@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .core import (
+    require_version,
     Version,
     Tlv,
     AID,
@@ -343,6 +344,9 @@ def check_key_support(
     This method will return None if the key (with PIN and touch policies) is supported,
     or it will raise a NotSupportedError if it is not.
     """
+    if version[0] == 0:
+        return  # Development build, skip version checks
+
     if version < (4, 0, 0):
         if key_type == KEY_TYPE.ECCP384:
             raise NotSupportedError("ECCP384 requires YubiKey 4 or later")
@@ -515,10 +519,7 @@ class PivSession:
         return self._get_pin_puk_metadata(PUK_P2)
 
     def get_management_key_metadata(self) -> ManagementKeyMetadata:
-        if self.version < (5, 3, 0):
-            raise NotSupportedError(
-                "Management key metadata requires version 5.3.0 or later."
-            )
+        require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(
             self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT.CARD_MANAGEMENT)
         )
@@ -529,9 +530,8 @@ class PivSession:
         )
 
     def get_slot_metadata(self, slot: SLOT) -> SlotMetadata:
-        if self.version < (5, 3, 0):
-            raise NotSupportedError("Slot metadata requires version 5.3.0 or later.")
-        elif slot == SLOT.CARD_MANAGEMENT:
+        require_version(self.version, (5, 3, 0))
+        if slot == SLOT.CARD_MANAGEMENT:
             raise ValueError(
                 "This method cannot be used for the card management key, use "
                 "get_management_key_metadata() instead"
@@ -693,8 +693,7 @@ class PivSession:
         return _parse_device_public_key(key_type, Tlv.unpack(0x7F49, response))
 
     def attest_key(self, slot: SLOT) -> x509.Certificate:
-        if self.version < (4, 3, 0):
-            raise NotSupportedError("Attestation requires YubiKey 4.3 or later")
+        require_version(self.version, (4, 3, 0))
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
         return x509.load_der_x509_certificate(response, default_backend())
 
@@ -712,8 +711,7 @@ class PivSession:
             raise InvalidPinError(retries)
 
     def _get_pin_puk_metadata(self, p2):
-        if self.version < (5, 3, 0):
-            raise NotSupportedError("PIN/PUK metadata requires version 5.3.0 or later.")
+        require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, p2))
         attempts = data[TAG_METADATA_RETRIES]
         return PinMetadata(

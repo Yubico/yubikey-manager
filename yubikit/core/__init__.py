@@ -222,6 +222,17 @@ class NotSupportedError(ValueError):
     """Attempting an action that is not supported on this YubiKey"""
 
 
+def require_version(
+    my_version: Version, min_version: Tuple[int, int, int], message=None,
+):
+    """Ensure a version is at least min_version."""
+    # Skip version checks for major == 0, used for development builds.
+    if my_version < min_version and my_version[0] != 0:
+        if not message:
+            message = "This action requires YubiKey %d.%d.%d or later" % min_version
+        raise NotSupportedError(message)
+
+
 def int2bytes(value: int, min_len: int = 0) -> bytes:
     buf = []
     while value > 0xFF:

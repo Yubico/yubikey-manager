@@ -30,6 +30,7 @@ from .core import (
     TRANSPORT,
     Version,
     bytes2int,
+    require_version,
     NotSupportedError,
     BadResponseError,
 )
@@ -363,7 +364,7 @@ class HmacSha1SlotConfiguration(SlotConfiguration):
         self._update_flags(CFGFLAG.HMAC_LT64, True)
 
     def is_supported_by(self, version):
-        return version >= (2, 2, 0)
+        return version >= (2, 2, 0) or version[0] == 0
 
     def require_touch(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.CHAL_BTN_TRIG, value)
@@ -412,7 +413,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
         self._update_flags(CFGFLAG.OATH_FIXED_MODHEX2, True)
 
     def is_supported_by(self, version):
-        return version >= (2, 2, 0)
+        return version >= (2, 2, 0) or version[0] == 0
 
     def digits8(self: Cfg, value: bool) -> Cfg:
         self._update_flags(CFGFLAG.OATH_HOTP8, value)
@@ -459,7 +460,7 @@ class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
         self._update_flags(CFGFLAG.SHORT_TICKET, True)
 
     def is_supported_by(self, version):
-        return version >= (2, 2, 0)
+        return version >= (2, 2, 0) or version[0] == 0
 
 
 class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
@@ -545,7 +546,7 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
         self._key = b"\0" * KEY_SIZE
 
     def is_supported_by(self, version):
-        return version >= (2, 2, 0)
+        return version >= (2, 2, 0) or version[0] == 0
 
     def _update_flags(self, flag, value):
         # NB: All EXT flags are allowed
@@ -583,13 +584,11 @@ class ConfigState:
         self.flags = sum(CFGSTATE) & touch_level
 
     def is_configured(self, slot: SLOT) -> bool:
-        if self.version < (2, 1, 0):
-            raise NotSupportedError("Configuration state requires YubiKey 2.1 or later")
+        require_version(self.version, (2, 1, 0))
         return self.flags & (CFGSTATE.SLOT1_VALID, CFGSTATE.SLOT2_VALID)[slot - 1] != 0
 
     def requires_touch(self, slot: SLOT) -> bool:
-        if self.version < (3, 0, 0):
-            raise NotSupportedError("Touch state requires YubiKey 3.0 or later")
+        require_version(self.version, (3, 0, 0))
         return self.flags & (CFGSTATE.SLOT1_TOUCH, CFGSTATE.SLOT2_TOUCH)[slot - 1] != 0
 
     def is_led_inverted(self) -> bool:
@@ -784,8 +783,7 @@ class YubiOtpSession:
         event: Optional[Event] = None,
         on_keepalive: Optional[Callable[[int], None]] = None,
     ) -> bytes:
-        if self.version < (2, 2, 0):
-            raise NotSupportedError("This operation requires YubiKey 2.2 or later")
+        require_version(self.version, (2, 2, 0))
 
         # Pad challenge with byte different from last
         challenge = challenge.ljust(

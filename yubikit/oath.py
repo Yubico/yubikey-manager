@@ -1,10 +1,10 @@
 from .core import (
     int2bytes,
     bytes2int,
+    require_version,
     Version,
     Tlv,
     AID,
-    NotSupportedError,
     BadResponseError,
 )
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
@@ -338,8 +338,7 @@ class OathSession:
     def rename_credential(
         self, credential_id: bytes, name: str, issuer: Optional[str] = None
     ) -> bytes:
-        if self.info.version < (5, 3, 1):
-            raise NotSupportedError("Operation requires YubiKey 5.3.1 or later")
+        require_version(self.info.version, (5, 3, 1))
         issuer, name, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
         self.protocol.send_apdu(

@@ -28,6 +28,7 @@
 from .core import (
     bytes2int,
     int2bytes,
+    require_version,
     Version,
     Tlv,
     AID,
@@ -36,10 +37,12 @@ from .core import (
     USB_INTERFACE,
     NotSupportedError,
     BadResponseError,
+    ApplicationNotAvailableError,
 )
 from .core.otp import check_crc, OtpConnection, OtpProtocol
 from .core.fido import FidoConnection
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from fido2.hid import CAPABILITY
 
 from enum import IntEnum, IntFlag, unique
 from dataclasses import dataclass
@@ -283,6 +286,8 @@ class _ManagementOtpBackend(_Backend):
     def __init__(self, otp_connection):
         self.protocol = OtpProtocol(otp_connection)
         self.version = Version.from_bytes(self.protocol.read_status()[:3])
+        if (1, 0, 0) <= self.version < (3, 0, 0):
+            raise ApplicationNotAvailableError()
 
     def close(self):
         self.protocol.close()
@@ -345,7 +350,8 @@ class _ManagementCtapBackend(_Backend):
         self.ctap = fido_connection
         version = fido_connection.device_version
         if version[0] < 4:  # Prior to YK4 this was not firmware version
-            version = (3, 0, 0)  # Guess
+            if not (version[0] == 0 and fido_connection.capabilities & CAPABILITY.CBOR):
+                version = (3, 0, 0)  # Guess that it's a NEO
         self.version = Version(*version)
 
     def close(self):
@@ -373,8 +379,6 @@ class ManagementSession:
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")
-        if self.version < (3, 0, 0):
-            raise NotSupportedError("ManagementSession requires YubiKey 3 or later")
 
     def close(self) -> None:
         self.backend.close()
@@ -384,8 +388,7 @@ class ManagementSession:
         return self.backend.version
 
     def read_device_info(self) -> DeviceInfo:
-        if self.version < (4, 1, 0):
-            raise NotSupportedError("Operation requires YubiKey 4.1 or later")
+        require_version(self.version, (4, 1, 0))
         return DeviceInfo.parse(self.backend.read_config(), self.version)
 
     def write_device_config(
@@ -395,9 +398,7 @@ class ManagementSession:
         cur_lock_code: Optional[bytes] = None,
         new_lock_code: Optional[bytes] = None,
     ) -> None:
-        if self.version < (5, 0, 0):
-            raise NotSupportedError("Operation requires YubiKey 5 or later")
-
+        require_version(self.version, (5, 0, 0))
         config = config or DeviceConfig({}, None, None, None)
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
@@ -406,8 +407,6 @@ class ManagementSession:
     def set_mode(
         self, mode: Mode, chalresp_timeout: int = 0, auto_eject_timeout: int = 0
     ) -> None:
-        if self.version < (3, 0, 0):
-            raise NotSupportedError("Changing mode requires YubiKey 3 or later")
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
             usb_enabled = APPLICATION(0)
