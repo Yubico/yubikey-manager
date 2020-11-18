@@ -414,6 +414,18 @@ def _fido_only(applications):
     return applications & ~(APPLICATION.U2F | APPLICATION.FIDO2) == 0
 
 
+def _is_preview(version):
+    _PREVIEW_RANGES = (
+        ((5, 0, 0), (5, 1, 0)),
+        ((5, 2, 0), (5, 2, 3)),
+        ((5, 5, 0), (5, 5, 2)),
+    )
+    for start, end in _PREVIEW_RANGES:
+        if start <= version < end:
+            return True
+    return False
+
+
 def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
     """Determine the product name of a YubiKey"""
     usb_supported = info.supported_applications[TRANSPORT.USB]
@@ -433,14 +445,12 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         if info.has_transport(TRANSPORT.NFC):
             device_name = "Security Key NFC"
     elif key_type == YUBIKEY.YK4:
-        if usb_supported == APPLICATION.OTP | APPLICATION.U2F:
-            device_name = "YubiKey Edge"
-        elif (5, 0, 0) <= info.version < (5, 1, 0) or info.version in [
-            (5, 2, 0),
-            (5, 2, 1),
-            (5, 2, 2),
-        ]:
+        if _is_preview(info.version):
             device_name = "YubiKey Preview"
+        elif is_fips_version(info.version):
+            device_name = "YubiKey FIPS"
+        elif usb_supported == APPLICATION.OTP | APPLICATION.U2F:
+            device_name = "YubiKey Edge"
         elif info.version >= (5, 1, 0):
             device_name = "YubiKey 5"
             if info.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
@@ -458,8 +468,5 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 device_name += "C Nano"
             elif info.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
                 device_name += "Ci"
-
-        elif is_fips_version(info.version):
-            device_name = "YubiKey FIPS"
 
     return device_name
