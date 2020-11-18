@@ -120,6 +120,9 @@ def fido_info():
     for dev in list_ctap_devices():
         lines.append("\t%r" % dev)
         with dev.open_connection(FidoConnection) as conn:
+            lines.append("CTAP device version: %d.%d.%d" % conn.device_version)
+            lines.append("CTAPHID protocol version: %s" % conn.version)
+            lines.append("Capabilities: %d" % conn.capabilities)
             lines.extend(mgmt_info(conn))
             try:
                 ctap2 = Ctap2(conn)
