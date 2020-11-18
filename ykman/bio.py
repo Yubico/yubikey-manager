@@ -140,7 +140,8 @@ class BioController(object):
 
         logfile.write('# {}\n'.format(sle_v))
         logfile.write(
-            '# Session ID, Duration, SPI Dur., I2C Dur., FPS Dur., Command, Error, ' 'Enrollments, Flags\n'
+            '# Session ID, Duration, SPI Dur., I2C Dur., FPS Dur., Command, Error, '
+            'Enrollments, Flags\n'
         )
         for line in self.dump_sle():
             logfile.write(
