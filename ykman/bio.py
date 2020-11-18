@@ -103,8 +103,8 @@ class BioController(object):
         lines = []
 
         while resp:
-            lines.append(struct.unpack_from('!HHHBBBB', resp))
-            resp = resp[10:]
+            lines.append(struct.unpack_from('!HHHHHBBBB', resp))
+            resp = resp[14:]
 
         return lines
 
@@ -128,7 +128,7 @@ class BioController(object):
 
         lines = []
         while resp:
-            lines.append(struct.unpack_from('<HHBBBBBBHI', resp))
+            lines.append(struct.unpack_from('<HHHBBBBBBHH', resp))
             resp = resp[16:]
 
         return lines
@@ -140,21 +140,21 @@ class BioController(object):
 
         logfile.write('# {}\n'.format(sle_v))
         logfile.write(
-            '# Session ID, Duration, SPI Dur., Command, Error, ' 'Enrollments, Flags\n'
+            '# Session ID, Duration, SPI Dur., I2C Dur., FPS Dur., Command, Error, ' 'Enrollments, Flags\n'
         )
         for line in self.dump_sle():
             logfile.write(
-                '0x{:04x},0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},'
-                '0x{:02x}\n'.format(*line)
+                '0x{:04x},0x{:04x},0x{:04x},0x{:04x},0x{:04x},0x{:02x},'
+                '0x{:02x},0x{:02x},0x{:02x}\n'.format(*line)
             )
 
         logfile.write('# {}\n'.format(stm_v))
         logfile.write(
-            '# Session ID, Duration, Command, Result, Last Enroll, '
+            '# Session ID, Duration, Capture Dur., Command, Result, Last Enroll, '
             'Samples Remaining, Error, Vendor Error, Flags, Reserved\n'
         )
         for line in self.dump_stm():
             logfile.write(
-                '0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},0x{:02x},'
-                '0x{:02x},0x{:04x},0x{:08x}\n'.format(*line)
+                '0x{:04x},0x{:04x},0x{:04x},0x{:02x},0x{:02x},0x{:02x},'
+                '0x{:02x},0x{:02x},0x{:02x},0x{:04x},0x{:04x}\n'.format(*line)
             )
