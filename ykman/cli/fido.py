@@ -555,6 +555,8 @@ def bio_enroll(ctx, name, pin):
     \b
     NAME        A short readable name for the fingerprint (eg. "Left thumb").
     """
+    if len(name.encode()) > 15:
+        ctx.fail("Fingerprint name must be a maximum of 15 characters")
     bio = _init_bio(ctx, pin)
 
     enroller = bio.enroll()
