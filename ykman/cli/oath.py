@@ -93,12 +93,12 @@ def info(ctx):
     Display status of OATH application.
     """
     session = ctx.obj["session"]
-    version = session.info.version
+    version = session.version
     click.echo("OATH version: {}.{}.{}".format(version[0], version[1], version[2]))
     click.echo("Password protection: " + ("enabled" if session.locked else "disabled"))
 
     keys = ctx.obj["settings"].get("keys", {})
-    if session.locked and session.info.device_id in keys:
+    if session.locked and session.device_id in keys:
         click.echo("The password for this YubiKey is remembered by ykman.")
 
     if is_fips_version(version):
@@ -123,7 +123,7 @@ def reset(ctx):
 
     session = ctx.obj["session"]
     click.echo("Resetting OATH data...")
-    old_id = session.info.device_id
+    old_id = session.device_id
     session.reset()
 
     settings = ctx.obj["settings"]
@@ -147,7 +147,7 @@ def _validate(ctx, key, remember):
         if remember:
             settings = ctx.obj["settings"]
             keys = settings.setdefault("keys", {})
-            keys[session.info.device_id] = key.hex()
+            keys[session.device_id] = key.hex()
             settings.write()
             click.echo("Password remembered.")
     except Exception:
@@ -158,7 +158,7 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
     session = ctx.obj["session"]
     settings = ctx.obj["settings"]
     keys = settings.setdefault("keys", {})
-    device_id = session.info.device_id
+    device_id = session.device_id
 
     if session.locked:
         if password:  # If password argument given, use it
@@ -200,7 +200,7 @@ def change(ctx, password, clear, new_password):
     session = ctx.obj["session"]
     settings = ctx.obj["settings"]
     keys = settings.setdefault("keys", {})
-    device_id = session.info.device_id
+    device_id = session.device_id
 
     if clear:
         session.unset_key()
@@ -232,13 +232,13 @@ def remember(ctx, password):
     on each use.
     """
     session = ctx.obj["session"]
-    device_id = session.info.device_id
+    device_id = session.device_id
     settings = ctx.obj["settings"]
     keys = settings.setdefault("keys", {})
 
     if not session.locked:
         if device_id in keys:
-            del keys[session.info.device_id]
+            del keys[session.device_id]
             settings.write()
         click.echo("This YubiKey is not password protected.")
     else:
@@ -276,12 +276,12 @@ def forget(ctx):
     Remove a stored password from this computer.
     """
     session = ctx.obj["session"]
-    device_id = session.info.device_id
+    device_id = session.device_id
     settings = ctx.obj["settings"]
     keys = settings.setdefault("keys", {})
 
     if device_id in keys:
-        del keys[session.info.device_id]
+        del keys[session.device_id]
         settings.write()
         click.echo("Password forgotten.")
     else:
@@ -467,7 +467,7 @@ def uri(ctx, data, touch, force, password, remember):
 
 def _add_cred(ctx, data, touch, force):
     session = ctx.obj["session"]
-    version = session.info.version
+    version = session.version
 
     if not (0 < len(data.name) <= 64):
         ctx.fail("Name must be between 1 and 64 bytes.")

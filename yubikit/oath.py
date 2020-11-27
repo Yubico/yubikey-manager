@@ -83,18 +83,10 @@ def parse_b32_key(key: str):
     return b32decode(key)
 
 
-@dataclass
-class OathApplicationInfo:
-    version: Version
-    device_id: str
-
-
 def _parse_select(response):
     data = Tlv.parse_dict(response)
     return (
-        OathApplicationInfo(
-            Version.from_bytes(data[TAG_VERSION]), _get_device_id(data[TAG_NAME])
-        ),
+        Version.from_bytes(data[TAG_VERSION]),
         data.get(TAG_NAME),
         data.get(TAG_CHALLENGE),
     )
@@ -254,14 +246,19 @@ def _format_code(credential, timestamp, truncated):
 class OathSession:
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
-        self._app_info, self._salt, self._challenge = _parse_select(
+        self._version, self._salt, self._challenge = _parse_select(
             self.protocol.select(AID.OATH)
         )
-        self.protocol.enable_touch_workaround(self.info.version)
+        self._device_id = _get_device_id(self._salt)
+        self.protocol.enable_touch_workaround(self._version)
 
     @property
-    def info(self) -> OathApplicationInfo:
-        return self._app_info
+    def version(self) -> Version:
+        return self._version
+
+    @property
+    def device_id(self) -> str:
+        return self._device_id
 
     @property
     def locked(self) -> bool:
@@ -269,9 +266,8 @@ class OathSession:
 
     def reset(self) -> None:
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
-        self._app_info, self._salt, self._challenge = _parse_select(
-            self.protocol.select(AID.OATH)
-        )
+        _, self._salt, self._challenge = _parse_select(self.protocol.select(AID.OATH))
+        self._device_id = _get_device_id(self._salt)
 
     def derive_key(self, password: str) -> bytes:
         return _derive_key(self._salt, password)
@@ -326,7 +322,7 @@ class OathSession:
 
         self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
         return Credential(
-            self.info.device_id,
+            self.device_id,
             cred_id,
             d.issuer,
             d.name,
@@ -338,7 +334,7 @@ class OathSession:
     def rename_credential(
         self, credential_id: bytes, name: str, issuer: Optional[str] = None
     ) -> bytes:
-        require_version(self.info.version, (5, 3, 1))
+        require_version(self.version, (5, 3, 1))
         issuer, name, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
         self.protocol.send_apdu(
@@ -355,7 +351,7 @@ class OathSession:
             issuer, name, period = _parse_cred_id(cred_id, oath_type)
             creds.append(
                 Credential(
-                    self.info.device_id, cred_id, issuer, name, oath_type, period, None
+                    self.device_id, cred_id, issuer, name, oath_type, period, None
                 )
             )
         return creds
@@ -397,7 +393,7 @@ class OathSession:
             issuer, name, period = _parse_cred_id(cred_id, oath_type)
 
             credential = Credential(
-                self.info.device_id, cred_id, issuer, name, oath_type, period, touch
+                self.device_id, cred_id, issuer, name, oath_type, period, touch
             )
 
             code = None  # Will be None for HOTP and touch
@@ -414,7 +410,7 @@ class OathSession:
     def calculate_code(
         self, credential: Credential, timestamp: Optional[int] = None
     ) -> Code:
-        if credential.device_id != self.info.device_id:
+        if credential.device_id != self.device_id:
             raise ValueError("Credential does not belong to this YubiKey")
 
         timestamp = int(timestamp or time())
