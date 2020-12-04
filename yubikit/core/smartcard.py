@@ -27,7 +27,7 @@
 
 from . import Version, TRANSPORT, Connection, CommandError, ApplicationNotAvailableError
 from time import time
-from enum import IntEnum, unique
+from enum import Enum, IntEnum, unique, auto
 from typing import Tuple
 import abc
 import struct
@@ -53,6 +53,13 @@ class ApduError(CommandError):
 
     def __str__(self):
         return "APDU error: SW=0x{:04x}".format(self.sw)
+
+
+class ApduFormat(Enum):
+    """APDU encoding format"""
+
+    SHORT = auto()
+    EXTENDED = auto()
 
 
 @unique
@@ -84,15 +91,12 @@ SW1_HAS_MORE_DATA = 0x61
 SHORT_APDU_MAX_CHUNK = 0xFF
 
 
-def _encode_apdu(cla, ins, p1, p2, data=b""):
-    data_len = len(data)
-    buf = struct.pack(">BBBB", cla, ins, p1, p2)
-    if data_len <= SHORT_APDU_MAX_CHUNK:
-        if data_len > 0:
-            buf += struct.pack(">B", data_len)
-    else:
-        buf += struct.pack(">BH", 0, data_len)
-    return buf + data
+def _encode_short_apdu(cla, ins, p1, p2, data):
+    return struct.pack(">BBBBB", cla, ins, p1, p2, len(data)) + data
+
+
+def _encode_extended_apdu(cla, ins, p1, p2, data):
+    return struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
 
 
 class SmartCardProtocol:
@@ -101,6 +105,7 @@ class SmartCardProtocol:
         smartcard_connection: SmartCardConnection,
         ins_send_remaining: int = INS_SEND_REMAINING,
     ):
+        self.apdu_format = ApduFormat.SHORT
         self.connection = smartcard_connection
         self._ins_send_remaining = ins_send_remaining
         self._touch_workaround = False
@@ -111,7 +116,7 @@ class SmartCardProtocol:
 
     def enable_touch_workaround(self, version: Version) -> None:
         self._touch_workaround = self.connection.transport == TRANSPORT.USB and (
-            (4, 2, 0,) <= version <= (4, 2, 6)
+            (4, 2, 0) <= version <= (4, 2, 6)
         )
 
     def select(self, aid: bytes) -> bytes:
@@ -131,18 +136,32 @@ class SmartCardProtocol:
             and time() - self._last_long_resp < 2
         ):
             self.connection.send_and_receive(
-                _encode_apdu(0, 0, 0, 0)
+                _encode_short_apdu(0, 0, 0, 0, b"")
             )  # Dummy APDU, returns error
             self._last_long_resp = 0
 
-        # Read first response APDU
-        response, sw = self.connection.send_and_receive(
-            _encode_apdu(cla, ins, p1, p2, data)
-        )
+        if self.apdu_format is ApduFormat.SHORT:
+            while len(data) > SHORT_APDU_MAX_CHUNK:
+                chunk, data = data[:SHORT_APDU_MAX_CHUNK], data[SHORT_APDU_MAX_CHUNK:]
+                response, sw = self.connection.send_and_receive(
+                    _encode_short_apdu(0x10 | cla, ins, p1, p2, chunk)
+                )
+                if sw != SW.OK:
+                    raise ApduError(response, sw)
+            response, sw = self.connection.send_and_receive(
+                _encode_short_apdu(cla, ins, p1, p2, data)
+            )
+            get_data = _encode_short_apdu(0, self._ins_send_remaining, 0, 0, b"")
+        elif self.apdu_format is ApduFormat.EXTENDED:
+            response, sw = self.connection.send_and_receive(
+                _encode_extended_apdu(cla, ins, p1, p2, data)
+            )
+            get_data = _encode_extended_apdu(0, self._ins_send_remaining, 0, 0, b"")
+        else:
+            raise TypeError("Invalid ApduFormat set")
 
-        # Read full response
+        # Read chained response
         buf = b""
-        get_data = _encode_apdu(0, self._ins_send_remaining, 0, 0)
         while sw >> 8 == SW1_HAS_MORE_DATA:
             buf += response
             response, sw = self.connection.send_and_receive(get_data)
