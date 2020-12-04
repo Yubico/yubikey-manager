@@ -34,7 +34,13 @@ from .core import (
     NotSupportedError,
     BadResponseError,
 )
-from .core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
+from .core.smartcard import (
+    SmartCardConnection,
+    SmartCardProtocol,
+    ApduError,
+    SW,
+    ApduFormat,
+)
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -95,9 +101,40 @@ class KEY_TYPE(IntEnum):
 
 
 @unique
+class MANAGEMENT_KEY_TYPE(IntEnum):
+    TDES = 0x03
+    AES128 = 0x08
+    AES192 = 0x0A
+    AES256 = 0x0C
+
+    @property
+    def key_len(self):
+        if self.name == "TDES":
+            return 24
+        # AES
+        return int(self.name[3:]) // 8
+
+    @property
+    def challenge_len(self):
+        if self.name == "TDES":
+            return 8
+        return 16
+
+
+def _parse_management_key(key_type, management_key):
+    if key_type == MANAGEMENT_KEY_TYPE.TDES:
+        return algorithms.TripleDES(management_key)
+    else:
+        return algorithms.AES(management_key)
+
+
+# The card management slot is special, we don't include it in SLOT below
+SLOT_CARD_MANAGEMENT = 0x9B
+
+
+@unique
 class SLOT(IntEnum):
     AUTHENTICATION = 0x9A
-    CARD_MANAGEMENT = 0x9B
     SIGNATURE = 0x9C
     KEY_MANAGEMENT = 0x9D
     CARD_AUTH = 0x9E
@@ -194,7 +231,6 @@ DEFAULT_MANAGEMENT_KEY = (
 )
 
 PIN_LEN = 8
-CHALLENGE_LEN = 8
 
 # Instruction set
 INS_VERIFY = 0x20
@@ -246,8 +282,6 @@ INDEX_RETRIES_REMAINING = 1
 PIN_P2 = 0x80
 PUK_P2 = 0x81
 
-TDES = 0x03
-
 
 class InvalidPinError(CommandError):
     def __init__(self, attempts_remaining):
@@ -285,6 +319,7 @@ class PinMetadata:
 
 @dataclass
 class ManagementKeyMetadata:
+    key_type: MANAGEMENT_KEY_TYPE
     default_value: bool
     touch_policy: TOUCH_POLICY
 
@@ -398,6 +433,8 @@ class PivSession:
             self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0)
         )
         self.protocol.enable_touch_workaround(self.version)
+        if self.version >= (4, 0, 0):
+            self.protocol.apdu_format = ApduFormat.EXTENDED
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
@@ -427,19 +464,22 @@ class PivSession:
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
-    def authenticate(self, management_key: bytes) -> None:
+    def authenticate(
+        self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
+    ) -> None:
+        key_type = MANAGEMENT_KEY_TYPE(key_type)
         response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
-            TDES,
-            SLOT.CARD_MANAGEMENT,
+            key_type,
+            SLOT_CARD_MANAGEMENT,
             Tlv(TAG_DYN_AUTH, Tlv(TAG_AUTH_WITNESS)),
         )
         witness = Tlv.unpack(TAG_AUTH_WITNESS, Tlv.unpack(TAG_DYN_AUTH, response))
-        challenge = os.urandom(8)
+        challenge = os.urandom(key_type.challenge_len)
 
         backend = default_backend()
-        cipher_key = algorithms.TripleDES(management_key)
+        cipher_key = _parse_management_key(key_type, management_key)
         cipher = Cipher(cipher_key, modes.ECB(), backend)  # nosec
         decryptor = cipher.decryptor()
         decrypted = decryptor.update(witness) + decryptor.finalize()
@@ -447,8 +487,8 @@ class PivSession:
         response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
-            TDES,
-            SLOT.CARD_MANAGEMENT,
+            key_type,
+            SLOT_CARD_MANAGEMENT,
             Tlv(
                 TAG_DYN_AUTH,
                 Tlv(TAG_AUTH_WITNESS, decrypted) + Tlv(TAG_AUTH_CHALLENGE, challenge),
@@ -461,16 +501,23 @@ class PivSession:
             raise BadResponseError("Device response is incorrect")
 
     def set_management_key(
-        self, management_key: bytes, require_touch: bool = False
+        self,
+        key_type: MANAGEMENT_KEY_TYPE,
+        management_key: bytes,
+        require_touch: bool = False,
     ) -> None:
-        if len(management_key) != 24:
-            raise ValueError("Management key must be 24 bytes")
+        key_type = MANAGEMENT_KEY_TYPE(key_type)
+        if key_type != MANAGEMENT_KEY_TYPE.TDES:
+            require_version(self.version, (5, 4, 0))
+        if len(management_key) != key_type.key_len:
+            raise ValueError("Management key must be %d bytes" % key_type.key_len)
+
         self.protocol.send_apdu(
             0,
             INS_SET_MGMKEY,
             0xFF,
             0xFE if require_touch else 0xFF,
-            int_to_bytes(TDES) + Tlv(SLOT.CARD_MANAGEMENT, management_key),
+            int_to_bytes(key_type) + Tlv(SLOT_CARD_MANAGEMENT, management_key),
         )
 
     def verify_pin(self, pin: str) -> None:
@@ -521,21 +568,17 @@ class PivSession:
     def get_management_key_metadata(self) -> ManagementKeyMetadata:
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(
-            self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT.CARD_MANAGEMENT)
+            self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT)
         )
         policy = data[TAG_METADATA_POLICY]
         return ManagementKeyMetadata(
+            MANAGEMENT_KEY_TYPE(data.get(TAG_METADATA_ALGO, b"\x03")[0]),
             data[TAG_METADATA_IS_DEFAULT] != b"\0",
             TOUCH_POLICY(policy[INDEX_TOUCH_POLICY]),
         )
 
     def get_slot_metadata(self, slot: SLOT) -> SlotMetadata:
         require_version(self.version, (5, 3, 0))
-        if slot == SLOT.CARD_MANAGEMENT:
-            raise ValueError(
-                "This method cannot be used for the card management key, use "
-                "get_management_key_metadata() instead"
-            )
         data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, slot))
         policy = data[TAG_METADATA_POLICY]
         return SlotMetadata(

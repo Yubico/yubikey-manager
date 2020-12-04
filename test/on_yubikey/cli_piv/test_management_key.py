@@ -147,11 +147,7 @@ def additional_tests(ykman_cli):
             self.assertEqual("", output)
 
         def test_change_management_key_no_protect_arg_bad_length(self):
-            with self.assertRaises(
-                SystemExit,
-                msg="Management key must be exactly "
-                "24 bytes long (48 hexadecimal digits).",
-            ):
+            with self.assertRaises(ValueError):
                 ykman_cli(
                     "piv",
                     "access",

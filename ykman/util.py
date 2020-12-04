@@ -90,14 +90,15 @@ def parse_certificates(data, password):
     if is_pem(data):
         certs = []
         for cert in data.split(PEM_IDENTIFIER):
-            try:
-                certs.append(
-                    x509.load_pem_x509_certificate(
-                        PEM_IDENTIFIER + cert, default_backend()
+            if cert:
+                try:
+                    certs.append(
+                        x509.load_pem_x509_certificate(
+                            PEM_IDENTIFIER + cert, default_backend()
+                        )
                     )
-                )
-            except Exception as e:
-                logger.debug("Failed to parse PEM certificate", exc_info=e)
+                except Exception as e:
+                    logger.debug("Failed to parse PEM certificate", exc_info=e)
         # Could be valid PEM but not certificates.
         if len(certs) > 0:
             return certs

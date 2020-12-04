@@ -30,6 +30,7 @@ from yubikit.piv import (
     PivSession,
     InvalidPinError,
     KEY_TYPE,
+    MANAGEMENT_KEY_TYPE,
     OBJECT_ID,
     SLOT,
     PIN_POLICY,
@@ -105,10 +106,10 @@ def click_parse_piv_object(ctx, param, val):
 def click_parse_management_key(ctx, param, val):
     try:
         key = bytes.fromhex(val)
-        if key and len(key) != 24:
+        if key and len(key) not in (16, 24, 32):
             raise ValueError(
-                "Management key must be exactly 24 bytes "
-                "(48 hexadecimal digits) long."
+                "Management key must be exactly 16, 24, or 32 bytes "
+                "(32, 48, or 64 hexadecimal digits) long."
             )
         return key
     except Exception:
@@ -373,7 +374,7 @@ def change_management_key(
     """
     Change the management key.
 
-    Management functionality is guarded by a 24 byte management key.
+    Management functionality is guarded by a management key.
     This key is required for administrative tasks, such as generating key pairs.
     A random key may be generated and stored on the YubiKey, protected by PIN.
     """
@@ -1004,12 +1005,14 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
         session.verify_pin(pin)
         if pivman.has_derived_key:
             with prompt_timeout():
-                session.authenticate(derive_management_key(pin, pivman.salt))
+                session.authenticate(
+                    MANAGEMENT_KEY_TYPE.TDES, derive_management_key(pin, pivman.salt)
+                )
             session.verify_pin(pin)  # Ensure verify was the last thing we did
         elif pivman.has_stored_key:
             pivman_prot = get_pivman_protected_data(session)
             with prompt_timeout():
-                session.authenticate(pivman_prot.key)
+                session.authenticate(MANAGEMENT_KEY_TYPE.TDES, pivman_prot.key)
             session.verify_pin(pin)  # Ensure verify was the last thing we did
 
         return True
@@ -1033,8 +1036,13 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             else:
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
+        if session.version >= (5, 4, 0):
+            key_type = session.get_management_key_metadata().key_type
+        else:
+            key_type = MANAGEMENT_KEY_TYPE.TDES
+
         with prompt_timeout():
-            session.authenticate(management_key)
+            session.authenticate(key_type, management_key)
     except Exception as e:
         logger.error("Authentication with management key failed.", exc_info=e)
         ctx.fail("Authentication with management key failed.")

@@ -15,6 +15,7 @@ from yubikit.piv import (
     PIN_POLICY,
     TOUCH_POLICY,
     SLOT,
+    MANAGEMENT_KEY_TYPE,
     InvalidPinError,
 )
 from ykman.piv import (
@@ -70,11 +71,11 @@ def additional_tests(open_device):
             self.conn.close()
 
         def assertMgmKeyIs(self, key):
-            self.session.authenticate(key)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, key)
 
         def assertMgmKeyIsNot(self, key):
             with self.assertRaises(ApduError):
-                self.session.authenticate(key)
+                self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, key)
 
         def assertStoredMgmKeyEquals(self, key):
             pivman_prot = get_pivman_protected_data(self.session)
@@ -97,7 +98,7 @@ def additional_tests(open_device):
                 session.reset()
 
         def generate_key(self, slot, alg=KEY_TYPE.ECCP256, pin_policy=None):
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             public_key = self.session.generate_key(
                 slot, alg, pin_policy=pin_policy, touch_policy=TOUCH_POLICY.NEVER
             )
@@ -111,7 +112,7 @@ def additional_tests(open_device):
             with self.assertRaises(ApduError):
                 self.session.delete_certificate(SLOT.AUTHENTICATION)
 
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.delete_certificate(SLOT.AUTHENTICATION)
 
         def test_generate_csr_works(self):
@@ -151,7 +152,7 @@ def additional_tests(open_device):
                     self.session, SLOT.AUTHENTICATION, public_key, "alice", now(), now()
                 )
 
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.verify_pin(DEFAULT_PIN)
             generate_self_signed_certificate(
                 self.session, SLOT.AUTHENTICATION, public_key, "alice", now(), now()
@@ -159,7 +160,7 @@ def additional_tests(open_device):
 
         def _test_generate_self_signed_certificate(self, slot):
             public_key = self.generate_key(slot)
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.verify_pin(DEFAULT_PIN)
             cert = generate_self_signed_certificate(
                 self.session, slot, public_key, "alice", now(), now()
@@ -196,7 +197,7 @@ def additional_tests(open_device):
                     touch_policy=TOUCH_POLICY.NEVER,
                 )
 
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.generate_key(
                 SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, touch_policy=TOUCH_POLICY.NEVER
             )
@@ -206,7 +207,7 @@ def additional_tests(open_device):
             with self.assertRaises(ApduError):
                 self.session.put_certificate(SLOT.AUTHENTICATION, cert)
 
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.put_certificate(SLOT.AUTHENTICATION, cert)
 
         def _test_put_key_pairing(self, alg1, alg2):
@@ -214,7 +215,7 @@ def additional_tests(open_device):
             public_key = self.generate_key(
                 SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER
             )
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             cert = generate_self_signed_certificate(
                 self.session,
                 SLOT.AUTHENTICATION,
@@ -269,12 +270,12 @@ def additional_tests(open_device):
             with self.assertRaises(ApduError):
                 self.session.put_key(SLOT.AUTHENTICATION, private_key)
 
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.put_key(SLOT.AUTHENTICATION, private_key)
 
         def test_get_certificate_does_not_require_authentication(self):
             cert = get_test_cert()
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.put_certificate(SLOT.AUTHENTICATION, cert)
 
             self.reconnect()
@@ -295,15 +296,15 @@ def additional_tests(open_device):
                 PivSession(conn).reset()
 
         def test_authenticate_twice_does_not_throw(self):
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
 
         def test_reset_resets_has_stored_key_flag(self):
             pivman = get_pivman_data(self.session)
             self.assertFalse(pivman.has_stored_key)
 
             self.session.verify_pin(DEFAULT_PIN)
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             pivman_set_mgm_key(self.session, None, store_on_device=True)
 
             pivman = get_pivman_data(self.session)
@@ -327,14 +328,16 @@ def additional_tests(open_device):
 
         def test_set_mgm_key_does_not_change_key_if_not_authenticated(self):
             with self.assertRaises(ApduError):
-                self.session.set_management_key(NON_DEFAULT_MANAGEMENT_KEY)
+                self.session.set_management_key(
+                    MANAGEMENT_KEY_TYPE.TDES, NON_DEFAULT_MANAGEMENT_KEY
+                )
             self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
         @yubikey_conditions.version_min((3, 5, 0))
         def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(
             self,
         ):  # noqa: E501
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             with self.assertRaises(ApduError):
                 pivman_set_mgm_key(self.session, None, store_on_device=True)
 
@@ -351,15 +354,17 @@ def additional_tests(open_device):
             self.session.reset()
 
         def test_set_mgm_key_changes_mgm_key(self):
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
-            self.session.set_management_key(NON_DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+            self.session.set_management_key(
+                MANAGEMENT_KEY_TYPE.TDES, NON_DEFAULT_MANAGEMENT_KEY
+            )
 
             self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
             self.assertMgmKeyIs(NON_DEFAULT_MANAGEMENT_KEY)
 
         def test_set_stored_mgm_key_succeeds_if_pin_is_verified(self):
             self.session.verify_pin(DEFAULT_PIN)
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             pivman_set_mgm_key(
                 self.session, NON_DEFAULT_MANAGEMENT_KEY, store_on_device=True
             )
@@ -373,7 +378,7 @@ def additional_tests(open_device):
 
         def test_set_stored_random_mgm_key_succeeds_if_pin_is_verified(self):
             self.session.verify_pin(DEFAULT_PIN)
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             pivman_set_mgm_key(self.session, None, store_on_device=True)
 
             self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
@@ -389,7 +394,7 @@ def additional_tests(open_device):
             self.session.reset()
 
         def generate_key(self, pin_policy=None):
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             public_key = self.session.generate_key(
                 SLOT.AUTHENTICATION,
                 KEY_TYPE.ECCP256,
@@ -513,7 +518,7 @@ def additional_tests(open_device):
             self.reconnect()
 
             # Fails with only management key
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             with self.assertRaises(ApduError):
                 self.session.set_pin_attempts(4, 4)
 
@@ -526,7 +531,7 @@ def additional_tests(open_device):
             puk_tries = 7
 
             self.session.verify_pin(DEFAULT_PIN)
-            self.session.authenticate(DEFAULT_MANAGEMENT_KEY)
+            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.set_pin_attempts(pin_tries, puk_tries)
 
             c1 = self.session

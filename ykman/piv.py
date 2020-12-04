@@ -33,6 +33,7 @@ from yubikit.piv import (
     SLOT,
     OBJECT_ID,
     KEY_TYPE,
+    MANAGEMENT_KEY_TYPE,
     ALGORITHM,
     TAG_LRC,
 )
@@ -203,7 +204,7 @@ def pivman_set_mgm_key(session, new_key, touch=False, store_on_device=False):
                 raise
 
     # Set the new management key
-    session.set_management_key(new_key)
+    session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
 
     if pivman.has_derived_key:
         # Clear salt for old derived keys.
@@ -235,11 +236,13 @@ def pivman_change_pin(session, old_pin, new_pin):
 
     pivman = get_pivman_data(session)
     if pivman.has_derived_key:
-        session.authenticate(derive_management_key(old_pin, pivman.salt))
+        session.authenticate(
+            MANAGEMENT_KEY_TYPE.TDES, derive_management_key(old_pin, pivman.salt)
+        )
         session.verify(new_pin)
         new_salt = os.urandom(16)
         new_key = derive_management_key(new_pin, new_salt)
-        session.set_management_key(new_key)
+        session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
         pivman.salt = new_salt
         session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
 
@@ -250,7 +253,7 @@ def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certif
     Only certificates which are successfully parsed are returned.
     """
     certs = OrderedDict()
-    for slot in set(SLOT) - {SLOT.CARD_MANAGEMENT, SLOT.ATTESTATION}:
+    for slot in set(SLOT) - {SLOT.ATTESTATION}:
         try:
             certs[slot] = session.get_certificate(slot)
         except ApduError:
