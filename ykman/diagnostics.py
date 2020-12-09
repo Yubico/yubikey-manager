@@ -51,7 +51,7 @@ def oath_info(conn):
         oath = OathSession(conn)
         return [
             "\tOATH",
-            "\t\tOath version: %s" % ".".join("%d" % d for d in oath.info.version),
+            "\t\tOath version: %s" % ".".join("%d" % d for d in oath.version),
             "\t\tPassword protected: %s" % oath.locked,
         ]
     except Exception as e:

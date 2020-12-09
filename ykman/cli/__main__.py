@@ -135,7 +135,7 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
                     else:
                         conn = dev.open_connection(SmartCardConnection)
                     info = read_info(dev.pid, conn)
-                    return conn, dev.pid, info
+                    return conn, dev, info
                 except Exception as e:
                     logger.error("Failure connecting to card", exc_info=e)
                     ctx.fail("Failed to connect: {}".format(e))
