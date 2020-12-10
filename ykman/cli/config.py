@@ -75,13 +75,16 @@ def config(ctx):
       Generate and set a random application lock code:
       $ ykman config set-lock-code --generate
     """
+    ctx.obj["controller"] = ManagementSession(ctx.obj["conn"])
+
+
+def _require_config(ctx):
     info = ctx.obj["info"]
     if info.version < (5, 0, 0):
         ctx.fail(
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."
         )
-    ctx.obj["controller"] = ManagementSession(ctx.obj["conn"])
 
 
 @config.command("set-lock-code")
@@ -109,6 +112,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     The lock code must be a 32 characters (16 bytes) hex value.
     """
 
+    _require_config(ctx)
     info = ctx.obj["info"]
     app = ctx.obj["controller"]
 
@@ -248,6 +252,7 @@ def usb(
     """
     Enable or disable applications over USB.
     """
+    _require_config(ctx)
 
     def ensure_not_all_disabled(ctx, usb_enabled):
         for app in APPLICATION:
@@ -385,6 +390,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     """
     Enable or disable applications over NFC.
     """
+    _require_config(ctx)
 
     if not (list_enabled or enable_all or enable or disable_all or disable):
         ctx.fail("No configuration options chosen.")

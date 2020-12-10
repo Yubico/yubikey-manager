@@ -317,18 +317,18 @@ class _ManagementSmartCardBackend(_Backend):
         self.protocol = SmartCardProtocol(smartcard_connection)
         select_str = self.protocol.select(AID.MANAGEMENT).decode()
         self.version = Version.from_string(select_str)
+        # For YubiKey NEO, we use the OTP application for further commands
+        if self.version[0] == 3:
+            # Workaround to "de-select" on NEO, otherwise it gets stuck.
+            self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
+            self.protocol.select(AID.OTP)
 
     def close(self):
         self.protocol.close()
 
     def set_mode(self, data):
-        if self.version[0] == 3:
-            # Use the OTP Application to set mode
-            self.protocol.select(AID.OTP)
+        if self.version[0] == 3:  # Using the OTP application
             self.protocol.send_apdu(0, 0x01, SLOT_DEVICE_CONFIG, 0, data)
-            # Workaround to "de-select" on NEO
-            self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
-            self.protocol.select(AID.MGMT)
         else:
             self.protocol.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
 
