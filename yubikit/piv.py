@@ -90,7 +90,10 @@ class KEY_TYPE(IntEnum):
     @classmethod
     def from_public_key(cls, key):
         if isinstance(key, rsa.RSAPublicKey):
-            return getattr(cls, "RSA%d" % key.key_size)
+            try:
+                return getattr(cls, "RSA%d" % key.key_size)
+            except AttributeError:
+                pass  # Fall through to ValueError
         elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
             if curve_name == "secp256r1":

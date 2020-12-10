@@ -398,7 +398,10 @@ def get_piv_info(session: PivSession) -> str:
                 continue
 
             fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-            key_type = KEY_TYPE.from_public_key(cert.public_key())
+            try:
+                key_algo = KEY_TYPE.from_public_key(cert.public_key()).name
+            except ValueError:
+                key_algo = "Unsupported"
             serial = cert.serial_number
             try:
                 not_before: Optional[datetime] = cert.not_valid_before
@@ -411,7 +414,7 @@ def get_piv_info(session: PivSession) -> str:
                 logger.debug("Failed reading not_valid_after", exc_info=e)
                 not_after = None
             # Print out everything
-            lines.append("\tAlgorithm:\t%s" % key_type.name)
+            lines.append("\tAlgorithm:\t%s" % key_algo)
             if print_dn:
                 lines.append("\tSubject DN:\t%s" % subject_dn)
                 lines.append("\tIssuer DN:\t%s" % issuer_dn)
