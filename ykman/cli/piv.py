@@ -462,7 +462,17 @@ def unblock_pin(ctx, puk, new_pin):
         new_pin = click_prompt(
             "Enter a new PIN", default="", show_default=False, hide_input=True
         )
-    session.unblock_pin(puk, new_pin)
+    try:
+        session.unblock_pin(puk, new_pin)
+        click.echo("PIN unblocked")
+    except InvalidPinError as e:
+        attempts = e.attempts_remaining
+        if attempts:
+            logger.debug("Failed to unblock PIN, %d tries left", attempts, exc_info=e)
+            ctx.fail("PIN unblock failed - %d tries left." % attempts)
+        else:
+            logger.debug("PUK is blocked.", exc_info=e)
+            ctx.fail("PUK is blocked.")
 
 
 @piv.group()
