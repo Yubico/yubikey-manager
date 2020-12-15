@@ -25,7 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import YubiKeyDevice, PID, TRANSPORT
+from ..base import YkmanDevice, PID
+from yubikit.core import TRANSPORT
 
 YUBICO_VID = 0x1050
 
@@ -33,7 +34,7 @@ USAGE_FIDO = (0xF1D0, 1)
 USAGE_OTP = (1, 6)
 
 
-class OtpYubiKeyDevice(YubiKeyDevice):
+class OtpYubiKeyDevice(YkmanDevice):
     """YubiKey USB HID OTP device"""
 
     def __init__(self, path, pid, connection_cls):

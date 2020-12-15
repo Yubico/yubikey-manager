@@ -25,14 +25,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, USB_INTERFACE, YUBIKEY
+from yubikit.core import TRANSPORT, USB_INTERFACE
 from yubikit.management import (
     ManagementSession,
     DeviceConfig,
-    APPLICATION,
+    CAPABILITY,
     DEVICE_FLAG,
     Mode,
 )
+from .. import YUBIKEY
 from .util import click_postpone_execution, click_force_option, click_prompt, EnumChoice
 import os
 import re
@@ -191,14 +192,14 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     "-e",
     "--enable",
     multiple=True,
-    type=EnumChoice(APPLICATION),
+    type=EnumChoice(CAPABILITY),
     help="Enable applications.",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
-    type=EnumChoice(APPLICATION),
+    type=EnumChoice(CAPABILITY),
     help="Disable applications.",
 )
 @click.option(
@@ -255,7 +256,7 @@ def usb(
     _require_config(ctx)
 
     def ensure_not_all_disabled(ctx, usb_enabled):
-        for app in APPLICATION:
+        for app in CAPABILITY:
             if app & usb_enabled:
                 return
         ctx.fail("Can not disable all applications over USB.")
@@ -272,7 +273,7 @@ def usb(
     ):
         ctx.fail("No configuration options chosen.")
 
-    enable = list(APPLICATION) if enable_all else enable
+    enable = list(CAPABILITY) if enable_all else enable
 
     _ensure_not_invalid_options(ctx, enable, disable)
 
@@ -281,8 +282,8 @@ def usb(
 
     info = ctx.obj["info"]
 
-    usb_supported = info.supported_applications[TRANSPORT.USB]
-    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
+    usb_supported = info.supported_capabilities[TRANSPORT.USB]
+    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
     flags = info.config.device_flags
 
     if not usb_supported:
@@ -365,14 +366,14 @@ def usb(
     "-e",
     "--enable",
     multiple=True,
-    type=EnumChoice(APPLICATION),
+    type=EnumChoice(CAPABILITY),
     help="Enable applications.",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
-    type=EnumChoice(APPLICATION),
+    type=EnumChoice(CAPABILITY),
     help="Disable applications.",
 )
 @click.option("-a", "--enable-all", is_flag=True, help="Enable all applications.")
@@ -396,16 +397,16 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
         ctx.fail("No configuration options chosen.")
 
     if enable_all:
-        enable = list(APPLICATION)
+        enable = list(CAPABILITY)
 
     if disable_all:
-        disable = list(APPLICATION)
+        disable = list(CAPABILITY)
 
     _ensure_not_invalid_options(ctx, enable, disable)
 
     info = ctx.obj["info"]
-    nfc_supported = info.supported_applications.get(TRANSPORT.NFC)
-    nfc_enabled = info.config.enabled_applications.get(TRANSPORT.NFC)
+    nfc_supported = info.supported_capabilities.get(TRANSPORT.NFC)
+    nfc_enabled = info.config.enabled_capabilities.get(TRANSPORT.NFC)
 
     if not nfc_supported:
         ctx.fail("NFC not available.")
@@ -461,7 +462,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
 
 
 def _list_apps(ctx, enabled):
-    for app in APPLICATION:
+    for app in CAPABILITY:
         if app & enabled:
             click.echo(str(app))
     ctx.exit()
@@ -505,7 +506,7 @@ def _parse_mode_string(ctx, param, mode):
         interfaces = USB_INTERFACE(0)
         if mode[0] in ["+", "-"]:
             info = ctx.obj["info"]
-            usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
+            usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
             my_mode = _mode_from_usb_enabled(usb_enabled)
             interfaces |= my_mode.interfaces
             for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
@@ -525,11 +526,11 @@ def _parse_mode_string(ctx, param, mode):
 
 def _mode_from_usb_enabled(usb_enabled):
     interfaces = USB_INTERFACE(0)
-    if APPLICATION.OTP & usb_enabled:
+    if CAPABILITY.OTP & usb_enabled:
         interfaces |= USB_INTERFACE.OTP
-    if (APPLICATION.U2F | APPLICATION.FIDO2) & usb_enabled:
+    if (CAPABILITY.U2F | CAPABILITY.FIDO2) & usb_enabled:
         interfaces |= USB_INTERFACE.FIDO
-    if (APPLICATION.OPENPGP | APPLICATION.PIV | APPLICATION.OATH) & usb_enabled:
+    if (CAPABILITY.OPENPGP | CAPABILITY.PIV | CAPABILITY.OATH) & usb_enabled:
         interfaces |= USB_INTERFACE.CCID
     return Mode(interfaces)
 
@@ -586,9 +587,9 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
     info = ctx.obj["info"]
     mgmt = ctx.obj["controller"]
-    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
+    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
     my_mode = _mode_from_usb_enabled(usb_enabled)
-    usb_supported = info.supported_applications[TRANSPORT.USB]
+    usb_supported = info.supported_capabilities[TRANSPORT.USB]
     interfaces_supported = _mode_from_usb_enabled(usb_supported).interfaces
     pid = ctx.obj["pid"]
     if pid:

@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from enum import Enum, IntEnum, IntFlag, unique, auto
+from enum import Enum, IntFlag, unique, auto
 from typing import (
     Type,
     List,
@@ -93,52 +93,6 @@ class AID(bytes, Enum):
     FIDO = b"\xa0\x00\x00\x06\x47\x2f\x00\x01"
 
 
-@unique
-class YUBIKEY(Enum):
-    """YubiKey hardware platforms."""
-
-    YKS = "YubiKey Standard"
-    NEO = "YubiKey NEO"
-    SKY = "Security Key by Yubico"
-    YKP = "YubiKey Plus"
-    YK4 = "YubiKey 4"  # This includes YubiKey 5
-
-    def get_pid(self, interfaces: USB_INTERFACE) -> "PID":
-        suffix = "_".join(
-            t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
-        )
-        return PID[self.name + "_" + suffix]
-
-
-@unique
-class PID(IntEnum):
-    """USB Product ID values for YubiKey devices."""
-
-    YKS_OTP = 0x0010
-    NEO_OTP = 0x0110
-    NEO_OTP_CCID = 0x0111
-    NEO_CCID = 0x0112
-    NEO_FIDO = 0x0113
-    NEO_OTP_FIDO = 0x0114
-    NEO_FIDO_CCID = 0x0115
-    NEO_OTP_FIDO_CCID = 0x0116
-    SKY_FIDO = 0x0120
-    YK4_OTP = 0x0401
-    YK4_FIDO = 0x0402
-    YK4_OTP_FIDO = 0x0403
-    YK4_CCID = 0x0404
-    YK4_OTP_CCID = 0x0405
-    YK4_FIDO_CCID = 0x0406
-    YK4_OTP_FIDO_CCID = 0x0407
-    YKP_OTP_FIDO = 0x0410
-
-    def get_type(self) -> YUBIKEY:
-        return YUBIKEY[self.name.split("_", 1)[0]]
-
-    def get_interfaces(self) -> USB_INTERFACE:
-        return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
-
-
 class Connection(abc.ABC):
     """A connection to a YubiKey"""
 
@@ -158,10 +112,9 @@ T_Connection = TypeVar("T_Connection", bound=Connection)
 class YubiKeyDevice(abc.ABC):
     """YubiKey device reference"""
 
-    def __init__(self, transport: TRANSPORT, fingerprint: Hashable, pid: Optional[PID]):
+    def __init__(self, transport: TRANSPORT, fingerprint: Hashable):
         self._transport = transport
         self._fingerprint = fingerprint
-        self._pid = pid
 
     @property
     def transport(self) -> TRANSPORT:
@@ -175,11 +128,6 @@ class YubiKeyDevice(abc.ABC):
     def open_connection(self, connection_type: Type[T_Connection]) -> T_Connection:
         """Opens a connection to the YubiKey"""
         raise ValueError("Unsupported Connection type")
-
-    @property
-    def pid(self) -> Optional[PID]:
-        """Return the PID of the YubiKey, if available."""
-        return self._pid
 
     @property
     def fingerprint(self) -> Hashable:

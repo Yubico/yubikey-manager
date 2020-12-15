@@ -25,8 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from ..base import YkmanDevice, PID
 from .base import OtpYubiKeyDevice
-from yubikit.core import YubiKeyDevice, PID, TRANSPORT
+from yubikit.core import TRANSPORT
 from fido2.hid import list_descriptors, open_connection, CtapHidDevice
 from typing import List, Callable
 import sys
@@ -45,7 +46,7 @@ else:
 list_otp_devices: Callable[[], List[OtpYubiKeyDevice]] = backend.list_devices
 
 
-class CtapYubiKeyDevice(YubiKeyDevice):
+class CtapYubiKeyDevice(YkmanDevice):
     """YubiKey FIDO USB HID device"""
 
     def __init__(self, descriptor):

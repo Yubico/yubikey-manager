@@ -32,7 +32,6 @@ from .core import (
     Version,
     Tlv,
     AID,
-    PID,
     TRANSPORT,
     USB_INTERFACE,
     NotSupportedError,
@@ -42,7 +41,7 @@ from .core import (
 from .core.otp import check_crc, OtpConnection, OtpProtocol
 from .core.fido import FidoConnection
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
-from fido2.hid import CAPABILITY
+from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from enum import IntEnum, IntFlag, unique
 from dataclasses import dataclass
@@ -52,7 +51,7 @@ import struct
 
 
 @unique
-class APPLICATION(IntFlag):
+class CAPABILITY(IntFlag):
     """YubiKey Application identifiers."""
 
     OTP = 0x01
@@ -63,9 +62,9 @@ class APPLICATION(IntFlag):
     FIDO2 = 0x200
 
     def __str__(self):
-        if self == APPLICATION.U2F:
+        if self == CAPABILITY.U2F:
             return "FIDO U2F"
-        elif self == APPLICATION.OPENPGP:
+        elif self == CAPABILITY.OPENPGP:
             return "OpenPGP"
         else:
             return self.name
@@ -131,7 +130,7 @@ TAG_NFC_ENABLED = 0x0E
 class DeviceConfig:
     """Management settings for YubiKey which can be configured by the user."""
 
-    enabled_applications: Mapping[TRANSPORT, APPLICATION]
+    enabled_capabilities: Mapping[TRANSPORT, CAPABILITY]
     auto_eject_timeout: Optional[int]
     challenge_response_timeout: Optional[int]
     device_flags: Optional[DEVICE_FLAG]
@@ -147,10 +146,10 @@ class DeviceConfig:
             buf += Tlv(TAG_REBOOT)
         if cur_lock_code:
             buf += Tlv(TAG_UNLOCK, cur_lock_code)
-        usb_enabled = self.enabled_applications.get(TRANSPORT.USB)
+        usb_enabled = self.enabled_capabilities.get(TRANSPORT.USB)
         if usb_enabled is not None:
             buf += Tlv(TAG_USB_ENABLED, int2bytes(usb_enabled, 2))
-        nfc_enabled = self.enabled_applications.get(TRANSPORT.NFC)
+        nfc_enabled = self.enabled_capabilities.get(TRANSPORT.NFC)
         if nfc_enabled is not None:
             buf += Tlv(TAG_NFC_ENABLED, int2bytes(nfc_enabled, 2))
         if self.auto_eject_timeout is not None:
@@ -174,11 +173,11 @@ class DeviceInfo:
     serial: Optional[int]
     version: Version
     form_factor: FORM_FACTOR
-    supported_applications: Mapping[TRANSPORT, APPLICATION]
+    supported_capabilities: Mapping[TRANSPORT, CAPABILITY]
     is_locked: bool
 
     def has_transport(self, transport: TRANSPORT) -> bool:
-        return transport in self.supported_applications
+        return transport in self.supported_capabilities
 
     @classmethod
     def parse(cls, encoded: bytes, default_version: Version) -> "DeviceInfo":
@@ -200,14 +199,14 @@ class DeviceInfo:
         enabled = {}
 
         if version == (4, 2, 4):  # Doesn't report correctly
-            supported[TRANSPORT.USB] = APPLICATION(0x3F)
+            supported[TRANSPORT.USB] = CAPABILITY(0x3F)
         else:
-            supported[TRANSPORT.USB] = APPLICATION(bytes2int(data[TAG_USB_SUPPORTED]))
+            supported[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_SUPPORTED]))
         if TAG_USB_ENABLED in data:  # From YK 5.0.0
-            enabled[TRANSPORT.USB] = APPLICATION(bytes2int(data[TAG_USB_ENABLED]))
+            enabled[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_ENABLED]))
         if TAG_NFC_SUPPORTED in data:  # YK with NFC
-            supported[TRANSPORT.NFC] = APPLICATION(bytes2int(data[TAG_NFC_SUPPORTED]))
-            enabled[TRANSPORT.NFC] = APPLICATION(bytes2int(data[TAG_NFC_ENABLED]))
+            supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
+            enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
 
         return cls(
             DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags),
@@ -251,10 +250,6 @@ class Mode:
     def from_code(cls, code: int) -> "Mode":
         code = code & 0b00000111
         return cls(_MODES[code])
-
-    @classmethod
-    def from_pid(cls, pid: PID) -> "Mode":
-        return cls(PID(pid).get_interfaces())
 
 
 SLOT_DEVICE_CONFIG = 0x11
@@ -350,7 +345,9 @@ class _ManagementCtapBackend(_Backend):
         self.ctap = fido_connection
         version = fido_connection.device_version
         if version[0] < 4:  # Prior to YK4 this was not firmware version
-            if not (version[0] == 0 and fido_connection.capabilities & CAPABILITY.CBOR):
+            if not (
+                version[0] == 0 and fido_connection.capabilities & CTAP_CAPABILITY.CBOR
+            ):
                 version = (3, 0, 0)  # Guess that it's a NEO
         self.version = Version(*version)
 
@@ -409,13 +406,13 @@ class ManagementSession:
     ) -> None:
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
-            usb_enabled = APPLICATION(0)
+            usb_enabled = CAPABILITY(0)
             if USB_INTERFACE.OTP in mode.interfaces:
-                usb_enabled |= APPLICATION.OTP
+                usb_enabled |= CAPABILITY.OTP
             if USB_INTERFACE.CCID in mode.interfaces:
-                usb_enabled |= APPLICATION.OATH | APPLICATION.PIV | APPLICATION.OPENPGP
+                usb_enabled |= CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
             if USB_INTERFACE.FIDO in mode.interfaces:
-                usb_enabled |= APPLICATION.U2F | APPLICATION.FIDO2
+                usb_enabled |= CAPABILITY.U2F | CAPABILITY.FIDO2
             self.write_device_config(
                 DeviceConfig(
                     {TRANSPORT.USB: usb_enabled},

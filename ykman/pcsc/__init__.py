@@ -25,8 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, USB_INTERFACE, YUBIKEY, YubiKeyDevice
+from yubikit.core import TRANSPORT, USB_INTERFACE
 from yubikit.core.smartcard import SmartCardConnection
+from ..base import YUBIKEY, YkmanDevice
 
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
@@ -61,7 +62,7 @@ def _pid_from_name(name):
     return key_type.get_pid(interfaces)
 
 
-class ScardYubiKeyDevice(YubiKeyDevice):
+class ScardYubiKeyDevice(YkmanDevice):
     """YubiKey Smart card device"""
 
     def __init__(self, reader):

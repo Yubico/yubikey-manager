@@ -195,13 +195,13 @@ def additional_tests(ykman_cli):
             time.sleep(0)
             output = ykman_cli("info")
             self.assertIn(
-                "Configured applications are protected by a lock code", output
+                "Configured capabilities are protected by a lock code", output
             )
             ykman_cli("config", "set-lock-code", "-l", VALID_LOCK_CODE, "--clear")
             time.sleep(0)
             output = ykman_cli("info")
             self.assertNotIn(
-                "Configured applications are protected by a lock code", output
+                "Configured capabilities are protected by a lock code", output
             )
 
         def test_set_invalid_lock_code(self):

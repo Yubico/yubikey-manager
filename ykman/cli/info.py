@@ -29,7 +29,7 @@ from yubikit.core import TRANSPORT, USB_INTERFACE
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import APPLICATION
+from yubikit.management import CAPABILITY
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 
@@ -54,7 +54,7 @@ def print_app_status_table(supported_apps, enabled_apps):
     nfc_supported = supported_apps.get(TRANSPORT.NFC, 0)
     nfc_enabled = enabled_apps.get(TRANSPORT.NFC, 0)
     rows = []
-    for app in APPLICATION:
+    for app in CAPABILITY:
         if app & usb_supported:
             if app & usb_enabled:
                 usb_status = "Enabled"
@@ -104,10 +104,10 @@ def print_app_status_table(supported_apps, enabled_apps):
 def get_overall_fips_status(pid, info):
     statuses = {}
 
-    usb_enabled = info.config.enabled_applications[TRANSPORT.USB]
+    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
 
     statuses["OTP"] = False
-    if usb_enabled & APPLICATION.OTP:
+    if usb_enabled & CAPABILITY.OTP:
         for dev in list_otp_devices():
             if dev.pid == pid:
                 with dev.open_connection(OtpConnection) as conn:
@@ -117,7 +117,7 @@ def get_overall_fips_status(pid, info):
                         break
 
     statuses["OATH"] = False
-    if usb_enabled & APPLICATION.OATH:
+    if usb_enabled & CAPABILITY.OATH:
         for dev in list_ccid():
             with dev.open_connection(SmartCardConnection) as conn:
                 info2 = read_info(pid, conn)
@@ -127,7 +127,7 @@ def get_overall_fips_status(pid, info):
                     break
 
     statuses["FIDO U2F"] = False
-    if usb_enabled & APPLICATION.U2F:
+    if usb_enabled & CAPABILITY.U2F:
         for dev in list_ctap_devices():
             if dev.pid == pid:
                 with dev.open_connection(FidoConnection) as conn:
@@ -173,7 +173,7 @@ def info(ctx, check_fips):
     Show general information.
 
     Displays information about the attached YubiKey such as serial number,
-    firmware version, applications, etc.
+    firmware version, capabilities, etc.
     """
     info = ctx.obj["info"]
     pid = ctx.obj["pid"]
@@ -206,19 +206,19 @@ def info(ctx, check_fips):
                 )
             )
         )
-    if TRANSPORT.NFC in info.supported_applications:
+    if TRANSPORT.NFC in info.supported_capabilities:
         f_nfc = (
             "enabled"
-            if info.config.enabled_applications.get(TRANSPORT.NFC)
+            if info.config.enabled_capabilities.get(TRANSPORT.NFC)
             else "disabled"
         )
         click.echo("NFC transport is {}.".format(f_nfc))
     if info.is_locked:
-        click.echo("Configured applications are protected by a lock code.")
+        click.echo("Configured capabilities are protected by a lock code.")
     click.echo()
 
     print_app_status_table(
-        info.supported_applications, info.config.enabled_applications
+        info.supported_capabilities, info.config.enabled_capabilities
     )
 
     if check_fips:
