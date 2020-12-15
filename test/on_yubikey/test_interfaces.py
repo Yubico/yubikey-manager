@@ -1,8 +1,10 @@
 import unittest
 
 from .framework import DestructiveYubikeyTestCase, exactly_one_yubikey_present
-from yubikit.core import USB_INTERFACE
-from ykman.device import connect_to_device, get_connection_types
+from yubikit.core.otp import OtpConnection
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
+from ykman.device import connect_to_device
 from time import sleep
 
 
@@ -10,26 +12,26 @@ from time import sleep
     not exactly_one_yubikey_present(), "Exactly one YubiKey must be present."
 )
 class TestInterfaces(DestructiveYubikeyTestCase):
-    def try_connection(self, interface):
+    def try_connection(self, conn_type):
         for _ in range(8):
             try:
-                conn = connect_to_device(None, get_connection_types(interface))[0]
+                conn = connect_to_device(None, [conn_type])[0]
                 conn.close()
                 return
             except Exception:
                 sleep(0.5)
-        self.fail("Failed connecting to device over " + interface.name)
+        self.fail("Failed connecting to device over %s" % conn_type)
 
     def test_switch_interfaces(self):
-        self.try_connection(USB_INTERFACE.FIDO)
-        self.try_connection(USB_INTERFACE.OTP)
-        self.try_connection(USB_INTERFACE.FIDO)
-        self.try_connection(USB_INTERFACE.CCID)
-        self.try_connection(USB_INTERFACE.OTP)
-        self.try_connection(USB_INTERFACE.CCID)
-        self.try_connection(USB_INTERFACE.OTP)
-        self.try_connection(USB_INTERFACE.FIDO)
-        self.try_connection(USB_INTERFACE.CCID)
-        self.try_connection(USB_INTERFACE.FIDO)
-        self.try_connection(USB_INTERFACE.CCID)
-        self.try_connection(USB_INTERFACE.OTP)
+        self.try_connection(FidoConnection)
+        self.try_connection(OtpConnection)
+        self.try_connection(FidoConnection)
+        self.try_connection(SmartCardConnection)
+        self.try_connection(OtpConnection)
+        self.try_connection(SmartCardConnection)
+        self.try_connection(OtpConnection)
+        self.try_connection(FidoConnection)
+        self.try_connection(SmartCardConnection)
+        self.try_connection(FidoConnection)
+        self.try_connection(SmartCardConnection)
+        self.try_connection(OtpConnection)

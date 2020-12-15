@@ -25,7 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import USB_INTERFACE, NotSupportedError
+from yubikit.core import NotSupportedError
+from yubikit.core.smartcard import SmartCardConnection
 from yubikit.piv import (
     PivSession,
     InvalidPinError,
@@ -135,7 +136,7 @@ click_touch_policy_option = click.option(
 )
 
 
-@ykman_group(USB_INTERFACE.CCID)
+@ykman_group(SmartCardConnection)
 @click.pass_context
 @click_postpone_execution
 def piv(ctx):

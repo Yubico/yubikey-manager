@@ -28,7 +28,9 @@
 import functools
 import click
 import sys
-from yubikit.core import USB_INTERFACE
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.fido import FidoConnection
 from yubikit.oath import parse_b32_key
 from collections import OrderedDict
 from collections.abc import MutableMapping
@@ -89,7 +91,7 @@ class _YkmanGroup(click.Group):
     """click.Group which returns commands before subgroups in list_commands."""
 
     def __init__(self, name=None, commands=None, **attrs):
-        self.interfaces = attrs.pop("interfaces", None)
+        self.connections = attrs.pop("connections", None)
         click.Group.__init__(self, name, commands, **attrs)
 
     def list_commands(self, ctx):
@@ -98,8 +100,12 @@ class _YkmanGroup(click.Group):
         )
 
 
-def ykman_group(interfaces=USB_INTERFACE(sum(USB_INTERFACE)), *args, **kwargs):
-    return click.group(cls=_YkmanGroup, *args, interfaces=interfaces, **kwargs)
+def ykman_group(
+    connections=[SmartCardConnection, OtpConnection, FidoConnection], *args, **kwargs
+):
+    if not isinstance(connections, list):
+        connections = [connections]  # Single type
+    return click.group(cls=_YkmanGroup, *args, connections=connections, **kwargs)
 
 
 def ykman_command(interfaces, *args, **kwargs):

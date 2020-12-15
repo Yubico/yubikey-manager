@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from enum import Enum, IntFlag, unique, auto
+from enum import Enum, unique, auto
 from typing import (
     Type,
     List,
@@ -70,15 +70,6 @@ class TRANSPORT(Enum):
 
     USB = auto()
     NFC = auto()
-
-
-@unique
-class USB_INTERFACE(IntFlag):
-    """YubiKey USB interface identifiers."""
-
-    OTP = 0x01
-    FIDO = 0x02
-    CCID = 0x04
 
 
 @unique

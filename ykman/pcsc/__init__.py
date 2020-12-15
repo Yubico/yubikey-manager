@@ -25,8 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, USB_INTERFACE
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import USB_INTERFACE
 from ..base import YUBIKEY, YkmanDevice
 
 from smartcard import System

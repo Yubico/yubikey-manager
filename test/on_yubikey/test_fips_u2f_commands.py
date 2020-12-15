@@ -1,7 +1,7 @@
 import unittest
 
 from fido2.ctap1 import ApduError
-from yubikit.core import USB_INTERFACE
+from yubikit.management import USB_INTERFACE
 from yubikit.core.smartcard import SW
 from ykman.fido import fips_change_pin, fips_verify_pin, fips_reset, is_in_fips_mode
 from .framework import device_test_suite, yubikey_conditions

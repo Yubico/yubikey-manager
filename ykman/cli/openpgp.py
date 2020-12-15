@@ -38,8 +38,7 @@ from .util import (
     EnumChoice,
 )
 
-from yubikit.core import USB_INTERFACE
-from yubikit.core.smartcard import ApduError, SW
+from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +74,7 @@ def int_in_range(minval, maxval):
     return inner
 
 
-@ykman_group(USB_INTERFACE.CCID)
+@ykman_group(SmartCardConnection)
 @click.pass_context
 @click_postpone_execution
 def openpgp(ctx):

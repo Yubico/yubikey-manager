@@ -25,9 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import USB_INTERFACE, ApplicationNotAvailableError
+from yubikit.core import ApplicationNotAvailableError
+from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import USB_INTERFACE
 
 import ykman.logging_setup
 
@@ -38,7 +40,6 @@ from ..device import (
     get_name,
     list_all_devices,
     scan_devices,
-    get_connection_types,
     connect_to_device,
 )
 from .util import UpperCaseChoice, YkmanContextObject, ykman_group
@@ -64,10 +65,17 @@ logger = logging.getLogger(__name__)
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
 
 
-def retrying_connect(serial, interfaces, attempts=10, state=None):
+USB_INTERFACE_MAPPING = {
+    SmartCardConnection: USB_INTERFACE.CCID,
+    OtpConnection: USB_INTERFACE.OTP,
+    FidoConnection: USB_INTERFACE.FIDO,
+}
+
+
+def retrying_connect(serial, connections, attempts=10, state=None):
     while True:
         try:
-            return connect_to_device(serial, get_connection_types(interfaces))
+            return connect_to_device(serial, connections)
         except Exception as e:
             logger.error("Failed opening connection", exc_info=e)
             while attempts:
@@ -96,8 +104,9 @@ def print_diagnostics(ctx, param, value):
     ctx.exit(get_diagnostics())
 
 
-def _disabled_interface(ctx, interfaces, cmd_name):
-    req = ", ".join((t.name for t in USB_INTERFACE if t & interfaces))
+def _disabled_interface(ctx, connections, cmd_name):
+    interfaces = [USB_INTERFACE_MAPPING[c] for c in connections]
+    req = ", ".join((t.name for t in interfaces))
     click.echo(
         "Command '{}' requires one of the following USB interfaces "
         "to be enabled: '{}'.".format(cmd_name, req)
@@ -105,15 +114,15 @@ def _disabled_interface(ctx, interfaces, cmd_name):
     ctx.fail("Use 'ykman config usb' to set the enabled USB interfaces.")
 
 
-def _run_cmd_for_serial(ctx, cmd, interfaces, serial):
+def _run_cmd_for_serial(ctx, cmd, connections, serial):
     try:
-        return retrying_connect(serial, interfaces)
+        return retrying_connect(serial, connections)
     except ValueError:
         try:
             # Serial not found, see if it's among other interfaces in USB enabled:
             conn = connect_to_device(serial)[0]
             conn.close()
-            _disabled_interface(ctx, interfaces, cmd)
+            _disabled_interface(ctx, connections, cmd)
         except ValueError:
             ctx.fail(
                 "Failed connecting to a YubiKey with serial: {}. "
@@ -122,10 +131,10 @@ def _run_cmd_for_serial(ctx, cmd, interfaces, serial):
             )
 
 
-def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
+def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     # Use a specific CCID reader
     if reader_name:
-        if USB_INTERFACE.CCID in interfaces or cmd in (fido.name, otp.name):
+        if SmartCardConnection in connections or cmd in (fido.name, otp.name):
             readers = list_ccid(reader_name)
             if len(readers) == 1:
                 dev = readers[0]
@@ -159,9 +168,10 @@ def _run_cmd_for_single(ctx, cmd, interfaces, reader_name=None):
 
     # Only one connected device, check if any needed interfaces are available
     pid = next(iter(devices.keys()))
-    if pid.get_interfaces() & interfaces:
-        return retrying_connect(None, interfaces, state=state)
-    _disabled_interface(ctx, interfaces, cmd)
+    for c in connections:
+        if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
+            return retrying_connect(None, connections, state=state)
+    _disabled_interface(ctx, connections, cmd)
 
 
 @ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -242,18 +252,20 @@ def cli(ctx, device, log_level, log_file, reader):
         return
 
     # Commands which need a YubiKey to act on
-    interfaces = getattr(subcmd, "interfaces", USB_INTERFACE(sum(USB_INTERFACE)))
-    if interfaces:
+    connections = getattr(
+        subcmd, "connections", [SmartCardConnection, FidoConnection, OtpConnection]
+    )
+    if connections:
 
         def resolve():
             if not getattr(resolve, "items", None):
                 if device is not None:
                     resolve.items = _run_cmd_for_serial(
-                        ctx, subcmd.name, interfaces, device
+                        ctx, subcmd.name, connections, device
                     )
                 else:
                     resolve.items = _run_cmd_for_single(
-                        ctx, subcmd.name, interfaces, reader
+                        ctx, subcmd.name, connections, reader
                     )
                 ctx.call_on_close(resolve.items[0].close)
             return resolve.items

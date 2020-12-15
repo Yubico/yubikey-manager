@@ -26,8 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from binascii import a2b_hex
-from yubikit.core import USB_INTERFACE, AID
-from yubikit.core.smartcard import SmartCardProtocol, ApduError, SW
+from yubikit.core import AID
+from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 from .util import EnumChoice, ykman_command
 
 import re
@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 APDU_PATTERN = re.compile(
     r"^"
     r"(?P<cla>[0-9a-f]{2})?(?P<ins>[0-9a-f]{2})(?P<params>[0-9a-f]{4})?"
-    r"(?:-(?P<body>(?:[0-9a-f]{2})+))?"
-    r"(?P<check>:(?P<sw>[0-9a-f]{4})?)?"
+    r"(?::(?P<body>(?:[0-9a-f]{2})+))?"
+    r"(?P<check>=(?P<sw>[0-9a-f]{4})?)?"
     r"$",
     re.IGNORECASE,
 )
@@ -83,7 +83,7 @@ def _print_response(resp, sw, no_pretty):
             )
 
 
-@ykman_command(USB_INTERFACE.CCID, hidden=True)
+@ykman_command(SmartCardConnection, hidden=True)
 @click.pass_context
 @click.option(
     "-x", "--no-pretty", is_flag=True, help="Print only the hex output of a response"
@@ -97,26 +97,26 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
     """
     Execute arbitary APDUs.
     Provide APDUs as a hex encoded, space-separated list using the following syntax:
-    [CLA]INS[P1P2][-DATA][:EXPECTED_SW]
+    [CLA]INS[P1P2][:DATA][=EXPECTED_SW]
 
     If not provided CLA, P1 and P2 are all set to zero.
     Setting EXPECTED_SW will cause the command to check the response SW an fail if it
-    differs. ":" can be used as shorthand for ":9000" (SW=OK).
+    differs. "=" can be used as shorthand for "=9000" (SW=OK).
 
     Examples:
 
     \b
       Select the OATH application, send a LIST instruction (0xA1), and make sure we get
       sw=9000 (these are equivalent):
-      $ ykman apdu a40400-a000000527210101:9000 a1:9000
+      $ ykman apdu a40400:a000000527210101=9000 a1=9000
         or
-      $ ykman apdu -a oath a1:
+      $ ykman apdu -a oath a1=
 
     \b
       Factory reset the OATH application (these are all equivalent):
       $ ykman apdu -a oath 04dead
         or
-      $ ykman apdu a40400-a000000527210101 04dead
+      $ ykman apdu a40400:a000000527210101 04dead
         or
       $ ykman apdu -s 00a4040008a000000527210101 -s 0004dead
     """

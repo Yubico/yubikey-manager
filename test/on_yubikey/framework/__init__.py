@@ -7,8 +7,25 @@ import test.util
 import unittest
 import time
 
-from yubikit.core import USB_INTERFACE
-from ykman import list_all_devices, connect_to_device, get_connection_types
+from yubikit.core.otp import OtpConnection
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import USB_INTERFACE
+from ykman import list_all_devices, connect_to_device
+
+
+CONNECTION_TYPE_MAPPING = {
+    USB_INTERFACE.CCID: SmartCardConnection,
+    USB_INTERFACE.OTP: OtpConnection,
+    USB_INTERFACE.FIDO: FidoConnection,
+}
+
+
+def get_connection_types(usb_interfaces):
+    """Get a list of Connection types valid for the given USB interfaces."""
+    return [
+        ct for iface, ct in CONNECTION_TYPE_MAPPING.items() if iface in usb_interfaces
+    ]
 
 
 _skip = True

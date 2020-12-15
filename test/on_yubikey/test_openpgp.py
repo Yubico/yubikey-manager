@@ -5,7 +5,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from ykman.openpgp import OpenPgpController, KEY_SLOT
-from yubikit.core import USB_INTERFACE
+from yubikit.management import USB_INTERFACE
 from yubikit.core.smartcard import ApduError
 from .framework import device_test_suite, yubikey_conditions
 

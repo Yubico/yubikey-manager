@@ -28,7 +28,6 @@
 from yubikit.core import (
     AID,
     TRANSPORT,
-    USB_INTERFACE,
     Version,
     Connection,
     NotSupportedError,
@@ -44,6 +43,7 @@ from yubikit.management import (
     ManagementSession,
     DeviceInfo,
     DeviceConfig,
+    USB_INTERFACE,
     CAPABILITY,
     FORM_FACTOR,
 )
@@ -86,24 +86,11 @@ def is_fips_version(version: Version) -> bool:
 
 BASE_NEO_APPS = CAPABILITY.OTP | CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
 
-CONNECTION_TYPE_MAPPING = {
-    USB_INTERFACE.CCID: SmartCardConnection,
-    USB_INTERFACE.OTP: OtpConnection,
-    USB_INTERFACE.FIDO: FidoConnection,
-}
-
 CONNECTION_LIST_MAPPING = {
     SmartCardConnection: list_ccid_devices,
     OtpConnection: list_otp_devices,
     FidoConnection: list_ctap_devices,
 }
-
-
-def get_connection_types(usb_interfaces: USB_INTERFACE) -> Iterable[Type[Connection]]:
-    """Get a list of Connection types valid for the given USB interfaces."""
-    return [
-        ct for iface, ct in CONNECTION_TYPE_MAPPING.items() if iface in usb_interfaces
-    ]
 
 
 def scan_devices() -> Tuple[Mapping[PID, int], int]:

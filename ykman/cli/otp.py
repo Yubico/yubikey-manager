@@ -34,8 +34,8 @@ from yubikit.yubiotp import (
     HotpSlotConfiguration,
     UpdateConfiguration,
 )
-from yubikit.core import TRANSPORT, USB_INTERFACE, CommandError
-from yubikit.core.otp import modhex_encode, modhex_decode
+from yubikit.core import TRANSPORT, CommandError
+from yubikit.core.otp import modhex_encode, modhex_decode, OtpConnection
 
 from .util import (
     ykman_group,
@@ -116,7 +116,7 @@ def _confirm_slot_overwrite(slot_state, slot):
         )
 
 
-@ykman_group(USB_INTERFACE.OTP)
+@ykman_group(OtpConnection)
 @click.pass_context
 @click_postpone_execution
 @click.option(

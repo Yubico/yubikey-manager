@@ -34,7 +34,6 @@ from fido2.ctap2 import (
     FPBioEnrollment,
     CaptureError,
 )
-from yubikit.core import USB_INTERFACE
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
 from time import sleep
@@ -59,7 +58,7 @@ FIPS_PIN_MIN_LENGTH = 6
 PIN_MIN_LENGTH = 4
 
 
-@ykman_group(USB_INTERFACE.FIDO)
+@ykman_group(FidoConnection)
 @click.pass_context
 @click_postpone_execution
 def fido(ctx):

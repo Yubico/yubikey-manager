@@ -7,7 +7,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 
-from yubikit.core import USB_INTERFACE
+from yubikit.management import USB_INTERFACE
 from yubikit.core.smartcard import ApduError
 from yubikit.piv import (
     PivSession,

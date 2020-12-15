@@ -25,11 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, USB_INTERFACE
+from yubikit.core import TRANSPORT
 from yubikit.management import (
     ManagementSession,
     DeviceConfig,
     CAPABILITY,
+    USB_INTERFACE,
     DEVICE_FLAG,
     Mode,
 )

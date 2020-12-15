@@ -33,7 +33,6 @@ from .core import (
     Tlv,
     AID,
     TRANSPORT,
-    USB_INTERFACE,
     NotSupportedError,
     BadResponseError,
     ApplicationNotAvailableError,
@@ -48,6 +47,15 @@ from dataclasses import dataclass
 from typing import Optional, Union, Mapping
 import abc
 import struct
+
+
+@unique
+class USB_INTERFACE(IntFlag):
+    """YubiKey USB interface identifiers."""
+
+    OTP = 0x01
+    FIDO = 0x02
+    CCID = 0x04
 
 
 @unique

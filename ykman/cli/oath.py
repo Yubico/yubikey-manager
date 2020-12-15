@@ -38,8 +38,7 @@ from .util import (
     prompt_timeout,
     EnumChoice,
 )
-from yubikit.core import USB_INTERFACE
-from yubikit.core.smartcard import ApduError, SW
+from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.oath import (
     OathSession,
     CredentialData,
@@ -55,7 +54,7 @@ from ..settings import Settings
 logger = logging.getLogger(__name__)
 
 
-@ykman_group(USB_INTERFACE.CCID)
+@ykman_group(SmartCardConnection)
 @click.pass_context
 @click_postpone_execution
 def oath(ctx):
