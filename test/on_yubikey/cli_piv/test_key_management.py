@@ -230,7 +230,7 @@ def additional_tests(ykman_cli):
                 DEFAULT_MANAGEMENT_KEY,
                 "-",
             )
-            output = ykman_cli("piv", "attest", "9a", "-")
+            output = ykman_cli("piv", "keys", "attest", "9a", "-")
             self.assertIn("BEGIN CERTIFICATE", output)
 
         def _test_generate_csr(self, algo):

@@ -987,22 +987,19 @@ def _ensure_authenticated(
     mgm_key_prompt=None,
     no_prompt=False,
 ):
-    pin_verified = False
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
 
-    if pivman.has_protected_key:
-        if not management_key:
-            pin_verified = _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
-        else:
-            _authenticate(
-                ctx, session, management_key, mgm_key_prompt, no_prompt=no_prompt
-            )
-    else:
-        if require_pin_and_key:
-            pin_verified = _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
-        _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=no_prompt)
-    return pin_verified
+    if pivman.has_protected_key and not management_key:
+        _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
+        return True
+
+    _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=no_prompt)
+
+    if require_pin_and_key:
+        # Ensure verify was the last thing we did
+        _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
+        return True
 
 
 def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
@@ -1025,8 +1022,6 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
             with prompt_timeout():
                 session.authenticate(MANAGEMENT_KEY_TYPE.TDES, pivman_prot.key)
             session.verify_pin(pin)  # Ensure verify was the last thing we did
-
-        return True
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts > 0:
