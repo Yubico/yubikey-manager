@@ -451,11 +451,11 @@ class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
         if len(scan_codes) > SCAN_CODES_SIZE:
             raise NotSupportedError("Password is too long")
 
-        # Scan codes are packed into fixed, key and uid
+        # Scan codes are packed into fixed, uid, and key
         scan_codes = scan_codes.ljust(SCAN_CODES_SIZE, b"\0")
         self._fixed = scan_codes[:FIXED_SIZE]
-        self._key = scan_codes[FIXED_SIZE : FIXED_SIZE + KEY_SIZE]
-        self._uid = scan_codes[FIXED_SIZE + KEY_SIZE :]
+        self._uid = scan_codes[FIXED_SIZE : FIXED_SIZE + UID_SIZE]
+        self._key = scan_codes[FIXED_SIZE + UID_SIZE :]
 
         self._update_flags(CFGFLAG.SHORT_TICKET, True)
 
