@@ -410,11 +410,14 @@ def import_key(
     _check_touch_policy(ctx, controller, touch_policy)
     _check_key_size(ctx, controller, private_key)
 
-    controller.import_key(
+    try:
+        controller.import_key(
             slot,
             private_key,
             pin_policy,
             touch_policy)
+    except UnsupportedAlgorithm as e:
+        ctx.fail('Cannot import key: {}'.format(str(e)))
 
 
 @piv.command()
@@ -979,7 +982,8 @@ def _authenticate(ctx, controller, management_key, mgm_key_prompt,
 
 
 def _check_key_size(ctx, controller, private_key):
-    if (private_key.key_size == 1024
+    if (hasattr(private_key, 'key_size')
+            and private_key.key_size == 1024
             and ALGO.RSA1024 not in controller.supported_algorithms):
         ctx.fail('1024 is not a supported key size on this YubiKey.')
 
