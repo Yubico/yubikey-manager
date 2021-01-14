@@ -89,9 +89,16 @@ K_IO_MASTER_PORT_DEFAULT = 0
 K_IO_HID_REPORT_TYPE_FEATURE = 2
 K_IO_RETURN_SUCCESS = 0
 
-# Load relevant libraries
-iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library("IOKit"))  # type: ignore
-cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))  # type: ignore
+# NOTE: find_library doesn't currently work on Big Sur, requiring the hardcoded paths
+iokit = ctypes.cdll.LoadLibrary(
+    ctypes.util.find_library("IOKit")
+    or "/System/Library/Frameworks/IOKit.framework/IOKit"
+)
+cf = ctypes.cdll.LoadLibrary(
+    ctypes.util.find_library("CoreFoundation")
+    or "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+)
+
 
 # Declare C function prototypes
 cf.CFSetGetValues.restype = None

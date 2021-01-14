@@ -406,6 +406,7 @@ def creds():
     Manage resident (discoverable) credentials.
 
     This command lets you manage credentials stored on your YubiKey.
+    Credential management is only available when a FIDO PIN is set on the YubiKey.
 
     \b
     Examples:
@@ -424,9 +425,9 @@ def _init_credman(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
 
     if not ctap2:
-        ctx.fail("Listing credentials not supported.")
+        ctx.fail("Managing stored credentials not supported.")
     elif not ctap2.info.options.get("clientPin"):
-        ctx.fail("No PIN is set.")
+        ctx.fail("Managing credentials requires having a PIN. Set a PIN first.")
 
     if pin is None:
         pin = _prompt_current_pin(prompt="Enter your PIN")
@@ -507,7 +508,7 @@ def _init_bio(ctx, pin):
     if not ctap2:  # TODO or "bioEnroll" not in ctap2.info.options:
         ctx.fail("Biometrics is not supported on this YubiKey.")
     elif not ctap2.info.options.get("clientPin"):
-        ctx.fail("No PIN is set.")
+        ctx.fail("Biometrics requires having a PIN. Set a PIN first.")
 
     if pin is None:
         pin = _prompt_current_pin(prompt="Enter your PIN")
