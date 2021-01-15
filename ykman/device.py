@@ -33,7 +33,7 @@ from yubikit.core import (
     NotSupportedError,
     ApplicationNotAvailableError,
 )
-from yubikit.core.otp import OtpConnection
+from yubikit.core.otp import OtpConnection, CommandRejectedError
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import (
     SmartCardConnection,
@@ -53,6 +53,7 @@ from .hid import list_otp_devices, list_ctap_devices
 from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
+from time import sleep
 from collections import Counter
 from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type
 import sys
@@ -256,7 +257,12 @@ def _read_info_ccid(conn, key_type, interfaces):
 def _read_info_otp(conn, key_type, interfaces):
     try:
         mgmt = ManagementSession(conn)
-        return mgmt.read_device_info()
+        # If a different interface was just active, it takes some time to reclaim
+        for _ in range(6):
+            try:
+                return mgmt.read_device_info()
+            except CommandRejectedError:
+                sleep(0.5)
     except (ApplicationNotAvailableError, NotSupportedError):
         logger.debug("Unable to get info via Management application, use fallback")
 

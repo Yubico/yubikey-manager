@@ -155,27 +155,34 @@ class OtpProtocol:
         logger.debug("RECV: %s", response.hex())
         return response
 
+    def _receive(self):
+        report = self.connection.receive()
+        if len(report) != FEATURE_RPT_SIZE:
+            raise Exception(
+                "Incorrect reature report size (was %d, expected %d)"
+                % len(report, FEATURE_RPT_SIZE)
+            )
+        return report
+
     def read_status(self) -> bytes:
         """Receive status bytes from YubiKey
 
         @return status bytes (first 3 bytes are the firmware version)
         @throws IOException in case of communication error
         """
-        return self.connection.receive()[1:-1]
+        return self._receive()[1:-1]
 
     def _await_ready_to_write(self):
         """Sleep for up to ~1s waiting for the WRITE flag to be unset"""
         for _ in range(20):
-            if (
-                self.connection.receive()[FEATURE_RPT_DATA_SIZE] & SLOT_WRITE_FLAG
-            ) == 0:
+            if (self._receive()[FEATURE_RPT_DATA_SIZE] & SLOT_WRITE_FLAG) == 0:
                 return
             sleep(0.05)
         raise Exception("Timeout waiting for YubiKey to become ready to receive")
 
     def _send_frame(self, buf):
         """Sends a 70 byte frame"""
-        prog_seq = self.connection.receive()[STATUS_OFFSET_PROG_SEQ]
+        prog_seq = self._receive()[STATUS_OFFSET_PROG_SEQ]
         seq = 0
         while buf:
             report, buf = buf[:FEATURE_RPT_DATA_SIZE], buf[FEATURE_RPT_DATA_SIZE:]
@@ -195,23 +202,24 @@ class OtpProtocol:
 
         try:
             while True:
-                report = self.connection.receive()
-                statusByte = report[FEATURE_RPT_DATA_SIZE]
-                if (statusByte & RESP_PENDING_FLAG) != 0:  # Response packet
-                    if seq == (statusByte & SEQUENCE_MASK):
+                report = self._receive()
+                status_byte = report[FEATURE_RPT_DATA_SIZE]
+                if (status_byte & RESP_PENDING_FLAG) != 0:  # Response packet
+                    if seq == (status_byte & SEQUENCE_MASK):
                         # Correct sequence
                         response += report[:FEATURE_RPT_DATA_SIZE]
                         seq += 1
-                    elif 0 == (statusByte & SEQUENCE_MASK):
+                    elif 0 == (status_byte & SEQUENCE_MASK):
                         # Transmission complete
                         self._reset_state()
                         return response
-                elif statusByte == 0:  # Status response
+                elif status_byte == 0:  # Status response
                     next_prog_seq = report[STATUS_OFFSET_PROG_SEQ]
                     if response:
                         raise Exception("Incomplete transfer")
                     elif next_prog_seq == prog_seq + 1 or (
-                        next_prog_seq == 0
+                        prog_seq > 0
+                        and next_prog_seq == 0
                         and report[STATUS_OFFSET_TOUCH_LOW] & CONFIG_STATUS_MASK == 0
                     ):  # Note: If no valid configurations exist, prog_seq resets to 0.
                         # Sequence updated, return status.
@@ -221,7 +229,7 @@ class OtpProtocol:
                     else:
                         raise CommandRejectedError("No data")
                 else:  # Need to wait
-                    if (statusByte & RESP_TIMEOUT_WAIT_FLAG) != 0:
+                    if (status_byte & RESP_TIMEOUT_WAIT_FLAG) != 0:
                         on_keepalive(STATUS_UPNEEDED)
                         needs_touch = True
                         timeout = 0.1

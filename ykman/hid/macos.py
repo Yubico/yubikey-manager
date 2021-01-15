@@ -192,7 +192,7 @@ class MacHidOtpConnection(OtpConnection):
             self.handle = None
 
     def receive(self):
-        buf = ctypes.create_string_buffer(9)
+        buf = ctypes.create_string_buffer(8)
         report_len = CF_INDEX(ctypes.sizeof(buf))
 
         result = iokit.IOHIDDeviceGetReport(
