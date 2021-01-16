@@ -26,12 +26,13 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from enum import Enum
-from . import us, de, fr, it, modhex, norman, bepo
+from . import us, uk, de, fr, it, modhex, norman, bepo
 
 
 class KEYBOARD_LAYOUT(Enum):
     MODHEX = modhex.scancodes
     US = us.scancodes
+    UK = uk.scancodes
     DE = de.scancodes
     FR = fr.scancodes
     IT = it.scancodes
