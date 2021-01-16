@@ -535,18 +535,19 @@ class PivSession:
             raise InvalidPinError(retries)
 
     def get_pin_attempts(self) -> int:
-        if self.version >= (5, 3, 0):
-            return self.get_pin_metadata().attempts_remaining
         try:
-            self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2)
-            # Already verified, no way to know true count
-            return self._current_pin_retries
-        except ApduError as e:
-            retries = _retries_from_sw(self.version, e.sw)
-            if retries is None:
-                raise
-            self._current_pin_retries = retries
-            return retries
+            return self.get_pin_metadata().attempts_remaining
+        except NotSupportedError:
+            try:
+                self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2)
+                # Already verified, no way to know true count
+                return self._current_pin_retries
+            except ApduError as e:
+                retries = _retries_from_sw(self.version, e.sw)
+                if retries is None:
+                    raise
+                self._current_pin_retries = retries
+                return retries
 
     def change_pin(self, old_pin: str, new_pin: str) -> None:
         self._change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)

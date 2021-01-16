@@ -305,7 +305,12 @@ def additional_tests(open_device):
 
             self.session.verify_pin(DEFAULT_PIN)
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
-            pivman_set_mgm_key(self.session, None, store_on_device=True)
+            pivman_set_mgm_key(
+                self.session,
+                NON_DEFAULT_MANAGEMENT_KEY,
+                MANAGEMENT_KEY_TYPE.TDES,
+                store_on_device=True,
+            )
 
             pivman = get_pivman_data(self.session)
             self.assertTrue(pivman.has_stored_key)
@@ -339,7 +344,12 @@ def additional_tests(open_device):
         ):  # noqa: E501
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             with self.assertRaises(ApduError):
-                pivman_set_mgm_key(self.session, None, store_on_device=True)
+                pivman_set_mgm_key(
+                    self.session,
+                    NON_DEFAULT_MANAGEMENT_KEY,
+                    MANAGEMENT_KEY_TYPE.TDES,
+                    store_on_device=True,
+                )
 
             self.assertMgmKeyIs(DEFAULT_MANAGEMENT_KEY)
 
@@ -366,7 +376,10 @@ def additional_tests(open_device):
             self.session.verify_pin(DEFAULT_PIN)
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             pivman_set_mgm_key(
-                self.session, NON_DEFAULT_MANAGEMENT_KEY, store_on_device=True
+                self.session,
+                NON_DEFAULT_MANAGEMENT_KEY,
+                MANAGEMENT_KEY_TYPE.TDES,
+                store_on_device=True,
             )
 
             self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
@@ -375,18 +388,6 @@ def additional_tests(open_device):
 
             pivman_prot = get_pivman_protected_data(self.session)
             self.assertMgmKeyIs(pivman_prot.key)
-
-        def test_set_stored_random_mgm_key_succeeds_if_pin_is_verified(self):
-            self.session.verify_pin(DEFAULT_PIN)
-            self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
-            pivman_set_mgm_key(self.session, None, store_on_device=True)
-
-            self.assertMgmKeyIsNot(DEFAULT_MANAGEMENT_KEY)
-            self.assertMgmKeyIsNot(NON_DEFAULT_MANAGEMENT_KEY)
-            pivman_prot = get_pivman_protected_data(self.session)
-            self.assertMgmKeyIs(pivman_prot.key)
-            self.assertStoredMgmKeyNotEquals(DEFAULT_MANAGEMENT_KEY)
-            self.assertStoredMgmKeyNotEquals(NON_DEFAULT_MANAGEMENT_KEY)
 
     class Operations(PivTestCase):
         def setUp(self):

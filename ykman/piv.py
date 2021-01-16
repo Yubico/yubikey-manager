@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from yubikit.core import Tlv, BadResponseError
+from yubikit.core import Tlv, BadResponseError, NotSupportedError
 from yubikit.core.smartcard import ApduError, SW
 from yubikit.piv import (
     PivSession,
@@ -85,9 +85,9 @@ def derive_management_key(pin: str, salt: bytes) -> bytes:
     return kdf.derive(pin.encode("utf-8"))
 
 
-def generate_random_management_key() -> bytes:
+def generate_random_management_key(algorithm: MANAGEMENT_KEY_TYPE) -> bytes:
     """Generates a new random management key."""
-    return os.urandom(24)
+    return os.urandom(algorithm.key_len)
 
 
 class PivmanData:
@@ -182,16 +182,8 @@ def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
         raise
 
 
-def pivman_set_mgm_key(session, new_key, touch=False, store_on_device=False):
+def pivman_set_mgm_key(session, new_key, algorithm, touch=False, store_on_device=False):
     """Set a new management key, while keeping PivmanData in sync."""
-    # If the key should be protected by PIN and no key is given,
-    # we generate a random key.
-    if not new_key:
-        if store_on_device:
-            new_key = generate_random_management_key()
-        else:
-            raise ValueError("new_key was not given and store_on_device was not True")
-
     pivman = get_pivman_data(session)
 
     if store_on_device or (not store_on_device and pivman.has_stored_key):
@@ -204,7 +196,7 @@ def pivman_set_mgm_key(session, new_key, touch=False, store_on_device=False):
                 raise
 
     # Set the new management key
-    session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
+    session.set_management_key(algorithm, new_key)
 
     if pivman.has_derived_key:
         # Clear salt for old derived keys.
@@ -356,6 +348,14 @@ def get_piv_info(session: PivSession) -> str:
     lines.append("PIN tries remaining: %s" % tries_str)
     if pivman.puk_blocked:
         lines.append("PUK blocked.")
+    try:
+        metadata = session.get_management_key_metadata()
+        lines.append("Management key algorithm: %s" % metadata.key_type.name)
+        if metadata.default_value:
+            lines.append("WARNING: Using default Management key value!")
+    except NotSupportedError:
+        lines.append("Management key algorithm: %s" % MANAGEMENT_KEY_TYPE.TDES.name)
+        pass
     if pivman.has_derived_key:
         lines.append("Management key is derived from PIN.")
     if pivman.has_stored_key:

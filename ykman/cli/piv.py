@@ -354,6 +354,14 @@ def change_puk(ctx, puk, new_puk):
     callback=click_parse_management_key,
 )
 @click.option(
+    "-a",
+    "--algorithm",
+    help="Management key algorithm.",
+    type=EnumChoice(MANAGEMENT_KEY_TYPE),
+    default=MANAGEMENT_KEY_TYPE.TDES.name,
+    show_default=True,
+)
+@click.option(
     "-p",
     "--protect",
     is_flag=True,
@@ -370,7 +378,15 @@ def change_puk(ctx, puk, new_puk):
 )
 @click_force_option
 def change_management_key(
-    ctx, management_key, pin, new_management_key, touch, protect, generate, force
+    ctx,
+    management_key,
+    algorithm,
+    pin,
+    new_management_key,
+    touch,
+    protect,
+    generate,
+    force,
 ):
     """
     Change the management key.
@@ -391,6 +407,7 @@ def change_management_key(
         no_prompt=force,
     )
 
+    # Can't combine new key with generate.
     if new_management_key and generate:
         ctx.fail("Invalid options: --new-management-key conflicts with --generate")
 
@@ -410,38 +427,40 @@ def change_management_key(
                 err=True,
             )
 
-    if not new_management_key and not protect:
-        if generate:
-            new_management_key = generate_random_management_key()
-
+    if not new_management_key:
+        if protect or generate:
+            new_management_key = generate_random_management_key(algorithm)
             if not protect:
                 click.echo(
                     "Generated management key: {}".format(new_management_key.hex())
                 )
-
         elif force:
             ctx.fail(
                 "New management key not given. Please remove the --force "
                 "flag, or set the --generate flag or the "
                 "--new-management-key option."
             )
-
         else:
-            new_management_key = click_prompt(
-                "Enter the new management key",
-                hide_input=True,
-                confirmation_prompt=True,
-            )
+            try:
+                new_management_key = bytes.fromhex(
+                    click_prompt(
+                        "Enter the new management key",
+                        hide_input=True,
+                        confirmation_prompt=True,
+                    )
+                )
+            except Exception:
+                ctx.fail("New management key has the wrong format.")
 
-    if new_management_key and type(new_management_key) is not bytes:
-        try:
-            new_management_key = bytes.fromhex(new_management_key)
-        except Exception:
-            ctx.fail("New management key has the wrong format.")
+    if len(new_management_key) != algorithm.key_len:
+        ctx.fail(
+            "Management key has the wrong length (expected %d bytes)"
+            % algorithm.key_len
+        )
 
     try:
         pivman_set_mgm_key(
-            session, new_management_key, touch=touch, store_on_device=protect
+            session, new_management_key, algorithm, touch=touch, store_on_device=protect
         )
     except ApduError as e:
         logger.error("Failed to change management key", exc_info=e)
@@ -1019,8 +1038,12 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
             session.verify_pin(pin)  # Ensure verify was the last thing we did
         elif pivman.has_stored_key:
             pivman_prot = get_pivman_protected_data(session)
+            try:
+                key_type = session.get_management_key_metadata().key_type
+            except NotSupportedError:
+                key_type = MANAGEMENT_KEY_TYPE.TDES
             with prompt_timeout():
-                session.authenticate(MANAGEMENT_KEY_TYPE.TDES, pivman_prot.key)
+                session.authenticate(key_type, pivman_prot.key)
             session.verify_pin(pin)  # Ensure verify was the last thing we did
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -1042,9 +1065,9 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             else:
                 management_key = _prompt_management_key(ctx, mgm_key_prompt)
     try:
-        if session.version >= (5, 4, 0):
+        try:
             key_type = session.get_management_key_metadata().key_type
-        else:
+        except NotSupportedError:
             key_type = MANAGEMENT_KEY_TYPE.TDES
 
         with prompt_timeout():

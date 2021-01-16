@@ -147,7 +147,7 @@ def additional_tests(ykman_cli):
             self.assertEqual("", output)
 
         def test_change_management_key_no_protect_arg_bad_length(self):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(SystemExit):
                 ykman_cli(
                     "piv",
                     "access",
