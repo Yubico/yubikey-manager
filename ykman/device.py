@@ -52,6 +52,7 @@ from .base import PID, YUBIKEY, YkmanDevice
 from .hid import list_otp_devices, list_ctap_devices
 from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
+from smartcard.Exceptions import NoCardException
 
 from time import sleep
 from collections import Counter
@@ -145,17 +146,37 @@ def connect_to_device(
     :return: An open connection to the device, the device reference, and the device
         information read from the device.
     """
+    retry_ccid = []
     for connection_type in connection_types:
         for dev in CONNECTION_LIST_MAPPING[connection_type]():
             try:
                 conn = dev.open_connection(connection_type)
-                info = read_info(dev.pid, conn)
-                if serial and info.serial != serial:
-                    conn.close()
-                else:
-                    return conn, dev, info
-            except Exception as e:
-                logger.debug("Error connecting", exc_info=e)
+            except NoCardException:
+                retry_ccid.append(dev)
+                logger.debug("CCID No card present, will retry")
+                continue
+            info = read_info(dev.pid, conn)
+            if serial and info.serial != serial:
+                conn.close()
+            else:
+                return conn, dev, info
+
+    # NEO ejects the card when other interfaces are used, and returns it after ~3s.
+    for _ in range(6):
+        if not retry_ccid:
+            break
+        sleep(0.5)
+        for dev in retry_ccid[:]:
+            try:
+                conn = dev.open_connection(SmartCardConnection)
+            except NoCardException:
+                continue
+            retry_ccid.remove(dev)
+            info = read_info(dev.pid, conn)
+            if serial and info.serial != serial:
+                conn.close()
+            else:
+                return conn, dev, info
 
     if serial:
         raise ValueError("YubiKey with given serial not found")
