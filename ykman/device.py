@@ -255,20 +255,31 @@ def _read_info_ccid(conn, key_type, interfaces):
 
 
 def _read_info_otp(conn, key_type, interfaces):
+    otp = None
+    serial = None
+
     try:
         mgmt = ManagementSession(conn)
-        # If a different interface was just active, it takes some time to reclaim
-        for _ in range(6):
-            try:
-                return mgmt.read_device_info()
-            except CommandRejectedError:
-                sleep(0.5)
-    except (ApplicationNotAvailableError, NotSupportedError):
-        logger.debug("Unable to get info via Management application, use fallback")
+    except ApplicationNotAvailableError:
+        otp = YubiOtpSession(conn)
+
+    # Retry during potential reclaim timeout period (~3s).
+    for _ in range(8):
+        try:
+            if otp is None:
+                try:
+                    return mgmt.read_device_info()  # Rejected while reclaim
+                except NotSupportedError:
+                    otp = YubiOtpSession(conn)
+            serial = otp.get_serial()  # Rejected if reclaim (or not API_SERIAL_VISIBLE)
+            break
+        except CommandRejectedError:
+            sleep(0.5)  # Potential reclaim
 
     # Synthesize info
-    version, serial = _otp_read_data(conn)
+    logger.debug("Unable to get info via Management application, use fallback")
 
+    version = otp.version
     if key_type == YUBIKEY.NEO:
         usb_supported = BASE_NEO_APPS
         if USB_INTERFACE.FIDO in interfaces or version >= (3, 3, 0):
