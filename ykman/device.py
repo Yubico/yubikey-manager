@@ -296,6 +296,8 @@ def _read_info_otp(conn, key_type, interfaces):
             break
         except CommandRejectedError:
             sleep(0.5)  # Potential reclaim
+    else:
+        otp = YubiOtpSession(conn)
 
     # Synthesize info
     logger.debug("Unable to get info via Management application, use fallback")
