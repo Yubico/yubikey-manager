@@ -58,7 +58,7 @@ class HidrawConnection(OtpConnection):
         return buf[1:]
 
     def send(self, data):
-        buf = bytearray([9])
+        buf = bytearray([0])  # Prepend the report ID.
         buf.extend(data)
         fcntl.ioctl(self.handle, USB_SET_REPORT, buf, True)
 
