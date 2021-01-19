@@ -279,8 +279,6 @@ def additional_tests(ykman_cli):
                 "ECCP256",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
-                "--pin-policy",
-                "ALWAYS",
                 "-",
             )
 
@@ -348,8 +346,6 @@ def additional_tests(ykman_cli):
                 "ECCP256",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
-                "--pin-policy",
-                "ALWAYS",
                 "-",
             )
 
@@ -380,8 +376,6 @@ def additional_tests(ykman_cli):
                 "ECCP256",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
-                "--pin-policy",
-                "ALWAYS",
                 "-",
                 input=public_key_pem,
             )
@@ -412,8 +406,6 @@ def additional_tests(ykman_cli):
                 "ECCP256",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
-                "--pin-policy",
-                "ALWAYS",
                 "-",
             )
 
@@ -444,8 +436,6 @@ def additional_tests(ykman_cli):
                 "ECCP256",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
-                "--pin-policy",
-                "ALWAYS",
                 "-",
                 input=public_key_pem,
             )

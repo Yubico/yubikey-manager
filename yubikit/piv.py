@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .core import (
-    require_version,
+    require_version as _require_version,
     Version,
     Tlv,
     AID,
@@ -67,6 +67,13 @@ logger = logging.getLogger(__name__)
 class ALGORITHM(Enum):
     EC = auto()
     RSA = auto()
+
+
+# Don't treat pre 1.0 versions as "developer builds".
+def require_version(my_version: Version, *args, **kwargs):
+    if my_version <= (0, 1, 3):  # Last pre 1.0 release of ykneo-piv
+        my_version = Version(1, 0, 0)
+    _require_version(my_version, *args, **kwargs)
 
 
 @unique
@@ -382,7 +389,7 @@ def check_key_support(
     This method will return None if the key (with PIN and touch policies) is supported,
     or it will raise a NotSupportedError if it is not.
     """
-    if version[0] == 0:
+    if version[0] == 0 and version > (0, 1, 3):
         return  # Development build, skip version checks
 
     if version < (4, 0, 0):

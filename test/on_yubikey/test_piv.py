@@ -97,10 +97,12 @@ def additional_tests(open_device):
                 session = PivSession(conn)
                 session.reset()
 
-        def generate_key(self, slot, alg=KEY_TYPE.ECCP256, pin_policy=None):
+        def generate_key(
+            self, slot, alg=KEY_TYPE.ECCP256, pin_policy=PIN_POLICY.DEFAULT
+        ):
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             public_key = self.session.generate_key(
-                slot, alg, pin_policy=pin_policy, touch_policy=TOUCH_POLICY.NEVER
+                slot, alg, pin_policy=pin_policy, touch_policy=TOUCH_POLICY.DEFAULT
             )
             self.reconnect()
             return public_key
@@ -143,9 +145,6 @@ def additional_tests(open_device):
 
         def test_generate_self_signed_certificate_requires_authentication(self):
             public_key = self.generate_key(SLOT.AUTHENTICATION)
-            if self.session.version < (4, 0, 0):
-                # NEO always has PIN policy "ONCE"
-                self.session.verify_pin(DEFAULT_PIN)
 
             with self.assertRaises(ApduError):
                 generate_self_signed_certificate(
@@ -194,12 +193,12 @@ def additional_tests(open_device):
                 self.session.generate_key(
                     SLOT.AUTHENTICATION,
                     KEY_TYPE.ECCP256,
-                    touch_policy=TOUCH_POLICY.NEVER,
+                    touch_policy=TOUCH_POLICY.DEFAULT,
                 )
 
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             self.session.generate_key(
-                SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, touch_policy=TOUCH_POLICY.NEVER
+                SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, touch_policy=TOUCH_POLICY.DEFAULT
             )
 
         def test_put_certificate_requires_authentication(self):
@@ -212,10 +211,9 @@ def additional_tests(open_device):
 
         def _test_put_key_pairing(self, alg1, alg2):
             # Set up a key in the slot and create a certificate for it
-            public_key = self.generate_key(
-                SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER
-            )
+            public_key = self.generate_key(SLOT.AUTHENTICATION, alg=alg1)
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+            self.session.verify_pin(DEFAULT_PIN)
             cert = generate_self_signed_certificate(
                 self.session,
                 SLOT.AUTHENTICATION,
@@ -235,17 +233,15 @@ def additional_tests(open_device):
             self.session.delete_certificate(SLOT.AUTHENTICATION)
 
             # Overwrite the key with one of the same type
-            self.generate_key(
-                SLOT.AUTHENTICATION, alg=alg1, pin_policy=PIN_POLICY.NEVER
-            )
+            self.generate_key(SLOT.AUTHENTICATION, alg=alg1)
+            self.session.verify_pin(DEFAULT_PIN)
             self.assertFalse(
                 check_key(self.session, SLOT.AUTHENTICATION, cert.public_key())
             )
 
             # Overwrite the key with one of a different type
-            self.generate_key(
-                SLOT.AUTHENTICATION, alg=alg2, pin_policy=PIN_POLICY.NEVER
-            )
+            self.generate_key(SLOT.AUTHENTICATION, alg=alg2)
+            self.session.verify_pin(DEFAULT_PIN)
             self.assertFalse(
                 check_key(self.session, SLOT.AUTHENTICATION, cert.public_key())
             )
@@ -259,9 +255,15 @@ def additional_tests(open_device):
         def test_put_certificate_verifies_key_pairing_rsa2048(self):
             self._test_put_key_pairing(KEY_TYPE.RSA2048, KEY_TYPE.ECCP256)
 
-        def test_put_certificate_verifies_key_pairing_eccp256(self):
+        @yubikey_conditions.is_not_roca
+        def test_put_certificate_verifies_key_pairing_eccp256_a(self):
+            self._test_put_key_pairing(KEY_TYPE.ECCP256, KEY_TYPE.RSA2048)
+
+        @yubikey_conditions.version_min((4, 0, 0))
+        def test_put_certificate_verifies_key_pairing_eccp256_b(self):
             self._test_put_key_pairing(KEY_TYPE.ECCP256, KEY_TYPE.ECCP384)
 
+        @yubikey_conditions.version_min((4, 0, 0))
         def test_put_certificate_verifies_key_pairing_eccp384(self):
             self._test_put_key_pairing(KEY_TYPE.ECCP384, KEY_TYPE.ECCP256)
 
@@ -394,13 +396,13 @@ def additional_tests(open_device):
             PivTestCase.setUp(self)
             self.session.reset()
 
-        def generate_key(self, pin_policy=None):
+        def generate_key(self, pin_policy=PIN_POLICY.DEFAULT):
             self.session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
             public_key = self.session.generate_key(
                 SLOT.AUTHENTICATION,
                 KEY_TYPE.ECCP256,
                 pin_policy=pin_policy,
-                touch_policy=TOUCH_POLICY.NEVER,
+                touch_policy=TOUCH_POLICY.DEFAULT,
             )
             self.reconnect()
             return public_key
@@ -435,6 +437,7 @@ def additional_tests(open_device):
             with self.assertRaises(ApduError):
                 self.generate_key(pin_policy=PIN_POLICY.NEVER)
 
+        @yubikey_conditions.supports_piv_pin_policies
         def test_sign_with_pin_policy_once_requires_pin_once_per_session(self):
             self.generate_key(pin_policy=PIN_POLICY.ONCE)
 
@@ -461,7 +464,7 @@ def additional_tests(open_device):
             self.assertIsNotNone(sig)
 
         def test_signature_can_be_verified_by_public_key(self):
-            public_key = self.generate_key(pin_policy=PIN_POLICY.ONCE)
+            public_key = self.generate_key()
 
             signed_data = bytes(random.randint(0, 255) for i in range(32))
 

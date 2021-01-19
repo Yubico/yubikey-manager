@@ -148,6 +148,7 @@ class OtpProtocol:
         if not on_keepalive:
             on_keepalive = lambda x: None  # noqa
         frame = _format_frame(slot, payload)
+
         logger.debug("SEND: %s", frame.hex())
         response = self._read_frame(
             self._send_frame(frame), event or Event(), on_keepalive
@@ -170,7 +171,14 @@ class OtpProtocol:
         @return status bytes (first 3 bytes are the firmware version)
         @throws IOException in case of communication error
         """
-        return self._receive()[1:-1]
+        status = self._receive()[1:-1]
+        if status[0] == 3:  # NEO, may have cached pgmSeq in arbitrator
+            try:  # Force communication with applet to refresh pgmSeq
+                # Write an invalid scan map, does nothing
+                self.send_and_receive(0x12, b"c" * 51)
+            except CommandRejectedError:
+                pass
+        return status
 
     def _await_ready_to_write(self):
         """Sleep for up to ~1s waiting for the WRITE flag to be unset"""

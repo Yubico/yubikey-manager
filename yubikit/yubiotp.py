@@ -35,7 +35,12 @@ from .core import (
     BadResponseError,
 )
 from .core import ApplicationNotAvailableError
-from .core.otp import check_crc, calculate_crc, OtpConnection, OtpProtocol
+from .core.otp import (
+    check_crc,
+    calculate_crc,
+    OtpConnection,
+    OtpProtocol,
+)
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
 
 import abc
@@ -763,6 +768,11 @@ class YubiOtpSession:
             b"\0" * CONFIG_SIZE,
             cur_acc_code,
         )
+
+    def set_scan_map(
+        self, scan_map: bytes, cur_acc_code: Optional[bytes] = None
+    ) -> None:
+        self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
 
     def set_ndef_configuration(
         self,

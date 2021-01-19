@@ -129,10 +129,16 @@ click_management_key_option = click.option(
 )
 click_pin_option = click.option("-P", "--pin", help="PIN code.")
 click_pin_policy_option = click.option(
-    "--pin-policy", type=EnumChoice(PIN_POLICY), help="PIN policy for slot."
+    "--pin-policy",
+    type=EnumChoice(PIN_POLICY),
+    default=PIN_POLICY.DEFAULT.name,
+    help="PIN policy for slot.",
 )
 click_touch_policy_option = click.option(
-    "--touch-policy", type=EnumChoice(TOUCH_POLICY), help="Touch policy for slot."
+    "--touch-policy",
+    type=EnumChoice(TOUCH_POLICY),
+    default=TOUCH_POLICY.DEFAULT.name,
+    help="Touch policy for slot.",
 )
 
 
@@ -543,10 +549,7 @@ def generate_key(
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
-    try:
-        public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
-    except NotSupportedError as e:
-        ctx.fail(e.message)
+    public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
 
     key_encoding = format
     public_key_output.write(
@@ -603,10 +606,7 @@ def import_key(
             continue
         break
 
-    try:
-        session.put_key(slot, private_key, pin_policy, touch_policy)
-    except NotSupportedError as e:
-        ctx.fail(e.message)
+    session.put_key(slot, private_key, pin_policy, touch_policy)
 
 
 @keys.command()

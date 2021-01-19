@@ -288,7 +288,7 @@ def check_key(
         return True
 
     except ApduError as e:
-        if e.sw == SW.INCORRECT_PARAMETERS:
+        if e.sw in (SW.INCORRECT_PARAMETERS, SW.WRONG_PARAMETERS_P1P2):
             return False
         raise
 
@@ -342,24 +342,33 @@ def get_piv_info(session: PivSession) -> str:
 
     lines.append("PIV version: %d.%d.%d" % session.version)
 
-    # Largest possible number of PIN tries to get back is 15
-    tries = session.get_pin_attempts()
-    tries_str = "15 or more." if tries == 15 else tries
+    try:
+        pin_data = session.get_pin_metadata()
+        if pin_data.default_value:
+            lines.append("WARNING: Using default PIN!")
+        tries_str = "%d/%d" % (pin_data.attempts_remaining, pin_data.total_attempts)
+    except NotSupportedError:
+        # Largest possible number of PIN tries to get back is 15
+        tries = session.get_pin_attempts()
+        tries_str = "15 or more." if tries == 15 else str(tries)
     lines.append("PIN tries remaining: %s" % tries_str)
     if pivman.puk_blocked:
         lines.append("PUK blocked.")
+
     try:
         metadata = session.get_management_key_metadata()
-        lines.append("Management key algorithm: %s" % metadata.key_type.name)
         if metadata.default_value:
-            lines.append("WARNING: Using default Management key value!")
+            lines.append("WARNING: Using default Management key!")
+        key_type = metadata.key_type
     except NotSupportedError:
-        lines.append("Management key algorithm: %s" % MANAGEMENT_KEY_TYPE.TDES.name)
-        pass
+        key_type = MANAGEMENT_KEY_TYPE.TDES
+    lines.append("Management key algorithm: %s" % key_type.name)
+
     if pivman.has_derived_key:
         lines.append("Management key is derived from PIN.")
     if pivman.has_stored_key:
         lines.append("Management key is stored on the YubiKey, protected by PIN.")
+
     try:
         chuid = session.get_object(OBJECT_ID.CHUID).hex()
     except ApduError as e:

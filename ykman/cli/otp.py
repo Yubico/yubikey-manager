@@ -744,7 +744,10 @@ def settings(
     if not session.get_config_state().is_configured(slot):
         ctx.fail("Not possible to update settings on an empty slot.")
 
-    if new_access_code is not None:
+    if new_access_code is None:
+        if not delete_access_code:
+            new_access_code = ctx.obj["access_code"]
+    else:
         if new_access_code == "":
             new_access_code = click_prompt("Enter new access code", show_default=False)
 
@@ -764,9 +767,6 @@ def settings(
     pacing_bits = int(pacing or "0") // 20
     pacing_10ms = bool(pacing_bits & 1)
     pacing_20ms = bool(pacing_bits & 2)
-
-    if delete_access_code:
-        new_access_code = None
 
     try:
         session.update_configuration(

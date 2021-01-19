@@ -220,7 +220,7 @@ def _read_info_ccid(conn, key_type, interfaces):
         version = None
 
     # Synthesize data
-    capabilities = CAPABILITY(USB_INTERFACE.CCID)
+    capabilities = CAPABILITY(0)
 
     # Try to read serial (and version if needed) from OTP application
     try:
@@ -256,10 +256,7 @@ def _read_info_ccid(conn, key_type, interfaces):
 
     return DeviceInfo(
         config=DeviceConfig(
-            enabled_capabilities={
-                TRANSPORT.USB: capabilities,
-                TRANSPORT.NFC: capabilities,
-            },
+            enabled_capabilities={},  # Populated later
             auto_eject_timeout=0,
             challenge_response_timeout=0,
             device_flags=0,
@@ -322,7 +319,7 @@ def _read_info_otp(conn, key_type, interfaces):
 
     return DeviceInfo(
         config=DeviceConfig(
-            enabled_capabilities=capabilities.copy(),
+            enabled_capabilities={},  # Populated later
             auto_eject_timeout=0,
             challenge_response_timeout=0,
             device_flags=0,
@@ -341,23 +338,15 @@ def _read_info_ctap(conn, key_type, interfaces):
         return mgmt.read_device_info()
     except Exception:  # SKY 1 or NEO
         version = (3, 0, 0)  # Guess, no way to know
-        enabled_apps = {TRANSPORT.USB: CAPABILITY.U2F}
-        if USB_INTERFACE.CCID in interfaces:
-            enabled_apps[TRANSPORT.USB] |= (
-                CAPABILITY.OPENPGP | CAPABILITY.PIV | CAPABILITY.OATH
-            )
-        if USB_INTERFACE.OTP in interfaces:
-            enabled_apps[TRANSPORT.USB] |= CAPABILITY.OTP
 
         supported_apps = {TRANSPORT.USB: CAPABILITY.U2F}
         if key_type == YUBIKEY.NEO:
             supported_apps[TRANSPORT.USB] |= BASE_NEO_APPS
             supported_apps[TRANSPORT.NFC] = supported_apps[TRANSPORT.USB]
-            enabled_apps[TRANSPORT.NFC] = supported_apps[TRANSPORT.NFC]
 
         return DeviceInfo(
             config=DeviceConfig(
-                enabled_capabilities=enabled_apps,
+                enabled_capabilities={},  # Populated later
                 auto_eject_timeout=0,
                 challenge_response_timeout=0,
                 device_flags=0,
@@ -413,6 +402,15 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
                 | CAPABILITY.PIV
             )
         info.config.enabled_capabilities[TRANSPORT.USB] = usb_enabled
+
+    # Set nfc_enabled if missing (pre YubiKey 5)
+    if (
+        info.has_transport(TRANSPORT.NFC)
+        and TRANSPORT.NFC not in info.config.enabled_capabilities
+    ):
+        info.config.enabled_capabilities[TRANSPORT.NFC] = info.supported_capabilities[
+            TRANSPORT.NFC
+        ]
 
     # Workaround for invalid configurations.
     # Assume all form factors except USB_A_KEYCHAIN and
