@@ -29,7 +29,7 @@ from __future__ import absolute_import
 
 from .driver import AbstractDriver, NotSupportedError
 from .util import TRANSPORT, PID, YUBIKEY, Mode
-from fido2.hid import CtapHidDevice, CTAPHID
+from .fido2.hid import CtapHidDevice, CTAPHID
 from enum import IntEnum, unique
 import logging
 import struct

@@ -30,8 +30,8 @@ from __future__ import absolute_import
 import six
 import time
 import logging
-from fido2.ctap1 import CTAP1, ApduError
-from fido2.ctap2 import CTAP2, PinProtocolV1, CredentialManagement
+from .fido2.ctap1 import CTAP1, ApduError
+from .fido2.ctap2 import CTAP2, PinProtocolV1, CredentialManagement
 from threading import Timer
 from .driver_ccid import SW
 from .driver_fido import FIPS_U2F_CMD

@@ -31,7 +31,7 @@ from setuptools import setup
 
 install_requires = [
     'six', 'pyscard', 'pyusb', 'click',
-    'cryptography', 'pyopenssl', 'fido2 >= 0.7, < 0.9'
+    'cryptography', 'pyopenssl'
 ]
 tests_require = []
 if sys.version_info < (3, 3):
@@ -60,7 +60,7 @@ setup(
         'console_scripts': ['ykman=ykman.cli.__main__:main'],
     },
     packages=[
-        'ykman', 'ykman.native', 'ykman.scancodes', 'ykman.cli'],
+        'ykman', 'ykman.native', 'ykman.scancodes', 'ykman.cli', 'ykman.fido2', 'ykman.fido2._pyu2f'],
     install_requires=install_requires,
     package_data={'ykman': ['VERSION']},
     include_package_data=True,
