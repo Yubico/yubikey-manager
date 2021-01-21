@@ -1,3 +1,6 @@
+* Version 3.1.2 (released 2021-01-21)
+ ** Bugfix release: Fix dependency on python-fido2 version.
+
 * Version 3.1.1 (released 2020-01-29)
  ** Add support for YubiKey 5C NFC
  ** OpenPGP: set-touch now performs compatibility checks before prompting for PIN
