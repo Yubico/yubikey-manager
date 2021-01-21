@@ -25,18 +25,65 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import logging
+from yubikit.core import Tlv
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from OpenSSL import crypto
-from yubikit.core import Tlv
+from functools import partial
+
+import logging
 
 
 logger = logging.getLogger(__name__)
 
 
 PEM_IDENTIFIER = b"-----BEGIN"
+
+
+def _parse_pkcs12_cryptography(pkcs12, data, password):
+    key, cert, cas = pkcs12.load_key_and_certificates(data, password, default_backend())
+    return key, [cert] + cas
+
+
+def _parse_pkcs12_pyopenssl(crypto, data, password):
+    try:
+        p12 = crypto.load_pkcs12(data, password)
+        key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
+        key = serialization.load_pem_private_key(
+            key_pem, password=None, backend=default_backend()
+        )
+
+        certs = [p12.get_certificate()]
+        cas = p12.get_ca_certificates()
+        if cas:
+            certs.extend(cas)
+        certs_pem = [
+            crypto.dump_certificate(crypto.FILETYPE_PEM, cert) for cert in certs
+        ]
+        certs = [
+            x509.load_pem_x509_certificate(cert_pem, default_backend())
+            for cert_pem in certs_pem
+        ]
+        return key, certs
+    except crypto.Error as e:
+        raise ValueError(e)
+
+
+def _parse_pkcs12_unsupported(data, password):
+    raise ValueError("PKCS#12 support requires cryptography >= 2.5 or pyOpenSSL")
+
+
+try:  # This requires cryptography 2.5.
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    _parse_pkcs12 = partial(_parse_pkcs12_cryptography, pkcs12)
+except ImportError:  # Use pyOpenSSL as a backup
+    try:
+        from OpenSSL import crypto
+
+        _parse_pkcs12 = partial(_parse_pkcs12_pyopenssl, crypto)
+    except ImportError:  # Can't support PKCS#12
+        _parse_pkcs12 = _parse_pkcs12_unsupported  # type: ignore
 
 
 def parse_private_key(data, password):
@@ -60,14 +107,7 @@ def parse_private_key(data, password):
 
     # PKCS12
     if is_pkcs12(data):
-        try:
-            p12 = crypto.load_pkcs12(data, password)
-            data = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-            return serialization.load_pem_private_key(
-                data, password=None, backend=default_backend()
-            )
-        except crypto.Error as e:
-            raise ValueError(e)
+        return _parse_pkcs12(data, password)[0]
 
     # DER
     try:
@@ -105,12 +145,7 @@ def parse_certificates(data, password):
 
     # PKCS12
     if is_pkcs12(data):
-        try:
-            p12 = crypto.load_pkcs12(data, password)
-            data = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
-            return [x509.load_pem_x509_certificate(data, default_backend())]
-        except crypto.Error as e:
-            raise ValueError(e)
+        return _parse_pkcs12(data, password)[1]
 
     # DER
     try:
