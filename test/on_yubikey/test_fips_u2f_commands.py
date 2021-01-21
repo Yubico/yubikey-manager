@@ -1,7 +1,7 @@
 import struct
 import unittest
 
-from fido2.hid import (CTAPHID)
+from ykman.fido2.hid import (CTAPHID)
 from ykman.util import (TRANSPORT)
 from ykman.driver_fido import (FIPS_U2F_CMD)
 from .framework import device_test_suite, yubikey_conditions
