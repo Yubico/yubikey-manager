@@ -20,13 +20,25 @@ jobs:
           brew update
           brew install swig
           python -m pip install --upgrade pip
-          pip install tox
-          pip install .
+          pip install poetry
+          poetry install
 
       - name: Run unit tests
-        run: tox -- -v
+        run: poetry run pytest -v
 
-      - name: Run CLI
+      - name: Build
+        run: poetry build
+
+      - name: Install from tar.gz
         run: |
+          pip install dist/*.tar.gz
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+          pip uninstall yubikey-manager
+
+      - name: Install from wheel
+        run: |
+          pip install dist/*.whl
+          ykman --version
+          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+          pip uninstall yubikey-manager

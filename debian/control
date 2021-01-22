@@ -18,6 +18,7 @@ Package: yubikey-manager
 Architecture: all
 Depends: pcscd,
          python3,
+         python3-virtualenv,
          ${misc:Depends},
 Description: Command line tool for configuring a YubiKey
  YubiKey Manager (ykman) is a command line tool for configuring a YubiKey over
