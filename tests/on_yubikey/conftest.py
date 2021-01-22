@@ -10,7 +10,8 @@ import os
 @pytest.fixture(scope="session")
 def _pid_info():
     devices = list_all_devices()
-    assert len(devices) == 1
+    if len(devices) != 1:
+        pytest.skip("Device tests require a single YubiKey to be attached")
     dev, info = devices[0]
     assert info.serial == int(os.environ.get("DESTRUCTIVE_TEST_YUBIKEY_SERIALS"))
     return dev.pid, info
