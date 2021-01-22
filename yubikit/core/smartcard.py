@@ -124,7 +124,11 @@ class SmartCardProtocol:
         try:
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
         except ApduError as e:
-            if e.sw in (SW.FILE_NOT_FOUND, SW.INVALID_INSTRUCTION):
+            if e.sw in (
+                SW.FILE_NOT_FOUND,
+                SW.INVALID_INSTRUCTION,
+                SW.WRONG_PARAMETERS_P1P2,
+            ):
                 raise ApplicationNotAvailableError()
             raise
 
