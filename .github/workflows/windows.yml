@@ -30,7 +30,7 @@ jobs:
           pip install dist/*.tar.gz
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall yubikey-manager
+          pip uninstall -y yubikey-manager
 
       - name: Install from wheel
         shell: bash
@@ -38,4 +38,4 @@ jobs:
           pip install dist/*.whl
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall yubikey-manager
+          pip uninstall -y yubikey-manager
