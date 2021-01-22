@@ -74,6 +74,8 @@ jobs:
 
       - name: Build .deb
         run: |
+          sudo add-apt-repository -y ppa:jyrki-pulliainen/dh-virtualenv
+          sudo apt-get update
           sudo apt install -y devscripts equivs
           yes | sudo mk-build-deps -i debian/control
           debuild -us -uc
