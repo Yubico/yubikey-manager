@@ -14,15 +14,15 @@ jobs:
         run: |
           choco install swig
           python -m pip install --upgrade pip
-          pip install tox
-          pip install --no-cache-dir -e .
+          pip install poetry
+          poetry install
         shell: powershell
 
       - name: Run unit tests
-        run: tox -- -v
+        run: poetry run pytest -v
 
       - name: Run CLI
         shell: bash
         run: |
-          ykman --version
+          poetry run ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
