@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 %:
-	dh $@ --with python2,python3 --buildsystem=pybuild
+	dh $@ --with python-virtualenv
 
 override_dh_installchangelogs:
 	dh_installchangelogs NEWS
