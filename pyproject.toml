@@ -33,6 +33,7 @@ pywin32 = {version = ">=223", platform = "win32"}
 [tool.poetry.dev-dependencies]
 pytest = "^6.0"
 pyOpenSSL = "^17.0"
+makefun = "^1.9.5"
 
 [tool.poetry.scripts]
 ykman = "ykman.cli.__main__:main"
