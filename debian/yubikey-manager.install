@@ -1,2 +1,0 @@
-debian/tmp/usr/bin/ykman
-debian/tmp/usr/lib/python3*/*-packages/ykman/cli/*.py

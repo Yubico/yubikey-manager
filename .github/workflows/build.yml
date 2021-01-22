@@ -24,11 +24,10 @@ jobs:
         run: |
           sudo apt-add-repository -y ppa:yubico/stable
           sudo apt-get update
-          sudo apt-get install -qq libykpers-1-1 swig libpcsclite-dev
+          sudo apt-get install -qq swig libpcsclite-dev
           python -m pip install --upgrade pip
-          pip install tox
-          pip install .
-          pip install bandit
+          pip install poetry
+          poetry install
 
       - name: Run pre-commit hooks
         run: |
@@ -37,9 +36,63 @@ jobs:
           pre-commit run --all-files --verbose
 
       - name: Run unit tests
-        run: tox -- -v
+        run: poetry run pytest
+
+      - name: Run CLI
+        run: |
+          pip install .
+          ykman --version
+          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+
+  deb:
+    runs-on: ubuntu-latest
+    name: Build .deb
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Check Debian version
+        run: |
+          export PY_VER=$(awk '/__version__/{print $NF}' ykman/__init__.py | tr -d '"')
+          export DEB_VER=$(dpkg-parsechangelog --show-field Version)
+          case "$PY_VER" in
+            *-dev*)
+              if [[ ! $DEB_VER =~ "+git" ]]
+              then
+                echo "Debian package version mismatch, must contain +git!"
+                exit 1
+              fi
+              ;;
+            *)
+              if [ $PY_VER != $DEB_VER ]
+              then
+                echo "Debian package version mismatch, expected $PY_VER!"
+                exit 1
+              fi
+              ;;
+          esac
+
+      - name: Build .deb
+        run: |
+          sudo add-apt-repository -y ppa:jyrki-pulliainen/dh-virtualenv
+          sudo apt-get update
+          sudo apt install -y devscripts equivs
+          yes | sudo mk-build-deps -i debian/control
+          debuild -us -uc
+          mkdir dist
+          mv ../yubikey-manager_* dist/
+
+      - name: Install .deb
+        run: |
+          sudo dpkg -i dist/yubikey-manager_*.deb
 
       - name: Run CLI
         run: |
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+
+      - name: Upload Debian packages
+        uses: actions/upload-artifact@v1
+        with:
+          name: python-deb-files
+          path: dist
