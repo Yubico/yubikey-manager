@@ -13,7 +13,14 @@ classifiers = [
   "Topic :: Security :: Cryptography",
   "Topic :: Utilities"
 ]
-include = ["COPYING", "NEWS", "README.adoc", "doc/", "man/"]
+include = [
+  "COPYING",
+  "NEWS",
+  "README.adoc",
+  "doc/",
+  "man/",
+  "tests/",
+]
 packages = [
   { include = "yubikit" },
   { include = "ykman" },
