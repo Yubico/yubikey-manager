@@ -40,6 +40,7 @@ from .core.otp import (
     calculate_crc,
     OtpConnection,
     OtpProtocol,
+    CommandRejectedError,
 )
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
 
@@ -653,14 +654,29 @@ INS_CONFIG = 0x01
 
 
 class _YubiOtpSmartCardBackend(_Backend):
-    def __init__(self, protocol):
+    def __init__(self, protocol, version, prog_seq):
         self.protocol = protocol
+        self._version = version
+        self._prog_seq = prog_seq
 
     def close(self):
         self.protocol.close()
 
     def write_update(self, slot, data):
-        return self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
+        status = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
+        prev_prog_seq, self._prog_seq = self._prog_seq, status[3]
+        if self.protocol.connection.transport == TRANSPORT.NFC and Version.from_bytes(
+            status[:3]
+        ) >= (4, 0, 0):
+            # Re-read status, as touch level is incorrect
+            self.protocol.connection.connection.disconnect()
+            self.protocol.connection.connection.connect()
+            status = self.protocol.select(AID.OTP)
+        if self._prog_seq == prev_prog_seq + 1 or (
+            prev_prog_seq > 0 and self._prog_seq == 0 and status[4] & 0x1F == 0
+        ):
+            return status
+        raise CommandRejectedError("Not updated")
 
     def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
         response = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
@@ -696,7 +712,9 @@ class YubiOtpSession:
             else:
                 self._version = mgmt_version or otp_version
             card_protocol.enable_touch_workaround(self._version)
-            self.backend = _YubiOtpSmartCardBackend(card_protocol)
+            self.backend = _YubiOtpSmartCardBackend(
+                card_protocol, self._version, self._status[3]
+            )
         else:
             raise TypeError("Unsupported connection type")
 

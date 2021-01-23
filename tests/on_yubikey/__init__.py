@@ -15,7 +15,7 @@ def condition(check, message="Condition not satisfied"):
             if p not in func_sig.parameters:
                 added_params.append(Parameter(p, kind=Parameter.POSITIONAL_OR_KEYWORD))
         new_sig = func_sig.replace(
-            parameters=added_params + list(func_sig.parameters.values())
+            parameters=list(func_sig.parameters.values()) + added_params
         )
 
         if isgeneratorfunction(func):
@@ -55,6 +55,14 @@ def register_condition(cond):
 
 
 @register_condition
+def transport(required_transport):
+    return condition(
+        lambda transport: transport == required_transport,
+        "Requires %s" % (required_transport.name),
+    )
+
+
+@register_condition
 def capability(capability):
     return condition(
         lambda info, device: capability
@@ -66,23 +74,23 @@ def capability(capability):
 @register_condition
 def min_version(major, minor=0, micro=0):
     if isinstance(major, tuple):
-        version = major
+        vers = major
     else:
-        version = (major, minor, micro)
-    return condition(lambda info: info.version >= version, "Version < %s" % (version,))
+        vers = (major, minor, micro)
+    return condition(lambda version: version >= vers, "Version < %s" % (vers,))
 
 
 @register_condition
 def max_version(major, minor=0, micro=0):
     if isinstance(major, tuple):
-        version = major
+        vers = major
     else:
-        version = (major, minor, micro)
-    return condition(lambda info: info.version <= version, "Version > %s" % (version,))
+        vers = (major, minor, micro)
+    return condition(lambda version: version <= vers, "Version > %s" % (vers,))
 
 
 @register_condition
 def fips(status=True):
     return condition(
-        lambda info: is_fips_version(info.version), "Requires FIPS = %s" % status
+        lambda version: is_fips_version(version), "Requires FIPS = %s" % status
     )

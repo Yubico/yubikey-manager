@@ -1,8 +1,10 @@
 from ykman.device import connect_to_device
+from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import USB_INTERFACE
+from . import condition
 
 
 def try_connection(conn_type):
@@ -10,6 +12,7 @@ def try_connection(conn_type):
         return True
 
 
+@condition.transport(TRANSPORT.USB)
 def test_switch_interfaces(pid):
     interfaces = pid.get_interfaces()
     if USB_INTERFACE.FIDO in interfaces:

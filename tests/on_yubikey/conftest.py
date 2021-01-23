@@ -42,8 +42,18 @@ def info(_device):
 
 
 @pytest.fixture(scope="session")
+def version(info):
+    return info.version
+
+
+@pytest.fixture(scope="session")
 def transport(device):
     return device.transport
+
+
+@pytest.fixture(scope="session")
+def pid(device):
+    return device.pid
 
 
 connection_scope = os.environ.get("CONNECTION_SCOPE", "module")
