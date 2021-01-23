@@ -3,7 +3,7 @@ import random
 import pytest
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 
 from yubikit.core import AID
@@ -37,13 +37,12 @@ DEFAULT_PUK = "12345678"
 NON_DEFAULT_PUK = "87654321"
 DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
     "010203040506070801020304050607080102030405060708"
-)  # noqa: E501
+)
 NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
     "010103040506070801020304050607080102030405060708"
-)  # noqa: E501
+)
 
-
-now = datetime.datetime.now
+NOW = datetime.datetime.now()
 
 
 def get_test_cert():
@@ -108,14 +107,7 @@ def test_generate_csr_works(session):
     session.verify_pin(DEFAULT_PIN)
     csr = generate_csr(session, SLOT.AUTHENTICATION, public_key, "alice")
 
-    assert csr.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ) == public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-
+    assert csr.public_key().public_numbers() == public_key.public_numbers()
     assert (
         csr.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value == "alice"
     )
@@ -127,12 +119,12 @@ def test_generate_self_signed_certificate_requires_pin(session):
 
     with pytest.raises(ApduError):
         generate_self_signed_certificate(
-            session, SLOT.AUTHENTICATION, public_key, "alice", now(), now()
+            session, SLOT.AUTHENTICATION, public_key, "alice", NOW, NOW
         )
 
     session.verify_pin(DEFAULT_PIN)
     generate_self_signed_certificate(
-        session, SLOT.AUTHENTICATION, public_key, "alice", now(), now()
+        session, SLOT.AUTHENTICATION, public_key, "alice", NOW, NOW
     )
 
 
@@ -141,16 +133,10 @@ def _test_generate_self_signed_certificate(session, slot):
     session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
     session.verify_pin(DEFAULT_PIN)
     cert = generate_self_signed_certificate(
-        session, slot, public_key, "alice", now(), now()
+        session, slot, public_key, "alice", NOW, NOW
     )
 
-    assert cert.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ) == public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
+    assert cert.public_key().public_numbers() == public_key.public_numbers()
     assert (
         cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
         == "alice"
@@ -192,12 +178,7 @@ def _test_put_key_pairing(session, alg1, alg2):
     session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
     session.verify_pin(DEFAULT_PIN)
     cert = generate_self_signed_certificate(
-        session,
-        SLOT.AUTHENTICATION,
-        public_key,
-        "test",
-        datetime.datetime.now(),
-        datetime.datetime.now(),
+        session, SLOT.AUTHENTICATION, public_key, "test", NOW, NOW
     )
     session.put_certificate(SLOT.AUTHENTICATION, cert)
     assert check_key(session, SLOT.AUTHENTICATION, cert.public_key())
@@ -218,8 +199,8 @@ def _test_put_key_pairing(session, alg1, alg2):
     assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 
 
-def not_roca(info):
-    return not ((4, 2, 0) <= info.version < (4, 3, 5))
+def not_roca(version):
+    return not ((4, 2, 0) <= version < (4, 3, 5))
 
 
 @condition(not_roca)
