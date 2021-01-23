@@ -1,4 +1,3 @@
-from yubikit.core import TRANSPORT
 from ykman.device import is_fips_version
 from inspect import signature, Parameter, isgeneratorfunction
 from makefun import wraps
@@ -7,28 +6,45 @@ import pytest
 
 
 def condition(check, message="Condition not satisfied"):
+    check_sig = signature(check)
+
     def deco(func):
-        sig = signature(func)
-        if "info" not in sig.parameters:
-            params = [Parameter("info", kind=Parameter.POSITIONAL_OR_KEYWORD)]
-            params.extend(sig.parameters.values())
-            sig = sig.replace(parameters=params)
+        func_sig = signature(func)
+        added_params = []
+        for p in check_sig.parameters:
+            if p not in func_sig.parameters:
+                added_params.append(Parameter(p, kind=Parameter.POSITIONAL_OR_KEYWORD))
+        new_sig = func_sig.replace(
+            parameters=added_params + list(func_sig.parameters.values())
+        )
 
         if isgeneratorfunction(func):
 
-            def wrapper(info, *args, **kwargs):
-                if not check(info):
+            def wrapper(*args, **kwargs):
+                check_args = {
+                    k: v for k, v in kwargs.items() if k in check_sig.parameters
+                }
+                if not check(**check_args):
                     pytest.skip(message)
-                yield from func(*args, **kwargs)
+                func_args = {
+                    k: v for k, v in kwargs.items() if k in func_sig.parameters
+                }
+                yield from func(**func_args)
 
         else:
 
-            def wrapper(info, *args, **kwargs):
-                if not check(info):
+            def wrapper(*args, **kwargs):
+                check_args = {
+                    k: v for k, v in kwargs.items() if k in check_sig.parameters
+                }
+                if not check(**check_args):
                     pytest.skip(message)
-                return func(*args, **kwargs)
+                func_args = {
+                    k: v for k, v in kwargs.items() if k in func_sig.parameters
+                }
+                return func(**func_args)
 
-        return wraps(func, new_sig=sig)(wrapper)
+        return wraps(func, new_sig=new_sig)(wrapper)
 
     return deco
 
@@ -41,7 +57,8 @@ def register_condition(cond):
 @register_condition
 def capability(capability):
     return condition(
-        lambda info: capability in info.config.enabled_capabilities[TRANSPORT.USB],
+        lambda info, device: capability
+        in info.config.enabled_capabilities.get(device.transport, []),
         "Requires %s" % capability,
     )
 
