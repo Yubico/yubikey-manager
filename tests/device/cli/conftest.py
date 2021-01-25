@@ -16,7 +16,7 @@ def ykman_cli(device, info):
 
 def _ykman_cli(*argv, **kwargs):
     argv = apply_aliases(["ykman"] + [str(a) for a in argv])
-    runner = CliRunner()
+    runner = CliRunner(mix_stderr=False)
     result = runner.invoke(cli, argv[1:], obj={}, **kwargs)
     if result.exit_code != 0:
         raise result.exception
