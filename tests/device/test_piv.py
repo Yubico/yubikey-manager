@@ -441,10 +441,11 @@ class TestUnblockPin:
 
         reset_state(session)
 
-        # Fails with only management key
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
-        with pytest.raises(ApduError):
-            session.set_pin_attempts(4, 4)
+        # Fails with only management key (requirement added in 0.1.3)
+        if session.version >= (0, 1, 3):
+            with pytest.raises(ApduError):
+                session.set_pin_attempts(4, 4)
 
         # Succeeds with both PIN and management key
         session.verify_pin(DEFAULT_PIN)

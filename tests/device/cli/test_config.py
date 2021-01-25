@@ -190,6 +190,7 @@ class TestConfigNFC:
 
 
 class TestConfigLockCode:
+    @pytest.fixture(autouse=True)
     @condition.min_version(5)
     def preconditions(self):
         pass
