@@ -404,6 +404,10 @@ class ManagementSession:
         new_lock_code: Optional[bytes] = None,
     ) -> None:
         require_version(self.version, (5, 0, 0))
+        if cur_lock_code is not None and len(cur_lock_code) != 16:
+            raise ValueError("Lock code must be 16 bytes")
+        if new_lock_code is not None and len(new_lock_code) != 16:
+            raise ValueError("Lock code must be 16 bytes")
         config = config or DeviceConfig({}, None, None, None)
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
