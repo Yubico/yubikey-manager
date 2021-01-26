@@ -288,7 +288,7 @@ class _Backend(abc.ABC):
 class _ManagementOtpBackend(_Backend):
     def __init__(self, otp_connection):
         self.protocol = OtpProtocol(otp_connection)
-        self.version = Version.from_bytes(self.protocol.read_status()[:3])
+        self.version = self.protocol.version
         if (1, 0, 0) <= self.version < (3, 0, 0):
             raise ApplicationNotAvailableError()
 

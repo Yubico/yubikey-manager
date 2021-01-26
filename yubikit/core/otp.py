@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Connection, CommandError, TimeoutError
+from . import Connection, CommandError, TimeoutError, Version
 
 from time import sleep
 from threading import Event
@@ -119,6 +119,14 @@ def _format_frame(slot, payload):
 class OtpProtocol:
     def __init__(self, otp_connection: OtpConnection):
         self.connection = otp_connection
+        report = self._receive()
+        self.version = Version.from_bytes(report[1:4])
+        if self.version[0] == 3:  # NEO, may have cached pgmSeq in arbitrator
+            try:  # Force communication with applet to refresh pgmSeq
+                # Write an invalid scan map, does nothing
+                self.send_and_receive(0x12, b"c" * 51)
+            except CommandRejectedError:
+                pass  # This is expected
 
     def close(self) -> None:
         self.connection.close()
@@ -171,14 +179,7 @@ class OtpProtocol:
         @return status bytes (first 3 bytes are the firmware version)
         @throws IOException in case of communication error
         """
-        status = self._receive()[1:-1]
-        if status[0] == 3:  # NEO, may have cached pgmSeq in arbitrator
-            try:  # Force communication with applet to refresh pgmSeq
-                # Write an invalid scan map, does nothing
-                self.send_and_receive(0x12, b"c" * 51)
-            except CommandRejectedError:
-                pass
-        return status
+        return self._receive()[1:-1]
 
     def _await_ready_to_write(self):
         """Sleep for up to ~1s waiting for the WRITE flag to be unset"""

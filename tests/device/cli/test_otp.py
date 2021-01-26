@@ -29,6 +29,7 @@
 
 from yubikit.management import CAPABILITY
 from .. import condition
+from time import sleep
 
 import re
 import pytest
@@ -47,6 +48,9 @@ class TestSlotStatus:
         assert "Slot 2:" in info
 
     def test_ykman_swap_slots(self, ykman_cli):
+        info = ykman_cli("otp", "info").output
+        if "programmed" not in info:
+            ykman_cli("otp", "static", "2", "incredible")
         output = ykman_cli("otp", "swap", "-f").output
         assert "Swapping slots..." in output
         output = ykman_cli("otp", "swap", "-f").output
@@ -58,6 +62,18 @@ class TestSlotStatus:
     ):  # noqa: E501
         info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode:" not in info
+
+
+class TestReclaimTimeout:
+    def test_update_after_reclaim(self, ykman_cli):
+        info = ykman_cli("otp", "info").output
+        if "programmed" not in info:
+            ykman_cli("otp", "static", "2", "incredible")
+        ykman_cli("otp", "swap", "-f")
+        ykman_cli("otp", "swap", "-f")
+        sleep(4)  # Ensure reclaim
+        ykman_cli("otp", "swap", "-f")
+        ykman_cli("otp", "swap", "-f")
 
 
 class TestSlotStaticPassword:

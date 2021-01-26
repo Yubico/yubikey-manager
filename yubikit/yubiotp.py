@@ -694,7 +694,7 @@ class YubiOtpSession:
         if isinstance(connection, OtpConnection):
             otp_protocol = OtpProtocol(connection)
             self._status = otp_protocol.read_status()
-            self._version = Version.from_bytes(self._status[:3])
+            self._version = otp_protocol.version
             self.backend: _Backend = _YubiOtpOtpBackend(otp_protocol)
         elif isinstance(connection, SmartCardConnection):
             card_protocol = SmartCardProtocol(connection)
