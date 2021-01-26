@@ -585,26 +585,33 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
 
 
 class ConfigState:
+    """The confgiuration state of the YubiOTP application."""
+
     def __init__(self, version: Version, touch_level: int):
         self.version = version
         self.flags = sum(CFGSTATE) & touch_level
 
     def is_configured(self, slot: SLOT) -> bool:
+        """Checks of a slot is programmed, or empty"""
         require_version(self.version, (2, 1, 0))
         return self.flags & (CFGSTATE.SLOT1_VALID, CFGSTATE.SLOT2_VALID)[slot - 1] != 0
 
-    def requires_touch(self, slot: SLOT) -> bool:
+    def is_touch_triggered(self, slot: SLOT) -> bool:
+        """Checks if a (programmed) state is triggered by touch (not challenge-response)
+        Requires YubiKey 3 or later.
+        """
         require_version(self.version, (3, 0, 0))
         return self.flags & (CFGSTATE.SLOT1_TOUCH, CFGSTATE.SLOT2_TOUCH)[slot - 1] != 0
 
     def is_led_inverted(self) -> bool:
+        """Checks if the LED behavior is inverted."""
         return self.flags & CFGSTATE.LED_INV != 0
 
     def __repr__(self):
-        return "ConfigState(configured: %s, requires_touch: %s, led_inverted: %s)" % (
+        return "ConfigState(configured: %s, touch_triggered: %s, led_inverted: %s)" % (
             (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO)),
-            (self.requires_touch(SLOT.ONE), self.requires_touch(SLOT.TWO))
-            if self.version[0] > 3
+            (self.is_touch_triggered(SLOT.ONE), self.is_touch_triggered(SLOT.TWO))
+            if self.version[0] >= 3
             else None,
             self.is_led_inverted(),
         )
@@ -665,17 +672,14 @@ class _YubiOtpSmartCardBackend(_Backend):
     def write_update(self, slot, data):
         status = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
         prev_prog_seq, self._prog_seq = self._prog_seq, status[3]
-        if self.protocol.connection.transport == TRANSPORT.NFC and Version.from_bytes(
-            status[:3]
-        ) >= (4, 0, 0):
-            # Re-read status, as touch level is incorrect
-            self.protocol.connection.connection.disconnect()
-            self.protocol.connection.connection.connect()
-            status = self.protocol.select(AID.OTP)
-        if self._prog_seq == prev_prog_seq + 1 or (
-            prev_prog_seq > 0 and self._prog_seq == 0 and status[4] & 0x1F == 0
-        ):
+        if self._prog_seq == prev_prog_seq + 1:
             return status
+        if self._prog_seq == 0 and prev_prog_seq > 0:
+            version = Version.from_bytes(status[:3])
+            if (4, 0) <= version < (5, 5):  # Programming state does not update
+                return status
+            if status[4] & 0x1F == 0:
+                return status
         raise CommandRejectedError("Not updated")
 
     def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
