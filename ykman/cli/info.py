@@ -139,31 +139,26 @@ def get_overall_fips_status(pid, info):
     return statuses
 
 
-def check_fips_status(pid, info):
-    if is_fips_version(info.version):
-        fips_status = get_overall_fips_status(pid, info)
-        click.echo()
+def _check_fips_status(pid, info):
+    fips_status = get_overall_fips_status(pid, info)
+    click.echo()
 
+    click.echo(
+        "FIPS Approved Mode: {}".format("Yes" if all(fips_status.values()) else "No")
+    )
+
+    status_keys = list(fips_status.keys())
+    status_keys.sort()
+    for status_key in status_keys:
         click.echo(
-            "FIPS Approved Mode: {}".format(
-                "Yes" if all(fips_status.values()) else "No"
-            )
+            "  {}: {}".format(status_key, "Yes" if fips_status[status_key] else "No")
         )
-
-        status_keys = list(fips_status.keys())
-        status_keys.sort()
-        for status_key in status_keys:
-            click.echo(
-                "  {}: {}".format(
-                    status_key, "Yes" if fips_status[status_key] else "No"
-                )
-            )
 
 
 @click.option(
     "-c",
     "--check-fips",
-    help="Check if YubiKey is in FIPS Approved mode.",
+    help="Check if YubiKey is in FIPS Approved mode (YubiKey FIPS only).",
     is_flag=True,
 )
 @click.command()
@@ -222,5 +217,8 @@ def info(ctx, check_fips):
     )
 
     if check_fips:
-        ctx.obj["conn"].close()
-        check_fips_status(pid, info)
+        if is_fips_version(info.version):
+            ctx.obj["conn"].close()
+            _check_fips_status(pid, info)
+        else:
+            ctx.fail("Not a YubiKey FIPS")

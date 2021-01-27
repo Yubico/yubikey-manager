@@ -565,12 +565,15 @@ def bio_enroll(ctx, name, pin):
         click.echo("Press your fingerprint against the sensor now...")
         try:
             template_id = enroller.capture()
-            click.echo("{} more scans needed.".format(enroller.remaining))
+            remaining = enroller.remaining
+            if remaining:
+                click.echo("{} more scans needed.".format(remaining))
         except CaptureError as e:
             click.echo(e)
         except CtapError as e:
             logger.error("Failed to add fingerprint template", exc_info=e)
             ctx.fail("Failed to add fingerprint: %s" % e.code.name)
+    click.echo("Capture complete.")
     bio.set_name(template_id, name)
 
 

@@ -437,7 +437,13 @@ def yubiotp(
 @click.argument("password", required=False)
 @click.option("-g", "--generate", is_flag=True, help="Generate a random password.")
 @click.option(
-    "-l", "--length", type=click.IntRange(1, 38), help="Length of generated password."
+    "-l",
+    "--length",
+    metavar="LENGTH",
+    type=click.IntRange(1, 38),
+    default=38,
+    show_default=True,
+    help="Length of generated password.",
 )
 @click.option(
     "-k",
