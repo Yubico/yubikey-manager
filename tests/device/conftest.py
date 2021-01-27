@@ -11,7 +11,7 @@ import os
 
 @pytest.fixture(scope="session")
 def _device(pytestconfig):
-    serial = pytestconfig.getoption("serial")
+    serial = pytestconfig.getoption("device")
     if not serial:
         pytest.skip("No serial specified for device tests")
     reader = pytestconfig.getoption("reader")
