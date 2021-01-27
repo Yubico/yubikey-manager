@@ -1,4 +1,5 @@
 from .. import condition
+import pytest
 
 
 class TestYkmanInfo:
@@ -10,8 +11,8 @@ class TestYkmanInfo:
 
     @condition.fips(False)
     def test_ykman_info_does_not_report_fips_for_non_fips_device(self, ykman_cli):
-        info = ykman_cli("info", "--check-fips").output
-        assert "FIPS" not in info
+        with pytest.raises(SystemExit):
+            ykman_cli("info", "--check-fips")
 
     @condition.fips(True)
     def test_ykman_info_reports_fips_status(self, ykman_cli):

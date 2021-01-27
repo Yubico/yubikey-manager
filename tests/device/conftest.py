@@ -4,8 +4,10 @@ from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
+from functools import partial
 
 import pytest
+import time
 import os
 
 
@@ -54,6 +56,12 @@ def transport(device):
 @pytest.fixture(scope="session")
 def pid(device):
     return device.pid
+
+
+@pytest.fixture(scope="session")
+def await_reboot(transport):
+    delay = float(os.environ.get("REBOOT_TIME", "2.0"))
+    return partial(time.sleep, delay) if transport == TRANSPORT.USB else lambda: None
 
 
 connection_scope = os.environ.get("CONNECTION_SCOPE", "module")

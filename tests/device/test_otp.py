@@ -10,7 +10,6 @@ from yubikit.yubiotp import (
 from yubikit.management import CAPABILITY, ManagementSession
 from ykman.device import connect_to_device
 from . import condition
-from time import sleep
 import pytest
 
 
@@ -46,7 +45,7 @@ def not_usb_ccid(conn_type, transport):
 
 
 @pytest.fixture()
-def read_config(session, conn_type, info, transport):
+def read_config(session, conn_type, info, transport, await_reboot):
     need_reboot = conn_type == SmartCardConnection and (4, 0) <= info.version < (5, 5)
     if need_reboot and info.version[0] == 4:
         pytest.skip("Can't read config")
@@ -61,7 +60,7 @@ def read_config(session, conn_type, info, transport):
                 conn.connection.connect()
             else:
                 ManagementSession(protocol.connection).write_device_config(reboot=True)
-                sleep(2.0)
+                await_reboot()
                 conn = connect_to_device(info.serial, [SmartCardConnection])[0]
             otp = YubiOtpSession(conn)
             session.backend = otp.backend

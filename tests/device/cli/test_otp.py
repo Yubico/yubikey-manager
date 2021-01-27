@@ -111,11 +111,9 @@ class TestSlotStaticPassword:
         with pytest.raises(SystemExit):
             ykman_cli("otp", "static", "2", "--generate", "--length", "39")
 
-    def test_generate_pw_no_length(self, ykman_cli):
+    def test_generate_pw_blank_length(self, ykman_cli):
         with pytest.raises(SystemExit):
             ykman_cli("otp", "static", "2", "--generate", "--length")
-        with pytest.raises(SystemExit):
-            ykman_cli("otp", "static", "2", "--generate")
 
     def test_generate_zero_length(self, ykman_cli):
         with pytest.raises(SystemExit):
@@ -123,6 +121,10 @@ class TestSlotStaticPassword:
 
     def test_generate_pw(self, ykman_cli):
         ykman_cli("otp", "static", "2", "--generate", "--length", "38")
+        assert "Slot 2: programmed" in ykman_cli("otp", "info").output
+
+    def test_generate_pw_default_length(self, ykman_cli):
+        ykman_cli("otp", "static", "2", "--generate")
         assert "Slot 2: programmed" in ykman_cli("otp", "info").output
 
     def test_us_scancodes(self, ykman_cli):

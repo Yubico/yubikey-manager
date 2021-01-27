@@ -129,7 +129,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         new_lock_code = _parse_lock_code(ctx, new_lock_code)
         try:
             app.write_device_config(
-                None, True, lock_code, new_lock_code,
+                None, False, lock_code, new_lock_code,
             )
         except Exception as e:
             logger.error("Changing the lock code failed", exc_info=e)
@@ -139,7 +139,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         new_lock_code = _parse_lock_code(ctx, new_lock_code)
         try:
             app.write_device_config(
-                None, True, None, new_lock_code,
+                None, False, None, new_lock_code,
             )
         except Exception as e:
             logger.error("Setting the lock code failed", exc_info=e)
