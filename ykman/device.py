@@ -467,6 +467,8 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         if info.has_transport(TRANSPORT.NFC):
             device_name = "Security Key NFC"
     elif key_type == YUBIKEY.YK4:
+        if info.version[0] == 0:
+            return "Yubikey (%d.%d.%d)" % info.version
         if _is_preview(info.version):
             device_name = "YubiKey Preview"
         elif is_fips_version(info.version):
@@ -474,21 +476,29 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         elif usb_supported == CAPABILITY.OTP | CAPABILITY.U2F:
             device_name = "YubiKey Edge"
         elif info.version >= (5, 1, 0):
-            device_name = "YubiKey 5"
-            if info.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
-                if info.has_transport(TRANSPORT.NFC):
-                    device_name += " NFC"
-                else:
-                    device_name += "A"
-            elif info.form_factor == FORM_FACTOR.USB_A_NANO:
-                device_name += " Nano"
-            elif info.form_factor == FORM_FACTOR.USB_C_KEYCHAIN:
-                device_name += "C"
-                if info.has_transport(TRANSPORT.NFC):
-                    device_name += " NFC"
-            elif info.form_factor == FORM_FACTOR.USB_C_NANO:
-                device_name += "C Nano"
-            elif info.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
-                device_name += "Ci"
+            if info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO):
+                device_name = "YubiKey "
+                if info.form_factor == FORM_FACTOR.USB_C_BIO:
+                    device_name += "C "
+                device_name += "BIO"
+                if _fido_only(usb_supported):
+                    device_name += " (FIDO Edition)"
+            else:
+                device_name = "YubiKey 5"
+                if info.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
+                    if info.has_transport(TRANSPORT.NFC):
+                        device_name += " NFC"
+                    else:
+                        device_name += "A"
+                elif info.form_factor == FORM_FACTOR.USB_A_NANO:
+                    device_name += " Nano"
+                elif info.form_factor == FORM_FACTOR.USB_C_KEYCHAIN:
+                    device_name += "C"
+                    if info.has_transport(TRANSPORT.NFC):
+                        device_name += " NFC"
+                elif info.form_factor == FORM_FACTOR.USB_C_NANO:
+                    device_name += "C Nano"
+                elif info.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
+                    device_name += "Ci"
 
     return device_name

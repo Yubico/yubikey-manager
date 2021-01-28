@@ -88,6 +88,8 @@ class FORM_FACTOR(IntEnum):
     USB_C_KEYCHAIN = 0x03
     USB_C_NANO = 0x04
     USB_C_LIGHTNING = 0x05
+    USB_A_BIO = 0x06
+    USB_C_BIO = 0x07
 
     def __str__(self):
         if self == FORM_FACTOR.USB_A_KEYCHAIN:
@@ -100,7 +102,11 @@ class FORM_FACTOR(IntEnum):
             return "Nano (USB-C)"
         elif self == FORM_FACTOR.USB_C_LIGHTNING:
             return "Keychain (USB-C, Lightning)"
-        elif self == FORM_FACTOR.UNKNOWN:
+        elif self == FORM_FACTOR.USB_A_BIO:
+            return "Bio (USB-A)"
+        elif self == FORM_FACTOR.USB_C_BIO:
+            return "Bio (USB-C)"
+        else:
             return "Unknown"
 
     @classmethod
