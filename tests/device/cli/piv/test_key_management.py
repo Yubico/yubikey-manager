@@ -10,12 +10,18 @@ import os
 import pytest
 
 
-def generate_pem_eccp256_key():
+def generate_pem_eccp256_keypair():
     pk = ec.generate_private_key(ec.SECP256R1(), default_backend())
-    return pk.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
+    return (
+        pk.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ),
+        pk.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ),
     )
 
 
@@ -33,6 +39,136 @@ def tmp_file():
     tmp.close()
     yield tmp.name
     os.remove(tmp.name)
+
+
+class TestKeyExport:
+    @condition.min_version(5, 3)
+    def test_from_metadata(self, ykman_cli):
+        pair = generate_pem_eccp256_keypair()
+
+        ykman_cli(
+            "piv",
+            "keys",
+            "import",
+            "9a",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-",
+            input=pair[0],
+        )
+        exported = ykman_cli("piv", "keys", "export", "9a", "-").stdout_bytes
+        assert exported == pair[1]
+
+    @condition.min_version(4, 3)
+    def test_from_metadata_or_attestation(self, ykman_cli):
+        der = ykman_cli(
+            "piv",
+            "keys",
+            "generate",
+            "9a",
+            "-a",
+            "ECCP256",
+            "-F",
+            "der",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-",
+        ).stdout_bytes
+        exported = ykman_cli(
+            "piv", "keys", "export", "9a", "-F", "der", "-"
+        ).stdout_bytes
+        assert der == exported
+
+    def test_from_metadata_or_cert(self, ykman_cli):
+        private_key_pem, public_key_pem = generate_pem_eccp256_keypair()
+        ykman_cli(
+            "piv",
+            "keys",
+            "import",
+            "9a",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-",
+            input=private_key_pem,
+        )
+        ykman_cli(
+            "piv",
+            "certificates",
+            "generate",
+            "9a",
+            "-",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-P",
+            DEFAULT_PIN,
+            "-s",
+            "test",
+            input=public_key_pem,
+        )
+
+        exported = ykman_cli("piv", "keys", "export", "9a", "-").stdout_bytes
+
+        assert public_key_pem == exported
+
+    @condition.max_version(5, 2, 9)
+    def test_from_cert_verify(self, ykman_cli):
+        private_key_pem, public_key_pem = generate_pem_eccp256_keypair()
+        ykman_cli(
+            "piv",
+            "keys",
+            "import",
+            "9a",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-",
+            input=private_key_pem,
+        )
+        ykman_cli(
+            "piv",
+            "certificates",
+            "generate",
+            "9a",
+            "-",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-P",
+            DEFAULT_PIN,
+            "-s",
+            "test",
+            input=public_key_pem,
+        )
+        ykman_cli("piv", "keys", "export", "9a", "--verify", "-P", DEFAULT_PIN, "-")
+
+    @condition.max_version(5, 2, 9)
+    def test_from_cert_verify_fails(self, ykman_cli):
+        private_key_pem = generate_pem_eccp256_keypair()[0]
+        public_key_pem = generate_pem_eccp256_keypair()[1]
+        ykman_cli(
+            "piv",
+            "keys",
+            "import",
+            "9a",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-",
+            input=private_key_pem,
+        )
+        ykman_cli(
+            "piv",
+            "certificates",
+            "generate",
+            "9a",
+            "-",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-P",
+            DEFAULT_PIN,
+            "-s",
+            "test",
+            input=public_key_pem,
+        )
+        with pytest.raises(SystemExit):
+            ykman_cli("piv", "keys", "export", "9a", "--verify", "-P", DEFAULT_PIN, "-")
 
 
 class TestKeyManagement:
@@ -135,7 +271,7 @@ class TestKeyManagement:
             "-m",
             DEFAULT_MANAGEMENT_KEY,
             "-",
-            input=generate_pem_eccp256_key(),
+            input=generate_pem_eccp256_keypair()[0],
         )
 
     @condition.min_version(4)
@@ -183,7 +319,7 @@ class TestKeyManagement:
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
                 "-",
-                input=generate_pem_eccp256_key(),
+                input=generate_pem_eccp256_keypair()[0],
             )
 
     @condition.min_version(4)
@@ -216,7 +352,7 @@ class TestKeyManagement:
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
                 "-",
-                input=generate_pem_eccp256_key(),
+                input=generate_pem_eccp256_keypair()[0],
             )
 
     @condition.min_version(4, 3)

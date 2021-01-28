@@ -634,6 +634,74 @@ def attest(ctx, slot, certificate, format):
     certificate.write(cert.public_bytes(encoding=format))
 
 
+@keys.command()
+@click.pass_context
+@click_format_option
+@click_slot_argument
+@click.option(
+    "-v",
+    "--verify",
+    is_flag=True,
+    help="Verify that the public key matches the private key in the slot.",
+)
+@click.option("-P", "--pin", help="PIN code (used for --verify).")
+@click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
+def export(ctx, slot, public_key_output, format, verify, pin):
+    """
+    Export a public key corresponding to a stored private key.
+
+    This command uses several different mechanisms for exporting the public key
+    corresponding to a stored private key, which may fail.
+    If a certificate is stored in the slot it is assumed to contain the correct public
+    key. If this is not the case, the wrong public key will be returned.
+
+    The --verify flag can be used to verify that the public key being returned matches
+    the private key, by using the slot to create and verify a signature. This may
+    require the PIN to be provided.
+
+    \b
+    SLOT        PIV slot of the private key.
+    PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
+    """
+    session = ctx.obj["session"]
+
+    try:  # Prefer metadata if available
+        public_key = session.get_slot_metadata(slot).public_key
+        logger.debug("Public key read from YubiKey")
+    except ApduError as e:
+        if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            ctx.fail("No key stored in slot {}.".format(slot.name))
+    except NotSupportedError:
+        try:  # Try attestation
+            public_key = session.attest_key(slot).public_key()
+            logger.debug("Public key read using attestation")
+        except (NotSupportedError, ApduError):
+            try:  # Read from stored certificate
+                public_key = session.get_certificate(slot).public_key()
+                logger.debug("Public key read from stored certificate")
+                if verify:  # Only needed when read from certificate
+
+                    def do_verify():
+                        with prompt_timeout():
+                            if not check_key(session, slot, public_key):
+                                ctx.fail(
+                                    "This public key is not tied to the private key in "
+                                    "the {} slot.".format(slot.name)
+                                )
+
+                    _verify_pin_if_needed(ctx, session, do_verify, pin)
+            except ApduError:
+                ctx.fail("Unable to export public key from slot {}".format(slot.name))
+
+    key_encoding = format
+    public_key_output.write(
+        public_key.public_bytes(
+            encoding=key_encoding,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+
+
 @piv.group("certificates")
 def cert():
     """
@@ -697,27 +765,20 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
     else:
         cert_to_import = certs[0]
 
-    def do_import(retry=True):
-        if verify:
-            try:
-                with prompt_timeout():
-                    if not check_key(session, slot, cert_to_import.public_key()):
-                        ctx.fail(
-                            "This certificate is not tied to the private key in the "
-                            "{} slot.".format(slot.name)
-                        )
-            except ApduError as e:
-                if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
-                    pivman = ctx.obj["pivman_data"]
-                    _verify_pin(ctx, session, pivman, pin)
-                    do_import(retry=False)
-                else:
-                    raise
+    if verify:
 
-        session.put_certificate(slot, cert_to_import)
-        session.put_object(OBJECT_ID.CHUID, generate_chuid())
+        def do_verify():
+            with prompt_timeout():
+                if not check_key(session, slot, cert_to_import.public_key()):
+                    ctx.fail(
+                        "This certificate is not tied to the private key in the "
+                        "{} slot.".format(slot.name)
+                    )
 
-    do_import()
+        _verify_pin_if_needed(ctx, session, do_verify, pin)
+
+    session.put_certificate(slot, cert_to_import)
+    session.put_object(OBJECT_ID.CHUID, generate_chuid())
 
 
 @cert.command("export")
@@ -1053,6 +1114,18 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
             ctx.fail("PIN is blocked.")
     except Exception:
         ctx.fail("PIN verification failed.")
+
+
+def _verify_pin_if_needed(ctx, session, func, pin=None, no_prompt=False):
+    try:
+        return func()
+    except ApduError as e:
+        if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+            pivman = ctx.obj["pivman_data"]
+            _verify_pin(ctx, session, pivman, pin, no_prompt)
+        else:
+            raise
+    return func()
 
 
 def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False):
