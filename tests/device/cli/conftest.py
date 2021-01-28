@@ -10,8 +10,10 @@ import pytest
 def ykman_cli(device, info):
     if device.transport == TRANSPORT.NFC:
         return partial(_ykman_cli, "--reader", device.reader.name)
-    else:
+    elif info.serial is not None:
         return partial(_ykman_cli, "--device", info.serial)
+    else:
+        return _ykman_cli
 
 
 def _ykman_cli(*argv, **kwargs):

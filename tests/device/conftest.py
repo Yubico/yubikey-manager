@@ -4,7 +4,9 @@ from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import USB_INTERFACE
 from functools import partial
+from . import condition
 
 import pytest
 import time
@@ -14,8 +16,12 @@ import os
 @pytest.fixture(scope="session")
 def _device(pytestconfig):
     serial = pytestconfig.getoption("device")
+    no_serial = pytestconfig.getoption("no_serial")
     if not serial:
-        pytest.skip("No serial specified for device tests")
+        if no_serial:
+            serial = None
+        else:
+            pytest.skip("No serial specified for device tests")
     reader = pytestconfig.getoption("reader")
     if reader:
         readers = list_devices(reader)
@@ -70,15 +76,19 @@ connection_scope = os.environ.get("CONNECTION_SCOPE", "module")
 
 
 @pytest.fixture(scope=connection_scope)
+@condition.transport(TRANSPORT.USB)
 def otp_connection(info):
-    with connect_to_device(info.serial, [OtpConnection])[0] as c:
-        yield c
+    if USB_INTERFACE.OTP in device.pid.get_interfaces():
+        with connect_to_device(info.serial, [OtpConnection])[0] as c:
+            yield c
 
 
 @pytest.fixture(scope=connection_scope)
+@condition.transport(TRANSPORT.USB)
 def fido_connection(info):
-    with connect_to_device(info.serial, [FidoConnection])[0] as c:
-        yield c
+    if USB_INTERFACE.FIDO in device.pid.get_interfaces():
+        with connect_to_device(info.serial, [FidoConnection])[0] as c:
+            yield c
 
 
 @pytest.fixture(scope=connection_scope)
@@ -86,6 +96,8 @@ def ccid_connection(device, info):
     if device.transport == TRANSPORT.NFC:
         with device.open_connection(SmartCardConnection) as c:
             yield c
-    else:
+    elif USB_INTERFACE.CCID in device.pid.get_interfaces():
         with connect_to_device(info.serial, [SmartCardConnection])[0] as c:
             yield c
+    else:
+        pytest.skip("CCID connection not available")

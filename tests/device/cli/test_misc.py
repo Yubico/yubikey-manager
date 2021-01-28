@@ -3,11 +3,12 @@ import pytest
 
 
 class TestYkmanInfo:
-    def test_ykman_info(self, ykman_cli):
-        info = ykman_cli("info").output
-        assert "Device type:" in info
-        assert "Serial number:" in info
-        assert "Firmware version:" in info
+    def test_ykman_info(self, ykman_cli, info):
+        output = ykman_cli("info").output
+        assert "Device type:" in output
+        if info.serial is not None:
+            assert "Serial number:" in output
+        assert "Firmware version:" in output
 
     @condition.fips(False)
     def test_ykman_info_does_not_report_fips_for_non_fips_device(self, ykman_cli):
