@@ -19,13 +19,15 @@ def _device(pytestconfig):
     reader = pytestconfig.getoption("reader")
     if reader:
         readers = list_devices(reader)
-        assert len(readers) == 1, "No/Multiple readers matched"
+        if len(readers) != 1:
+            pytest.exit("No/Multiple readers matched")
         dev = readers[0]
         with dev.open_connection(SmartCardConnection) as conn:
             info = read_info(None, conn)
     else:
         devices = list_all_devices()
-        assert len(devices) == 1, "Device tests require a single YubiKey"
+        if len(devices) != 1:
+            pytest.exit("Device tests require a single YubiKey")
         dev, info = devices[0]
     if info.serial != serial:
         pytest.exit("Device serial does not match: %d != %d" % (serial, info.serial))
