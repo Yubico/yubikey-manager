@@ -499,6 +499,25 @@ def creds_delete(ctx, query, pin, force):
 def bio():
     """
     Manage fingerprints.
+
+    Requires a YubiKey with fingerprint sensor.
+    Fingerprint management is only available when a FIDO PIN is set on the YubiKey.
+
+    \b
+    Examples:
+
+    \b
+      Register a new fingerprint (providing PIN via argument):
+      $ ykman fido fingerprints add "Left thumb" --pin 123456
+
+    \b
+      List already stored fingerprints (providing PIN via argument):
+      $ ykman fido fingerprints list --pin 123456
+
+    \b
+      Delete a stored fingerprint with ID "f691" (PIN will be prompted for):
+      $ ykman fido fingerprints delete f691
+
     """
 
 
@@ -612,8 +631,8 @@ def bio_delete(ctx, template_id, pin, force):
     """
     Delete a fingerprint.
 
-    Delete a fingerprint from the YubiKey by its ID, which can be seen by running
-    bio-list.
+    Delete a fingerprint from the YubiKey by its ID, which can be seen by running the
+    "list" subcommand.
     """
     bio = _init_bio(ctx, pin)
     enrollments = bio.enumerate_enrollments()
