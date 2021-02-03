@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import AID, Tlv, NotSupportedError
+from yubikit.core import AID, Tlv, NotSupportedError, require_version
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 
 from cryptography import x509
@@ -411,7 +411,7 @@ class OpenPgpController(object):
 
     def set_pin_retries(self, pw1_tries, pw2_tries, pw3_tries):
         """Requires Admin PIN verification."""
-        if self.version < (1, 0, 7):  # For YubiKey NEO
+        if (1, 0, 0) <= self.version < (1, 0, 7):  # For YubiKey NEO
             raise ValueError(
                 "Setting PIN retry counters requires version 1.0.7 or later."
             )
@@ -428,6 +428,7 @@ class OpenPgpController(object):
         )
 
     def read_certificate(self, key_slot):
+        require_version(self.version, (5, 2, 0))
         if key_slot == KEY_SLOT.ATT:
             data = self._get_data(DO.ATT_CERTIFICATE)
         else:
@@ -439,6 +440,7 @@ class OpenPgpController(object):
 
     def import_certificate(self, key_slot, certificate):
         """Requires Admin PIN verification."""
+        require_version(self.version, (5, 2, 0))
         cert_data = certificate.public_bytes(Encoding.DER)
         if key_slot == KEY_SLOT.ATT:
             self._put_data(DO.ATT_CERTIFICATE, cert_data)
@@ -488,6 +490,7 @@ class OpenPgpController(object):
         return numbers.public_key(default_backend())
 
     def generate_ec_key(self, key_slot, curve_name, timestamp=None):
+        require_version(self.version, (5, 2, 0))
         """Requires Admin PIN verification."""
         if timestamp is None:
             timestamp = int(time.time())
@@ -539,6 +542,7 @@ class OpenPgpController(object):
 
     def delete_certificate(self, key_slot):
         """Requires Admin PIN verification."""
+        require_version(self.version, (5, 2, 0))
         if key_slot == KEY_SLOT.ATT:
             self._put_data(DO.ATT_CERTIFICATE, b"")
         else:
@@ -547,6 +551,7 @@ class OpenPgpController(object):
 
     def attest(self, key_slot):
         """Requires User PIN verification."""
+        require_version(self.version, (5, 2, 0))
         self._app.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
         return self.read_certificate(key_slot)
 
