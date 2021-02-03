@@ -43,36 +43,53 @@ Commands:
   piv      Manage the PIV Application.
 ....
 
+The `--help` argument can also be used to get detailed information about specific
+subcommands:
+
+    ykman oath --help
+
 === Installation
+YubiKey Manager can be installed independently of platform by using pip (or
+equivalent):
 
-==== Ubuntu
+  pip install --user yubikey-manager
 
-    $ sudo apt-add-repository ppa:yubico/stable
-    $ sudo apt update
-    $ sudo apt install yubikey-manager
-
-==== macOS
-
-    $ brew install ykman
-
-==== Windows
-
-The command line tool is installed together with the GUI version of https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager].
-
-==== Pip
-
-    $ pip install yubikey-manager
+On Linux platforms you will need `pcscd` installed and running to be able to
+communicate with a YubiKey over the SmartCard interface. Additionally, you may
+need to set permissions for your user to access YubiKeys via the HID interfaces.
 
 Some of the libraries used by yubikey-manager have C-extensions, and may require
 additional dependencies to build, such as http://www.swig.org/[swig] and
 potentially https://pcsclite.alioth.debian.org/pcsclite.html[PCSC lite].
 
+=== Pre-build packages
+Pre-built packages specific to your platform may be available from Yubico or
+third parties. Please refer to your platforms native package manager for
+detailed instructions on how to install, if available.
+
+==== Windows
+The command line tool ykman.exe is provided as part of the installer for the
+https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager] on Windows.
+
+==== MacOS
+Packages for MacOS are available from Homebrew and MacPorts.
+
+==== Linux
+Packages are available for several Linux distributions by third party package
+maintainers.
+Yubico also provides packages for Ubuntu in the yubico/stable PPA:
+
+  $ sudo apt-add-repository ppa:yubico/stable
+  $ sudo apt update
+  $ sudo apt install yubikey-manager
+
 ==== Source
-To install from source, see the link:doc/development.adoc[development] instructions.
+To install from source, see the link:doc/development.adoc[development]
+instructions.
 
 === Bash completion
 
 Experimental Bash completion for the command line tool is available, but not
 enabled by default. To enable it, run this command once:
 
-    $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
+  $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
