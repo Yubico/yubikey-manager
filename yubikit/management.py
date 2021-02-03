@@ -37,7 +37,13 @@ from .core import (
     BadResponseError,
     ApplicationNotAvailableError,
 )
-from .core.otp import check_crc, OtpConnection, OtpProtocol
+from .core.otp import (
+    check_crc,
+    OtpConnection,
+    OtpProtocol,
+    STATUS_OFFSET_PROG_SEQ,
+    CommandRejectedError,
+)
 from .core.fido import FidoConnection
 from .core.smartcard import SmartCardConnection, SmartCardProtocol
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
@@ -302,7 +308,13 @@ class _ManagementOtpBackend(_Backend):
         self.protocol.close()
 
     def set_mode(self, data):
-        self.protocol.send_and_receive(SLOT_DEVICE_CONFIG, data)
+        empty = self.protocol.read_status()[STATUS_OFFSET_PROG_SEQ] == 0
+        try:
+            self.protocol.send_and_receive(SLOT_DEVICE_CONFIG, data)
+        except CommandRejectedError:
+            if empty:
+                return  # ProgSeq isn't updated by set mode when empty
+            raise
 
     def read_config(self):
         response = self.protocol.send_and_receive(SLOT_YK4_CAPABILITIES)
