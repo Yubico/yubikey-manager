@@ -1,4 +1,4 @@
-yubikey-manager (3.1.2+git) xenial; urgency=low
+yubikey-manager (4.0.0a1) xenial; urgency=low
 
   * Build for ppa
 
