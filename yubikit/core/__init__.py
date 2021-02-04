@@ -60,7 +60,7 @@ class Version(NamedTuple):
         m = _VERSION_STRING_PATTERN.search(data)
         if m:
             return cls(
-                int(m.group("major")), int(m.group("minor")), int(m.group("patch")),
+                int(m.group("major")), int(m.group("minor")), int(m.group("patch"))
             )
         raise ValueError("No version found in string")
 
@@ -134,11 +134,7 @@ class YubiKeyDevice(abc.ABC):
         return hash(self.fingerprint)
 
     def __repr__(self):
-        return "%s(pid=%04x, fingerprint=%r)" % (
-            type(self).__name__,
-            self.pid,
-            self.fingerprint,
-        )
+        return "%s(fingerprint=%r)" % (type(self).__name__, self.fingerprint)
 
 
 class CommandError(Exception):
@@ -162,7 +158,7 @@ class NotSupportedError(ValueError):
 
 
 def require_version(
-    my_version: Version, min_version: Tuple[int, int, int], message=None,
+    my_version: Version, min_version: Tuple[int, int, int], message=None
 ):
     """Ensure a version is at least min_version."""
     # Skip version checks for major == 0, used for development builds.

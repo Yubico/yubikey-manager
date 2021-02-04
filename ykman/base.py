@@ -88,3 +88,10 @@ class YkmanDevice(YubiKeyDevice):
     def pid(self) -> Optional[PID]:
         """Return the PID of the YubiKey, if available."""
         return self._pid
+
+    def __repr__(self):
+        return "%s(pid=%04x, fingerprint=%r)" % (
+            type(self).__name__,
+            self.pid or 0,
+            self.fingerprint,
+        )
