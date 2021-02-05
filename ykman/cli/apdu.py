@@ -113,11 +113,11 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
       $ ykman apdu -a oath a1=
 
     \b
-      Factory reset the OATH application (these are all equivalent):
+      Factory reset the OATH application:
       $ ykman apdu -a oath 04dead
         or
       $ ykman apdu a40400:a000000527210101 04dead
-        or
+        or (using full-apdu mode)
       $ ykman apdu -s 00a4040008a000000527210101 -s 0004dead
     """
     if apdu and send_apdu:
