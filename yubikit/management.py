@@ -70,16 +70,19 @@ class CAPABILITY(IntFlag):
 
     OTP = 0x01
     U2F = 0x02
-    OPENPGP = 0x08
-    PIV = 0x10
-    OATH = 0x20
     FIDO2 = 0x200
+    OATH = 0x20
+    PIV = 0x10
+    OPENPGP = 0x08
+    HSMAUTH = 0x100
 
     def __str__(self):
         if self == CAPABILITY.U2F:
             return "FIDO U2F"
         elif self == CAPABILITY.OPENPGP:
             return "OpenPGP"
+        elif self == CAPABILITY.HSMAUTH:
+            return "YubiHSM Auth"
         else:
             return self.name
 

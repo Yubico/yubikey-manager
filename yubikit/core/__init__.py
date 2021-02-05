@@ -76,12 +76,13 @@ class TRANSPORT(Enum):
 class AID(bytes, Enum):
     """YubiKey Application smart card AID values."""
 
-    OTP = b"\xa0\x00\x00\x05\x27\x20\x01"
-    MANAGEMENT = b"\xa0\x00\x00\x05\x27\x47\x11\x17"
-    OPENPGP = b"\xd2\x76\x00\x01\x24\x01"
-    OATH = b"\xa0\x00\x00\x05\x27\x21\x01"
-    PIV = b"\xa0\x00\x00\x03\x08"
-    FIDO = b"\xa0\x00\x00\x06\x47\x2f\x00\x01"
+    OTP = bytes.fromhex("a0000005272001")
+    MANAGEMENT = bytes.fromhex("a000000527471117")
+    OPENPGP = bytes.fromhex("d27600012401")
+    OATH = bytes.fromhex("a0000005272101")
+    PIV = bytes.fromhex("a000000308")
+    FIDO = bytes.fromhex("a0000006472f0001")
+    HSMAUTH = bytes.fromhex("a0000005272108")
 
 
 class Connection(abc.ABC):
