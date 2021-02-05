@@ -524,7 +524,7 @@ def bio():
 def _init_bio(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
 
-    if not ctap2:  # TODO or "bioEnroll" not in ctap2.info.options:
+    if not ctap2 or "bioEnroll" not in ctap2.info.options:
         ctx.fail("Biometrics is not supported on this YubiKey.")
     elif not ctap2.info.options.get("clientPin"):
         ctx.fail("Biometrics requires having a PIN. Set a PIN first.")
