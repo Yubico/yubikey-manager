@@ -226,7 +226,8 @@ class DeviceInfo:
         else:
             supported[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_SUPPORTED]))
         if TAG_USB_ENABLED in data:  # From YK 5.0.0
-            enabled[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_ENABLED]))
+            if not ((4, 0, 0) <= version < (5, 0, 0)):  # Broken on YK4
+                enabled[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_ENABLED]))
         if TAG_NFC_SUPPORTED in data:  # YK with NFC
             supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
             enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
