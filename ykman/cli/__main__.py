@@ -176,20 +176,18 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
 
 @ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option(
-    "-v",
-    "--version",
-    is_flag=True,
-    callback=print_version,
-    expose_value=False,
-    is_eager=True,
-    help="Show version information about the app",
-)
-@click.option(
     "-d",
     "--device",
     type=int,
     metavar="SERIAL",
     help="Specify which YubiKey to interact with by serial number.",
+)
+@click.option(
+    "-r",
+    "--reader",
+    help="Use an external smart card reader. Conflicts with --device and list.",
+    metavar="NAME",
+    default=None,
 )
 @click.option(
     "-l",
@@ -207,19 +205,27 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     "ignored unless --log-level is also set.",
 )
 @click.option(
-    "-r",
-    "--reader",
-    help="Use an external smart card reader. Conflicts with --device and list.",
-    metavar="NAME",
-    default=None,
-)
-@click.option(
     "--diagnose",
     is_flag=True,
     callback=print_diagnostics,
     expose_value=False,
     is_eager=True,
     help="Show diagnostics information useful for troubleshooting.",
+)
+@click.option(
+    "-v",
+    "--version",
+    is_flag=True,
+    callback=print_version,
+    expose_value=False,
+    is_eager=True,
+    help="Show version information about the app",
+)
+@click.option(
+    "--full-help",
+    is_flag=True,
+    expose_value=False,
+    help="Show --help, including hidden commands, and exit.",
 )
 @click.pass_context
 def cli(ctx, device, log_level, log_file, reader):
@@ -247,6 +253,8 @@ def cli(ctx, device, log_level, log_file, reader):
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     # Commands that don't directly act on a key
     if subcmd in (list_keys,):
+        if device:
+            ctx.fail("--device can't be used with this command.")
         if reader:
             ctx.fail("--reader can't be used with this command.")
         return
@@ -322,6 +330,11 @@ for cmd in COMMANDS:
 
 def main():
     sys.argv = apply_aliases(sys.argv)
+    try:
+        # --full-help triggers --help, hidden commands will already have read it by now.
+        sys.argv[sys.argv.index("--full-help")] = "--help"
+    except ValueError:
+        pass  # No --full-help
 
     try:
         cli(obj={})
