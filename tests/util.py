@@ -6,7 +6,6 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.utils import int_from_bytes
 from cryptography.x509.oid import NameOID
 
 
@@ -29,22 +28,14 @@ def generate_self_signed_certificate(
     private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
     public_key = private_key.public_key()
 
-    builder = x509.CertificateBuilder()
-    builder = builder.public_key(public_key)
-    builder = builder.subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    )
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
 
-    # Same as subject on self-signed certificates.
-    builder = builder.issuer_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    )
-
-    # x509.random_serial_number added in cryptography 1.6
-    serial = int_from_bytes(os.urandom(20), "big") >> 1
-    builder = builder.serial_number(serial)
-
-    builder = builder.not_valid_before(valid_from)
-    builder = builder.not_valid_after(valid_to)
-
-    return builder.sign(private_key, hashes.SHA256(), default_backend())
+    return (
+        x509.CertificateBuilder()
+        .public_key(public_key)
+        .subject_name(subject)
+        .issuer_name(subject)  # Same as subject on self-signed certificate.
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(valid_from)
+        .not_valid_after(valid_to)
+    ).sign(private_key, hashes.SHA256(), default_backend())

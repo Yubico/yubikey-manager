@@ -27,6 +27,8 @@
 
 from .core import (
     require_version as _require_version,
+    int2bytes,
+    bytes2int,
     Version,
     Tlv,
     AID,
@@ -50,7 +52,6 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
 from cryptography.hazmat.backends import default_backend
-from cryptography.utils import int_to_bytes, int_from_bytes
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum, unique, auto
@@ -363,9 +364,7 @@ def _pad_message(key_type, message, hash_algorithm, padding):
         signature = dummy.sign(message, padding, hash_algorithm)
         # Raw (textbook) RSA encrypt
         n = dummy.public_key().public_numbers().n
-        return int_to_bytes(
-            pow(int_from_bytes(signature, "big"), e, n), key_type.bit_len // 8
-        )
+        return int2bytes(pow(bytes2int(signature), e, n), key_type.bit_len // 8)
 
 
 def _unpad_message(padded, padding):
@@ -373,7 +372,7 @@ def _unpad_message(padded, padding):
     dummy = rsa.generate_private_key(e, len(padded) * 8, default_backend())
     # Raw (textbook) RSA encrypt
     n = dummy.public_key().public_numbers().n
-    encrypted = int_to_bytes(pow(int_from_bytes(padded, "big"), e, n), len(padded))
+    encrypted = int2bytes(pow(bytes2int(padded), e, n), len(padded))
     return dummy.decrypt(encrypted, padding)
 
 
@@ -417,8 +416,8 @@ def check_key_support(
 def _parse_device_public_key(key_type, encoded):
     data = Tlv.parse_dict(encoded)
     if key_type.algorithm == ALGORITHM.RSA:
-        modulus = int_from_bytes(data[0x81], "big")
-        exponent = int_from_bytes(data[0x82], "big")
+        modulus = bytes2int(data[0x81])
+        exponent = bytes2int(data[0x82])
         return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
     else:
         if key_type == KEY_TYPE.ECCP256:
@@ -527,7 +526,7 @@ class PivSession:
             INS_SET_MGMKEY,
             0xFF,
             0xFE if require_touch else 0xFF,
-            int_to_bytes(key_type) + Tlv(SLOT_CARD_MANAGEMENT, management_key),
+            int2bytes(key_type) + Tlv(SLOT_CARD_MANAGEMENT, management_key),
         )
 
     def verify_pin(self, pin: str) -> None:
@@ -645,11 +644,7 @@ class PivSession:
             return Tlv.unpack(
                 expected,
                 self.protocol.send_apdu(
-                    0,
-                    INS_GET_DATA,
-                    0x3F,
-                    0xFF,
-                    Tlv(TAG_OBJ_ID, int_to_bytes(object_id)),
+                    0, INS_GET_DATA, 0x3F, 0xFF, Tlv(TAG_OBJ_ID, int2bytes(object_id)),
                 ),
             )
         except ValueError as e:
@@ -661,7 +656,7 @@ class PivSession:
             INS_PUT_DATA,
             0x3F,
             0xFF,
-            Tlv(TAG_OBJ_ID, int_to_bytes(object_id)) + Tlv(TAG_OBJ_DATA, data or b""),
+            Tlv(TAG_OBJ_ID, int2bytes(object_id)) + Tlv(TAG_OBJ_DATA, data or b""),
         )
 
     def get_certificate(self, slot: SLOT) -> x509.Certificate:
@@ -711,19 +706,19 @@ class PivSession:
                 raise NotSupportedError("RSA exponent must be 65537")
             ln //= 2
             data = (
-                Tlv(0x01, int_to_bytes(numbers.p, ln))
-                + Tlv(0x02, int_to_bytes(numbers.q, ln))
-                + Tlv(0x03, int_to_bytes(numbers.dmp1, ln))
-                + Tlv(0x04, int_to_bytes(numbers.dmq1, ln))
-                + Tlv(0x05, int_to_bytes(numbers.iqmp, ln))
+                Tlv(0x01, int2bytes(numbers.p, ln))
+                + Tlv(0x02, int2bytes(numbers.q, ln))
+                + Tlv(0x03, int2bytes(numbers.dmp1, ln))
+                + Tlv(0x04, int2bytes(numbers.dmq1, ln))
+                + Tlv(0x05, int2bytes(numbers.iqmp, ln))
             )
         else:
             numbers = cast(ec.EllipticCurvePrivateNumbers, numbers)
-            data = Tlv(0x06, int_to_bytes(numbers.private_value, ln))
+            data = Tlv(0x06, int2bytes(numbers.private_value, ln))
         if pin_policy:
-            data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))
+            data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
-            data += Tlv(TAG_TOUCH_POLICY, int_to_bytes(touch_policy))
+            data += Tlv(TAG_TOUCH_POLICY, int2bytes(touch_policy))
         self.protocol.send_apdu(0, INS_IMPORT_KEY, key_type, slot, data)
         return key_type
 
@@ -736,11 +731,11 @@ class PivSession:
     ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
         key_type = KEY_TYPE(key_type)
         check_key_support(self.version, key_type, pin_policy, touch_policy, True)
-        data: bytes = Tlv(TAG_GEN_ALGORITHM, int_to_bytes(key_type))
+        data: bytes = Tlv(TAG_GEN_ALGORITHM, int2bytes(key_type))
         if pin_policy:
-            data += Tlv(TAG_PIN_POLICY, int_to_bytes(pin_policy))
+            data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
-            data += Tlv(TAG_TOUCH_POLICY, int_to_bytes(touch_policy))
+            data += Tlv(TAG_TOUCH_POLICY, int2bytes(touch_policy))
         response = self.protocol.send_apdu(
             0, INS_GENERATE_ASYMMETRIC, 0, slot, Tlv(0xAC, data)
         )

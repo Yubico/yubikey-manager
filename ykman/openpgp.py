@@ -25,11 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import AID, Tlv, NotSupportedError, require_version
+from yubikit.core import (
+    AID,
+    Tlv,
+    NotSupportedError,
+    require_version,
+    int2bytes,
+    bytes2int,
+)
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 
 from cryptography import x509
-from cryptography.utils import int_to_bytes, int_from_bytes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import (
@@ -195,21 +201,21 @@ def _get_key_template(key, key_slot, crt=False):
         ln = (key.key_size // 8) // 2
 
         e = Tlv(0x91, b"\x01\x00\x01")  # e=65537
-        p = Tlv(0x92, int_to_bytes(private_numbers.p, ln))
-        q = Tlv(0x93, int_to_bytes(private_numbers.q, ln))
+        p = Tlv(0x92, int2bytes(private_numbers.p, ln))
+        q = Tlv(0x93, int2bytes(private_numbers.q, ln))
         values = (e, p, q)
         if crt:
-            dp = Tlv(0x94, int_to_bytes(private_numbers.dmp1, ln))
-            dq = Tlv(0x95, int_to_bytes(private_numbers.dmq1, ln))
-            qinv = Tlv(0x96, int_to_bytes(private_numbers.iqmp, ln))
-            n = Tlv(0x97, int_to_bytes(private_numbers.public_numbers.n, 2 * ln))
+            dp = Tlv(0x94, int2bytes(private_numbers.dmp1, ln))
+            dq = Tlv(0x95, int2bytes(private_numbers.dmq1, ln))
+            qinv = Tlv(0x96, int2bytes(private_numbers.iqmp, ln))
+            n = Tlv(0x97, int2bytes(private_numbers.public_numbers.n, 2 * ln))
             values += (dp, dq, qinv, n)
 
     elif isinstance(key, ec.EllipticCurvePrivateKey):
         private_numbers = key.private_numbers()
         ln = key.key_size // 8
 
-        privkey = Tlv(0x92, int_to_bytes(private_numbers.private_value, ln))
+        privkey = Tlv(0x92, int2bytes(private_numbers.private_value, ln))
         values = (privkey,)
 
     elif _get_curve_name(key) in ("ed25519", "x25519"):
@@ -480,9 +486,7 @@ class OpenPgpController(object):
         resp = self._app.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
 
         data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
-        numbers = rsa.RSAPublicNumbers(
-            int_from_bytes(data[0x82], "big"), int_from_bytes(data[0x81], "big")
-        )
+        numbers = rsa.RSAPublicNumbers(bytes2int(data[0x82]), bytes2int(data[0x81]))
 
         self._put_data(key_slot.gen_time, struct.pack(">I", timestamp))
         # TODO: Calculate and write fingerprint

@@ -39,7 +39,6 @@ from yubikit.piv import (
 )
 
 from cryptography import x509
-from cryptography.utils import int_from_bytes
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
@@ -518,23 +517,16 @@ def generate_self_signed_certificate(
     """Generate a self-signed certificate using a private key in a slot."""
     key_type = KEY_TYPE.from_public_key(public_key)
 
-    builder = x509.CertificateBuilder()
-    builder = builder.public_key(public_key)
-    builder = builder.subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    builder = (
+        x509.CertificateBuilder()
+        .public_key(public_key)
+        .subject_name(subject)
+        .issuer_name(subject)  # Same as subject on self-signed certificate.
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(valid_from)
+        .not_valid_after(valid_to)
     )
-
-    # Same as subject on self-signed certificates.
-    builder = builder.issuer_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    )
-
-    # x509.random_serial_number added in cryptography 1.6
-    serial = int_from_bytes(os.urandom(20), "big") >> 1
-    builder = builder.serial_number(serial)
-
-    builder = builder.not_valid_before(valid_from)
-    builder = builder.not_valid_after(valid_to)
 
     try:
         return sign_certificate_builder(session, slot, key_type, builder)
@@ -550,8 +542,7 @@ def generate_csr(
     subject: str,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot."""
-    builder = x509.CertificateSigningRequestBuilder()
-    builder = builder.subject_name(
+    builder = x509.CertificateSigningRequestBuilder().subject_name(
         x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)])
     )
 
