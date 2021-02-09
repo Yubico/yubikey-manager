@@ -274,18 +274,18 @@ def usb(
     ):
         ctx.fail("No configuration options chosen.")
 
-    enable = list(CAPABILITY) if enable_all else enable
+    info = ctx.obj["info"]
+    usb_supported = info.supported_capabilities[TRANSPORT.USB]
+    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
+    flags = info.config.device_flags
+
+    if enable_all:
+        enable = [c for c in CAPABILITY if c in usb_supported]
 
     _ensure_not_invalid_options(ctx, enable, disable)
 
     if touch_eject and no_touch_eject:
         ctx.fail("Invalid options.")
-
-    info = ctx.obj["info"]
-
-    usb_supported = info.supported_capabilities[TRANSPORT.USB]
-    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
-    flags = info.config.device_flags
 
     if not usb_supported:
         ctx.fail("USB not supported.")
@@ -397,17 +397,17 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     if not (list_enabled or enable_all or enable or disable_all or disable):
         ctx.fail("No configuration options chosen.")
 
-    if enable_all:
-        enable = list(CAPABILITY)
-
-    if disable_all:
-        disable = list(CAPABILITY)
-
-    _ensure_not_invalid_options(ctx, enable, disable)
-
     info = ctx.obj["info"]
     nfc_supported = info.supported_capabilities.get(TRANSPORT.NFC)
     nfc_enabled = info.config.enabled_capabilities.get(TRANSPORT.NFC)
+
+    if enable_all:
+        enable = [c for c in CAPABILITY if c in nfc_supported]
+
+    if disable_all:
+        disable = [c for c in CAPABILITY if c in nfc_enabled]
+
+    _ensure_not_invalid_options(ctx, enable, disable)
 
     if not nfc_supported:
         ctx.fail("NFC not available.")
