@@ -598,19 +598,21 @@ class TestFipsMode:
     @pytest.fixture(autouse=True)
     @condition.fips(True)
     def delete_slots(self, ykman_cli):
+        try:
+            ykman_cli("otp", "delete", "1", "-f")
+        except SystemExit:
+            pass
+        try:
+            ykman_cli("otp", "delete", "2", "-f")
+        except SystemExit:
+            pass
         yield None
-        ykman_cli("otp", "--access-code", "111111111111", "delete", "1", "-f")
-        ykman_cli("otp", "--access-code", "111111111111", "delete", "2", "-f")
 
     def test_not_fips_mode_if_no_slot_programmed(self, ykman_cli):
-        ykman_cli("otp", "delete", "1", "-f")
-        ykman_cli("otp", "delete", "2", "-f")
-
         info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode: No" in info
 
     def test_not_fips_mode_if_slot_1_not_programmed(self, ykman_cli):
-        ykman_cli("otp", "delete", "1", "-f")
         ykman_cli("otp", "static", "2", "--generate", "--length", "10")
 
         info = ykman_cli("otp", "info").output
@@ -618,7 +620,6 @@ class TestFipsMode:
 
     def test_not_fips_mode_if_slot_2_not_programmed(self, ykman_cli):
         ykman_cli("otp", "static", "1", "--generate", "--length", "10")
-        ykman_cli("otp", "delete", "2", "-f")
 
         info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode: No" in info
@@ -627,7 +628,7 @@ class TestFipsMode:
         ykman_cli("otp", "static", "1", "--generate", "--length", "10")
         ykman_cli("otp", "static", "2", "--generate", "--length", "10")
 
-        info = ykman_cli("otp", "info")
+        info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode: No" in info
 
     def test_not_fips_mode_if_only_slot_1_has_access_code(self, ykman_cli):
@@ -639,6 +640,8 @@ class TestFipsMode:
         info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode: No" in info
 
+        ykman_cli("otp", "--access-code", "111111111111", "delete", "1", "-f")
+
     def test_not_fips_mode_if_only_slot_2_has_access_code(self, ykman_cli):
         ykman_cli("otp", "static", "1", "--generate", "--length", "10")
         ykman_cli("otp", "static", "2", "--generate", "--length", "10")
@@ -647,6 +650,8 @@ class TestFipsMode:
 
         info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode: No" in info
+
+        ykman_cli("otp", "--access-code", "111111111111", "delete", "2", "-f")
 
     def test_fips_mode_if_both_slots_have_access_code(self, ykman_cli):
         ykman_cli("otp", "static", "--generate", "--length", "10", "1", "-f")
@@ -657,3 +662,6 @@ class TestFipsMode:
 
         info = ykman_cli("otp", "info").output
         assert "FIPS Approved Mode: Yes" in info
+
+        ykman_cli("otp", "--access-code", "111111111111", "delete", "1", "-f")
+        ykman_cli("otp", "--access-code", "111111111111", "delete", "2", "-f")

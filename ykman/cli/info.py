@@ -33,10 +33,7 @@ from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 
-from ..hid import list_otp_devices, list_ctap_devices
-from ..pcsc import list_devices as list_ccid
-
-from ..device import is_fips_version, get_name, read_info
+from ..device import is_fips_version, get_name, connect_to_device
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
@@ -108,33 +105,20 @@ def get_overall_fips_status(pid, info):
 
     statuses["OTP"] = False
     if usb_enabled & CAPABILITY.OTP:
-        for dev in list_otp_devices():
-            if dev.pid == pid:
-                with dev.open_connection(OtpConnection) as conn:
-                    app = YubiOtpSession(conn)
-                    if app.get_serial() == info.serial:
-                        statuses["OTP"] = otp_in_fips_mode(app)
-                        break
+        with connect_to_device(info.serial, [OtpConnection])[0] as conn:
+            app = YubiOtpSession(conn)
+            statuses["OTP"] = otp_in_fips_mode(app)
 
     statuses["OATH"] = False
     if usb_enabled & CAPABILITY.OATH:
-        for dev in list_ccid():
-            with dev.open_connection(SmartCardConnection) as conn:
-                info2 = read_info(pid, conn)
-                if info2.serial == info.serial:
-                    app = OathSession(conn)
-                    statuses["OATH"] = oath_in_fips_mode(app)
-                    break
+        with connect_to_device(info.serial, [SmartCardConnection])[0] as conn:
+            app = OathSession(conn)
+            statuses["OATH"] = oath_in_fips_mode(app)
 
     statuses["FIDO U2F"] = False
     if usb_enabled & CAPABILITY.U2F:
-        for dev in list_ctap_devices():
-            if dev.pid == pid:
-                with dev.open_connection(FidoConnection) as conn:
-                    info2 = read_info(pid, conn)
-                    if info2.serial == info.serial:
-                        statuses["FIDO U2F"] = ctap_in_fips_mode(conn)
-                        break
+        with connect_to_device(info.serial, [FidoConnection])[0] as conn:
+            statuses["FIDO U2F"] = ctap_in_fips_mode(conn)
 
     return statuses
 

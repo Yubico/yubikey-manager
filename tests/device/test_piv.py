@@ -6,7 +6,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 
-from yubikit.core import AID
+from yubikit.core import AID, NotSupportedError
 from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
 from yubikit.piv import (
@@ -358,7 +358,7 @@ class TestOperations:
 
     @condition.fips(True)
     def test_pin_policy_never_blocked_on_fips(self, session):
-        with pytest.raises(ApduError):
+        with pytest.raises(NotSupportedError):
             generate_key(session, pin_policy=PIN_POLICY.NEVER)
 
     @condition.min_version(4)
