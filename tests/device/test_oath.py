@@ -2,7 +2,7 @@ import pytest
 
 from yubikit.core import AID
 from yubikit.core.smartcard import ApduError, SW
-from yubikit.management import CAPABILITY, ManagementSession
+from yubikit.management import CAPABILITY
 from yubikit.oath import (
     OathSession,
     CredentialData,
@@ -52,7 +52,8 @@ class TestLockPreventsAccess:
         session.set_key(KEY)
 
         # Force re-select to lock
-        ManagementSession(session.protocol.connection)
+        session.protocol.connection.connection.disconnect()
+        session.protocol.connection.connection.connect()
         session.protocol.select(AID.OATH)
 
     def test_list(self, session):
