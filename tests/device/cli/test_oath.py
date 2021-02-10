@@ -3,6 +3,7 @@
 from ykman.oath import STEAM_CHAR_TABLE
 from yubikit.management import CAPABILITY
 from .. import condition
+from base64 import b32encode
 import contextlib
 import io
 import pytest
@@ -122,10 +123,40 @@ class TestOATH:
             "Success! All OATH credentials have been cleared from the YubiKey" in output
         )
 
+    def test_oath_hotp_vectors_6(self, ykman_cli):
+        ykman_cli(
+            "oath",
+            "accounts",
+            "add",
+            "-o",
+            "HOTP",
+            "testvector",
+            b32encode(b"12345678901234567890").decode(),
+        )
+        for code in ["755224", "287082", "359152", "969429", "338314"]:
+            words = ykman_cli("oath", "accounts", "code", "testvector").output.split()
+            assert code in words
+
+    def test_oath_hotp_vectors_8(self, ykman_cli):
+        ykman_cli(
+            "oath",
+            "accounts",
+            "add",
+            "-o",
+            "HOTP",
+            "-d",
+            "8",
+            "testvector8",
+            b32encode(b"12345678901234567890").decode(),
+        )
+        for code in ["84755224", "94287082", "37359152", "26969429", "40338314"]:
+            words = ykman_cli("oath", "accounts", "code", "testvector8").output.split()
+            assert code in words
+
     def test_oath_hotp_code(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "-o", "HOTP", "hotp-cred", "abba")
-        cred = ykman_cli("oath", "accounts", "code", "hotp-cred").output
-        assert "659165" in cred
+        words = ykman_cli("oath", "accounts", "code", "hotp-cred").output.split()
+        assert "659165" in words
 
     def test_oath_totp_steam_code(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "-o", "TOTP", "Steam:steam-cred", "abba")
