@@ -72,7 +72,7 @@ def await_reboot(transport):
     return partial(time.sleep, delay) if transport == TRANSPORT.USB else lambda: None
 
 
-connection_scope = os.environ.get("CONNECTION_SCOPE", "module")
+connection_scope = os.environ.get("CONNECTION_SCOPE", "function")
 
 
 @pytest.fixture(scope=connection_scope)

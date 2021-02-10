@@ -335,7 +335,7 @@ class OathSession:
         self, credential_id: bytes, name: str, issuer: Optional[str] = None
     ) -> bytes:
         require_version(self.version, (5, 3, 1))
-        issuer, name, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
+        _, _, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
         self.protocol.send_apdu(
             0, INS_RENAME, 0, 0, Tlv(TAG_NAME, credential_id) + Tlv(TAG_NAME, new_id)

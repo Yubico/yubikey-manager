@@ -119,9 +119,7 @@ class TestOATH:
 
     def test_oath_reset(self, ykman_cli):
         output = ykman_cli("oath", "reset", "-f").output
-        assert (
-            "Success! All OATH credentials have been cleared from the YubiKey" in output
-        )
+        assert "Success! All OATH accounts have been deleted from the YubiKey" in output
 
     def test_oath_hotp_vectors_6(self, ykman_cli):
         ykman_cli(
@@ -194,6 +192,17 @@ class TestOATH:
 
         with pytest.raises(SystemExit):
             ykman_cli("oath", "accounts", "add", "testx", "abba")
+
+    @condition.min_version(5, 3, 1)
+    def test_rename(self, ykman_cli):
+        ykman_cli("oath", "accounts", "uri", URI_TOTP_EXAMPLE)
+        ykman_cli(
+            "oath", "accounts", "rename", "john.doe", "Example:user@example.com", "-f"
+        )
+
+        creds = ykman_cli("oath", "accounts", "list").output
+        assert "john.doe" not in creds
+        assert "Example:user@example.com" in creds
 
 
 class TestOathFips:

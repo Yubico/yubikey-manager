@@ -2,7 +2,7 @@ import pytest
 
 from yubikit.core import AID
 from yubikit.core.smartcard import ApduError, SW
-from yubikit.management import CAPABILITY
+from yubikit.management import CAPABILITY, ManagementSession
 from yubikit.oath import (
     OathSession,
     CredentialData,
@@ -27,6 +27,23 @@ def session(ccid_connection):
 CRED_DATA = CredentialData("name", OATH_TYPE.TOTP, HASH_ALGORITHM.SHA1, b"secret")
 
 
+class TestFunctions:
+    @condition.min_version(5, 3)
+    def test_rename(self, session):
+        cred = session.put_credential(CRED_DATA)
+        new_id = session.rename_credential(cred.id, "newname", "newissuer")
+        with pytest.raises(ApduError):
+            session.calculate(cred.id, b"challenge")
+        session.calculate(new_id, b"challenge")
+
+    @condition.min_version(5, 3)
+    def test_rename_to_existing(self, session):
+        cred = session.put_credential(CRED_DATA)
+        new_id = session.rename_credential(cred.id, "newname", "newissuer")
+        with pytest.raises(ApduError):
+            session.rename_credential(new_id, "newname", "newissuer")
+
+
 class TestLockPreventsAccess:
     @pytest.fixture(autouse=True)
     def set_lock(self, session):
@@ -34,8 +51,8 @@ class TestLockPreventsAccess:
         session.put_credential(CRED_DATA)
         session.set_key(KEY)
 
-        # Re-select to lock
-        session.protocol.select(AID.MANAGEMENT)
+        # Force re-select to lock
+        ManagementSession(session.protocol.connection)
         session.protocol.select(AID.OATH)
 
     def test_list(self, session):

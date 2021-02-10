@@ -45,6 +45,7 @@ from yubikit.oath import (
     OATH_TYPE,
     HASH_ALGORITHM,
     parse_b32_key,
+    _format_cred_id,
 )
 from ..oath import is_steam, calculate_steam, is_hidden
 from ..device import is_fips_version
@@ -64,11 +65,12 @@ def oath(ctx):
     Examples:
 
     \b
-      Generate codes for credentials starting with 'yubi':
+      Generate codes for accounts starting with 'yubi':
       $ ykman oath accounts code yubi
 
     \b
-      Add a touch credential with the secret key f5up4ub3dw and the name yubico:
+      Add an account with the secret key f5up4ub3dw and the name yubico,
+      which requires touch:
       $ ykman oath accounts add yubico f5up4ub3dw --touch
 
     \b
@@ -109,14 +111,14 @@ def info(ctx):
 @click.confirmation_option(
     "-f",
     "--force",
-    prompt="WARNING! This will delete "
-    "all stored OATH credentials and restore factory settings?",
+    prompt="WARNING! This will delete all stored OATH accounts and restore factory "
+    "settings. Proceed?",
 )
 def reset(ctx):
     """
     Reset all OATH data.
 
-    This action will wipe all credentials and reset factory settings for
+    This action will delete all accounts and restore factory settings for
     the OATH application on the YubiKey.
     """
 
@@ -131,7 +133,7 @@ def reset(ctx):
         del keys[old_id]
         settings.write()
 
-    click.echo("Success! All OATH credentials have been cleared from the YubiKey.")
+    click.echo("Success! All OATH accounts have been deleted from the YubiKey.")
 
 
 click_password_option = click.option(
@@ -186,10 +188,10 @@ def access():
 @click.option("-n", "--new-password", help="Provide a new password as an argument.")
 def change(ctx, password, clear, new_password):
     """
-    Change the password used to protect OATH credentials.
+    Change the password used to protect OATH accounts.
 
     Allows you to set or change a password that will be required to access the OATH
-    credentials stored on the YubiKey.
+    accounts stored on the YubiKey.
     """
     if clear and new_password:
         ctx.fail("--clear cannot be combined with --new-password.")
@@ -297,7 +299,7 @@ click_touch_option = click.option(
 
 
 click_show_hidden_option = click.option(
-    "-H", "--show-hidden", is_flag=True, help="Include hidden credentials."
+    "-H", "--show-hidden", is_flag=True, help="Include hidden accounts."
 )
 
 
@@ -341,7 +343,7 @@ def accounts():
     "--oath-type",
     type=EnumChoice(OATH_TYPE),
     default=OATH_TYPE.TOTP.name,
-    help="Time-based (TOTP) or counter-based (HOTP) credential.",
+    help="Time-based (TOTP) or counter-based (HOTP) account.",
     show_default=True,
 )
 @click.option(
@@ -365,9 +367,9 @@ def accounts():
     "--counter",
     type=click.INT,
     default=0,
-    help="Initial counter value for HOTP credentials.",
+    help="Initial counter value for HOTP accounts.",
 )
-@click.option("-i", "--issuer", help="Issuer of the credential.")
+@click.option("-i", "--issuer", help="Issuer of the account.")
 @click.option(
     "-p",
     "--period",
@@ -396,9 +398,9 @@ def add(
     remember,
 ):
     """
-    Add a new credential.
+    Add a new account.
 
-    This will add a new credential to the YubiKey.
+    This will add a new OATH account to the YubiKey.
     """
 
     digits = int(digits)
@@ -441,9 +443,9 @@ def click_parse_uri(ctx, param, val):
 @click.pass_context
 def uri(ctx, data, touch, force, password, remember):
     """
-    Add a new credential from an otpauth:// URI.
+    Add a new account from an otpauth:// URI.
 
-    Use a URI to add a new credential to the YubiKey.
+    Use a URI to add a new account to the YubiKey.
     """
 
     if not data:
@@ -475,10 +477,10 @@ def _add_cred(ctx, data, touch, force):
         ctx.fail("Secret must be at least 2 bytes.")
 
     if touch and version < (4, 2, 6):
-        ctx.fail("Touch-required credentials not supported on this key.")
+        ctx.fail("Require touch is not supported on this YubiKey.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
-        ctx.fail("Counter only supported for HOTP credentials.")
+        ctx.fail("Counter only supported for HOTP accounts.")
 
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
         version < (4, 3, 1) or is_fips_version(version)
@@ -489,7 +491,7 @@ def _add_cred(ctx, data, touch, force):
     cred_id = data.get_id()
     if not force and any(cred.id == cred_id for cred in creds):
         click.confirm(
-            "A credential called {} already exists on this YubiKey."
+            "An account called {} already exists on this YubiKey."
             " Do you want to overwrite it?".format(data.name),
             abort=True,
             err=True,
@@ -502,13 +504,13 @@ def _add_cred(ctx, data, touch, force):
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
-        ctx.fail("Choose a name that is not a subset of an existing credential.")
+        ctx.fail("Choose a name that is not a subset of an existing account.")
 
     try:
         session.put_credential(data, touch)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            ctx.fail("No space left on the YubiKey for OATH credentials.")
+            ctx.fail("No space left on the YubiKey for OATH accounts.")
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
             ctx.fail("The command failed. Is there enough space on the YubiKey?")
@@ -525,9 +527,9 @@ def _add_cred(ctx, data, touch, force):
 @click_remember_option
 def list(ctx, show_hidden, oath_type, period, password, remember):
     """
-    List all credentials.
+    List all accounts.
 
-    List all credentials stored on the YubiKey.
+    List all accounts stored on the YubiKey.
     """
     _init_session(ctx, password, remember)
     session = ctx.obj["session"]
@@ -540,7 +542,7 @@ def list(ctx, show_hidden, oath_type, period, password, remember):
     for cred in creds:
         click.echo(_string_id(cred), nl=False)
         if oath_type:
-            click.echo(u", {}".format(cred.oath_type.name), nl=False)
+            click.echo(", {}".format(cred.oath_type.name), nl=False)
         if period:
             click.echo(", {}".format(cred.period), nl=False)
         click.echo()
@@ -562,9 +564,10 @@ def code(ctx, show_hidden, query, single, password, remember):
     """
     Generate codes.
 
-    Generate codes from credentials stored on the YubiKey.
-    Provide a query string to match one or more specific credentials.
-    Touch and HOTP credentials require a single match to be triggered.
+    Generate codes from OATH accounts stored on the YubiKey.
+    Provide a query string to match one or more specific accounts.
+    Accounts of type HOTP, or those that require touch, requre a single match to be
+    triggered.
     """
 
     _init_session(ctx, password, remember)
@@ -588,14 +591,14 @@ def code(ctx, show_hidden, query, single, password, remember):
                 code = session.calculate_code(cred)
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                ctx.fail("Touch credential timed out!")
+                ctx.fail("Touch account timed out!")
         entries[cred] = code
 
     elif single and len(creds) > 1:
         _error_multiple_hits(ctx, creds)
 
     elif single and len(creds) == 0:
-        ctx.fail("No matching credential found.")
+        ctx.fail("No matching account found.")
 
     if single and creds:
         if is_steam(cred):
@@ -609,9 +612,9 @@ def code(ctx, show_hidden, query, single, password, remember):
             if code:
                 code = code.value
             elif cred.touch_required:
-                code = "[Touch Credential]"
+                code = "[Requires Touch]"
             elif cred.oath_type == OATH_TYPE.HOTP:
-                code = "[HOTP Credential]"
+                code = "[HOTP Account]"
             else:
                 code = ""
             if is_steam(cred):
@@ -620,10 +623,62 @@ def code(ctx, show_hidden, query, single, password, remember):
 
         longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
         longest_code = max(len(c) for (n, c) in outputs) if outputs else 0
-        format_str = u"{:<%d}  {:>%d}" % (longest_name, longest_code)
+        format_str = "{:<%d}  {:>%d}" % (longest_name, longest_code)
 
         for name, result in outputs:
             click.echo(format_str.format(name, result))
+
+
+@accounts.command()
+@click.pass_context
+@click.argument("query")
+@click.argument("name")
+@click.option("-f", "--force", is_flag=True, help="Confirm rename without prompting")
+@click_password_option
+@click_remember_option
+def rename(ctx, query, name, force, password, remember):
+    """
+    Rename an account (Requires YubiKey 5.3 or later).
+
+    \b
+    QUERY       A query to match a single account (as shown in "list").
+    NAME        The name of the account (use "<issuer>:<name>" to specify issuer).
+    """
+
+    _init_session(ctx, password, remember)
+    session = ctx.obj["session"]
+    creds = session.list_credentials()
+    hits = _search(creds, query, True)
+    if len(hits) == 0:
+        click.echo("No matches, nothing to be done.")
+    elif len(hits) == 1:
+        cred = hits[0]
+        if ":" in name:
+            issuer, name = name.split(":", 1)
+        else:
+            issuer = None
+
+        new_id = _format_cred_id(issuer, name, cred.oath_type, cred.period)
+        if any(cred.id == new_id for cred in creds):
+            ctx.fail(
+                "Another account with ID {} already exists on this YubiKey.".format(
+                    new_id.decode()
+                )
+            )
+        if force or (
+            click.confirm(
+                "Rename account: {} ?".format(_string_id(cred)),
+                default=False,
+                err=True,
+            )
+        ):
+            session.rename_credential(cred.id, name, issuer)
+            click.echo("Renamed {} to {}.".format(_string_id(cred), new_id.decode()))
+        else:
+            click.echo("Rename aborted by user.")
+
+    else:
+        _error_multiple_hits(ctx, hits)
 
 
 @accounts.command()
@@ -634,10 +689,10 @@ def code(ctx, show_hidden, query, single, password, remember):
 @click_remember_option
 def delete(ctx, query, force, password, remember):
     """
-    Delete a credential.
+    Delete an account.
 
-    Delete a credential from the YubiKey.
-    Provide a query string to match the credential to delete.
+    Delete an account from the YubiKey.
+    Provide a query string to match the account to delete.
     """
 
     _init_session(ctx, password, remember)
@@ -650,13 +705,13 @@ def delete(ctx, query, force, password, remember):
         cred = hits[0]
         if force or (
             click.confirm(
-                u"Delete credential: {} ?".format(_string_id(cred)),
+                "Delete account: {} ?".format(_string_id(cred)),
                 default=False,
                 err=True,
             )
         ):
             session.delete_credential(cred.id)
-            click.echo(u"Deleted {}.".format(_string_id(cred)))
+            click.echo("Deleted {}.".format(_string_id(cred)))
         else:
             click.echo("Deletion aborted by user.")
 
