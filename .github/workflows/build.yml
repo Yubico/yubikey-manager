@@ -9,7 +9,7 @@ jobs:
 
     strategy:
       matrix:
-        python: [ '2.x', '3.x' ]
+        python: [ '3.x' ]
 
     name: Python ${{ matrix.python }}
     steps:
