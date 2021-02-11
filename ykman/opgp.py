@@ -37,7 +37,7 @@ from enum import Enum, IntEnum, unique
 from binascii import b2a_hex
 from collections import namedtuple
 from cryptography import x509
-from cryptography.utils import int_to_bytes, int_from_bytes
+from cryptography.utils import int_to_bytes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import (
@@ -485,8 +485,8 @@ class OpgpController(object):
 
         data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
         numbers = rsa.RSAPublicNumbers(
-            int_from_bytes(data[0x82], 'big'),
-            int_from_bytes(data[0x81], 'big')
+            int.from_bytes(data[0x82], 'big'),
+            int.from_bytes(data[0x81], 'big')
         )
 
         self._put_data(key_slot.gen_time, struct.pack('>I', timestamp))

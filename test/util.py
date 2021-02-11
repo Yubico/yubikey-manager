@@ -8,7 +8,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding
-from cryptography.utils import int_from_bytes
 from cryptography.x509.oid import NameOID
 from ykman.cli.__main__ import cli
 from ykman.util import Tlv
@@ -80,7 +79,7 @@ def generate_self_signed_certificate(
         x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
 
     # x509.random_serial_number added in cryptography 1.6
-    serial = int_from_bytes(os.urandom(20), 'big') >> 1
+    serial = int.from_bytes(os.urandom(20), 'big') >> 1
     builder = builder.serial_number(serial)
 
     builder = builder.not_valid_before(valid_from)

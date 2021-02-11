@@ -36,7 +36,7 @@ from .util import (
     ensure_not_cve201715361_vulnerable_firmware_version)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
-from cryptography.utils import int_to_bytes, int_from_bytes
+from cryptography.utils import int_to_bytes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
@@ -794,8 +794,8 @@ class PivController(object):
         key_data = Tlv.parse_dict(Tlv.unpack(0x7f49, resp))
         if algorithm in [ALGO.RSA1024, ALGO.RSA2048]:
             return rsa.RSAPublicNumbers(
-                int_from_bytes(key_data[0x82], 'big'),
-                int_from_bytes(key_data[0x81], 'big')
+                int.from_bytes(key_data[0x82], 'big'),
+                int.from_bytes(key_data[0x81], 'big')
             ).public_key(default_backend())
         elif algorithm in [ALGO.ECCP256, ALGO.ECCP384]:
             curve = ec.SECP256R1 if algorithm == ALGO.ECCP256 else ec.SECP384R1
@@ -832,7 +832,7 @@ class PivController(object):
             x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name), ]))
 
         # x509.random_serial_number added in cryptography 1.6
-        serial = int_from_bytes(os.urandom(20), 'big') >> 1
+        serial = int.from_bytes(os.urandom(20), 'big') >> 1
         builder = builder.serial_number(serial)
 
         builder = builder.not_valid_before(valid_from)
