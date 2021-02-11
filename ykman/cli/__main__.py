@@ -101,7 +101,8 @@ def print_version(ctx, param, value):
 def print_diagnostics(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    ctx.exit(get_diagnostics())
+    click.echo(get_diagnostics())
+    ctx.exit()
 
 
 def _disabled_interface(ctx, connections, cmd_name):
