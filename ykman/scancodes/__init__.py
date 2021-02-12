@@ -25,14 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
 from enum import Enum
-from . import us, de, fr, it, modhex, norman, bepo
+from . import us, uk, de, fr, it, modhex, norman, bepo
 
 
 class KEYBOARD_LAYOUT(Enum):
     MODHEX = modhex.scancodes
     US = us.scancodes
+    UK = uk.scancodes
     DE = de.scancodes
     FR = fr.scancodes
     IT = it.scancodes
@@ -44,4 +44,4 @@ def encode(data, keyboard_layout=KEYBOARD_LAYOUT.MODHEX):
     try:
         return bytes(bytearray(keyboard_layout.value[c] for c in data))
     except KeyError as e:
-        raise ValueError('Unsupported character: %s' % e.args[0])
+        raise ValueError("Unsupported character: %s" % e.args[0])

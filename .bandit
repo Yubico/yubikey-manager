@@ -1,2 +1,2 @@
 [bandit]
-exclude: /test,/.tox
+exclude: /tests

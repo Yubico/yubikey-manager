@@ -25,13 +25,19 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
+from yubikit.core import TRANSPORT
+from yubikit.core.otp import OtpConnection
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import CAPABILITY, USB_INTERFACE
+from yubikit.yubiotp import YubiOtpSession
+from yubikit.oath import OathSession
 
-from ..descriptor import open_device, FailedOpeningDeviceException
-from ..fido import FipsU2fController
-from ..oath import OathController
-from ..otp import OtpController
-from ..util import APPLICATION, TRANSPORT
+from ..device import is_fips_version, get_name, connect_to_device
+from ..otp import is_in_fips_mode as otp_in_fips_mode
+from ..oath import is_in_fips_mode as oath_in_fips_mode
+from ..fido import is_in_fips_mode as ctap_in_fips_mode
+
 import click
 import logging
 
@@ -39,24 +45,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def print_app_status_table(config):
+def print_app_status_table(supported_apps, enabled_apps):
+    usb_supported = supported_apps.get(TRANSPORT.USB, 0)
+    usb_enabled = enabled_apps.get(TRANSPORT.USB, 0)
+    nfc_supported = supported_apps.get(TRANSPORT.NFC, 0)
+    nfc_enabled = enabled_apps.get(TRANSPORT.NFC, 0)
     rows = []
-    for app in APPLICATION:
-        if app & config.usb_supported:
-            if app & config.usb_enabled:
-                usb_status = 'Enabled'
+    for app in CAPABILITY:
+        if app & usb_supported:
+            if app & usb_enabled:
+                usb_status = "Enabled"
             else:
-                usb_status = 'Disabled'
+                usb_status = "Disabled"
         else:
-            usb_status = 'Not available'
-        if config.nfc_supported:
-            if app & config.nfc_supported:
-                if app & config.nfc_enabled:
-                    nfc_status = 'Enabled'
+            usb_status = "Not available"
+        if nfc_supported:
+            if app & nfc_supported:
+                if app & nfc_enabled:
+                    nfc_status = "Enabled"
                 else:
-                    nfc_status = 'Disabled'
+                    nfc_status = "Disabled"
             else:
-                nfc_status = 'Not available'
+                nfc_status = "Not available"
             rows.append([str(app), usb_status, nfc_status])
         else:
             rows.append([str(app), usb_status])
@@ -70,61 +80,71 @@ def print_app_status_table(config):
             else:
                 column_l.append(len(c))
 
-    f_apps = 'Applications'.ljust(column_l[0])
-    if config.nfc_supported:
-        f_USB = 'USB'.ljust(column_l[1])
-        f_NFC = 'NFC'.ljust(column_l[2])
-    f_table = ''
+    f_apps = "Applications".ljust(column_l[0])
+    if nfc_supported:
+        f_USB = "USB".ljust(column_l[1])
+        f_NFC = "NFC".ljust(column_l[2])
+    f_table = ""
 
     for row in rows:
         for idx, c in enumerate(row):
-            f_table += '{}\t'.format(c.ljust(column_l[idx]))
-        f_table += '\n'
+            f_table += "{}\t".format(c.ljust(column_l[idx]))
+        f_table += "\n"
 
-    if config.nfc_supported:
-        click.echo('{}\t{}\t{}'.format(f_apps, f_USB, f_NFC))
+    if nfc_supported:
+        click.echo("{}\t{}\t{}".format(f_apps, f_USB, f_NFC))
     else:
-        click.echo('{}'.format(f_apps))
+        click.echo("{}".format(f_apps))
     click.echo(f_table, nl=False)
 
 
-def get_fips_status_over_transport(serial, transport, controller_constructor):
-    try:
-        with open_device(transports=transport, serial=serial) as dev:
-            return controller_constructor(dev._driver).is_in_fips_mode
-    except FailedOpeningDeviceException as e:
-        logger.debug('Failed to open device', exc_info=e)
-        return False
-
-
-def get_overall_fips_status(serial, config):
+def get_overall_fips_status(pid, info):
     statuses = {}
 
-    if config.usb_enabled & APPLICATION.OTP:
-        statuses['OTP'] = get_fips_status_over_transport(
-            serial, TRANSPORT.OTP, OtpController)
-    else:
-        statuses['OTP'] = False
+    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
 
-    if config.usb_enabled & APPLICATION.OATH:
-        statuses['OATH'] = get_fips_status_over_transport(
-            serial, TRANSPORT.CCID, OathController)
-    else:
-        statuses['OATH'] = False
+    statuses["OTP"] = False
+    if usb_enabled & CAPABILITY.OTP:
+        with connect_to_device(info.serial, [OtpConnection])[0] as conn:
+            app = YubiOtpSession(conn)
+            statuses["OTP"] = otp_in_fips_mode(app)
 
-    if config.usb_enabled & APPLICATION.U2F:
-        statuses['FIDO U2F'] = get_fips_status_over_transport(
-            serial, TRANSPORT.FIDO, FipsU2fController)
-    else:
-        statuses['FIDO U2F'] = False
+    statuses["OATH"] = False
+    if usb_enabled & CAPABILITY.OATH:
+        with connect_to_device(info.serial, [SmartCardConnection])[0] as conn:
+            app = OathSession(conn)
+            statuses["OATH"] = oath_in_fips_mode(app)
+
+    statuses["FIDO U2F"] = False
+    if usb_enabled & CAPABILITY.U2F:
+        with connect_to_device(info.serial, [FidoConnection])[0] as conn:
+            statuses["FIDO U2F"] = ctap_in_fips_mode(conn)
 
     return statuses
 
 
+def _check_fips_status(pid, info):
+    fips_status = get_overall_fips_status(pid, info)
+    click.echo()
+
+    click.echo(
+        "FIPS Approved Mode: {}".format("Yes" if all(fips_status.values()) else "No")
+    )
+
+    status_keys = list(fips_status.keys())
+    status_keys.sort()
+    for status_key in status_keys:
+        click.echo(
+            "  {}: {}".format(status_key, "Yes" if fips_status[status_key] else "No")
+        )
+
+
 @click.option(
-    '-c', '--check-fips',
-    help='Check if YubiKey is in FIPS Approved mode.',
-    is_flag=True)
+    "-c",
+    "--check-fips",
+    help="Check if YubiKey is in FIPS Approved mode (YubiKey FIPS only).",
+    is_flag=True,
+)
 @click.command()
 @click.pass_context
 def info(ctx, check_fips):
@@ -132,44 +152,57 @@ def info(ctx, check_fips):
     Show general information.
 
     Displays information about the attached YubiKey such as serial number,
-    firmware version, applications, etc.
+    firmware version, capabilities, etc.
     """
-    dev = ctx.obj['dev']
-
-    if dev.is_fips and check_fips:
-        fips_status = get_overall_fips_status(dev.serial, dev.config)
-
-    click.echo('Device type: {}'.format(dev.device_name))
-    click.echo('Serial number: {}'.format(
-        dev.serial or 'Not set or unreadable'))
-    if dev.version:
-        f_version = '.'.join(str(x) for x in dev.version)
-        click.echo('Firmware version: {}'.format(f_version))
+    info = ctx.obj["info"]
+    pid = ctx.obj["pid"]
+    if pid is None:
+        interfaces = None
+        key_type = None
     else:
-        click.echo('Firmware version: Uncertain, re-run with only one '
-                   'YubiKey connected')
+        interfaces = pid.get_interfaces()
+        key_type = pid.get_type()
+    device_name = get_name(info, key_type)
 
-    config = dev.config
-    if config.form_factor:
-        click.echo('Form factor: {!s}'.format(config.form_factor))
-    click.echo('Enabled USB interfaces: {}'.format(dev.mode))
-    if config.nfc_supported:
-        f_nfc = 'enabled' if config.nfc_enabled else 'disabled'
-        click.echo('NFC interface is {}.'.format(f_nfc))
-    if config.configuration_locked:
-        click.echo('Configured applications are protected by a lock code.')
+    click.echo("Device type: {}".format(device_name))
+    if info.serial:
+        click.echo("Serial number: {}".format(info.serial))
+    if info.version:
+        f_version = ".".join(str(x) for x in info.version)
+        click.echo("Firmware version: {}".format(f_version))
+    else:
+        click.echo(
+            "Firmware version: Uncertain, re-run with only one YubiKey connected"
+        )
+
+    if info.form_factor:
+        click.echo("Form factor: {!s}".format(info.form_factor))
+    if interfaces:
+        click.echo(
+            "Enabled USB interfaces: {}".format(
+                ", ".join(
+                    t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
+                )
+            )
+        )
+    if TRANSPORT.NFC in info.supported_capabilities:
+        f_nfc = (
+            "enabled"
+            if info.config.enabled_capabilities.get(TRANSPORT.NFC)
+            else "disabled"
+        )
+        click.echo("NFC transport is {}.".format(f_nfc))
+    if info.is_locked:
+        click.echo("Configured capabilities are protected by a lock code.")
     click.echo()
 
-    print_app_status_table(config)
+    print_app_status_table(
+        info.supported_capabilities, info.config.enabled_capabilities
+    )
 
-    if dev.is_fips and check_fips:
-        click.echo()
-
-        click.echo('FIPS Approved Mode: {}'.format(
-            'Yes' if all(fips_status.values()) else 'No'))
-
-        status_keys = list(fips_status.keys())
-        status_keys.sort()
-        for status_key in status_keys:
-            click.echo('  {}: {}'.format(
-                status_key, 'Yes' if fips_status[status_key] else 'No'))
+    if check_fips:
+        if is_fips_version(info.version):
+            ctx.obj["conn"].close()
+            _check_fips_status(pid, info)
+        else:
+            ctx.fail("Not a YubiKey FIPS")

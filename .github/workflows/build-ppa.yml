@@ -13,8 +13,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-add-repository -y ppa:yubico/stable
-          sudo apt-get update
           sudo apt-get install -qq git devscripts equivs
           sudo mk-build-deps -i debian/control
           cd ..

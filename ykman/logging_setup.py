@@ -25,38 +25,55 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
-
+from ykman import __version__ as ykman_version
 import logging
-import ykman
+import ctypes
+import sys
+import os
 
 
-LOG_LEVELS = [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR,
-              logging.CRITICAL]
+LOG_LEVELS = [
+    logging.DEBUG,
+    logging.INFO,
+    logging.WARNING,
+    logging.ERROR,
+    logging.CRITICAL,
+]
 LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
+
+
+def log_sys_info(log):
+    log("Python: %s" % sys.version)
+    log("Platform: %s" % sys.platform)
+    if sys.platform == "win32":
+        w = sys.getwindowsversion()
+        log("Windows version: (%s, %s, %s)" % (w.major, w.minor, w.build))
+        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+    else:
+        is_admin = os.getuid() == 0
+    log("Running as admin: %s" % is_admin)
 
 
 def setup(log_level_name, log_file=None):
     log_level_value = next(
-        (lvl for lvl in LOG_LEVELS
-         if logging.getLevelName(lvl) == log_level_name),
-        None
+        (lvl for lvl in LOG_LEVELS if logging.getLevelName(lvl) == log_level_name), None
     )
 
     if log_level_value is None:
-        raise ValueError('Unknown log level: ' + log_level_name)
+        raise ValueError("Unknown log level: " + log_level_name)
 
     logging.disable(logging.NOTSET)
     logging.basicConfig(
-        datefmt='%Y-%m-%dT%H:%M:%S%z',
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
         filename=log_file,
-        format='%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',  # noqa: E501
-        level=log_level_value
+        format="%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",  # noqa: E501
+        level=log_level_value,
     )
 
     logger = logging.getLogger(__name__)
-    logger.info('Initialized logging for %s version: %s',
-                ykman.__name__, ykman.__version__)
+    logger.info("Initialized logging for level: %s", log_level_name)
+    logger.info("Running ykman version: %s", ykman_version)
+    log_sys_info(logger.debug)
 
 
 logging.disable(logging.CRITICAL * 2)

@@ -25,26 +25,24 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
-
 import os
 import json
 
 
-DIR_NAME = '.ykman'
+DIR_NAME = ".ykman"
 
 
 def _get_conf_dir():
     if os.path.isdir(DIR_NAME):
         return os.path.abspath(DIR_NAME)
-    return os.path.join(os.path.expanduser('~'), DIR_NAME)
+    return os.path.join(os.path.expanduser("~"), DIR_NAME)
 
 
 class Settings(dict):
     def __init__(self, name):
-        self.fname = os.path.join(_get_conf_dir(), name + '.json')
+        self.fname = os.path.join(_get_conf_dir(), name + ".json")
         if os.path.isfile(self.fname):
-            with open(self.fname, 'r') as f:
+            with open(self.fname, "r") as f:
                 self.update(json.load(f))
 
     def __eq__(self, other):
@@ -58,7 +56,7 @@ class Settings(dict):
         if not os.path.isdir(conf_dir):
             os.makedirs(conf_dir)
         data = json.dumps(self, indent=2)
-        with open(self.fname, 'w') as f:
+        with open(self.fname, "w") as f:
             f.write(data)
 
     __hash__ = None
