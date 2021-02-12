@@ -82,7 +82,7 @@ class AID(bytes, Enum):
     OATH = bytes.fromhex("a0000005272101")
     PIV = bytes.fromhex("a000000308")
     FIDO = bytes.fromhex("a0000006472f0001")
-    HSMAUTH = bytes.fromhex("a0000005272108")
+    HSMAUTH = bytes.fromhex("a000000527210701")
 
 
 class Connection(abc.ABC):
