@@ -101,6 +101,7 @@ class KEY_TYPE(IntEnum):
             try:
                 return getattr(cls, "RSA%d" % key.key_size)
             except AttributeError:
+                raise ValueError("Unsupported RSA key size: %d" % key.key_size)
                 pass  # Fall through to ValueError
         elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
@@ -108,7 +109,8 @@ class KEY_TYPE(IntEnum):
                 return cls.ECCP256
             elif curve_name == "secp384r1":
                 return cls.ECCP384
-        raise ValueError("Unsupported key type: %s" % type(key))
+            raise ValueError("Unsupported EC curve: %s" % curve_name)
+        raise ValueError("Unsupported key type: %s" % type(key).__name__)
 
 
 @unique
