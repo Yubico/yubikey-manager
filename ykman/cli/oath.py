@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 @click_postpone_execution
 def oath(ctx):
     """
-    Manage the OATH Application.
+    Manage the OATH application.
 
     Examples:
 

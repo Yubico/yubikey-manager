@@ -147,7 +147,7 @@ click_touch_policy_option = click.option(
 @click_postpone_execution
 def piv(ctx):
     """
-    Manage the PIV Application.
+    Manage the PIV application.
 
     Examples:
 

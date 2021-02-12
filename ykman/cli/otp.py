@@ -127,7 +127,7 @@ def _confirm_slot_overwrite(slot_state, slot):
 )
 def otp(ctx, access_code):
     """
-    Manage the OTP Application.
+    Manage the YubiOTP application.
 
     The YubiKey provides two keyboard-based slots which can each be configured
     with a credential. Several credential types are supported.

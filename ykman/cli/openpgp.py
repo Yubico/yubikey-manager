@@ -79,7 +79,7 @@ def int_in_range(minval, maxval):
 @click_postpone_execution
 def openpgp(ctx):
     """
-    Manage the OpenPGP Application.
+    Manage the OpenPGP application.
 
     Examples:
 

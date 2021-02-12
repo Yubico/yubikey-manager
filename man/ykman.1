@@ -1,4 +1,4 @@
-.TH YKMAN "1" "January 2021" "ykman 3.1.2" "User Commands"
+.TH YKMAN "1" "February 2021" "ykman 4.0.0" "User Commands"
 .SH NAME
 ykman \- YubiKey Manager (ykman)
 .SH SYNOPSIS
@@ -8,32 +8,32 @@ ykman \- YubiKey Manager (ykman)
 .PP
 Configure your YubiKey via the command line.
 .SH OPTIONS
-.HP
-\fB\-v\fR, \fB\-\-version\fR
-.HP
-\fB\-d\fR, \fB\-\-device\fR SERIAL
 .TP
-\fB\-l\fR, \fB\-\-log\-level\fR [DEBUG|INFO|WARNING|ERROR|CRITICAL]
+\fB\-d\fR, \fB\-\-device\fR SERIAL
+Specify which YubiKey to interact with by serial number.
+.TP
+\fB\-r\fR, \fB\-\-reader\fR NAME
+Use an external smart card reader. Conflicts with --device and list.
+.TP
+\fB\-l\fR, \fB\-\-log\fR-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
 Enable logging at given verbosity level.
 .TP
 \fB\-\-log\-file\fR FILE
-Write logs to the given FILE instead of
-standard error; ignored unless \fB\-\-log\-level\fR
+Write logs to the given FILE instead of standard error; ignored unless --log-level
 is also set.
 .TP
-\fB\-r\fR, \fB\-\-reader\fR NAME
-Use an external smart card reader. Conflicts
-with \fB\-\-device\fR and list.
+\fB\-\-diagnose\fR
+Show diagnostics information useful for troubleshooting.
+.TP
+\fB\-v\fR, \fB\-\-version\fR
+Show version information about the app
+.TP
+\fB\-\-full\-help\fR
+Show --help, including hidden commands, and exit.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Show this message and exit.
 .SS "Commands:"
-.TP
-config
-Enable/Disable applications.
-.TP
-fido
-Manage FIDO applications.
 .TP
 info
 Show general information.
@@ -41,20 +41,23 @@ Show general information.
 list
 List connected YubiKeys.
 .TP
-mode
-Manage connection modes (USB Interfaces).
+config
+Enable/Disable applications.
+.TP
+fido
+Manage the FIDO applications.
 .TP
 oath
-Manage OATH Application.
+Manage the OATH application.
 .TP
 openpgp
-Manage OpenPGP Application.
+Manage the OpenPGP application.
 .TP
 otp
-Manage OTP Application.
+Manage the YubiOTP application.
 .TP
 piv
-Manage PIV Application.
+Manage the PIV application.
 .SH EXAMPLES
 .PP
 List connected YubiKeys, only output serial number:
