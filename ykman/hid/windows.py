@@ -23,6 +23,7 @@ from ctypes import wintypes, LibraryLoader
 import ctypes
 import platform
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,11 @@ def get_usage(device):
         hid.HidD_FreePreparsedData(preparsed_data)
 
 
-def list_devices():
+VID_RE = re.compile(rb"\Wvid_%04x\W" % YUBICO_VID)
+PID_RE = re.compile(rb"\Wpid_([a-z0-9]{4})\W")
+
+
+def list_paths():
     hid_guid = GUID()
     hid.HidD_GetHidGuid(ctypes.byref(hid_guid))
 
@@ -251,7 +256,7 @@ def list_devices():
         interface_info = DeviceInterfaceData()
         interface_info.cbSize = ctypes.sizeof(DeviceInterfaceData)
 
-        devices = []
+        paths = []
         while True:
             result = setupapi.SetupDiEnumDeviceInterfaces(
                 collection,
@@ -298,28 +303,30 @@ def list_devices():
                 raise ctypes.WinError()
 
             path = ctypes.string_at(ctypes.addressof(interface_detail.DevicePath))
-
-            device = kernel32.CreateFileA(
-                path,
-                0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None,
-                OPEN_EXISTING,
-                0,
-                None,
-            )
-            if device == INVALID_HANDLE_VALUE:
-                raise ctypes.WinError()
-            try:
-                vid, pid = get_vid_pid(device)
-                usage = get_usage(device)
-                if vid == YUBICO_VID and usage == USAGE_OTP:
-                    devices.append(OtpYubiKeyDevice(path, pid, WinHidOtpConnection))
-            except Exception as e:
-                logger.debug("Failed reading HID descriptor: %s", e)
-                continue
-            finally:
-                kernel32.CloseHandle(device)
-        return devices
+            if VID_RE.search(path):
+                pid_match = PID_RE.search(path)
+                if pid_match:
+                    paths.append((int(pid_match.group(1), 16), path))
+        return paths
     finally:
         setupapi.SetupDiDestroyDeviceInfoList(collection)
+
+
+def list_devices():
+    devices = []
+    for pid, path in list_paths():
+        device = kernel32.CreateFileA(
+            path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None,
+        )
+        if device == INVALID_HANDLE_VALUE:
+            raise ctypes.WinError()
+        try:
+            usage = get_usage(device)
+            if usage == USAGE_OTP:
+                devices.append(OtpYubiKeyDevice(path, pid, WinHidOtpConnection))
+        except Exception as e:
+            logger.debug("Failed reading HID descriptor: %s", e)
+            continue
+        finally:
+            kernel32.CloseHandle(device)
+    return devices

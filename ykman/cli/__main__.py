@@ -34,6 +34,7 @@ from yubikit.management import USB_INTERFACE
 import ykman.logging_setup
 
 from .. import __version__
+from ..base import PID
 from ..pcsc import list_devices as list_ccid, list_readers
 from ..device import (
     read_info,
@@ -307,6 +308,7 @@ def list_keys(ctx, serials, readers):
         ctx.exit()
 
     # List all attached devices
+    pids = set()
     for dev, dev_info in list_all_devices():
         if serials:
             if dev_info.serial:
@@ -320,6 +322,19 @@ def list_keys(ctx, serials, readers):
                     " Serial: {}".format(dev_info.serial) if dev_info.serial else "",
                 )
             )
+        pids.add(dev.pid)
+
+    if sys.platform.startswith("win32") and not serials:
+        from ..hid.windows import list_paths
+
+        for pid, _ in list_paths():
+            if pid not in pids:
+                p = PID(pid)
+                click.echo(
+                    "{} [{}] <permission denied>".format(
+                        p.get_type().value, p.name.split("_", 1)[1].replace("_", "+")
+                    )
+                )
 
 
 COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
