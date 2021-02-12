@@ -3,6 +3,7 @@ from .logging_setup import log_sys_info
 from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
 
+from yubikit.core import Version
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
@@ -19,7 +20,7 @@ from fido2.ctap2 import Ctap2
 def mgmt_info(conn):
     try:
         raw_info = ManagementSession(conn).backend.read_config()
-        info = DeviceInfo.parse(raw_info, None)
+        info = DeviceInfo.parse(raw_info, Version(0, 0, 0))
         return [
             "\t%s" % info,
             "\tRawInfo: %s" % raw_info.hex(),
@@ -31,7 +32,9 @@ def mgmt_info(conn):
 def piv_info(conn):
     try:
         piv = PivSession(conn)
-        return ["\tPIV"] + ["\t\t%s" % l for l in get_piv_info(piv).splitlines() if l]
+        return ["\tPIV"] + [
+            "\t\t%s" % ln for ln in get_piv_info(piv).splitlines() if ln
+        ]
     except Exception as e:
         return ["\tPIV not accessible %s" % e]
 
@@ -40,7 +43,7 @@ def openpgp_info(conn):
     try:
         openpgp = OpenPgpController(conn)
         return ["\tOpenPGP"] + [
-            "\t\t%s" % l for l in get_openpgp_info(openpgp).splitlines() if l
+            "\t\t%s" % ln for ln in get_openpgp_info(openpgp).splitlines() if ln
         ]
     except Exception as e:
         return ["\tOpenPGP not accessible %s" % e]
