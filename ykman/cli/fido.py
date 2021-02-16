@@ -217,6 +217,20 @@ def reset(ctx, force):
             ctx.fail("Reset failed.")
 
 
+def _fail_pin_error(ctx, e, other="%s"):
+    if e.code == CtapError.ERR.PIN_INVALID:
+        ctx.fail("Wrong PIN.")
+    elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
+        ctx.fail(
+            "PIN authentication is currently blocked. "
+            "Remove and re-insert the YubiKey."
+        )
+    elif e.code == CtapError.ERR.PIN_BLOCKED:
+        ctx.fail("PIN is blocked.")
+    else:
+        ctx.fail(other % e.code)
+
+
 @fido.group("access")
 def access():
     """
@@ -290,19 +304,10 @@ def change_pin(ctx, pin, new_pin, u2f):
 
         except CtapError as e:
             logger.error("Failed to change PIN", exc_info=e)
-            if e.code == CtapError.ERR.PIN_INVALID:
-                ctx.fail("Wrong PIN.")
-            elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
-                ctx.fail(
-                    "PIN authentication is currently blocked. "
-                    "Remove and re-insert the YubiKey."
-                )
-            elif e.code == CtapError.ERR.PIN_BLOCKED:
-                ctx.fail("PIN is blocked.")
-            elif e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 ctx.fail("New PIN is too long.")
             else:
-                ctx.fail("Failed to change PIN: %s" % e.code.name)
+                _fail_pin_error(ctx, e, "Failed to change PIN: %s")
 
         except ApduError as e:
             logger.error("Failed to change PIN", exc_info=e)
@@ -322,7 +327,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 ctx.fail("PIN is too long.")
             else:
-                ctx.fail("Failed to set PIN: %s" % e.code.name)
+                ctx.fail("Failed to set PIN: %s" % e.code)
 
     if not is_fips:
         if ctap2.info.options.get("clientPin"):
@@ -386,6 +391,9 @@ def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
 
 
 def _gen_creds(credman):
+    data = credman.get_metadata()
+    if data.get(CredentialManagement.RESULT.EXISTING_CRED_COUNT) == 0:
+        return  # No credentials
     for rp in credman.enumerate_rps():
         for cred in credman.enumerate_creds(rp[CredentialManagement.RESULT.RP_ID_HASH]):
             yield (
@@ -436,10 +444,8 @@ def _init_credman(ctx, pin):
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
     except CtapError as e:
-        if e.code == CtapError.ERR.PIN_INVALID:
-            ctx.fail("Wrong PIN.")
-        else:
-            raise
+        logger.error("Ctap error", exc_info=e)
+        _fail_pin_error(ctx, e, "PIN error: %s")
 
     return CredentialManagement(ctap2, client_pin.protocol, token)
 
@@ -536,10 +542,8 @@ def _init_bio(ctx, pin):
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.BIO_ENROLL)
     except CtapError as e:
-        if e.code == CtapError.ERR.PIN_INVALID:
-            ctx.fail("Wrong PIN.")
-        else:
-            raise
+        logger.error("Ctap error", exc_info=e)
+        _fail_pin_error(ctx, e, "PIN error: %s")
 
     return FPBioEnrollment(ctap2, client_pin.protocol, token)
 
