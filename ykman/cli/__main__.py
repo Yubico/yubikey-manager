@@ -329,12 +329,16 @@ def list_keys(ctx, serials, readers):
 
         for pid, _ in list_paths():
             if pid not in pids:
-                p = PID(pid)
-                click.echo(
-                    "{} [{}] <permission denied>".format(
-                        p.get_type().value, p.name.split("_", 1)[1].replace("_", "+")
+                try:
+                    p = PID(pid)
+                    click.echo(
+                        "{} [{}] <permission denied>".format(
+                            p.get_type().value,
+                            p.name.split("_", 1)[1].replace("_", "+"),
+                        )
                     )
-                )
+                except ValueError:
+                    logger.debug("Unsupported Yubico device with PID: %02x" % pid)
 
 
 COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)

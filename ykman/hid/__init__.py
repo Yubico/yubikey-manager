@@ -31,6 +31,9 @@ from yubikit.core import TRANSPORT
 from fido2.hid import list_descriptors, open_connection, CtapHidDevice
 from typing import List, Callable
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 if sys.platform.startswith("linux"):
@@ -65,4 +68,11 @@ class CtapYubiKeyDevice(YkmanDevice):
 
 
 def list_ctap_devices() -> List[CtapYubiKeyDevice]:
-    return [CtapYubiKeyDevice(d) for d in list_descriptors()]
+    devs = []
+    for desc in list_descriptors():
+        if desc.vid == 0x1050:
+            try:
+                devs.append(CtapYubiKeyDevice(desc))
+            except ValueError:
+                logger.debug("Unsupported Yubico device with PID: %02x" % desc.pid)
+    return devs
