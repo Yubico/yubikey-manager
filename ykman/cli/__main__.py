@@ -43,7 +43,7 @@ from ..device import (
     scan_devices,
     connect_to_device,
 )
-from .util import UpperCaseChoice, YkmanContextObject, ykman_group
+from .util import YkmanContextObject, ykman_group
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -195,7 +195,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     "-l",
     "--log-level",
     default=None,
-    type=UpperCaseChoice(ykman.logging_setup.LOG_LEVEL_NAMES),
+    type=click.Choice(ykman.logging_setup.LOG_LEVEL_NAMES, case_sensitive=False),
     help="Enable logging at given verbosity level.",
 )
 @click.option(

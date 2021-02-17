@@ -39,30 +39,7 @@ from contextlib import contextmanager
 from threading import Timer
 
 
-class UpperCaseChoice(click.Choice):
-    """
-    Support lowercase option values for uppercase options.
-    Does not support token normalization.
-    Choice options MUST be all uppercase.
-    """
-
-    def __init__(self, choices):
-        for v in choices:
-            if v.upper() != v:
-                raise ValueError("Choice not all uppercase: " + v)
-        click.Choice.__init__(self, choices)
-
-    def convert(self, value, param, ctx):
-        if value.upper() in self.choices:
-            return value.upper()
-        self.fail(
-            "invalid choice: %s. (choose from %s)" % (value, ", ".join(self.choices)),
-            param,
-            ctx,
-        )
-
-
-class EnumChoice(UpperCaseChoice):
+class EnumChoice(click.Choice):
     """
     Use an enum's member names as the definition for a choice option.
 
@@ -70,9 +47,10 @@ class EnumChoice(UpperCaseChoice):
     Underscores in enum names are translated to dashes in the option choice.
     """
 
-    def __init__(self, choices_enum):
-        super(EnumChoice, self).__init__(
-            [v.name.replace("_", "-") for v in choices_enum]
+    def __init__(self, choices_enum, hidden=[]):
+        super().__init__(
+            [v.name.replace("_", "-") for v in choices_enum if v not in hidden],
+            case_sensitive=False,
         )
         self.choices_enum = choices_enum
 
@@ -146,7 +124,7 @@ click_force_option = click.option(
 click_format_option = click.option(
     "-F",
     "--format",
-    type=UpperCaseChoice(["PEM", "DER"]),
+    type=click.Choice(["PEM", "DER"], case_sensitive=False),
     default="PEM",
     show_default=True,
     help="Encoding format.",

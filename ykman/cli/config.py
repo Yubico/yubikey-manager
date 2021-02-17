@@ -193,14 +193,14 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     "-e",
     "--enable",
     multiple=True,
-    type=EnumChoice(CAPABILITY),
+    type=EnumChoice(CAPABILITY, hidden=[CAPABILITY.HSMAUTH]),
     help="Enable applications.",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
-    type=EnumChoice(CAPABILITY),
+    type=EnumChoice(CAPABILITY, hidden=[CAPABILITY.HSMAUTH]),
     help="Disable applications.",
 )
 @click.option(
@@ -367,14 +367,14 @@ def usb(
     "-e",
     "--enable",
     multiple=True,
-    type=EnumChoice(CAPABILITY),
+    type=EnumChoice(CAPABILITY, hidden=[CAPABILITY.HSMAUTH]),
     help="Enable applications.",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
-    type=EnumChoice(CAPABILITY),
+    type=EnumChoice(CAPABILITY, hidden=[CAPABILITY.HSMAUTH]),
     help="Disable applications.",
 )
 @click.option("-a", "--enable-all", is_flag=True, help="Enable all applications.")
