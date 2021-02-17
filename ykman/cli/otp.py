@@ -39,6 +39,7 @@ from yubikit.core.otp import modhex_encode, modhex_decode, OtpConnection
 
 from .util import (
     ykman_group,
+    cli_fail,
     click_force_option,
     click_callback,
     click_parse_b32_key,
@@ -101,7 +102,7 @@ click_slot_argument = click.argument(
 
 def _failed_to_write_msg(ctx, exc_info):
     logger.error("Failed to write to device", exc_info=exc_info)
-    ctx.fail(
+    cli_fail(
         "Failed to write to the YubiKey. Make sure the device does not "
         "have restricted access."
     )
@@ -220,10 +221,10 @@ def ndef(ctx, slot, prefix):
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not info.has_transport(TRANSPORT.NFC):
-        ctx.fail("This YubiKey does not support NFC.")
+        cli_fail("This YubiKey does not support NFC.")
 
     if not state.is_configured(slot):
-        ctx.fail("Slot {} is empty.".format(slot))
+        cli_fail("Slot {} is empty.".format(slot))
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"])
@@ -242,7 +243,7 @@ def delete(ctx, slot, force):
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
-        ctx.fail("Not possible to delete an empty slot.")
+        cli_fail("Not possible to delete an empty slot.")
     force or click.confirm(
         "Do you really want to delete the configuration of slot {}?".format(slot),
         abort=True,
@@ -351,7 +352,7 @@ def yubiotp(
         if serial_public_id:
             serial = session.get_serial()
             if serial is None:
-                ctx.fail("Serial number not set, public ID must be provided")
+                cli_fail("Serial number not set, public ID must be provided")
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo("Using YubiKey serial as public ID: {}".format(public_id))
         elif force:
@@ -409,7 +410,7 @@ def yubiotp(
             click.echo("Upload to YubiCloud initiated successfully.")
         except PrepareUploadFailed as e:
             error_msg = "\n".join(e.messages())
-            ctx.fail("Upload to YubiCloud failed.\n" + error_msg)
+            cli_fail("Upload to YubiCloud failed.\n" + error_msg)
 
     force or click.confirm(
         "Program an OTP credential in slot {}?".format(slot), abort=True, err=True
@@ -608,7 +609,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 
     # Check that slot is not empty
     if not session.get_config_state().is_configured(slot):
-        ctx.fail("Cannot perform challenge-response on an empty slot.")
+        cli_fail("Cannot perform challenge-response on an empty slot.")
 
     if totp:  # Challenge omitted or timestamp
         if challenge is None:
@@ -748,7 +749,7 @@ def settings(
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
     if not session.get_config_state().is_configured(slot):
-        ctx.fail("Not possible to update settings on an empty slot.")
+        cli_fail("Not possible to update settings on an empty slot.")
 
     if new_access_code is None:
         if not delete_access_code:

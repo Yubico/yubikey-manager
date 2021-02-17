@@ -209,3 +209,8 @@ def prompt_timeout(timeout=0.5):
         yield timer.start()
     finally:
         timer.cancel()
+
+
+def cli_fail(message: str, code: int = 1):
+    click.echo("Error: %s" % message, err=True)
+    sys.exit(code)

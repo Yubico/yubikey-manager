@@ -61,6 +61,7 @@ from ..piv import (
 )
 from .util import (
     ykman_group,
+    cli_fail,
     click_force_option,
     click_format_option,
     click_postpone_execution,
@@ -165,14 +166,9 @@ def piv(ctx):
       Reset all PIV data and restore default settings:
       $ ykman piv reset
     """
-    try:
-        session = PivSession(ctx.obj["conn"])
-        ctx.obj["session"] = session
-        ctx.obj["pivman_data"] = get_pivman_data(session)
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            ctx.fail("The PIV application can't be found on this YubiKey.")
-        raise
+    session = PivSession(ctx.obj["conn"])
+    ctx.obj["session"] = session
+    ctx.obj["pivman_data"] = get_pivman_data(session)
 
 
 @piv.command()
@@ -245,7 +241,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo("\tPUK:\t12345678")
     except Exception as e:
         logger.error("Failed to set PIN retries", exc_info=e)
-        ctx.fail("Setting pin retries failed.")
+        cli_fail("Setting pin retries failed.")
 
 
 @access.command("change-pin")
@@ -264,7 +260,7 @@ def change_pin(ctx, pin, new_pin):
     session = ctx.obj["session"]
 
     if not pin:
-        pin = _prompt_pin(ctx, prompt="Enter the current PIN")
+        pin = _prompt_pin("Enter the current PIN")
     if not new_pin:
         new_pin = click_prompt(
             "Enter the new PIN",
@@ -289,10 +285,10 @@ def change_pin(ctx, pin, new_pin):
             logger.debug(
                 "Failed to change the PIN, %d tries left", attempts, exc_info=e
             )
-            ctx.fail("PIN change failed - %d tries left." % attempts)
+            cli_fail("PIN change failed - %d tries left." % attempts)
         else:
             logger.debug("PIN is blocked.", exc_info=e)
-            ctx.fail("PIN is blocked.")
+            cli_fail("PIN is blocked.")
 
 
 @access.command("change-puk")
@@ -309,7 +305,7 @@ def change_puk(ctx, puk, new_puk):
     """
     session = ctx.obj["session"]
     if not puk:
-        puk = _prompt_pin(ctx, prompt="Enter the current PUK")
+        puk = _prompt_pin("Enter the current PUK")
     if not new_puk:
         new_puk = click_prompt(
             "Enter the new PUK",
@@ -332,10 +328,10 @@ def change_puk(ctx, puk, new_puk):
         attempts = e.attempts_remaining
         if attempts:
             logger.debug("Failed to change PUK, %d tries left", attempts, exc_info=e)
-            ctx.fail("PUK change failed - %d tries left." % attempts)
+            cli_fail("PUK change failed - %d tries left." % attempts)
         else:
             logger.debug("PUK is blocked.", exc_info=e)
-            ctx.fail("PUK is blocked.")
+            cli_fail("PUK is blocked.")
 
 
 @access.command("change-management-key")
@@ -419,7 +415,7 @@ def change_management_key(
 
     # Touch not supported on NEO.
     if touch and session.version < (4, 0, 0):
-        ctx.fail("Require touch not supported on this YubiKey.")
+        cli_fail("Require touch not supported on this YubiKey.")
 
     # If an old stored key needs to be cleared, the PIN is needed.
     if not pin_verified and pivman.has_stored_key:
@@ -459,7 +455,7 @@ def change_management_key(
                 ctx.fail("New management key has the wrong format.")
 
     if len(new_management_key) != algorithm.key_len:
-        ctx.fail(
+        cli_fail(
             "Management key has the wrong length (expected %d bytes)"
             % algorithm.key_len
         )
@@ -470,7 +466,7 @@ def change_management_key(
         )
     except ApduError as e:
         logger.error("Failed to change management key", exc_info=e)
-        ctx.fail("Changing the management key failed.")
+        cli_fail("Changing the management key failed.")
 
 
 @access.command("unblock-pin")
@@ -495,10 +491,10 @@ def unblock_pin(ctx, puk, new_pin):
         attempts = e.attempts_remaining
         if attempts:
             logger.debug("Failed to unblock PIN, %d tries left", attempts, exc_info=e)
-            ctx.fail("PIN unblock failed - %d tries left." % attempts)
+            cli_fail("PIN unblock failed - %d tries left." % attempts)
         else:
             logger.debug("PUK is blocked.", exc_info=e)
-            ctx.fail("PUK is blocked.")
+            cli_fail("PUK is blocked.")
 
 
 @piv.group()
@@ -630,7 +626,7 @@ def attest(ctx, slot, certificate, format):
         cert = session.attest_key(slot)
     except ApduError as e:
         logger.error("Attestation failed", exc_info=e)
-        ctx.fail("Attestation failed.")
+        cli_fail("Attestation failed.")
     certificate.write(cert.public_bytes(encoding=format))
 
 
@@ -670,7 +666,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
         logger.debug("Public key read from YubiKey")
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            ctx.fail("No key stored in slot {}.".format(slot.name))
+            cli_fail("No key stored in slot {}.".format(slot.name))
     except NotSupportedError:
         try:  # Try attestation
             public_key = session.attest_key(slot).public_key()
@@ -684,14 +680,14 @@ def export(ctx, slot, public_key_output, format, verify, pin):
                     def do_verify():
                         with prompt_timeout():
                             if not check_key(session, slot, public_key):
-                                ctx.fail(
+                                cli_fail(
                                     "This public key is not tied to the private key in "
                                     "the {} slot.".format(slot.name)
                                 )
 
                     _verify_pin_if_needed(ctx, session, do_verify, pin)
             except ApduError:
-                ctx.fail("Unable to export public key from slot {}".format(slot.name))
+                cli_fail("Unable to export public key from slot {}".format(slot.name))
 
     key_encoding = format
     public_key_output.write(
@@ -770,7 +766,7 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
         def do_verify():
             with prompt_timeout():
                 if not check_key(session, slot, cert_to_import.public_key()):
-                    ctx.fail(
+                    cli_fail(
                         "This certificate is not tied to the private key in the "
                         "{} slot.".format(slot.name)
                     )
@@ -801,7 +797,7 @@ def export_certificate(ctx, format, slot, certificate):
         cert = session.get_certificate(slot)
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
-            ctx.fail("No certificate found.")
+            cli_fail("No certificate found.")
         else:
             logger.error("Failed to read certificate from slot %s", slot, exc_info=e)
     certificate.write(cert.public_bytes(encoding=format))
@@ -858,7 +854,7 @@ def generate_certificate(
             session.put_object(OBJECT_ID.CHUID, generate_chuid())
     except ApduError as e:
         logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
-        ctx.fail("Certificate generation failed.")
+        cli_fail("Certificate generation failed.")
 
 
 @cert.command("request")
@@ -897,7 +893,7 @@ def generate_certificate_signing_request(
         with prompt_timeout():
             csr = generate_csr(session, slot, public_key, subject)
     except ApduError:
-        ctx.fail("Certificate Signing Request generation failed.")
+        cli_fail("Certificate Signing Request generation failed.")
 
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
 
@@ -965,7 +961,7 @@ def read_object(ctx, pin, object_id, output):
             output.write(session.get_object(object_id))
         except ApduError as e:
             if e.sw == SW.FILE_NOT_FOUND:
-                ctx.fail("No data found.")
+                cli_fail("No data found.")
             elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 _verify_pin(ctx, session, pivman, pin)
                 do_read_object(retry=False)
@@ -1003,7 +999,7 @@ def write_object(ctx, pin, management_key, object_id, data):
         except ApduError as e:
             logger.debug("Failed writing object", exc_info=e)
             if e.sw == SW.INCORRECT_PARAMETERS:
-                ctx.fail("Something went wrong, is the object id valid?")
+                cli_fail("Something went wrong, is the object id valid?")
             raise
 
     do_write_object()
@@ -1037,9 +1033,7 @@ def generate_object(ctx, pin, management_key, object_id):
         ctx.fail("Unsupported object ID for generate.")
 
 
-def _prompt_management_key(
-    ctx, prompt="Enter a management key [blank to use default key]"
-):
+def _prompt_management_key(prompt="Enter a management key [blank to use default key]"):
     management_key = click_prompt(
         prompt, default="", hide_input=True, show_default=False
     )
@@ -1048,10 +1042,10 @@ def _prompt_management_key(
     try:
         return bytes.fromhex(management_key)
     except Exception:
-        ctx.fail("Management key has the wrong format.")
+        cli_fail("Management key has the wrong format.")
 
 
-def _prompt_pin(ctx, prompt="Enter PIN"):
+def _prompt_pin(prompt="Enter PIN"):
     return click_prompt(prompt, default="", hide_input=True, show_default=False)
 
 
@@ -1085,9 +1079,9 @@ def _ensure_authenticated(
 def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     if not pin:
         if no_prompt:
-            ctx.fail("PIN required.")
+            cli_fail("PIN required.")
         else:
-            pin = _prompt_pin(ctx)
+            pin = _prompt_pin()
 
     try:
         session.verify_pin(pin)
@@ -1109,11 +1103,11 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts > 0:
-            ctx.fail("PIN verification failed, {} tries left.".format(attempts))
+            cli_fail("PIN verification failed, {} tries left.".format(attempts))
         else:
-            ctx.fail("PIN is blocked.")
+            cli_fail("PIN is blocked.")
     except Exception:
-        ctx.fail("PIN verification failed.")
+        cli_fail("PIN verification failed.")
 
 
 def _verify_pin_if_needed(ctx, session, func, pin=None, no_prompt=False):
@@ -1134,9 +1128,9 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             ctx.fail("Management key required.")
         else:
             if mgm_key_prompt is None:
-                management_key = _prompt_management_key(ctx)
+                management_key = _prompt_management_key()
             else:
-                management_key = _prompt_management_key(ctx, mgm_key_prompt)
+                management_key = _prompt_management_key(mgm_key_prompt)
     try:
         try:
             key_type = session.get_management_key_metadata().key_type
@@ -1147,4 +1141,4 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             session.authenticate(key_type, management_key)
     except Exception as e:
         logger.error("Authentication with management key failed.", exc_info=e)
-        ctx.fail("Authentication with management key failed.")
+        cli_fail("Authentication with management key failed.")

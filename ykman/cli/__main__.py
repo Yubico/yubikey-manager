@@ -43,7 +43,7 @@ from ..device import (
     scan_devices,
     connect_to_device,
 )
-from .util import YkmanContextObject, ykman_group
+from .util import YkmanContextObject, ykman_group, cli_fail
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -106,17 +106,19 @@ def print_diagnostics(ctx, param, value):
     ctx.exit()
 
 
-def _disabled_interface(ctx, connections, cmd_name):
+def _disabled_interface(connections, cmd_name):
     interfaces = [USB_INTERFACE_MAPPING[c] for c in connections]
     req = ", ".join((t.name for t in interfaces))
-    click.echo(
-        "Command '{}' requires one of the following USB interfaces "
-        "to be enabled: '{}'.".format(cmd_name, req)
+    cli_fail(
+        (
+            "Command '{}' requires one of the following USB interfaces "
+            "to be enabled: '{}'.\n\n"
+            "Use 'ykman config usb' to set the enabled USB interfaces."
+        ).format(cmd_name, req)
     )
-    ctx.fail("Use 'ykman config usb' to set the enabled USB interfaces.")
 
 
-def _run_cmd_for_serial(ctx, cmd, connections, serial):
+def _run_cmd_for_serial(cmd, connections, serial):
     try:
         return retrying_connect(serial, connections)
     except ValueError:
@@ -124,10 +126,10 @@ def _run_cmd_for_serial(ctx, cmd, connections, serial):
             # Serial not found, see if it's among other interfaces in USB enabled:
             conn = connect_to_device(serial)[0]
             conn.close()
-            _disabled_interface(ctx, connections, cmd)
+            _disabled_interface(connections, cmd)
         except ValueError:
-            ctx.fail(
-                "Failed connecting to a YubiKey with serial: {}. "
+            cli_fail(
+                "Failed connecting to a YubiKey with serial: {}.\n"
                 "Make sure the application has the required "
                 "permissions.".format(serial)
             )
@@ -149,11 +151,11 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
                     return conn, dev, info
                 except Exception as e:
                     logger.error("Failure connecting to card", exc_info=e)
-                    ctx.fail("Failed to connect: {}".format(e))
+                    cli_fail("Failed to connect: {}".format(e))
             elif len(readers) > 1:
-                ctx.fail("Multiple YubiKeys on external readers detected.")
+                cli_fail("Multiple YubiKeys on external readers detected.")
             else:
-                ctx.fail("No YubiKey found on external reader.")
+                cli_fail("No YubiKey found on external reader.")
         else:
             ctx.fail("Not a CCID command.")
 
@@ -161,9 +163,9 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     devices, state = scan_devices()
     n_devs = sum(devices.values())
     if n_devs == 0:
-        ctx.fail("No YubiKey detected!")
+        cli_fail("No YubiKey detected!")
     if n_devs > 1:
-        ctx.fail(
+        cli_fail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
             "which one to use."
         )
@@ -173,7 +175,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     for c in connections:
         if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
             return retrying_connect(None, connections, state=state)
-    _disabled_interface(ctx, connections, cmd)
+    _disabled_interface(connections, cmd)
 
 
 @ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -271,7 +273,7 @@ def cli(ctx, device, log_level, log_file, reader):
             if not getattr(resolve, "items", None):
                 if device is not None:
                     resolve.items = _run_cmd_for_serial(
-                        ctx, subcmd.name, connections, device
+                        subcmd.name, connections, device
                     )
                 else:
                     resolve.items = _run_cmd_for_single(
@@ -360,16 +362,14 @@ def main():
         cli(obj={})
     except ApplicationNotAvailableError as e:
         logger.error("Error", exc_info=e)
-        click.echo(
+        cli_fail(
             "The functionality required for this command is not enabled or not "
             "available on this YubiKey."
         )
-        return 1
     except ValueError as e:
         logger.error("Error", exc_info=e)
-        click.echo("Error: " + str(e))
-        return 1
+        cli_fail(str(e))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

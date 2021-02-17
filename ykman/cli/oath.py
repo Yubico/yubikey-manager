@@ -28,6 +28,7 @@
 import click
 import logging
 from .util import (
+    cli_fail,
     click_force_option,
     click_postpone_execution,
     click_callback,
@@ -77,14 +78,9 @@ def oath(ctx):
       Set a password for the OATH application:
       $ ykman oath access change-password
     """
-    try:
-        session = OathSession(ctx.obj["conn"])
-        ctx.obj["session"] = session
-        ctx.obj["settings"] = Settings("oath")
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            ctx.fail("The OATH application can't be found on this YubiKey.")
-        raise
+    session = OathSession(ctx.obj["conn"])
+    ctx.obj["session"] = session
+    ctx.obj["settings"] = Settings("oath")
 
 
 @oath.command()
@@ -152,7 +148,7 @@ def _validate(ctx, key, remember):
             settings.write()
             click.echo("Password remembered.")
     except Exception:
-        ctx.fail("Authentication to the YubiKey failed. Wrong password?")
+        cli_fail("Authentication to the YubiKey failed. Wrong password?")
 
 
 def _init_session(ctx, password, remember, prompt="Enter the password"):
@@ -171,7 +167,7 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
             key = session.derive_key(password)
         _validate(ctx, key, remember)
     elif password:
-        ctx.fail("Password provided, but no password is set.")
+        cli_fail("Password provided, but no password is set.")
 
 
 @oath.group()
@@ -477,7 +473,7 @@ def _add_cred(ctx, data, touch, force):
         ctx.fail("Secret must be at least 2 bytes.")
 
     if touch and version < (4, 2, 6):
-        ctx.fail("Require touch is not supported on this YubiKey.")
+        cli_fail("Require touch is not supported on this YubiKey.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
         ctx.fail("Counter only supported for HOTP accounts.")
@@ -485,7 +481,7 @@ def _add_cred(ctx, data, touch, force):
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
         version < (4, 3, 1) or is_fips_version(version)
     ):
-        ctx.fail("Algorithm SHA512 not supported on this YubiKey.")
+        cli_fail("Algorithm SHA512 not supported on this YubiKey.")
 
     creds = session.list_credentials()
     cred_id = data.get_id()
@@ -504,16 +500,16 @@ def _add_cred(ctx, data, touch, force):
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
-        ctx.fail("Choose a name that is not a subset of an existing account.")
+        cli_fail("Choose a name that is not a subset of an existing account.")
 
     try:
         session.put_credential(data, touch)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            ctx.fail("No space left on the YubiKey for OATH accounts.")
+            cli_fail("No space left on the YubiKey for OATH accounts.")
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
-            ctx.fail("The command failed. Is there enough space on the YubiKey?")
+            cli_fail("The command failed. Is there enough space on the YubiKey?")
         else:
             raise
 
@@ -591,14 +587,14 @@ def code(ctx, show_hidden, query, single, password, remember):
                 code = session.calculate_code(cred)
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                ctx.fail("Touch account timed out!")
+                cli_fail("Touch account timed out!")
         entries[cred] = code
 
     elif single and len(creds) > 1:
         _error_multiple_hits(ctx, creds)
 
     elif single and len(creds) == 0:
-        ctx.fail("No matching account found.")
+        cli_fail("No matching account found.")
 
     if single and creds:
         if is_steam(cred):
@@ -660,7 +656,7 @@ def rename(ctx, query, name, force, password, remember):
 
         new_id = _format_cred_id(issuer, name, cred.oath_type, cred.period)
         if any(cred.id == new_id for cred in creds):
-            ctx.fail(
+            cli_fail(
                 "Another account with ID {} already exists on this YubiKey.".format(
                     new_id.decode()
                 )

@@ -44,6 +44,7 @@ from .util import (
     ykman_group,
     prompt_timeout,
 )
+from .util import cli_fail
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
 from ..device import is_fips_version
@@ -132,7 +133,7 @@ def reset(ctx, force):
 
     n_keys = len(list_ctap_devices())
     if n_keys > 1:
-        ctx.fail("Only one YubiKey can be connected to perform a reset.")
+        cli_fail("Only one YubiKey can be connected to perform a reset.")
 
     is_fips = is_fips_version(ctx.obj["info"].version)
 
@@ -177,7 +178,7 @@ def reset(ctx, force):
                 show_default=False,
             )
             if destroy_input != "OVERWRITE":
-                ctx.fail("Reset aborted by user.")
+                cli_fail("Reset aborted by user.")
 
         try:
             try_reset()
@@ -185,16 +186,16 @@ def reset(ctx, force):
         except ApduError as e:
             logger.error("Reset failed", exc_info=e)
             if e.code == SW.COMMAND_NOT_ALLOWED:
-                ctx.fail(
+                cli_fail(
                     "Reset failed. Reset must be triggered within 5 seconds after the "
                     "YubiKey is inserted."
                 )
             else:
-                ctx.fail("Reset failed.")
+                cli_fail("Reset failed.")
 
         except Exception as e:
             logger.error("Reset failed", exc_info=e)
-            ctx.fail("Reset failed.")
+            cli_fail("Reset failed.")
 
     else:
         try:
@@ -202,33 +203,33 @@ def reset(ctx, force):
         except CtapError as e:
             logger.error(e)
             if e.code == CtapError.ERR.ACTION_TIMEOUT:
-                ctx.fail(
+                cli_fail(
                     "Reset failed. You need to touch your YubiKey to confirm the reset."
                 )
             elif e.code == CtapError.ERR.NOT_ALLOWED:
-                ctx.fail(
+                cli_fail(
                     "Reset failed. Reset must be triggered within 5 seconds after the "
                     "YubiKey is inserted."
                 )
             else:
-                ctx.fail("Reset failed: %s" % e.code.name)
+                cli_fail("Reset failed: %s" % e.code.name)
         except Exception as e:
             logger.error(e)
-            ctx.fail("Reset failed.")
+            cli_fail("Reset failed.")
 
 
 def _fail_pin_error(ctx, e, other="%s"):
     if e.code == CtapError.ERR.PIN_INVALID:
-        ctx.fail("Wrong PIN.")
+        cli_fail("Wrong PIN.")
     elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
-        ctx.fail(
+        cli_fail(
             "PIN authentication is currently blocked. "
             "Remove and re-insert the YubiKey."
         )
     elif e.code == CtapError.ERR.PIN_BLOCKED:
-        ctx.fail("PIN is blocked.")
+        cli_fail("PIN is blocked.")
     else:
-        ctx.fail(other % e.code)
+        cli_fail(other % e.code)
 
 
 @fido.group("access")
@@ -259,10 +260,10 @@ def change_pin(ctx, pin, new_pin, u2f):
     is_fips = is_fips_version(ctx.obj["info"].version)
 
     if is_fips and not u2f:
-        ctx.fail("This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f option.")
+        cli_fail("This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f option.")
 
     if u2f and not is_fips:
-        ctx.fail(
+        cli_fail(
             "This is not a YubiKey FIPS, and therefore does not support a U2F PIN. "
             "To set the FIDO2 PIN, remove the --u2f option."
         )
@@ -305,18 +306,18 @@ def change_pin(ctx, pin, new_pin, u2f):
         except CtapError as e:
             logger.error("Failed to change PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                ctx.fail("New PIN is too long.")
+                cli_fail("New PIN is too long.")
             else:
                 _fail_pin_error(ctx, e, "Failed to change PIN: %s")
 
         except ApduError as e:
             logger.error("Failed to change PIN", exc_info=e)
             if e.code == SW.VERIFY_FAIL_NO_RETRY:
-                ctx.fail("Wrong PIN.")
+                cli_fail("Wrong PIN.")
             elif e.code == SW.AUTH_METHOD_BLOCKED:
-                ctx.fail("PIN is blocked.")
+                cli_fail("PIN is blocked.")
             else:
-                ctx.fail("Failed to change PIN: SW=%04x" % e.code)
+                cli_fail("Failed to change PIN: SW=%04x" % e.code)
 
     def set_pin(new_pin):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
@@ -325,9 +326,9 @@ def change_pin(ctx, pin, new_pin, u2f):
         except CtapError as e:
             logger.error("Failed to set PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                ctx.fail("PIN is too long.")
+                cli_fail("PIN is too long.")
             else:
-                ctx.fail("Failed to set PIN: %s" % e.code)
+                cli_fail("Failed to set PIN: %s" % e.code)
 
     if not is_fips:
         if ctap2.info.options.get("clientPin"):
@@ -335,7 +336,7 @@ def change_pin(ctx, pin, new_pin, u2f):
                 pin = _prompt_current_pin()
         else:
             if pin:
-                ctx.fail("There is no current PIN set. Use --new-pin to set one.")
+                cli_fail("There is no current PIN set. Use --new-pin to set one.")
 
     if not new_pin:
         new_pin = prompt_new_pin()
@@ -358,7 +359,7 @@ def unlock(ctx, pin):
 
     conn = ctx.obj["conn"]
     if not is_fips_version(ctx.obj["info"].version):
-        ctx.fail(
+        cli_fail(
             "This is not a YubiKey FIPS, and therefore does not support a U2F PIN."
         )
 
@@ -371,13 +372,13 @@ def unlock(ctx, pin):
     except ApduError as e:
         logger.error("PIN verification failed", exc_info=e)
         if e.code == SW.VERIFY_FAIL_NO_RETRY:
-            ctx.fail("Wrong PIN.")
+            cli_fail("Wrong PIN.")
         elif e.code == SW.AUTH_METHOD_BLOCKED:
-            ctx.fail("PIN is blocked.")
+            cli_fail("PIN is blocked.")
         elif e.code == SW.COMMAND_NOT_ALLOWED:
-            ctx.fail("PIN is not set.")
+            cli_fail("PIN is not set.")
         else:
-            ctx.fail("PIN verification failed: %s" % e.code.name)
+            cli_fail("PIN verification failed: %s" % e.code.name)
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
@@ -433,9 +434,9 @@ def _init_credman(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
 
     if not ctap2:
-        ctx.fail("Managing stored credentials not supported.")
+        cli_fail("Managing stored credentials not supported.")
     elif not ctap2.info.options.get("clientPin"):
-        ctx.fail("Managing credentials requires having a PIN. Set a PIN first.")
+        cli_fail("Managing credentials requires having a PIN. Set a PIN first.")
 
     if pin is None:
         pin = _prompt_current_pin(prompt="Enter your PIN")
@@ -486,7 +487,7 @@ def creds_delete(ctx, query, pin, force):
         or query.lower() in _format_cred(rp_id, user_id, user_name)
     ]
     if len(hits) == 0:
-        ctx.fail("No matches, nothing to be done.")
+        cli_fail("No matches, nothing to be done.")
     elif len(hits) == 1:
         (rp_id, cred_id, user_id, user_name) = hits[0]
         if force or click.confirm(
@@ -496,9 +497,9 @@ def creds_delete(ctx, query, pin, force):
                 credman.delete_cred(cred_id)
             except CtapError as e:
                 logger.error("Failed to delete resident credential", exc_info=e)
-                ctx.fail("Failed to delete resident credential.")
+                cli_fail("Failed to delete resident credential.")
     else:
-        ctx.fail("Multiple matches, make the query more specific.")
+        cli_fail("Multiple matches, make the query more specific.")
 
 
 @fido.group("fingerprints")
@@ -531,9 +532,9 @@ def _init_bio(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
 
     if not ctap2 or "bioEnroll" not in ctap2.info.options:
-        ctx.fail("Biometrics is not supported on this YubiKey.")
+        cli_fail("Biometrics is not supported on this YubiKey.")
     elif not ctap2.info.options.get("clientPin"):
-        ctx.fail("Biometrics requires having a PIN. Set a PIN first.")
+        cli_fail("Biometrics requires having a PIN. Set a PIN first.")
 
     if pin is None:
         pin = _prompt_current_pin(prompt="Enter your PIN")
@@ -595,7 +596,7 @@ def bio_enroll(ctx, name, pin):
             click.echo(e)
         except CtapError as e:
             logger.error("Failed to add fingerprint template", exc_info=e)
-            ctx.fail("Failed to add fingerprint: %s" % e.code.name)
+            cli_fail("Failed to add fingerprint: %s" % e.code.name)
     click.echo("Capture complete.")
     bio.set_name(template_id, name)
 
@@ -614,14 +615,14 @@ def bio_rename(ctx, template_id, name, pin):
     NAME        A short readable name for the fingerprint (eg. "Left thumb").
     """
     if len(name) >= 16:
-        ctx.fail("Fingerprint label must be <= 15 characters.")
+        ctx.fail("Fingerprint name must be a maximum of 15 characters")
 
     bio = _init_bio(ctx, pin)
     enrollments = bio.enumerate_enrollments()
 
     key = bytes.fromhex(template_id)
     if key not in enrollments:
-        ctx.fail("No fingerprint matching ID={}.".format(template_id))
+        cli_fail("No fingerprint matching ID={}.".format(template_id))
 
     bio.set_name(key, name)
 
@@ -643,7 +644,7 @@ def bio_delete(ctx, template_id, pin, force):
 
     key = bytes.fromhex(template_id)
     if key not in enrollments:
-        ctx.fail("No fingerprint matching ID={}".format(template_id))
+        cli_fail("No fingerprint matching ID={}".format(template_id))
 
     name = enrollments[key]
     if force or click.confirm("Delete fingerprint {}?".format(_format_fp(key, name))):
@@ -651,4 +652,4 @@ def bio_delete(ctx, template_id, pin, force):
             bio.remove_enrollment(key)
         except CtapError as e:
             logger.error("Failed to delete fingerprint template", exc_info=e)
-            ctx.fail("Failed to delete fingerprint: %s" % e.code.name)
+            cli_fail("Failed to delete fingerprint: %s" % e.code.name)
