@@ -1,5 +1,5 @@
-yubikey-manager (3.1.2+git) xenial; urgency=low
+yubikey-manager (4.0.0a3) xenial; urgency=low
 
   * Build for ppa
 
- -- Dain Nilsson <dain@yubico.com>  Fri, 22 Jan 2021 08:59:28 +0100
+ -- Dain Nilsson <dain@yubico.com>  Thu, 18 Feb 2021 17:00:12 +0100

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "yubikey-manager"
-version = "4.0.0-dev0"
+version = "4.0.0a3"
 description = "Tool for managing your YubiKey configuration."
 authors = ["Dain Nilsson <dain@yubico.com>"]
 license = "BSD"
