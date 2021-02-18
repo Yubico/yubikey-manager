@@ -52,7 +52,7 @@ class ApduError(CommandError):
         self.sw = sw
 
     def __str__(self):
-        return "APDU error: SW=0x{:04x}".format(self.sw)
+        return f"APDU error: SW=0x{self.sw:04x}"
 
 
 class ApduFormat(Enum):

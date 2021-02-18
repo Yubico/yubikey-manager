@@ -372,7 +372,7 @@ class OpenPgpController(object):
             self._app.send_apdu(0, INS.VERIFY, 0, pw, pin)
         except ApduError:
             pw_remaining = self.get_remaining_pin_tries()[pw - PW1]
-            raise ValueError("Invalid PIN, {} tries remaining.".format(pw_remaining))
+            raise ValueError(f"Invalid PIN, {pw_remaining} tries remaining.")
 
     def verify_pin(self, pin):
         self._verify(PW1, pin)
@@ -567,27 +567,19 @@ def get_openpgp_info(controller: OpenPgpController) -> str:
     lines.append("Application version: %d.%d.%d" % controller.version)
     lines.append("")
     retries = controller.get_remaining_pin_tries()
-    lines.append("PIN tries remaining: {}".format(retries.pin))
-    lines.append("Reset code tries remaining: {}".format(retries.reset))
-    lines.append("Admin PIN tries remaining: {}".format(retries.admin))
+    lines.append(f"PIN tries remaining: {retries.pin}")
+    lines.append(f"Reset code tries remaining: {retries.reset}")
+    lines.append(f"Admin PIN tries remaining: {retries.admin}")
     # Touch only available on YK4 and later
     if controller.version >= (4, 2, 6):
         lines.append("")
         lines.append("Touch policies")
-        lines.append(
-            "Signature key           {!s}".format(controller.get_touch(KEY_SLOT.SIG))
-        )
-        lines.append(
-            "Encryption key          {!s}".format(controller.get_touch(KEY_SLOT.ENC))
-        )
-        lines.append(
-            "Authentication key      {!s}".format(controller.get_touch(KEY_SLOT.AUT))
-        )
+        lines.append(f"Signature key           {controller.get_touch(KEY_SLOT.SIG)!s}")
+        lines.append(f"Encryption key          {controller.get_touch(KEY_SLOT.ENC)!s}")
+        lines.append(f"Authentication key      {controller.get_touch(KEY_SLOT.AUT)!s}")
         if controller.supports_attestation:
             lines.append(
-                "Attestation key         {!s}".format(
-                    controller.get_touch(KEY_SLOT.ATT)
-                )
+                f"Attestation key         {controller.get_touch(KEY_SLOT.ATT)!s}"
             )
 
     return "\n".join(lines)

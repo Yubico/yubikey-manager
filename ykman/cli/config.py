@@ -159,7 +159,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
 
     if generate:
         new_lock_code = os.urandom(16).hex()
-        click.echo("Using a randomly generated lock code: {}".format(new_lock_code))
+        click.echo(f"Using a randomly generated lock code: {new_lock_code}")
         force or click.confirm(
             "Lock configuration with this lock code?", abort=True, err=True
         )
@@ -308,12 +308,12 @@ def usb(
         if app & usb_supported:
             usb_enabled |= app
         else:
-            cli_fail("{} not supported over USB on this YubiKey.".format(app.name))
+            cli_fail(f"{app.name} not supported over USB on this YubiKey.")
     for app in disable:
         if app & usb_supported:
             usb_enabled &= ~app
         else:
-            cli_fail("{} not supported over USB on this YubiKey.".format(app.name))
+            cli_fail(f"{app.name} not supported over USB on this YubiKey.")
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
@@ -326,10 +326,8 @@ def usb(
         else "",
         "Set touch eject.\n" if touch_eject else "",
         "Disable touch eject.\n" if no_touch_eject else "",
-        "Set autoeject timeout to {}.\n".format(autoeject_timeout)
-        if autoeject_timeout
-        else "",
-        "Set challenge-response timeout to {}.\n".format(chalresp_timeout)
+        f"Set autoeject timeout to {autoeject_timeout}.\n" if autoeject_timeout else "",
+        f"Set challenge-response timeout to {chalresp_timeout}.\n"
         if chalresp_timeout
         else "",
     )
@@ -425,12 +423,12 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
         if app & nfc_supported:
             nfc_enabled |= app
         else:
-            cli_fail("{} not supported over NFC on this YubiKey.".format(app.name))
+            cli_fail(f"{app.name} not supported over NFC on this YubiKey.")
     for app in disable:
         if app & nfc_supported:
             nfc_enabled &= ~app
         else:
-            cli_fail("{} not supported over NFC on this YubiKey.".format(app.name))
+            cli_fail(f"{app.name} not supported over NFC on this YubiKey.")
 
     f_confirm = "{}{}Configure NFC?".format(
         "Enable {}.\n".format(", ".join([str(app) for app in enable]))
@@ -505,7 +503,7 @@ def _parse_mode_string(ctx, param, mode):
         mode_int = int(mode)
         return Mode.from_code(mode_int)
     except IndexError:
-        ctx.fail("Invalid mode: {}".format(mode_int))
+        ctx.fail(f"Invalid mode: {mode_int}")
     except ValueError:
         pass  # Not a numeric mode, parse string
 
@@ -526,7 +524,7 @@ def _parse_mode_string(ctx, param, mode):
             for t in filter(None, re.split(r"[+]+", mode.upper())):
                 interfaces |= _parse_interface_string(t)
     except ValueError:
-        ctx.fail("Invalid mode string: {}".format(mode))
+        ctx.fail(f"Invalid mode string: {mode}")
 
     return Mode(interfaces)
 
@@ -614,7 +612,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     if not force:
         if mode == my_mode:
-            cli_fail("Mode is already {}, nothing to do...".format(mode), 0)
+            cli_fail(f"Mode is already {mode}, nothing to do...", 0)
         elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
             cli_fail(
                 "Mode switching is not supported on this YubiKey!\n"
@@ -622,12 +620,10 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             )
         elif mode.interfaces not in interfaces_supported:
             cli_fail(
-                "Mode {} is not supported on this YubiKey!\n".format(mode)
+                f"Mode {mode} is not supported on this YubiKey!\n"
                 + "Use --force to attempt to set it anyway."
             )
-        force or click.confirm(
-            "Set mode of YubiKey to {}?".format(mode), abort=True, err=True
-        )
+        force or click.confirm(f"Set mode of YubiKey to {mode}?", abort=True, err=True)
 
     try:
         mgmt.set_mode(mode, chalresp_timeout, autoeject)

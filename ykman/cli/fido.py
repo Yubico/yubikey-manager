@@ -94,17 +94,13 @@ def info(ctx):
     ctap2 = ctx.obj.get("ctap2")
 
     if is_fips_version(ctx.obj["info"].version):
-        click.echo(
-            "FIPS Approved Mode: {}".format("Yes" if is_in_fips_mode(conn) else "No")
-        )
+        click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(conn) else 'No'}")
     elif ctap2:
         if ctap2.info.options.get("clientPin"):
             client_pin = ClientPin(ctap2)
             try:
                 click.echo(
-                    "PIN is set, with {} tries left.".format(
-                        client_pin.get_pin_retries()[0]
-                    )
+                    f"PIN is set, with {client_pin.get_pin_retries()[0]} tries left."
                 )
             except CtapError as e:
                 if e.code == CtapError.ERR.PIN_BLOCKED:
@@ -212,7 +208,7 @@ def reset(ctx, force):
                     "YubiKey is inserted."
                 )
             else:
-                cli_fail("Reset failed: %s" % e.code.name)
+                cli_fail(f"Reset failed: {e.code.name}")
         except Exception as e:
             logger.error(e)
             cli_fail("Reset failed.")
@@ -317,7 +313,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             elif e.code == SW.AUTH_METHOD_BLOCKED:
                 cli_fail("PIN is blocked.")
             else:
-                cli_fail("Failed to change PIN: SW=%04x" % e.code)
+                cli_fail(f"Failed to change PIN: SW={e.code:04x}")
 
     def set_pin(new_pin):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
@@ -328,7 +324,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 cli_fail("PIN is too long.")
             else:
-                cli_fail("Failed to set PIN: %s" % e.code)
+                cli_fail(f"Failed to set PIN: {e.code}")
 
     if not is_fips:
         if ctap2.info.options.get("clientPin"):
@@ -378,7 +374,7 @@ def unlock(ctx, pin):
         elif e.code == SW.COMMAND_NOT_ALLOWED:
             cli_fail("PIN is not set.")
         else:
-            cli_fail("PIN verification failed: %s" % e.code.name)
+            cli_fail(f"PIN verification failed: {e.code.name}")
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
@@ -388,7 +384,7 @@ def _prompt_current_pin(prompt="Enter your current PIN"):
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
     min_length = FIPS_PIN_MIN_LENGTH if is_fips else PIN_MIN_LENGTH
     if not pin or len(pin) < min_length:
-        ctx.fail("PIN must be over {} characters long".format(min_length))
+        ctx.fail(f"PIN must be over {min_length} characters long")
 
 
 def _gen_creds(credman):
@@ -406,7 +402,7 @@ def _gen_creds(credman):
 
 
 def _format_cred(rp_id, user_id, user_name):
-    return "{} {} {}".format(rp_id, user_id.hex(), user_name)
+    return f"{rp_id} {user_id.hex()} {user_name}"
 
 
 @fido.group("credentials")
@@ -491,7 +487,7 @@ def creds_delete(ctx, query, pin, force):
     elif len(hits) == 1:
         (rp_id, cred_id, user_id, user_name) = hits[0]
         if force or click.confirm(
-            "Delete credential {}?".format(_format_cred(rp_id, user_id, user_name))
+            f"Delete credential {_format_cred(rp_id, user_id, user_name)}?"
         ):
             try:
                 credman.delete_cred(cred_id)
@@ -550,7 +546,7 @@ def _init_bio(ctx, pin):
 
 
 def _format_fp(template_id, name):
-    return "{}{}".format(template_id.hex(), " ({})".format(name) if name else "")
+    return f"{template_id.hex()}{f' ({name})' if name else ''}"
 
 
 @bio.command("list")
@@ -565,7 +561,7 @@ def bio_list(ctx, pin):
     bio = _init_bio(ctx, pin)
 
     for t_id, name in bio.enumerate_enrollments().items():
-        click.echo("ID: {}".format(_format_fp(t_id, name)))
+        click.echo(f"ID: {_format_fp(t_id, name)}")
 
 
 @bio.command("add")
@@ -591,12 +587,12 @@ def bio_enroll(ctx, name, pin):
             template_id = enroller.capture()
             remaining = enroller.remaining
             if remaining:
-                click.echo("{} more scans needed.".format(remaining))
+                click.echo(f"{remaining} more scans needed.")
         except CaptureError as e:
             click.echo(e)
         except CtapError as e:
             logger.error("Failed to add fingerprint template", exc_info=e)
-            cli_fail("Failed to add fingerprint: %s" % e.code.name)
+            cli_fail(f"Failed to add fingerprint: {e.code.name}")
     click.echo("Capture complete.")
     bio.set_name(template_id, name)
 
@@ -622,7 +618,7 @@ def bio_rename(ctx, template_id, name, pin):
 
     key = bytes.fromhex(template_id)
     if key not in enrollments:
-        cli_fail("No fingerprint matching ID={}.".format(template_id))
+        cli_fail(f"No fingerprint matching ID={template_id}.")
 
     bio.set_name(key, name)
 
@@ -644,12 +640,12 @@ def bio_delete(ctx, template_id, pin, force):
 
     key = bytes.fromhex(template_id)
     if key not in enrollments:
-        cli_fail("No fingerprint matching ID={}".format(template_id))
+        cli_fail(f"No fingerprint matching ID={template_id}")
 
     name = enrollments[key]
-    if force or click.confirm("Delete fingerprint {}?".format(_format_fp(key, name))):
+    if force or click.confirm(f"Delete fingerprint {_format_fp(key, name)}?"):
         try:
             bio.remove_enrollment(key)
         except CtapError as e:
             logger.error("Failed to delete fingerprint template", exc_info=e)
-            cli_fail("Failed to delete fingerprint: %s" % e.code.name)
+            cli_fail(f"Failed to delete fingerprint: {e.code.name}")

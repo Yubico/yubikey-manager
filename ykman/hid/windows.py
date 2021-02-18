@@ -55,7 +55,7 @@ if platform.architecture()[0] == "64bit":
 elif platform.architecture()[0] == "32bit":
     SETUPAPI_PACK = 1
 else:
-    raise OSError("Unknown architecture: %s" % platform.architecture()[0])
+    raise OSError(f"Unknown architecture: {platform.architecture()[0]}")
 
 
 class DeviceInterfaceData(ctypes.Structure):

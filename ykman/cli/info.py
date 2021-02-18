@@ -91,13 +91,13 @@ def print_app_status_table(supported_apps, enabled_apps):
 
     for row in rows:
         for idx, c in enumerate(row):
-            f_table += "{}\t".format(c.ljust(column_l[idx]))
+            f_table += f"{c.ljust(column_l[idx])}\t"
         f_table += "\n"
 
     if nfc_supported:
-        click.echo("{}\t{}\t{}".format(f_apps, f_USB, f_NFC))
+        click.echo(f"{f_apps}\t{f_USB}\t{f_NFC}")
     else:
-        click.echo("{}".format(f_apps))
+        click.echo(f"{f_apps}")
     click.echo(f_table, nl=False)
 
 
@@ -130,16 +130,12 @@ def _check_fips_status(pid, info):
     fips_status = get_overall_fips_status(pid, info)
     click.echo()
 
-    click.echo(
-        "FIPS Approved Mode: {}".format("Yes" if all(fips_status.values()) else "No")
-    )
+    click.echo(f"FIPS Approved Mode: {'Yes' if all(fips_status.values()) else 'No'}")
 
     status_keys = list(fips_status.keys())
     status_keys.sort()
     for status_key in status_keys:
-        click.echo(
-            "  {}: {}".format(status_key, "Yes" if fips_status[status_key] else "No")
-        )
+        click.echo(f"  {status_key}: {'Yes' if fips_status[status_key] else 'No'}")
 
 
 @click.option(
@@ -167,19 +163,19 @@ def info(ctx, check_fips):
         key_type = pid.get_type()
     device_name = get_name(info, key_type)
 
-    click.echo("Device type: {}".format(device_name))
+    click.echo(f"Device type: {device_name}")
     if info.serial:
-        click.echo("Serial number: {}".format(info.serial))
+        click.echo(f"Serial number: {info.serial}")
     if info.version:
         f_version = ".".join(str(x) for x in info.version)
-        click.echo("Firmware version: {}".format(f_version))
+        click.echo(f"Firmware version: {f_version}")
     else:
         click.echo(
             "Firmware version: Uncertain, re-run with only one YubiKey connected"
         )
 
     if info.form_factor:
-        click.echo("Form factor: {!s}".format(info.form_factor))
+        click.echo(f"Form factor: {info.form_factor!s}")
     if interfaces:
         click.echo(
             "Enabled USB interfaces: {}".format(
@@ -194,7 +190,7 @@ def info(ctx, check_fips):
             if info.config.enabled_capabilities.get(TRANSPORT.NFC)
             else "disabled"
         )
-        click.echo("NFC transport is {}.".format(f_nfc))
+        click.echo(f"NFC transport is {f_nfc}.")
     if info.is_locked:
         click.echo("Configured capabilities are protected by a lock code.")
     click.echo()

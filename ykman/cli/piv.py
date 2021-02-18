@@ -433,9 +433,7 @@ def change_management_key(
         if protect or generate:
             new_management_key = generate_random_management_key(algorithm)
             if not protect:
-                click.echo(
-                    "Generated management key: {}".format(new_management_key.hex())
-                )
+                click.echo(f"Generated management key: {new_management_key.hex()}")
         elif force:
             ctx.fail(
                 "New management key not given. Please remove the --force "
@@ -666,7 +664,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
         logger.debug("Public key read from YubiKey")
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            cli_fail("No key stored in slot {}.".format(slot.name))
+            cli_fail(f"No key stored in slot {slot.name}.")
     except NotSupportedError:
         try:  # Try attestation
             public_key = session.attest_key(slot).public_key()
@@ -687,7 +685,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
 
                     _verify_pin_if_needed(ctx, session, do_verify, pin)
             except ApduError:
-                cli_fail("Unable to export public key from slot {}".format(slot.name))
+                cli_fail(f"Unable to export public key from slot {slot.name}")
 
     key_encoding = format
     public_key_output.write(
@@ -1103,7 +1101,7 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts > 0:
-            cli_fail("PIN verification failed, {} tries left.".format(attempts))
+            cli_fail(f"PIN verification failed, {attempts} tries left.")
         else:
             cli_fail("PIN is blocked.")
     except Exception:

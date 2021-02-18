@@ -159,10 +159,10 @@ class TestOATH:
     def test_oath_totp_steam_code(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "-o", "TOTP", "Steam:steam-cred", "abba")
         cred = ykman_cli("oath", "accounts", "code", "-s", "steam-cred").output.strip()
-        assert 5, len(cred) == "cred wrong length: %r" % cred
-        assert all(c in STEAM_CHAR_TABLE for c in cred), (
-            "%r contains non-steam characters" % cred
-        )
+        assert 5, len(cred) == f"cred wrong length: {cred!r}"
+        assert all(
+            c in STEAM_CHAR_TABLE for c in cred
+        ), f"{cred!r} contains non-steam characters"
 
     def test_oath_delete(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "delete-me", "abba")

@@ -43,15 +43,15 @@ LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
 
 
 def log_sys_info(log):
-    log("Python: %s" % sys.version)
-    log("Platform: %s" % sys.platform)
+    log(f"Python: {sys.version}")
+    log(f"Platform: {sys.platform}")
     if sys.platform == "win32":
         w = sys.getwindowsversion()
-        log("Windows version: (%s, %s, %s)" % (w.major, w.minor, w.build))
+        log(f"Windows version: ({w.major}, {w.minor}, {w.build})")
         is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
     else:
         is_admin = os.getuid() == 0
-    log("Running as admin: %s" % is_admin)
+    log(f"Running as admin: {is_admin}")
 
 
 def setup(log_level_name, log_file=None):

@@ -81,7 +81,7 @@ class PrepareUploadError(Enum):
 class PrepareUploadFailed(Exception):
     def __init__(self, status, content, error_ids):
         super(PrepareUploadFailed, self).__init__(
-            "Upload to YubiCloud failed with status {}: {}".format(status, content)
+            f"Upload to YubiCloud failed with status {status}: {content}"
         )
         self.status = status
         self.content = content

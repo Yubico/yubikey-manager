@@ -171,9 +171,7 @@ class MacHidOtpConnection(OtpConnection):
         )
         if not device_entry:
             raise OSError(
-                "Device ID {} does not match any HID device on the system".format(
-                    device_id
-                )
+                f"Device ID {device_id} does not match any HID device on the system"
             )
 
         self.handle = iokit.IOHIDDeviceCreate(K_CF_ALLOCATOR_DEFAULT, device_entry)
@@ -184,7 +182,7 @@ class MacHidOtpConnection(OtpConnection):
         # Open device
         result = iokit.IOHIDDeviceOpen(self.handle, 0)
         if result != K_IO_RETURN_SUCCESS:
-            raise OSError("Failed to open device for communication: {}".format(result))
+            raise OSError(f"Failed to open device for communication: {result}")
 
     def close(self):
         if self.handle:
@@ -201,7 +199,7 @@ class MacHidOtpConnection(OtpConnection):
 
         # Non-zero status indicates failure
         if result != K_IO_RETURN_SUCCESS:
-            raise OSError("Failed to read report from device: {}".format(result))
+            raise OSError(f"Failed to read report from device: {result}")
 
         return buf.raw[:]
 
@@ -213,7 +211,7 @@ class MacHidOtpConnection(OtpConnection):
 
         # Non-zero status indicates failure
         if result != K_IO_RETURN_SUCCESS:
-            raise OSError("Failed to write report to device: {}".format(result))
+            raise OSError(f"Failed to write report to device: {result}")
 
 
 def get_int_property(dev, key):
@@ -225,7 +223,7 @@ def get_int_property(dev, key):
         return None
 
     if cf.CFGetTypeID(type_ref) != cf.CFNumberGetTypeID():
-        raise OSError("Expected number type, got {}".format(cf.CFGetTypeID(type_ref)))
+        raise OSError(f"Expected number type, got {cf.CFGetTypeID(type_ref)}")
 
     out = ctypes.c_int32()
     ret = cf.CFNumberGetValue(type_ref, K_CF_NUMBER_SINT32_TYPE, ctypes.byref(out))
@@ -251,7 +249,7 @@ def get_device_id(device_handle):
         io_service_obj, ctypes.byref(entry_id)
     )
     if result != K_IO_RETURN_SUCCESS:
-        raise OSError("Failed to obtain IORegistry entry ID: {}".format(result))
+        raise OSError(f"Failed to obtain IORegistry entry ID: {result}")
 
     return entry_id.value
 

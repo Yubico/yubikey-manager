@@ -57,7 +57,7 @@ def get_or_fail(data):
         if key in data:
             return data[key]
         raise ValueError(
-            "Invalid value: {}. Must be one of: {}".format(key, ", ".join(data.keys()))
+            f"Invalid value: {key}. Must be one of: {', '.join(data.keys())}"
         )
 
     return inner
@@ -68,9 +68,7 @@ def int_in_range(minval, maxval):
         intval = int(val)
         if minval <= intval <= maxval:
             return intval
-        raise ValueError(
-            "Invalid value: {}. Must be in range {}-{}".format(intval, minval, maxval)
-        )
+        raise ValueError(f"Invalid value: {intval}. Must be in range {minval}-{maxval}")
 
     return inner
 
@@ -220,7 +218,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
     policy_name = policy.name.lower().replace("_", "-")
 
     if policy not in controller.supported_touch_policies:
-        cli_fail("Touch policy {} not supported by this YubiKey.".format(policy_name))
+        cli_fail(f"Touch policy {policy_name} not supported by this YubiKey.")
 
     if key == KEY_SLOT.ATT and not controller.supports_attestation:
         cli_fail("Attestation is not supported by this YubiKey.")
@@ -229,7 +227,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
         admin_pin = click_prompt("Enter admin PIN", hide_input=True)
 
     if force or click.confirm(
-        "Set touch policy of {} key to {}?".format(key.value.lower(), policy_name),
+        f"Set touch policy of {key.value.lower()} key to {policy_name}?",
         abort=True,
         err=True,
     ):
@@ -345,7 +343,7 @@ def export_certificate(ctx, key, format, certificate):
     try:
         cert = controller.read_certificate(key)
     except ValueError:
-        cli_fail("Failed to read certificate from {}".format(key.name))
+        cli_fail(f"Failed to read certificate from {key.name}")
     certificate.write(cert.public_bytes(encoding=format))
 
 

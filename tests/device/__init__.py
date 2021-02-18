@@ -58,7 +58,7 @@ def register_condition(cond):
 def transport(required_transport):
     return condition(
         lambda transport: transport == required_transport,
-        "Requires %s" % (required_transport.name),
+        f"Requires {required_transport.name}",
     )
 
 
@@ -66,7 +66,7 @@ def transport(required_transport):
 def has_transport(transport):
     return condition(
         lambda info: info.supported_capabilities.get(transport),
-        "Requires %s" % (transport.name),
+        f"Requires {transport.name}",
     )
 
 
@@ -75,7 +75,7 @@ def capability(capability):
     return condition(
         lambda info, device: capability
         in info.config.enabled_capabilities.get(device.transport, []),
-        "Requires %s" % capability,
+        f"Requires {capability}",
     )
 
 
@@ -85,7 +85,7 @@ def min_version(major, minor=0, micro=0):
         vers = major
     else:
         vers = (major, minor, micro)
-    return condition(lambda version: version >= vers, "Version < %s" % (vers,))
+    return condition(lambda version: version >= vers, f"Version < {vers}")
 
 
 @register_condition
@@ -94,12 +94,11 @@ def max_version(major, minor=0, micro=0):
         vers = major
     else:
         vers = (major, minor, micro)
-    return condition(lambda version: version <= vers, "Version > %s" % (vers,))
+    return condition(lambda version: version <= vers, f"Version > {vers}")
 
 
 @register_condition
 def fips(status=True):
     return condition(
-        lambda version: status == is_fips_version(version),
-        "Requires FIPS = %s" % status,
+        lambda version: status == is_fips_version(version), f"Requires FIPS = {status}",
     )

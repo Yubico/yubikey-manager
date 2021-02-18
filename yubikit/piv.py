@@ -109,8 +109,8 @@ class KEY_TYPE(IntEnum):
                 return cls.ECCP256
             elif curve_name == "secp384r1":
                 return cls.ECCP384
-            raise ValueError("Unsupported EC curve: %s" % curve_name)
-        raise ValueError("Unsupported key type: %s" % type(key).__name__)
+            raise ValueError(f"Unsupported EC curve: {curve_name}")
+        raise ValueError(f"Unsupported key type: {type(key).__name__}")
 
 
 @unique

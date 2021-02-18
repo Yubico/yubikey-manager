@@ -350,7 +350,7 @@ def get_piv_info(session: PivSession) -> str:
         # Largest possible number of PIN tries to get back is 15
         tries = session.get_pin_attempts()
         tries_str = "15 or more." if tries == 15 else str(tries)
-    lines.append("PIN tries remaining: %s" % tries_str)
+    lines.append(f"PIN tries remaining: {tries_str}")
     if pivman.puk_blocked:
         lines.append("PUK blocked.")
 
@@ -361,7 +361,7 @@ def get_piv_info(session: PivSession) -> str:
         key_type = metadata.key_type
     except NotSupportedError:
         key_type = MANAGEMENT_KEY_TYPE.TDES
-    lines.append("Management key algorithm: %s" % key_type.name)
+    lines.append(f"Management key algorithm: {key_type.name}")
 
     if pivman.has_derived_key:
         lines.append("Management key is derived from PIN.")
@@ -383,7 +383,7 @@ def get_piv_info(session: PivSession) -> str:
     lines.append("CCC: \t" + ccc)
 
     for (slot, cert) in list_certificates(session).items():
-        lines.append("Slot %02x:" % slot)
+        lines.append(f"Slot {slot:02x}:")
 
         if isinstance(cert, x509.Certificate):
             try:
@@ -402,7 +402,7 @@ def get_piv_info(session: PivSession) -> str:
             except ValueError as e:
                 # Malformed certificates may throw ValueError
                 logger.debug("Failed parsing certificate", exc_info=e)
-                lines.append("\tMalformed certificate: {}".format(e))
+                lines.append(f"\tMalformed certificate: {e}")
                 continue
 
             fingerprint = cert.fingerprint(hashes.SHA256()).hex()
@@ -422,19 +422,19 @@ def get_piv_info(session: PivSession) -> str:
                 logger.debug("Failed reading not_valid_after", exc_info=e)
                 not_after = None
             # Print out everything
-            lines.append("\tAlgorithm:\t%s" % key_algo)
+            lines.append(f"\tAlgorithm:\t{key_algo}")
             if print_dn:
-                lines.append("\tSubject DN:\t%s" % subject_dn)
-                lines.append("\tIssuer DN:\t%s" % issuer_dn)
+                lines.append(f"\tSubject DN:\t{subject_dn}")
+                lines.append(f"\tIssuer DN:\t{issuer_dn}")
             else:
-                lines.append("\tSubject CN:\t%s" % subject_cn)
-                lines.append("\tIssuer CN:\t%s" % issuer_cn)
-            lines.append("\tSerial:\t\t%s" % serial)
-            lines.append("\tFingerprint:\t%s" % fingerprint)
+                lines.append(f"\tSubject CN:\t{subject_cn}")
+                lines.append(f"\tIssuer CN:\t{issuer_cn}")
+            lines.append(f"\tSerial:\t\t{serial}")
+            lines.append(f"\tFingerprint:\t{fingerprint}")
             if not_before:
-                lines.append("\tNot before:\t%s" % not_before)
+                lines.append(f"\tNot before:\t{not_before}")
             if not_after:
-                lines.append("\tNot after:\t%s" % not_after)
+                lines.append(f"\tNot after:\t{not_after}")
         else:
             lines.append("\tError: Failed to parse certificate.")
 

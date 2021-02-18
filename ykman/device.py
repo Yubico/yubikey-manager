@@ -118,7 +118,7 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
                     counter[PID(pid)] += 1
                     fingerprints.add(path)
                 except ValueError:  # Unsupported PID
-                    logger.debug("Unsupported Yubico device with PID: %02x" % pid)
+                    logger.debug(f"Unsupported Yubico device with PID: {pid:02x}")
         merged.update(counter)
     return merged, hash(tuple(fingerprints))
 

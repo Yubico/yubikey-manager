@@ -78,7 +78,7 @@ def parse_hex(length):
     def inner(ctx, param, val):
         val = bytes.fromhex(val)
         if len(val) != length:
-            raise ValueError("Must be exactly {} bytes.".format(length))
+            raise ValueError(f"Must be exactly {length} bytes.")
         return val
 
     return inner
@@ -111,7 +111,7 @@ def _failed_to_write_msg(ctx, exc_info):
 def _confirm_slot_overwrite(slot_state, slot):
     if slot_state.is_configured(slot):
         click.confirm(
-            "Slot {} is already configured. Overwrite configuration?".format(slot),
+            f"Slot {slot} is already configured. Overwrite configuration?",
             abort=True,
             err=True,
         )
@@ -181,13 +181,11 @@ def info(ctx):
     slot1 = state.is_configured(1)
     slot2 = state.is_configured(2)
 
-    click.echo("Slot 1: {}".format(slot1 and "programmed" or "empty"))
-    click.echo("Slot 2: {}".format(slot2 and "programmed" or "empty"))
+    click.echo(f"Slot 1: {slot1 and 'programmed' or 'empty'}")
+    click.echo(f"Slot 2: {slot2 and 'programmed' or 'empty'}")
 
     if is_fips_version(session.version):
-        click.echo(
-            "FIPS Approved Mode: {}".format("Yes" if is_in_fips_mode(session) else "No")
-        )
+        click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(session) else 'No'}")
 
 
 @otp.command()
@@ -224,7 +222,7 @@ def ndef(ctx, slot, prefix):
         cli_fail("This YubiKey does not support NFC.")
 
     if not state.is_configured(slot):
-        cli_fail("Slot {} is empty.".format(slot))
+        cli_fail(f"Slot {slot} is empty.")
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"])
@@ -245,11 +243,11 @@ def delete(ctx, slot, force):
     if not force and not state.is_configured(slot):
         cli_fail("Not possible to delete an empty slot.")
     force or click.confirm(
-        "Do you really want to delete the configuration of slot {}?".format(slot),
+        f"Do you really want to delete the configuration of slot {slot}?",
         abort=True,
         err=True,
     )
-    click.echo("Deleting the configuration in slot {}...".format(slot))
+    click.echo(f"Deleting the configuration in slot {slot}...")
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
     except CommandError as e:
@@ -354,7 +352,7 @@ def yubiotp(
             if serial is None:
                 cli_fail("Serial number not set, public ID must be provided")
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
-            click.echo("Using YubiKey serial as public ID: {}".format(public_id))
+            click.echo(f"Using YubiKey serial as public ID: {public_id}")
         elif force:
             ctx.fail(
                 "Public ID not given. Please remove the --force flag, or "
@@ -371,9 +369,7 @@ def yubiotp(
     if not private_id:
         if generate_private_id:
             private_id = os.urandom(6)
-            click.echo(
-                "Using a randomly generated private ID: {}".format(private_id.hex())
-            )
+            click.echo(f"Using a randomly generated private ID: {private_id.hex()}")
         elif force:
             ctx.fail(
                 "Private ID not given. Please remove the --force flag, or "
@@ -386,7 +382,7 @@ def yubiotp(
     if not key:
         if generate_key:
             key = os.urandom(16)
-            click.echo("Using a randomly generated secret key: {}".format(key.hex()))
+            click.echo(f"Using a randomly generated secret key: {key.hex()}")
         elif force:
             ctx.fail(
                 "Secret key not given. Please remove the --force flag, or "
@@ -413,7 +409,7 @@ def yubiotp(
             cli_fail("Upload to YubiCloud failed.\n" + error_msg)
 
     force or click.confirm(
-        "Program an OTP credential in slot {}?".format(slot), abort=True, err=True
+        f"Program an OTP credential in slot {slot}?", abort=True, err=True
     )
 
     try:
@@ -556,16 +552,14 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
         else:
             if generate:
                 key = os.urandom(20)
-                click.echo("Using a randomly generated key: {}".format(key.hex()))
+                click.echo(f"Using a randomly generated key: {key.hex()}")
             else:
                 key = click_prompt("Enter a secret key")
                 key = parse_oath_key(key)
 
     cred_type = "TOTP" if totp else "challenge-response"
     force or click.confirm(
-        "Program a {} credential in slot {}?".format(cred_type, slot),
-        abort=True,
-        err=True,
+        f"Program a {cred_type} credential in slot {slot}?", abort=True, err=True,
     )
     try:
         session.put_configuration(
@@ -675,7 +669,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
                 click.echo(e)
 
     force or click.confirm(
-        "Program a HOTP credential in slot {}?".format(slot), abort=True, err=True
+        f"Program a HOTP credential in slot {slot}?", abort=True, err=True
     )
     try:
         session.put_configuration(
@@ -769,7 +763,7 @@ def settings(
         abort=True,
         err=True,
     )
-    click.echo("Updating settings for slot {}...".format(slot))
+    click.echo(f"Updating settings for slot {slot}...")
 
     pacing_bits = int(pacing or "0") // 20
     pacing_10ms = bool(pacing_bits & 1)

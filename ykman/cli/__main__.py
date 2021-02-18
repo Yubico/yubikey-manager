@@ -102,7 +102,7 @@ def retrying_connect(serial, connections, attempts=10, state=None):
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo("YubiKey Manager (ykman) version: {}".format(__version__))
+    click.echo(f"YubiKey Manager (ykman) version: {__version__}")
     ctx.exit()
 
 
@@ -158,7 +158,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
                     return conn, dev, info
                 except Exception as e:
                     logger.error("Failure connecting to card", exc_info=e)
-                    cli_fail("Failed to connect: {}".format(e))
+                    cli_fail(f"Failed to connect: {e}")
             elif len(readers) > 1:
                 cli_fail("Multiple YubiKeys on external readers detected.")
             else:
@@ -335,7 +335,7 @@ def list_keys(ctx, serials, readers):
                     get_name(dev_info, dev.pid.get_type()),
                     "%d.%d.%d" % dev_info.version if dev_info.version else "unknown",
                     dev.pid.name.split("_", 1)[1].replace("_", "+"),
-                    " Serial: {}".format(dev_info.serial) if dev_info.serial else "",
+                    f" Serial: {dev_info.serial}" if dev_info.serial else "",
                 )
             )
         pids.add(dev.pid)

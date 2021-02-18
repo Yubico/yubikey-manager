@@ -91,7 +91,7 @@ def info(ctx):
     """
     session = ctx.obj["session"]
     version = session.version
-    click.echo("OATH version: {}.{}.{}".format(version[0], version[1], version[2]))
+    click.echo(f"OATH version: {version[0]}.{version[1]}.{version[2]}")
     click.echo("Password protection: " + ("enabled" if session.locked else "disabled"))
 
     keys = ctx.obj["settings"].get("keys", {})
@@ -99,7 +99,7 @@ def info(ctx):
         click.echo("The password for this YubiKey is remembered by ykman.")
 
     if is_fips_version(version):
-        click.echo("FIPS Approved Mode: {}".format("Yes" if session.locked else "No"))
+        click.echo(f"FIPS Approved Mode: {'Yes' if session.locked else 'No'}")
 
 
 @oath.command()
@@ -538,9 +538,9 @@ def list(ctx, show_hidden, oath_type, period, password, remember):
     for cred in creds:
         click.echo(_string_id(cred), nl=False)
         if oath_type:
-            click.echo(", {}".format(cred.oath_type.name), nl=False)
+            click.echo(f", {cred.oath_type.name}", nl=False)
         if period:
-            click.echo(", {}".format(cred.period), nl=False)
+            click.echo(f", {cred.period}", nl=False)
         click.echo()
 
 
@@ -663,13 +663,11 @@ def rename(ctx, query, name, force, password, remember):
             )
         if force or (
             click.confirm(
-                "Rename account: {} ?".format(_string_id(cred)),
-                default=False,
-                err=True,
+                f"Rename account: {_string_id(cred)} ?", default=False, err=True,
             )
         ):
             session.rename_credential(cred.id, name, issuer)
-            click.echo("Renamed {} to {}.".format(_string_id(cred), new_id.decode()))
+            click.echo(f"Renamed {_string_id(cred)} to {new_id.decode()}.")
         else:
             click.echo("Rename aborted by user.")
 
@@ -701,13 +699,11 @@ def delete(ctx, query, force, password, remember):
         cred = hits[0]
         if force or (
             click.confirm(
-                "Delete account: {} ?".format(_string_id(cred)),
-                default=False,
-                err=True,
+                f"Delete account: {_string_id(cred)} ?", default=False, err=True,
             )
         ):
             session.delete_credential(cred.id)
-            click.echo("Deleted {}.".format(_string_id(cred)))
+            click.echo(f"Deleted {_string_id(cred)}.")
         else:
             click.echo("Deletion aborted by user.")
 

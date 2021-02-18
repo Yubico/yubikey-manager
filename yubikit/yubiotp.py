@@ -292,9 +292,7 @@ def _shorten_hmac_key(key: bytes) -> bytes:
     if len(key) > SHA1_BLOCK_SIZE:
         key = sha1(key).digest()  # nosec
     elif len(key) > HMAC_KEY_SIZE:
-        raise NotSupportedError(
-            "Key lengths > {} bytes not supported".format(HMAC_KEY_SIZE)
-        )
+        raise NotSupportedError(f"Key lengths > {HMAC_KEY_SIZE} bytes not supported")
     return key
 
 
@@ -432,7 +430,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
         fixed_modhex2: bool = True,
     ) -> Cfg:
         if len(token_id) > FIXED_SIZE:
-            raise ValueError("token_id must be <= {} bytes".format(FIXED_SIZE))
+            raise ValueError(f"token_id must be <= {FIXED_SIZE} bytes")
 
         self._fixed = token_id
         self._update_flags(CFGFLAG.OATH_FIXED_MODHEX1, fixed_modhex1)
@@ -442,9 +440,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
     def imf(self: Cfg, imf: int) -> Cfg:
         if not (imf % 16 == 0 or 0 <= imf <= 0xFFFF0):
             raise ValueError(
-                "imf should be between {} and {}, evenly dividable by 16".format(
-                    0, 0xFFFF0
-                )
+                f"imf should be between {0} and {1048560}, evenly dividable by 16"
             )
         self._uid = self._uid[:4] + struct.pack(">H", imf >> 4)
         return self
@@ -474,13 +470,13 @@ class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
         super(YubiOtpSlotConfiguration, self).__init__()
 
         if len(fixed) > FIXED_SIZE:
-            raise ValueError("fixed must be <= {} bytes".format(FIXED_SIZE))
+            raise ValueError(f"fixed must be <= {FIXED_SIZE} bytes")
 
         if len(uid) != UID_SIZE:
-            raise ValueError("uid must be {} bytes".format(UID_SIZE))
+            raise ValueError(f"uid must be {UID_SIZE} bytes")
 
         if len(key) != KEY_SIZE:
-            raise ValueError("key must be {} bytes".format(KEY_SIZE))
+            raise ValueError(f"key must be {KEY_SIZE} bytes")
 
         self._fixed = fixed
         self._uid = uid
@@ -512,13 +508,13 @@ class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
         super(StaticTicketSlotConfiguration, self).__init__()
 
         if len(fixed) > FIXED_SIZE:
-            raise ValueError("fixed must be <= {} bytes".format(FIXED_SIZE))
+            raise ValueError(f"fixed must be <= {FIXED_SIZE} bytes")
 
         if len(uid) != UID_SIZE:
-            raise ValueError("uid must be {} bytes".format(UID_SIZE))
+            raise ValueError(f"uid must be {UID_SIZE} bytes")
 
         if len(key) != KEY_SIZE:
-            raise ValueError("key must be {} bytes".format(KEY_SIZE))
+            raise ValueError(f"key must be {KEY_SIZE} bytes")
 
         self._fixed = fixed
         self._uid = uid

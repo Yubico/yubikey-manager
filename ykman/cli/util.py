@@ -99,7 +99,7 @@ def click_callback(invoke_on_missing=False):
             try:
                 return f(ctx, param, val)
             except ValueError as e:
-                ctx.fail('Invalid value for "{}": {}'.format(param.name, str(e)))
+                ctx.fail(f'Invalid value for "{param.name}": {str(e)}')
 
         return inner
 
@@ -212,5 +212,5 @@ def prompt_timeout(timeout=0.5):
 
 
 def cli_fail(message: str, code: int = 1):
-    click.echo("Error: %s" % message, err=True)
+    click.echo(f"Error: {message}", err=True)
     sys.exit(code)

@@ -135,7 +135,7 @@ class YubiKeyDevice(abc.ABC):
         return hash(self.fingerprint)
 
     def __repr__(self):
-        return "%s(fingerprint=%r)" % (type(self).__name__, self.fingerprint)
+        return f"{type(self).__name__}(fingerprint={self.fingerprint!r})"
 
 
 class CommandError(Exception):
@@ -278,5 +278,5 @@ class Tlv(bytes):
     def unpack(cls: Type[T_Tlv], tag: int, data: bytes) -> bytes:
         tlv = cls(data)
         if tlv.tag != tag:
-            raise ValueError("Wrong tag, got %02x expected %02x" % (tlv.tag, tag))
+            raise ValueError(f"Wrong tag, got {tlv.tag:02x} expected {tag:02x}")
         return tlv.value

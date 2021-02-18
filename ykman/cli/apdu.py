@@ -71,7 +71,7 @@ def _parse_apdu(data):
 
 
 def _print_response(resp, sw, no_pretty):
-    click.echo("RECV (SW={:04X})".format(sw) + (":" if resp else ""))
+    click.echo(f"RECV (SW={sw:04X})" + (":" if resp else ""))
     if no_pretty:
         click.echo(resp.hex().upper())
     else:
@@ -167,5 +167,5 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
             _print_response(resp, sw, no_pretty)
 
             if check is not None and sw != check:
-                click.echo("Aborted due to error (expected SW={:04X}).".format(check))
+                click.echo(f"Aborted due to error (expected SW={check:04X}).")
                 ctx.exit(1)

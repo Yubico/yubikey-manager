@@ -74,5 +74,5 @@ def list_ctap_devices() -> List[CtapYubiKeyDevice]:
             try:
                 devs.append(CtapYubiKeyDevice(desc))
             except ValueError:
-                logger.debug("Unsupported Yubico device with PID: %02x" % desc.pid)
+                logger.debug(f"Unsupported Yubico device with PID: {desc.pid:02x}")
     return devs
