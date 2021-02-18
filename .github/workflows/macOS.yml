@@ -42,3 +42,19 @@ jobs:
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
           pip uninstall -y yubikey-manager
+
+      - name: PyInstaller
+        run: |
+          pip install pyinstaller
+          pip install dist/*.whl
+          pyinstaller ykman.spec
+          dist/ykman --version
+          [[ -z "$(dist/ykman --version | grep -E "not found|missing")" ]]
+          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
+          mv dist/ykman dist/ykman-$REF
+
+      - name: Upload build
+        uses: actions/upload-artifact@v1
+        with:
+          name: ykman-builds-macos
+          path: dist

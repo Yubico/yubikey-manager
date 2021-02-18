@@ -1,4 +1,4 @@
-name: build
+name: Ubuntu
 
 on: [push, pull_request]
 
@@ -41,6 +41,21 @@ jobs:
           pip install .
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+
+      - name: PyInstaller
+        run: |
+          pip install pyinstaller
+          pyinstaller ykman.spec
+          dist/ykman --version
+          [[ -z "$(dist/ykman --version | grep -E "not found|missing")" ]]
+          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
+          mv dist/ykman dist/ykman-$REF
+
+      - name: Upload build
+        uses: actions/upload-artifact@v1
+        with:
+          name: ykman-builds-ubuntu
+          path: dist
 
   deb:
     runs-on: ubuntu-latest

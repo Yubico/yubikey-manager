@@ -8,7 +8,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
 
       - name: Install dependencies
         run: |
@@ -39,3 +39,34 @@ jobs:
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
           pip uninstall -y yubikey-manager
+
+      - name: Clone PyInstaller
+        uses: actions/checkout@v2
+        with:
+          repository: 'pyinstaller/pyinstaller'
+          path: pyinstaller
+
+      - name: Build PyInstaller
+        shell: bash
+        run: |
+          cd pyinstaller/bootloader
+          python waf distclean all
+          cd ..
+          pip install .
+          cd ..
+
+      - name: Build exe
+        shell: bash
+        run: |
+          pip install dist/*.whl
+          pyinstaller ykman.spec
+          dist/ykman.exe --version
+          [[ -z "$(dist/ykman.exe --version | grep -E "not found|missing")" ]]
+          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
+          mv dist/ykman.exe dist/ykman-$REF.exe
+
+      - name: Upload build
+        uses: actions/upload-artifact@v1
+        with:
+          name: ykman-builds-windows
+          path: dist
