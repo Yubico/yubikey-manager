@@ -58,6 +58,7 @@ from time import sleep
 from collections import Counter
 from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type
 import sys
+import ctypes
 import logging
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,18 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
         devs = list_devs()
         merged.update(Counter(d.pid for d in devs if d.pid is not None))
         fingerprints.update({d.fingerprint for d in devs})
+    if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
+        from .hid.windows import list_paths
+
+        counter = Counter()
+        for pid, path in list_paths():
+            if pid not in merged:
+                try:
+                    counter[PID(pid)] += 1
+                    fingerprints.add(path)
+                except ValueError:  # Unsupported PID
+                    logger.debug("Unsupported Yubico device with PID: %02x" % pid)
+        merged.update(counter)
     return merged, hash(tuple(fingerprints))
 
 

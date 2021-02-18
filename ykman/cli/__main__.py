@@ -34,7 +34,6 @@ from yubikit.management import USB_INTERFACE
 import ykman.logging_setup
 
 from .. import __version__
-from ..base import PID
 from ..pcsc import list_devices as list_ccid, list_readers
 from ..device import (
     read_info,
@@ -55,6 +54,7 @@ from ..diagnostics import get_diagnostics
 from .aliases import apply_aliases
 from .apdu import apdu
 import click
+import ctypes
 import time
 import sys
 import logging
@@ -71,6 +71,13 @@ USB_INTERFACE_MAPPING = {
     OtpConnection: USB_INTERFACE.OTP,
     FidoConnection: USB_INTERFACE.FIDO,
 }
+
+
+WIN_CTAP_RESTRICTED = (
+    sys.platform == "win32"
+    and not bool(ctypes.windll.shell32.IsUserAnAdmin())
+    and sys.getwindowsversion()[:3] >= (10, 0, 18362)
+)
 
 
 def retrying_connect(serial, connections, attempts=10, state=None):
@@ -162,6 +169,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     # Find all connected devices
     devices, state = scan_devices()
     n_devs = sum(devices.values())
+
     if n_devs == 0:
         cli_fail("No YubiKey detected!")
     if n_devs > 1:
@@ -174,6 +182,9 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     pid = next(iter(devices.keys()))
     for c in connections:
         if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
+            if WIN_CTAP_RESTRICTED and c == FidoConnection:
+                # FIDO-only command on Windows without Admin won't work.
+                cli_fail("FIDO access on Windows requires running as Administrator.")
             return retrying_connect(None, connections, state=state)
     _disabled_interface(connections, cmd)
 
@@ -268,6 +279,9 @@ def cli(ctx, device, log_level, log_file, reader):
         subcmd, "connections", [SmartCardConnection, FidoConnection, OtpConnection]
     )
     if connections:
+        if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
+            # FIDO-only command on Windows without Admin won't work.
+            cli_fail("FIDO access on Windows requires running as Administrator.")
 
         def resolve():
             if not getattr(resolve, "items", None):
@@ -326,21 +340,18 @@ def list_keys(ctx, serials, readers):
             )
         pids.add(dev.pid)
 
-    if sys.platform.startswith("win32") and not serials:
-        from ..hid.windows import list_paths
-
-        for pid, _ in list_paths():
+    # Look for FIDO devices that we can't access
+    if not serials:
+        devs, _ = scan_devices()
+        for pid, count in devs.items():
             if pid not in pids:
-                try:
-                    p = PID(pid)
+                for _ in range(count):
                     click.echo(
-                        "{} [{}] <permission denied>".format(
-                            p.get_type().value,
-                            p.name.split("_", 1)[1].replace("_", "+"),
+                        "{} [{}] <access denied>".format(
+                            pid.get_type().value,
+                            pid.name.split("_", 1)[1].replace("_", "+"),
                         )
                     )
-                except ValueError:
-                    logger.debug("Unsupported Yubico device with PID: %02x" % pid)
 
 
 COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
