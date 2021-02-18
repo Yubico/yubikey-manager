@@ -317,20 +317,20 @@ def usb(
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
-    f_confirm = "{}{}{}{}{}{}Configure USB?".format(
-        "Enable {}.\n".format(", ".join([str(app) for app in enable]))
-        if enable
-        else "",
-        "Disable {}.\n".format(", ".join([str(app) for app in disable]))
-        if disable
-        else "",
-        "Set touch eject.\n" if touch_eject else "",
-        "Disable touch eject.\n" if no_touch_eject else "",
-        f"Set autoeject timeout to {autoeject_timeout}.\n" if autoeject_timeout else "",
-        f"Set challenge-response timeout to {chalresp_timeout}.\n"
-        if chalresp_timeout
-        else "",
-    )
+    f_confirm = ""
+    if enable:
+        f_confirm += f"Enable {', '.join(str(app) for app in enable)}.\n"
+    if disable:
+        f_confirm += f"Disable {', '.join(str(app) for app in disable)}.\n"
+    if touch_eject:
+        f_confirm += "Set touch eject.\n"
+    elif no_touch_eject:
+        f_confirm += "Disable touch eject.\n"
+    if autoeject_timeout:
+        f_confirm += f"Set autoeject timeout to {autoeject_timeout}.\n"
+    if chalresp_timeout:
+        f_confirm += f"Set challenge-response timeout to {chalresp_timeout}.\n"
+    f_confirm += "Configure USB?"
 
     is_locked = info.is_locked
 
@@ -430,14 +430,12 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
         else:
             cli_fail(f"{app.name} not supported over NFC on this YubiKey.")
 
-    f_confirm = "{}{}Configure NFC?".format(
-        "Enable {}.\n".format(", ".join([str(app) for app in enable]))
-        if enable
-        else "",
-        "Disable {}.\n".format(", ".join([str(app) for app in disable]))
-        if disable
-        else "",
-    )
+    f_confirm = ""
+    if enable:
+        f_confirm += f"Enable {', '.join(str(app) for app in enable)}.\n"
+    if disable:
+        f_confirm += f"Disable {', '.join(str(app) for app in disable)}.\n"
+    f_confirm += "Configure NFC?"
 
     is_locked = info.is_locked
 

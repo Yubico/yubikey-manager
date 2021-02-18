@@ -51,7 +51,7 @@ APDU_PATTERN = re.compile(
 
 
 def _hex(data):
-    return " ".join("{:02X}".format(d) for d in data)
+    return " ".join(f"{d:02X}" for d in data)
 
 
 def _parse_apdu(data):
@@ -78,7 +78,7 @@ def _print_response(resp, sw, no_pretty):
         for i in range(0, len(resp), 16):
             chunk = resp[i : i + 16]
             click.echo(
-                " ".join("{:02X}".format(c) for c in chunk).ljust(50)
+                " ".join(f"{c:02X}" for c in chunk).ljust(50)
                 # Replace non-printable characters with a dot.
                 + "".join(chr(c) if 31 < c < 127 else chr(183) for c in chunk)
             )

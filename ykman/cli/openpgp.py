@@ -162,9 +162,8 @@ def set_pin_retries(
     if resets_pins:
         click.echo("WARNING: Setting PIN retries will reset the values for all 3 PINs!")
     if force or click.confirm(
-        "Set PIN retry counters to: {} {} {}?".format(
-            pin_retries, reset_code_retries, admin_pin_retries
-        ),
+        f"Set PIN retry counters to: {pin_retries} {reset_code_retries} "
+        "{admin_pin_retries}?",
         abort=True,
         err=True,
     ):
@@ -304,8 +303,8 @@ def attest(ctx, key, certificate, pin, format):
         cert = None
 
     if not cert or click.confirm(
-        "There is already data stored in the certificate slot for {}, "
-        "do you want to overwrite it?".format(key.value)
+        f"There is already data stored in the certificate slot for {key.value}, "
+        "do you want to overwrite it?"
     ):
         touch_policy = controller.get_touch(KEY_SLOT.ATT)
         if touch_policy in [TOUCH_MODE.ON, TOUCH_MODE.FIXED]:

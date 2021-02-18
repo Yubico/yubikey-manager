@@ -7,4 +7,4 @@ NON_DEFAULT_MANAGEMENT_KEY = "010103040506070801020304050607080102030405060708"
 
 
 def old_new_new(old, new):
-    return "{0}\n{1}\n{1}\n".format(old, new)
+    return f"{old}\n{new}\n{new}\n"

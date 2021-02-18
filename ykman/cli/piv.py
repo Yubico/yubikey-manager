@@ -228,9 +228,8 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     )
     click.echo("WARNING: This will reset the PIN and PUK to the factory defaults!")
     force or click.confirm(
-        "Set the number of PIN and PUK retry attempts to: {} {}?".format(
-            pin_retries, puk_retries
-        ),
+        f"Set the number of PIN and PUK retry attempts to: {pin_retries} "
+        f"{puk_retries}?",
         abort=True,
         err=True,
     )
@@ -680,7 +679,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
                             if not check_key(session, slot, public_key):
                                 cli_fail(
                                     "This public key is not tied to the private key in "
-                                    "the {} slot.".format(slot.name)
+                                    f"the {slot.name} slot."
                                 )
 
                     _verify_pin_if_needed(ctx, session, do_verify, pin)
@@ -766,7 +765,7 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
                 if not check_key(session, slot, cert_to_import.public_key()):
                     cli_fail(
                         "This certificate is not tied to the private key in the "
-                        "{} slot.".format(slot.name)
+                        f"{slot.name} slot."
                     )
 
         _verify_pin_if_needed(ctx, session, do_verify, pin)

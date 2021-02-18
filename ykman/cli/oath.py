@@ -487,8 +487,8 @@ def _add_cred(ctx, data, touch, force):
     cred_id = data.get_id()
     if not force and any(cred.id == cred_id for cred in creds):
         click.confirm(
-            "An account called {} already exists on this YubiKey."
-            " Do you want to overwrite it?".format(data.name),
+            f"An account called {data.name} already exists on this YubiKey."
+            " Do you want to overwrite it?",
             abort=True,
             err=True,
         )
@@ -657,9 +657,8 @@ def rename(ctx, query, name, force, password, remember):
         new_id = _format_cred_id(issuer, name, cred.oath_type, cred.period)
         if any(cred.id == new_id for cred in creds):
             cli_fail(
-                "Another account with ID {} already exists on this YubiKey.".format(
-                    new_id.decode()
-                )
+                "Another account with ID {new_id.decode()} "
+                "already exists on this YubiKey."
             )
         if force or (
             click.confirm(

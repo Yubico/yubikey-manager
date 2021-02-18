@@ -253,9 +253,7 @@ class Tlv(bytes):
         self._value_offset = len(self) - ln
 
     def __repr__(self):
-        return "{}(tag={:02x}, value={})".format(
-            self.__class__.__name__, self.tag, self.value.hex()
-        )
+        return f"Tlv(tag=0x{self.tag:02x}, value={self.value.hex()})"
 
     @classmethod
     def parse_from(cls: Type[T_Tlv], data: bytes) -> Tuple[T_Tlv, bytes]:
@@ -278,5 +276,5 @@ class Tlv(bytes):
     def unpack(cls: Type[T_Tlv], tag: int, data: bytes) -> bytes:
         tlv = cls(data)
         if tlv.tag != tag:
-            raise ValueError(f"Wrong tag, got {tlv.tag:02x} expected {tag:02x}")
+            raise ValueError(f"Wrong tag, got 0x{tlv.tag:02x} expected 0x{tag:02x}")
         return tlv.value

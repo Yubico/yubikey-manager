@@ -117,11 +117,9 @@ def _disabled_interface(connections, cmd_name):
     interfaces = [USB_INTERFACE_MAPPING[c] for c in connections]
     req = ", ".join((t.name for t in interfaces))
     cli_fail(
-        (
-            "Command '{}' requires one of the following USB interfaces "
-            "to be enabled: '{}'.\n\n"
-            "Use 'ykman config usb' to set the enabled USB interfaces."
-        ).format(cmd_name, req)
+        f"Command '{cmd_name}' requires one of the following USB interfaces "
+        f"to be enabled: '{req}'.\n\n"
+        "Use 'ykman config usb' to set the enabled USB interfaces."
     )
 
 
@@ -136,9 +134,8 @@ def _run_cmd_for_serial(cmd, connections, serial):
             _disabled_interface(connections, cmd)
         except ValueError:
             cli_fail(
-                "Failed connecting to a YubiKey with serial: {}.\n"
-                "Make sure the application has the required "
-                "permissions.".format(serial)
+                f"Failed connecting to a YubiKey with serial: {serial}.\n"
+                "Make sure the application has the required permissions."
             )
 
 
@@ -330,13 +327,12 @@ def list_keys(ctx, serials, readers):
             if dev_info.serial:
                 click.echo(dev_info.serial)
         else:
+            name = get_name(dev_info, dev.pid.get_type())
+            version = "%d.%d.%d" % dev_info.version if dev_info.version else "unknown"
+            mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
             click.echo(
-                "{} ({}) [{}]{}".format(
-                    get_name(dev_info, dev.pid.get_type()),
-                    "%d.%d.%d" % dev_info.version if dev_info.version else "unknown",
-                    dev.pid.name.split("_", 1)[1].replace("_", "+"),
-                    f" Serial: {dev_info.serial}" if dev_info.serial else "",
-                )
+                f"{name} ({version}) [{mode}]"
+                + (f" Serial: {dev_info.serial}" if dev_info.serial else "")
             )
         pids.add(dev.pid)
 
@@ -346,12 +342,9 @@ def list_keys(ctx, serials, readers):
         for pid, count in devs.items():
             if pid not in pids:
                 for _ in range(count):
-                    click.echo(
-                        "{} [{}] <access denied>".format(
-                            pid.get_type().value,
-                            pid.name.split("_", 1)[1].replace("_", "+"),
-                        )
-                    )
+                    name = pid.get_type().value
+                    mode = pid.name.split("_", 1)[1].replace("_", "+")
+                    click.echo(f"{name} [{mode}] <access denied>")
 
 
 COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)

@@ -409,7 +409,7 @@ def yubiotp(
             cli_fail("Upload to YubiCloud failed.\n" + error_msg)
 
     force or click.confirm(
-        f"Program an OTP credential in slot {slot}?", abort=True, err=True
+        f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
     )
 
     try:
@@ -758,8 +758,8 @@ def settings(
             ctx.fail("Failed to parse access code: " + str(e))
 
     force or click.confirm(
-        "Update the settings for slot {}? "
-        "All existing settings will be overwritten.".format(slot),
+        f"Update the settings for slot {slot}? "
+        "All existing settings will be overwritten.",
         abort=True,
         err=True,
     )

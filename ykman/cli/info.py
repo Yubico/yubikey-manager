@@ -177,13 +177,10 @@ def info(ctx, check_fips):
     if info.form_factor:
         click.echo(f"Form factor: {info.form_factor!s}")
     if interfaces:
-        click.echo(
-            "Enabled USB interfaces: {}".format(
-                ", ".join(
-                    t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
-                )
-            )
+        f_interfaces = ", ".join(
+            t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
         )
+        click.echo(f"Enabled USB interfaces: {f_interfaces}")
     if TRANSPORT.NFC in info.supported_capabilities:
         f_nfc = (
             "enabled"
