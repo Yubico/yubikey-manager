@@ -43,7 +43,8 @@ jobs:
       - name: Clone PyInstaller
         uses: actions/checkout@v2
         with:
-          repository: 'pyinstaller/pyinstaller'
+          repository: pyinstaller/pyinstaller
+          ref: 40c9abce2d8de879e414fd377c933dccaab1e156
           path: pyinstaller
 
       - name: Build PyInstaller
