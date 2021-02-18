@@ -99,7 +99,7 @@ def openpgp(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OpenPGP application.
+    Display general status of the OpenPGP application.
     """
     controller = ctx.obj["controller"]
     click.echo(get_openpgp_info(controller))
@@ -116,7 +116,7 @@ def info(ctx):
 @click.pass_context
 def reset(ctx):
     """
-    Reset OpenPGP application.
+    Reset all OpenPGP data.
 
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
@@ -181,7 +181,7 @@ def set_pin_retries(
 
 @openpgp.group("keys")
 def keys():
-    """Manage OpenPGP key slots."""
+    """Manage private keys."""
 
 
 @keys.command("set-touch")
@@ -324,7 +324,7 @@ def attest(ctx, key, certificate, pin, format):
 @openpgp.group("certificates")
 def certificates():
     """
-    Manage certificates in the OpenPGP card application.
+    Manage certificates.
     """
 
 

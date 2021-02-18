@@ -63,7 +63,7 @@ def prompt_lock_code(prompt="Enter your lock code"):
 @click_postpone_execution
 def config(ctx):
     """
-    Enable/Disable applications.
+    Enable or disable applications.
 
     The applications may be enabled and disabled independently
     over different transports (USB and NFC). The configuration may

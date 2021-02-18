@@ -87,7 +87,7 @@ def oath(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of OATH application.
+    Display general status of the OATH application.
     """
     session = ctx.obj["session"]
     version = session.version

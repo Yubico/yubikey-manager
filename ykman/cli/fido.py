@@ -88,7 +88,7 @@ def fido(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display status of FIDO2 application.
+    Display general status of the FIDO2 application.
     """
     conn = ctx.obj["conn"]
     ctap2 = ctx.obj.get("ctap2")
@@ -412,7 +412,7 @@ def _format_cred(rp_id, user_id, user_name):
 @fido.group("credentials")
 def creds():
     """
-    Manage resident (discoverable) credentials.
+    Manage discoverable (resident) credentials.
 
     This command lets you manage credentials stored on your YubiKey.
     Credential management is only available when a FIDO PIN is set on the YubiKey.
@@ -421,11 +421,11 @@ def creds():
     Examples:
 
     \b
-      List stored credentials (providing PIN via argument):
+      List credentials (providing PIN via argument):
       $ ykman fido credentials list --pin 123456
 
     \b
-      Delete a stored credential by user name (PIN will be prompted for):
+      Delete a credential by user name (PIN will be prompted for):
       $ ykman fido credentials delete example_user
     """
 
@@ -434,9 +434,9 @@ def _init_credman(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
 
     if not ctap2:
-        cli_fail("Managing stored credentials not supported.")
+        cli_fail("Credential management not supported on this YubiKey.")
     elif not ctap2.info.options.get("clientPin"):
-        cli_fail("Managing credentials requires having a PIN. Set a PIN first.")
+        cli_fail("Credential management requires having a PIN. Set a PIN first.")
 
     if pin is None:
         pin = _prompt_current_pin(prompt="Enter your PIN")
@@ -456,7 +456,7 @@ def _init_credman(ctx, pin):
 @click.option("-P", "--pin", help="PIN code.")
 def creds_list(ctx, pin):
     """
-    List resident credentials.
+    List credentials.
     """
     creds = _init_credman(ctx, pin)
     for (rp_id, _, user_id, user_name) in _gen_creds(creds):
@@ -470,7 +470,7 @@ def creds_list(ctx, pin):
 @click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
 def creds_delete(ctx, query, pin, force):
     """
-    Delete a resident credential.
+    Delete a credential.
 
     \b
     QUERY       A unique substring match of a credentials RP ID, user ID (hex) or name,

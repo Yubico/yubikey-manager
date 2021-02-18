@@ -207,7 +207,7 @@ def reset(ctx):
 
 @piv.group()
 def access():
-    """Manage PIN, PUK and Management Key."""
+    """Manage PIN, PUK, and Management Key."""
 
 
 @access.command("set-retries")
