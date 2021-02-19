@@ -47,6 +47,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 from enum import Enum, IntEnum, unique
 from collections import namedtuple
+from dataclasses import dataclass
+from typing import Optional
 import time
 import struct
 import logging
@@ -228,63 +230,82 @@ def _get_key_template(key, key_slot, crt=False):
 
 
 @unique
-class KdfAlgorithm(bytes, Enum):
-    NONE = b"\x00"
-    KDF_ITERSALTED_S2K = b"\x03"
-
-
-@unique
-class HashAlgorithm(bytes, Enum):
-    SHA256 = b"\x08"
-    SHA512 = b"\x0a"
+class HashAlgorithm(IntEnum):
+    SHA256 = 0x08
+    SHA512 = 0x0A
 
     def create_digest(self):
-        algorithm = {self.SHA256: hashes.SHA256, self.SHA512: hashes.SHA512}[self]
+        algorithm = getattr(hashes, self.name)
         return hashes.Hash(algorithm(), default_backend())
 
 
-class Kdf(object):
-    _fields = {
-        b"\x81": ("kdf_algorithm", KdfAlgorithm),
-        b"\x82": ("hash_algorithm", HashAlgorithm),
-        b"\x83": ("iteration_count", lambda data: struct.unpack(">I", data)[0]),
-        b"\x84": ("pw1_salt_bytes", bytes),
-        b"\x85": ("pw2_salt_bytes", bytes),
-        b"\x86": ("pw3_salt_bytes", bytes),
-        b"\x87": ("pw1_initial_hash", bytes),
-        b"\x88": ("pw3_initial_hash", bytes),
-    }
+@unique
+class KdfAlgorithm(IntEnum):
+    NONE = 0x00
+    KDF_ITERSALTED_S2K = 0x03
 
-    __slots__ = (name for name, _ in _fields.values())
 
-    def __init__(self, data):
-        for field_tag, (field_name, field_type) in self._fields.items():
-            tag, size = struct.unpack("cB", data[:2])
-            setattr(self, field_name, field_type(data[2 : 2 + size]))
-            data = data[2 + size :]
+def _kdf_none(pin, salt, hash_algorithm, iteration_count):
+    return pin
+
+
+def _kdf_itersalted_s2k(pin, salt, hash_algorithm, iteration_count):
+    data = salt + pin
+    digest = hash_algorithm.create_digest()
+    # Although the field is called "iteration count", it's actually
+    # the number of bytes to be passed to the hash function, which
+    # is called only once. Go figure!
+    data_count, trailing_bytes = divmod(iteration_count, len(data))
+    for _ in range(data_count):
+        digest.update(data)
+    digest.update(data[:trailing_bytes])
+    return digest.finalize()
+
+
+_KDFS = {
+    KdfAlgorithm.NONE: _kdf_none,
+    KdfAlgorithm.KDF_ITERSALTED_S2K: _kdf_itersalted_s2k,
+}
+
+
+def _parse_int(data, tag, func=lambda x: x, default=None):
+    return func(int.from_bytes(data[tag], "big")) if tag in data else default
+
+
+@dataclass
+class KdfData:
+    kdf_algorithm: KdfAlgorithm
+    hash_algorithm: Optional[HashAlgorithm]
+    iteration_count: Optional[int]
+    pw1_salt_bytes: Optional[bytes]
+    pw2_salt_bytes: Optional[bytes]
+    pw3_salt_bytes: Optional[bytes]
+    pw1_initial_hash: Optional[bytes]
+    pw3_initial_hash: Optional[bytes]
 
     def process(self, pw, pin):
-        if self.kdf_algorithm != KdfAlgorithm.KDF_ITERSALTED_S2K:
-            raise ValueError("Unsupported KDF algorithm")
+        kdf = _KDFS[self.kdf_algorithm]
         if pw == PW1:
             salt = self.pw1_salt_bytes
         elif pw == PW3:
-            salt = self.pw3_salt_bytes
+            salt = self.pw3_salt_bytes or self.pw1_salt_bytes
         else:
-            raise ValueError("Unsupported PIN type")
-        return self._itersalted_s2k(salt, pin)
+            raise ValueError("Invalid value for pw")
+        return kdf(pin, salt, self.hash_algorithm, self.iteration_count)
 
-    def _itersalted_s2k(self, salt, pin):
-        data = salt + pin
-        digest = self.hash_algorithm.create_digest()
-        # Although the field is called "iteration count", it's actually
-        # the number of bytes to be passed to the hash function, which
-        # is called only once. Go figure!
-        data_count, trailing_bytes = divmod(self.iteration_count, len(data))
-        for _ in range(data_count):
-            digest.update(data)
-        digest.update(data[:trailing_bytes])
-        return digest.finalize()
+    @classmethod
+    def parse(cls, data: bytes) -> "KdfData":
+        fields = Tlv.parse_dict(data)
+        return cls(
+            _parse_int(fields, 0x81, KdfAlgorithm, KdfAlgorithm.NONE),
+            _parse_int(fields, 0x82, HashAlgorithm),
+            _parse_int(fields, 0x83),
+            fields.get(0x84),
+            fields.get(0x85),
+            fields.get(0x86),
+            fields.get(0x87),
+            fields.get(0x88),
+        )
 
 
 class OpenPgpController(object):
@@ -356,19 +377,13 @@ class OpenPgpController(object):
     def _get_kdf(self):
         try:
             data = self._get_data(DO.KDF)
-            if data == b"\x81\x01\x00":
-                return None
-            else:
-                return Kdf(data)
         except ApduError:
-            return None
+            data = b""
+        return KdfData.parse(data)
 
     def _verify(self, pw, pin):
         try:
-            pin = pin.encode("utf-8")
-            kdf = self._get_kdf()
-            if kdf:
-                pin = kdf.process(pw, pin)
+            pin = self._get_kdf().process(pw, pin.encode())
             self._app.send_apdu(0, INS.VERIFY, 0, pw, pin)
         except ApduError:
             pw_remaining = self.get_remaining_pin_tries()[pw - PW1]
