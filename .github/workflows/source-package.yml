@@ -29,12 +29,13 @@ jobs:
       - name: Create source package
         run: |
           poetry build
+          mkdir artifacts
           export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/yubikey-manager-*.tar.gz dist/yubikey-manager-$REF.tar.gz
-          mv dist/yubikey_manager-*.whl dist/yubikey_manager-$REF.whl
+          mv dist/yubikey-manager-*.tar.gz artifacts/yubikey-manager-$REF.tar.gz
+          mv dist/yubikey_manager-*.whl artifacts/yubikey_manager-$REF.whl
 
       - name: Upload artifact
         uses: actions/upload-artifact@v1
         with:
           name: yubikey-manager-source-package
-          path: dist
+          path: artifacts
