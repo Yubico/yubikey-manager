@@ -30,6 +30,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
 from functools import partial
+from typing import Tuple
+import ctypes
 
 import logging
 
@@ -190,3 +192,22 @@ def is_pkcs12(data):
         return header.tag == 0x02 and header.value == b"\x03"
     except ValueError:
         return False
+
+
+class OSVERSIONINFOW(ctypes.Structure):
+    _fields_ = [
+        ("dwOSVersionInfoSize", ctypes.c_ulong),
+        ("dwMajorVersion", ctypes.c_ulong),
+        ("dwMinorVersion", ctypes.c_ulong),
+        ("dwBuildNumber", ctypes.c_ulong),
+        ("dwPlatformId", ctypes.c_ulong),
+        ("szCSDVersion", ctypes.c_wchar * 128),
+    ]
+
+
+def get_windows_version() -> Tuple[int, int, int]:
+    """Get the true Windows version, since sys.getwindowsversion lies."""
+    osvi = OSVERSIONINFOW()
+    osvi.dwOSVersionInfoSize = ctypes.sizeof(osvi)
+    ctypes.windll.Ntdll.RtlGetVersion(ctypes.byref(osvi))  # type: ignore
+    return osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber

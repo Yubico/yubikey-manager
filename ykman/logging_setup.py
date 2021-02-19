@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from ykman import __version__ as ykman_version
+from ykman.util import get_windows_version
 import logging
 import ctypes
 import sys
@@ -46,8 +47,7 @@ def log_sys_info(log):
     log(f"Python: {sys.version}")
     log(f"Platform: {sys.platform}")
     if sys.platform == "win32":
-        w = sys.getwindowsversion()
-        log(f"Windows version: ({w.major}, {w.minor}, {w.build})")
+        log(f"Windows version: {get_windows_version()}")
         is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
     else:
         is_admin = os.getuid() == 0

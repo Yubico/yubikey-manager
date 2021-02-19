@@ -42,6 +42,8 @@ from ..device import (
     scan_devices,
     connect_to_device,
 )
+from ..util import get_windows_version
+from ..diagnostics import get_diagnostics
 from .util import YkmanContextObject, ykman_group, cli_fail
 from .info import info
 from .otp import otp
@@ -50,7 +52,6 @@ from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
-from ..diagnostics import get_diagnostics
 from .aliases import apply_aliases
 from .apdu import apdu
 import click
@@ -76,7 +77,7 @@ USB_INTERFACE_MAPPING = {
 WIN_CTAP_RESTRICTED = (
     sys.platform == "win32"
     and not bool(ctypes.windll.shell32.IsUserAnAdmin())
-    and sys.getwindowsversion()[:3] >= (10, 0, 18362)
+    and get_windows_version() >= (10, 0, 18362)
 )
 
 
