@@ -213,7 +213,7 @@ def access():
 @access.command("set-retries")
 @click.pass_context
 @click.argument("pin-retries", type=click.IntRange(1, 255), metavar="PIN-RETRIES")
-@click.argument("puk-retries", type=click.IntRange(1, 255), metavar="PUK-RETRIES")
+@click.argument("puk-retries", type=click.IntRange(0, 255), metavar="PUK-RETRIES")
 @click_management_key_option
 @click_pin_option
 @click_force_option

@@ -139,7 +139,7 @@ def access():
 @access.command("set-retries")
 @click.argument("pin-retries", type=click.IntRange(1, 99), metavar="PIN-RETRIES")
 @click.argument(
-    "reset-code-retries", type=click.IntRange(1, 99), metavar="RESET-CODE-RETRIES"
+    "reset-code-retries", type=click.IntRange(0, 99), metavar="RESET-CODE-RETRIES"
 )
 @click.argument(
     "admin-pin-retries", type=click.IntRange(1, 99), metavar="ADMIN-PIN-RETRIES"
@@ -163,7 +163,7 @@ def set_pin_retries(
         click.echo("WARNING: Setting PIN retries will reset the values for all 3 PINs!")
     if force or click.confirm(
         f"Set PIN retry counters to: {pin_retries} {reset_code_retries} "
-        "{admin_pin_retries}?",
+        f"{admin_pin_retries}?",
         abort=True,
         err=True,
     ):
