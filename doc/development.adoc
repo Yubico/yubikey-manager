@@ -3,6 +3,8 @@
 === Install dependencies
 
 It's assumed a Python 3 environment with pip is installed.
+Additionally, the project uses https://python-poetry.org/[poetry]
+as its build tool; install that as well.
 
 ==== Windows
 Make sure the http://www.swig.org/[swig] executable is in your PATH.
@@ -22,25 +24,21 @@ Clone the repository:
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
 
-Install in editable mode with pip:
+Install via poetry:
 
-    $ pip install -e .
+    $ poetry install
 
 Show available commands:
 
-    $ ykman --help
+    $ poetry run ykman --help
 
 Show information about inserted YubiKey:
 
-    $ ykman info
+    $ poetry run ykman info
 
 Run ykman in DEBUG mode:
 
-    $ ykman --log-level DEBUG info
-
-To uninstall, run:
-
-    $ pip uninstall yubikey-manager
+    $ poetry run ykman --log-level DEBUG info
 
 === Code Style & Security
 This project uses https://black.readthedocs.io/en/latest/[Black] and
@@ -61,11 +59,7 @@ First, install https://tox.readthedocs.io/en/latest/[tox] if you haven't already
 
 To run unit tests:
 
-    $ tox
-
-To run with multiple Python versions (requires all those interpreters to be installed):
-
-    $ tox -e py36,py38
+    $ poetry run pytest
 
 
 === Integration tests
