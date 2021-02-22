@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
+from pathlib import Path
 import json
 
 
@@ -45,18 +46,18 @@ def _get_conf_dir():
     location to save the new configuration files.
     """
     for path in CONFIG_DIR_CANDIDATES:
-        path = os.path.expanduser(os.path.abspath(path))
-        if os.path.isdir(path):
+        path = Path(path).expanduser().resolve()
+        if path.is_dir():
             return path
-    return os.path.expanduser(os.path.abspath(CONFIG_DIR_CANDIDATES[-1]))
+    return Path(CONFIG_DIR_CANDIDATES[-1]).expanduser().resolve()
 
 
 class Settings(dict):
     def __init__(self, name):
-        self.fname = os.path.join(_get_conf_dir(), name + ".json")
-        if os.path.isfile(self.fname):
-            with open(self.fname, "r") as f:
-                self.update(json.load(f))
+        self.fname: Path = _get_conf_dir() / (name + ".json")
+        if self.fname.is_file():
+            with self.fname.open("r") as fd:
+                self.update(json.load(fd))
 
     def __eq__(self, other):
         return other is not None and self.fname == other.fname
@@ -65,8 +66,8 @@ class Settings(dict):
         return other is None or self.fname != other.fname
 
     def write(self):
-        conf_dir = os.path.dirname(self.fname)
-        if not os.path.isdir(conf_dir):
+        conf_dir = self.fname.parent
+        if not conf_dir.is_dir():
             os.makedirs(conf_dir)
         with self.fname.open("w") as fd:
             json.dump(self, fd, indent=2)
