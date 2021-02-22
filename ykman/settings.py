@@ -62,7 +62,7 @@ class Settings(dict):
         return other is not None and self.fname == other.fname
 
     def __ne__(self, other):
-        return other is not None or self.fname != other.fname
+        return other is None or self.fname != other.fname
 
     def write(self):
         conf_dir = os.path.dirname(self.fname)
