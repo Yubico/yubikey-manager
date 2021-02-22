@@ -67,7 +67,7 @@ _aliases = (
     (["fido", "delete"], replace("fido", "credentials", "delete")),
     (["fido", "list"], replace("fido", "credentials", "list")),
     (["fido", "set-pin"], replace("fido", "access", "change-pin")),
-    (["fido", "unlock"], replace("fido", "access", "unlock")),
+    (["fido", "unlock"], replace("fido", "access", "verify-pin")),
     (["piv", "change-pin"], replace("piv", "access", "change-pin")),
     (["piv", "change-puk"], replace("piv", "access", "change-puk")),
     (

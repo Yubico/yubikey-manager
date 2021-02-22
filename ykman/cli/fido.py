@@ -358,38 +358,50 @@ def change_pin(ctx, pin, new_pin, u2f):
         set_pin(new_pin)
 
 
-@access.command("unlock")
+@access.command("verify-pin")
 @click.pass_context
 @click.option("-P", "--pin", help="Current PIN code.")
-def unlock(ctx, pin):
+def verify(ctx, pin):
     """
-    Verify U2F PIN for YubiKey FIPS.
+    Verify the FIDO PIN against a YubiKey.
 
-    Unlock the YubiKey FIPS and allow U2F registration.
+    For YubiKeys supporting FIDO2 this will reset the "retries" counter of the PIN.
+    For YubiKey FIPS this will unlock the session, allowing U2F registration.
     """
-
-    conn = ctx.obj["conn"]
-    if not is_fips_version(ctx.obj["info"].version):
-        cli_fail(
-            "This is not a YubiKey FIPS, and therefore does not support a U2F PIN."
-        )
 
     if pin is None:
         pin = _prompt_current_pin("Enter your PIN")
 
-    _fail_if_not_valid_pin(ctx, pin, True)
-    try:
-        fips_verify_pin(conn, pin)
-    except ApduError as e:
-        logger.error("PIN verification failed", exc_info=e)
-        if e.code == SW.VERIFY_FAIL_NO_RETRY:
-            cli_fail("Wrong PIN.")
-        elif e.code == SW.AUTH_METHOD_BLOCKED:
-            cli_fail("PIN is blocked.")
-        elif e.code == SW.COMMAND_NOT_ALLOWED:
+    ctap2 = ctx.obj.get("ctap2")
+    if ctap2:
+        if not ctap2.info.options.get("clientPin"):
             cli_fail("PIN is not set.")
-        else:
-            cli_fail(f"PIN verification failed: {e.code.name}")
+        client_pin = ClientPin(ctap2)
+        try:
+            # Get a PIN token to verify the PIN.
+            client_pin.get_pin_token(
+                pin, ClientPin.PERMISSION.GET_ASSERTION, "ykman.example.com"
+            )
+        except CtapError as e:
+            logger.error("PIN verification failed", exc_info=e)
+            cli_fail(f"Error: {e}")
+    elif is_fips_version(ctx.obj["info"].version):
+        _fail_if_not_valid_pin(ctx, pin, True)
+        try:
+            fips_verify_pin(ctx.obj["conn"], pin)
+        except ApduError as e:
+            logger.error("PIN verification failed", exc_info=e)
+            if e.code == SW.VERIFY_FAIL_NO_RETRY:
+                cli_fail("Wrong PIN.")
+            elif e.code == SW.AUTH_METHOD_BLOCKED:
+                cli_fail("PIN is blocked.")
+            elif e.code == SW.COMMAND_NOT_ALLOWED:
+                cli_fail("PIN is not set.")
+            else:
+                cli_fail(f"PIN verification failed: {e.code.name}")
+    else:
+        cli_fail("This YubiKey does not support a FIDO PIN.")
+    click.echo("PIN verified.")
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
