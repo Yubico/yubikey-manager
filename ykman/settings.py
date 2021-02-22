@@ -68,8 +68,7 @@ class Settings(dict):
         conf_dir = os.path.dirname(self.fname)
         if not os.path.isdir(conf_dir):
             os.makedirs(conf_dir)
-        data = json.dumps(self, indent=2)
-        with open(self.fname, "w") as f:
-            f.write(data)
+        with self.fname.open("w") as fd:
+            json.dump(self, fd, indent=2)
 
     __hash__ = None
