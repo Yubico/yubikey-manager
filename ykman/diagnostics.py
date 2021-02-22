@@ -14,7 +14,7 @@ from yubikit.oath import OathSession
 from ykman.piv import get_piv_info
 from ykman.openpgp import OpenPgpController, get_openpgp_info
 from fido2.ctap import CtapError
-from fido2.ctap2 import Ctap2
+from fido2.ctap2 import Ctap2, ClientPin
 
 
 def mgmt_info(conn):
@@ -128,6 +128,19 @@ def fido_info():
             try:
                 ctap2 = Ctap2(conn)
                 lines.append(f"\tCtap2Info: {ctap2.info.data!r}")
+                if ctap2.info.options.get("clientPin"):
+                    client_pin = ClientPin(ctap2)
+                    lines.append(f"PIN retries: {client_pin.get_pin_retries()}")
+                    bio_enroll = ctap2.info.options.get("bioEnroll")
+                    if bio_enroll:
+                        lines.append(
+                            f"Fingerprint retries: {client_pin.get_uv_retries()}"
+                        )
+                    elif bio_enroll is False:
+                        lines.append("Fingerprints: Not configured")
+                else:
+                    lines.append("PIN: Not configured")
+
             except (ValueError, CtapError) as e:
                 lines.append(f"\tCouldn't get info: {e}")
         lines.append("")

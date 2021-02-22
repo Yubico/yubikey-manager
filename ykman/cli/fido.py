@@ -98,15 +98,30 @@ def info(ctx):
     elif ctap2:
         if ctap2.info.options.get("clientPin"):
             client_pin = ClientPin(ctap2)
-            try:
-                click.echo(
-                    f"PIN is set, with {client_pin.get_pin_retries()[0]} tries left."
-                )
-            except CtapError as e:
-                if e.code == CtapError.ERR.PIN_BLOCKED:
-                    click.echo("PIN is blocked.")
+            pin_retries, power_cycle = client_pin.get_pin_retries()
+            if pin_retries:
+                click.echo(f"PIN is set, with {pin_retries} attempt(s) remaining.")
+                if power_cycle:
+                    click.echo(
+                        "PIN is temporarily blocked. "
+                        "Remove and re-insert the YubiKey to unblock."
+                    )
+            else:
+                click.echo("PIN is set, but has been blocked.")
+            bio_enroll = ctap2.info.options.get("bioEnroll")
+            if bio_enroll:
+                uv_retries, _ = client_pin.get_uv_retries()
+                if uv_retries:
+                    click.echo(
+                        f"Fingerprints registered, with {uv_retries} attempt(s) "
+                        "remaining."
+                    )
                 else:
-                    raise
+                    click.echo(
+                        "Fingerprints registered, but blocked until PIN is verified."
+                    )
+            elif bio_enroll is False:
+                click.echo("No fingerprints have been registered.")
         else:
             click.echo("PIN is not set.")
     else:
