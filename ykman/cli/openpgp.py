@@ -139,7 +139,7 @@ def access():
 @access.command("set-retries")
 @click.argument("pin-retries", type=click.IntRange(1, 99), metavar="PIN-RETRIES")
 @click.argument(
-    "reset-code-retries", type=click.IntRange(0, 99), metavar="RESET-CODE-RETRIES"
+    "reset-code-retries", type=click.IntRange(1, 99), metavar="RESET-CODE-RETRIES"
 )
 @click.argument(
     "admin-pin-retries", type=click.IntRange(1, 99), metavar="ADMIN-PIN-RETRIES"
