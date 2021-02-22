@@ -94,10 +94,10 @@ def info(ctx):
     ctap2 = ctx.obj.get("ctap2")
 
     if is_fips_version(ctx.obj["info"].version):
-        click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(conn) else 'No'}")
+        click.echo("FIPS Approved Mode: " + ("Yes" if is_in_fips_mode(conn) else "No"))
     elif ctap2:
-        if ctap2.info.options.get("clientPin"):
-            client_pin = ClientPin(ctap2)
+        client_pin = ClientPin(ctap2)  # N.B. All YubiKeys with CTAP2 support PIN.
+        if ctap2.info.options["clientPin"]:
             pin_retries, power_cycle = client_pin.get_pin_retries()
             if pin_retries:
                 click.echo(f"PIN is set, with {pin_retries} attempt(s) remaining.")
@@ -108,22 +108,23 @@ def info(ctx):
                     )
             else:
                 click.echo("PIN is set, but has been blocked.")
-            bio_enroll = ctap2.info.options.get("bioEnroll")
-            if bio_enroll:
-                uv_retries, _ = client_pin.get_uv_retries()
-                if uv_retries:
-                    click.echo(
-                        f"Fingerprints registered, with {uv_retries} attempt(s) "
-                        "remaining."
-                    )
-                else:
-                    click.echo(
-                        "Fingerprints registered, but blocked until PIN is verified."
-                    )
-            elif bio_enroll is False:
-                click.echo("No fingerprints have been registered.")
         else:
             click.echo("PIN is not set.")
+
+        bio_enroll = ctap2.info.options.get("bioEnroll")
+        if bio_enroll:
+            uv_retries, _ = client_pin.get_uv_retries()
+            if uv_retries:
+                click.echo(
+                    f"Fingerprints registered, with {uv_retries} attempt(s) "
+                    "remaining."
+                )
+            else:
+                click.echo(
+                    "Fingerprints registered, but blocked until PIN is verified."
+                )
+        elif bio_enroll is False:
+            click.echo("No fingerprints have been registered.")
     else:
         click.echo("PIN is not supported.")
 
