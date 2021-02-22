@@ -156,7 +156,7 @@ def set_pin_retries(
     controller = ctx.obj["controller"]
 
     if admin_pin is None:
-        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
     resets_pins = controller.version < (4, 0, 0)
     if resets_pins:
@@ -223,7 +223,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
         cli_fail("Attestation is not supported by this YubiKey.")
 
     if admin_pin is None:
-        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
     if force or click.confirm(
         f"Set touch policy of {key.value.lower()} key to {policy_name}?",
@@ -260,7 +260,7 @@ def import_key(ctx, key, private_key, admin_pin):
         ctx.fail("Importing keys is only supported for the Attestation slot.")
 
     if admin_pin is None:
-        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         private_key = parse_private_key(private_key.read(), password=None)
     except Exception as e:
@@ -359,7 +359,7 @@ def delete_certificate(ctx, key, admin_pin):
     """
     controller = ctx.obj["controller"]
     if admin_pin is None:
-        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         controller.verify_admin(admin_pin)
         controller.delete_certificate(key)
@@ -384,7 +384,7 @@ def import_certificate(ctx, key, cert, admin_pin):
     controller = ctx.obj["controller"]
 
     if admin_pin is None:
-        admin_pin = click_prompt("Enter admin PIN", hide_input=True)
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
     try:
         certs = parse_certificates(cert.read(), password=None)
