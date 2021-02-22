@@ -29,13 +29,26 @@ import os
 import json
 
 
-DIR_NAME = ".ykman"
+CONFIG_DIR_CANDIDATES = (
+    "./.ykman",
+    "~/.ykman",
+    "{}/ykman".format(os.environ.get("XDG_CONFIG_HOME", "~/.config")),
+)
 
 
 def _get_conf_dir():
-    if os.path.isdir(DIR_NAME):
-        return os.path.abspath(DIR_NAME)
-    return os.path.join(os.path.expanduser("~"), DIR_NAME)
+    """
+    gets directory to be used for configuration.
+
+    It returns first candidate, for which path exists and is a directory. If none of
+    candidates exists, it returns the last one, as this should be the preferred
+    location to save the new configuration files.
+    """
+    for path in CONFIG_DIR_CANDIDATES:
+        path = os.path.expanduser(os.path.abspath(path))
+        if os.path.isdir(path):
+            return path
+    return os.path.expanduser(os.path.abspath(CONFIG_DIR_CANDIDATES[-1]))
 
 
 class Settings(dict):
