@@ -39,10 +39,7 @@ logger = logging.getLogger(__name__)
 
 @unique
 class INS(IntEnum):
-    DEBUG = 0x20
-    # SLE = 0x21
-    # STM = 0x22
-    SLE_VERSION = 0x0C
+    DEBUG = 0x12
     STM_VERSION = 0x0D
 
 
@@ -53,7 +50,7 @@ INS_GET_RESPONSE = 0xC0
 class P1(IntEnum):
     DUMP_STM = 0x21
     DUMP_SLE = 0x22
-    CLEAR_LOGS = 0x28
+    CLEAR_LOGS = 0x23
     OPEN = 0x2A
     CLOSE = 0x2B
 
@@ -61,13 +58,13 @@ class P1(IntEnum):
 class BioController(object):
     def __init__(self, driver):
         self._driver = driver
-        driver.select(AID.MGR)
+        self._sle_version = driver.select(AID.MGR)
 
     def clear_logs(self):
         self.send_cmd(INS.DEBUG, P1.CLEAR_LOGS)
 
     def read_sle_version(self):
-        return self.send_cmd(INS.SLE_VERSION).decode('utf8')
+        return self._sle_version.decode('utf8')
 
     def read_stm_version(self):
         return self.send_cmd(INS.STM_VERSION).decode('utf8')
