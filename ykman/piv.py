@@ -62,7 +62,7 @@ OBJECT_ID_PIVMAN_DATA = 0x5FFF00
 OBJECT_ID_PIVMAN_PROTECTED_DATA = OBJECT_ID.PRINTED  # Use slot for printed information.
 
 
-_name_attributes = {
+_NAME_ATTRIBUTES = {
     "CN": NameOID.COMMON_NAME,
     "L": NameOID.LOCALITY_NAME,
     "ST": NameOID.STATE_OR_PROVINCE_NAME,
@@ -79,33 +79,31 @@ _ESCAPED = "\\\"+,'<> #="
 
 
 def _parse(value: str) -> List[List[str]]:
+    remaining = list(value)
     name = []
     entry = []
     buf = ""
     hexbuf = b""
-    while value:
-        c, value = value[0], value[1:]
+    while remaining:
+        c = remaining.pop(0)
         if c == "\\":
-            c1, value = value[0], value[1:]
+            c1 = remaining.pop(0)
             if c1 in _ESCAPED:
                 c = c1
             else:
-                c2, value = value[0], value[1:]
+                c2 = remaining.pop(0)
                 hexbuf += bytes.fromhex(c1 + c2)
                 try:
                     c = hexbuf.decode()
                     hexbuf = b""
                 except UnicodeDecodeError:
-                    continue  # Multi-byte, expect more hex
-        elif c == "+":
+                    continue  # Possibly multi-byte, expect more hex
+        elif c in ",+":
             entry.append(buf)
             buf = ""
-            continue
-        elif c == ",":
-            entry.append(buf)
-            buf = ""
-            name.append(entry)
-            entry = []
+            if c == ",":
+                name.append(entry)
+                entry = []
             continue
         if hexbuf:
             raise ValueError("Invalid UTF-8 data")
@@ -128,9 +126,9 @@ def parse_rfc4514_string(value: str) -> x509.Name:
             if "=" not in part:
                 raise ValueError("Invalid RFC 4514 string")
             k, v = part.split("=", 1)
-            if k not in _name_attributes:
+            if k not in _NAME_ATTRIBUTES:
                 raise ValueError(f"Unsupported attribute: '{k}'")
-            parts.append(x509.NameAttribute(_name_attributes[k], v))
+            parts.append(x509.NameAttribute(_NAME_ATTRIBUTES[k], v))
         attributes.insert(0, x509.RelativeDistinguishedName(parts))
 
     return x509.Name(attributes)
