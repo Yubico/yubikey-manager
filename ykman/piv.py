@@ -52,7 +52,7 @@ import logging
 import struct
 import os
 
-from typing import Union, Mapping, Optional
+from typing import Union, Mapping, Optional, List
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,80 @@ logger = logging.getLogger(__name__)
 
 OBJECT_ID_PIVMAN_DATA = 0x5FFF00
 OBJECT_ID_PIVMAN_PROTECTED_DATA = OBJECT_ID.PRINTED  # Use slot for printed information.
+
+
+_name_attributes = {
+    "CN": NameOID.COMMON_NAME,
+    "L": NameOID.LOCALITY_NAME,
+    "ST": NameOID.STATE_OR_PROVINCE_NAME,
+    "O": NameOID.ORGANIZATION_NAME,
+    "OU": NameOID.ORGANIZATIONAL_UNIT_NAME,
+    "C": NameOID.COUNTRY_NAME,
+    "STREET": NameOID.STREET_ADDRESS,
+    "DC": NameOID.DOMAIN_COMPONENT,
+    "UID": NameOID.USER_ID,
+}
+
+
+_ESCAPED = "\\\"+,'<> #="
+
+
+def _parse(value: str) -> List[List[str]]:
+    name = []
+    entry = []
+    buf = ""
+    hexbuf = b""
+    while value:
+        c, value = value[0], value[1:]
+        if c == "\\":
+            c1, value = value[0], value[1:]
+            if c1 in _ESCAPED:
+                c = c1
+            else:
+                c2, value = value[0], value[1:]
+                hexbuf += bytes.fromhex(c1 + c2)
+                try:
+                    c = hexbuf.decode()
+                    hexbuf = b""
+                except UnicodeDecodeError:
+                    continue  # Multi-byte, expect more hex
+        elif c == "+":
+            entry.append(buf)
+            buf = ""
+            continue
+        elif c == ",":
+            entry.append(buf)
+            buf = ""
+            name.append(entry)
+            entry = []
+            continue
+        if hexbuf:
+            raise ValueError("Invalid UTF-8 data")
+        buf += c
+    entry.append(buf)
+    name.append(entry)
+    return name
+
+
+def parse_rfc4514_string(value: str) -> x509.Name:
+    """Parses an RFC 4514 string into a x509.Name.
+
+    See: https://tools.ietf.org/html/rfc4514.html
+    """
+    name = _parse(value)
+    attributes: List[x509.RelativeDistinguishedName] = []
+    for entry in name:
+        parts = []
+        for part in entry:
+            if "=" not in part:
+                raise ValueError("Invalid RFC 4514 string")
+            k, v = part.split("=", 1)
+            if k not in _name_attributes:
+                raise ValueError(f"Unsupported attribute: '{k}'")
+            parts.append(x509.NameAttribute(_name_attributes[k], v))
+        attributes.insert(0, x509.RelativeDistinguishedName(parts))
+
+    return x509.Name(attributes)
 
 
 def _dummy_key(algorithm):
@@ -510,14 +584,14 @@ def generate_self_signed_certificate(
     session: PivSession,
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
-    common_name: str,
+    subject_str: str,
     valid_from: datetime,
     valid_to: datetime,
 ) -> x509.Certificate:
     """Generate a self-signed certificate using a private key in a slot."""
     key_type = KEY_TYPE.from_public_key(public_key)
 
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    subject = parse_rfc4514_string(subject_str)
     builder = (
         x509.CertificateBuilder()
         .public_key(public_key)
@@ -539,11 +613,11 @@ def generate_csr(
     session: PivSession,
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
-    subject: str,
+    subject_str: str,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot."""
     builder = x509.CertificateSigningRequestBuilder().subject_name(
-        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)])
+        parse_rfc4514_string(subject_str)
     )
 
     try:

@@ -156,7 +156,7 @@ def piv(ctx):
       Generate an ECC P-256 private key and a self-signed certificate in
       slot 9a:
       $ ykman piv keys generate --algorithm ECCP256 9a pubkey.pem
-      $ ykman piv certificates generate --subject "yubico" 9a pubkey.pem
+      $ ykman piv certificates generate --subject "CN=yubico" 9a pubkey.pem
 
     \b
       Change the PIN from 123456 to 654321:
@@ -809,7 +809,7 @@ def export_certificate(ctx, format, slot, certificate):
 @click.option(
     "-s",
     "--subject",
-    help="Subject common name (CN) for the certificate.",
+    help="Subject for the certificate, as an RFC 4514 string.",
     required=True,
 )
 @click.option(
@@ -842,6 +842,10 @@ def generate_certificate(
     now = datetime.datetime.utcnow()
     valid_to = now + datetime.timedelta(days=valid_days)
 
+    if "=" not in subject:
+        # Old style, common name only.
+        subject = "CN=" + subject
+
     try:
         with prompt_timeout():
             cert = generate_self_signed_certificate(
@@ -863,7 +867,7 @@ def generate_certificate(
 @click.option(
     "-s",
     "--subject",
-    help="Subject common name (CN) for the requested certificate.",
+    help="Subject for the requested certificate, as an RFC 4514 string.",
     required=True,
 )
 def generate_certificate_signing_request(
@@ -885,6 +889,10 @@ def generate_certificate_signing_request(
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(data, default_backend())
+
+    if "=" not in subject:
+        # Old style, common name only.
+        subject = "CN=" + subject
 
     try:
         with prompt_timeout():

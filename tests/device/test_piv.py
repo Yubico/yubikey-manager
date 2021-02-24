@@ -109,7 +109,7 @@ class TestKeyManagement:
         public_key = generate_key(session, SLOT.AUTHENTICATION)
 
         session.verify_pin(DEFAULT_PIN)
-        csr = generate_csr(session, SLOT.AUTHENTICATION, public_key, "alice")
+        csr = generate_csr(session, SLOT.AUTHENTICATION, public_key, "CN=alice")
 
         assert csr.public_key().public_numbers() == public_key.public_numbers()
         assert (
@@ -123,12 +123,12 @@ class TestKeyManagement:
 
         with pytest.raises(ApduError):
             generate_self_signed_certificate(
-                session, SLOT.AUTHENTICATION, public_key, "alice", NOW, NOW
+                session, SLOT.AUTHENTICATION, public_key, "CN=alice", NOW, NOW
             )
 
         session.verify_pin(DEFAULT_PIN)
         generate_self_signed_certificate(
-            session, SLOT.AUTHENTICATION, public_key, "alice", NOW, NOW
+            session, SLOT.AUTHENTICATION, public_key, "CN=alice", NOW, NOW
         )
 
     def _test_generate_self_signed_certificate(self, session, slot):
@@ -136,7 +136,7 @@ class TestKeyManagement:
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
         session.verify_pin(DEFAULT_PIN)
         cert = generate_self_signed_certificate(
-            session, slot, public_key, "alice", NOW, NOW
+            session, slot, public_key, "CN=alice", NOW, NOW
         )
 
         assert cert.public_key().public_numbers() == public_key.public_numbers()
@@ -174,7 +174,7 @@ class TestKeyManagement:
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
         session.verify_pin(DEFAULT_PIN)
         cert = generate_self_signed_certificate(
-            session, SLOT.AUTHENTICATION, public_key, "test", NOW, NOW
+            session, SLOT.AUTHENTICATION, public_key, "CN=test", NOW, NOW
         )
         session.put_certificate(SLOT.AUTHENTICATION, cert)
         assert check_key(session, SLOT.AUTHENTICATION, cert.public_key())

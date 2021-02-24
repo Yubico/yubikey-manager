@@ -1,7 +1,4 @@
-#  vim: set fileencoding=utf-8 :
-
-from ykman.piv import generate_random_management_key
-import unittest
+from ykman.piv import generate_random_management_key, parse_rfc4514_string
 
 from yubikit.core import NotSupportedError
 from yubikit.piv import (
@@ -12,41 +9,53 @@ from yubikit.piv import (
     check_key_support,
 )
 
+import pytest
 
-class TestPivFunctions(unittest.TestCase):
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        r"UID=jsmith,DC=example,DC=net",
+        r"OU=Sales+CN=J.  Smith,DC=example,DC=net",
+        r"CN=James \"Jim\" Smith\, III,DC=example,DC=net",
+        r"CN=Before\0dAfter,DC=example,DC=net",
+        # r"1.3.6.1.4.1.1466.0=#04024869", - Not supported.
+        r"CN=Lu\C4\8Di\C4\87",
+    ],
+)
+def test_parse_rfc4514_string(value):
+    name = parse_rfc4514_string(value)
+    name2 = parse_rfc4514_string(name.rfc4514_string())
+    assert name == name2
+
+
+class TestPivFunctions:
     def test_generate_random_management_key(self):
         output1 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
         output2 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
-        self.assertIsInstance(output1, bytes)
-        self.assertIsInstance(output2, bytes)
-        self.assertNotEqual(output1, output2)
+        assert isinstance(output1, bytes)
+        assert isinstance(output2, bytes)
+        assert output1 != output2
 
-        self.assertEqual(
-            24, len(generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES))
-        )
-        self.assertEqual(
-            16, len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES128))
-        )
-        self.assertEqual(
-            24, len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES192))
-        )
-        self.assertEqual(
-            32, len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES256))
-        )
+        assert 24 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES))
+
+        assert 16 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES128))
+        assert 24 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES192))
+        assert 32 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES256))
 
     def test_supported_algorithms(self):
-        with self.assertRaises(NotSupportedError):
+        with pytest.raises(NotSupportedError):
             check_key_support(
                 (3, 1, 1), KEY_TYPE.ECCP384, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
             )
 
-        with self.assertRaises(NotSupportedError):
+        with pytest.raises(NotSupportedError):
             check_key_support(
                 (4, 4, 1), KEY_TYPE.RSA1024, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
             )
 
         for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.RSA2048):
-            with self.assertRaises(NotSupportedError):
+            with pytest.raises(NotSupportedError):
                 check_key_support(
                     (4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
                 )
