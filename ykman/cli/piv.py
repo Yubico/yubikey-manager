@@ -875,7 +875,7 @@ def generate_certificate_signing_request(
     A private key must already be present in the corresponding key slot.
 
     \b
-    SLOT            PIV slot of the certificate.
+    SLOT        PIV slot of the certificate.
     PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
     CSR         File to write CSR to. Use '-' to use stdout.
     """
