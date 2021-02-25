@@ -617,9 +617,17 @@ def bio_enroll(ctx, name, pin):
             if remaining:
                 click.echo(f"{remaining} more scans needed.")
         except CaptureError as e:
-            click.echo(e)
+            logger.error(f"Capture error: {e.code}")
+            click.echo("Capture failed. Re-center your finger, and try again.")
         except CtapError as e:
             logger.error("Failed to add fingerprint template", exc_info=e)
+            if e.code == CtapError.ERR.FP_DATABASE_FULL:
+                cli_fail(
+                    "Fingerprint storage full. "
+                    "Remove some fingerprints before adding new ones."
+                )
+            elif e.code == CtapError.ERR.USER_ACTION_TIMEOUT:
+                cli_fail("Failed to add fingerprint due to user inactivity.")
             cli_fail(f"Failed to add fingerprint: {e.code.name}")
     click.echo("Capture complete.")
     bio.set_name(template_id, name)
