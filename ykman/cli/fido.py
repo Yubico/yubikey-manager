@@ -666,9 +666,22 @@ def bio_delete(ctx, template_id, pin, force):
     bio = _init_bio(ctx, pin)
     enrollments = bio.enumerate_enrollments()
 
-    key = bytes.fromhex(template_id)
+    try:
+        key = bytes.fromhex(template_id)
+    except ValueError:
+        key = None
+
     if key not in enrollments:
-        cli_fail(f"No fingerprint matching ID={template_id}")
+        # Match using template_id as NAME
+        matches = [k for k in enrollments if enrollments[k] == template_id]
+        if len(matches) == 0:
+            cli_fail(f"No fingerprint matching ID={template_id}")
+        elif len(matches) > 1:
+            cli_fail(
+                f"Multiple matches for NAME={template_id}. "
+                "Delete by template ID instead."
+            )
+        key = matches[0]
 
     name = enrollments[key]
     if force or click.confirm(f"Delete fingerprint {_format_fp(key, name)}?"):
