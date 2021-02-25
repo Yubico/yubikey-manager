@@ -81,7 +81,7 @@ def fido(ctx):
     try:
         ctx.obj["ctap2"] = Ctap2(conn)
     except (ValueError, CtapError) as e:
-        logger.debug("FIDO device does not support CTAP2: %s", e)
+        logger.info("FIDO device does not support CTAP2: %s", e)
 
 
 @fido.command()
@@ -610,7 +610,7 @@ def bio_enroll(ctx, name, pin):
     enroller = bio.enroll()
     template_id = None
     while template_id is None:
-        click.echo("Press your fingerprint against the sensor now...")
+        click.echo("Place your finger against the sensor now...")
         try:
             template_id = enroller.capture()
             remaining = enroller.remaining
