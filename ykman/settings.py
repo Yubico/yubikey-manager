@@ -27,36 +27,51 @@
 
 import os
 import json
+from pathlib import Path
 
 
-DIR_NAME = ".ykman"
+XDG_CONF = (
+    Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser().resolve()
+    / "ykman"
+)
+HOME_CONF = Path.home() / ".ykman"
 
 
 def _get_conf_dir():
-    if os.path.isdir(DIR_NAME):
-        return os.path.abspath(DIR_NAME)
-    return os.path.join(os.path.expanduser("~"), DIR_NAME)
+    """
+    Gets the directory to be used for configuration.
+
+    Two locations are supported for configuration. One following the XDG base directory
+    layout, and one using a directory in $HOME.
+
+    If either directory exists, use that, with preference to XDG.
+    If neither exists, use XDG only if $XDG_CONFIG_HOME already exists.
+    """
+
+    for path in (XDG_CONF, HOME_CONF):
+        if path.is_dir():
+            return path
+    return XDG_CONF if XDG_CONF.parent.is_dir() else HOME_CONF
 
 
 class Settings(dict):
     def __init__(self, name):
-        self.fname = os.path.join(_get_conf_dir(), name + ".json")
-        if os.path.isfile(self.fname):
-            with open(self.fname, "r") as f:
-                self.update(json.load(f))
+        self.fname: Path = _get_conf_dir() / (name + ".json")
+        if self.fname.is_file():
+            with self.fname.open("r") as fd:
+                self.update(json.load(fd))
 
     def __eq__(self, other):
         return other is not None and self.fname == other.fname
 
     def __ne__(self, other):
-        return other is not None or self.fname != other.fname
+        return other is None or self.fname != other.fname
 
     def write(self):
-        conf_dir = os.path.dirname(self.fname)
-        if not os.path.isdir(conf_dir):
+        conf_dir = self.fname.parent
+        if not conf_dir.is_dir():
             os.makedirs(conf_dir)
-        data = json.dumps(self, indent=2)
-        with open(self.fname, "w") as f:
-            f.write(data)
+        with self.fname.open("w") as fd:
+            json.dump(self, fd, indent=2)
 
     __hash__ = None
