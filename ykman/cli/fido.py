@@ -98,6 +98,11 @@ def info(ctx):
     elif ctap2:
         client_pin = ClientPin(ctap2)  # N.B. All YubiKeys with CTAP2 support PIN.
         if ctap2.info.options["clientPin"]:
+            if ctap2.info.force_pin_change:
+                click.echo(
+                    "NOTE: The FIDO PID is disabled and must be changed before it can "
+                    "be used!"
+                )
             pin_retries, power_cycle = client_pin.get_pin_retries()
             if pin_retries:
                 click.echo(f"PIN is set, with {pin_retries} attempt(s) remaining.")
@@ -125,6 +130,14 @@ def info(ctx):
                 )
         elif bio_enroll is False:
             click.echo("No fingerprints have been registered.")
+
+        always_uv = ctap2.info.options.get("alwaysUv")
+        if always_uv is not None:
+            click.echo(
+                "Always Require User Verification is turned "
+                + ("on." if always_uv else "off.")
+            )
+
     else:
         click.echo("PIN is not supported.")
 
@@ -298,7 +311,6 @@ def change_pin(ctx, pin, new_pin, u2f):
     def change_pin(pin, new_pin):
         if pin is not None:
             _fail_if_not_valid_pin(ctx, pin, is_fips)
-        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         try:
             if is_fips:
                 try:
@@ -318,7 +330,7 @@ def change_pin(ctx, pin, new_pin, u2f):
         except CtapError as e:
             logger.error("Failed to change PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                cli_fail("New PIN is too long.")
+                cli_fail("New PIN doesn't meet policy requirements.")
             else:
                 _fail_pin_error(ctx, e, "Failed to change PIN: %s")
 
@@ -353,10 +365,29 @@ def change_pin(ctx, pin, new_pin, u2f):
     if not new_pin:
         new_pin = prompt_new_pin()
 
-    if is_fips or ctap2.info.options.get("clientPin"):
+    if is_fips:
+        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         change_pin(pin, new_pin)
     else:
-        set_pin(new_pin)
+        if len(new_pin) < ctap2.info.min_pin_length:
+            cli_fail("New PIN is too short.")
+        if ctap2.info.options.get("clientPin"):
+            change_pin(pin, new_pin)
+        else:
+            set_pin(new_pin)
+
+
+def _require_pin(ctx, pin, feature="This feature"):
+    ctap2 = ctx.obj.get("ctap2")
+    if not ctap2:
+        cli_fail(f"{feature} is not supported on this YubiKey.")
+    if not ctap2.info.options.get("clientPin"):
+        cli_fail(f"{feature} requires having a PIN. Set a PIN first.")
+    if ctap2.info.force_pin_change:
+        cli_fail("The FIDO PIN is blocked. Change the PIN first.")
+    if pin is None:
+        pin = _prompt_current_pin(prompt="Enter your PIN")
+    return pin
 
 
 @access.command("verify-pin")
@@ -370,13 +401,9 @@ def verify(ctx, pin):
     For YubiKey FIPS this will unlock the session, allowing U2F registration.
     """
 
-    if pin is None:
-        pin = _prompt_current_pin("Enter your PIN")
-
     ctap2 = ctx.obj.get("ctap2")
     if ctap2:
-        if not ctap2.info.options.get("clientPin"):
-            cli_fail("PIN is not set.")
+        pin = _require_pin(ctx, pin)
         client_pin = ClientPin(ctap2)
         try:
             # Get a PIN token to verify the PIN.
@@ -455,16 +482,9 @@ def creds():
 
 
 def _init_credman(ctx, pin):
+    pin = _require_pin(ctx, pin, "Credential Management")
+
     ctap2 = ctx.obj.get("ctap2")
-
-    if not ctap2:
-        cli_fail("Credential management not supported on this YubiKey.")
-    elif not ctap2.info.options.get("clientPin"):
-        cli_fail("Credential management requires having a PIN. Set a PIN first.")
-
-    if pin is None:
-        pin = _prompt_current_pin(prompt="Enter your PIN")
-
     client_pin = ClientPin(ctap2)
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
@@ -554,14 +574,9 @@ def bio():
 
 def _init_bio(ctx, pin):
     ctap2 = ctx.obj.get("ctap2")
-
     if not ctap2 or "bioEnroll" not in ctap2.info.options:
         cli_fail("Biometrics is not supported on this YubiKey.")
-    elif not ctap2.info.options.get("clientPin"):
-        cli_fail("Biometrics requires having a PIN. Set a PIN first.")
-
-    if pin is None:
-        pin = _prompt_current_pin(prompt="Enter your PIN")
+    pin = _require_pin(ctx, pin, "Biometrics")
 
     client_pin = ClientPin(ctap2)
     try:
