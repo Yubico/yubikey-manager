@@ -26,30 +26,32 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
-from pathlib import Path
 import json
+from pathlib import Path
 
 
-CONFIG_DIR_CANDIDATES = (
-    "./.ykman",
-    "~/.ykman",
-    "{}/ykman".format(os.environ.get("XDG_CONFIG_HOME", "~/.config")),
+XDG_CONF = (
+    Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser().resolve()
+    / "ykman"
 )
+HOME_CONF = Path.home() / ".ykman"
 
 
 def _get_conf_dir():
     """
-    gets directory to be used for configuration.
+    Gets the directory to be used for configuration.
 
-    It returns first candidate, for which path exists and is a directory. If none of
-    candidates exists, it returns the last one, as this should be the preferred
-    location to save the new configuration files.
+    Two locations are supported for configuration. One following the XDG base directory
+    layout, and one using a directory in $HOME.
+
+    If either directory exists, use that, with preference to XDG.
+    If neither exists, use XDG only if $XDG_CONFIG_HOME already exists.
     """
-    for path in CONFIG_DIR_CANDIDATES:
-        path = Path(path).expanduser().resolve()
+
+    for path in (XDG_CONF, HOME_CONF):
         if path.is_dir():
             return path
-    return Path(CONFIG_DIR_CANDIDATES[-1]).expanduser().resolve()
+    return XDG_CONF if XDG_CONF.parent.is_dir() else HOME_CONF
 
 
 class Settings(dict):
