@@ -33,8 +33,14 @@ DIR_NAME = ".ykman"
 
 
 def _get_conf_dir():
-    if os.path.isdir(DIR_NAME):
-        return os.path.abspath(DIR_NAME)
+    # Note, this is currently experimental and unsupported.
+    # This behavior may be changed at any time.
+    if "YKMAN_XDG_EXPERIMENTAL" in os.environ:
+        # Use XDG base directory structure.
+        xdg_data_default = os.path.join(os.path.expanduser("~"), ".local", "share")
+        xdg_data_home = os.environ.get("XDG_DATA_HOME", xdg_data_default)
+        return os.path.join(xdg_data_home, "ykman")
+
     return os.path.join(os.path.expanduser("~"), DIR_NAME)
 
 
