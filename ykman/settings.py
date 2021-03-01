@@ -30,33 +30,18 @@ import json
 from pathlib import Path
 
 
-XDG_CONF = (
-    Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser().resolve()
-    / "ykman"
-)
-HOME_CONF = Path.home() / ".ykman"
+HOME_CONFIG = "~/.ykman"
+XDG_DATA_HOME = os.environ.get("XDG_DATA_HOME", "~/.local/share") + "/ykman"
+XDG_CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", "~/.config") + "/ykman"
 
-
-def _get_conf_dir():
-    """
-    Gets the directory to be used for configuration.
-
-    Two locations are supported for configuration. One following the XDG base directory
-    layout, and one using a directory in $HOME.
-
-    If either directory exists, use that, with preference to XDG.
-    If neither exists, use XDG only if $XDG_CONFIG_HOME already exists.
-    """
-
-    for path in (XDG_CONF, HOME_CONF):
-        if path.is_dir():
-            return path
-    return XDG_CONF if XDG_CONF.parent.is_dir() else HOME_CONF
+USE_XDG = "YKMAN_XDG_EXPERIMENTAL" in os.environ
 
 
 class Settings(dict):
+    _config_dir = HOME_CONFIG
+
     def __init__(self, name):
-        self.fname: Path = _get_conf_dir() / (name + ".json")
+        self.fname = Path(self._config_dir).expanduser().resolve() / (name + ".json")
         if self.fname.is_file():
             with self.fname.open("r") as fd:
                 self.update(json.load(fd))
@@ -70,8 +55,16 @@ class Settings(dict):
     def write(self):
         conf_dir = self.fname.parent
         if not conf_dir.is_dir():
-            os.makedirs(conf_dir)
+            conf_dir.mkdir(0o700, parents=True)
         with self.fname.open("w") as fd:
             json.dump(self, fd, indent=2)
 
     __hash__ = None
+
+
+class Configuration(Settings):
+    _config_dir = XDG_CONFIG_HOME if USE_XDG else HOME_CONFIG
+
+
+class AppData(Settings):
+    _config_dir = XDG_DATA_HOME if USE_XDG else HOME_CONFIG

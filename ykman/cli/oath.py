@@ -50,7 +50,7 @@ from yubikit.oath import (
 )
 from ..oath import is_steam, calculate_steam, is_hidden
 from ..device import is_fips_version
-from ..settings import Settings
+from ..settings import AppData
 
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def oath(ctx):
     """
     session = OathSession(ctx.obj["conn"])
     ctx.obj["session"] = session
-    ctx.obj["settings"] = Settings("oath")
+    ctx.obj["settings"] = AppData("oath")
 
 
 @oath.command()
@@ -249,7 +249,7 @@ def _clear_all_passwords(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
 
-    settings = Settings("oath")
+    settings = AppData("oath")
     if "keys" in settings:
         del settings["keys"]
         settings.write()
