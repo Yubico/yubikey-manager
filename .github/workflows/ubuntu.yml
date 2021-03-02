@@ -3,62 +3,8 @@ name: Ubuntu
 on: [push, pull_request]
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        python: [ '3.x' ]
-
-    name: Python ${{ matrix.python }}
-    steps:
-      - uses: actions/checkout@v1
-
-      - name: Set up Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get install -qq swig libpcsclite-dev
-          python -m pip install --upgrade pip
-          pip install poetry
-          poetry install
-
-      - name: Run pre-commit hooks
-        run: |
-          pip install pre-commit
-          pre-commit install
-          pre-commit run --all-files --verbose
-
-      - name: Run unit tests
-        run: poetry run pytest
-
-      - name: Run CLI
-        run: |
-          pip install .
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-
-      - name: PyInstaller
-        run: |
-          pip install pyinstaller
-          pyinstaller ykman.spec
-          dist/ykman --version
-          [[ -z "$(dist/ykman --version | grep -E "not found|missing")" ]]
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/ykman dist/ykman-$REF
-
-      - name: Upload build
-        uses: actions/upload-artifact@v1
-        with:
-          name: ykman-builds-ubuntu
-          path: dist
-
   deb:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     name: Build .deb
 
     steps:
