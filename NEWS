@@ -1,16 +1,16 @@
 * Version 4.0.0 (unreleased)
- ** Drop support for Python < 3.6
- ** Drop reliance on libusb and libykpersonalize
+ ** Drop support for Python < 3.6.
+ ** Drop reliance on libusb and libykpersonalize.
  ** Support the "fido" and "otp" subcommands over NFC (using the --reader flag)
  ** New "ykman --diagnose" command to aid in troubleshooting.
  ** New "ykman apdu" command for sending raw APDUs over the smart card interface.
  ** Restructuring of subcommands, with aliases for old versions (to be removed
     in a future release).
  ** Major changes to the underlying "library" code:
-  *** New "yubikit" package added for custom development and advanced scripting
-  *** Type hints added for a large part of the "public" API
- ** OpenPGP: Add support for KDF enabled YubiKeys
- ** Static password: Add support for FR, IT, UK and BEPO keyboard layouts
+  *** New "yubikit" package added for custom development and advanced scripting.
+  *** Type hints added for a large part of the "public" API.
+ ** OpenPGP: Add support for KDF enabled YubiKeys.
+ ** Static password: Add support for FR, IT, UK and BEPO keyboard layouts.
 
 * Version 3.1.2 (released 2021-01-21)
  ** Bugfix release: Fix dependency on python-fido2 version.

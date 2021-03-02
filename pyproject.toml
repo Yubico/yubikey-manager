@@ -17,7 +17,6 @@ include = [
   "COPYING",
   "NEWS",
   "README.adoc",
-  "doc/",
   "man/",
   "tests/",
 ]

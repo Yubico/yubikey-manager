@@ -7,6 +7,7 @@ Additionally, the project uses https://python-poetry.org/[poetry]
 as its build tool; install that as well.
 
 ==== Windows
+
 Make sure the http://www.swig.org/[swig] executable is in your PATH.
 
 ==== macOS
@@ -41,21 +42,19 @@ Run ykman in DEBUG mode:
     $ poetry run ykman --log-level DEBUG info
 
 === Code Style & Security
+
 This project uses https://black.readthedocs.io/en/latest/[Black] and
 https://flake8.pycqa.org/[Flake8] for code style,
 https://mypy-lang.org[mypy] for static type checking, and
 https://github.com/PyCQA[Bandit] for security linting. These are invoked with a
 http://pre-commit.com/[pre-commit] hook.
+
 To use these:
 
     $ pip install pre-commit black flake8 bandit mypy
     $ pre-commit install
 
 === Unit tests
-
-First, install https://tox.readthedocs.io/en/latest/[tox] if you haven't already:
-
-    $ pip install tox
 
 To run unit tests:
 
@@ -64,17 +63,25 @@ To run unit tests:
 
 === Integration tests
 
-WARNING: ONLY run these on dedicated developer keys, as it will permanently delete data on the device(s)!
+WARNING: ONLY run these on dedicated developer keys, as it will permanently
+delete data on the device(s)!
 
-To run integration tests, indicate the serial numbers (given by `ykman list`) of the YubiKeys to test with:
+To run integration tests, indicate the serial number (given by `ykman list`) of
+the YubiKey to test with.  Make sure no other YubiKey is connected when running
+the test!
 
-   $ DESTRUCTIVE_TEST_YUBIKEY_SERIALS=123456,234567 tox -e integration-test
+   $ poetry run pytest --device 123456
 
-The integration test suite will automatically identify which test cases can be run with the
-available YubiKeys, and run those test cases for each eligible YubiKey. See
-link:integration-tests.adoc[integration-tests.adoc] for a deep dive into how this works.
+To run the tests over NFC, place the YubiKey to test on an NFC reader, and
+indicate both the reader and the serial number of the YubiKey:
+
+   $ poetry run pytest --reader HID --device 123456
+
+The integration test suite will automatically identify which test cases can be
+run with the attached YubiKey.
 
 
 === Packaging
 
-For third-party packaging, use the source releases and signatures available https://developers.yubico.com/yubikey-manager/Releases/[here].
+For third-party packaging, use the source releases and signatures available
+https://developers.yubico.com/yubikey-manager/Releases/[here].
