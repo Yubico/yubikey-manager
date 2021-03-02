@@ -1,4 +1,4 @@
-* Version 4.0.0 (unreleased)
+* Version 4.0.0 (released 2021-03-02)
  ** Drop support for Python < 3.6.
  ** Drop reliance on libusb and libykpersonalize.
  ** Support the "fido" and "otp" subcommands over NFC (using the --reader flag)
