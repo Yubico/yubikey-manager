@@ -57,7 +57,7 @@ equivalent):
 On Linux platforms you will need `pcscd` installed and running to be able to
 communicate with a YubiKey over the SmartCard interface. Additionally, you may
 need to set permissions for your user to access YubiKeys via the HID interfaces.
-More information available link:doc/permissions.adoc[here].
+More information available link:doc/Device_Permissions.adoc[here].
 
 Some of the libraries used by yubikey-manager have C-extensions, and may require
 additional dependencies to build, such as http://www.swig.org/[swig] and
@@ -85,7 +85,7 @@ Yubico also provides packages for Ubuntu in the yubico/stable PPA:
   $ sudo apt install yubikey-manager
 
 ==== Source
-To install from source, see the link:doc/development.adoc[development]
+To install from source, see the link:doc/Development.adoc[development]
 instructions.
 
 === Bash completion

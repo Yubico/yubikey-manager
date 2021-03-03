@@ -1,4 +1,4 @@
-== Device permissions on Linux
+== Device Permissions on Linux
 When using ykman on Linux, you may find that the tool is sometimes unable to
 access your YubiKey for some of the commands. This is often due to USB device
 permissions, and can be tested by running the same ykman command as
@@ -8,15 +8,16 @@ The YubiKey is accessed in several different ways, depending on which command
 is invoked.
 
 
-=== Smart card access
+=== Smart Card Access
 For smart card based applications, or when accessing a YubiKey over NFC, the
 access is done via pcscd, the PC/SC Smart Card Daemon. It's usually enough to
 have pcscd installed and running for this to work.
 
-Smart card access is required for the `piv`, `oath`, and `openpgp` commands.
+Smart card access is required for the `piv`, `oath`, and `openpgp` commands, as
+well as for any command issued over NFC.
 
 
-=== Keyboard access
+=== Keyboard Access
 The Yubico OTP application is accessed via the USB keyboard interface.
 Permission is typically granted using udev, via a rules file. You can find an
 example udev rules file which grants access to the keyboard interface
@@ -25,7 +26,7 @@ https://github.com/Yubico/yubikey-personalization/blob/master/69-yubikey.rules[h
 Keyboard access is required for the `otp` command.
 
 
-=== FIDO access
+=== FIDO Access
 The FIDO protocols are accessed via a USB HID interface. As with keybaord
 access, permission is granted through udev. You can find an example udev rules
 file which grants access to a large number (not just YubiKeys) of FIDO devices
