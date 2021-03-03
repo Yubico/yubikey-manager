@@ -597,7 +597,7 @@ def _format_fp(template_id, name):
 @click.option("-P", "--pin", help="PIN code.")
 def bio_list(ctx, pin):
     """
-    List registred fingerprint.
+    List registered fingerprint.
 
     Lists fingerprints by ID and (if available) label.
     """
