@@ -96,6 +96,18 @@ class PrepareUploadFailed(Exception):
 
 
 def test_upload():
+    print("certifi info")
+    try:
+        import certifi
+
+        print("certifi.where()", certifi.where())
+        print("Use certifi context")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(certifi.where())
+        do_test_upload(context)
+    except Exception as e:
+        print("Failed to use certifi:", e)
+        logger.error("Failed to use certifi", exc_info=e)
     print("Use unverified context")
     do_test_upload(ssl._create_unverified_context())  # nosec
     print("Use stdlib context")
