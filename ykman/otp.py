@@ -110,7 +110,14 @@ def prepare_upload_key(
         "private_id": private_id.hex(),
     }
 
-    context = ssl._create_stdlib_context()
+    try:
+        from pip._vendor import certifi
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(certifi.where())
+    except Exception as e:
+        logger.error("Unable to load certifi CA bundle.", exc_info=e)
+        context = ssl.create_default_context()
     httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1, context=context)  # nosec
 
     try:
