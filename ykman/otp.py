@@ -35,6 +35,7 @@ from http.client import HTTPSConnection
 from typing import Iterable
 
 import re
+import ssl
 import json
 import struct
 import random
@@ -92,6 +93,30 @@ class PrepareUploadFailed(Exception):
 
     def messages(self):
         return [e.message() for e in self.errors]
+
+
+def test_upload():
+    print("Use unverified context")
+    do_test_upload(ssl._create_unverified_context())  # nosec
+    print("Use stdlib context")
+    do_test_upload(ssl._create_stdlib_context())
+    print("Use default context")
+    do_test_upload(ssl.create_default_context())
+
+
+def do_test_upload(context):
+    print("Connecting...")
+    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1, context=context)  # nosec
+    print("Connected!")
+    try:
+        print("Sending request...")
+        httpconn.request("GET", "/")
+    except Exception as e:
+        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
+        return
+
+    resp = httpconn.getresponse()
+    print("Got response:", resp.read()[:100])
 
 
 def prepare_upload_key(
