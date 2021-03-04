@@ -54,7 +54,6 @@ from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
     PrepareUploadFailed,
     prepare_upload_key,
-    test_upload,
     is_in_fips_mode,
     generate_static_pw,
     parse_oath_key,
@@ -169,12 +168,6 @@ def otp(ctx, access_code):
             ctx.fail("Failed to parse access code: " + str(e))
 
     ctx.obj["access_code"] = access_code
-
-
-@otp.command("test")
-@click.pass_context
-def test_upload_cmd(ctx):
-    test_upload()
 
 
 @otp.command()

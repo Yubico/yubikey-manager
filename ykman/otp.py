@@ -95,42 +95,6 @@ class PrepareUploadFailed(Exception):
         return [e.message() for e in self.errors]
 
 
-def test_upload():
-    print("certifi info")
-    try:
-        import certifi
-
-        print("certifi.where()", certifi.where())
-        print("Use certifi context")
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.load_verify_locations(certifi.where())
-        do_test_upload(context)
-    except Exception as e:
-        print("Failed to use certifi:", e)
-        logger.error("Failed to use certifi", exc_info=e)
-    print("Use unverified context")
-    do_test_upload(ssl._create_unverified_context())  # nosec
-    print("Use stdlib context")
-    do_test_upload(ssl._create_stdlib_context())
-    print("Use default context")
-    do_test_upload(ssl.create_default_context())
-
-
-def do_test_upload(context):
-    print("Connecting...")
-    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1, context=context)  # nosec
-    print("Connected!")
-    try:
-        print("Sending request...")
-        httpconn.request("GET", "/")
-    except Exception as e:
-        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
-        return
-
-    resp = httpconn.getresponse()
-    print("Got response:", resp.read()[:100])
-
-
 def prepare_upload_key(
     key,
     public_id,
@@ -146,7 +110,8 @@ def prepare_upload_key(
         "private_id": private_id.hex(),
     }
 
-    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
+    context = ssl._create_stdlib_context()
+    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1, context=context)  # nosec
 
     try:
         httpconn.request(
