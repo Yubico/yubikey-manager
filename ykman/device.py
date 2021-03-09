@@ -493,7 +493,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 device_name = "YubiKey "
                 if info.form_factor == FORM_FACTOR.USB_C_BIO:
                     device_name += "C "
-                device_name += "BIO"
+                device_name += "Bio"
                 if _fido_only(usb_supported):
                     device_name += " (FIDO Edition)"
             else:
