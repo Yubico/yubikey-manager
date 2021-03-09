@@ -64,7 +64,7 @@ class CtapYubiKeyDevice(YkmanDevice):
     def open_connection(self, connection_type):
         if self.supports_connection(connection_type):
             return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
-        return super(OtpYubiKeyDevice, self).open_connection(connection_type)
+        return super(CtapYubiKeyDevice, self).open_connection(connection_type)
 
 
 def list_ctap_devices() -> List[CtapYubiKeyDevice]:
