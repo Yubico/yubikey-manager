@@ -159,7 +159,7 @@ def list_readers():
 
 
 def list_devices(name_filter=None):
-    name_filter = name_filter or YK_READER_NAME
+    name_filter = YK_READER_NAME if name_filter is None else name_filter
     devices = []
     for reader in list_readers():
         if name_filter.lower() in reader.name.lower():
