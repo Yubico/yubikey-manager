@@ -319,7 +319,8 @@ def list_devices():
             path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None,
         )
         if device == INVALID_HANDLE_VALUE:
-            raise ctypes.WinError()
+            logger.debug("Failed reading HID descriptor: INVALID_HANDLE")
+            continue
         try:
             usage = get_usage(device)
             if usage == USAGE_OTP:
