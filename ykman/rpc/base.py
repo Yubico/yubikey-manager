@@ -26,94 +26,101 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-import inspect
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class NoSuchCommandException(Exception):
-    def __init__(self):
-        super().__init__("No such command")
+class NoSuchActionException(Exception):
+    def __init__(selfi, name):
+        super().__init__(f"No such action: {name}")
 
 
-def command(func):
-    setattr(func, "_command", func.__name__)
+class NoSuchNodeException(Exception):
+    def __init__(self, name):
+        super().__init__(f"No such node: {name}")
+
+
+MARKER_ACTION = "_rpc_action_marker"
+MARKER_CHILD = "_rpc_child_marker"
+
+
+def action(func):
+    setattr(func, MARKER_ACTION, True)
     return func
-
-
-class CommandNode:
-    def __init__(self):
-        self._commands = {
-            f._command: f for _, f in inspect.getmembers(self) if hasattr(f, "_command")
-        }
-
-    def _register(self, name, func):
-        self._commands[name] = func
-
-    def __call__(self, command, request, event, signal):
-        if not command:
-            return self.invoke(request, event, signal)
-        if len(command) != 1:
-            raise NoSuchCommandException()
-        head = command[0]
-        if head in self._commands:
-            logger.debug("invoke command: %s", head)
-            return self._commands[head](request, event, signal)
-        raise NoSuchCommandException()
-
-    def invoke(self, request, event, signal):
-        raise NoSuchCommandException()
-
-    def close(self):
-        pass
 
 
 def child(func):
-    setattr(func, "_child", func.__name__)
+    setattr(func, MARKER_CHILD, True)
     return func
 
 
-class ParentNode(CommandNode):
+class RpcNode:
     def __init__(self):
-        super().__init__()
         self._child = None
         self._child_name = None
-        self._children = {
-            f._child: f for _, f in inspect.getmembers(self) if hasattr(f, "_child")
-        }
 
-    def __call__(self, command, request, event, signal):
-        name = command[0] if command else None
-
-        if self._child and self._child_name != name:
-            logger.debug("close existing child: %s", self._child_name)
-            self._child.close()
-            self._child = None
-            self._child_name = None
-
-        if not self._child and name:
-            try:
-                self._child = self.create_child(name)
-                self._child_name = name
-                logger.debug("created child: %s", name)
-            except NoSuchCommandException:
-                pass  # No child
-
-        if self._child:
-            return self._child(command[1:], request, event, signal)
-
-        return super().__call__(command, request, event, signal)
+    def __call__(self, action, target, params, event, signal):
+        if target:
+            return self.get_child(target.pop(0))(action, target, params, event, signal)
+        if action in self.list_actions():
+            return self.get_action(action)(params, event, signal)
+        if action in self.list_children():
+            return self.get_child(action)("get", [], params, event, signal)
+        raise NoSuchActionException(action)
 
     def close(self):
         if self._child:
-            logger.debug("close child %s", self._child_name)
-            self._child.close()
-            self._child = None
-            self._child_name = None
-        super().close()
+            self._close_child()
+
+    def get_data(self):
+        return dict()
+
+    def list_actions(self):
+        return [
+            name for name in dir(self) if hasattr(getattr(self, name), MARKER_ACTION)
+        ]
+
+    def get_action(self, name):
+        if self._child:
+            self._close_child()
+        action = getattr(self, name, None)
+        if hasattr(action, MARKER_ACTION):
+            return action
+        raise NoSuchActionException(name)
+
+    def list_children(self):
+        return {
+            name: {} for name in dir(self) if hasattr(getattr(self, name), MARKER_CHILD)
+        }
 
     def create_child(self, name):
-        if name in self._children:
-            return self._children[name]()
-        raise NoSuchCommandException()
+        child = getattr(self, name, None)
+        if hasattr(child, MARKER_CHILD):
+            return child()
+        raise NoSuchNodeException(name)
+
+    def _close_child(self):
+        logger.debug("close existing child: %s", self._child_name)
+        self._child.close()
+        self._child = None
+        self._child_name = None
+
+    def get_child(self, name):
+        if self._child and self._child_name != name:
+            self._close_child()
+
+        if not self._child:
+            self._child = self.create_child(name)
+            self._child_name = name
+            logger.debug("created child: %s", name)
+
+        return self._child
+
+    @action
+    def get(self, params, event, signal):
+        return dict(
+            data=self.get_data(),
+            actions=self.list_actions(),
+            children=self.list_children(),
+        )
