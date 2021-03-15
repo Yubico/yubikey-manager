@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import ParentNode, child
+from .base import RpcNode, child
 from .oath import OathNode
 from ..device import (
     scan_devices,
@@ -42,7 +42,7 @@ from yubikit.core.fido import FidoConnection
 from ..pcsc import list_devices, YK_READER_NAME
 from queue import Queue
 from threading import Thread, Event
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
 import os
 import logging
@@ -55,7 +55,7 @@ _SESSION_NODES = {
 }
 
 
-class RootNode(ParentNode):
+class RootNode(RpcNode):
     def __init__(self):
         super().__init__()
         self._devices = DevicesNode()
@@ -70,14 +70,14 @@ class RootNode(ParentNode):
         return self._readers
 
 
-class ReadersNode(ParentNode):
+class ReadersNode(RpcNode):
     def __init__(self):
         super().__init__()
         self._state = set()
         self._readers = {}
         self._reader_mapping = {}
 
-    def invoke(self, request, event, signal):
+    def list_children(self):
         devices = [
             d for d in list_devices("") if YK_READER_NAME not in d.reader.name.lower()
         ]
@@ -98,14 +98,14 @@ class ReadersNode(ParentNode):
         return super().create_child(name)
 
 
-class DevicesNode(ParentNode):
+class DevicesNode(RpcNode):
     def __init__(self):
         super().__init__()
         self._state = 0
         self._devices = {}
         self._device_mapping = {}
 
-    def invoke(self, request, event, signal):
+    def list_children(self):
         state = scan_devices()[1]
         if state != self._state:
             self._devices = {}
@@ -119,14 +119,12 @@ class DevicesNode(ParentNode):
         return self._devices
 
     def create_child(self, name):
-        if not self._state:  # TODO: Remove
-            self.invoke({}, None, None)
-        if name in self._devices:
+        if name in self.list_children():
             return DeviceNode(*self._device_mapping[name])
         return super().create_child(name)
 
 
-class DeviceNode(ParentNode):
+class DeviceNode(RpcNode):
     def __init__(self, device, info=None):
         super().__init__()
         self._device = device
@@ -153,7 +151,7 @@ class DeviceNode(ParentNode):
     def fido(self):
         return self._create_connection(FidoConnection)
 
-    def invoke(self, request, event, signal):
+    def get_data(self):
         for conn_type in (SmartCardConnection, OtpConnection, FidoConnection):
             if self._device.supports_connection(conn_type):
                 with self._device.open_connection(conn_type) as conn:
@@ -164,7 +162,7 @@ class DeviceNode(ParentNode):
         raise ValueError("No supported connections")
 
 
-class ConnectionNode(ParentNode):
+class ConnectionNode(RpcNode):
     def __init__(self, connection):
         super().__init__()
         self._connection = connection
@@ -173,12 +171,15 @@ class ConnectionNode(ParentNode):
         super().close()
         self._connection.close()
 
+    def list_children(self):
+        return {session: {} for session in _SESSION_NODES}
+
     def create_child(self, name):
         if name in _SESSION_NODES:
             return _SESSION_NODES[name](self._connection)
         return super().create_child(name)
 
-    def invoke(self, request, event, signal):
+    def get_data(self):
         info = read_info(None, self._connection)
         logger.debug("Get info: %s", info)
         return {"version": info.version, "serial": info.serial}
@@ -197,7 +198,7 @@ def _handle_incoming(event, recv, error, cmd_queue):
                 else:
                     # Ignore other signals
                     logger.error("Unhandled signal: %r", request)
-            elif "command" in request:
+            elif "action" in request:
                 cmd_queue.join()  # Wait for existing command to complete
                 event.clear()  # Reset event for next command
                 cmd_queue.put(request)
@@ -212,7 +213,7 @@ def _handle_incoming(event, recv, error, cmd_queue):
 def process(
     send: Callable[[Dict], None],
     recv: Callable[[], Dict],
-    handler: Callable[[str, Dict, Event, Callable[[str], None]], Dict],
+    handler: Callable[[str, List, Dict, Event, Callable[[str], None]], Dict],
 ) -> None:
     def error(e):
         logger.error("Returning error", exc_info=e)
@@ -234,7 +235,15 @@ def process(
         if request is None:
             break
         try:
-            success(handler(request.pop("command"), request, event, signal))
+            success(
+                handler(
+                    request.pop("action"),
+                    request.pop("target", []),
+                    request.pop("params", {}),
+                    event,
+                    signal,
+                )
+            )
         except Exception as e:
             error(e)
         cmd_queue.task_done()
