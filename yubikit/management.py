@@ -122,6 +122,7 @@ class FORM_FACTOR(IntEnum):
     def from_code(cls, code: int) -> "FORM_FACTOR":
         if code and not isinstance(code, int):
             raise ValueError(f"Invalid form factor code: {code}")
+        code &= 0xF
         return cls(code) if code in cls.__members__.values() else cls.UNKNOWN
 
 
