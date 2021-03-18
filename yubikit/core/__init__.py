@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from enum import Enum, unique, auto
+from enum import Enum, unique
 from typing import (
     Type,
     List,
@@ -65,11 +65,12 @@ class Version(NamedTuple):
         raise ValueError("No version found in string")
 
 
-class TRANSPORT(Enum):
+@unique
+class TRANSPORT(str, Enum):
     """YubiKey physical connection transports."""
 
-    USB = auto()
-    NFC = auto()
+    USB = "usb"
+    NFC = "nfc"
 
 
 @unique

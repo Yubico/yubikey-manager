@@ -54,7 +54,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
 from cryptography.hazmat.backends import default_backend
 
 from dataclasses import dataclass
-from enum import Enum, IntEnum, unique, auto
+from enum import Enum, IntEnum, unique
 from typing import Optional, Union, cast
 
 import logging
@@ -65,9 +65,10 @@ import re
 logger = logging.getLogger(__name__)
 
 
-class ALGORITHM(Enum):
-    EC = auto()
-    RSA = auto()
+@unique
+class ALGORITHM(str, Enum):
+    EC = "ec"
+    RSA = "rsa"
 
 
 # Don't treat pre 1.0 versions as "developer builds".

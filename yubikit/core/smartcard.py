@@ -27,7 +27,7 @@
 
 from . import Version, TRANSPORT, Connection, CommandError, ApplicationNotAvailableError
 from time import time
-from enum import Enum, IntEnum, unique, auto
+from enum import Enum, IntEnum, unique
 from typing import Tuple
 import abc
 import struct
@@ -55,11 +55,12 @@ class ApduError(CommandError):
         return f"APDU error: SW=0x{self.sw:04x}"
 
 
-class ApduFormat(Enum):
+@unique
+class ApduFormat(str, Enum):
     """APDU encoding format"""
 
-    SHORT = auto()
-    EXTENDED = auto()
+    SHORT = "short"
+    EXTENDED = "extended"
 
 
 @unique
