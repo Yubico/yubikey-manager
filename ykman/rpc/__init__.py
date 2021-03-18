@@ -26,8 +26,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import RpcNode, child
+from .base import RpcNode, child, action, NoSuchNodeException
 from .oath import OathNode
+from .management import ManagementNode
+from .. import __version__ as ykman_version
 from ..device import (
     scan_devices,
     list_all_devices,
@@ -35,13 +37,18 @@ from ..device import (
     read_info,
     connect_to_device,
 )
+from ..diagnostics import get_diagnostics
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
+from yubikit.management import USB_INTERFACE
 
 from ..pcsc import list_devices, YK_READER_NAME
+from smartcard.Exceptions import SmartcardException
 from queue import Queue
 from threading import Thread, Event
+from dataclasses import asdict
 from typing import Callable, Dict, List
 
 import os
@@ -50,9 +57,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-_SESSION_NODES = {
-    "oath": OathNode,
-}
+_SESSION_NODES = dict(management=ManagementNode, oath=OathNode,)
 
 
 class RootNode(RpcNode):
@@ -61,13 +66,20 @@ class RootNode(RpcNode):
         self._devices = DevicesNode()
         self._readers = ReadersNode()
 
+    def get_data(self):
+        return dict(version=ykman_version)
+
     @child
-    def devices(self):
+    def usb(self):
         return self._devices
 
     @child
-    def readers(self):
+    def nfc(self):
         return self._readers
+
+    @action
+    def diagnose(self, *ignored):
+        return dict(diagnostics=get_diagnostics())
 
 
 class ReadersNode(RpcNode):
@@ -93,9 +105,7 @@ class ReadersNode(RpcNode):
         return self._readers
 
     def create_child(self, name):
-        if name in self._readers:
-            return DeviceNode(self._reader_mapping[name], None)
-        return super().create_child(name)
+        return DeviceNode(self._reader_mapping[name], None)
 
 
 class DevicesNode(RpcNode):
@@ -111,17 +121,17 @@ class DevicesNode(RpcNode):
             self._devices = {}
             self._device_mapping = {}
             for dev, info in list_all_devices():
-                dev_id = str(len(self._devices))  # os.urandom(4).hex()
+                dev_id = str(info.serial) if info.serial else os.urandom(4).hex()
+                while dev_id in self._device_mapping:
+                    dev_id = os.urandom(4).hex()
                 self._device_mapping[dev_id] = (dev, info)
                 name = get_name(info, dev.pid.get_type())
-                self._devices[dev_id] = dict(pid=dev.pid, name=name)
+                self._devices[dev_id] = dict(pid=dev.pid, name=name, serial=info.serial)
             self._state = state
         return self._devices
 
     def create_child(self, name):
-        if name in self.list_children():
-            return DeviceNode(*self._device_mapping[name])
-        return super().create_child(name)
+        return DeviceNode(*self._device_mapping[name])
 
 
 class DeviceNode(RpcNode):
@@ -130,6 +140,16 @@ class DeviceNode(RpcNode):
         self._device = device
         self._info = info
 
+    def __call__(self, *args):
+        try:
+            return super().__call__(*args)
+        except (SmartcardException, OSError) as e:
+            logger.error("Device error", exc_info=e)
+            self._child = None
+            name = self._child_name
+            self._child_name = None
+            raise NoSuchNodeException(name)
+
     def _create_connection(self, conn_type):
         if self._device.supports_connection(conn_type):
             connection = self._device.open_connection(conn_type)
@@ -137,7 +157,18 @@ class DeviceNode(RpcNode):
             connection = connect_to_device(self._info.serial, [conn_type])[0]
         else:
             raise ValueError("Unsupported connection type")
-        return ConnectionNode(connection)
+        return ConnectionNode(self._device.transport, connection)
+
+    def list_children(self):
+        children = super().list_children()
+        if self._device.transport == TRANSPORT.USB:
+            enabled = self._device.pid.get_interfaces()
+        else:  # NFC, only ccid and FIDO
+            enabled = USB_INTERFACE.CCID | USB_INTERFACE.FIDO
+        for iface in USB_INTERFACE:
+            if iface not in enabled:
+                del children[iface.name.lower()]
+        return children
 
     @child
     def ccid(self):
@@ -155,17 +186,20 @@ class DeviceNode(RpcNode):
         for conn_type in (SmartCardConnection, OtpConnection, FidoConnection):
             if self._device.supports_connection(conn_type):
                 with self._device.open_connection(conn_type) as conn:
-                    info = read_info(self._device.pid, conn)
-                    logger.debug("Get info: %s", info)
-                    # TODO: Add more data from info
-                    return {"version": info.version, "serial": info.serial}
+                    pid = self._device.pid
+                    info = read_info(pid, conn)
+                    name = get_name(info, pid.get_type() if pid else None)
+                    return dict(pid=pid, name=name, info=asdict(info))
         raise ValueError("No supported connections")
 
 
 class ConnectionNode(RpcNode):
-    def __init__(self, connection):
+    def __init__(self, transport, connection):
         super().__init__()
+        self._transport = transport
         self._connection = connection
+        self._info = read_info(None, self._connection)
+        self._capabilities = self._info.config.enabled_capabilities[transport]
 
     def close(self):
         super().close()
@@ -181,7 +215,6 @@ class ConnectionNode(RpcNode):
 
     def get_data(self):
         info = read_info(None, self._connection)
-        logger.debug("Get info: %s", info)
         return {"version": info.version, "serial": info.serial}
 
 
@@ -217,13 +250,13 @@ def process(
 ) -> None:
     def error(e):
         logger.error("Returning error", exc_info=e)
-        send({"result": "error", "message": str(e)})
+        send(dict(result="error", message=str(e)))
 
     def signal(name: str, **kwargs):
-        send({"signal": name, **kwargs})
+        send(dict(signal=name, **kwargs))
 
     def success(data: Dict):
-        send({"result": "success", **data})
+        send(dict(result="success", **data))
 
     event = Event()
     cmd_queue: Queue = Queue(1)

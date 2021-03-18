@@ -10,6 +10,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def red(value):
+    return f"\u001b[31;1m{value}\u001b[0m"
+
+
+def green(value):
+    return f"\u001b[32;1m{value}\u001b[0m"
+
+
+def yellow(value):
+    return f"\u001b[33;1m{value}\u001b[0m"
+
+
+def cyan(value):
+    return f"\u001b[36;1m{value}\u001b[0m"
+
+
 class RpcShell(cmd.Cmd):
     def __init__(self, cmd_queue, result_queue):
         super().__init__()
@@ -71,7 +87,11 @@ class RpcShell(cmd.Cmd):
         if status == "success":
             return result
         else:
-            print(f"{status.upper()}:", result)
+            print(red(f"{status.upper()}: {result}"))
+
+    def do_quit(self, args):
+        self._cmds.put(None)
+        return True
 
     def do_cd(self, args):
         if args:
@@ -96,17 +116,20 @@ class RpcShell(cmd.Cmd):
             self._node = result
             data = self._node.get("data", None)
             if data:
-                print(data)
+                for k, v in data.items():
+                    print(yellow(f"{k}: {v}"))
+
+            for c, c_data in self._node.get("children", {}).items():
+                print(green(f"{c}/"))
+                if c_data:
+                    for k, v in c_data.items():
+                        print(yellow(f"  {k}: {v}"))
+
             for name in self._node.get("actions", []):
                 if name != "get":  # Don't show get, always available
-                    print(name)
-            for k, v in self._node.get("children", {}).items():
-                line = f"{k}/"
-                if v:
-                    line += f" {v}"
-                print(line)
+                    print(cyan(f"{name}"))
         else:
-            print(f"{status.upper()}:", result)
+            print(red(f"{status.upper()}: {result}"))
 
     def default(self, line):
         parts = line.strip().split(maxsplit=1)
@@ -129,9 +152,9 @@ class RpcShell(cmd.Cmd):
         status = result.pop("result")
         if status == "success":
             if result:
-                print(result)
+                print(yellow(json.dumps(result)))
         else:
-            print(f"{status.upper()}:", result)
+            print(red(f"{status.upper()}: {result}"))
 
     def do_EOF(self, args):
         return True
