@@ -426,21 +426,21 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
         ]
 
     # Workaround for invalid configurations.
-    # Assume all form factors except USB_A_KEYCHAIN and
-    # USB_C_KEYCHAIN >= 5.2.4 does not support NFC.
-    if not (
-        info.version < (4, 0, 0)  # No relevant programming yet
-        or (info.form_factor is FORM_FACTOR.USB_A_KEYCHAIN)
-        or (
-            info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version >= (5, 2, 4)
-        )
-    ):
-        info.supported_capabilities = {
-            TRANSPORT.USB: info.supported_capabilities[TRANSPORT.USB]
-        }
-        info.config.enabled_capabilities = {
-            TRANSPORT.USB: info.config.enabled_capabilities[TRANSPORT.USB]
-        }
+    if info.version >= (4, 0, 0):
+        if info.form_factor in (
+            FORM_FACTOR.USB_A_NANO,
+            FORM_FACTOR.USB_C_NANO,
+            FORM_FACTOR.USB_C_LIGHTNING,
+        ) or (
+            info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version < (5, 2, 4)
+        ):
+            # Known not to have NFC
+            info.supported_capabilities = {
+                TRANSPORT.USB: info.supported_capabilities[TRANSPORT.USB]
+            }
+            info.config.enabled_capabilities = {
+                TRANSPORT.USB: info.config.enabled_capabilities[TRANSPORT.USB]
+            }
 
     return info
 
@@ -497,7 +497,10 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 if _fido_only(usb_supported):
                     device_name += " (FIDO Edition)"
             else:
-                device_name = "YubiKey 5"
+                if info.is_fips:
+                    device_name = "YubiKey "
+                else:
+                    device_name = "YubiKey 5"
                 if info.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
                     if info.has_transport(TRANSPORT.NFC):
                         device_name += " NFC"
@@ -513,5 +516,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                     device_name += "C Nano"
                 elif info.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
                     device_name += "Ci"
+                if info.is_fips:
+                    device_name = device_name.replace("  ", " ") + " FIPS"
 
     return device_name
