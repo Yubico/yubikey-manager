@@ -199,6 +199,7 @@ class DeviceInfo:
     form_factor: FORM_FACTOR
     supported_capabilities: Mapping[TRANSPORT, CAPABILITY]
     is_locked: bool
+    is_fips: bool = False
 
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
@@ -210,7 +211,9 @@ class DeviceInfo:
         data = Tlv.parse_dict(encoded[1:])
         locked = data.get(TAG_CONFIG_LOCK) == b"\1"
         serial = bytes2int(data.get(TAG_SERIAL, b"\0")) or None
-        form_factor = FORM_FACTOR.from_code(bytes2int(data.get(TAG_FORM_FACTOR, b"\0")))
+        ff_value = bytes2int(data.get(TAG_FORM_FACTOR, b"\0"))
+        form_factor = FORM_FACTOR.from_code(ff_value)
+        fips = bool(ff_value & 0x80)
         if TAG_VERSION in data:
             version = Version.from_bytes(data[TAG_VERSION])
         else:
@@ -240,6 +243,7 @@ class DeviceInfo:
             form_factor,
             supported,
             locked,
+            fips,
         )
 
 
