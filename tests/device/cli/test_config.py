@@ -37,56 +37,56 @@ class TestConfigUSB:
         ykman_cli("config", "usb", "--enable-all", "-f")
         await_reboot()
 
-    @condition.capability(CAPABILITY.OTP)
+    @condition.capability(CAPABILITY.OTP, TRANSPORT.USB)
     def test_disable_otp(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "OTP", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "OTP" not in output
 
-    @condition.capability(CAPABILITY.U2F)
+    @condition.capability(CAPABILITY.U2F, TRANSPORT.USB)
     def test_disable_u2f(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "U2F", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "FIDO U2F" not in output
 
-    @condition.capability(CAPABILITY.OPENPGP)
+    @condition.capability(CAPABILITY.OPENPGP, TRANSPORT.USB)
     def test_disable_openpgp(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "OPENPGP", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "OpenPGP" not in output
 
-    @condition.capability(CAPABILITY.OPENPGP)
+    @condition.capability(CAPABILITY.OPENPGP, TRANSPORT.USB)
     def test_disable_openpgp_alternative_syntax(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "openpgp", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "OpenPGP" not in output
 
-    @condition.capability(CAPABILITY.PIV)
+    @condition.capability(CAPABILITY.PIV, TRANSPORT.USB)
     def test_disable_piv(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "PIV", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "PIV" not in output
 
-    @condition.capability(CAPABILITY.OATH)
+    @condition.capability(CAPABILITY.OATH, TRANSPORT.USB)
     def test_disable_oath(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "OATH", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "OATH" not in output
 
-    @condition.capability(CAPABILITY.FIDO2)
+    @condition.capability(CAPABILITY.FIDO2, TRANSPORT.USB)
     def test_disable_fido2(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--disable", "FIDO2", "-f")
         await_reboot()
         output = ykman_cli("config", "usb", "--list").output
         assert "FIDO2" not in output
 
-    @condition.capability(CAPABILITY.FIDO2)
+    @condition.capability(CAPABILITY.FIDO2, TRANSPORT.USB)
     def test_disable_and_enable(self, ykman_cli):
         with pytest.raises(SystemExit):
             ykman_cli("config", "usb", "--disable", "FIDO2", "--enable", "FIDO2", "-f")
@@ -106,6 +106,7 @@ class TestConfigUSB:
                 "OATH",
                 "-d",
                 "OPENPGP",
+                "-d",
                 "PIV",
                 "-d",
                 "OTP",
@@ -161,31 +162,37 @@ class TestConfigNFC:
         ykman_cli("config", "nfc", "--enable-all", "-f")
         await_reboot()
 
+    @condition.capability(CAPABILITY.OTP, TRANSPORT.NFC)
     def test_disable_otp(self, ykman_cli):
         ykman_cli("config", "nfc", "--disable", "OTP", "-f")
         output = ykman_cli("config", "nfc", "--list").output
         assert "OTP" not in output
 
+    @condition.capability(CAPABILITY.U2F, TRANSPORT.NFC)
     def test_disable_u2f(self, ykman_cli):
         ykman_cli("config", "nfc", "--disable", "U2F", "-f")
         output = ykman_cli("config", "nfc", "--list").output
         assert "FIDO U2F" not in output
 
+    @condition.capability(CAPABILITY.OPENPGP, TRANSPORT.NFC)
     def test_disable_openpgp(self, ykman_cli):
         ykman_cli("config", "nfc", "--disable", "OPENPGP", "-f")
         output = ykman_cli("config", "nfc", "--list").output
         assert "OpenPGP" not in output
 
+    @condition.capability(CAPABILITY.PIV, TRANSPORT.NFC)
     def test_disable_piv(self, ykman_cli):
         ykman_cli("config", "nfc", "--disable", "PIV", "-f")
         output = ykman_cli("config", "nfc", "--list").output
         assert "PIV" not in output
 
+    @condition.capability(CAPABILITY.OATH, TRANSPORT.NFC)
     def test_disable_oath(self, ykman_cli):
         ykman_cli("config", "nfc", "--disable", "OATH", "-f")
         output = ykman_cli("config", "nfc", "--list").output
         assert "OATH" not in output
 
+    @condition.capability(CAPABILITY.FIDO2, TRANSPORT.NFC)
     def test_disable_fido2(self, ykman_cli):
         ykman_cli("config", "nfc", "--disable", "FIDO2", "-f")
         output = ykman_cli("config", "nfc", "--list").output
@@ -197,6 +204,7 @@ class TestConfigNFC:
         output = ykman_cli("config", "nfc", "--list").output
         assert not output
 
+    @condition.capability(CAPABILITY.FIDO2, TRANSPORT.NFC)
     def test_disable_and_enable(self, ykman_cli):
         with pytest.raises(SystemExit):
             ykman_cli("config", "nfc", "--disable", "FIDO2", "--enable", "FIDO2", "-f")

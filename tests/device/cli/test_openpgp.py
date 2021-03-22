@@ -4,7 +4,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-@condition.capability(CAPABILITY.OATH)
+@condition.capability(CAPABILITY.OPENPGP)
 def preconditions(ykman_cli):
     ykman_cli("openpgp", "reset", "-f")
 

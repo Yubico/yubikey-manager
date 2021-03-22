@@ -71,10 +71,10 @@ def has_transport(transport):
 
 
 @register_condition
-def capability(capability):
+def capability(capability, transport=None):
     return condition(
         lambda info, device: capability
-        in info.config.enabled_capabilities.get(device.transport, []),
+        in info.config.enabled_capabilities.get(transport or device.transport, []),
         f"Requires {capability}",
     )
 
