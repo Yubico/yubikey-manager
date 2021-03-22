@@ -150,7 +150,6 @@ class TestUtilityFunctions(unittest.TestCase):
             self.assertFalse(is_pem(rsa_2048_key_cert_encrypted_pfx.read()))
 
     def test_form_factor_from_code(self):
-        self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(None))
         with self.assertRaises(ValueError):
             FORM_FACTOR.from_code("im a string")
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x00))
