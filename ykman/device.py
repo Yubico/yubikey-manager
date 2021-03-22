@@ -416,6 +416,10 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
             )
         info.config.enabled_capabilities[TRANSPORT.USB] = usb_enabled
 
+    # YK4-based FIPS version
+    if is_fips_version(info.version):
+        info.is_fips = True
+
     # Set nfc_enabled if missing (pre YubiKey 5)
     if (
         info.has_transport(TRANSPORT.NFC)
@@ -484,7 +488,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
             return "Yubikey (%d.%d.%d)" % info.version
         if _is_preview(info.version):
             device_name = "YubiKey Preview"
-        elif is_fips_version(info.version):
+        elif is_fips_version(info.version):  # YK4 FIPS
             device_name = "YubiKey FIPS"
         elif usb_supported == CAPABILITY.OTP | CAPABILITY.U2F:
             device_name = "YubiKey Edge"

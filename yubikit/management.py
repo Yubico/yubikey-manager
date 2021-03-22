@@ -84,7 +84,7 @@ class CAPABILITY(IntFlag):
         elif self == CAPABILITY.HSMAUTH:
             return "YubiHSM Auth"
         else:
-            return super().__str__()
+            return getattr(self, "name", super().__str__())
 
 
 @unique
