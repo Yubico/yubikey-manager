@@ -1,3 +1,7 @@
+* Version 4.0.1 (released 2021-03-29)
+ ** Add support for YK5-based FIPS YubiKeys.
+ ** Bugfix: Fix OTP device enumeration on Win32.
+
 * Version 4.0.0 (released 2021-03-02)
  ** Drop support for Python < 3.6.
  ** Drop reliance on libusb and libykpersonalize.
