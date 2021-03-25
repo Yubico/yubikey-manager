@@ -439,12 +439,8 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
             info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version < (5, 2, 4)
         ):
             # Known not to have NFC
-            info.supported_capabilities = {
-                TRANSPORT.USB: info.supported_capabilities[TRANSPORT.USB]
-            }
-            info.config.enabled_capabilities = {
-                TRANSPORT.USB: info.config.enabled_capabilities[TRANSPORT.USB]
-            }
+            info.supported_capabilities.pop(TRANSPORT.NFC, None)
+            info.config.enabled_capabilities.pop(TRANSPORT.NFC, None)
 
     return info
 
