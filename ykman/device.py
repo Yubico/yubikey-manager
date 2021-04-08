@@ -83,7 +83,7 @@ def list_ccid_devices():
 
 
 def is_fips_version(version: Version) -> bool:
-    """True if a given firmware version indicates a YubiKey FIPS"""
+    """True if a given firmware version indicates a YubiKey (4) FIPS"""
     return (4, 4, 0) <= version < (4, 5, 0)
 
 
@@ -501,7 +501,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
             )
 
             name_parts = ["YubiKey"]
-            if not (is_bio or info.is_fips):
+            if not is_bio:
                 name_parts.append("5")
             if is_c:
                 name_parts.append("C")
@@ -516,9 +516,9 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
             if is_bio:
                 name_parts.append("Bio")
                 if _fido_only(usb_supported):
-                    name_parts.append("(FIDO Edition)")
+                    name_parts.append("- FIDO Edition")
             if info.is_fips:
                 name_parts.append("FIPS")
-            device_name = " ".join(name_parts).replace("5 C", "5C")
+            device_name = " ".join(name_parts).replace("5 C", "5C").replace("5 A", "5A")
 
     return device_name
