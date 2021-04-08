@@ -333,12 +333,11 @@ class OpenPgpController(object):
         self._app.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, data)
 
     def _select_certificate(self, key_slot):
+        data = Tlv(0x60, Tlv(0x5C, b"\x7f\x21"))
+        if self.version <= (5, 4, 3):  # These use a non-standard byte in the command.
+            data = b"\x06" + data  # 6 is the length of the data.
         self._app.send_apdu(
-            0,
-            INS.SELECT_DATA,
-            3 - key_slot.index,
-            0x04,
-            Tlv(0, Tlv(0x60, Tlv(0x5C, b"\x7f\x21")))[1:],
+            0, INS.SELECT_DATA, 3 - key_slot.index, 0x04, data,
         )
 
     def _read_version(self):
