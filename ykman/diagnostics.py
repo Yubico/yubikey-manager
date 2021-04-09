@@ -23,14 +23,14 @@ def mgmt_info(pid, conn):
         raw_info = ManagementSession(conn).backend.read_config()
         lines.append(f"\tRawInfo: {raw_info.hex()}")
     except Exception as e:
-        lines.append(f"\tFailed to read device info via Management: {e}")
+        lines.append(f"\tFailed to read device info via Management: {e!r}")
     try:
         info = read_info(pid, conn)
         lines.append(f"\t{info}")
         name = get_name(info, pid.get_type())
         lines.append(f"\tDevice name: {name}")
     except Exception as e:
-        lines.append(f"\tFailed to read device info: {e}")
+        lines.append(f"\tFailed to read device info: {e!r}")
     return lines
 
 
@@ -39,7 +39,7 @@ def piv_info(conn):
         piv = PivSession(conn)
         return ["\tPIV"] + [f"\t\t{ln}" for ln in get_piv_info(piv).splitlines() if ln]
     except Exception as e:
-        return [f"\tPIV not accessible {e}"]
+        return [f"\tPIV not accessible {e!r}"]
 
 
 def openpgp_info(conn):
@@ -49,7 +49,7 @@ def openpgp_info(conn):
             f"\t\t{ln}" for ln in get_openpgp_info(openpgp).splitlines() if ln
         ]
     except Exception as e:
-        return [f"\tOpenPGP not accessible {e}"]
+        return [f"\tOpenPGP not accessible {e!r}"]
 
 
 def oath_info(conn):
@@ -61,7 +61,7 @@ def oath_info(conn):
             f"\t\tPassword protected: {oath.locked}",
         ]
     except Exception as e:
-        return [f"\tOATH not accessible {e}"]
+        return [f"\tOATH not accessible {e!r}"]
 
 
 def ccid_info():
@@ -81,7 +81,7 @@ def ccid_info():
         lines.append("")
     except Exception as e:
         return [
-            f"PC/SC failure: {e}",
+            f"PC/SC failure: {e!r}",
             "",
         ]
 
@@ -95,7 +95,7 @@ def ccid_info():
                 lines.extend(oath_info(conn))
                 lines.extend(openpgp_info(conn))
         except Exception as e:
-            lines.append(f"\tPC/SC connection failure: {e}")
+            lines.append(f"\tPC/SC connection failure: {e!r}")
         lines.append("")
 
     lines.append("")
@@ -115,9 +115,9 @@ def otp_info():
                     config = otp.get_config_state()
                     lines.append(f"\tOTP: {config!r}")
                 except ValueError as e:
-                    lines.append(f"\tCouldn't read OTP state: {e}")
+                    lines.append(f"\tCouldn't read OTP state: {e!r}")
         except Exception as e:
-            lines.append(f"\tOTP connection failure: {e}")
+            lines.append(f"\tOTP connection failure: {e!r}")
         lines.append("")
     lines.append("")
     return lines
@@ -151,9 +151,9 @@ def fido_info():
                         lines.append("PIN: Not configured")
 
                 except (ValueError, CtapError) as e:
-                    lines.append(f"\tCouldn't get info: {e}")
+                    lines.append(f"\tCouldn't get info: {e!r}")
         except Exception as e:
-            lines.append(f"\tFIDO connection failure: {e}")
+            lines.append(f"\tFIDO connection failure: {e!r}")
         lines.append("")
     return lines
 
