@@ -3,30 +3,35 @@ from .logging_setup import log_sys_info
 from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
 
-from yubikit.core import Version
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
-from yubikit.management import ManagementSession, DeviceInfo
+from yubikit.management import ManagementSession
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.piv import PivSession
 from yubikit.oath import OathSession
+from ykman.device import read_info, get_name
 from ykman.piv import get_piv_info
 from ykman.openpgp import OpenPgpController, get_openpgp_info
 from fido2.ctap import CtapError
 from fido2.ctap2 import Ctap2, ClientPin
 
 
-def mgmt_info(conn):
+def mgmt_info(pid, conn):
+    lines = []
     try:
         raw_info = ManagementSession(conn).backend.read_config()
-        info = DeviceInfo.parse(raw_info, Version(0, 0, 0))
-        return [
-            f"\t{info}",
-            f"\tRawInfo: {raw_info.hex()}",
-        ]
+        lines.append(f"\tRawInfo: {raw_info.hex()}")
     except Exception as e:
-        return [f"\tFailed to read device info: {e}"]
+        lines.append(f"\tFailed to read device info via Management: {e}")
+    try:
+        info = read_info(pid, conn)
+        lines.append(f"\t{info}")
+        name = get_name(info, pid.get_type())
+        lines.append(f"\tDevice name: {name}")
+    except Exception as e:
+        lines.append(f"\tFailed to read device info: {e}")
+    return lines
 
 
 def piv_info(conn):
@@ -85,7 +90,7 @@ def ccid_info():
         lines.append(f"\t{dev!r}")
         try:
             with dev.open_connection(SmartCardConnection) as conn:
-                lines.extend(mgmt_info(conn))
+                lines.extend(mgmt_info(dev.pid, conn))
                 lines.extend(piv_info(conn))
                 lines.extend(oath_info(conn))
                 lines.extend(openpgp_info(conn))
@@ -104,7 +109,7 @@ def otp_info():
         lines.append(f"\t{dev!r}")
         try:
             with dev.open_connection(OtpConnection) as conn:
-                lines.extend(mgmt_info(conn))
+                lines.extend(mgmt_info(dev.pid, conn))
                 otp = YubiOtpSession(conn)
                 try:
                     config = otp.get_config_state()
@@ -128,7 +133,7 @@ def fido_info():
                 lines.append("CTAP device version: %d.%d.%d" % conn.device_version)
                 lines.append(f"CTAPHID protocol version: {conn.version}")
                 lines.append("Capabilities: %d" % conn.capabilities)
-                lines.extend(mgmt_info(conn))
+                lines.extend(mgmt_info(dev.pid, conn))
                 try:
                     ctap2 = Ctap2(conn)
                     lines.append(f"\tCtap2Info: {ctap2.info.data!r}")
