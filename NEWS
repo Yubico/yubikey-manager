@@ -1,3 +1,8 @@
+* Version 4.0.2 (unreleased)
+ ** Update device names.
+ ** Add read_info output to the --diagnose command, and show exception types.
+ ** Bugfix: Fix read_info for YubiKey Plus.
+
 * Version 4.0.1 (released 2021-03-29)
  ** Add support for YK5-based FIPS YubiKeys.
  ** Bugfix: Fix OTP device enumeration on Win32.
