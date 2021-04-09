@@ -323,7 +323,7 @@ def _read_info_otp(conn, key_type, interfaces):
         }
     elif key_type == YUBIKEY.YKP:
         capabilities = {
-            TRANSPORT.USB: CAPABILITY.OTP | TRANSPORT.U2F,
+            TRANSPORT.USB: CAPABILITY.OTP | CAPABILITY.U2F,
         }
     else:
         capabilities = {
