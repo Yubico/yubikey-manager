@@ -349,8 +349,11 @@ def _read_info_ctap(conn, key_type, interfaces):
     try:
         mgmt = ManagementSession(conn)
         return mgmt.read_device_info()
-    except Exception:  # SKY 1 or NEO
-        version = (3, 0, 0)  # Guess, no way to know
+    except Exception:  # SKY 1, NEO, or YKP
+        if key_type == YUBIKEY.YKP:
+            version = (4, 0, 0)
+        else:
+            version = (3, 0, 0)  # Guess, no way to know
 
         supported_apps = {TRANSPORT.USB: CAPABILITY.U2F}
         if key_type == YUBIKEY.NEO:
