@@ -29,6 +29,7 @@ from binascii import a2b_hex
 from yubikit.core import AID
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
 from .util import EnumChoice, ykman_command
+from typing import Tuple, Optional
 
 import re
 import sys
@@ -50,11 +51,11 @@ APDU_PATTERN = re.compile(
 )
 
 
-def _hex(data):
+def _hex(data: bytes) -> str:
     return " ".join(f"{d:02X}" for d in data)
 
 
-def _parse_apdu(data):
+def _parse_apdu(data: str) -> Tuple[Tuple[int, int, int, int, bytes], Optional[int]]:
     m = APDU_PATTERN.match(data)
     if not m:
         raise ValueError("Invalid APDU format: " + data)
@@ -63,14 +64,14 @@ def _parse_apdu(data):
     params = int(m.group("params") or "0000", 16)
     body = a2b_hex(m.group("body") or "")
     if m.group("check"):
-        sw = int(m.group("sw") or "9000", 16)
+        sw: Optional[int] = int(m.group("sw") or "9000", 16)
     else:
         sw = None
     p1, p2 = params >> 8, params & 0xFF
     return (cla, ins, p1, p2, body), sw
 
 
-def _print_response(resp, sw, no_pretty):
+def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
     click.echo(f"RECV (SW={sw:04X})" + (":" if resp else ""))
     if no_pretty:
         click.echo(resp.hex().upper())

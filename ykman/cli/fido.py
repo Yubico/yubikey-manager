@@ -48,6 +48,7 @@ from .util import cli_fail
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
 from ..device import is_fips_version
+from typing import Optional
 
 import click
 import logging
@@ -690,7 +691,7 @@ def bio_delete(ctx, template_id, pin, force):
     enrollments = bio.enumerate_enrollments()
 
     try:
-        key = bytes.fromhex(template_id)
+        key: Optional[bytes] = bytes.fromhex(template_id)
     except ValueError:
         key = None
 

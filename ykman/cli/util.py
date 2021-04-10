@@ -83,11 +83,15 @@ def ykman_group(
 ):
     if not isinstance(connections, list):
         connections = [connections]  # Single type
-    return click.group(cls=_YkmanGroup, *args, connections=connections, **kwargs)
+    return click.group(
+        cls=_YkmanGroup, *args, connections=connections, **kwargs,
+    )  # type: ignore
 
 
 def ykman_command(interfaces, *args, **kwargs):
-    return click.command(cls=_YkmanCommand, *args, interfaces=interfaces, **kwargs)
+    return click.command(
+        cls=_YkmanCommand, *args, interfaces=interfaces, **kwargs,
+    )  # type: ignore
 
 
 def click_callback(invoke_on_missing=False):
@@ -206,7 +210,8 @@ def prompt_for_touch():
 def prompt_timeout(timeout=0.5):
     timer = Timer(timeout, prompt_for_touch)
     try:
-        yield timer.start()
+        timer.start()
+        yield None
     finally:
         timer.cancel()
 

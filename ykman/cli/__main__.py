@@ -282,17 +282,15 @@ def cli(ctx, device, log_level, log_file, reader):
             cli_fail("FIDO access on Windows requires running as Administrator.")
 
         def resolve():
-            if not getattr(resolve, "items", None):
+            items = getattr(resolve, "items", None)
+            if not items:
                 if device is not None:
-                    resolve.items = _run_cmd_for_serial(
-                        subcmd.name, connections, device
-                    )
+                    items = _run_cmd_for_serial(subcmd.name, connections, device)
                 else:
-                    resolve.items = _run_cmd_for_single(
-                        ctx, subcmd.name, connections, reader
-                    )
-                ctx.call_on_close(resolve.items[0].close)
-            return resolve.items
+                    items = _run_cmd_for_single(ctx, subcmd.name, connections, reader)
+                ctx.call_on_close(items[0].close)
+                setattr(resolve, "items", items)
+            return items
 
         ctx.obj.add_resolver("conn", lambda: resolve()[0])
         ctx.obj.add_resolver("pid", lambda: resolve()[1].pid)
@@ -328,6 +326,8 @@ def list_keys(ctx, serials, readers):
             if dev_info.serial:
                 click.echo(dev_info.serial)
         else:
+            if dev.pid is None:  # Devices from list_all_devices should always have PID.
+                raise AssertionError("PID is None")
             name = get_name(dev_info, dev.pid.get_type())
             version = "%d.%d.%d" % dev_info.version if dev_info.version else "unknown"
             mode = dev.pid.name.split("_", 1)[1].replace("_", "+")

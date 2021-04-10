@@ -55,7 +55,7 @@ from cryptography.hazmat.backends import default_backend
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum, unique
-from typing import Optional, Union, cast
+from typing import Optional, Union, Type, cast
 
 import logging
 import os
@@ -424,7 +424,7 @@ def _parse_device_public_key(key_type, encoded):
         return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
     else:
         if key_type == KEY_TYPE.ECCP256:
-            curve = ec.SECP256R1
+            curve: Type[ec.EllipticCurve] = ec.SECP256R1
         else:
             curve = ec.SECP384R1
 

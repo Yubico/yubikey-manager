@@ -621,7 +621,7 @@ class _Backend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def write_update(self, slot: CONFIG_SLOT, data: bytes) -> None:
+    def write_update(self, slot: CONFIG_SLOT, data: bytes) -> bytes:
         ...
 
     @abc.abstractmethod

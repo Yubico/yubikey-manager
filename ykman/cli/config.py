@@ -519,8 +519,9 @@ def _parse_mode_string(ctx, param, mode):
                 else:
                     interfaces ^= interface
         else:
-            for t in filter(None, re.split(r"[+]+", mode.upper())):
-                interfaces |= _parse_interface_string(t)
+            for t in re.split(r"[+]+", mode.upper()):
+                if t:
+                    interfaces |= _parse_interface_string(t)
     except ValueError:
         ctx.fail(f"Invalid mode string: {mode}")
 

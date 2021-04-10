@@ -46,6 +46,7 @@ from yubikit.management import (
     USB_INTERFACE,
     CAPABILITY,
     FORM_FACTOR,
+    DEVICE_FLAG,
 )
 from yubikit.yubiotp import YubiOtpSession
 from .base import PID, YUBIKEY, YkmanDevice
@@ -196,14 +197,14 @@ def connect_to_device(
     raise ValueError("No YubiKey found with the given interface(s)")
 
 
-def _otp_read_data(conn):
+def _otp_read_data(conn) -> Tuple[Version, Optional[int]]:
     otp = YubiOtpSession(conn)
     version = otp.version
+    serial: Optional[int] = None
     try:
         serial = otp.get_serial()
     except Exception as e:
         logger.debug("Unable to read serial over OTP, no serial", exc_info=e)
-        serial = None
     return version, serial
 
 
@@ -220,6 +221,7 @@ SCAN_APPLETS = {
 
 
 def _read_info_ccid(conn, key_type, interfaces):
+    version: Optional[Version] = None
     try:
         mgmt = ManagementSession(conn)
         version = mgmt.version
@@ -230,7 +232,6 @@ def _read_info_ccid(conn, key_type, interfaces):
             conn.send_and_receive(b"\xa4\x04\x00\x08")
     except ApplicationNotAvailableError:
         logger.debug("Unable to select Management application, use fallback.")
-        version = None
 
     # Synthesize data
     capabilities = CAPABILITY(0)
@@ -246,7 +247,7 @@ def _read_info_ccid(conn, key_type, interfaces):
         serial = None
 
     if version is None:
-        version = (3, 0, 0)  # Guess, no way to know
+        version = Version(3, 0, 0)  # Guess, no way to know
 
     # Scan for remaining capabilities
     protocol = SmartCardProtocol(conn)
@@ -272,7 +273,7 @@ def _read_info_ccid(conn, key_type, interfaces):
             enabled_capabilities={},  # Populated later
             auto_eject_timeout=0,
             challenge_response_timeout=0,
-            device_flags=0,
+            device_flags=DEVICE_FLAG(0),
         ),
         serial=serial,
         version=version,
@@ -335,7 +336,7 @@ def _read_info_otp(conn, key_type, interfaces):
             enabled_capabilities={},  # Populated later
             auto_eject_timeout=0,
             challenge_response_timeout=0,
-            device_flags=0,
+            device_flags=DEVICE_FLAG(0),
         ),
         serial=serial,
         version=version,
@@ -350,10 +351,11 @@ def _read_info_ctap(conn, key_type, interfaces):
         mgmt = ManagementSession(conn)
         return mgmt.read_device_info()
     except Exception:  # SKY 1, NEO, or YKP
+        # Best guess version
         if key_type == YUBIKEY.YKP:
-            version = (4, 0, 0)
+            version = Version(4, 0, 0)
         else:
-            version = (3, 0, 0)  # Guess, no way to know
+            version = Version(3, 0, 0)
 
         supported_apps = {TRANSPORT.USB: CAPABILITY.U2F}
         if key_type == YUBIKEY.NEO:
@@ -365,7 +367,7 @@ def _read_info_ctap(conn, key_type, interfaces):
                 enabled_capabilities={},  # Populated later
                 auto_eject_timeout=0,
                 challenge_response_timeout=0,
-                device_flags=0,
+                device_flags=DEVICE_FLAG(0),
             ),
             serial=None,
             version=version,

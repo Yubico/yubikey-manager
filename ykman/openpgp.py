@@ -48,7 +48,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from enum import Enum, IntEnum, unique
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 import time
 import struct
 import logging
@@ -181,7 +181,7 @@ def _format_ec_attributes(key_slot, curve_name):
 
 
 def _get_key_attributes(key, key_slot):
-    if isinstance(key, rsa.RSAPrivateKey):
+    if isinstance(key, rsa.RSAPrivateKeyWithSerialization):
         if key.private_numbers().public_numbers.e != 65537:
             raise ValueError("RSA keys with e != 65537 are not supported!")
         return _format_rsa_attributes(key.key_size)
@@ -198,26 +198,28 @@ def _get_key_template(key, key_slot, crt=False):
             body += tlv.value
         return Tlv(0x7F48, header) + Tlv(0x5F48, body)
 
-    if isinstance(key, rsa.RSAPrivateKey):
-        private_numbers = key.private_numbers()
+    values: Tuple[Tlv, ...]
+
+    if isinstance(key, rsa.RSAPrivateKeyWithSerialization):
+        rsa_numbers = key.private_numbers()
         ln = (key.key_size // 8) // 2
 
         e = Tlv(0x91, b"\x01\x00\x01")  # e=65537
-        p = Tlv(0x92, int2bytes(private_numbers.p, ln))
-        q = Tlv(0x93, int2bytes(private_numbers.q, ln))
+        p = Tlv(0x92, int2bytes(rsa_numbers.p, ln))
+        q = Tlv(0x93, int2bytes(rsa_numbers.q, ln))
         values = (e, p, q)
         if crt:
-            dp = Tlv(0x94, int2bytes(private_numbers.dmp1, ln))
-            dq = Tlv(0x95, int2bytes(private_numbers.dmq1, ln))
-            qinv = Tlv(0x96, int2bytes(private_numbers.iqmp, ln))
-            n = Tlv(0x97, int2bytes(private_numbers.public_numbers.n, 2 * ln))
+            dp = Tlv(0x94, int2bytes(rsa_numbers.dmp1, ln))
+            dq = Tlv(0x95, int2bytes(rsa_numbers.dmq1, ln))
+            qinv = Tlv(0x96, int2bytes(rsa_numbers.iqmp, ln))
+            n = Tlv(0x97, int2bytes(rsa_numbers.public_numbers.n, 2 * ln))
             values += (dp, dq, qinv, n)
 
-    elif isinstance(key, ec.EllipticCurvePrivateKey):
-        private_numbers = key.private_numbers()
+    elif isinstance(key, ec.EllipticCurvePrivateKeyWithSerialization):
+        ec_numbers = key.private_numbers()
         ln = key.key_size // 8
 
-        privkey = Tlv(0x92, int2bytes(private_numbers.private_value, ln))
+        privkey = Tlv(0x92, int2bytes(ec_numbers.private_value, ln))
         values = (privkey,)
 
     elif _get_curve_name(key) in ("ed25519", "x25519"):
@@ -333,7 +335,7 @@ class OpenPgpController(object):
         self._app.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, data)
 
     def _select_certificate(self, key_slot):
-        data = Tlv(0x60, Tlv(0x5C, b"\x7f\x21"))
+        data: bytes = Tlv(0x60, Tlv(0x5C, b"\x7f\x21"))
         if self.version <= (5, 4, 3):  # These use a non-standard byte in the command.
             data = b"\x06" + data  # 6 is the length of the data.
         self._app.send_apdu(

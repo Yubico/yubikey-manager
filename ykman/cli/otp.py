@@ -607,7 +607,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 
     if totp:  # Challenge omitted or timestamp
         if challenge is None:
-            challenge = time_challenge(time())
+            challenge = time_challenge(int(time()))
         else:
             try:
                 challenge = time_challenge(int(challenge))
@@ -623,7 +623,7 @@ def calculate(ctx, slot, challenge, totp, digits):
         def on_keepalive(status):
             if not hasattr(on_keepalive, "prompted") and status == 2:
                 prompt_for_touch()
-                on_keepalive.prompted = True
+                setattr(on_keepalive, "prompted", True)
 
         response = session.calculate_hmac_sha1(slot, challenge, event, on_keepalive)
         if totp:

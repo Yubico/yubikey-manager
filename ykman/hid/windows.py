@@ -18,7 +18,7 @@
 from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 from yubikit.core.otp import OtpConnection
 
-from ctypes import WinDLL  # type: ignore
+from ctypes import WinDLL, WinError  # type: ignore
 from ctypes import wintypes, LibraryLoader
 import ctypes
 import platform
@@ -191,7 +191,7 @@ class WinHidOtpConnection(OtpConnection):
             None,
         )
         if self.handle == INVALID_HANDLE_VALUE:
-            raise ctypes.WinError()
+            raise WinError()
 
     def close(self):
         if self.handle:
@@ -202,21 +202,21 @@ class WinHidOtpConnection(OtpConnection):
         buf = ctypes.create_string_buffer(9)
         result = hid.HidD_GetFeature(self.handle, buf, ctypes.sizeof(buf))
         if not result:
-            raise ctypes.WinError()
+            raise WinError()
         return buf.raw[1:]
 
     def send(self, data):
         buf = ctypes.create_string_buffer(b"\0" + bytes(data))
         result = hid.HidD_SetFeature(self.handle, buf, ctypes.sizeof(buf))
         if not result:
-            raise ctypes.WinError()
+            raise WinError()
 
 
 def get_vid_pid(device):
     attributes = HidAttributes()
     result = hid.HidD_GetAttributes(device, ctypes.byref(attributes))
     if not result:
-        raise ctypes.WinError()
+        raise WinError()
 
     return attributes.VendorID, attributes.ProductID
 
@@ -225,14 +225,14 @@ def get_usage(device):
     preparsed_data = PHIDP_PREPARSED_DATA(0)
     ret = hid.HidD_GetPreparsedData(device, ctypes.byref(preparsed_data))
     if not ret:
-        raise ctypes.WinError()
+        raise WinError()
 
     try:
         caps = HidCapabilities()
         ret = hid.HidP_GetCaps(preparsed_data, ctypes.byref(caps))
 
         if ret != HIDP_STATUS_SUCCESS:
-            raise ctypes.WinError()
+            raise WinError()
 
         return caps.UsagePage, caps.Usage
 
@@ -269,19 +269,19 @@ def list_paths():
             if not result:
                 break
 
-            detail_len = wintypes.DWORD()
+            detail_len_dw = wintypes.DWORD()
             result = setupapi.SetupDiGetDeviceInterfaceDetailA(
                 collection,
                 ctypes.byref(interface_info),
                 None,
                 0,
-                ctypes.byref(detail_len),
+                ctypes.byref(detail_len_dw),
                 None,
             )
             if result:
-                raise ctypes.WinError()
+                raise WinError()
 
-            detail_len = detail_len.value
+            detail_len = detail_len_dw.value
             if detail_len == 0:
                 # skip this device, some kind of error
                 continue
@@ -300,7 +300,7 @@ def list_paths():
             )
 
             if not result:
-                raise ctypes.WinError()
+                raise WinError()
 
             path = ctypes.string_at(ctypes.addressof(interface_detail.DevicePath))
             if VID_RE.search(path):

@@ -52,7 +52,7 @@ import logging
 import struct
 import os
 
-from typing import Union, Mapping, Optional, List
+from typing import Union, Mapping, Optional, List, cast
 
 
 logger = logging.getLogger(__name__)
@@ -162,50 +162,50 @@ def generate_random_management_key(algorithm: MANAGEMENT_KEY_TYPE) -> bytes:
 
 
 class PivmanData:
-    def __init__(self, raw_data=Tlv(0x80)):
+    def __init__(self, raw_data: bytes = Tlv(0x80)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
         self._flags = struct.unpack(">B", data[0x81])[0] if 0x81 in data else None
         self.salt = data.get(0x82)
         self.pin_timestamp = struct.unpack(">I", data[0x83]) if 0x83 in data else None
 
-    def _get_flag(self, mask):
+    def _get_flag(self, mask: int) -> bool:
         return bool((self._flags or 0) & mask)
 
-    def _set_flag(self, mask, value):
+    def _set_flag(self, mask: int, value: bool) -> None:
         if value:
             self._flags = (self._flags or 0) | mask
         elif self._flags is not None:
             self._flags &= ~mask
 
     @property
-    def puk_blocked(self):
+    def puk_blocked(self) -> bool:
         return self._get_flag(0x01)
 
     @puk_blocked.setter
-    def puk_blocked(self, value):
+    def puk_blocked(self, value: bool) -> None:
         self._set_flag(0x01, value)
 
     @property
-    def mgm_key_protected(self):
+    def mgm_key_protected(self) -> bool:
         return self._get_flag(0x02)
 
     @mgm_key_protected.setter
-    def mgm_key_protected(self, value):
+    def mgm_key_protected(self, value: bool) -> None:
         self._set_flag(0x02, value)
 
     @property
-    def has_protected_key(self):
+    def has_protected_key(self) -> bool:
         return self.has_derived_key or self.has_stored_key
 
     @property
-    def has_derived_key(self):
+    def has_derived_key(self) -> bool:
         return self.salt is not None
 
     @property
-    def has_stored_key(self):
+    def has_stored_key(self) -> bool:
         return self.mgm_key_protected
 
-    def get_bytes(self):
+    def get_bytes(self) -> bytes:
         data = b""
         if self._flags is not None:
             data += Tlv(0x81, struct.pack(">B", self._flags))
@@ -217,11 +217,11 @@ class PivmanData:
 
 
 class PivmanProtectedData:
-    def __init__(self, raw_data=Tlv(0x88)):
+    def __init__(self, raw_data: bytes = Tlv(0x88)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
         self.key = data.get(0x89)
 
-    def get_bytes(self):
+    def get_bytes(self) -> bytes:
         data = b""
         if self.key is not None:
             data += Tlv(0x89, self.key)
@@ -253,7 +253,13 @@ def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
         raise
 
 
-def pivman_set_mgm_key(session, new_key, algorithm, touch=False, store_on_device=False):
+def pivman_set_mgm_key(
+    session: PivSession,
+    new_key: bytes,
+    algorithm: MANAGEMENT_KEY_TYPE,
+    touch: bool = False,
+    store_on_device: bool = False,
+) -> None:
     """Set a new management key, while keeping PivmanData in sync."""
     pivman = get_pivman_data(session)
 
@@ -290,19 +296,20 @@ def pivman_set_mgm_key(session, new_key, algorithm, touch=False, store_on_device
                 OBJECT_ID_PIVMAN_PROTECTED_DATA, pivman_prot.get_bytes(),
             )
         except ApduError as e:
-            logger.debug("No PIN provided, can't clear key..", exc_info=e)
+            logger.debug("No PIN provided, can't clear key...", exc_info=e)
 
 
-def pivman_change_pin(session, old_pin, new_pin):
+def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
     """Change the PIN, while keeping PivmanData in sync."""
     session.change_pin(old_pin, new_pin)
 
     pivman = get_pivman_data(session)
     if pivman.has_derived_key:
         session.authenticate(
-            MANAGEMENT_KEY_TYPE.TDES, derive_management_key(old_pin, pivman.salt)
+            MANAGEMENT_KEY_TYPE.TDES,
+            derive_management_key(old_pin, cast(bytes, pivman.salt)),
         )
-        session.verify(new_pin)
+        session.verify_pin(new_pin)
         new_salt = os.urandom(16)
         new_key = derive_management_key(new_pin, new_salt)
         session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
