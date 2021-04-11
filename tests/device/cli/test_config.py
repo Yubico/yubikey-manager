@@ -28,7 +28,7 @@ def not_sky(device, info):
 
 class TestConfigUSB:
     @pytest.fixture(autouse=True)
-    @condition(not_sky)
+    @condition.check(not_sky)
     @condition.min_version(5)
     def enable_all(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--enable-all", "-f")
@@ -152,7 +152,7 @@ class TestConfigUSB:
 
 class TestConfigNFC:
     @pytest.fixture(autouse=True)
-    @condition(not_sky)
+    @condition.check(not_sky)
     @condition.min_version(5)
     @condition.has_transport(TRANSPORT.NFC)
     def enable_all_nfc(self, ykman_cli, await_reboot):

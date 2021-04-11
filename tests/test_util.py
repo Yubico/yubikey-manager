@@ -71,7 +71,8 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(b"\0" * 8, time_challenge(0))
         self.assertEqual(b"\x00\x00\x00\x00\x00\x06G\x82", time_challenge(12345678))
         self.assertEqual(
-            b"\x00\x00\x00\x00\x02\xf2\xeaC", time_challenge(1484223461.2644958)
+            b"\x00\x00\x00\x00\x02\xf2\xeaC",
+            time_challenge(1484223461.2644958),  # type: ignore
         )
 
     def test_tlv(self):
@@ -151,7 +152,7 @@ class TestUtilityFunctions(unittest.TestCase):
 
     def test_form_factor_from_code(self):
         with self.assertRaises(ValueError):
-            FORM_FACTOR.from_code("im a string")
+            FORM_FACTOR.from_code("im a string")  # type: ignore
         self.assertEqual(FORM_FACTOR.UNKNOWN, FORM_FACTOR.from_code(0x00))
         self.assertEqual(FORM_FACTOR.USB_A_KEYCHAIN, FORM_FACTOR.from_code(0x01))
         self.assertEqual(FORM_FACTOR.USB_A_NANO, FORM_FACTOR.from_code(0x02))

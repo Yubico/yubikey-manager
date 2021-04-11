@@ -81,7 +81,7 @@ class TestNonDefaultMgmKey:
         assert "Fingerprint:\t" + fingerprint in output
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9a", "RSA1024")
 
@@ -89,7 +89,7 @@ class TestNonDefaultMgmKey:
         self._test_generate_self_signed(ykman_cli, "9a", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9c", "RSA1024")
 
@@ -97,7 +97,7 @@ class TestNonDefaultMgmKey:
         self._test_generate_self_signed(ykman_cli, "9c", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9d", "RSA1024")
 
@@ -105,7 +105,7 @@ class TestNonDefaultMgmKey:
         self._test_generate_self_signed(ykman_cli, "9d", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9e", "RSA1024")
 
@@ -146,7 +146,7 @@ class TestNonDefaultMgmKey:
         assert subject_input == subject_output
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9a", "RSA1024")
 
@@ -154,7 +154,7 @@ class TestNonDefaultMgmKey:
         self._test_generate_csr(ykman_cli, "9a", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9c", "RSA1024")
 
@@ -162,7 +162,7 @@ class TestNonDefaultMgmKey:
         self._test_generate_csr(ykman_cli, "9c", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9d", "RSA1024")
 
@@ -170,7 +170,7 @@ class TestNonDefaultMgmKey:
         self._test_generate_csr(ykman_cli, "9d", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9e", "RSA1024")
 
@@ -217,7 +217,7 @@ class TestProtectedMgmKey:
         assert "Fingerprint:\t" + fingerprint in output
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9a", "RSA1024")
 
@@ -225,7 +225,7 @@ class TestProtectedMgmKey:
         self._test_generate_self_signed(ykman_cli, "9a", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9c", "RSA1024")
 
@@ -233,7 +233,7 @@ class TestProtectedMgmKey:
         self._test_generate_self_signed(ykman_cli, "9c", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9d", "RSA1024")
 
@@ -241,7 +241,7 @@ class TestProtectedMgmKey:
         self._test_generate_self_signed(ykman_cli, "9d", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_self_signed_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9e", "RSA1024")
 
@@ -274,7 +274,7 @@ class TestProtectedMgmKey:
         assert subject_input == subject_output
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9a", "RSA1024")
 
@@ -282,7 +282,7 @@ class TestProtectedMgmKey:
         self._test_generate_csr(ykman_cli, "9a", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9c", "RSA1024")
 
@@ -290,7 +290,7 @@ class TestProtectedMgmKey:
         self._test_generate_csr(ykman_cli, "9c", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9d", "RSA1024")
 
@@ -298,7 +298,7 @@ class TestProtectedMgmKey:
         self._test_generate_csr(ykman_cli, "9d", "ECCP256")
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9e", "RSA1024")
 

@@ -26,10 +26,12 @@ def generate_pem_eccp256_keypair():
 
 
 def roca(version):
+    """Not ROCA affected"""
     return (4, 2, 0) <= version < (4, 3, 5)
 
 
 def not_roca(version):
+    """ROCA affected"""
     return not roca(version)
 
 
@@ -172,21 +174,21 @@ class TestKeyExport:
 
 
 class TestKeyManagement:
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_key_default(self, ykman_cli):
         output = ykman_cli(
             "piv", "keys", "generate", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
         ).output
         assert "BEGIN PUBLIC KEY" in output
 
-    @condition(roca)
+    @condition.check(roca)
     def test_generate_key_default_cve201715361(self, ykman_cli):
         with pytest.raises(NotSupportedError):
             ykman_cli(
                 "piv", "keys", "generate", "9a", "-m", DEFAULT_MANAGEMENT_KEY, "-"
             )
 
-    @condition(not_roca)
+    @condition.check(not_roca)
     @condition.fips(False)
     def test_generate_key_rsa1024(self, ykman_cli):
         output = ykman_cli(
@@ -202,7 +204,7 @@ class TestKeyManagement:
         ).output
         assert "BEGIN PUBLIC KEY" in output
 
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_key_rsa2048(self, ykman_cli):
         output = ykman_cli(
             "piv",
@@ -218,7 +220,7 @@ class TestKeyManagement:
         assert "BEGIN PUBLIC KEY" in output
 
     @condition.fips(False)
-    @condition(roca)
+    @condition.check(roca)
     def test_generate_key_rsa1024_cve201715361(self, ykman_cli):
         with pytest.raises(NotSupportedError):
             ykman_cli(
@@ -233,7 +235,7 @@ class TestKeyManagement:
                 "-",
             )
 
-    @condition(roca)
+    @condition.check(roca)
     def test_generate_key_rsa2048_cve201715361(self, ykman_cli):
         with pytest.raises(NotSupportedError):
             ykman_cli(
@@ -399,7 +401,7 @@ class TestKeyManagement:
         assert csr.is_signature_valid
 
     @condition.fips(False)
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_generate_csr_rsa1024(self, ykman_cli, tmp_file):
         self._test_generate_csr(ykman_cli, tmp_file, "RSA1024")
 

@@ -194,16 +194,16 @@ class TestKeyManagement:
         session.verify_pin(DEFAULT_PIN)
         assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 
-    @condition(not_roca)
+    @condition.check(not_roca)
     @condition.fips(False)
     def test_put_certificate_verifies_key_pairing_rsa1024(self, session):
         self._test_put_key_pairing(session, KEY_TYPE.RSA1024, KEY_TYPE.ECCP256)
 
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_put_certificate_verifies_key_pairing_rsa2048(self, session):
         self._test_put_key_pairing(session, KEY_TYPE.RSA2048, KEY_TYPE.ECCP256)
 
-    @condition(not_roca)
+    @condition.check(not_roca)
     def test_put_certificate_verifies_key_pairing_eccp256_a(self, session):
         self._test_put_key_pairing(session, KEY_TYPE.ECCP256, KEY_TYPE.RSA2048)
 

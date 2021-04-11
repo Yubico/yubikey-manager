@@ -1,6 +1,6 @@
 from ykman.piv import generate_random_management_key, parse_rfc4514_string
 
-from yubikit.core import NotSupportedError
+from yubikit.core import NotSupportedError, Version
 from yubikit.piv import (
     KEY_TYPE,
     MANAGEMENT_KEY_TYPE,
@@ -46,21 +46,27 @@ class TestPivFunctions:
     def test_supported_algorithms(self):
         with pytest.raises(NotSupportedError):
             check_key_support(
-                (3, 1, 1), KEY_TYPE.ECCP384, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                Version(3, 1, 1),
+                KEY_TYPE.ECCP384,
+                PIN_POLICY.DEFAULT,
+                TOUCH_POLICY.DEFAULT,
             )
 
         with pytest.raises(NotSupportedError):
             check_key_support(
-                (4, 4, 1), KEY_TYPE.RSA1024, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                Version(4, 4, 1),
+                KEY_TYPE.RSA1024,
+                PIN_POLICY.DEFAULT,
+                TOUCH_POLICY.DEFAULT,
             )
 
         for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.RSA2048):
             with pytest.raises(NotSupportedError):
                 check_key_support(
-                    (4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                    Version(4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
                 )
 
         for key_type in KEY_TYPE:
             check_key_support(
-                (5, 1, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                Version(5, 1, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
             )

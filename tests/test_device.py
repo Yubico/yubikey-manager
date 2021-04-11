@@ -1,16 +1,23 @@
 from ykman.device import get_name
 from ykman.base import YUBIKEY
 from yubikit.core import TRANSPORT
-from yubikit.management import CAPABILITY, FORM_FACTOR, DeviceInfo
+from yubikit.management import (
+    CAPABILITY,
+    FORM_FACTOR,
+    DeviceInfo,
+    DeviceConfig,
+    Version,
+)
+from typing import cast
 
 
 def info(form_factor):
     return DeviceInfo(
-        config=None,
+        config=cast(DeviceConfig, None),
         serial=None,
-        version=(5, 3, 0),
+        version=Version(5, 3, 0),
         form_factor=form_factor,
-        supported_capabilities={TRANSPORT.USB: 0xFF},
+        supported_capabilities={TRANSPORT.USB: 0xFF},  # type: ignore
         is_locked=False,
         is_fips=False,
     )

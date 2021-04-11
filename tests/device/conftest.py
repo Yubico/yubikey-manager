@@ -36,7 +36,7 @@ def _device(pytestconfig):
             pytest.exit("Device tests require a single YubiKey")
         dev, info = devices[0]
     if info.serial != serial:
-        pytest.exit("Device serial does not match: %d != %d" % (serial, info.serial))
+        pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
 
     return dev, info
 

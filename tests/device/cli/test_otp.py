@@ -453,7 +453,7 @@ class TestSlotProgramming:
 
         ykman_cli("otp", "--access-code", "111111111111", "delete", "2", "-f")
 
-    @condition(lambda version: not (4, 3, 2) <= version <= (4, 3, 5))
+    @condition.check(lambda version: not (4, 3, 2) <= version <= (4, 3, 5))
     def test_update_access_code_slot_2(self, ykman_cli):
         ykman_cli("otp", "static", "2", "--generate", "--length", "10")
 
@@ -476,7 +476,7 @@ class TestSlotProgramming:
 
         ykman_cli("otp", "delete", "2", "-f")
 
-    @condition(lambda version: not (4, 3, 2) <= version <= (4, 3, 5))
+    @condition.check(lambda version: not (4, 3, 2) <= version <= (4, 3, 5))
     def test_update_access_code_prompt_slot_2(self, ykman_cli):
         ykman_cli("otp", "static", "2", "--generate", "--length", "10")
 
@@ -502,7 +502,7 @@ class TestSlotProgramming:
 
         ykman_cli("otp", "delete", "2", "-f")
 
-    @condition(lambda version: not (4, 3, 2) <= version <= (4, 3, 5))
+    @condition.check(lambda version: not (4, 3, 2) <= version <= (4, 3, 5))
     def test_new_access_code_conflicts_with_delete_access_code(self, ykman_cli):
         ykman_cli("otp", "static", "2", "--generate", "--length", "10")
 

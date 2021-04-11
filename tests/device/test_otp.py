@@ -129,7 +129,7 @@ class TestProgrammingState:
 
 class TestChallengeResponse:
     @pytest.fixture(autouse=True)
-    @condition(not_usb_ccid)
+    @condition.check(not_usb_ccid)
     def clear_slot2(self, session, read_config):
         state = read_config()
         if state.is_configured(SLOT.TWO):

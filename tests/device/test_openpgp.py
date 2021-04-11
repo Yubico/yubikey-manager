@@ -27,76 +27,86 @@ def controller(ccid_connection):
 
 
 def not_roca(version):
+    """ROCA affected"""
     return not ((4, 2, 0) <= version < (4, 3, 5))
 
 
-class KeyManagement:
-    def test_generate_requires_admin(self):
-        with self.assertRaises(ApduError):
-            self.controller.generate_rsa_key(KEY_SLOT.SIG, 2048)
+def test_generate_requires_admin(controller):
+    with pytest.raises(ApduError):
+        controller.generate_rsa_key(KEY_SLOT.SIG, 2048)
 
-    @condition(not_roca)
-    def test_generate_rsa2048(self):
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        pub = self.controller.generate_rsa_key(KEY_SLOT.SIG, 2048)
-        self.assertEqual(pub.key_size, 2048)
-        self.controller.delete_key(KEY_SLOT.SIG)
 
-    @condition(not_roca)
-    @condition.min_version(4)
-    def test_generate_rsa4096(self):
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        pub = self.controller.generate_rsa_key(KEY_SLOT.SIG, 4096)
-        self.assertEqual(pub.key_size, 4096)
+@condition.check(not_roca)
+def test_generate_rsa2048(controller):
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    pub = controller.generate_rsa_key(KEY_SLOT.SIG, 2048)
+    assert pub.key_size == 2048
+    controller.delete_key(KEY_SLOT.SIG)
 
-    @condition.min_version(5, 2)
-    def test_generate_secp256r1(self):
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        pub = self.controller.generate_ec_key(KEY_SLOT.SIG, "secp256r1")
-        self.assertEqual(pub.key_size, 256)
-        self.assertEqual(pub.curve.name, "secp256r1")
 
-    @condition.min_version(5, 2)
-    def test_generate_ed25519(self):
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        pub = self.controller.generate_ec_key(KEY_SLOT.SIG, "ed25519")
-        self.assertEqual(len(pub.public_bytes(Encoding.Raw, PublicFormat.Raw)), 32)
+@condition.check(not_roca)
+@condition.min_version(4)
+def test_generate_rsa4096(controller):
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    pub = controller.generate_rsa_key(KEY_SLOT.SIG, 4096)
+    assert pub.key_size == 4096
 
-    @condition.min_version(5, 2)
-    def test_generate_x25519(self):
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        pub = self.controller.generate_ec_key(KEY_SLOT.ENC, "x25519")
-        self.assertEqual(len(pub.public_bytes(Encoding.Raw, PublicFormat.Raw)), 32)
 
-    def test_import_rsa2048(self):
-        priv = rsa.generate_private_key(E, 2048, default_backend())
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        self.controller.import_key(KEY_SLOT.SIG, priv)
+@condition.min_version(5, 2)
+def test_generate_secp256r1(controller):
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    pub = controller.generate_ec_key(KEY_SLOT.SIG, "secp256r1")
+    assert pub.key_size == 256
+    assert pub.curve.name == "secp256r1"
 
-    @condition.min_version(4)
-    def test_import_rsa4096(self):
-        priv = rsa.generate_private_key(E, 4096, default_backend())
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        self.controller.import_key(KEY_SLOT.SIG, priv)
 
-    @condition.min_version(5, 2)
-    def test_import_secp256r1(self):
-        priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        self.controller.import_key(KEY_SLOT.SIG, priv)
+@condition.min_version(5, 2)
+def test_generate_ed25519(controller):
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    pub = controller.generate_ec_key(KEY_SLOT.SIG, "ed25519")
+    assert len(pub.public_bytes(Encoding.Raw, PublicFormat.Raw)) == 32
 
-    @condition.min_version(5, 2)
-    def test_import_ed25519(self):
-        from cryptography.hazmat.primitives.asymmetric import ed25519
 
-        priv = ed25519.Ed25519PrivateKey.generate()
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        self.controller.import_key(KEY_SLOT.SIG, priv)
+@condition.min_version(5, 2)
+def test_generate_x25519(controller):
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    pub = controller.generate_ec_key(KEY_SLOT.ENC, "x25519")
+    assert len(pub.public_bytes(Encoding.Raw, PublicFormat.Raw)) == 32
 
-    @condition.min_version(5, 2)
-    def test_import_x25519(self):
-        from cryptography.hazmat.primitives.asymmetric import x25519
 
-        priv = x25519.X25519PrivateKey.generate()
-        self.controller.verify_admin(DEFAULT_ADMIN_PIN)
-        self.controller.import_key(KEY_SLOT.ENC, priv)
+def test_import_rsa2048(controller):
+    priv = rsa.generate_private_key(E, 2048, default_backend())
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    controller.import_key(KEY_SLOT.SIG, priv)
+
+
+@condition.min_version(4)
+def test_import_rsa4096(controller):
+    priv = rsa.generate_private_key(E, 4096, default_backend())
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    controller.import_key(KEY_SLOT.SIG, priv)
+
+
+@condition.min_version(5, 2)
+def test_import_secp256r1(controller):
+    priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    controller.import_key(KEY_SLOT.SIG, priv)
+
+
+@condition.min_version(5, 2)
+def test_import_ed25519(controller):
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    priv = ed25519.Ed25519PrivateKey.generate()
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    controller.import_key(KEY_SLOT.SIG, priv)
+
+
+@condition.min_version(5, 2)
+def test_import_x25519(controller):
+    from cryptography.hazmat.primitives.asymmetric import x25519
+
+    priv = x25519.X25519PrivateKey.generate()
+    controller.verify_admin(DEFAULT_ADMIN_PIN)
+    controller.import_key(KEY_SLOT.ENC, priv)
