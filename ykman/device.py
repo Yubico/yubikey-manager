@@ -261,7 +261,10 @@ def _read_info_ccid(conn, key_type, interfaces):
             logger.debug("Missing applet: aid: %s, capability: %s", aid, code)
         except Exception as e:
             logger.error(
-                "Error selecting aid: %s, capability: %s", aid, code, exc_info=e,
+                "Error selecting aid: %s, capability: %s",
+                aid,
+                code,
+                exc_info=e,
             )
 
     # Assume U2F on devices >= 3.3.0

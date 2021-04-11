@@ -647,7 +647,11 @@ class PivSession:
             return Tlv.unpack(
                 expected,
                 self.protocol.send_apdu(
-                    0, INS_GET_DATA, 0x3F, 0xFF, Tlv(TAG_OBJ_ID, int2bytes(object_id)),
+                    0,
+                    INS_GET_DATA,
+                    0x3F,
+                    0xFF,
+                    Tlv(TAG_OBJ_ID, int2bytes(object_id)),
                 ),
             )
         except ValueError as e:
@@ -790,7 +794,13 @@ class PivSession:
                     ),
                 ),
             )
-            return Tlv.unpack(TAG_AUTH_RESPONSE, Tlv.unpack(TAG_DYN_AUTH, response,),)
+            return Tlv.unpack(
+                TAG_AUTH_RESPONSE,
+                Tlv.unpack(
+                    TAG_DYN_AUTH,
+                    response,
+                ),
+            )
         except ApduError as e:
             if e.sw == SW.INCORRECT_PARAMETERS:
                 raise e  # TODO: Different error, No key?

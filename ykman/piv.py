@@ -293,7 +293,8 @@ def pivman_set_mgm_key(
         try:
             pivman_prot.key = None
             session.put_object(
-                OBJECT_ID_PIVMAN_PROTECTED_DATA, pivman_prot.get_bytes(),
+                OBJECT_ID_PIVMAN_PROTECTED_DATA,
+                pivman_prot.get_bytes(),
             )
         except ApduError as e:
             logger.debug("No PIN provided, can't clear key...", exc_info=e)
@@ -357,7 +358,10 @@ def check_key(
 
         if isinstance(public_key, rsa.RSAPublicKey):
             public_key.verify(
-                test_sig, test_data, padding.PKCS1v15(), hashes.SHA256(),
+                test_sig,
+                test_data,
+                padding.PKCS1v15(),
+                hashes.SHA256(),
             )
         elif isinstance(public_key, ec.EllipticCurvePublicKey):
             public_key.verify(test_sig, test_data, ec.ECDSA(hashes.SHA256()))

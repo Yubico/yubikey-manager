@@ -179,7 +179,10 @@ def access():
 @click.pass_context
 @click_password_option
 @click.option(
-    "-c", "--clear", is_flag=True, help="Clear the current password.",
+    "-c",
+    "--clear",
+    is_flag=True,
+    help="Clear the current password.",
 )
 @click.option("-n", "--new-password", help="Provide a new password as an argument.")
 def change(ctx, password, clear, new_password):
@@ -286,7 +289,10 @@ def forget(ctx):
 
 
 click_remember_option = click.option(
-    "-r", "--remember", is_flag=True, help="Remember the password on this machine.",
+    "-r",
+    "--remember",
+    is_flag=True,
+    help="Remember the password on this machine.",
 )
 
 click_touch_option = click.option(
@@ -662,7 +668,9 @@ def rename(ctx, query, name, force, password, remember):
             )
         if force or (
             click.confirm(
-                f"Rename account: {_string_id(cred)} ?", default=False, err=True,
+                f"Rename account: {_string_id(cred)} ?",
+                default=False,
+                err=True,
             )
         ):
             session.rename_credential(cred.id, name, issuer)
@@ -698,7 +706,9 @@ def delete(ctx, query, force, password, remember):
         cred = hits[0]
         if force or (
             click.confirm(
-                f"Delete account: {_string_id(cred)} ?", default=False, err=True,
+                f"Delete account: {_string_id(cred)} ?",
+                default=False,
+                err=True,
             )
         ):
             session.delete_credential(cred.id)

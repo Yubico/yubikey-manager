@@ -80,5 +80,6 @@ def max_version(major, minor=0, micro=0):
 
 def fips(status=True):
     return check(
-        lambda version: status == is_fips_version(version), f"Requires FIPS = {status}",
+        lambda version: status == is_fips_version(version),
+        f"Requires FIPS = {status}",
     )

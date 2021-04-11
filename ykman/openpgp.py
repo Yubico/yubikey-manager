@@ -46,28 +46,25 @@ from cryptography.hazmat.primitives.serialization import (
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 from enum import Enum, IntEnum, unique
-from collections import namedtuple
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import time
 import struct
 import logging
 
+from typing import NamedTuple
+
 logger = logging.getLogger(__name__)
 
 
-_KeySlot = namedtuple(
-    "KeySlot",
-    [
-        "value",
-        "index",
-        "key_id",
-        "fingerprint",
-        "gen_time",
-        "uif",  # touch policy
-        "crt",  # Control Reference Template
-    ],
-)
+class _KeySlot(NamedTuple):
+    value: str
+    indx: int
+    key_id: int
+    fingerprint: int
+    gen_time: int
+    uif: int  # touch policy
+    crt: bytes  # Control Reference Template
 
 
 @unique
@@ -117,7 +114,10 @@ class INS(IntEnum):  # noqa: N801
     SELECT_DATA = 0xA5
 
 
-PinRetries = namedtuple("PinRetries", ["pin", "reset", "admin"])
+class PinRetries(NamedTuple):
+    pin: int
+    reset: int
+    admin: int
 
 
 PW1 = 0x81
@@ -339,7 +339,11 @@ class OpenPgpController(object):
         if self.version <= (5, 4, 3):  # These use a non-standard byte in the command.
             data = b"\x06" + data  # 6 is the length of the data.
         self._app.send_apdu(
-            0, INS.SELECT_DATA, 3 - key_slot.index, 0x04, data,
+            0,
+            INS.SELECT_DATA,
+            3 - key_slot.indx,
+            0x04,
+            data,
         )
 
     def _read_version(self):
@@ -572,7 +576,7 @@ class OpenPgpController(object):
     def attest(self, key_slot):
         """Requires User PIN verification."""
         require_version(self.version, (5, 2, 0))
-        self._app.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.index, 0)
+        self._app.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.indx, 0)
         return self.read_certificate(key_slot)
 
 

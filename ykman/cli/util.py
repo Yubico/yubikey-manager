@@ -84,13 +84,19 @@ def ykman_group(
     if not isinstance(connections, list):
         connections = [connections]  # Single type
     return click.group(
-        cls=_YkmanGroup, *args, connections=connections, **kwargs,
+        cls=_YkmanGroup,
+        *args,
+        connections=connections,
+        **kwargs,
     )  # type: ignore
 
 
 def ykman_command(interfaces, *args, **kwargs):
     return click.command(
-        cls=_YkmanCommand, *args, interfaces=interfaces, **kwargs,
+        cls=_YkmanCommand,
+        *args,
+        interfaces=interfaces,
+        **kwargs,
     )  # type: ignore
 
 

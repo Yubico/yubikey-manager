@@ -194,7 +194,11 @@ class MacHidOtpConnection(OtpConnection):
         report_len = CF_INDEX(ctypes.sizeof(buf))
 
         result = iokit.IOHIDDeviceGetReport(
-            self.handle, K_IO_HID_REPORT_TYPE_FEATURE, 0, buf, ctypes.byref(report_len),
+            self.handle,
+            K_IO_HID_REPORT_TYPE_FEATURE,
+            0,
+            buf,
+            ctypes.byref(report_len),
         )
 
         # Non-zero status indicates failure
@@ -206,7 +210,11 @@ class MacHidOtpConnection(OtpConnection):
     def send(self, data):
         buf = bytes(data)
         result = iokit.IOHIDDeviceSetReport(
-            self.handle, K_IO_HID_REPORT_TYPE_FEATURE, 0, buf, len(buf),
+            self.handle,
+            K_IO_HID_REPORT_TYPE_FEATURE,
+            0,
+            buf,
+            len(buf),
         )
 
         # Non-zero status indicates failure

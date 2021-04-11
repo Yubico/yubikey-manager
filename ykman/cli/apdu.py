@@ -91,7 +91,11 @@ def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
     "-x", "--no-pretty", is_flag=True, help="Print only the hex output of a response"
 )
 @click.option(
-    "-a", "--app", type=EnumChoice(AID), required=False, help="Select application",
+    "-a",
+    "--app",
+    type=EnumChoice(AID),
+    required=False,
+    help="Select application",
 )
 @click.argument("apdu", nargs=-1)
 @click.option("-s", "--send-apdu", multiple=True, help="Provide full APDUs")

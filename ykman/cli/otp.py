@@ -559,7 +559,9 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     cred_type = "TOTP" if totp else "challenge-response"
     force or click.confirm(
-        f"Program a {cred_type} credential in slot {slot}?", abort=True, err=True,
+        f"Program a {cred_type} credential in slot {slot}?",
+        abort=True,
+        err=True,
     )
     try:
         session.put_configuration(
