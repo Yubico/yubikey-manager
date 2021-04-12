@@ -1,4 +1,4 @@
-yubikey-manager (4.0.2) xenial; urgency=low
+yubikey-manager (4.0.2+git) xenial; urgency=low
 
   * Build for Github Actions.
 
