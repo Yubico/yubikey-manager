@@ -78,7 +78,9 @@ Packages for MacOS are available from Homebrew and MacPorts.
 ==== Linux
 Packages are available for several Linux distributions by third party package
 maintainers.
-Yubico also provides packages for Ubuntu in the yubico/stable PPA:
+Yubico also provides packages for Ubuntu in the yubico/stable PPA (for amd64
+ONLY, other architectures such as arm should use the general `pip` instructions
+above instead):
 
   $ sudo apt-add-repository ppa:yubico/stable
   $ sudo apt update
