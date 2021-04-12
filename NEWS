@@ -1,4 +1,4 @@
-* Version 4.0.2 (unreleased)
+* Version 4.0.2 (released 2021-04-12)
  ** Update device names.
  ** Add read_info output to the --diagnose command, and show exception types.
  ** Bugfix: Fix read_info for YubiKey Plus.
