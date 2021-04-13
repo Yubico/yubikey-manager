@@ -273,7 +273,7 @@ def pivman_set_mgm_key(
                 raise
 
     # Set the new management key
-    session.set_management_key(algorithm, new_key)
+    session.set_management_key(algorithm, new_key, touch)
 
     if pivman.has_derived_key:
         # Clear salt for old derived keys.

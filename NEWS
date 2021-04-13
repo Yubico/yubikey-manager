@@ -1,3 +1,6 @@
+* Version 4.0.3 (unreleased)
+ ** Bugfix: The --touch argument to piv change-management-key was ignored.
+
 * Version 4.0.2 (released 2021-04-12)
  ** Update device names.
  ** Add read_info output to the --diagnose command, and show exception types.
