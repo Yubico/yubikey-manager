@@ -3,8 +3,9 @@ import random
 import pytest
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, padding
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 
 from yubikit.core import AID, NotSupportedError
 from yubikit.core.smartcard import ApduError
@@ -131,7 +132,8 @@ class TestKeyManagement:
             session, SLOT.AUTHENTICATION, public_key, "CN=alice", NOW, NOW
         )
 
-    def _test_generate_self_signed_certificate(self, session, slot):
+    @pytest.mark.parametrize("slot", (SLOT.AUTHENTICATION, SLOT.SIGNATURE))
+    def test_generate_self_signed_certificate(self, session, slot):
         public_key = generate_key(session, slot)
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
         session.verify_pin(DEFAULT_PIN)
@@ -144,12 +146,6 @@ class TestKeyManagement:
             cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
             == "alice"
         )
-
-    def test_generate_self_signed_certificate_slot_9a_works(self, session):
-        self._test_generate_self_signed_certificate(session, SLOT.AUTHENTICATION)
-
-    def test_generate_self_signed_certificate_slot_9c_works(self, session):
-        self._test_generate_self_signed_certificate(session, SLOT.SIGNATURE)
 
     def test_generate_key_requires_authentication(self, session):
         with pytest.raises(ApduError):
@@ -465,3 +461,92 @@ class TestUnblockPin:
         with pytest.raises(InvalidPinError) as ctx:
             session.change_puk(NON_DEFAULT_PUK, DEFAULT_PUK)
         assert ctx.value.attempts_remaining == puk_tries - 1
+
+
+class TestMetadata:
+    @pytest.fixture(autouse=True)
+    @condition.min_version(5, 3)
+    def preconditions(self):
+        pass
+
+    def test_pin_metadata(self, session):
+        data = session.get_pin_metadata()
+        assert data.default_value is True
+        assert data.total_attempts == 3
+        assert data.attempts_remaining == 3
+
+    def test_management_key_metadata(self, session):
+        data = session.get_management_key_metadata()
+        assert data.key_type == MANAGEMENT_KEY_TYPE.TDES
+        assert data.default_value is True
+        assert data.touch_policy is TOUCH_POLICY.NEVER
+
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        session.set_management_key(
+            MANAGEMENT_KEY_TYPE.AES192, NON_DEFAULT_MANAGEMENT_KEY
+        )
+        data = session.get_management_key_metadata()
+        assert data.key_type == MANAGEMENT_KEY_TYPE.AES192
+        assert data.default_value is False
+        assert data.touch_policy is TOUCH_POLICY.NEVER
+
+        session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        data = session.get_management_key_metadata()
+        assert data.default_value is True
+
+        session.set_management_key(MANAGEMENT_KEY_TYPE.AES192, DEFAULT_MANAGEMENT_KEY)
+        data = session.get_management_key_metadata()
+        assert data.default_value is False
+
+    @pytest.mark.parametrize("key_type", list(KEY_TYPE))
+    def test_slot_metadata_generate(self, session, key_type):
+        slot = SLOT.SIGNATURE
+        key = generate_key(session, slot, key_type)
+        data = session.get_slot_metadata(slot)
+
+        assert data.key_type == key_type
+        assert data.pin_policy == PIN_POLICY.ALWAYS
+        assert data.touch_policy == TOUCH_POLICY.NEVER
+        assert data.generated is True
+        assert data.public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ) == key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            rsa.generate_private_key(65537, 1024, default_backend()),
+            rsa.generate_private_key(65537, 2048, default_backend()),
+            ec.generate_private_key(ec.SECP256R1(), default_backend()),
+            ec.generate_private_key(ec.SECP384R1(), default_backend()),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "slot, pin_policy",
+        [
+            (SLOT.AUTHENTICATION, PIN_POLICY.ONCE),
+            (SLOT.SIGNATURE, PIN_POLICY.ALWAYS),
+            (SLOT.KEY_MANAGEMENT, PIN_POLICY.ONCE),
+            (SLOT.CARD_AUTH, PIN_POLICY.NEVER),
+        ],
+    )
+    def test_slot_metadata_put(self, session, key, slot, pin_policy):
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        session.put_key(slot, key)
+        data = session.get_slot_metadata(slot)
+
+        assert data.key_type == KEY_TYPE.from_public_key(key.public_key())
+        assert data.pin_policy == pin_policy
+        assert data.touch_policy == TOUCH_POLICY.NEVER
+        assert data.generated is False
+        assert data.public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ) == key.public_key().public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
