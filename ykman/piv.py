@@ -52,7 +52,7 @@ import logging
 import struct
 import os
 
-from typing import Union, Mapping, Optional, List, cast
+from typing import Union, Mapping, Optional, List, Type, cast
 
 
 logger = logging.getLogger(__name__)
@@ -529,16 +529,17 @@ def sign_certificate_builder(
     slot: SLOT,
     key_type: KEY_TYPE,
     builder: x509.CertificateBuilder,
+    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.Certificate:
     """Sign a Certificate."""
     dummy_key = _dummy_key(key_type)
-    cert = builder.sign(dummy_key, hashes.SHA256(), default_backend())
+    cert = builder.sign(dummy_key, hash_algorithm(), default_backend())
 
     sig = session.sign(
         slot,
         key_type,
         cert.tbs_certificate_bytes,
-        hashes.SHA256(),
+        hash_algorithm(),
         padding.PKCS1v15(),  # Only used for RSA
     )
 
@@ -556,11 +557,12 @@ def sign_csr_builder(
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
     builder: x509.CertificateSigningRequestBuilder,
+    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Sign a CSR."""
     key_type = KEY_TYPE.from_public_key(public_key)
     dummy_key = _dummy_key(key_type)
-    csr = builder.sign(dummy_key, hashes.SHA256(), default_backend())
+    csr = builder.sign(dummy_key, hash_algorithm(), default_backend())
     seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
 
     # Replace public key
@@ -577,7 +579,7 @@ def sign_csr_builder(
         slot,
         key_type,
         seq[0],
-        hashes.SHA256(),
+        hash_algorithm(),
         padding.PKCS1v15(),  # Only used for RSA
     )
 
@@ -596,6 +598,7 @@ def generate_self_signed_certificate(
     subject_str: str,
     valid_from: datetime,
     valid_to: datetime,
+    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.Certificate:
     """Generate a self-signed certificate using a private key in a slot."""
     key_type = KEY_TYPE.from_public_key(public_key)
@@ -612,7 +615,9 @@ def generate_self_signed_certificate(
     )
 
     try:
-        return sign_certificate_builder(session, slot, key_type, builder)
+        return sign_certificate_builder(
+            session, slot, key_type, builder, hash_algorithm
+        )
     except ApduError as e:
         logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
         raise
@@ -623,6 +628,7 @@ def generate_csr(
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
     subject_str: str,
+    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot."""
     builder = x509.CertificateSigningRequestBuilder().subject_name(
@@ -630,7 +636,7 @@ def generate_csr(
     )
 
     try:
-        return sign_csr_builder(session, slot, public_key, builder)
+        return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
     except ApduError as e:
         logger.error(
             "Failed to generate Certificate Signing Request for slot %s",

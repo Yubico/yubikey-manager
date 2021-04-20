@@ -70,7 +70,7 @@ from .util import (
     prompt_timeout,
     EnumChoice,
 )
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
 import click
 import datetime
@@ -118,6 +118,14 @@ def click_parse_management_key(ctx, param, val):
         raise ValueError(val)
 
 
+@click_callback()
+def click_parse_hash(ctx, param, val):
+    try:
+        return getattr(hashes, val)
+    except AttributeError:
+        raise ValueError(val)
+
+
 click_slot_argument = click.argument("slot", callback=click_parse_piv_slot)
 click_object_argument = click.argument(
     "object_id", callback=click_parse_piv_object, metavar="OBJECT"
@@ -140,6 +148,15 @@ click_touch_policy_option = click.option(
     type=EnumChoice(TOUCH_POLICY),
     default=TOUCH_POLICY.DEFAULT.name,
     help="Touch policy for slot.",
+)
+click_hash_option = click.option(
+    "-a",
+    "--hash-algorithm",
+    type=click.Choice(["SHA1", "SHA256", "SHA384", "SHA512"], case_sensitive=False),
+    default="SHA256",
+    show_default=True,
+    help="Hash algorithm.",
+    callback=click_parse_hash,
 )
 
 
@@ -820,8 +837,9 @@ def export_certificate(ctx, format, slot, certificate):
     default=365,
     show_default=True,
 )
+@click_hash_option
 def generate_certificate(
-    ctx, management_key, pin, slot, public_key, subject, valid_days
+    ctx, management_key, pin, slot, public_key, subject, valid_days, hash_algorithm
 ):
     """
     Generate a self-signed X.509 certificate.
@@ -849,7 +867,7 @@ def generate_certificate(
     try:
         with prompt_timeout():
             cert = generate_self_signed_certificate(
-                session, slot, public_key, subject, now, valid_to
+                session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
             session.put_certificate(slot, cert)
             session.put_object(OBJECT_ID.CHUID, generate_chuid())
@@ -870,8 +888,9 @@ def generate_certificate(
     help="Subject for the requested certificate, as an RFC 4514 string.",
     required=True,
 )
+@click_hash_option
 def generate_certificate_signing_request(
-    ctx, pin, slot, public_key, csr_output, subject
+    ctx, pin, slot, public_key, csr_output, subject, hash_algorithm
 ):
     """
     Generate a Certificate Signing Request (CSR).
@@ -896,7 +915,7 @@ def generate_certificate_signing_request(
 
     try:
         with prompt_timeout():
-            csr = generate_csr(session, slot, public_key, subject)
+            csr = generate_csr(session, slot, public_key, subject, hash_algorithm)
     except ApduError:
         cli_fail("Certificate Signing Request generation failed.")
 

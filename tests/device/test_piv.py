@@ -12,6 +12,7 @@ from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
 from yubikit.piv import (
     PivSession,
+    ALGORITHM,
     KEY_TYPE,
     PIN_POLICY,
     TOUCH_POLICY,
@@ -96,6 +97,56 @@ def generate_key(
     return key
 
 
+def import_key(
+    session,
+    slot=SLOT.AUTHENTICATION,
+    key_type=KEY_TYPE.ECCP256,
+    pin_policy=PIN_POLICY.DEFAULT,
+):
+
+    if key_type.algorithm == ALGORITHM.RSA:
+        private_key = rsa.generate_private_key(
+            65537, key_type.bit_len, default_backend()
+        )
+    elif key_type == KEY_TYPE.ECCP256:
+        private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+    elif key_type == KEY_TYPE.ECCP384:
+        private_key = ec.generate_private_key(ec.SECP384R1(), default_backend())
+    session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+    session.put_key(slot, private_key, pin_policy)
+    reset_state(session)
+    return private_key.public_key()
+
+
+def verify_cert_signature(cert, public_key=None):
+    if not public_key:
+        public_key = cert.public_key
+    args = [cert.signature, cert.tbs_certificate_bytes, cert.signature_hash_algorithm]
+    if KEY_TYPE.from_public_key(public_key).algorithm == ALGORITHM.RSA:
+        args.insert(2, padding.PKCS1v15())
+    else:
+        args[2] = ec.ECDSA(args[2])
+    public_key.verify(*args)
+
+
+class TestCertificateSignatures:
+    @pytest.mark.parametrize("key_type", list(KEY_TYPE))
+    @pytest.mark.parametrize(
+        "hash_algorithm", (hashes.SHA1, hashes.SHA256, hashes.SHA384, hashes.SHA512)
+    )
+    def test_generate_self_signed_certificate(self, session, key_type, hash_algorithm):
+        slot = SLOT.SIGNATURE
+        public_key = import_key(session, slot, key_type)
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        session.verify_pin(DEFAULT_PIN)
+        cert = generate_self_signed_certificate(
+            session, slot, public_key, "CN=alice", NOW, NOW, hash_algorithm
+        )
+
+        assert cert.public_key().public_numbers() == public_key.public_numbers()
+        verify_cert_signature(cert, public_key)
+
+
 class TestKeyManagement:
     def test_delete_certificate_requires_authentication(self, session):
         generate_key(session, SLOT.AUTHENTICATION)
@@ -132,7 +183,7 @@ class TestKeyManagement:
             session, SLOT.AUTHENTICATION, public_key, "CN=alice", NOW, NOW
         )
 
-    @pytest.mark.parametrize("slot", (SLOT.AUTHENTICATION, SLOT.SIGNATURE))
+    @pytest.mark.parametrize("slot", (SLOT.SIGNATURE, SLOT.AUTHENTICATION))
     def test_generate_self_signed_certificate(self, session, slot):
         public_key = generate_key(session, slot)
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
