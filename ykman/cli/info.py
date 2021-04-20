@@ -46,7 +46,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SHOWN_CAPABILITIES = set(CAPABILITY) - {CAPABILITY.HSMAUTH}
+SHOWN_CAPABILITIES = set(CAPABILITY)
 
 
 def print_app_status_table(supported_apps, enabled_apps):
