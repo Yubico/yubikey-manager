@@ -89,6 +89,9 @@ above instead):
 ==== FreeBSD
 Althought not being officially supported on this platform, YubiKey Manager can be
 installed on FreeBSD. It's available via its ports tree or as pre-built package.
+Should you opt to install and use YubiKey Manager on this platform, please be aware
+that it's not mainly maintained by Yubico. A recommendation would be to first
+contact the FreeBSD port's maintainer to report any kind of issues.
 
 ==== Source
 To install from source, see the link:doc/Development.adoc[development]
