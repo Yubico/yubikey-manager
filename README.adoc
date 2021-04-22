@@ -96,6 +96,7 @@ contact the FreeBSD port's maintainer to report any kind of issues.
 To install YubiKey Manager using the pre-built package on FreeBSD you need to have
 *root* privileges. Here we consider you can use `sudo` for that:
 
+  $ sudo pkg update -f
   $ sudo pkg install security/py-yubikey-manager
 
 If you wish to install it via ports tree, please refer to the official documentation
