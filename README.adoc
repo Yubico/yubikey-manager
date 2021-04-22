@@ -86,6 +86,10 @@ above instead):
   $ sudo apt update
   $ sudo apt install yubikey-manager
 
+==== FreeBSD
+Althought not being officially supported on this platform, YubiKey Manager can be
+installed on FreeBSD. It's available via its ports tree or as pre-built package.
+
 ==== Source
 To install from source, see the link:doc/Development.adoc[development]
 instructions.
