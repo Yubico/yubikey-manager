@@ -142,7 +142,8 @@ def _check_fips_status(pid, info):
 @click.option(
     "-c",
     "--check-fips",
-    help="Check if YubiKey is in FIPS Approved mode (YubiKey FIPS only).",
+    help="Check if YubiKey is in FIPS Approved mode (available on YubiKey 4 FIPS "
+    "only).",
     is_flag=True,
 )
 @click.command()
@@ -202,4 +203,4 @@ def info(ctx, check_fips):
             ctx.obj["conn"].close()
             _check_fips_status(pid, info)
         else:
-            cli_fail("Not a YubiKey FIPS")
+            cli_fail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")
