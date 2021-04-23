@@ -148,7 +148,14 @@ class RpcShell(cmd.Cmd):
         action = target.pop()
         cmd = {"action": action or "get", "target": target, "params": args}
         self._cmds.put(cmd)
-        result = self._results.get()
+
+        result = {}
+        while "result" not in result:
+            result = self._results.get()
+
+            if "signal" in result:
+                print(cyan(f"{result.pop('signal')}: {result}"))
+
         status = result.pop("result")
         if status == "success":
             if result:
@@ -170,14 +177,14 @@ def bytes_to_hex(value):
 @click.option("-s", "--shell", is_flag=True)
 def rpc(shell):
     if shell:
-        cmd_queue = Queue(1)
+        cmd_queue = Queue(1)  # type: ignore
 
         def send(data):
             # Make sure JSON encodable
             data = json.loads(json.dumps(data, default=bytes_to_hex))
             result_queue.put(data)
 
-        result_queue = Queue(1)
+        result_queue = Queue(1)  # type: ignore
 
         def recv():
             # Make sure JSON encodeable

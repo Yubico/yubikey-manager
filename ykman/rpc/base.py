@@ -101,10 +101,11 @@ class RpcNode:
         raise NoSuchNodeException(name)
 
     def _close_child(self):
-        logger.debug("close existing child: %s", self._child_name)
-        self._child.close()
-        self._child = None
-        self._child_name = None
+        if self._child:
+            logger.debug("close existing child: %s", self._child_name)
+            self._child.close()
+            self._child = None
+            self._child_name = None
 
     def get_child(self, name):
         if self._child and self._child_name != name:
