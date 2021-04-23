@@ -27,6 +27,7 @@
 
 from ykman import __version__ as ykman_version
 from ykman.util import get_windows_version
+import platform
 import logging
 import ctypes
 import sys
@@ -46,6 +47,7 @@ LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
 def log_sys_info(log):
     log(f"Python: {sys.version}")
     log(f"Platform: {sys.platform}")
+    log(f"Arch: {platform.machine()}")
     if sys.platform == "win32":
         log(f"Windows version: {get_windows_version()}")
         is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
