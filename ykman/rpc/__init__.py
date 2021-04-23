@@ -28,6 +28,7 @@
 
 from .base import RpcNode, child, action, NoSuchNodeException
 from .oath import OathNode
+from .fido import FidoNode
 from .management import ManagementNode
 from .. import __version__ as ykman_version
 from ..device import (
@@ -57,7 +58,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-_SESSION_NODES = dict(management=ManagementNode, oath=OathNode,)
+_SESSION_NODES = dict(management=ManagementNode, oath=OathNode, fido=FidoNode)
 
 
 class RootNode(RpcNode):
@@ -65,6 +66,12 @@ class RootNode(RpcNode):
         super().__init__()
         self._devices = DevicesNode()
         self._readers = ReadersNode()
+
+    def __call__(self, *args):
+        result = super().__call__(*args)
+        if result is None:
+            result = {}
+        return result
 
     def get_data(self):
         return dict(version=ykman_version)
@@ -125,7 +132,7 @@ class DevicesNode(RpcNode):
                 while dev_id in self._device_mapping:
                     dev_id = os.urandom(4).hex()
                 self._device_mapping[dev_id] = (dev, info)
-                name = get_name(info, dev.pid.get_type())
+                name = get_name(info, dev.pid.get_type() if dev.pid else None)
                 self._devices[dev_id] = dict(pid=dev.pid, name=name, serial=info.serial)
             self._state = state
         return self._devices
@@ -156,7 +163,9 @@ class DeviceNode(RpcNode):
         elif self._info and self._info.serial:
             connection = connect_to_device(self._info.serial, [conn_type])[0]
         else:
-            raise ValueError("Unsupported connection type")
+            # TODO: Make sure there's only one device
+            connection = connect_to_device(self._info.serial, [conn_type])[0]
+            # raise ValueError("Unsupported connection type")
         return ConnectionNode(self._device.transport, connection)
 
     def list_children(self):
@@ -189,7 +198,12 @@ class DeviceNode(RpcNode):
                     pid = self._device.pid
                     info = read_info(pid, conn)
                     name = get_name(info, pid.get_type() if pid else None)
-                    return dict(pid=pid, name=name, info=asdict(info))
+                    return dict(
+                        pid=pid,
+                        name=name,
+                        transport=self._device.transport,
+                        info=asdict(info),
+                    )
         raise ValueError("No supported connections")
 
 
@@ -285,6 +299,7 @@ def process(
 
 
 def run_rpc(
-    send: Callable[[Dict], None], recv: Callable[[], Dict],
+    send: Callable[[Dict], None],
+    recv: Callable[[], Dict],
 ):
     process(send, recv, RootNode())
