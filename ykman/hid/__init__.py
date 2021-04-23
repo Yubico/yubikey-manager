@@ -47,10 +47,12 @@ elif sys.platform.startswith("freebsd"):
 else:
     raise Exception("Unsupported platform")
 
+
 if backend is not None:
     list_otp_devices: Callable[[], List[OtpYubiKeyDevice]] = backend.list_devices
 else:
     list_otp_devices: Callable[[], List[OtpYubiKeyDevice]] = lambda: []
+
 
 class CtapYubiKeyDevice(YkmanDevice):
     """YubiKey FIDO USB HID device"""
