@@ -1,5 +1,0 @@
-yubikey-manager (4.0.2+git) xenial; urgency=low
-
-  * Build for Github Actions.
-
- -- Dain Nilsson <dain@yubico.com>  Mon, 12 Apr 2021 09:25:00 +0100
