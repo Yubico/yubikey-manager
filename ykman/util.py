@@ -42,9 +42,18 @@ logger = logging.getLogger(__name__)
 PEM_IDENTIFIER = b"-----BEGIN"
 
 
+class InvalidPasswordError(Exception):
+    """Raised when parsing key/certificate and the password might be wrong/missing."""
+
+
 def _parse_pkcs12_cryptography(pkcs12, data, password):
-    key, cert, cas = pkcs12.load_key_and_certificates(data, password, default_backend())
-    return key, [cert] + cas
+    try:
+        key, cert, cas = pkcs12.load_key_and_certificates(
+            data, password, default_backend()
+        )
+        return key, [cert] + cas
+    except ValueError as e:  # cryptography raises ValueError on wrong password
+        raise InvalidPasswordError(e)
 
 
 def _parse_pkcs12_pyopenssl(crypto, data, password):
@@ -68,7 +77,7 @@ def _parse_pkcs12_pyopenssl(crypto, data, password):
         ]
         return key, certs
     except crypto.Error as e:
-        raise ValueError(e)
+        raise InvalidPasswordError(e)
 
 
 def _parse_pkcs12_unsupported(data, password):
@@ -96,14 +105,14 @@ def parse_private_key(data, password):
     if is_pem(data):
         if b"ENCRYPTED" in data:
             if password is None:
-                raise TypeError("No password provided for encrypted key.")
+                raise InvalidPasswordError("No password provided for encrypted key.")
         try:
             return serialization.load_pem_private_key(
                 data, password, backend=default_backend()
             )
-        except ValueError:
+        except ValueError as e:
             # Cryptography raises ValueError if decryption fails.
-            raise
+            raise InvalidPasswordError(e)
         except Exception as e:
             logger.debug("Failed to parse PEM private key ", exc_info=e)
 

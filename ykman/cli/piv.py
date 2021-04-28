@@ -44,6 +44,7 @@ from ..util import (
     get_leaf_certificates,
     parse_private_key,
     parse_certificates,
+    InvalidPasswordError,
 )
 from ..piv import (
     get_piv_info,
@@ -592,7 +593,6 @@ def import_key(
     PRIVATE-KEY File containing the private key. Use '-' to use stdin.
     """
     session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
 
     data = private_key.read()
 
@@ -601,7 +601,8 @@ def import_key(
             password = password.encode()
         try:
             private_key = parse_private_key(data, password)
-        except (ValueError, TypeError):
+        except InvalidPasswordError as e:
+            logger.error("Error parsing key", exc_info=e)
             if password is None:
                 password = click_prompt(
                     "Enter password to decrypt key",
@@ -616,6 +617,7 @@ def import_key(
             continue
         break
 
+    _ensure_authenticated(ctx, pin, management_key)
     session.put_key(slot, private_key, pin_policy, touch_policy)
 
 
@@ -743,7 +745,6 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
     CERTIFICATE     File containing the certificate. Use '-' to use stdin.
     """
     session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key)
 
     data = cert.read()
 
@@ -752,7 +753,8 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
             password = password.encode()
         try:
             certs = parse_certificates(data, password)
-        except (ValueError, TypeError):
+        except InvalidPasswordError as e:
+            logger.error("Error parsing certificate", exc_info=e)
             if password is None:
                 password = click_prompt(
                     "Enter password to decrypt certificate",
@@ -774,6 +776,8 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
         cert_to_import = leafs[0]
     else:
         cert_to_import = certs[0]
+
+    _ensure_authenticated(ctx, pin, management_key)
 
     if verify:
 
