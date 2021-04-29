@@ -50,7 +50,10 @@ from yubikit.management import (
 )
 from yubikit.yubiotp import YubiOtpSession
 from .base import PID, YUBIKEY, YkmanDevice
-from .hid import list_otp_devices, list_ctap_devices
+from .hid import (
+    list_otp_devices as _list_otp_devices,
+    list_ctap_devices as _list_ctap_devices,
+)
 from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 from smartcard.Exceptions import NoCardException
@@ -65,22 +68,48 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-_pcsc_missing = False
+class ConnectionNotAvailableException(ValueError):
+    def __init__(self, connection_types):
+        super().__init__(
+            f"No eligiable connections are available ({connection_types})."
+        )
+        self.connection_types = connection_types
 
 
+def _warn_once(message, e_type=Exception):
+    warned: List[bool] = []
+
+    def outer(f):
+        def inner():
+            try:
+                return f()
+            except e_type:
+                if not warned:
+                    print("WARNING:", message, file=sys.stderr)
+                    warned.append(True)
+                raise
+
+        return inner
+
+    return outer
+
+
+@_warn_once(
+    "PC/SC not available. Smart card protocols will not function.",
+    EstablishContextException,
+)
 def list_ccid_devices():
-    try:
-        return _list_ccid_devices()
-    except Exception as e:
-        global _pcsc_missing
-        if not _pcsc_missing and isinstance(e, EstablishContextException):
-            _pcsc_missing = True
-            print(
-                "WARNING: PCSC not available. Smart card protocols will not function.",
-                file=sys.stderr,
-            )
-        logger.error("Unable to list CCID devices", exc_info=e)
-        return []
+    return _list_ccid_devices()
+
+
+@_warn_once("No CTAP HID backend available. FIDO protocols will not function.")
+def list_ctap_devices():
+    return _list_ctap_devices()
+
+
+@_warn_once("No OTP HID backend available. OTP protocols will not function.")
+def list_otp_devices():
+    return _list_otp_devices()
 
 
 def is_fips_version(version: Version) -> bool:
@@ -106,7 +135,11 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
     fingerprints = set()
     merged: Dict[PID, int] = {}
     for list_devs in CONNECTION_LIST_MAPPING.values():
-        devs = list_devs()
+        try:
+            devs = list_devs()
+        except Exception as e:
+            logger.error("Unable to list devices for connection", exc_info=e)
+            devs = []
         merged.update(Counter(d.pid for d in devs if d.pid is not None))
         fingerprints.update({d.fingerprint for d in devs})
     if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
@@ -134,7 +167,13 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
     devices = []
 
     for connection_type, list_devs in CONNECTION_LIST_MAPPING.items():
-        for dev in list_devs():
+        try:
+            devs = list_devs()
+        except Exception as e:
+            logger.error("Unable to list devices for connection", exc_info=e)
+            devs = []
+
+        for dev in devs:
             if dev.pid not in handled_pids and pids.get(dev.pid, True):
                 try:
                     with dev.open_connection(connection_type) as conn:
@@ -160,9 +199,19 @@ def connect_to_device(
     :return: An open connection to the device, the device reference, and the device
         information read from the device.
     """
+    failed_connections = set()
     retry_ccid = []
     for connection_type in connection_types:
-        for dev in CONNECTION_LIST_MAPPING[connection_type]():
+        try:
+            devs = CONNECTION_LIST_MAPPING[connection_type]()
+        except Exception as e:
+            logger.error(
+                f"Error listing connection of type {connection_type}", exc_info=e
+            )
+            failed_connections.add(connection_type)
+            continue
+
+        for dev in devs:
             try:
                 conn = dev.open_connection(connection_type)
             except NoCardException:
@@ -174,6 +223,9 @@ def connect_to_device(
                 conn.close()
             else:
                 return conn, dev, info
+
+    if set(connection_types) == failed_connections:
+        raise ConnectionNotAvailableException(connection_types)
 
     # NEO ejects the card when other interfaces are used, and returns it after ~3s.
     for _ in range(6):

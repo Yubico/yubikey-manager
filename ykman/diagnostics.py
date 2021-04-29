@@ -2,6 +2,9 @@ from . import __version__ as ykman_version
 from .logging_setup import log_sys_info
 from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
+from .device import read_info, get_name
+from .piv import get_piv_info
+from .openpgp import OpenPgpController, get_openpgp_info
 
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
@@ -10,9 +13,6 @@ from yubikit.management import ManagementSession
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.piv import PivSession
 from yubikit.oath import OathSession
-from ykman.device import read_info, get_name
-from ykman.piv import get_piv_info
-from ykman.openpgp import OpenPgpController, get_openpgp_info
 from fido2.ctap import CtapError
 from fido2.ctap2 import Ctap2, ClientPin
 
@@ -86,17 +86,23 @@ def ccid_info():
         ]
 
     lines.append("Detected YubiKeys over PC/SC:")
-    for dev in list_ccid_devices():
-        lines.append(f"\t{dev!r}")
-        try:
-            with dev.open_connection(SmartCardConnection) as conn:
-                lines.extend(mgmt_info(dev.pid, conn))
-                lines.extend(piv_info(conn))
-                lines.extend(oath_info(conn))
-                lines.extend(openpgp_info(conn))
-        except Exception as e:
-            lines.append(f"\tPC/SC connection failure: {e!r}")
-        lines.append("")
+    try:
+        for dev in list_ccid_devices():
+            lines.append(f"\t{dev!r}")
+            try:
+                with dev.open_connection(SmartCardConnection) as conn:
+                    lines.extend(mgmt_info(dev.pid, conn))
+                    lines.extend(piv_info(conn))
+                    lines.extend(oath_info(conn))
+                    lines.extend(openpgp_info(conn))
+            except Exception as e:
+                lines.append(f"\tPC/SC connection failure: {e!r}")
+            lines.append("")
+    except Exception as e:
+        return [
+            f"PC/SC failure: {e!r}",
+            "",
+        ]
 
     lines.append("")
     return lines
@@ -105,20 +111,23 @@ def ccid_info():
 def otp_info():
     lines = []
     lines.append("Detected YubiKeys over HID OTP:")
-    for dev in list_otp_devices():
-        lines.append(f"\t{dev!r}")
-        try:
-            with dev.open_connection(OtpConnection) as conn:
-                lines.extend(mgmt_info(dev.pid, conn))
-                otp = YubiOtpSession(conn)
-                try:
-                    config = otp.get_config_state()
-                    lines.append(f"\tOTP: {config!r}")
-                except ValueError as e:
-                    lines.append(f"\tCouldn't read OTP state: {e!r}")
-        except Exception as e:
-            lines.append(f"\tOTP connection failure: {e!r}")
-        lines.append("")
+    try:
+        for dev in list_otp_devices():
+            lines.append(f"\t{dev!r}")
+            try:
+                with dev.open_connection(OtpConnection) as conn:
+                    lines.extend(mgmt_info(dev.pid, conn))
+                    otp = YubiOtpSession(conn)
+                    try:
+                        config = otp.get_config_state()
+                        lines.append(f"\tOTP: {config!r}")
+                    except ValueError as e:
+                        lines.append(f"\tCouldn't read OTP state: {e!r}")
+            except Exception as e:
+                lines.append(f"\tOTP connection failure: {e!r}")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"\tHID OTP backend failure: {e!r}")
     lines.append("")
     return lines
 
@@ -126,35 +135,39 @@ def otp_info():
 def fido_info():
     lines = []
     lines.append("Detected YubiKeys over HID FIDO:")
-    for dev in list_ctap_devices():
-        lines.append(f"\t{dev!r}")
-        try:
-            with dev.open_connection(FidoConnection) as conn:
-                lines.append("CTAP device version: %d.%d.%d" % conn.device_version)
-                lines.append(f"CTAPHID protocol version: {conn.version}")
-                lines.append("Capabilities: %d" % conn.capabilities)
-                lines.extend(mgmt_info(dev.pid, conn))
-                try:
-                    ctap2 = Ctap2(conn)
-                    lines.append(f"\tCtap2Info: {ctap2.info.data!r}")
-                    if ctap2.info.options.get("clientPin"):
-                        client_pin = ClientPin(ctap2)
-                        lines.append(f"PIN retries: {client_pin.get_pin_retries()}")
-                        bio_enroll = ctap2.info.options.get("bioEnroll")
-                        if bio_enroll:
-                            lines.append(
-                                f"Fingerprint retries: {client_pin.get_uv_retries()}"
-                            )
-                        elif bio_enroll is False:
-                            lines.append("Fingerprints: Not configured")
-                    else:
-                        lines.append("PIN: Not configured")
+    try:
+        for dev in list_ctap_devices():
+            lines.append(f"\t{dev!r}")
+            try:
+                with dev.open_connection(FidoConnection) as conn:
+                    lines.append("CTAP device version: %d.%d.%d" % conn.device_version)
+                    lines.append(f"CTAPHID protocol version: {conn.version}")
+                    lines.append("Capabilities: %d" % conn.capabilities)
+                    lines.extend(mgmt_info(dev.pid, conn))
+                    try:
+                        ctap2 = Ctap2(conn)
+                        lines.append(f"\tCtap2Info: {ctap2.info.data!r}")
+                        if ctap2.info.options.get("clientPin"):
+                            client_pin = ClientPin(ctap2)
+                            lines.append(f"PIN retries: {client_pin.get_pin_retries()}")
+                            bio_enroll = ctap2.info.options.get("bioEnroll")
+                            if bio_enroll:
+                                lines.append(
+                                    "Fingerprint retries: "
+                                    f"{client_pin.get_uv_retries()}"
+                                )
+                            elif bio_enroll is False:
+                                lines.append("Fingerprints: Not configured")
+                        else:
+                            lines.append("PIN: Not configured")
 
-                except (ValueError, CtapError) as e:
-                    lines.append(f"\tCouldn't get info: {e!r}")
-        except Exception as e:
-            lines.append(f"\tFIDO connection failure: {e!r}")
-        lines.append("")
+                    except (ValueError, CtapError) as e:
+                        lines.append(f"\tCouldn't get info: {e!r}")
+            except Exception as e:
+                lines.append(f"\tFIDO connection failure: {e!r}")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"\tHID FIDO backend failure: {e!r}")
     return lines
 
 

@@ -28,7 +28,6 @@
 from ..base import YkmanDevice, PID
 from .base import OtpYubiKeyDevice
 from yubikit.core import TRANSPORT
-from fido2.hid import list_descriptors, open_connection, CtapHidDevice
 from typing import List, Callable
 import sys
 import logging
@@ -43,36 +42,59 @@ elif sys.platform.startswith("win32"):
 elif sys.platform.startswith("darwin"):
     from . import macos as backend
 else:
-    raise Exception("Unsupported platform")
+
+    class backend:
+        @staticmethod
+        def list_devices():
+            raise NotImplementedError(
+                "OTP HID support is not implemented on this platform"
+            )
 
 
 list_otp_devices: Callable[[], List[OtpYubiKeyDevice]] = backend.list_devices
 
 
-class CtapYubiKeyDevice(YkmanDevice):
-    """YubiKey FIDO USB HID device"""
+try:
+    from fido2.hid import list_descriptors, open_connection, CtapHidDevice
 
-    def __init__(self, descriptor):
-        super(CtapYubiKeyDevice, self).__init__(
-            TRANSPORT.USB, descriptor.path, PID(descriptor.pid)
+    class CtapYubiKeyDevice(YkmanDevice):
+        """YubiKey FIDO USB HID device"""
+
+        def __init__(self, descriptor):
+            super(CtapYubiKeyDevice, self).__init__(
+                TRANSPORT.USB, descriptor.path, PID(descriptor.pid)
+            )
+            self.descriptor = descriptor
+
+        def supports_connection(self, connection_type):
+            return issubclass(CtapHidDevice, connection_type)
+
+        def open_connection(self, connection_type):
+            if self.supports_connection(connection_type):
+                return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
+            return super(CtapYubiKeyDevice, self).open_connection(connection_type)
+
+    def list_ctap_devices() -> List[CtapYubiKeyDevice]:
+        devs = []
+        for desc in list_descriptors():
+            if desc.vid == 0x1050:
+                try:
+                    devs.append(CtapYubiKeyDevice(desc))
+                except ValueError:
+                    logger.debug(f"Unsupported Yubico device with PID: {desc.pid:02x}")
+        return devs
+
+
+except Exception:
+    # CTAP not supported on this platform
+
+    class CtapYubiKeyDevice(YkmanDevice):  # type: ignore
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError(
+                "CTAP HID support is not implemented on this platform"
+            )
+
+    def list_ctap_devices() -> List[CtapYubiKeyDevice]:
+        raise NotImplementedError(
+            "CTAP HID support is not implemented on this platform"
         )
-        self.descriptor = descriptor
-
-    def supports_connection(self, connection_type):
-        return issubclass(CtapHidDevice, connection_type)
-
-    def open_connection(self, connection_type):
-        if self.supports_connection(connection_type):
-            return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
-        return super(CtapYubiKeyDevice, self).open_connection(connection_type)
-
-
-def list_ctap_devices() -> List[CtapYubiKeyDevice]:
-    devs = []
-    for desc in list_descriptors():
-        if desc.vid == 0x1050:
-            try:
-                devs.append(CtapYubiKeyDevice(desc))
-            except ValueError:
-                logger.debug(f"Unsupported Yubico device with PID: {desc.pid:02x}")
-    return devs

@@ -41,6 +41,7 @@ from ..device import (
     list_all_devices,
     scan_devices,
     connect_to_device,
+    ConnectionNotAvailableException,
 )
 from ..util import get_windows_version
 from ..diagnostics import get_diagnostics
@@ -85,6 +86,9 @@ def retrying_connect(serial, connections, attempts=10, state=None):
     while True:
         try:
             return connect_to_device(serial, connections)
+        except ConnectionNotAvailableException as e:
+            logger.error("Failed opening connection", exc_info=e)
+            raise  # No need to retry
         except Exception as e:
             logger.error("Failed opening connection", exc_info=e)
             while attempts:
