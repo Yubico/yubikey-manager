@@ -348,8 +348,9 @@ def yubiotp(
 
     if not public_id:
         if serial_public_id:
-            serial = session.get_serial()
-            if serial is None:
+            try:
+                serial = session.get_serial()
+            except CommandError:
                 cli_fail("Serial number not set, public ID must be provided")
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo(f"Using YubiKey serial as public ID: {public_id}")
