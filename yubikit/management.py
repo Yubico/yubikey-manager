@@ -441,7 +441,10 @@ class ManagementSession:
         )
 
     def set_mode(
-        self, mode: Mode, chalresp_timeout: int = 0, auto_eject_timeout: int = 0
+        self,
+        mode: Mode,
+        chalresp_timeout: int = 0,
+        auto_eject_timeout: Optional[int] = None,
     ) -> None:
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
@@ -461,6 +464,13 @@ class ManagementSession:
                 )
             )
         else:
+            code = mode.code
+            if auto_eject_timeout is not None:
+                if mode.interfaces == USB_INTERFACE.CCID:
+                    code |= DEVICE_FLAG.EJECT
+                else:
+                    raise ValueError("Touch-eject only applicable for mode: CCID")
             self.backend.set_mode(
-                struct.pack(">BBH", mode.code, chalresp_timeout, auto_eject_timeout)
+                # N.B. This is little endian!
+                struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
             )

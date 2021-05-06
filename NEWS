@@ -2,6 +2,7 @@
  ** Add support for fido reset over NFC.
  ** Bugfix: The --touch argument to piv change-management-key was ignored.
  ** Bugfix: Don't prompt for password when importing PIV key/cert if file is invalid.
+ ** Bugfix: Fix setting touch-eject/auto-eject for YubiKey 4 and NEO.
 
 * Version 4.0.2 (released 2021-04-12)
  ** Update device names.

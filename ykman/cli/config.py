@@ -607,9 +607,9 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     else:
         key_type = None
 
-    if autoeject_timeout:
+    if autoeject_timeout:  # autoeject implies touch eject
         touch_eject = True
-    autoeject = autoeject_timeout if touch_eject else 0
+    autoeject = autoeject_timeout if touch_eject else None
 
     if mode.interfaces != USB_INTERFACE.CCID:
         if touch_eject:
