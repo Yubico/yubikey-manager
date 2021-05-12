@@ -151,8 +151,9 @@ def parse_certificates(data, password):
                 except Exception as e:
                     logger.debug("Failed to parse PEM certificate", exc_info=e)
         # Could be valid PEM but not certificates.
-        if len(certs) > 0:
-            return certs
+        if not certs:
+            raise ValueError("PEM file does not contain any certificate(s)")
+        return certs
 
     # PKCS12
     if is_pkcs12(data):
@@ -187,7 +188,7 @@ def get_leaf_certificates(certs):
 
 
 def is_pem(data):
-    return PEM_IDENTIFIER in data if data else False
+    return data and PEM_IDENTIFIER in data
 
 
 def is_pkcs12(data):
@@ -197,10 +198,16 @@ def is_pkcs12(data):
     See: https://tools.ietf.org/html/rfc7292.
     """
     try:
-        header = Tlv.parse_list(Tlv.unpack(0x30, data))[0]
-        return header.tag == 0x02 and header.value == b"\x03"
-    except ValueError:
-        return False
+        if data[0] == 0x30:
+            if data[1] == 0x80:  # Indefinite length TLV, version starts at 2
+                data = data[2:]
+            else:
+                data = Tlv.unpack(0x30, data)
+            header = Tlv.parse_from(data)[0]
+            return header.tag == 0x02 and header.value == b"\x03"
+    except ValueError as e:
+        logger.debug("Unable to parse TLV", exc_info=e)
+    return False
 
 
 class OSVERSIONINFOW(ctypes.Structure):

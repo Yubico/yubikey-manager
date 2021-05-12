@@ -92,8 +92,6 @@ class TestUtilityFunctions(unittest.TestCase):
 
     def test_is_pkcs12(self):
         with self.assertRaises(TypeError):
-            is_pkcs12("just a string")
-        with self.assertRaises(TypeError):
             is_pkcs12(None)
 
         with open_file("rsa_2048_key.pem") as rsa_2048_key_pem:
