@@ -3,6 +3,7 @@
  ** Bugfix: The --touch argument to piv change-management-key was ignored.
  ** Bugfix: Don't prompt for password when importing PIV key/cert if file is invalid.
  ** Bugfix: Fix setting touch-eject/auto-eject for YubiKey 4 and NEO.
+ ** Bugfix: Detect PKCS#12 format when outer sequence uses indefinite length.
  ** Dependency: Add support for Click 8.
 
 * Version 4.0.2 (released 2021-04-12)

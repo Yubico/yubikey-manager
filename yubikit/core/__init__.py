@@ -183,26 +183,35 @@ def bytes2int(data: bytes) -> int:
     return int.from_bytes(data, "big")
 
 
-def _tlv_parse(data):
+def _tlv_parse(data, offset=0):
     try:
-        tag, rest = data[0], data[1:]
+        tag = data[offset]
+        offset += 1
         if tag & 0x1F == 0x1F:  # Long form
-            tag, rest = tag << 8 | rest[0], rest[1:]
+            tag = tag << 8 | data[offset]
+            offset += 1
             while tag & 0x80 == 0x80:  # Additional bytes
-                tag, rest = tag << 8 | rest[0], rest[1:]
+                tag = tag << 8 | data[offset]
+                offset += 1
 
-        ln, rest = rest[0], rest[1:]
-        if ln == 0x80:
-            raise ValueError("Indefinite length not supported")
-        if ln > 0x80:
-            n_bytes = ln - 0x80
-            ln, rest = bytes2int(rest[:n_bytes]), rest[n_bytes:]
+        ln = data[offset]
+        offset += 1
+        if ln == 0x80:  # Indefinite length
+            end = offset
+            while data[end] or data[end + 1]:  # Run until 0x0000
+                end = _tlv_parse(data, end)[3]  # Skip over TLV
+            ln = end - offset
+            end += 2  # End after 0x0000
+        else:
+            if ln > 0x80:  # Length spans multiple bytes
+                n_bytes = ln - 0x80
+                ln = bytes2int(data[offset : offset + n_bytes])
+                offset += n_bytes
+            end = offset + ln
 
-        value, rest = rest[:ln], rest[ln:]
+        return tag, offset, ln, end
     except IndexError:
         raise ValueError("Invalid encoding of tag/length")
-
-    return tag, ln, value, rest
 
 
 T_Tlv = TypeVar("T_Tlv", bound="Tlv")
@@ -215,11 +224,11 @@ class Tlv(bytes):
 
     @property
     def length(self) -> int:
-        return len(self) - self._value_offset
+        return self._value_ln
 
     @property
     def value(self) -> bytes:
-        return self[self._value_offset :]
+        return self[self._value_offset : self._value_offset + self._value_ln]
 
     def __new__(cls, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
         """This allows creation by passing either binary data, or tag and value."""
@@ -248,18 +257,17 @@ class Tlv(bytes):
         return super(Tlv, cls).__new__(cls, data)  # type: ignore
 
     def __init__(self, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
-        self._tag, ln, value, rest = _tlv_parse(self)
-        if rest:
+        self._tag, self._value_offset, self._value_ln, end = _tlv_parse(self)
+        if len(self) != end:
             raise ValueError("Incorrect TLV length")
-        self._value_offset = len(self) - ln
 
     def __repr__(self):
         return f"Tlv(tag=0x{self.tag:02x}, value={self.value.hex()})"
 
     @classmethod
     def parse_from(cls: Type[T_Tlv], data: bytes) -> Tuple[T_Tlv, bytes]:
-        tag, ln, value, rest = _tlv_parse(data)
-        return cls(data[: len(data) - len(rest)]), rest
+        tag, offs, ln, end = _tlv_parse(data)
+        return cls(data[:end]), data[end:]
 
     @classmethod
     def parse_list(cls: Type[T_Tlv], data: bytes) -> List[T_Tlv]:
