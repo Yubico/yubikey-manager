@@ -55,7 +55,9 @@ class EnumChoice(click.Choice):
         self.choices_enum = choices_enum
 
     def convert(self, value, param, ctx):
-        name = super(EnumChoice, self).convert(value, param, ctx).replace("-", "_")
+        if isinstance(value, self.choices_enum):
+            return value
+        name = super().convert(value, param, ctx).replace("-", "_")
         return self.choices_enum[name]
 
 
