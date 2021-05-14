@@ -29,6 +29,7 @@ from ykman.piv import (
     pivman_set_mgm_key,
 )
 from ykman.util import parse_certificates, parse_private_key
+from ykman.device import is_fips_version
 from ..util import open_file
 from . import condition
 
@@ -135,6 +136,11 @@ class TestCertificateSignatures:
         "hash_algorithm", (hashes.SHA1, hashes.SHA256, hashes.SHA384, hashes.SHA512)
     )
     def test_generate_self_signed_certificate(self, session, key_type, hash_algorithm):
+        if key_type == KEY_TYPE.ECCP384 and session.version < (4, 0, 0):
+            pytest.skip("ECCP384 requires YubiKey 4 or later")
+        if key_type == KEY_TYPE.RSA1024 and is_fips_version(session.version):
+            pytest.skip("RSA1024 not available on YubiKey FIPS")
+
         slot = SLOT.SIGNATURE
         public_key = import_key(session, slot, key_type)
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
