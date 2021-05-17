@@ -1,4 +1,4 @@
-* Version 4.0.3 (unreleased)
+* Version 4.0.3 (released 2021-05-17)
  ** Add support for fido reset over NFC.
  ** Bugfix: The --touch argument to piv change-management-key was ignored.
  ** Bugfix: Don't prompt for password when importing PIV key/cert if file is invalid.
