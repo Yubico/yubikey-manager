@@ -90,9 +90,16 @@ above instead):
 To install from source, see the link:doc/Development.adoc[development]
 instructions.
 
-=== Bash completion
+=== Shell completion
 
-Experimental Bash completion for the command line tool is available, but not
-enabled by default. To enable it, run this command once:
+Experimental shell completion for the command line tool is available, provided
+by the underlying CLI library (`click`) but it is not enabled by default. To
+enable it, run this command once (for Bash):
 
-  $ source <(_YKMAN_COMPLETE=source ykman | sudo tee /etc/bash_completion.d/ykman)
+  $ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
+
+More information on shell completion is available here:
+https://click.palletsprojects.com/en/8.0.x/shell-completion
+
+NOTE: If your version of the Click dependency is older than 8.0 you need to use
+`source_bash` for the variable instead.
