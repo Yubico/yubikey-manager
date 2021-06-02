@@ -73,7 +73,7 @@ class ALGORITHM(str, Enum):
 
 # Don't treat pre 1.0 versions as "developer builds".
 def require_version(my_version: Version, *args, **kwargs):
-    if my_version <= (0, 1, 3):  # Last pre 1.0 release of ykneo-piv
+    if my_version <= (0, 1, 4):  # Last pre 1.0 release of ykneo-piv
         my_version = Version(1, 0, 0)
     _require_version(my_version, *args, **kwargs)
 

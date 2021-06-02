@@ -1,3 +1,6 @@
+* Version 4.0.4 (unreleased)
+ ** Bugfix: Fix PIV feature detection for some YubiKey NEO versions.
+
 * Version 4.0.3 (released 2021-05-17)
  ** Add support for fido reset over NFC.
  ** Bugfix: The --touch argument to piv change-management-key was ignored.
