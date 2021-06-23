@@ -25,6 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from base64 import b32encode
 from yubikit.yubiotp import (
     SLOT,
     YubiOtpSession,
@@ -542,6 +543,13 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
                 "No secret key given. Please remove the --force flag, "
                 "set the KEY argument or set the --generate flag."
             )
+        elif generate:
+            key = os.urandom(20)
+            if totp:
+                b32key = b32encode(key).decode()
+                click.echo(f"Using a randomly generated key (Base32): {b32key}")
+            else:
+                click.echo(f"Using a randomly generated key: {key.hex()}")
         elif totp:
             while True:
                 key = click_prompt("Enter a secret key (base32)")
@@ -551,12 +559,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
                 except Exception as e:
                     click.echo(e)
         else:
-            if generate:
-                key = os.urandom(20)
-                click.echo(f"Using a randomly generated key: {key.hex()}")
-            else:
-                key = click_prompt("Enter a secret key")
-                key = parse_oath_key(key)
+            key = click_prompt("Enter a secret key")
+            key = parse_oath_key(key)
 
     cred_type = "TOTP" if totp else "challenge-response"
     force or click.confirm(
