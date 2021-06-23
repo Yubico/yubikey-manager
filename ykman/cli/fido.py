@@ -197,6 +197,10 @@ def reset(ctx, force):
             cli_fail("Only one YubiKey can be connected to perform a reset.")
         is_fips = is_fips_version(ctx.obj["info"].version)
 
+        ctap2 = ctx.obj.get("ctap2")
+        if not is_fips and not ctap2:
+            cli_fail("This YubiKey does not support FIDO reset.")
+
         def prompt_re_insert():
             click.echo("Remove and re-insert your YubiKey to perform the reset...")
 
@@ -317,6 +321,8 @@ def change_pin(ctx, pin, new_pin, u2f):
         conn = ctx.obj["conn"]
     else:
         ctap2 = ctx.obj.get("ctap2")
+        if not ctap2:
+            cli_fail("PIN is not supported on this YubiKey.")
         client_pin = ClientPin(ctap2)
 
     def prompt_new_pin():
