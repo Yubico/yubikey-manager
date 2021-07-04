@@ -60,6 +60,9 @@ import ctypes
 import time
 import sys
 import logging
+import json
+import io
+import contextlib
 
 
 logger = logging.getLogger(__name__)
@@ -352,7 +355,35 @@ def list_keys(ctx, serials, readers):
                     click.echo(f"{name} [{mode}] <access denied>")
 
 
-COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
+@cli.command("repl")
+@click.pass_context
+def repl(ctx):
+    """
+    Enter commands as REPL (formatted as JSON)
+    """
+    while 1:
+        line = input()
+        if not line:
+            break
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout):
+                cli.main(args=json.loads(line))
+        except SystemExit:
+            pass
+        print(
+            json.dumps(
+                {
+                    "stdout": stdout.getvalue().splitlines(),
+                    "stderr": stderr.getvalue().splitlines(),
+                }
+            ),
+            flush=True,
+        )
+
+
+COMMANDS = (repl, list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
 
 
 for cmd in COMMANDS:
