@@ -687,8 +687,8 @@ def bio_rename(ctx, template_id, name, pin):
     ID          The ID of the fingerprint to rename (as shown in "list").
     NAME        A short readable name for the fingerprint (eg. "Left thumb").
     """
-    if len(name) >= 16:
-        ctx.fail("Fingerprint name must be a maximum of 15 characters")
+    if len(name.encode()) >= 16:
+        ctx.fail("Fingerprint name must be a maximum of 15 bytes")
 
     bio = _init_bio(ctx, pin)
     enrollments = bio.enumerate_enrollments()
