@@ -634,10 +634,10 @@ def calculate(ctx, slot, challenge, totp, digits):
 
         response = session.calculate_hmac_sha1(slot, challenge, event, on_keepalive)
 
-        if totp and digits == '0':
-            digits = '6'
+        if totp and digits == "0":
+            digits = "6"
 
-        if digits != '0':
+        if digits != "0":
             value = format_oath_code(response, int(digits))
         else:
             value = response.hex()
