@@ -637,7 +637,7 @@ def calculate(ctx, slot, challenge, totp, digits):
         if totp and digits == '0':
             digits = '6'
 
-        if digits != '0':            
+        if digits != '0':
             value = format_oath_code(response, int(digits))
         else:
             value = response.hex()
