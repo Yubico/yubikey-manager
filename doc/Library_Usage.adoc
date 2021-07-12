@@ -16,7 +16,9 @@ If the above runs without error (no output at all), then you should be all set.
 The first step you'll likely want to do is to establish a Session with a
 YubiKey Application. Depending on which Application you intend to access,
 you'll need to establish a specific type of Connection. The `connect_to_device`
-function lets you search for, and connect to, a YubiKey.
+function lets you search for, and connect to, a YubiKey. Once you are done
+using a Connection, you should close it. This can be done explicitly by calling
+`connection.close()`, or by using a `with` block.
 
 ==== Example
 [source,py]
@@ -31,7 +33,7 @@ connection, device, info = connect_to_device(
     connection_types=[SmartCardConnection],  # Possible Connection types to allow
 )
 
-with connection:  # Makes sure we close the connection after this block
+with connection:  # This closes the connection after the block
     piv = PivSession(connection)
     attempts = piv.get_pin_attempts()
     print(f"You have {attempts} PIN attempts left.")
@@ -60,8 +62,9 @@ from yubikit.core.smartcard import SmartCardConnection
 
 for device, info in list_all_devices():
     if info.version >= (5, 0, 0):  # The info object provides details about the YubiKey
-        connection, _, _ = connect_to_device(serial=info.serial, [SmartCardConnection])
-	...  # Do something with the connection.
+        connection, _, _ = connect_to_device(serial=info.serial, connection_types=[SmartCardConnection])
+        with connection:
+            ...  # Do something with the connection.
 ----
 
 
@@ -86,12 +89,13 @@ while True:  # Run this until we stop the script with Ctrl+C
     pids, new_state = scan_devices()
     if new_state != state:
         state = new_state  # State has changed
-	for device, info in list_all_devices():
-	    if info.serial not in handled_serials:  # Unhandled YubiKey
-	        print(f"Programming YubiKey with serial: {info.serial}")
+        for device, info in list_all_devices():
+            if info.serial not in handled_serials:  # Unhandled YubiKey
+                print(f"Programming YubiKey with serial: {info.serial}")
+                # Since we're not filtering on connection type here the Connection may have any type.
                 with connect_to_device(info.serial)[0] as connection:
-		    ...
-		handled.add(info.serial)
+                    ...  # Do something with the connection.
+                handled.add(info.serial)
     else:
         sleep(1.0)  # No change, sleep for 1 second.
 ----
