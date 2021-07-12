@@ -85,6 +85,10 @@ class TOUCH_MODE(IntEnum):  # noqa: N801
     CACHED = 0x03
     CACHED_FIXED = 0x04
 
+    @property
+    def is_fixed(self):
+        return "FIXED" in self.name
+
     def __str__(self):
         if self == TOUCH_MODE.OFF:
             return "Off"

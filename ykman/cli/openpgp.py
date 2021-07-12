@@ -207,10 +207,10 @@ def set_touch(ctx, key, policy, admin_pin, force):
     \b
     Off (default)   No touch required
     On              Touch required
-    Fixed           Touch required, can't be disabled without a full reset
+    Fixed           Touch required, can't be disabled without deleting the private key
     Cached          Touch required, cached for 15s after use
     Cached-Fixed    Touch required, cached for 15s after use, can't be disabled
-                    without a full reset
+                    without deleting the private key
     """
     controller = ctx.obj["controller"]
 
@@ -225,11 +225,15 @@ def set_touch(ctx, key, policy, admin_pin, force):
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
-    if force or click.confirm(
-        f"Set touch policy of {key.value.lower()} key to {policy_name}?",
-        abort=True,
-        err=True,
-    ):
+    prompt = f"Set touch policy of {key.value.lower()} key to {policy_name}?"
+    if policy.is_fixed:
+        prompt = (
+            "WARNING: This touch policy cannot be changed without deleting the "
+            + "corresponding key slot!\n"
+            + prompt
+        )
+
+    if force or click.confirm(prompt, abort=True, err=True):
         try:
             controller.verify_admin(admin_pin)
             controller.set_touch(key, policy)
