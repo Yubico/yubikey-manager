@@ -371,7 +371,7 @@ def accounts():
     default=0,
     help="Initial counter value for HOTP accounts.",
 )
-@click.option("-i", "--issuer", help="Issuer of the account.")
+@click.option("-i", "--issuer", help="Issuer of the account (optional).")
 @click.option(
     "-p",
     "--period",
@@ -403,6 +403,10 @@ def add(
     Add a new account.
 
     This will add a new OATH account to the YubiKey.
+
+    \b
+    NAME    Human readable name of the account, such as a username or e-mail address.
+    SECRET  Base32-encoded secret/key value provided by the server.
     """
 
     digits = int(digits)
@@ -452,7 +456,7 @@ def uri(ctx, data, touch, force, password, remember):
 
     if not data:
         while True:
-            uri = click_prompt("Enter an OATH URI")
+            uri = click_prompt("Enter an OATH URI (otpauth://)")
             try:
                 data = CredentialData.parse_uri(uri)
                 break
@@ -643,8 +647,8 @@ def rename(ctx, query, name, force, password, remember):
     Rename an account (Requires YubiKey 5.3 or later).
 
     \b
-    QUERY       A query to match a single account (as shown in "list").
-    NAME        The name of the account (use "<issuer>:<name>" to specify issuer).
+    QUERY  A query to match a single account (as shown in "list").
+    NAME   The name of the account (use "<issuer>:<name>" to specify issuer).
     """
 
     _init_session(ctx, password, remember)
@@ -693,7 +697,9 @@ def delete(ctx, query, force, password, remember):
     Delete an account.
 
     Delete an account from the YubiKey.
-    Provide a query string to match the account to delete.
+
+    \b
+    QUERY  A query to match a single account (as shown in "list").
     """
 
     _init_session(ctx, password, remember)
