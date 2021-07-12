@@ -373,7 +373,7 @@ def accounts():
 )
 @click.option("-i", "--issuer", help="Issuer of the account (optional).")
 @click.option(
-    "-p",
+    "-P",
     "--period",
     help="Number of seconds a TOTP code is valid.",
     default=30,
@@ -528,7 +528,7 @@ def _add_cred(ctx, data, touch, force):
 @click_show_hidden_option
 @click.pass_context
 @click.option("-o", "--oath-type", is_flag=True, help="Display the OATH type.")
-@click.option("-p", "--period", is_flag=True, help="Display the period.")
+@click.option("-P", "--period", is_flag=True, help="Display the period.")
 @click_password_option
 @click_remember_option
 def list(ctx, show_hidden, oath_type, period, password, remember):
