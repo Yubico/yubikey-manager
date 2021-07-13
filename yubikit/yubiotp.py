@@ -438,7 +438,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
         return self
 
     def imf(self: Cfg, imf: int) -> Cfg:
-        if not (imf % 16 == 0 or 0 <= imf <= 0xFFFF0):
+        if not (imf % 16 == 0 and 0 <= imf <= 0xFFFF0):
             raise ValueError(
                 f"imf should be between {0} and {1048560}, evenly dividable by 16"
             )
