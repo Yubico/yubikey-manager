@@ -115,16 +115,46 @@ class ReadersNode(RpcNode):
         return DeviceNode(self._reader_mapping[name], None)
 
 
+class _ScanDevices:
+    def __init__(self):
+        self._state = 0
+        self._caching = False
+
+    def __call__(self):
+        if not self._caching or not self._state:
+            self._state = scan_devices()[1]
+        return self._state
+
+    def __enter__(self):
+        self._caching = True
+        self._state = 0
+
+    def __exit__(self, exc_type, exc, exc_tb):
+        self._caching = False
+
+
 class DevicesNode(RpcNode):
     def __init__(self):
         super().__init__()
-        self._state = 0
+        self._get_state = _ScanDevices()
+        self._list_state = 0
         self._devices = {}
         self._device_mapping = {}
 
+    def __call__(self, *args, **kwargs):
+        with self._get_state:
+            return super().__call__(*args, **kwargs)
+
+    @action(closes_child=False)
+    def scan(self, *ignored):
+        return dict(state=self._get_state())
+
+    def get_data(self):
+        return dict(state=self._get_state())
+
     def list_children(self):
-        state = scan_devices()[1]
-        if state != self._state:
+        state = self._get_state()
+        if state != self._list_state:
             self._devices = {}
             self._device_mapping = {}
             for dev, info in list_all_devices():
@@ -134,7 +164,8 @@ class DevicesNode(RpcNode):
                 self._device_mapping[dev_id] = (dev, info)
                 name = get_name(info, dev.pid.get_type() if dev.pid else None)
                 self._devices[dev_id] = dict(pid=dev.pid, name=name, serial=info.serial)
-            self._state = state
+            self._list_state = state
+
         return self._devices
 
     def create_child(self, name):
@@ -147,9 +178,9 @@ class DeviceNode(RpcNode):
         self._device = device
         self._info = info
 
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
         try:
-            return super().__call__(*args)
+            return super().__call__(*args, **kwargs)
         except (SmartcardException, OSError) as e:
             logger.error("Device error", exc_info=e)
             self._child = None

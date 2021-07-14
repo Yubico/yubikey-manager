@@ -26,6 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+from functools import partial
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -45,8 +47,11 @@ MARKER_ACTION = "_rpc_action_marker"
 MARKER_CHILD = "_rpc_child_marker"
 
 
-def action(func):
-    setattr(func, MARKER_ACTION, True)
+def action(func=None, *, closes_child=True):
+    if not func:
+        return partial(action, closes_child=closes_child)
+
+    setattr(func, MARKER_ACTION, dict(closes_child=closes_child))
     return func
 
 
@@ -82,10 +87,11 @@ class RpcNode:
         ]
 
     def get_action(self, name):
-        if self._child:
-            self._close_child()
         action = getattr(self, name, None)
         if hasattr(action, MARKER_ACTION):
+            options = getattr(action, MARKER_ACTION)
+            if options["closes_child"] and self._child:
+                self._close_child()
             return action
         raise NoSuchActionException(name)
 
