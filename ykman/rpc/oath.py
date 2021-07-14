@@ -44,12 +44,6 @@ class OathNode(RpcNode):
             locked=self.session.locked,
         )
 
-    def list_children(self):
-        children = super().list_children()
-        if self.session.locked:
-            del children["accounts"]
-        return children
-
     @action
     def derive(self, params, event, signal):
         return dict(key=self.session.derive_key(params.pop("password")))
@@ -63,7 +57,7 @@ class OathNode(RpcNode):
         self.session.validate(key)
         return dict()
 
-    @child
+    @child(condition=lambda self: not self.session.locked)
     def accounts(self):
         return CredentialsNode(self.session)
 
@@ -118,13 +112,12 @@ class CredentialNode(RpcNode):
         self.credential = credential
         self.refresh = refresh
 
-    def list_actions(self):
-        actions = super().list_actions()
+    def _require_version(self, major, minor, micro):
         try:
-            require_version(self.session.version, (5, 3, 1))
+            require_version(self.session.version, (major, minor, micro))
+            return True
         except NotSupportedError:
-            actions.remove("rename")
-        return actions
+            return False
 
     def get_info(self):
         return asdict(self.credential)
@@ -148,7 +141,7 @@ class CredentialNode(RpcNode):
         self.credential = None
         return dict()
 
-    @action
+    @action(condition=lambda self: self._require_version(5, 3, 1))
     def rename(self, params, event, signal):
         name = params.pop("name")
         issuer = params.pop("issuer", None)

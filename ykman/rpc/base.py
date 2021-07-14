@@ -47,16 +47,19 @@ MARKER_ACTION = "_rpc_action_marker"
 MARKER_CHILD = "_rpc_child_marker"
 
 
-def action(func=None, *, closes_child=True):
+def action(func=None, *, closes_child=True, condition=None):
     if not func:
-        return partial(action, closes_child=closes_child)
+        return partial(action, closes_child=closes_child, condition=condition)
 
-    setattr(func, MARKER_ACTION, dict(closes_child=closes_child))
+    setattr(func, MARKER_ACTION, dict(closes_child=closes_child, condition=condition))
     return func
 
 
-def child(func):
-    setattr(func, MARKER_CHILD, True)
+def child(func=None, *, condition=None):
+    if not func:
+        return partial(child, condition=condition)
+
+    setattr(func, MARKER_CHILD, dict(condition=condition))
     return func
 
 
@@ -81,24 +84,30 @@ class RpcNode:
     def get_data(self):
         return dict()
 
+    def _list_marked(self, marker):
+        children = {}
+        for name in dir(self):
+            options = getattr(getattr(self, name), marker, None)
+            if options is not None:
+                condition = options["condition"]
+                if condition is None or condition(self):
+                    children[name] = options
+        return children
+
     def list_actions(self):
-        return [
-            name for name in dir(self) if hasattr(getattr(self, name), MARKER_ACTION)
-        ]
+        return list(self._list_marked(MARKER_ACTION))
 
     def get_action(self, name):
         action = getattr(self, name, None)
-        if hasattr(action, MARKER_ACTION):
-            options = getattr(action, MARKER_ACTION)
+        options = getattr(action, MARKER_ACTION, None)
+        if options is not None:
             if options["closes_child"] and self._child:
                 self._close_child()
             return action
         raise NoSuchActionException(name)
 
     def list_children(self):
-        return {
-            name: {} for name in dir(self) if hasattr(getattr(self, name), MARKER_CHILD)
-        }
+        return {name: {} for name in self._list_marked(MARKER_CHILD).keys()}
 
     def create_child(self, name):
         child = getattr(self, name, None)
