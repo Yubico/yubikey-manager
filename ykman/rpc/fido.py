@@ -72,7 +72,7 @@ class FidoNode(RpcNode):
                 params.pop("new_pin"),
             )
 
-    @child
+    @child(condition=lambda self: self._pin)
     def fingerprints(self):
         token = self.client_pin.get_pin_token(
             self._pin, ClientPin.PERMISSION.BIO_ENROLL
@@ -80,7 +80,7 @@ class FidoNode(RpcNode):
         bio = FPBioEnrollment(self.ctap, self.client_pin.protocol, token)
         return FingerprintsNode(bio)
 
-    @child
+    @child(condition=lambda self: self._pin)
     def credentials(self):
         token = self.client_pin.get_pin_token(
             self._pin, ClientPin.PERMISSION.CREDENTIAL_MGMT
