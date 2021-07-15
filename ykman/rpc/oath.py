@@ -41,6 +41,7 @@ class OathNode(RpcNode):
         return dict(
             version=self.session.version,
             device_id=self.session.device_id,
+            has_key=self.session.has_key,
             locked=self.session.locked,
         )
 
@@ -48,13 +49,35 @@ class OathNode(RpcNode):
     def derive(self, params, event, signal):
         return dict(key=self.session.derive_key(params.pop("password")))
 
+    def _get_key(self, params):
+        has_key = "key" in params
+        has_pw = "password" in params
+        if has_key and has_pw:
+            raise ValueError("Only one of 'key' and 'password' can be provided.")
+        if has_pw:
+            return self.session.derive_key(params.pop("password"))
+        if has_key:
+            return bytes.fromhex(params.pop("key"))
+        raise ValueError("One of 'key' and 'password' must be provided.")
+
     @action
     def validate(self, params, event, signal):
-        if "password" in params:
-            key = self.session.derive_key(params.pop("password"))
-        else:
-            key = bytes.fromhex(params.pop("key"))
-        self.session.validate(key)
+        self.session.validate(self._get_key(params))
+        return dict()
+
+    @action
+    def set_key(self, params, event, signal):
+        self.session.set_key(self._get_key(params))
+        return dict()
+
+    @action(condition=lambda self: self.session.has_key)
+    def unset_key(self, params, event, signal):
+        self.session.unset_key()
+        return dict()
+
+    @action
+    def reset(self, params, event, signal):
+        self.session.reset()
         return dict()
 
     @child(condition=lambda self: not self.session.locked)
