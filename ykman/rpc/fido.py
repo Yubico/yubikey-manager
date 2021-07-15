@@ -37,7 +37,7 @@ from fido2.ctap2 import (
 )
 
 
-class FidoNode(RpcNode):
+class Ctap2Node(RpcNode):
     def __init__(self, connection):
         super().__init__()
         self.ctap = Ctap2(connection)
@@ -45,11 +45,24 @@ class FidoNode(RpcNode):
         self._pin = None
 
     def get_data(self):
-        return self.ctap.get_info().data
+        info = self.ctap.get_info()
+        pin_retries, power_cycle = self.client_pin.get_pin_retries()
+        if info.options.get("bioEnroll"):
+            uv_retries = self.client_pin.get_uv_retries()
+            if isinstance(uv_retries, tuple):
+                uv_retries = uv_retries[0]
+        else:
+            uv_retries = None
+        return dict(
+            info=info.data,
+            pin_retries=pin_retries,
+            power_cycle=power_cycle,
+            uv_retries=uv_retries,
+        )
 
     @action
     def reset(self, params, event, signal):
-        raise NotSupportedError("TODO")
+        raise NotSupportedError("TODO")  # TODO
 
     @action
     def verify_pin(self, params, event, signal):
@@ -72,7 +85,7 @@ class FidoNode(RpcNode):
                 params.pop("new_pin"),
             )
 
-    @child(condition=lambda self: self._pin)
+    @child(condition=lambda self: "bioEnroll" in self.ctap.info.options and self._pin)
     def fingerprints(self):
         token = self.client_pin.get_pin_token(
             self._pin, ClientPin.PERMISSION.BIO_ENROLL
@@ -80,6 +93,7 @@ class FidoNode(RpcNode):
         bio = FPBioEnrollment(self.ctap, self.client_pin.protocol, token)
         return FingerprintsNode(bio)
 
+    # TODO: Use CredentialManagement.is_supported when released
     @child(condition=lambda self: self._pin)
     def credentials(self):
         token = self.client_pin.get_pin_token(

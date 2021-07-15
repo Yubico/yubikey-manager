@@ -28,7 +28,7 @@
 
 from .base import RpcNode, child, action, NoSuchNodeException
 from .oath import OathNode
-from .fido import FidoNode
+from .fido import Ctap2Node
 from .management import ManagementNode
 from .. import __version__ as ykman_version
 from ..device import (
@@ -39,7 +39,6 @@ from ..device import (
     connect_to_device,
 )
 from ..diagnostics import get_diagnostics
-from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
@@ -58,7 +57,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-_SESSION_NODES = dict(management=ManagementNode, oath=OathNode, fido=FidoNode)
+_SESSION_NODES = dict(management=ManagementNode, oath=OathNode, ctap2=Ctap2Node)
 
 
 class RootNode(RpcNode):
@@ -112,7 +111,7 @@ class ReadersNode(RpcNode):
         return self._readers
 
     def create_child(self, name):
-        return DeviceNode(self._reader_mapping[name], None)
+        return ReaderDeviceNode(self._reader_mapping[name], None)
 
 
 class _ScanDevices:
@@ -169,11 +168,11 @@ class DevicesNode(RpcNode):
         return self._devices
 
     def create_child(self, name):
-        return DeviceNode(*self._device_mapping[name])
+        return UsbDeviceNode(*self._device_mapping[name])
 
 
-class DeviceNode(RpcNode):
-    def __init__(self, device, info=None):
+class AbstractDeviceNode(RpcNode):
+    def __init__(self, device, info):
         super().__init__()
         self._device = device
         self._info = info
@@ -188,6 +187,27 @@ class DeviceNode(RpcNode):
             self._child_name = None
             raise NoSuchNodeException(name)
 
+    def get_data(self):
+        for conn_type in (SmartCardConnection, OtpConnection, FidoConnection):
+            if self._device.supports_connection(conn_type):
+                with self._device.open_connection(conn_type) as conn:
+                    pid = self._device.pid
+                    self._info = read_info(pid, conn)
+                    name = get_name(self._info, pid.get_type() if pid else None)
+                    return dict(
+                        pid=pid,
+                        name=name,
+                        transport=self._device.transport,
+                        info=asdict(self._info),
+                    )
+        raise ValueError("No supported connections")
+
+
+class UsbDeviceNode(AbstractDeviceNode):
+    def __init__(self, device, info):
+        super().__init__(device, info)
+        self._interfaces = device.pid.get_interfaces()
+
     def _create_connection(self, conn_type):
         if self._device.supports_connection(conn_type):
             connection = self._device.open_connection(conn_type)
@@ -195,55 +215,49 @@ class DeviceNode(RpcNode):
             connection = connect_to_device(self._info.serial, [conn_type])[0]
         else:
             # TODO: Make sure there's only one device
-            connection = connect_to_device(self._info.serial, [conn_type])[0]
-            # raise ValueError("Unsupported connection type")
-        return ConnectionNode(self._device.transport, connection)
+            connection = connect_to_device(connection_types=[conn_type])[0]
+        return ConnectionNode(self._device.transport, connection, self._info)
 
-    def list_children(self):
-        children = super().list_children()
-        if self._device.transport == TRANSPORT.USB:
-            enabled = self._device.pid.get_interfaces()
-        else:  # NFC, only ccid and FIDO
-            enabled = USB_INTERFACE.CCID | USB_INTERFACE.FIDO
-        for iface in USB_INTERFACE:
-            if iface not in enabled:
-                del children[iface.name.lower()]
-        return children
-
-    @child
+    @child(condition=lambda self: USB_INTERFACE.CCID in self._interfaces)
     def ccid(self):
         return self._create_connection(SmartCardConnection)
 
-    @child
+    @child(condition=lambda self: USB_INTERFACE.OTP in self._interfaces)
     def otp(self):
         return self._create_connection(OtpConnection)
 
-    @child
+    @child(condition=lambda self: USB_INTERFACE.FIDO in self._interfaces)
     def fido(self):
         return self._create_connection(FidoConnection)
 
+
+class ReaderDeviceNode(AbstractDeviceNode):
     def get_data(self):
-        for conn_type in (SmartCardConnection, OtpConnection, FidoConnection):
-            if self._device.supports_connection(conn_type):
-                with self._device.open_connection(conn_type) as conn:
-                    pid = self._device.pid
-                    info = read_info(pid, conn)
-                    name = get_name(info, pid.get_type() if pid else None)
-                    return dict(
-                        pid=pid,
-                        name=name,
-                        transport=self._device.transport,
-                        info=asdict(info),
-                    )
-        raise ValueError("No supported connections")
+        try:
+            return super().get_data() | dict(present=True)
+        except Exception:
+            return dict(present=False)
+
+    @child
+    def ccid(self):
+        connection = self._device.open_connection(SmartCardConnection)
+        info = read_info(None, connection)
+        return ConnectionNode(self._device.transport, connection, info)
+
+    @child
+    def fido(self):
+        with self._device.open_connection(SmartCardConnection) as conn:
+            info = read_info(None, conn)
+        connection = self._device.open_connection(FidoConnection)
+        return ConnectionNode(self._device.transport, connection, info)
 
 
 class ConnectionNode(RpcNode):
-    def __init__(self, transport, connection):
+    def __init__(self, transport, connection, info):
         super().__init__()
         self._transport = transport
         self._connection = connection
-        self._info = read_info(None, self._connection)
+        self._info = info or read_info(None, self._connection)
         self._capabilities = self._info.config.enabled_capabilities[transport]
 
     def close(self):
