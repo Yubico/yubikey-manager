@@ -27,7 +27,6 @@
 
 
 from .base import RpcNode, action, child
-from yubikit.core import NotSupportedError
 from fido2.ctap2 import (
     Ctap2,
     ClientPin,
@@ -41,30 +40,32 @@ class Ctap2Node(RpcNode):
     def __init__(self, connection):
         super().__init__()
         self.ctap = Ctap2(connection)
+        self._info = self.ctap.info
         self.client_pin = ClientPin(self.ctap)
         self._pin = None
 
     def get_data(self):
-        info = self.ctap.get_info()
-        pin_retries, power_cycle = self.client_pin.get_pin_retries()
-        if info.options.get("bioEnroll"):
-            uv_retries = self.client_pin.get_uv_retries()
-            if isinstance(uv_retries, tuple):
-                uv_retries = uv_retries[0]
-        else:
-            uv_retries = None
-        return dict(
-            info=info.data,
-            pin_retries=pin_retries,
-            power_cycle=power_cycle,
-            uv_retries=uv_retries,
-        )
+        self._info = self.ctap.get_info()
+        data = dict(info=self._info.data)
+        if self._info.options.get("clientPin"):
+            pin_retries, power_cycle = self.client_pin.get_pin_retries()
+            data.update(
+                pin_retries=pin_retries,
+                power_cycle=power_cycle,
+            )
+            if self._info.options.get("bioEnroll"):
+                uv_retries = self.client_pin.get_uv_retries()
+                if isinstance(uv_retries, tuple):
+                    uv_retries = uv_retries[0]
+                data.update(uv_retries=uv_retries)
+        return data
 
     @action
     def reset(self, params, event, signal):
-        raise NotSupportedError("TODO")  # TODO
+        self.ctap.reset(event)
+        return dict()
 
-    @action
+    @action(condition=lambda self: self._info.options["clientPin"])
     def verify_pin(self, params, event, signal):
         pin = params.pop("pin")
         self.client_pin.get_pin_token(
@@ -77,7 +78,7 @@ class Ctap2Node(RpcNode):
         has_pin = self.ctap.get_info().options["clientPin"]
         if has_pin:
             self.client_pin.change_pin(
-                params.pop("pin", None),
+                params.pop("pin"),
                 params.pop("new_pin"),
             )
         else:
@@ -85,7 +86,7 @@ class Ctap2Node(RpcNode):
                 params.pop("new_pin"),
             )
 
-    @child(condition=lambda self: "bioEnroll" in self.ctap.info.options and self._pin)
+    @child(condition=lambda self: "bioEnroll" in self._info.options and self._pin)
     def fingerprints(self):
         token = self.client_pin.get_pin_token(
             self._pin, ClientPin.PERMISSION.BIO_ENROLL
