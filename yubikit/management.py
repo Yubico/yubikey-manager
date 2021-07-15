@@ -63,6 +63,15 @@ class USB_INTERFACE(IntFlag):
     FIDO = 0x02
     CCID = 0x04
 
+    def supports_connection(self, connection_type) -> bool:
+        if issubclass(connection_type, SmartCardConnection):
+            return USB_INTERFACE.CCID in self
+        if issubclass(connection_type, FidoConnection):
+            return USB_INTERFACE.FIDO in self
+        if issubclass(connection_type, OtpConnection):
+            return USB_INTERFACE.OTP in self
+        return False
+
 
 @unique
 class CAPABILITY(IntFlag):
