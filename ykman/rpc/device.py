@@ -29,6 +29,7 @@
 from .base import RpcNode, child, action, NoSuchNodeException
 from .oath import OathNode
 from .fido import Ctap2Node
+from .yubiotp import YubiOtpNode
 from .management import ManagementNode
 from .. import __version__ as ykman_version
 from ..device import (
@@ -302,3 +303,18 @@ class ConnectionNode(RpcNode):
     )
     def ctap2(self):
         return Ctap2Node(self._connection)
+
+    @child(
+        condition=lambda self: CAPABILITY.OTP in self.capabilities
+        and (
+            isinstance(self._connection, OtpConnection)
+            or (  # SmartCardConnection can be used over NFC, or on 5.3 and later.
+                isinstance(self._connection, SmartCardConnection)
+                and (
+                    self._transport == TRANSPORT.NFC or self._info.version >= (5, 3, 0)
+                )
+            )
+        )
+    )
+    def yubiotp(self):
+        return YubiOtpNode(self._connection)
