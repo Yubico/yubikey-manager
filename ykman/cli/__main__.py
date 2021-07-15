@@ -152,11 +152,11 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
             if len(readers) == 1:
                 dev = readers[0]
                 try:
-                    if cmd == fido.name:
-                        conn = dev.open_connection(FidoConnection)
-                    else:
-                        conn = dev.open_connection(SmartCardConnection)
+                    conn = dev.open_connection(SmartCardConnection)
                     info = read_info(dev.pid, conn)
+                    if cmd == fido.name:
+                        conn.close()
+                        conn = dev.open_connection(FidoConnection)
                     return conn, dev, info
                 except Exception as e:
                     logger.error("Failure connecting to card", exc_info=e)
