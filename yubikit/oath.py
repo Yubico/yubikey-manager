@@ -405,12 +405,12 @@ class OathSession:
             )
 
             code = None  # Will be None for HOTP and touch
-            if oath_type == OATH_TYPE.TOTP:
-                if period != DEFAULT_PERIOD:
+            if resp_tag == TAG_TRUNCATED:  # Only TOTP, no-touch here
+                if period == DEFAULT_PERIOD:
+                    code = _format_code(credential, timestamp, tlv.value)
+                else:
                     # Non-standard period, recalculate
                     code = self.calculate_code(credential, timestamp)
-                elif resp_tag == TAG_TRUNCATED:
-                    code = _format_code(credential, timestamp, tlv.value)
             entries[credential] = code
 
         return entries
