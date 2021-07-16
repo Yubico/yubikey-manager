@@ -155,7 +155,7 @@ class CredentialNode(RpcNode):
     def calculate(self, params, event, signal):
         challenge = bytes.fromhex(params.pop("challenge"))
         response = self.session.calculate(self.credential.id, challenge)
-        return dict(response=response.hex())
+        return dict(response=response)
 
     @action
     def delete(self, params, event, signal):
