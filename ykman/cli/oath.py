@@ -667,7 +667,7 @@ def rename(ctx, query, name, force, password, remember):
         new_id = _format_cred_id(issuer, name, cred.oath_type, cred.period)
         if any(cred.id == new_id for cred in creds):
             cli_fail(
-                "Another account with ID {new_id.decode()} "
+                f"Another account with ID {new_id.decode()} "
                 "already exists on this YubiKey."
             )
         if force or (
