@@ -282,7 +282,7 @@ def import_key(ctx, key, private_key, admin_pin):
 @click.pass_context
 @click.option("-P", "--pin", help="PIN code.")
 @click_format_option
-@click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
+@click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT, hidden=[KEY_SLOT.ATT]))
 @click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
 def attest(ctx, key, certificate, pin, format):
     """
