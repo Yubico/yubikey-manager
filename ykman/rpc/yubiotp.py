@@ -28,7 +28,16 @@
 
 from .base import RpcNode, action, child
 
-from yubikit.yubiotp import YubiOtpSession, SLOT
+from yubikit.yubiotp import (
+    YubiOtpSession,
+    SLOT,
+    UpdateConfiguration,
+    HmacSha1SlotConfiguration,
+    HotpSlotConfiguration,
+    StaticPasswordSlotConfiguration,
+    YubiOtpSlotConfiguration,
+    StaticTicketSlotConfiguration,
+)
 
 
 class YubiOtpNode(RpcNode):
@@ -64,6 +73,15 @@ class YubiOtpNode(RpcNode):
         return SlotNode(self.session, SLOT.TWO)
 
 
+_CONFIG_TYPES = dict(
+    hmac_sha1=HmacSha1SlotConfiguration,
+    hotp=HotpSlotConfiguration,
+    static_password=StaticPasswordSlotConfiguration,
+    yubiotp=YubiOtpSlotConfiguration,
+    static_ticket=StaticTicketSlotConfiguration,
+)
+
+
 class SlotNode(RpcNode):
     def __init__(self, session, slot):
         super().__init__()
@@ -80,7 +98,7 @@ class SlotNode(RpcNode):
 
     @action(condition=lambda self: self._state.is_configured(self.slot))
     def delete(self, params, event, signal):
-        self.session.delete_slot(self.slot, params.pop("acc_code", None))
+        self.session.delete_slot(self.slot, params.pop("cur_acc_code", None))
 
     @action(
         condition=lambda self: self._state.is_configured(self.slot)
@@ -89,4 +107,69 @@ class SlotNode(RpcNode):
     def calculate(self, params, event, signal):
         challenge = bytes.fromhex(params.pop("challenge"))
         response = self.session.calculate_hmac_sha1(self.slot, challenge, event)
-        return dict(response=response.hex())
+        return dict(response=response)
+
+    def _apply_config(self, config, params):
+        for option in (
+            "serial_api_visible",
+            "serial_usb_visible",
+            "allow_update",
+            "dormant",
+            "invert_led",
+            "protect_slot2",
+            "require_touch",
+            "lt64",
+            "append_cr",
+            "use_numeric",
+            "fast_trigger",
+            "digits8",
+            "imf",
+            "send_reference",
+            "short_ticket",
+            "manual_update",
+        ):
+            if option in params:
+                getattr(config, option)(params.pop(option))
+
+        for option in ("tabs", "delay", "pacing", "strong_password"):
+            if option in params:
+                getattr(config, option)(*params.pop(option))
+
+        if "token_id" in params:
+            token_id, *args = params.pop("token_id")
+            config.token_id(bytes.fromhex(token_id), *args)
+
+        return config
+
+    @action
+    def put(self, params, event, signal):
+        config = None
+        for key in _CONFIG_TYPES:
+            if key in params:
+                if config is not None:
+                    raise ValueError("Only one configuration type can be provided.")
+                config = _CONFIG_TYPES[key](
+                    *(bytes.fromhex(arg) for arg in params.pop(key))
+                )
+        if config is None:
+            raise ValueError("No supported configuration type provided.")
+        self._apply_config(config, params)
+        self.session.put_configuration(
+            self.slot,
+            config,
+            params.pop("acc_code", None),
+            params.pop("cur_acc_code", None),
+        )
+        return dict()
+
+    @action(condition=lambda self: self._state.is_configured(self.slot))
+    def update(self, params, event, signal):
+        config = UpdateConfiguration()
+        self._apply_config(config, params)
+        self.session.update_configuration(
+            self.slot,
+            config,
+            params.pop("acc_code", None),
+            params.pop("cur_acc_code", None),
+        )
+        return dict()
