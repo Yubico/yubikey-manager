@@ -343,6 +343,10 @@ def export_certificate(ctx, key, format, certificate):
     CERTIFICATE File to write certificate to. Use '-' to use stdout.
     """
     controller = ctx.obj["controller"]
+
+    if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
+        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+
     try:
         cert = controller.read_certificate(key)
     except ValueError:
@@ -362,6 +366,10 @@ def delete_certificate(ctx, key, admin_pin):
     KEY         Key slot to delete certificate from (sig, enc, aut, or att).
     """
     controller = ctx.obj["controller"]
+
+    if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
+        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
@@ -386,6 +394,9 @@ def import_certificate(ctx, key, cert, admin_pin):
     CERTIFICATE File containing the certificate. Use '-' to use stdin.
     """
     controller = ctx.obj["controller"]
+
+    if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
+        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)

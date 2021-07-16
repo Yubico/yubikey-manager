@@ -339,16 +339,23 @@ class OpenPgpController(object):
         self._app.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, data)
 
     def _select_certificate(self, key_slot):
-        data: bytes = Tlv(0x60, Tlv(0x5C, b"\x7f\x21"))
-        if self.version <= (5, 4, 3):  # These use a non-standard byte in the command.
-            data = b"\x06" + data  # 6 is the length of the data.
-        self._app.send_apdu(
-            0,
-            INS.SELECT_DATA,
-            3 - key_slot.indx,
-            0x04,
-            data,
-        )
+        try:
+            require_version(self.version, (5, 2, 0))
+            data: bytes = Tlv(0x60, Tlv(0x5C, b"\x7f\x21"))
+            if self.version <= (5, 4, 3):
+                # These use a non-standard byte in the command.
+                data = b"\x06" + data  # 6 is the length of the data.
+            self._app.send_apdu(
+                0,
+                INS.SELECT_DATA,
+                3 - key_slot.indx,
+                0x04,
+                data,
+            )
+        except NotSupportedError:
+            if key_slot == KEY_SLOT.AUT:
+                return  # Older version still support AUT, which is the default slot.
+            raise
 
     def _read_version(self):
         bcd_hex = self._app.send_apdu(0, INS.GET_VERSION, 0, 0).hex()
@@ -458,8 +465,8 @@ class OpenPgpController(object):
         )
 
     def read_certificate(self, key_slot):
-        require_version(self.version, (5, 2, 0))
         if key_slot == KEY_SLOT.ATT:
+            require_version(self.version, (5, 2, 0))
             data = self._get_data(DO.ATT_CERTIFICATE)
         else:
             self._select_certificate(key_slot)
@@ -470,9 +477,9 @@ class OpenPgpController(object):
 
     def import_certificate(self, key_slot, certificate):
         """Requires Admin PIN verification."""
-        require_version(self.version, (5, 2, 0))
         cert_data = certificate.public_bytes(Encoding.DER)
         if key_slot == KEY_SLOT.ATT:
+            require_version(self.version, (5, 2, 0))
             self._put_data(DO.ATT_CERTIFICATE, cert_data)
         else:
             self._select_certificate(key_slot)
@@ -570,8 +577,8 @@ class OpenPgpController(object):
 
     def delete_certificate(self, key_slot):
         """Requires Admin PIN verification."""
-        require_version(self.version, (5, 2, 0))
         if key_slot == KEY_SLOT.ATT:
+            require_version(self.version, (5, 2, 0))
             self._put_data(DO.ATT_CERTIFICATE, b"")
         else:
             self._select_certificate(key_slot)
