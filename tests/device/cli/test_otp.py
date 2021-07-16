@@ -484,7 +484,7 @@ class TestSlotProgramming:
         self._check_slot_2_does_not_have_access_code(ykman_cli)
 
         ykman_cli(
-            "otp", "settings", "--new-access-code", "", "2", "-f", input="111111111111"
+            "otp", "settings", "--new-access-code", "-", "2", "-f", input="111111111111"
         )
         self._check_slot_2_has_access_code(ykman_cli)
 

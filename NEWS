@@ -2,6 +2,8 @@
  ** Bugfix: Fix PIV feature detection for some YubiKey NEO versions.
  ** Bugfix: Fix argument short form for --period when adding TOTP credentials.
  ** Bugfix: More strict validation for some arguments, resulting in better error messages.
+ ** Bugfix: Correctly handle TOTP credentials using period != 30 AND touch_required.
+ ** Bugfix: Fix prompting for access code in the otp settings command (now uses "-A -").
 
 * Version 4.0.3 (released 2021-05-17)
  ** Add support for fido reset over NFC.

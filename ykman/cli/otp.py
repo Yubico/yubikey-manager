@@ -701,8 +701,8 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
     "--new-access-code",
     metavar="HEX",
     required=False,
-    help="Set a new 6 byte access code for the slot. Set to empty to use a "
-    "prompt for input.",
+    help='Set a new 6 byte access code for the slot. Use "-" as a value to prompt for '
+    "input.",
 )
 @click.option(
     "--delete-access-code", is_flag=True, help="Remove access code from the slot."
@@ -746,7 +746,7 @@ def settings(
     """
     session = ctx.obj["session"]
 
-    if (new_access_code is not None) and delete_access_code:
+    if new_access_code and delete_access_code:
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
     if not session.get_config_state().is_configured(slot):
@@ -756,7 +756,7 @@ def settings(
         if not delete_access_code:
             new_access_code = ctx.obj["access_code"]
     else:
-        if new_access_code == "":
+        if new_access_code == "-":
             new_access_code = click_prompt("Enter new access code", show_default=False)
 
         try:
