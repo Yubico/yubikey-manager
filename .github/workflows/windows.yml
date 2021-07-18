@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: pyinstaller/pyinstaller
-          ref: 40c9abce2d8de879e414fd377c933dccaab1e156
+          ref: 90431c010a23b1c9080fcb44f932d4615bb71825
           path: pyinstaller
 
       - name: Build PyInstaller
