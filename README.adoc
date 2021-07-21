@@ -90,17 +90,10 @@ above instead):
 Althought not being officially supported on this platform, YubiKey Manager can be
 installed on FreeBSD. It's available via its ports tree or as pre-built package.
 Should you opt to install and use YubiKey Manager on this platform, please be aware
-that it's not mainly maintained by Yubico. A recommendation would be to first
-contact the FreeBSD port's maintainer to report any kind of issues.
+that it's **NOT** maintained by Yubico.
 
-To install YubiKey Manager using the pre-built package on FreeBSD you need to have
-*root* privileges. Here we consider you can use `sudo` for that:
-
-  $ sudo pkg update -f
-  $ sudo pkg install security/py-yubikey-manager
-
-If you wish to install it via ports tree, please refer to the official documentation
-on the https://docs.freebsd.org/en_US.ISO8859-1/books/handbook/ports-using.html[FreeBSD Handbook].
+For more information about how to install packages or ports on FreeBSD, please refer
+to its official documentation: https://docs.freebsd.org/en/books/handbook/ports[FreeBSD Handbook].
 
 ==== Source
 To install from source, see the link:doc/Development.adoc[development]
