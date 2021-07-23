@@ -56,6 +56,7 @@ from .config import config
 from .aliases import apply_aliases
 from .apdu import apdu
 import click
+import click.shell_completion
 import ctypes
 import time
 import sys
@@ -198,6 +199,14 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     type=int,
     metavar="SERIAL",
     help="Specify which YubiKey to interact with by serial number.",
+    shell_complete=lambda ctx, param, incomplete: [
+        click.shell_completion.CompletionItem(
+            str(dev_info.serial),
+            help=_describe_device(dev, dev_info),
+        )
+        for dev, dev_info in list_all_devices()
+        if dev_info.serial and str(dev_info.serial).startswith(incomplete)
+    ],
 )
 @click.option(
     "-r",
@@ -330,13 +339,8 @@ def list_keys(ctx, serials, readers):
             if dev_info.serial:
                 click.echo(dev_info.serial)
         else:
-            if dev.pid is None:  # Devices from list_all_devices should always have PID.
-                raise AssertionError("PID is None")
-            name = get_name(dev_info, dev.pid.get_type())
-            version = "%d.%d.%d" % dev_info.version if dev_info.version else "unknown"
-            mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
             click.echo(
-                f"{name} ({version}) [{mode}]"
+                _describe_device(dev, dev_info)
                 + (f" Serial: {dev_info.serial}" if dev_info.serial else "")
             )
         pids.add(dev.pid)
@@ -350,6 +354,15 @@ def list_keys(ctx, serials, readers):
                     name = pid.get_type().value
                     mode = pid.name.split("_", 1)[1].replace("_", "+")
                     click.echo(f"{name} [{mode}] <access denied>")
+
+
+def _describe_device(dev, dev_info):
+    if dev.pid is None:  # Devices from list_all_devices should always have PID.
+        raise AssertionError("PID is None")
+    name = get_name(dev_info, dev.pid.get_type())
+    version = "%d.%d.%d" % dev_info.version if dev_info.version else "unknown"
+    mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
+    return f"{name} ({version}) [{mode}]"
 
 
 COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)

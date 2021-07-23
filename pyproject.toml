@@ -33,7 +33,7 @@ cryptography = "^2.1 || ^3.0"
 pyOpenSSL = {version = ">=0.15.1", optional = true}
 pyscard = "^1.9 || ^2.0"
 fido2 = ">=0.9, <1.0"
-click = "^6.0 || ^7.0 || ^8.0"
+click = "^8.0"
 pywin32 = {version = ">=223", platform = "win32"}
 
 [tool.poetry.dev-dependencies]
