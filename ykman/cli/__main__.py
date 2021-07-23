@@ -214,6 +214,9 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     help="Use an external smart card reader. Conflicts with --device and list.",
     metavar="NAME",
     default=None,
+    shell_complete=lambda ctx, param, incomplete: [
+        reader.name for reader in list_readers()
+    ],
 )
 @click.option(
     "-l",
