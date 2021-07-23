@@ -39,6 +39,7 @@ from fido2.pcsc import CtapPcscDevice
 from time import sleep
 import subprocess  # nosec
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ def kill_scdaemon():
                 killed = True
     except ImportError:
         # Works for Linux and OS X.
-        return_code = subprocess.call(["/usr/bin/pkill", "-9", "scdaemon"])  # nosec
+        return_code = subprocess.call([shutil.which("pkill"), "-9", "scdaemon"])  # nosec
         if return_code == 0:
             killed = True
     if killed:
