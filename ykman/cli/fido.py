@@ -51,6 +51,7 @@ from ..hid import list_ctap_devices
 from ..device import is_fips_version
 from ..pcsc import list_devices as list_ccid
 from smartcard.Exceptions import NoCardException, CardConnectionException
+from collections.abc import Sequence
 from typing import Optional
 
 import click
@@ -482,6 +483,22 @@ def _gen_creds(credman):
             )
 
 
+def _format_table(headings: Sequence[str], rows: list[Sequence[str]]) -> str:
+    all_rows: list[Sequence[str]] = [headings] + rows
+    padded_rows: list[list[str]] = [["" for cell in row] for row in all_rows]
+
+    max_cols = max(len(row) for row in all_rows)
+    for c in range(max_cols):
+        max_width = max(len(row[c]) for row in all_rows if len(row) > c)
+        for r in range(len(all_rows)):
+            if c < len(all_rows[r]):
+                padded_rows[r][c] = all_rows[r][c] + (
+                    " " * (max_width - len(all_rows[r][c]))
+                )
+
+    return "\n".join("  ".join(row) for row in padded_rows)
+
+
 def _format_cred(rp_id, user_id, user_name):
     return f"{rp_id} {user_id.hex()} {user_name}"
 
@@ -529,8 +546,15 @@ def creds_list(ctx, pin):
     List credentials.
     """
     creds = _init_credman(ctx, pin)
-    for (rp_id, _, user_id, user_name) in _gen_creds(creds):
-        click.echo(_format_cred(rp_id, user_id, user_name))
+    click.echo(
+        _format_table(
+            ["RP ID", "User ID", "Username"],
+            [
+                (rp_id, user_id.hex(), user_name)
+                for rp_id, _, user_id, user_name in _gen_creds(creds)
+            ],
+        )
+    )
 
 
 @creds.command("delete")
