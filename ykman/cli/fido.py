@@ -480,6 +480,7 @@ def _gen_creds(credman):
                 cred[CredentialManagement.RESULT.CREDENTIAL_ID],
                 cred[CredentialManagement.RESULT.USER]["id"],
                 cred[CredentialManagement.RESULT.USER]["name"],
+                cred[CredentialManagement.RESULT.USER]["displayName"],
             )
 
 
@@ -548,10 +549,10 @@ def creds_list(ctx, pin):
     creds = _init_credman(ctx, pin)
     click.echo(
         _format_table(
-            ["RP ID", "User ID", "Username"],
+            ["RP ID", "User ID", "Username", "Display name"],
             [
-                (rp_id, user_id.hex(), user_name)
-                for rp_id, _, user_id, user_name in _gen_creds(creds)
+                (rp_id, user_id.hex(), user_name, display_name)
+                for rp_id, _, user_id, user_name, display_name in _gen_creds(creds)
             ],
         )
     )
@@ -574,7 +575,7 @@ def creds_delete(ctx, query, pin, force):
 
     hits = [
         (rp_id, cred_id, user_id, user_name)
-        for (rp_id, cred_id, user_id, user_name) in _gen_creds(credman)
+        for (rp_id, cred_id, user_id, user_name, _) in _gen_creds(credman)
         if query.lower() in user_name.lower()
         or query.lower() in rp_id.lower()
         or user_id.hex().startswith(query.lower())
