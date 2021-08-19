@@ -354,7 +354,11 @@ P1_DEVICE_CONFIG = 0x11
 class _ManagementSmartCardBackend(_Backend):
     def __init__(self, smartcard_connection):
         self.protocol = SmartCardProtocol(smartcard_connection)
-        select_str = self.protocol.select(AID.MANAGEMENT).decode()
+        select_bytes = self.protocol.select(AID.MANAGEMENT)
+        if select_bytes[-2:] == b"\x90\x00":
+            # YubiKey Edge incorrectly appends SW twice.
+            select_bytes = select_bytes[:-2]
+        select_str = select_bytes.decode()
         self.version = Version.from_string(select_str)
         # For YubiKey NEO, we use the OTP application for further commands
         if self.version[0] == 3:

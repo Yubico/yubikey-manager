@@ -459,9 +459,11 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
     ):
         usb_enabled = info.supported_capabilities[TRANSPORT.USB]
         if usb_enabled == (CAPABILITY.OTP | CAPABILITY.U2F | USB_INTERFACE.CCID):
-            # YubiKey Edge, hide unusable CCID interface
-            usb_enabled = CAPABILITY.OTP | CAPABILITY.U2F
-            info.supported_capabilities = {TRANSPORT.USB: usb_enabled}
+            # YubiKey Edge, hide unusable CCID interface from supported
+            # usb_enabled = CAPABILITY.OTP | CAPABILITY.U2F
+            info.supported_capabilities = {
+                TRANSPORT.USB: CAPABILITY.OTP | CAPABILITY.U2F
+            }
 
         if USB_INTERFACE.OTP not in interfaces:
             usb_enabled &= ~CAPABILITY.OTP

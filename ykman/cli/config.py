@@ -540,7 +540,9 @@ def _mode_from_usb_enabled(usb_enabled):
         interfaces |= USB_INTERFACE.OTP
     if (CAPABILITY.U2F | CAPABILITY.FIDO2) & usb_enabled:
         interfaces |= USB_INTERFACE.FIDO
-    if (CAPABILITY.OPENPGP | CAPABILITY.PIV | CAPABILITY.OATH) & usb_enabled:
+    if (
+        USB_INTERFACE.CCID | CAPABILITY.OPENPGP | CAPABILITY.PIV | CAPABILITY.OATH
+    ) & usb_enabled:
         interfaces |= USB_INTERFACE.CCID
     return Mode(interfaces)
 
