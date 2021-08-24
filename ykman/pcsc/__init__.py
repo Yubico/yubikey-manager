@@ -39,7 +39,6 @@ from fido2.pcsc import CtapPcscDevice
 from time import sleep
 import subprocess  # nosec
 import logging
-import shutil
 
 logger = logging.getLogger(__name__)
 
