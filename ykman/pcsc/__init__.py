@@ -139,7 +139,7 @@ def kill_scdaemon():
                 killed = True
     except ImportError:
         # Works for Linux and OS X.
-        return_code = subprocess.call(["/usr/bin/pkill", "-9", "scdaemon"])  # nosec
+        return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # nosec
         if return_code == 0:
             killed = True
     if killed:
