@@ -45,7 +45,6 @@ from ..device import (
 )
 from ..util import get_windows_version
 from ..diagnostics import get_diagnostics
-from ..settings import AppData
 from .util import YkmanContextObject, ykman_group, cli_fail
 from .info import info
 from .otp import otp
@@ -59,6 +58,7 @@ from .apdu import apdu
 import click
 import click.shell_completion
 import ctypes
+import os
 import time
 import sys
 import logging
@@ -193,35 +193,11 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     _disabled_interface(connections, cmd)
 
 
-def _dangerous_completion(f):
-    def complete(ctx, param, incomplete):
-        state = AppData("completion")
-
-        warned = state.get("disruptive_warned", [])
-        state["disruptive_warned"] = warned
-        enabled = state.get("disruptive_enabled", [])
-        state["disruptive_enabled"] = enabled
-
-        if param.name in enabled:
-            return f(ctx, param, incomplete)
-        elif incomplete == "enable_disruptive":
-            enabled.append(param.name)
-            state.write()
-            return [f"# Shell completion enabled for --{param.name}."]
-        elif param.name in warned:
-            return []
-        else:
-            warned.append(param.name)
-            state.write()
-            return [
-                f"""# Shell completion for --{param.name} is slow and may disrupt"""
-                """ concurrent YubiKey operations."""
-                """ To enable it, replace this completion text"""
-                """ with 'enable_disruptive' and then trigger completion."""
-                """ This message will not be shown again."""
-            ]
-
-    return complete
+def _experimental_completion(env_var_name, f):
+    if env_var_name in os.environ:
+        return f
+    else:
+        return lambda ctx, param, incomplete: []
 
 
 @ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -231,7 +207,9 @@ def _dangerous_completion(f):
     type=int,
     metavar="SERIAL",
     help="Specify which YubiKey to interact with by serial number.",
-    shell_complete=_dangerous_completion(
+    shell_complete=_experimental_completion(
+        # Leading underscore for uniformity with _YKMAN_COMPLETE from Click
+        "_YKMAN_EXPERIMENTAL_COMPLETE_DEVICE",
         lambda ctx, param, incomplete: [
             click.shell_completion.CompletionItem(
                 str(dev_info.serial),
@@ -239,7 +217,7 @@ def _dangerous_completion(f):
             )
             for dev, dev_info in list_all_devices()
             if dev_info.serial and str(dev_info.serial).startswith(incomplete)
-        ]
+        ],
     ),
 )
 @click.option(
