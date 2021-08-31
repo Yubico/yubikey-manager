@@ -542,8 +542,12 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         if info.has_transport(TRANSPORT.NFC):
             device_name = "Security Key NFC"
     elif key_type == YUBIKEY.YK4:
-        if info.version[0] == 0:
-            return "Yubikey (%d.%d.%d)" % info.version
+        if info.version[0] < 4:
+            if info.version[0] == 0:
+                return "YubiKey (%d.%d.%d)" % info.version
+            else:
+                return "YubiKey"
+
         if _is_preview(info.version):
             device_name = "YubiKey Preview"
         elif is_fips_version(info.version):  # YK4 FIPS
