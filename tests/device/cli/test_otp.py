@@ -491,7 +491,7 @@ class TestSlotProgramming:
         ykman_cli(
             "otp",
             "--access-code",
-            "",
+            "-",
             "settings",
             "--delete-access-code",
             "2",

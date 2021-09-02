@@ -105,7 +105,7 @@ def _failed_to_write_msg(ctx, exc_info):
     logger.error("Failed to write to device", exc_info=exc_info)
     cli_fail(
         "Failed to write to the YubiKey. Make sure the device does not "
-        "have restricted access."
+        'have restricted access (see "ykman otp --help" for more info).'
     )
 
 
@@ -125,7 +125,7 @@ def _confirm_slot_overwrite(slot_state, slot):
     "--access-code",
     required=False,
     metavar="HEX",
-    help="A 6 byte access code. Set to empty to use a prompt for input.",
+    help='A 6 byte access code. Use "-" as a value to prompt for input.',
 )
 def otp(ctx, access_code):
     """
@@ -137,7 +137,9 @@ def otp(ctx, access_code):
     A slot configuration may be write-protected with an access code. This
     prevents the configuration to be overwritten without the access code
     provided. Mode switching the YubiKey is not possible when a slot is
-    configured with an access code.
+    configured with an access code. To provide an access code to commands
+    which require it, use the --access-code option. Note that this option must
+    be given directly after the "otp" command, before any sub-command.
 
     Examples:
 
@@ -156,12 +158,16 @@ def otp(ctx, access_code):
     \b
       Program a random 38 characters long static password to slot 2:
       $ ykman otp static --generate 2 --length 38
+
+    \b
+      Remove a currently set access code from slot 2):
+      $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code
     """
 
     ctx.obj["session"] = YubiOtpSession(ctx.obj["conn"])
     if access_code is not None:
-        if access_code == "":
-            access_code = click_prompt("Enter the access code", show_default=False)
+        if access_code == "-":
+            access_code = click_prompt("Enter the access code", hide_input=True)
 
         try:
             access_code = parse_access_code_hex(access_code)
@@ -749,6 +755,12 @@ def settings(
     if new_access_code and delete_access_code:
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
+    if delete_access_code and not ctx.obj["access_code"]:
+        cli_fail(
+            "--delete-access-code used without providing an access code "
+            '(see "ykman otp --help" for more info).'
+        )
+
     if not session.get_config_state().is_configured(slot):
         cli_fail("Not possible to update settings on an empty slot.")
 
@@ -757,7 +769,9 @@ def settings(
             new_access_code = ctx.obj["access_code"]
     else:
         if new_access_code == "-":
-            new_access_code = click_prompt("Enter new access code", show_default=False)
+            new_access_code = click_prompt(
+                "Enter new access code", hide_input=True, confirmation_prompt=True
+            )
 
         try:
             new_access_code = parse_access_code_hex(new_access_code)
