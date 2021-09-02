@@ -262,6 +262,7 @@ def usb(
     info = ctx.obj["info"]
     usb_supported = info.supported_capabilities[TRANSPORT.USB]
     usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
+    usb_interfaces = USB_INTERFACE.for_capabilities(usb_enabled)
     flags = info.config.device_flags
 
     if enable_all:
@@ -296,6 +297,8 @@ def usb(
 
     ensure_not_all_disabled(ctx, usb_enabled)
 
+    reboot = usb_interfaces != USB_INTERFACE.for_capabilities(usb_enabled)
+
     f_confirm = ""
     if enable:
         f_confirm += f"Enable {', '.join(str(app) for app in enable)}.\n"
@@ -309,6 +312,8 @@ def usb(
         f_confirm += f"Set autoeject timeout to {autoeject_timeout}.\n"
     if chalresp_timeout:
         f_confirm += f"Set challenge-response timeout to {chalresp_timeout}.\n"
+    if reboot:
+        f_confirm += "This will cause the YubiKey to reboot.\n"
     f_confirm += "Configure USB?"
 
     is_locked = info.is_locked
@@ -335,7 +340,7 @@ def usb(
                 chalresp_timeout,
                 flags,
             ),
-            True,
+            reboot,
             lock_code,
         )
     except Exception as e:
@@ -485,12 +490,10 @@ def _parse_mode_string(ctx, param, mode):
         pass  # Not a numeric mode, parse string
 
     try:
-        interfaces = USB_INTERFACE(0)
         if mode[0] in ["+", "-"]:
             info = ctx.obj["info"]
             usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
-            my_mode = _mode_from_usb_enabled(usb_enabled)
-            interfaces |= my_mode.interfaces
+            interfaces = USB_INTERFACE.for_capabilities(usb_enabled)
             for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
                 interface = _parse_interface_string(mod[1:])
                 if mod.startswith("+"):
@@ -498,25 +501,13 @@ def _parse_mode_string(ctx, param, mode):
                 else:
                     interfaces ^= interface
         else:
+            interfaces = USB_INTERFACE(0)
             for t in re.split(r"[+]+", mode.upper()):
                 if t:
                     interfaces |= _parse_interface_string(t)
     except ValueError:
         ctx.fail(f"Invalid mode string: {mode}")
 
-    return Mode(interfaces)
-
-
-def _mode_from_usb_enabled(usb_enabled):
-    interfaces = USB_INTERFACE(0)
-    if CAPABILITY.OTP & usb_enabled:
-        interfaces |= USB_INTERFACE.OTP
-    if (CAPABILITY.U2F | CAPABILITY.FIDO2) & usb_enabled:
-        interfaces |= USB_INTERFACE.FIDO
-    if (
-        USB_INTERFACE.CCID | CAPABILITY.OPENPGP | CAPABILITY.PIV | CAPABILITY.OATH
-    ) & usb_enabled:
-        interfaces |= USB_INTERFACE.CCID
     return Mode(interfaces)
 
 
@@ -573,9 +564,9 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     info = ctx.obj["info"]
     mgmt = ctx.obj["controller"]
     usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
-    my_mode = _mode_from_usb_enabled(usb_enabled)
+    my_mode = Mode(USB_INTERFACE.for_capabilities(usb_enabled))
     usb_supported = info.supported_capabilities[TRANSPORT.USB]
-    interfaces_supported = _mode_from_usb_enabled(usb_supported).interfaces
+    interfaces_supported = USB_INTERFACE.for_capabilities(usb_supported)
     pid = ctx.obj["pid"]
     if pid:
         key_type = pid.get_type()

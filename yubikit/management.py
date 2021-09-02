@@ -56,24 +56,6 @@ import struct
 
 
 @unique
-class USB_INTERFACE(IntFlag):
-    """YubiKey USB interface identifiers."""
-
-    OTP = 0x01
-    FIDO = 0x02
-    CCID = 0x04
-
-    def supports_connection(self, connection_type) -> bool:
-        if issubclass(connection_type, SmartCardConnection):
-            return USB_INTERFACE.CCID in self
-        if issubclass(connection_type, FidoConnection):
-            return USB_INTERFACE.FIDO in self
-        if issubclass(connection_type, OtpConnection):
-            return USB_INTERFACE.OTP in self
-        return False
-
-
-@unique
 class CAPABILITY(IntFlag):
     """YubiKey Application identifiers."""
 
@@ -94,6 +76,37 @@ class CAPABILITY(IntFlag):
             return "YubiHSM Auth"
         else:
             return getattr(self, "name", super().__str__())
+
+
+@unique
+class USB_INTERFACE(IntFlag):
+    """YubiKey USB interface identifiers."""
+
+    OTP = 0x01
+    FIDO = 0x02
+    CCID = 0x04
+
+    def supports_connection(self, connection_type) -> bool:
+        if issubclass(connection_type, SmartCardConnection):
+            return USB_INTERFACE.CCID in self
+        if issubclass(connection_type, FidoConnection):
+            return USB_INTERFACE.FIDO in self
+        if issubclass(connection_type, OtpConnection):
+            return USB_INTERFACE.OTP in self
+        return False
+
+    @staticmethod
+    def for_capabilities(capabilities: CAPABILITY) -> "USB_INTERFACE":
+        ifaces = USB_INTERFACE(0)
+        if capabilities & CAPABILITY.OTP:
+            ifaces |= USB_INTERFACE.OTP
+        if capabilities & (CAPABILITY.U2F | CAPABILITY.FIDO2):
+            ifaces |= USB_INTERFACE.FIDO
+        if capabilities & (
+            CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP | CAPABILITY.HSMAUTH
+        ):
+            ifaces |= USB_INTERFACE.CCID
+        return ifaces
 
 
 @unique
