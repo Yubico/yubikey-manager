@@ -299,7 +299,7 @@ def attest(ctx, key, certificate, pin, format):
     controller = ctx.obj["controller"]
 
     if not pin:
-        pin = click_prompt("Enter PIN", default="", hide_input=True, show_default=False)
+        pin = click_prompt("Enter PIN", hide_input=True)
 
     try:
         cert = controller.read_certificate(key)

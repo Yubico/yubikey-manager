@@ -328,9 +328,7 @@ def change_pin(ctx, pin, new_pin, u2f):
     def prompt_new_pin():
         return click_prompt(
             "Enter your new PIN",
-            default="",
             hide_input=True,
-            show_default=False,
             confirmation_prompt=True,
         )
 
@@ -459,7 +457,7 @@ def verify(ctx, pin):
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
-    return click_prompt(prompt, default="", hide_input=True, show_default=False)
+    return click_prompt(prompt, hide_input=True)
 
 
 def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):

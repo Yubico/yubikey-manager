@@ -51,11 +51,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-CLEAR_LOCK_CODE = "0" * 32
+CLEAR_LOCK_CODE = b"\0" * 16
 
 
-def prompt_lock_code(prompt="Enter your lock code"):
-    return click_prompt(prompt, default="", hide_input=True, show_default=False)
+def prompt_lock_code():
+    return click_prompt("Enter your lock code", hide_input=True)
 
 
 @click.group()
@@ -124,78 +124,51 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     info = ctx.obj["info"]
     app = ctx.obj["controller"]
 
-    def prompt_new_lock_code():
-        return prompt_lock_code(prompt="Enter your new lock code")
+    if sum(1 for arg in [new_lock_code, generate, clear] if arg) > 1:
+        cli_fail(
+            "Invalid options: Only one of --new-lock-code, --generate, "
+            "and --clear may be used."
+        )
 
-    def prompt_current_lock_code():
-        return prompt_lock_code(prompt="Enter your current lock code")
-
-    def change_lock_code(lock_code, new_lock_code):
-        lock_code = _parse_lock_code(ctx, lock_code)
-        new_lock_code = _parse_lock_code(ctx, new_lock_code)
-        try:
-            app.write_device_config(
-                None,
-                False,
-                lock_code,
-                new_lock_code,
-            )
-        except Exception as e:
-            logger.error("Changing the lock code failed", exc_info=e)
-            cli_fail("Failed to change the lock code. Wrong current code?")
-
-    def set_lock_code(new_lock_code):
-        new_lock_code = _parse_lock_code(ctx, new_lock_code)
-        try:
-            app.write_device_config(
-                None,
-                False,
-                None,
-                new_lock_code,
-            )
-        except Exception as e:
-            logger.error("Setting the lock code failed", exc_info=e)
-            cli_fail("Failed to set the lock code.")
-
-    if generate and new_lock_code:
-        ctx.fail("Invalid options: --new-lock-code conflicts with --generate.")
-
+    # Get the new lock code to set
     if clear:
-        new_lock_code = CLEAR_LOCK_CODE
-
-    if generate:
-        new_lock_code = os.urandom(16).hex()
-        click.echo(f"Using a randomly generated lock code: {new_lock_code}")
+        set_code = CLEAR_LOCK_CODE
+    elif generate:
+        set_code = os.urandom(16)
+        click.echo(f"Using a randomly generated lock code: {set_code.hex()}")
         force or click.confirm(
             "Lock configuration with this lock code?", abort=True, err=True
         )
+    else:
+        if not new_lock_code:
+            new_lock_code = click_prompt(
+                "Enter your new lock code", hide_input=True, confirmation_prompt=True
+            )
+        set_code = _parse_lock_code(ctx, new_lock_code)
 
+    # Get the current lock code to use
     if info.is_locked:
-        if lock_code:
-            if new_lock_code:
-                change_lock_code(lock_code, new_lock_code)
-            else:
-                new_lock_code = prompt_new_lock_code()
-                change_lock_code(lock_code, new_lock_code)
-        else:
-            if new_lock_code:
-                lock_code = prompt_current_lock_code()
-                change_lock_code(lock_code, new_lock_code)
-            else:
-                lock_code = prompt_current_lock_code()
-                new_lock_code = prompt_new_lock_code()
-                change_lock_code(lock_code, new_lock_code)
+        if not lock_code:
+            lock_code = click_prompt("Enter your current lock code", hide_input=True)
+        use_code = _parse_lock_code(ctx, lock_code)
     else:
         if lock_code:
-            cli_fail(
-                "There is no current lock code set. Use --new-lock-code to set one."
-            )
-        else:
-            if new_lock_code:
-                set_lock_code(new_lock_code)
-            else:
-                new_lock_code = prompt_new_lock_code()
-                set_lock_code(new_lock_code)
+            cli_fail("No lock code is currently set. Use --new-lock-code to set one.")
+        use_code = None
+
+    # Set new lock code
+    try:
+        app.write_device_config(
+            None,
+            False,
+            use_code,
+            set_code,
+        )
+    except Exception as e:
+        logger.error("Setting the lock code failed", exc_info=e)
+        if info.is_locked:
+            cli_fail("Failed to change the lock code. Wrong current code?")
+        cli_fail("Failed to set the lock code.")
 
 
 @config.command()
