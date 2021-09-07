@@ -82,6 +82,15 @@ WIN_CTAP_RESTRICTED = (
 )
 
 
+def _scan_changes(state, attempts=10):
+    for _ in range(attempts):
+        time.sleep(0.25)
+        devices, new_state = scan_devices()
+        if new_state != state:
+            return devices, new_state
+    raise TimeoutError("Timed out waiting for state change")
+
+
 def retrying_connect(serial, connections, attempts=10, state=None):
     while True:
         try:
@@ -91,17 +100,11 @@ def retrying_connect(serial, connections, attempts=10, state=None):
             raise  # No need to retry
         except Exception as e:
             logger.error("Failed opening connection", exc_info=e)
-            while attempts:
-                attempts -= 1
-                _, new_state = scan_devices()
-                if new_state != state:
-                    state = new_state
-                    logger.debug("State changed, re-try connect...")
-                    break
-                logger.debug("Sleep...")
-                time.sleep(0.5)
-            else:
-                raise
+            try:
+                _, state = _scan_changes(state)
+                logger.debug("State changed, re-try connect...")
+            except TimeoutError:
+                raise e
 
 
 def print_version(ctx, param, value):
@@ -172,8 +175,12 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     devices, state = scan_devices()
     n_devs = sum(devices.values())
 
-    if n_devs == 0:
-        cli_fail("No YubiKey detected!")
+    if n_devs == 0:  # The device might not yet be ready, wait a bit
+        try:
+            devices, state = _scan_changes(state)
+            n_devs = sum(devices.values())
+        except TimeoutError:
+            cli_fail("No YubiKey detected!")
     if n_devs > 1:
         cli_fail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
@@ -184,7 +191,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     pid = next(iter(devices.keys()))
     for c in connections:
         if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
-            if WIN_CTAP_RESTRICTED and c == FidoConnection:
+            if WIN_CTAP_RESTRICTED and connections == FidoConnection:
                 # FIDO-only command on Windows without Admin won't work.
                 cli_fail("FIDO access on Windows requires running as Administrator.")
             return retrying_connect(None, connections, state=state)

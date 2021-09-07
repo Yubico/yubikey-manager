@@ -39,7 +39,7 @@ class YUBIKEY(Enum):
     NEO = "YubiKey NEO"
     SKY = "Security Key by Yubico"
     YKP = "YubiKey Plus"
-    YK4 = "YubiKey 4"  # This includes YubiKey 5
+    YK4 = "YubiKey"  # This includes YubiKey 5
 
     def get_pid(self, interfaces: USB_INTERFACE) -> "PID":
         suffix = "_".join(
