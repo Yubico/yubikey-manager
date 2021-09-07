@@ -566,9 +566,12 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 FORM_FACTOR.USB_C_BIO,
             )
 
-            name_parts = ["YubiKey"]
-            if not is_bio:
-                name_parts.append("5")
+            if info.is_sky:
+                name_parts = ["Security Key"]
+            else:
+                name_parts = ["YubiKey"]
+                if not is_bio:
+                    name_parts.append("5")
             if is_c:
                 name_parts.append("C")
             elif info.form_factor == FORM_FACTOR.USB_C_LIGHTNING:

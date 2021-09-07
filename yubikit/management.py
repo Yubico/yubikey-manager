@@ -222,6 +222,7 @@ class DeviceInfo:
     supported_capabilities: Mapping[TRANSPORT, CAPABILITY]
     is_locked: bool
     is_fips: bool = False
+    is_sky: bool = False
 
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
@@ -236,6 +237,7 @@ class DeviceInfo:
         ff_value = bytes2int(data.get(TAG_FORM_FACTOR, b"\0"))
         form_factor = FORM_FACTOR.from_code(ff_value)
         fips = bool(ff_value & 0x80)
+        sky = bool(ff_value & 0x40)
         if TAG_VERSION in data:
             version = Version.from_bytes(data[TAG_VERSION])
         else:
@@ -266,6 +268,7 @@ class DeviceInfo:
             supported,
             locked,
             fips,
+            sky,
         )
 
 
