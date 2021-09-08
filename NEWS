@@ -1,3 +1,9 @@
+* Version 4.0.6 (released 2021-09-08)
+ ** Improve handling of YubiKey device reboots.
+ ** More consistently mask PIN/password input in prompts.
+ ** Support switching mode over CCID for YubiKey Edge.
+ ** Run pkill from PATH instead of fixed location.
+
 * Version 4.0.5 (released 2021-07-16)
  ** Bugfix: Fix PIV feature detection for some YubiKey NEO versions.
  ** Bugfix: Fix argument short form for --period when adding TOTP credentials.
