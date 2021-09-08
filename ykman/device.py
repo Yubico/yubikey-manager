@@ -542,18 +542,22 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         if info.has_transport(TRANSPORT.NFC):
             device_name = "Security Key NFC"
     elif key_type == YUBIKEY.YK4:
-        if info.version[0] < 4:
+        major_version = info.version[0]
+        if major_version < 4:
             if info.version[0] == 0:
                 return "YubiKey (%d.%d.%d)" % info.version
             else:
                 return "YubiKey"
+        elif major_version == 4:
+            if is_fips_version(info.version):  # YK4 FIPS
+                device_name = "YubiKey FIPS"
+            elif usb_supported == CAPABILITY.OTP | CAPABILITY.U2F:
+                device_name = "YubiKey Edge"
+            else:
+                device_name = "YubiKey 4"
 
         if _is_preview(info.version):
             device_name = "YubiKey Preview"
-        elif is_fips_version(info.version):  # YK4 FIPS
-            device_name = "YubiKey FIPS"
-        elif usb_supported == CAPABILITY.OTP | CAPABILITY.U2F:
-            device_name = "YubiKey Edge"
         elif info.version >= (5, 1, 0):
             is_nano = info.form_factor in (
                 FORM_FACTOR.USB_A_NANO,
