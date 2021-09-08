@@ -621,10 +621,10 @@ def code(ctx, show_hidden, query, single, password, remember):
                 code = "[Requires Touch]"
             elif cred.oath_type == OATH_TYPE.HOTP:
                 code = "[HOTP Account]"
+            elif is_steam(cred):
+                code = calculate_steam(session, cred)
             else:
                 code = ""
-            if is_steam(cred):
-                code = calculate_steam(session, cred)
             outputs.append((_string_id(cred), code))
 
         longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
