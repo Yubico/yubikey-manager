@@ -1,3 +1,7 @@
+* Version 4.0.7 (released 2021-09-08)
+ ** Bugfix release: Fix broken naming for "YubiKey 4", and a small OATH issue with
+    touch Steam credentials.
+
 * Version 4.0.6 (released 2021-09-08)
  ** Improve handling of YubiKey device reboots.
  ** More consistently mask PIN/password input in prompts.
