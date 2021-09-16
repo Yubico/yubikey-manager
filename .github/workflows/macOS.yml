@@ -48,8 +48,8 @@ jobs:
           pip install pyinstaller
           pip install dist/*.whl
           pyinstaller ykman.spec
-          dist/ykman --version
-          [[ -z "$(dist/ykman --version | grep -E "not found|missing")" ]]
+          dist/ykman/ykman --version
+          [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
           export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
           mv dist/ykman dist/ykman-$REF
 
