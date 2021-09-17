@@ -371,7 +371,7 @@ def yubiotp(
 
     try:
         public_id = modhex_decode(public_id)
-    except KeyError:
+    except ValueError:
         ctx.fail("Invalid public ID, must be modhex.")
 
     if not private_id:
