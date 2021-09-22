@@ -106,6 +106,17 @@ class CredentialsNode(RpcNode):
         return super().create_child(name)
 
     @action
+    def calculate_all(self, params, event, signal):
+        timestamp = params.pop("timestamp", None)
+        result = self.session.calculate_all(timestamp)
+        return dict(
+            entries=[
+                dict(credential=asdict(cred), code=(asdict(code) if code else None))
+                for (cred, code) in result.items()
+            ]
+        )
+
+    @action
     def put(self, params, event, signal):
         require_touch = params.pop("require_touch", False)
         if "uri" in params:

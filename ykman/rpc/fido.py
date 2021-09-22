@@ -209,9 +209,9 @@ class FingerprintsNode(RpcNode):
         enroller = self.bio.enroll()
         template_id = None
         while template_id is None:
-            signal("capture", remaining=enroller.remaining)
             try:
                 template_id = enroller.capture(event)
+                signal("capture", remaining=enroller.remaining)
             except CaptureError as e:
                 signal("capture-error", code=e.code)
         if name:
