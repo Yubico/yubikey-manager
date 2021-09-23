@@ -616,13 +616,14 @@ def code(ctx, show_hidden, query, single, password, remember):
         for cred in sorted(creds):
             code = entries[cred]
             if code:
-                code = code.value
+                if is_steam(cred):
+                    code = calculate_steam(session, cred)
+                else:
+                    code = code.value
             elif cred.touch_required:
                 code = "[Requires Touch]"
             elif cred.oath_type == OATH_TYPE.HOTP:
                 code = "[HOTP Account]"
-            elif is_steam(cred):
-                code = calculate_steam(session, cred)
             else:
                 code = ""
             outputs.append((_string_id(cred), code))
