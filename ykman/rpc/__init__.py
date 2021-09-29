@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+from .base import RpcException
 from .device import RootNode
 
 from queue import Queue
@@ -43,21 +44,26 @@ def _handle_incoming(event, recv, error, cmd_queue):
         if not request:
             break
         try:
-            if "signal" in request:
+            kind = request["kind"]
+            if kind == "signal":
                 # Cancel signals are handled here, the rest forwarded
-                if request["signal"] == "cancel":
+                if request["status"] == "cancel":
                     event.set()
                 else:
                     # Ignore other signals
                     logger.error("Unhandled signal: %r", request)
-            elif "action" in request:
+            elif kind == "command":
                 cmd_queue.join()  # Wait for existing command to complete
                 event.clear()  # Reset event for next command
                 cmd_queue.put(request)
             else:
-                error(Exception("Unsupported message type"))
+                error("invalid-command", "Unsupported request type")
+        except KeyError as e:
+            error("invalid-command", str(e))
+        except RpcException as e:
+            error(e.status, e.message, e.body)
         except Exception as e:
-            error(e)
+            error("exception", f"{e!r}")
     event.set()
     cmd_queue.put(None)
 
@@ -67,15 +73,14 @@ def process(
     recv: Callable[[], Dict],
     handler: Callable[[str, List, Dict, Event, Callable[[str], None]], Dict],
 ) -> None:
-    def error(e):
-        logger.error("Returning error", exc_info=e)
-        send(dict(result="error", message=str(e)))
+    def error(status: str, message: str, body: Dict = {}):
+        send(dict(kind="error", status=status, message=message, body=body))
 
-    def signal(name: str, **kwargs):
-        send(dict(signal=name, **kwargs))
+    def signal(status: str, body: Dict = {}):
+        send(dict(kind="signal", status=status, body=body))
 
-    def success(data: Dict):
-        send(dict(result="success", **data))
+    def success(body: Dict):
+        send(dict(kind="success", body=body))
 
     event = Event()
     cmd_queue: Queue = Queue(1)
@@ -89,15 +94,17 @@ def process(
         try:
             success(
                 handler(
-                    request.pop("action"),
-                    request.pop("target", []),
-                    request.pop("params", {}),
+                    request["action"],
+                    request.get("target", []),
+                    request.get("body", {}),
                     event,
                     signal,
                 )
             )
+        except RpcException as e:
+            error(e.status, e.message, e.body)
         except Exception as e:
-            error(e)
+            error("exception", f"{e!r}")
         cmd_queue.task_done()
 
     read_thread.join()
