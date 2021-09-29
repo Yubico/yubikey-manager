@@ -26,16 +26,31 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import RpcNode, action, child
+from .base import RpcNode, action, child, ChildResetException, RpcException
 from yubikit.core import require_version, NotSupportedError
+from yubikit.core.smartcard import ApduError, SW
 from yubikit.oath import OathSession, CredentialData, OATH_TYPE, HASH_ALGORITHM
 from dataclasses import asdict
+
+
+class AuthRequiredException(RpcException):
+    def __init__(self):
+        super().__init__("auth-required", "Authentication is required")
 
 
 class OathNode(RpcNode):
     def __init__(self, connection):
         super().__init__()
         self.session = OathSession(connection)
+
+    def __call__(self, *args, **kwargs):
+        try:
+            return super().__call__(*args, **kwargs)
+        except ApduError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                raise AuthRequiredException()
+            # TODO: This should probably be in a baseclass of all "AppNodes".
+            raise ChildResetException(f"SW: {e.sw:x}")
 
     def get_data(self):
         return dict(
@@ -62,8 +77,13 @@ class OathNode(RpcNode):
 
     @action
     def validate(self, params, event, signal):
-        self.session.validate(self._get_key(params))
-        return dict()
+        try:
+            self.session.validate(self._get_key(params))
+            return dict(unlocked=True)
+        except ApduError as e:
+            if e.sw == SW.INCORRECT_PARAMETERS:
+                return dict(unlocked=False)
+            raise e
 
     @action
     def set_key(self, params, event, signal):
@@ -97,10 +117,10 @@ class CredentialsNode(RpcNode):
             self._close_child()
 
     def list_children(self):
-        return {c_id.decode(): asdict(c) for c_id, c in self._creds.items()}
+        return {c_id.hex(): asdict(c) for c_id, c in self._creds.items()}
 
     def create_child(self, name):
-        key = name.encode()
+        key = bytes.fromhex(name)  # .encode()
         if key in self._creds:
             return CredentialNode(self.session, self._creds[key], self.refresh)
         return super().create_child(name)
@@ -129,7 +149,7 @@ class CredentialsNode(RpcNode):
                 OATH_TYPE[params.pop("oath_type").upper()],
                 HASH_ALGORITHM[params.pop("hash", "sha1".upper())],
                 bytes.fromhex(params.pop("secret")),
-                **params
+                **params,
             )
 
         if data.get_id() in self._creds:
@@ -181,4 +201,4 @@ class CredentialNode(RpcNode):
         issuer = params.pop("issuer", None)
         new_id = self.session.rename_credential(self.credential.id, name, issuer)
         self.refresh()
-        return dict(credential_id=new_id.decode())
+        return dict(credential_id=new_id.hex())  # .decode())

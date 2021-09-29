@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import RpcNode, child, action, NoSuchNodeException
+from .base import RpcNode, child, action, NoSuchNodeException, ChildResetException
 from .oath import OathNode
 from .fido import Ctap2Node
 from .yubiotp import YubiOtpNode
@@ -41,7 +41,7 @@ from ..device import (
 )
 from ..diagnostics import get_diagnostics
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.smartcard import SmartCardConnection, ApduError, SW
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.management import CAPABILITY
@@ -266,6 +266,17 @@ class ConnectionNode(RpcNode):
         self._transport = transport
         self._connection = connection
         self._info = info or read_info(None, self._connection)
+
+    def __call__(self, *args, **kwargs):
+        try:
+            return super().__call__(*args, **kwargs)
+        except (SmartcardException, OSError) as e:
+            logger.error("Connection error", exc_info=e)
+            raise ChildResetException(f"{e}")
+        except ApduError as e:
+            if e.sw == SW.INVALID_INSTRUCTION:
+                raise ChildResetException(f"SW: {e.sw}")
+            raise e
 
     @property
     def capabilities(self):

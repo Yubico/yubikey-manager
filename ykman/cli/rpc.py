@@ -80,14 +80,17 @@ class RpcShell(cmd.Cmd):
 
     def get_node(self, target):
         logger.debug("sending get: %r", target)
-        self._cmds.put({"action": "get", "target": target})
+        self._cmds.put({"kind": "command", "action": "get", "target": target})
         result = self._results.get()
         logger.debug("got info: %r", result)
-        status = result.pop("result")
-        if status == "success":
+        kind = result["kind"]
+        if kind == "success":
             return result
+        elif kind == "error":
+            status = result["status"]
+            print(red(f"{status.upper()}: {result['body']}"))
         else:
-            print(red(f"{status.upper()}: {result}"))
+            print(red(f"Invalid response: {result}"))
 
     def do_quit(self, args):
         self._cmds.put(None)
@@ -109,11 +112,11 @@ class RpcShell(cmd.Cmd):
         return self.completepath(text[3:], True)
 
     def do_ls(self, args):
-        self._cmds.put({"action": "get", "target": self._path})
+        self._cmds.put({"kind": "command", "action": "get", "target": self._path})
         result = self._results.get()
-        status = result.pop("result")
-        if status == "success":
-            self._node = result
+        kind = result["kind"]
+        if kind == "success":
+            self._node = result["body"]
             data = self._node.get("data", None)
             if data:
                 for k, v in data.items():
@@ -128,8 +131,11 @@ class RpcShell(cmd.Cmd):
             for name in self._node.get("actions", []):
                 if name != "get":  # Don't show get, always available
                     print(cyan(f"{name}"))
+        elif kind == "error":
+            status = result["status"]
+            print(red(f"{status.upper()}: {result['body']}"))
         else:
-            print(red(f"{status.upper()}: {result}"))
+            print(red(f"Invalid response: {result}"))
 
     def default(self, line):
         parts = line.strip().split(maxsplit=1)
@@ -146,22 +152,34 @@ class RpcShell(cmd.Cmd):
             args = {}
         target = self.resolve_path(parts[0])
         action = target.pop()
-        cmd = {"action": action or "get", "target": target, "params": args}
+        cmd = {
+            "kind": "command",
+            "action": action or "get",
+            "target": target,
+            "body": args,
+        }
         self._cmds.put(cmd)
 
-        result = {}
-        while "result" not in result:
+        while True:
             result = self._results.get()
+            kind = result["kind"]
 
-            if "signal" in result:
-                print(cyan(f"{result.pop('signal')}: {result}"))
+            if kind == "signal":
+                print(cyan(f"{result['status']}: {result.get('body', None)}"))
+            else:
+                break
 
-        status = result.pop("result")
-        if status == "success":
+        if kind == "success":
+            body = result.get("body", None)
+            if body:
+                print(yellow(json.dumps(body)))
+        elif kind == "error":
+            print(red(f"{result['status']}: {result['message']}"))
+            body = result.get("body", None)
             if result:
-                print(yellow(json.dumps(result)))
+                print(red(json.dumps(body)))
         else:
-            print(red(f"{status.upper()}: {result}"))
+            print(red(f"Invalid response: {result}"))
 
     def do_EOF(self, args):
         return True

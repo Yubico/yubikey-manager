@@ -233,7 +233,7 @@ def _format_code(credential, timestamp, truncated):
         valid_to = (time_step + 1) * credential.period
     else:  # HOTP
         valid_from = timestamp
-        valid_to = float("Inf")
+        valid_to = timestamp + 24 * 3600  # A "large enough" value.
     digits = truncated[0]
 
     return Code(

@@ -33,14 +33,42 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class NoSuchActionException(Exception):
-    def __init__(selfi, name):
-        super().__init__(f"No such action: {name}")
+class RpcException(Exception):
+    """An exception that is returned as the result of an RPC command.i
+
+    Types:
+    invalid-command
+    state-reset
+    exception
+    """
+
+    def __init__(self, status, message, body=None):
+        self.status = status
+        self.message = message
+        self.body = body or {}
+        super().__init__(message)
 
 
-class NoSuchNodeException(Exception):
+class NoSuchActionException(RpcException):
     def __init__(self, name):
-        super().__init__(f"No such node: {name}")
+        super().__init__("invalid-command", f"No such action: {name}")
+
+
+class NoSuchNodeException(RpcException):
+    def __init__(self, name):
+        super().__init__("invalid-command", f"No such node: {name}")
+
+
+class StateResetException(RpcException):
+    def __init__(self, message, path):
+        message = f"State reset: {message}" if message else "State reset in node"
+        super().__init__("state-reset", message, dict(path=path))
+
+
+class ChildResetException(Exception):
+    def __init__(self, message):
+        self.message = message
+        super().__init__()
 
 
 MARKER_ACTION = "_rpc_action_marker"
@@ -68,13 +96,25 @@ class RpcNode:
         self._child = None
         self._child_name = None
 
-    def __call__(self, action, target, params, event, signal):
-        if target:
-            return self.get_child(target.pop(0))(action, target, params, event, signal)
-        if action in self.list_actions():
-            return self.get_action(action)(params, event, signal)
-        if action in self.list_children():
-            return self.get_child(action)("get", [], params, event, signal)
+    def __call__(self, action, target, params, event, signal, traversed=None):
+        traversed = traversed or []
+        try:
+            if target:
+                traversed += [target[0]]
+                return self.get_child(target[0])(
+                    action, target[1:], params, event, signal, traversed
+                )
+            if action in self.list_actions():
+                return self.get_action(action)(params, event, signal)
+            if action in self.list_children():
+                traversed += [action]
+                return self.get_child(action)(
+                    "get", [], params, event, signal, traversed
+                )
+        except ChildResetException as e:
+            self._close_child()
+            raise StateResetException(e.message, traversed)
+
         raise NoSuchActionException(action)
 
     def close(self):
