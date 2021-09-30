@@ -26,7 +26,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import RpcNode, action, child, ChildResetException, RpcException
+from .base import (
+    RpcNode,
+    action,
+    child,
+    ChildResetException,
+    RpcException,
+    encode_bytes,
+    decode_bytes,
+)
 from yubikit.core import require_version, NotSupportedError
 from yubikit.core.smartcard import ApduError, SW
 from yubikit.oath import OathSession, CredentialData, OATH_TYPE, HASH_ALGORITHM
@@ -72,7 +80,7 @@ class OathNode(RpcNode):
         if has_pw:
             return self.session.derive_key(params.pop("password"))
         if has_key:
-            return bytes.fromhex(params.pop("key"))
+            return decode_bytes(params.pop("key"))
         raise ValueError("One of 'key' and 'password' must be provided.")
 
     @action
@@ -112,15 +120,17 @@ class CredentialsNode(RpcNode):
         self.refresh()
 
     def refresh(self):
-        self._creds = {c.id: c for c in self.session.list_credentials()}
+        # N.B. We use 'calculate_all' since it tells us if a TOTP credential
+        # requires touch or not.
+        self._creds = {c.id: c for c in self.session.calculate_all().keys()}
         if self._child and self._child_name not in self._creds:
             self._close_child()
 
     def list_children(self):
-        return {c_id.hex(): asdict(c) for c_id, c in self._creds.items()}
+        return {encode_bytes(c_id): asdict(c) for c_id, c in self._creds.items()}
 
     def create_child(self, name):
-        key = bytes.fromhex(name)  # .encode()
+        key = decode_bytes(name)
         if key in self._creds:
             return CredentialNode(self.session, self._creds[key], self.refresh)
         return super().create_child(name)
@@ -148,7 +158,7 @@ class CredentialsNode(RpcNode):
                 params.pop("name"),
                 OATH_TYPE[params.pop("oath_type").upper()],
                 HASH_ALGORITHM[params.pop("hash", "sha1".upper())],
-                bytes.fromhex(params.pop("secret")),
+                decode_bytes(params.pop("secret")),
                 **params,
             )
 
@@ -184,7 +194,7 @@ class CredentialNode(RpcNode):
 
     @action
     def calculate(self, params, event, signal):
-        challenge = bytes.fromhex(params.pop("challenge"))
+        challenge = decode_bytes(params.pop("challenge"))
         response = self.session.calculate(self.credential.id, challenge)
         return dict(response=response)
 
@@ -201,4 +211,4 @@ class CredentialNode(RpcNode):
         issuer = params.pop("issuer", None)
         new_id = self.session.rename_credential(self.credential.id, name, issuer)
         self.refresh()
-        return dict(credential_id=new_id.hex())  # .decode())
+        return dict(credential_id=new_id)

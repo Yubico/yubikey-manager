@@ -5,6 +5,7 @@ import sys
 from threading import Thread
 from queue import Queue
 from ..rpc import run_rpc
+from ..rpc.base import encode_bytes
 import logging
 
 logger = logging.getLogger(__name__)
@@ -185,9 +186,9 @@ class RpcShell(cmd.Cmd):
         return True
 
 
-def bytes_to_hex(value):
+def _json_encode(value):
     if isinstance(value, bytes):
-        return value.hex()
+        return encode_bytes(value)
     raise TypeError(type(value))
 
 
@@ -199,7 +200,7 @@ def rpc(shell):
 
         def send(data):
             # Make sure JSON encodable
-            data = json.loads(json.dumps(data, default=bytes_to_hex))
+            data = json.loads(json.dumps(data, default=_json_encode))
             result_queue.put(data)
 
         result_queue = Queue(1)  # type: ignore
@@ -218,7 +219,7 @@ def rpc(shell):
     else:
 
         def send(data):
-            json.dump(data, sys.stdout, default=bytes_to_hex)
+            json.dump(data, sys.stdout, default=_json_encode)
             sys.stdout.write("\n")
             sys.stdout.flush()
 
