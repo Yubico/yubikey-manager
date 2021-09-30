@@ -33,6 +33,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def encode_bytes(value: bytes) -> str:
+    return value.hex()
+
+
+decode_bytes = bytes.fromhex
+
+
 class RpcException(Exception):
     """An exception that is returned as the result of an RPC command.i
 
@@ -61,8 +68,9 @@ class NoSuchNodeException(RpcException):
 
 class StateResetException(RpcException):
     def __init__(self, message, path):
-        message = f"State reset: {message}" if message else "State reset in node"
-        super().__init__("state-reset", message, dict(path=path))
+        super().__init__(
+            "state-reset", message or "State reset in node", dict(path=path)
+        )
 
 
 class ChildResetException(Exception):
