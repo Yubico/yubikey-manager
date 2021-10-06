@@ -14,9 +14,9 @@ classifiers = [
   "Topic :: Utilities"
 ]
 include = [
-  "COPYING",
-  "NEWS",
-  "README.adoc",
+  { path = "COPYING", format = "sdist"},
+  { path = "NEWS", format = "sdist"},
+  { path = "README.adoc", format = "sdist"},
   "man/",
   "tests/",
 ]
