@@ -1,12 +1,12 @@
+#!/usr/bin/env python3
+
 import cmd
 import json
 import click
-import sys
-from threading import Thread
-from queue import Queue
-from ..rpc import run_rpc
-from ..rpc.base import encode_bytes
+import subprocess  # nosec
+
 import logging
+from typing import IO, cast
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,20 @@ def cyan(value):
 
 
 class RpcShell(cmd.Cmd):
-    def __init__(self, cmd_queue, result_queue):
+    def __init__(self, stdin, stdout):
         super().__init__()
-        self._cmds = cmd_queue
-        self._results = result_queue
+        self._stdin = stdin
+        self._stdout = stdout
         self._path = []
         self._node = None
         self.do_cd(None)
+
+    def _send(self, data):
+        self._stdin.write(json.dumps(data) + "\n")
+        self._stdin.flush()
+
+    def _recv(self):
+        return json.loads(self._stdout.readline())
 
     @property
     def prompt(self):
@@ -81,8 +88,8 @@ class RpcShell(cmd.Cmd):
 
     def get_node(self, target):
         logger.debug("sending get: %r", target)
-        self._cmds.put({"kind": "command", "action": "get", "target": target})
-        result = self._results.get()
+        self._send({"kind": "command", "action": "get", "target": target})
+        result = self._recv()
         logger.debug("got info: %r", result)
         kind = result["kind"]
         if kind == "success":
@@ -94,7 +101,6 @@ class RpcShell(cmd.Cmd):
             print(red(f"Invalid response: {result}"))
 
     def do_quit(self, args):
-        self._cmds.put(None)
         return True
 
     def do_cd(self, args):
@@ -113,8 +119,8 @@ class RpcShell(cmd.Cmd):
         return self.completepath(text[3:], True)
 
     def do_ls(self, args):
-        self._cmds.put({"kind": "command", "action": "get", "target": self._path})
-        result = self._results.get()
+        self._send({"kind": "command", "action": "get", "target": self._path})
+        result = self._recv()
         kind = result["kind"]
         if kind == "success":
             self._node = result["body"]
@@ -153,16 +159,17 @@ class RpcShell(cmd.Cmd):
             args = {}
         target = self.resolve_path(parts[0])
         action = target.pop()
-        cmd = {
-            "kind": "command",
-            "action": action or "get",
-            "target": target,
-            "body": args,
-        }
-        self._cmds.put(cmd)
+        self._send(
+            {
+                "kind": "command",
+                "action": action or "get",
+                "target": target,
+                "body": args,
+            }
+        )
 
         while True:
-            result = self._results.get()
+            result = self._recv()
             kind = result["kind"]
 
             if kind == "signal":
@@ -186,47 +193,21 @@ class RpcShell(cmd.Cmd):
         return True
 
 
-def _json_encode(value):
-    if isinstance(value, bytes):
-        return encode_bytes(value)
-    raise TypeError(type(value))
-
-
 @click.command()
-@click.option("-s", "--shell", is_flag=True)
-def rpc(shell):
-    if shell:
-        cmd_queue = Queue(1)  # type: ignore
+def shell():
+    """A basic shell for interacting with the ykman rpc."""
+    rpc = subprocess.Popen(  # nosec
+        ["ykman", "rpc"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf8"
+    )
 
-        def send(data):
-            # Make sure JSON encodable
-            data = json.loads(json.dumps(data, default=_json_encode))
-            result_queue.put(data)
+    click.echo("Shell starting...")
+    stdout = cast(IO[str], rpc.stdout)
+    shell = RpcShell(rpc.stdin, stdout)
+    shell.cmdloop()
+    click.echo("Stopping...")
+    stdout.close()
+    rpc.communicate()
 
-        result_queue = Queue(1)  # type: ignore
 
-        def recv():
-            # Make sure JSON encodeable
-            request = cmd_queue.get()
-            return json.loads(json.dumps(request))
-
-        rpc_thread = Thread(target=run_rpc, args=(send, recv))
-        rpc_thread.start()
-
-        shell = RpcShell(cmd_queue, result_queue)
-        shell.cmdloop()
-        cmd_queue.put(None)
-    else:
-
-        def send(data):
-            json.dump(data, sys.stdout, default=_json_encode)
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-        def recv():
-            line = sys.stdin.readline()
-            if line:
-                return json.loads(line.strip())
-            return None
-
-        run_rpc(send, recv)
+if __name__ == "__main__":
+    shell()

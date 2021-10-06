@@ -55,7 +55,7 @@ from .fido import fido
 from .config import config
 from .aliases import apply_aliases
 from .apdu import apdu
-from .rpc import rpc
+from ..rpc import run_rpc_pipes
 import click
 import ctypes
 import time
@@ -360,7 +360,7 @@ def list_keys(ctx, serials, readers):
                     click.echo(f"{name} [{mode}] <access denied>")
 
 
-COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu, rpc)
+COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
 
 
 for cmd in COMMANDS:
@@ -368,6 +368,9 @@ for cmd in COMMANDS:
 
 
 def main():
+    if sys.argv[1:] == ["rpc"]:
+        return run_rpc_pipes(sys.stdout, sys.stdin)
+
     sys.argv = apply_aliases(sys.argv)
     try:
         # --full-help triggers --help, hidden commands will already have read it by now.

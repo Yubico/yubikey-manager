@@ -26,13 +26,14 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import RpcException
+from .base import RpcException, encode_bytes
 from .device import RootNode
 
 from queue import Queue
 from threading import Thread, Event
 from typing import Callable, Dict, List
 
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -115,3 +116,23 @@ def run_rpc(
     recv: Callable[[], Dict],
 ) -> None:
     process(send, recv, RootNode())
+
+
+def run_rpc_pipes(stdout, stdin):
+    def _json_encode(value):
+        if isinstance(value, bytes):
+            return encode_bytes(value)
+        raise TypeError(type(value))
+
+    def send(data):
+        json.dump(data, stdout, default=_json_encode)
+        stdout.write("\n")
+        stdout.flush()
+
+    def recv():
+        line = stdin.readline()
+        if line:
+            return json.loads(line.strip())
+        return None
+
+    run_rpc(send, recv)
