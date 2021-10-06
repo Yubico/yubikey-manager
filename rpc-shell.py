@@ -3,6 +3,7 @@
 import cmd
 import json
 import click
+import os
 import subprocess  # nosec
 
 import logging
@@ -32,16 +33,23 @@ class RpcShell(cmd.Cmd):
         super().__init__()
         self._stdin = stdin
         self._stdout = stdout
+        self._echo = False
         self._path = []
         self._node = None
         self.do_cd(None)
 
     def _send(self, data):
-        self._stdin.write(json.dumps(data) + "\n")
+        if self._echo:
+            print("SEND:", cyan(json.dumps(data)))
+        json.dump(data, self._stdin)
+        self._stdin.write("\n")
         self._stdin.flush()
 
     def _recv(self):
-        return json.loads(self._stdout.readline())
+        result = json.loads(self._stdout.readline())
+        if self._echo:
+            print("RECV:", cyan(json.dumps(result)))
+        return result
 
     @property
     def prompt(self):
@@ -99,6 +107,10 @@ class RpcShell(cmd.Cmd):
             print(red(f"{status.upper()}: {result['body']}"))
         else:
             print(red(f"Invalid response: {result}"))
+
+    def do_echo(self, args):
+        self._echo = not self._echo
+        print("ECHO is", "on" if self._echo else "off")
 
     def do_quit(self, args):
         return True
@@ -196,8 +208,12 @@ class RpcShell(cmd.Cmd):
 @click.command()
 def shell():
     """A basic shell for interacting with the ykman rpc."""
+    executable = os.environ.get("_YKMAN_PATH", "ykman")
     rpc = subprocess.Popen(  # nosec
-        ["ykman", "rpc"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf8"
+        [executable, "rpc"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        encoding="utf8",
     )
 
     click.echo("Shell starting...")
