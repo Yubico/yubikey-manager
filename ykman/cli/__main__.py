@@ -44,7 +44,7 @@ from ..device import (
     ConnectionNotAvailableException,
 )
 from ..util import get_windows_version
-from ..diagnostics import get_diagnostics
+from ..diagnostics import get_diagnostics_text
 from .util import YkmanContextObject, ykman_group, cli_fail
 from .info import info
 from .otp import otp
@@ -118,7 +118,7 @@ def print_version(ctx, param, value):
 def print_diagnostics(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo(get_diagnostics())
+    click.echo(get_diagnostics_text())
     ctx.exit()
 
 

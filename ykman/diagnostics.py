@@ -18,57 +18,54 @@ from fido2.ctap2 import Ctap2, ClientPin
 
 
 def mgmt_info(pid, conn):
-    lines = []
+    data = {}
     try:
         raw_info = ManagementSession(conn).backend.read_config()
-        lines.append(f"\tRawInfo: {raw_info.hex()}")
+        data["RawInfo"] = raw_info.hex()
     except Exception as e:
-        lines.append(f"\tFailed to read device info via Management: {e!r}")
+        data["Failed to read device info via Management"] = f"{e!r}"
     try:
         info = read_info(pid, conn)
-        lines.append(f"\t{info}")
+        data["Info"] = f"{info}"
         name = get_name(info, pid.get_type())
-        lines.append(f"\tDevice name: {name}")
+        data["Device name"] = f"{name}"
     except Exception as e:
-        lines.append(f"\tFailed to read device info: {e!r}")
-    return lines
+        data["Failed to read device info"] = f"{e!r}"
+    return data
 
 
 def piv_info(conn):
     try:
         piv = PivSession(conn)
-        return ["\tPIV"] + [f"\t\t{ln}" for ln in get_piv_info(piv).splitlines() if ln]
+        return "\n" + get_piv_info(piv)
     except Exception as e:
-        return [f"\tPIV not accessible {e!r}"]
+        return {"PIV not accessible": f"{e!r}"}
 
 
 def openpgp_info(conn):
     try:
         openpgp = OpenPgpController(conn)
-        return ["\tOpenPGP"] + [
-            f"\t\t{ln}" for ln in get_openpgp_info(openpgp).splitlines() if ln
-        ]
+        return "\n" + get_openpgp_info(openpgp)
     except Exception as e:
-        return [f"\tOpenPGP not accessible {e!r}"]
+        return {"OpenPGP not accessible": f"{e!r}"}
 
 
 def oath_info(conn):
     try:
         oath = OathSession(conn)
-        return [
-            "\tOATH",
-            f"\t\tOath version: {'.'.join('%d' % d for d in oath.version)}",
-            f"\t\tPassword protected: {oath.locked}",
-        ]
+        return {
+            "OATH version": f"{'.'.join('%d' % d for d in oath.version)}",
+            "Password protected": oath.locked,
+        }
     except Exception as e:
-        return [f"\tOATH not accessible {e!r}"]
+        return {"OATH not accessible": f"{e!r}"}
 
 
 def ccid_info():
-    lines = []
+    data = {}
     try:
+        reader_data = []
         readers = list_readers()
-        lines.append("Detected PC/SC readers:")
         for reader in readers:
             try:
                 c = reader.createConnection()
@@ -77,109 +74,122 @@ def ccid_info():
                 result = "Success"
             except Exception as e:
                 result = e.__class__.__name__
-            lines.append(f"\t{reader.name} (connect: {result})")
-        lines.append("")
+            reader_data.append({reader.name: f"Connect: {result}"})
+        data["Detected PC/SC readers"] = reader_data
     except Exception as e:
-        return [
-            f"PC/SC failure: {e!r}",
-            "",
-        ]
+        return {"PC/SC failure": f"{e!r}"}
 
-    lines.append("Detected YubiKeys over PC/SC:")
     try:
+        devs = {}
         for dev in list_ccid_devices():
-            lines.append(f"\t{dev!r}")
             try:
                 with dev.open_connection(SmartCardConnection) as conn:
-                    lines.extend(mgmt_info(dev.pid, conn))
-                    lines.extend(piv_info(conn))
-                    lines.extend(oath_info(conn))
-                    lines.extend(openpgp_info(conn))
+                    result = {
+                        "Management": mgmt_info(dev.pid, conn),
+                        "PIV": piv_info(conn),
+                        "OATH": oath_info(conn),
+                        "OpenPGP": openpgp_info(conn),
+                    }
             except Exception as e:
-                lines.append(f"\tPC/SC connection failure: {e!r}")
-            lines.append("")
+                result = {"PC/SC connection failure": f"{e!r}"}
+            devs[f"{dev!r}"] = result
+        data["Detected YubiKeys over PC/SC"] = devs
     except Exception as e:
-        return [
-            f"PC/SC failure: {e!r}",
-            "",
-        ]
+        return {"PC/SC failure": f"{e!r}"}
 
-    lines.append("")
-    return lines
+    return data
 
 
 def otp_info():
-    lines = []
-    lines.append("Detected YubiKeys over HID OTP:")
+    data = {}
     try:
         for dev in list_otp_devices():
-            lines.append(f"\t{dev!r}")
             try:
+                result = {}
                 with dev.open_connection(OtpConnection) as conn:
-                    lines.extend(mgmt_info(dev.pid, conn))
+                    result["Management"] = mgmt_info(dev.pid, conn)
                     otp = YubiOtpSession(conn)
                     try:
                         config = otp.get_config_state()
-                        lines.append(f"\tOTP: {config!r}")
+                        result["OTP"] = config
                     except ValueError as e:
-                        lines.append(f"\tCouldn't read OTP state: {e!r}")
+                        result["Couldn't read OTP state"] = f"{e!r}"
             except Exception as e:
-                lines.append(f"\tOTP connection failure: {e!r}")
-            lines.append("")
+                result = {"OTP connection failure": f"{e!r}"}
+            data[f"{dev!r}"] = result
     except Exception as e:
-        lines.append(f"\tHID OTP backend failure: {e!r}")
-    lines.append("")
-    return lines
+        data["HID OTP backend failure"] = f"{e!r}"
+    return data
 
 
 def fido_info():
-    lines = []
-    lines.append("Detected YubiKeys over HID FIDO:")
+    data = {}
     try:
         for dev in list_ctap_devices():
-            lines.append(f"\t{dev!r}")
             try:
+                result = {}
                 with dev.open_connection(FidoConnection) as conn:
-                    lines.append("CTAP device version: %d.%d.%d" % conn.device_version)
-                    lines.append(f"CTAPHID protocol version: {conn.version}")
-                    lines.append("Capabilities: %d" % conn.capabilities)
-                    lines.extend(mgmt_info(dev.pid, conn))
+                    result["CTAP device version"] = "%d.%d.%d" % conn.device_version
+                    result["CTAPHID protocol version"] = f"{conn.version}"
+                    result["Capabilities"] = "%d" % conn.capabilities
+                    result["Management"] = mgmt_info(dev.pid, conn)
                     try:
                         ctap2 = Ctap2(conn)
-                        lines.append(f"\tCtap2Info: {ctap2.info.data!r}")
+                        result["Ctap2Info"] = f"{ctap2.info.data!r}"
                         if ctap2.info.options.get("clientPin"):
                             client_pin = ClientPin(ctap2)
-                            lines.append(f"PIN retries: {client_pin.get_pin_retries()}")
+                            result["PIN retries"] = f"{client_pin.get_pin_retries()}"
                             bio_enroll = ctap2.info.options.get("bioEnroll")
                             if bio_enroll:
-                                lines.append(
-                                    "Fingerprint retries: "
-                                    f"{client_pin.get_uv_retries()}"
-                                )
+                                result[
+                                    "Fingerprint retries"
+                                ] = f"{client_pin.get_uv_retries()}"
                             elif bio_enroll is False:
-                                lines.append("Fingerprints: Not configured")
+                                result["Fingerprints"] = "Not configured"
                         else:
-                            lines.append("PIN: Not configured")
+                            result["PIN"] = "Not configured"
 
                     except (ValueError, CtapError) as e:
-                        lines.append(f"\tCouldn't get info: {e!r}")
+                        result["Couldn't get info"] = f"{e!r}"
             except Exception as e:
-                lines.append(f"\tFIDO connection failure: {e!r}")
-            lines.append("")
+                result = {"FIDO connection failure": f"{e!r}"}
+            data[f"{dev!r}"] = result
     except Exception as e:
-        lines.append(f"\tHID FIDO backend failure: {e!r}")
-    return lines
+        data["HID FIDO backend failure"] = f"{e!r}"
+    return data
 
 
 def get_diagnostics():
-    lines = []
-    lines.append(f"ykman: {ykman_version}")
-    log_sys_info(lines.append)
-    lines.append("")
+    data = {"ykman": f"{ykman_version}"}
+    sysinfo = []
+    log_sys_info(sysinfo.append)
+    data["System"] = "\n" + "\n".join(f"    {ln}" for ln in sysinfo)
 
-    lines.extend(ccid_info())
-    lines.extend(otp_info())
-    lines.extend(fido_info())
+    data.update(ccid_info())
+    data["Detected YubiKeys over HID OTP"] = otp_info()
+    data["Detected YubiKeys over HID FIDO"] = fido_info()
+
+    return data
+
+
+def get_diagnostics_text():
+    lines = []
+
+    def _pretty_print(data, level=0):
+        for key, value in data.items():
+            line = level * "   " + key + ":"
+            if isinstance(value, dict):
+                lines.append(line)
+                _pretty_print(value, level + 1)
+            elif isinstance(value, list):
+                lines.append(line)
+                for item in value:
+                    _pretty_print(item, level + 1)
+            else:
+                line += f" {value}"
+                lines.append(line)
+
+    _pretty_print(get_diagnostics())
     lines.append("End of diagnostics")
 
     return "\n".join(lines)
