@@ -40,6 +40,7 @@ from ..device import (
     connect_to_device,
 )
 from ..diagnostics import get_diagnostics
+from ..logging_setup import setup as setup_logging
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection, ApduError, SW
 from yubikit.core.otp import OtpConnection
@@ -82,6 +83,13 @@ class RootNode(RpcNode):
     @action
     def diagnose(self, *ignored):
         return dict(diagnostics=get_diagnostics())
+
+    @action(closes_child=False)
+    def logging(self, params, event, signal):
+        level = params["level"].upper()
+        log_file = params.get("file", None)
+        setup_logging(level, log_file)
+        return dict()
 
 
 class ReadersNode(RpcNode):
