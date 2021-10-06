@@ -56,7 +56,7 @@ from .config import config
 from .aliases import apply_aliases
 from .apdu import apdu
 from .script import run_script
-from .rpc import rpc
+from ..rpc import run_rpc_pipes
 
 import click
 import ctypes
@@ -373,7 +373,6 @@ COMMANDS = (
     config,
     apdu,
     run_script,
-    rpc,
 )
 
 
@@ -382,6 +381,9 @@ for cmd in COMMANDS:
 
 
 def main():
+    if sys.argv[1:] == ["rpc"]:
+        return run_rpc_pipes(sys.stdout, sys.stdin)
+
     sys.argv = apply_aliases(sys.argv)
     try:
         # --full-help triggers --help, hidden commands will already have read it by now.
