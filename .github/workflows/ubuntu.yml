@@ -39,8 +39,7 @@ jobs:
 
       - name: PyInstaller
         run: |
-          pip install pyinstaller
-          pyinstaller ykman.spec
+          poetry run pyinstaller ykman.spec
           dist/ykman/ykman --version
           [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
           export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)

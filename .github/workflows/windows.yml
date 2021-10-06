@@ -52,20 +52,19 @@ jobs:
           ref: 5a02f55c696f16b98f23a8b487f3daa8f644a8d2
           path: pyinstaller
 
-      - name: Build PyInstaller
+      - name: Build PyInstaller from source
         shell: bash
         run: |
           cd pyinstaller/bootloader
           python waf distclean all
-          cd ..
-          pip install .
-          cd ..
+          cd ../../
+          poetry run pip uninstall -y pyinstaller
+          poetry run pip install ./pyinstaller
 
       - name: Build exe
         shell: bash
         run: |
-          pip install dist/*.whl
-          pyinstaller ykman.spec
+          poetry run pyinstaller ykman.spec
           dist/ykman/ykman.exe --version
           [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
           export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
