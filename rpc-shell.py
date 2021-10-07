@@ -210,13 +210,13 @@ class RpcShell(cmd.Cmd):
 
 
 @click.command()
-@click.argument("executable", required=False)
+@click.argument("executable", nargs=-1)
 def shell(executable):
     """A basic shell for interacting with the ykman rpc."""
     env = os.environ.copy()
     env["_YKMAN_RPC"] = "1"
     rpc = subprocess.Popen(  # nosec
-        [executable or "ykman"],
+        executable or ["ykman"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         encoding="utf8",
