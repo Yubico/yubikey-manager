@@ -166,7 +166,10 @@ class RpcNode:
     def _close_child(self):
         if self._child:
             logger.debug("close existing child: %s", self._child_name)
-            self._child.close()
+            try:
+                self._child.close()
+            except Exception as e:
+                logger.error("Error closing child", exc_info=e)
             self._child = None
             self._child_name = None
 

@@ -292,7 +292,10 @@ class ConnectionNode(RpcNode):
 
     def close(self):
         super().close()
-        self._connection.close()
+        try:
+            self._connection.close()
+        except Exception as e:
+            logger.warning("Error closing connection", exc_info=e)
 
     def get_data(self):
         if (
