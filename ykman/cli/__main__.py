@@ -62,6 +62,7 @@ import click
 import ctypes
 import time
 import sys
+import os
 import logging
 
 
@@ -381,7 +382,7 @@ for cmd in COMMANDS:
 
 
 def main():
-    if sys.argv[1:] == ["rpc"]:
+    if os.environ.get("_YKMAN_RPC", False):
         return run_rpc_pipes(sys.stdout, sys.stdin)
 
     sys.argv = apply_aliases(sys.argv)

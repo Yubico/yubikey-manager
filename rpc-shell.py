@@ -46,10 +46,14 @@ class RpcShell(cmd.Cmd):
         self._stdin.flush()
 
     def _recv(self):
-        result = json.loads(self._stdout.readline())
+        line = self._stdout.readline()
         if self._echo:
-            print("RECV:", cyan(json.dumps(result)))
-        return result
+            print("RECV:", cyan(line))
+        try:
+            return json.loads(line)
+        except Exception:
+            print("failed to parse:", line)
+            raise
 
     @property
     def prompt(self):
@@ -206,22 +210,23 @@ class RpcShell(cmd.Cmd):
 
 
 @click.command()
-def shell():
+@click.argument("executable", required=False)
+def shell(executable):
     """A basic shell for interacting with the ykman rpc."""
-    executable = os.environ.get("_YKMAN_PATH", "ykman")
+    env = os.environ.copy()
+    env["_YKMAN_RPC"] = "1"
     rpc = subprocess.Popen(  # nosec
-        [executable, "rpc"],
+        [executable or "ykman"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         encoding="utf8",
+        env=env,
     )
 
     click.echo("Shell starting...")
-    stdout = cast(IO[str], rpc.stdout)
-    shell = RpcShell(rpc.stdin, stdout)
+    shell = RpcShell(rpc.stdin, cast(IO[str], rpc.stdout))
     shell.cmdloop()
     click.echo("Stopping...")
-    stdout.close()
     rpc.communicate()
 
 
