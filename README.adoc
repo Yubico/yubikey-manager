@@ -75,6 +75,12 @@ https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager] on Windows.
 ==== MacOS
 Packages for MacOS are available from Homebrew and MacPorts.
 
+You may run into MacOS permission problems resulting in an error such as:
+
+  Failed to open device for communication: -536870174
+  
+Try to add your terminal application to the `Input Monitoring` permission list via `System Preferences -> Security & Privacy -> Privacy -> Input Monitoring` to resolve this error.
+
 ==== Linux
 Packages are available for several Linux distributions by third party package
 maintainers.
