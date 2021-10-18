@@ -75,11 +75,19 @@ https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager] on Windows.
 ==== MacOS
 Packages for MacOS are available from Homebrew and MacPorts.
 
-You may run into MacOS permission problems resulting in an error such as:
-
-  Failed to open device for communication: -536870174
+===== Input Monitoring access on MacOS
+When running one of the `ykman otp` commands you may run into an error such as:
+`Failed to open device for communication: -536870174`. This indicates a problem
+with the permission to access the OTP (keyboard) USB interface.
   
-Try to add your terminal application to the `Input Monitoring` permission list via `System Preferences -> Security & Privacy -> Privacy -> Input Monitoring` to resolve this error.
+To access a YubiKey over this interface the application needs the `Input
+Monitoring` permission. If you are not automatically prompted to grant this
+permission, you may have to do so manually. Note that it is the _terminal_ you
+are using that needs the permission, not the ykman executable.
+
+To add your terminal application to the `Input Monitoring` permission list, go
+to `System Preferences -> Security & Privacy -> Privacy -> Input Monitoring` to
+resolve this.
 
 ==== Linux
 Packages are available for several Linux distributions by third party package
