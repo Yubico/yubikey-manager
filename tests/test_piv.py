@@ -21,6 +21,8 @@ import pytest
         r"CN=Before\0dAfter,DC=example,DC=net",
         # r"1.3.6.1.4.1.1466.0=#04024869", - Not supported.
         r"CN=Lu\C4\8Di\C4\87",
+        (r"CN=James Smith,OU=Sales,L=Redwood Shores,O=OpenLDAP,"
+         r"ST=California,C=US,emailAddress=james.smith@openldap.org"),
     ],
 )
 def test_parse_rfc4514_string(value):
