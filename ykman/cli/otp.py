@@ -659,6 +659,17 @@ def calculate(ctx, slot, challenge, totp, digits):
         _failed_to_write_msg(ctx, e)
 
 
+def parse_modhex_or_bcd(value):
+    try:
+        return True, modhex_decode(value)
+    except ValueError:
+        try:
+            int(value)
+            return False, bytes.fromhex(value)
+        except ValueError:
+            raise ValueError("value must be modhex or decimal")
+
+
 @otp.command()
 @click_slot_argument
 @click.argument("key", callback=click_parse_b32_key, required=False)
@@ -670,6 +681,7 @@ def calculate(ctx, slot, challenge, totp, digits):
     help="Number of digits in generated code (default is 6).",
 )
 @click.option("-c", "--counter", type=int, default=0, help="Initial counter value.")
+@click.option("-i", "--identifier", help="Token identifier.")
 @click.option(
     "--no-enter",
     is_flag=True,
@@ -677,11 +689,49 @@ def calculate(ctx, slot, challenge, totp, digits):
 )
 @click_force_option
 @click.pass_context
-def hotp(ctx, slot, key, digits, counter, no_enter, force):
+def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     """
     Program an HMAC-SHA1 OATH-HOTP credential.
+
+    The YubiKey can be configured to output an OATH Token Identifier as a prefix
+    to the OTP itself, which consists of OMP+TT+MUI. Using the "--identifier" option,
+    you may specify the OMP+TT as 4 characters, the MUI as 8 characters, or the full
+    OMP+TT+MUI as 12 characters. If omitted, a default value of "ubhe" will be used for
+    OMP+TT, and the YubiKey serial number will be used as MUI.
     """
     session = ctx.obj["session"]
+
+    mh1 = False
+    mh2 = False
+    if identifier:
+        if identifier == "-":
+            identifier = "ubhe"
+        if len(identifier) == 4:
+            identifier += f"{session.get_serial():08}"
+        elif len(identifier) == 8:
+            identifier = "ubhe" + identifier
+        if len(identifier) != 12:
+            raise ValueError("Incorrect length for token identifier.")
+
+        omp_m, omp = parse_modhex_or_bcd(identifier[:2])
+        tt_m, tt = parse_modhex_or_bcd(identifier[2:4])
+        mui_m, mui = parse_modhex_or_bcd(identifier[4:])
+        if tt_m and not omp_m:
+            raise ValueError("TT can only be modhex encoded if OMP is as well.")
+        if mui_m and not (omp_m and tt_m):
+            raise ValueError(
+                "MUI can only be modhex encoded if OMP and TT are as well."
+            )
+        token_id = omp + tt + mui
+        if mui_m:
+            mh1 = mh2 = True
+        elif tt_m:
+            mh2 = True
+        elif omp_m:
+            mh1 = True
+    else:
+        token_id = b""
+
     if not key:
         while True:
             key = click_prompt("Enter a secret key (base32)")
@@ -699,6 +749,7 @@ def hotp(ctx, slot, key, digits, counter, no_enter, force):
             slot,
             HotpSlotConfiguration(key)
             .imf(counter)
+            .token_id(token_id, mh1, mh2)
             .digits8(int(digits) == 8)
             .append_cr(not no_enter),
             ctx.obj["access_code"],
