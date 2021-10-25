@@ -195,6 +195,13 @@ SCAN_CODES_SIZE = FIXED_SIZE + UID_SIZE + KEY_SIZE
 
 SHA1_BLOCK_SIZE = 64
 
+
+@unique
+class NDEF_TYPE(IntEnum):
+    TEXT = ord("T")
+    URI = ord("U")
+
+
 DEFAULT_NDEF_URI = "https://my.yubico.com/yk/#"
 
 NDEF_URL_PREFIXES = (
@@ -260,22 +267,25 @@ def _build_update(ext, tkt, cfg, acc_code=None):
     )
 
 
-def _build_ndef_config(uri):
-    uri = uri or DEFAULT_NDEF_URI
-    for i, prefix in enumerate(NDEF_URL_PREFIXES):
-        if uri.startswith(prefix):
-            id_code = i + 1
-            uri = uri[len(prefix) :]
-            break
+def _build_ndef_config(value, ndef_type=NDEF_TYPE.URI):
+    if ndef_type == NDEF_TYPE.URI:
+        if value is None:
+            value = DEFAULT_NDEF_URI
+        for i, prefix in enumerate(NDEF_URL_PREFIXES):
+            if value.startswith(prefix):
+                id_code = i + 1
+                value = value[len(prefix) :]
+                break
+        else:
+            id_code = 0
+        data = bytes([id_code]) + value.encode()
     else:
-        id_code = 0
-    uri_bytes = uri.encode()
-    data_len = 1 + len(uri_bytes)
-    if data_len > NDEF_DATA_SIZE:
+        if value is None:
+            value = ""
+        data = b"\x02en" + value.encode()
+    if len(data) > NDEF_DATA_SIZE:
         raise ValueError("URI payload too large")
-    return struct.pack("<BBB", data_len, ord("U"), id_code) + uri_bytes.ljust(
-        NDEF_DATA_SIZE - 1, b"\0"
-    )
+    return bytes([len(data), ndef_type]) + data.ljust(NDEF_DATA_SIZE, b"\0")
 
 
 @unique
@@ -797,10 +807,11 @@ class YubiOtpSession:
         slot: SLOT,
         uri: Optional[str] = None,
         cur_acc_code: Optional[bytes] = None,
+        ndef_type: NDEF_TYPE = NDEF_TYPE.URI,
     ) -> None:
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
-            _build_ndef_config(uri),
+            _build_ndef_config(uri, ndef_type),
             cur_acc_code,
         )
 

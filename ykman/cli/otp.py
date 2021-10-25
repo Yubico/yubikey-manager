@@ -28,6 +28,7 @@
 from base64 import b32encode
 from yubikit.yubiotp import (
     SLOT,
+    NDEF_TYPE,
     YubiOtpSession,
     YubiOtpSlotConfiguration,
     HmacSha1SlotConfiguration,
@@ -214,13 +215,22 @@ def swap(ctx):
 @click_slot_argument
 @click.pass_context
 @click.option("-p", "--prefix", help="Added before the NDEF payload. Typically a URI.")
-def ndef(ctx, slot, prefix):
+@click.option(
+    "-t",
+    "--ndef-type",
+    type=EnumChoice(NDEF_TYPE),
+    default="URI",
+    show_default=True,
+    help="NDEF payload type.",
+)
+def ndef(ctx, slot, prefix, ndef_type):
     """
     Configure a slot to be used over NDEF (NFC).
 
-    The default prefix will be used if no prefix is specified:
-
-        "https://my.yubico.com/yk/#"
+    \b
+    If "--prefix" is not specified, a default value will be used, based on the type:
+    - For URI the default value is: "https://my.yubico.com/yk/#"
+    - For TEXT the default is an empty string
     """
     info = ctx.obj["info"]
     session = ctx.obj["session"]
@@ -232,7 +242,7 @@ def ndef(ctx, slot, prefix):
         cli_fail(f"Slot {slot} is empty.")
 
     try:
-        session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"])
+        session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
 
