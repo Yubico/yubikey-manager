@@ -46,8 +46,9 @@ class Ctap2Node(RpcNode):
 
     def get_data(self):
         self._info = self.ctap.get_info()
-        data = dict(info=self._info.data)
+        data = dict(info=self._info.data, locked=False)
         if self._info.options.get("clientPin"):
+            data["locked"] = self._pin is None
             pin_retries, power_cycle = self.client_pin.get_pin_retries()
             data.update(
                 pin_retries=pin_retries,
@@ -63,6 +64,7 @@ class Ctap2Node(RpcNode):
     @action
     def reset(self, params, event, signal):
         self.ctap.reset(event)
+        self._pin = None
         return dict()
 
     @action(condition=lambda self: self._info.options["clientPin"])
@@ -85,6 +87,7 @@ class Ctap2Node(RpcNode):
             self.client_pin.set_pin(
                 params.pop("new_pin"),
             )
+        self._pin = None
 
     @child(condition=lambda self: "bioEnroll" in self._info.options and self._pin)
     def fingerprints(self):
