@@ -196,7 +196,7 @@ def _parse_cred_id(cred_id, oath_type):
             issuer, data = data.split(":", 1)
         else:
             issuer = None
-    return issuer, data, None
+    return issuer, data, 0
 
 
 def _get_device_id(salt):
