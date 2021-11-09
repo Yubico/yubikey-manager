@@ -13,7 +13,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
@@ -49,7 +49,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: pyinstaller/pyinstaller
-          ref: 5a02f55c696f16b98f23a8b487f3daa8f644a8d2
+          ref: v4.6
           path: pyinstaller
 
       - name: Build PyInstaller from source
