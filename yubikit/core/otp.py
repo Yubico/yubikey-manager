@@ -37,6 +37,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+MODHEX_ALPHABET = "cbdefghijklnrtuv"
+
+
 class CommandRejectedError(CommandError):
     """The issues command was rejected by the YubiKey"""
 
@@ -70,18 +73,15 @@ def check_crc(data: bytes) -> bool:
     return calculate_crc(data) == CRC_OK_RESIDUAL
 
 
-_MODHEX = "cbdefghijklnrtuv"
-
-
 def modhex_encode(data: bytes) -> str:
     """Encode a bytes-like object using Modhex (modified hexadecimal) encoding."""
-    return "".join(_MODHEX[b >> 4] + _MODHEX[b & 0xF] for b in data)
+    return "".join(MODHEX_ALPHABET[b >> 4] + MODHEX_ALPHABET[b & 0xF] for b in data)
 
 
 def modhex_decode(string: str) -> bytes:
     """Decode the Modhex (modified hexadecimal) string."""
     return bytes(
-        _MODHEX.index(string[i]) << 4 | _MODHEX.index(string[i + 1])
+        MODHEX_ALPHABET.index(string[i]) << 4 | MODHEX_ALPHABET.index(string[i + 1])
         for i in range(0, len(string), 2)
     )
 

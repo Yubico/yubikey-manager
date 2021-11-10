@@ -37,7 +37,12 @@ from yubikit.yubiotp import (
     UpdateConfiguration,
 )
 from yubikit.core import TRANSPORT, CommandError
-from yubikit.core.otp import modhex_encode, modhex_decode, OtpConnection
+from yubikit.core.otp import (
+    MODHEX_ALPHABET,
+    modhex_encode,
+    modhex_decode,
+    OtpConnection,
+)
 
 from .util import (
     ykman_group,
@@ -381,8 +386,8 @@ def yubiotp(
 
     try:
         public_id = modhex_decode(public_id)
-    except KeyError:
-        ctx.fail("Invalid public ID, must be modhex.")
+    except ValueError:
+        ctx.fail(f"Invalid public ID, must be modhex ({MODHEX_ALPHABET}).")
 
     if not private_id:
         if generate_private_id:
