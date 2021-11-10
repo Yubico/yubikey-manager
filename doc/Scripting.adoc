@@ -1,0 +1,138 @@
+== Running custom scripts
+The ykman executable lets you run custom python scripts in the context of
+YubiKey Manager.
+See also: link:Library_Usage.adoc[Library Usage].
+
+
+=== Invoking the script
+To run a script, use the `script` subcommand of ykman:
+
+  ykman script myscript.py
+
+You can pass additional arguments used in the script by adding them at the end
+of the command:
+
+  ykman script myscript.py 123456 a_word "a string with spaces"
+
+These arguments are available within the script as the variable `arguments`,
+which is a Python `tuple`, accessible as `arguments[0]`, `arguments[1]`, and so
+on.
+
+
+=== Adding additional dependencies
+By default, the script will run with the full ykman library available, as well
+as the Python dependencies used by the application. If your script needs
+additional dependencies, you can provide an additional location to load Python
+packages from, by using the `--site-dir` argument:
+
+  ykman script --site-dir /path/to/additional/site-packages myscript.py
+
+
+=== Writing your first script
+Create a new file, `myscript.py` and add the following content to it:
+
+[source,py]
+----
+print("Hello, from ykman!")
+----
+
+Now, save the file and run:
+
+  ykman script myscript.py
+
+If everything went as planned, you should see the print output in your
+terminal. Something like:
+
+....
+> ykman script myscript.py
+Hello, from ykman!
+>
+....
+
+Now for something a bit more interesting. Let's connect to a YubiKey and read
+its serial number. Modify the `myscript.py` file to contain the following:
+
+[source,py]
+----
+from ykman.device import list_all_devices
+import sys
+
+devices = list_all_devices()
+
+if len(devices) != 1:
+    print("Run this script with a single YubiKey connected")
+    sys.exit(1)
+
+device, info = devices[0]
+print("Found YubiKey with serial:", info.serial)
+----
+
+Save the file, then run it again using `ykman script`, and you should see
+output similar to:
+
+....
+> ykman script myscript.py
+Found YubiKey with serial: 7800302
+>
+....
+
+What we did here is we imported the `list_all_devices` funtion from ykman,
+which as the name implies, lists all connected YubiKeys. It returns a list of
+entries, where each entry contains a `device` element, and an `info` element.
+Ignoring the `device` for now, we can use the `info` object to see the YubiKeys
+serial number, and print it.
+
+Now, let's pass an argument to our script. We'll modify the script to take a
+serial number, and check for the presense of that particular YubiKey:
+
+[source,py]
+----
+from ykman.device import list_all_devices
+import sys
+
+devices = list_all_devices()
+
+try:
+    target_serial = int(arguments[0])  # noqa
+except:
+    print("Usage: ykman script myscript.py <serial>")
+    sys.exit(1)
+
+for device, info in devices:
+    if info.serial == target_serial:
+        print("YubiKey found, with serial:", target_serial)
+        break
+else:
+    print("No YubiKey found with serial:", target_serial)
+----
+
+Now if we run the script like before, it will fail:
+
+....
+> ykman script myscript.py
+Usage: ykman script myscript.py <serial>
+>
+....
+
+This is because the script now expects a serial number. If we try it again,
+this time with a serial number, we instead get:
+
+....
+> ykman script myscript.py 7800302
+YubiKey found, with serial: 7800302
+....
+
+The serial number we passed to the script is stored in the `arguments`
+variable. Since multiple argument can be passed in, the variable will contain a
+tuple, and we need to tell our script to use the "first" argument, which in our
+case is the serial. Arguments passed to the script are always of type `string`,
+so we need to interpret it as a number, and `int`. Now, we loop over the
+attached YubiKeys, looking for a specific serial number. If found, the script
+prints a message and breaks. If not found, it prints a different message.  The
+`# noqa` part tells the editor not to mark the line as an error, as it may
+think the `arguments` variable is undefied (it doesn't know this variable will
+be set by ykman).
+
+Congratulations! You've written your first script that interacts with a
+YubiKey. There's a lot more that's possible. See the section on
+link:Library_Usage.adoc[Library Usage] for more advanced usage.
