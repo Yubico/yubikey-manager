@@ -67,6 +67,7 @@ from ..otp import (
     parse_b32_key,
     time_challenge,
     format_oath_code,
+    format_csv,
 )
 from threading import Event
 from time import time
@@ -334,6 +335,14 @@ def delete(ctx, slot, force):
     required=False,
     help="Upload credential to YubiCloud (opens in browser). Conflicts with --force.",
 )
+@click.option(
+    "-O",
+    "--config-output",
+    type=click.File("a"),
+    required=False,
+    help="File to output the configuration to. "
+    "If the file exists, it will be appended to.",
+)
 @click_force_option
 @click.pass_context
 def yubiotp(
@@ -348,6 +357,7 @@ def yubiotp(
     generate_private_id,
     generate_key,
     upload,
+    config_output,
 ):
     """
     Program a Yubico OTP credential.
@@ -355,6 +365,7 @@ def yubiotp(
 
     info = ctx.obj["info"]
     session = ctx.obj["session"]
+    serial = None
 
     if public_id and serial_public_id:
         ctx.fail("Invalid options: --public-id conflicts with --serial-public-id.")
@@ -435,17 +446,23 @@ def yubiotp(
         f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
     )
 
+    access_code = ctx.obj["access_code"]
     try:
         session.put_configuration(
             slot,
             YubiOtpSlotConfiguration(public_id, private_id, key).append_cr(
                 not no_enter
             ),
-            ctx.obj["access_code"],
-            ctx.obj["access_code"],
+            access_code,
+            access_code,
         )
     except CommandError as e:
         _failed_to_write_msg(ctx, e)
+
+    if config_output:
+        serial = serial or session.get_serial()
+        csv = format_csv(serial, public_id, private_id, key, access_code)
+        config_output.write(csv + "\n")
 
     if upload:
         click.echo("Opening upload form in browser: " + upload_url)
