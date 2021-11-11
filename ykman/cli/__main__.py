@@ -55,6 +55,8 @@ from .fido import fido
 from .config import config
 from .aliases import apply_aliases
 from .apdu import apdu
+from .script import run_script
+
 import click
 import ctypes
 import time
@@ -359,7 +361,7 @@ def list_keys(ctx, serials, readers):
                     click.echo(f"{name} [{mode}] <access denied>")
 
 
-COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu)
+COMMANDS = (list_keys, info, otp, openpgp, oath, piv, fido, config, apdu, run_script)
 
 
 for cmd in COMMANDS:
