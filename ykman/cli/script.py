@@ -75,9 +75,9 @@ def run_script(ctx, site_dir, script, arguments, force):
     {0}
 
     Argument can be passed to the script by adding them after the end of the
-    command. These will be accessible inside the script as a tuple named
-    'arguments'. For more information on scripting, see the "Scripting" page
-    in the documentation.
+    command. These will be accessible inside the script as sys.argv, with the script
+    name as the initial value. For more information on scripting, see the "Scripting"
+    page in the documentation.
 
     Examples:
 
@@ -101,5 +101,5 @@ def run_script(ctx, site_dir, script, arguments, force):
 
     script_body = script.read()
 
-    variables = dict(arguments=arguments)
-    exec(script_body, variables, variables)  # nosec
+    sys.argv = [script.name, *arguments]
+    exec(script_body, {})  # nosec

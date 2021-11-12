@@ -22,9 +22,19 @@ of the command:
 
   ykman script myscript.py 123456 a_word "a string with spaces"
 
-These arguments are available within the script as the variable `arguments`,
-which is a Python `tuple`, accessible as `arguments[0]`, `arguments[1]`, and so
-on.
+These arguments are accessible in the standard Python way of using sys.argv:
+
+  import sys
+
+  print(sys.argv[1])  # prints "123456"
+  print(sys.argv[3])  # prints "a string with spaces"
+
+
+=== Scripting utilities
+We include some functions which may be helpful for scripting purposes in
+`ykman/scripting.py`, such as connectiong to one or more YubiKeys to perform
+actions upon them. See "Writing your first script" below for some example
+usage.
 
 
 === Adding additional dependencies
@@ -62,17 +72,10 @@ its serial number. Modify the `myscript.py` file to contain the following:
 
 [source,py]
 ----
-from ykman.device import list_all_devices
-import sys
+from ykman import scripting as s
 
-devices = list_all_devices()
-
-if len(devices) != 1:
-    print("Run this script with a single YubiKey connected")
-    sys.exit(1)
-
-device, info = devices[0]
-print("Found YubiKey with serial:", info.serial)
+device = s.single()
+print("Found a YubiKey:", device)
 ----
 
 Save the file, then run it again using `ykman script`, and you should see
@@ -80,38 +83,35 @@ output similar to:
 
 ....
 > ykman script myscript.py
-Found YubiKey with serial: 7800302
+Found a YubiKey: YubiKey 5 NFC (9681624)
 >
 ....
 
-What we did here is we imported the `list_all_devices` funtion from ykman,
-which as the name implies, lists all connected YubiKeys. It returns a list of
-entries, where each entry contains a `device` element, and an `info` element.
-Ignoring the `device` for now, we can use the `info` object to see the YubiKeys
-serial number, and print it.
-
 Now, let's pass an argument to our script. We'll modify the script to take a
-serial number, and check for the presense of that particular YubiKey:
+serial number, and check for the presense of that particular YubiKey. We'll use
+the `s.multi` function to keep waiting for more YubiKeys until either the
+correct one is found, or the user presses CTRL+C to stop the script. By setting
+`allow_initial=True` we allow there to be YubiKeys connected at the start of
+the function call. By default, the call will fail if there are YubiKeys already
+connected, to prevent accidental programming of the wrong YubiKey.
 
 [source,py]
 ----
-from ykman.device import list_all_devices
+from ykman import scripting as s
 import sys
 
-devices = list_all_devices()
-
 try:
-    target_serial = int(arguments[0])  # noqa
+    target_serial = int(sys.argv[1])
 except:
     print("Usage: ykman script myscript.py <serial>")
     sys.exit(1)
 
-for device, info in devices:
-    if info.serial == target_serial:
+for device in s.multi(allow_initial=True):
+    if device.info.serial == target_serial:
         print("YubiKey found, with serial:", target_serial)
         break
-else:
-    print("No YubiKey found with serial:", target_serial)
+    else:
+        print("This is not the YubiKey we are looking for, try again...")
 ----
 
 Now if we run the script like before, it will fail:
@@ -127,19 +127,20 @@ this time with a serial number, we instead get:
 
 ....
 > ykman script myscript.py 7800302
+This is not the YubiKey we are looking for, try again...
 YubiKey found, with serial: 7800302
 ....
 
-The serial number we passed to the script is stored in the `arguments`
-variable. Since multiple argument can be passed in, the variable will contain a
-tuple, and we need to tell our script to use the "first" argument, which in our
-case is the serial. Arguments passed to the script are always of type `string`,
-so we need to interpret it as a number, and `int`. Now, we loop over the
-attached YubiKeys, looking for a specific serial number. If found, the script
-prints a message and breaks. If not found, it prints a different message.  The
-`# noqa` part tells the editor not to mark the line as an error, as it may
-think the `arguments` variable is undefied (it doesn't know this variable will
-be set by ykman).
+The serial number we passed to the script is stored in `sys.argv`. Since
+multiple argument can be passed in, the variable will contain a list, and we
+need to tell our script to use the "first" argument, which in our case is the
+serial. The first value in `sys.argv` is always the name of the script, so our
+argument will be the second value, with index `1`.  Arguments passed to the
+script are always of type `string`, so we need to interpret it as a number, and
+`int`. Now, we use `s.multi` to watch for connected YubiKeys. Each one is
+checked against the given serial number, and the script will stop when either
+the correct YubiKey is found, or if the user presses `Ctrl+C` to stop the
+`s.multi` call.
 
 Congratulations! You've written your first script that interacts with a
 YubiKey. There's a lot more that's possible. See the section on
