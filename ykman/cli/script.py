@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .util import click_force_option
+from .. import scripting  # noqa - make sure this file gets included by PyInstaller.
 
 import sys
 import click
