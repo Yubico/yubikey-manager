@@ -36,6 +36,7 @@ from typing import (
     Optional,
     Hashable,
     NamedTuple,
+    Callable,
 )
 import re
 import abc
@@ -114,11 +115,17 @@ class YubiKeyDevice(abc.ABC):
         """Get the transport used to communicate with this YubiKey"""
         return self._transport
 
-    def supports_connection(self, connection_type: Type[T_Connection]) -> bool:
+    # mypy will not accept abstract types in Type[T_Connection]
+    def supports_connection(
+        self, connection_type: Union[Type[T_Connection], Callable[..., T_Connection]]
+    ) -> bool:
         """Check if a YubiKeyDevice supports a specific Connection type"""
         return False
 
-    def open_connection(self, connection_type: Type[T_Connection]) -> T_Connection:
+    # mypy will not accept abstract types in Type[T_Connection]
+    def open_connection(
+        self, connection_type: Union[Type[T_Connection], Callable[..., T_Connection]]
+    ) -> T_Connection:
         """Opens a connection to the YubiKey"""
         raise ValueError("Unsupported Connection type")
 
