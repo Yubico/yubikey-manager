@@ -104,7 +104,9 @@ class ScardSmartCardConnection(SmartCardConnection):
         self.connection = connection
         connection.connect()
         atr = connection.getATR()
-        self._transport = TRANSPORT.USB if atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
+        self._transport = (
+            TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
+        )
 
     @property
     def transport(self):
