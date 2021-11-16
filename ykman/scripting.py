@@ -27,15 +27,18 @@
 
 
 from .base import YkmanDevice
-from .device import list_all_devices, scan_devices, get_name
+from .device import list_all_devices, scan_devices, get_name, read_info
+from .pcsc import list_devices as list_ccid
 
+from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.management import DeviceInfo
+from smartcard.Exceptions import NoCardException, CardConnectionException
 
 from time import sleep
-from typing import Generator
+from typing import Generator, Optional, Set
 
 
 """
@@ -73,7 +76,7 @@ class ScriptingDevice:
         return getattr(self._wrapped, attr)
 
     def __str__(self):
-        name = get_name(self._info, self.pid.get_type())
+        name = get_name(self._info, self.pid.get_type() if self.pid else None)
         serial = self._info.serial
         return f"{name} ({serial})" if serial else name
 
@@ -84,7 +87,7 @@ class ScriptingDevice:
     def otp(self) -> OtpConnection:
         return self.open_connection(OtpConnection)
 
-    def ccid(self) -> SmartCardConnection:
+    def smart_card(self) -> SmartCardConnection:
         return self.open_connection(SmartCardConnection)
 
     def fido(self) -> FidoConnection:
@@ -110,10 +113,10 @@ def single(*, prompt=True) -> ScriptingDevice:
 
 
 def multi(
-    *, ignore_duplicates=True, allow_initial=False, prompt=True
+    *, ignore_duplicates: bool = True, allow_initial: bool = False, prompt: bool = True
 ) -> Generator[ScriptingDevice, None, None]:
     state = None
-    handled_serials = set()  # Keep track of YubiKeys we've already handled.
+    handled_serials: Set[Optional[int]] = set()
     pids, _ = scan_devices()
     n_devs = sum(pids.values())
     if n_devs == 0:
@@ -127,15 +130,88 @@ def multi(
         if new_state != state:
             state = new_state  # State has changed
             serials = set()
+            if len(pids) == 0 and None in handled_serials:
+                handled_serials.remove(None)  # Allow one key without serial at a time
             for device, info in list_all_devices():
                 serials.add(info.serial)
                 if info.serial not in handled_serials:
                     handled_serials.add(info.serial)
                     yield ScriptingDevice(device, info)
-            if not ignore_duplicates:  # Reset handled serials to currnently connected
+            if not ignore_duplicates:  # Reset handled serials to currently connected
                 handled_serials = serials
         else:
             try:
                 sleep(1.0)  # No change, sleep for 1 second.
             except KeyboardInterrupt:
                 return  # Stop waiting
+
+
+def _get_reader(reader) -> YkmanDevice:
+    readers = [d for d in list_ccid(reader) if d.transport == TRANSPORT.NFC]
+    if not readers:
+        raise ValueError(f"No NFC reader found matching filter: '{reader}'")
+    elif len(readers) > 1:
+        names = [r.fingerprint for r in readers]
+        raise ValueError(f"Multiple NFC readers matching filter: '{reader}' {names}")
+    return readers[0]
+
+
+def single_nfc(reader="", *, prompt=True) -> ScriptingDevice:
+    device = _get_reader(reader)
+    while True:
+        try:
+            with device.open_connection(SmartCardConnection) as connection:
+                info = read_info(None, connection)
+            return ScriptingDevice(device, info)
+        except NoCardException:
+            if prompt:
+                print("Place YubiKey on NFC reader...")
+                prompt = False
+            sleep(1.0)
+
+
+def multi_nfc(
+    reader="", *, ignore_duplicates=True, allow_initial=False, prompt=True
+) -> Generator[ScriptingDevice, None, None]:
+    device = _get_reader(reader)
+    prompted = False
+
+    try:
+        with device.open_connection(SmartCardConnection) as connection:
+            if not allow_initial:
+                raise ValueError("YubiKey must not be present initially.")
+    except NoCardException:
+        if prompt:
+            print("Place YubiKey on NFC reader...")
+            prompted = True
+        sleep(1.0)
+
+    handled_serials: Set[Optional[int]] = set()
+    current: Optional[int] = -1
+    while True:  # Run this until we stop the script with Ctrl+C
+        try:
+            with device.open_connection(SmartCardConnection) as connection:
+                info = read_info(None, connection)
+            if info.serial in handled_serials or current == info.serial:
+                if prompt and not prompted:
+                    print("Remove YubiKey from NFC reader.")
+                    prompted = True
+            else:
+                current = info.serial
+                if ignore_duplicates:
+                    handled_serials.add(current)
+                yield ScriptingDevice(device, info)
+                prompted = False
+        except NoCardException:
+            if None in handled_serials:
+                handled_serials.remove(None)  # Allow one key without serial at a time
+            current = -1
+            if prompt and not prompted:
+                print("Place YubiKey on NFC reader...")
+                prompted = True
+        except CardConnectionException:
+            pass
+        try:
+            sleep(1.0)  # No change, sleep for 1 second.
+        except KeyboardInterrupt:
+            return  # Stop waiting

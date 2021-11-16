@@ -2,11 +2,11 @@
 This script will program Yubico OTP credentials for a batch of YubiKeys, outputting
 a .ycfg file with the secret values for upload to a validation server.
 
-YubiKeys are inserted as the script is running, and can be removed once programmed.
-When done, press Ctrl+C to end the batch. If a YubiKey is inserted twice in the same
-session it will be ignored.
+YubiKeys are programmed over NFC using an NFC reader. One YubiKey can be placed
+on the reader at a time. When done, press Ctrl+C to end the batch. If a YubiKey
+is presented twice in the same session it will be ignored.
 
-Usage: yubiotp_batch.py <output_file>
+Usage: yubiotp_batch_nfc.py <nfc_reader> <output_file>
 """
 
 from ykman import scripting as s
@@ -20,21 +20,24 @@ import struct
 
 # ycfg file out output to, given as an argument
 try:
-    output_fname = sys.argv[1]
+    nfc_reader = sys.argv[1]
+    output_fname = sys.argv[2]
 except IndexError:
-    print("USAGE: yubiotp_batch.py <OUTPUT_FILE>")
+    print("USAGE: yubiotp_batch_nfc.py <NFC_READER> <OUTPUT_FILE>")
     sys.exit(1)
 
 # Write configuration to file
 with open(output_fname, "a") as output:
-    for device in s.multi(allow_initial=True):
+    # Look for YubiKeys on the NFC reader matched by the argument
+    for device in s.multi_nfc(nfc_reader):
         print(f"Programming YubiKey: {device}...")
         serial = device.info.serial
         if serial is None:
             print("No serial number, skipping")
             continue
 
-        with device.otp() as connection:
+        # NFC uses a SmartCardConnection for the OTP application
+        with device.smart_card() as connection:
             session = YubiOtpSession(connection)
 
             # Change these as appropriate
