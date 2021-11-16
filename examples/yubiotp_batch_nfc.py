@@ -18,10 +18,11 @@ import sys
 import struct
 
 
-# ycfg file out output to, given as an argument
 try:
-    nfc_reader = sys.argv[1]
-    output_fname = sys.argv[2]
+    # name of the NFC reader to use. Case-insentitive substring matching.
+    nfc_reader = sys.argv[1]  # e.g: "hid"
+    # ycfg file out output to, given as an argument
+    output_fname = sys.argv[2]  # e.g: "output.ycfg"
 except IndexError:
     print("USAGE: yubiotp_batch_nfc.py <NFC_READER> <OUTPUT_FILE>")
     sys.exit(1)
@@ -66,6 +67,6 @@ with open(output_fname, "a") as output:
             csv_line = format_csv(serial, public_id, private_id, key, access_code)
             output.write(csv_line + "\n")
 
-        print("Done! Insert next YubiKey...")
+        print("Done! Replace the YubiKey with the next one...")
 
 print("Done programming. Output written to:", output_fname)
