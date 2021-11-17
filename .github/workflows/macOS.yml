@@ -48,8 +48,10 @@ jobs:
           poetry run pyinstaller ykman.spec
           dist/ykman/ykman --version
           [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/ykman dist/ykman-$REF
+
+      - name: Build installer
+        run: |
+          ./resources/macos/make_installer.sh "4.1.0"
 
       - name: Upload build
         uses: actions/upload-artifact@v1
