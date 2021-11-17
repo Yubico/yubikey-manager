@@ -16,7 +16,10 @@ if [ -z "$2" ]
 then
     SOURCE_DIR="$SCRIPT_DIR/../../dist/ykman"
 else
-    SOURCE_DIR=`pwd`/$2
+    SOURCE_DIR=$2
+    if [[ ! "$SOURCE_DIR" = /* ]]; then
+        SOURCE_DIR=`pwd`/$SOURCE_DIR
+    fi
 fi
 
 
@@ -27,8 +30,17 @@ set -x
 
 cd $SCRIPT_DIR
 
-mkdir -p pkg/root/usr/local/bin pkg/comp
+# Create needed directories
+mkdir -p pkg/root/usr/local/bin pkg/comp ../../dist
 cp -r $SOURCE_DIR pkg/root/usr/local/
+
+# Make sure binary is executable
+BIN="pkg/root/usr/loca/ykman/ykman"
+if [[ ! -x "$BIN" ]]; then
+  chmod +x "$BIN"
+fi
+
+# Create symlink in /usr/local/bin
 (cd pkg/root/usr/local/bin && ln -s ../ykman/ykman)
 
 pkgbuild --root="pkg/root" --identifier "com.yubico.yubikey-manager" --version "$RELEASE_VERSION" "pkg/comp/ykman.pkg"
