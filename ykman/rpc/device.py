@@ -40,7 +40,6 @@ from ..device import (
     connect_to_device,
 )
 from ..diagnostics import get_diagnostics
-from ..logging_setup import setup as setup_logging
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection, ApduError, SW
 from yubikit.core.otp import OtpConnection
@@ -52,6 +51,7 @@ from smartcard.Exceptions import SmartcardException
 from dataclasses import asdict
 
 import os
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -87,8 +87,22 @@ class RootNode(RpcNode):
     @action(closes_child=False)
     def logging(self, params, event, signal):
         level = params["level"].upper()
-        log_file = params.get("file", None)
-        setup_logging(level, log_file)
+        log_level_value = getattr(logging, level)
+        logging.disable(logging.NOTSET)
+        logging.basicConfig(
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+            format=json.dumps(
+                {
+                    "time": 123456,
+                    "name": "%(name)s",
+                    "level": "%(levelname)s",
+                    "message": "%(message)s",
+                }
+            ).replace("123456", "%(created)d"),
+            level=log_level_value,
+        )
+
+        logger.info("Logging is enabled")
         return dict()
 
 
