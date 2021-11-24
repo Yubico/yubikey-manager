@@ -88,21 +88,8 @@ class RootNode(RpcNode):
     def logging(self, params, event, signal):
         level = params["level"].upper()
         log_level_value = getattr(logging, level)
-        logging.disable(logging.NOTSET)
-        logging.basicConfig(
-            datefmt="%Y-%m-%dT%H:%M:%S%z",
-            format=json.dumps(
-                {
-                    "time": 123456,
-                    "name": "%(name)s",
-                    "level": "%(levelname)s",
-                    "message": "%(message)s",
-                }
-            ).replace("123456", "%(created)d"),
-            level=log_level_value,
-        )
-
-        logger.info("Logging is enabled")
+        logging.getLogger().setLevel(log_level_value)
+        logger.info(f"Log level set to: {level}")
         return dict()
 
 

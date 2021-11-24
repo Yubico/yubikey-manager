@@ -39,6 +39,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _init_logging():
+    logging.disable(logging.NOTSET)
+    logging.basicConfig(
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+        format=json.dumps(
+            {
+                "time": 123456,
+                "name": "%(name)s",
+                "level": "%(levelname)s",
+                "message": "%(message)s",
+            }
+        ).replace("123456", "%(created)d"),
+    )
+
+
 def _handle_incoming(event, recv, error, cmd_queue):
     while True:
         request = recv()
@@ -119,6 +134,8 @@ def run_rpc(
 
 
 def run_rpc_pipes(stdout, stdin):
+    _init_logging()
+
     def _json_encode(value):
         if isinstance(value, bytes):
             return encode_bytes(value)
