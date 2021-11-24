@@ -51,7 +51,6 @@ from smartcard.Exceptions import SmartcardException
 from dataclasses import asdict
 
 import os
-import json
 import logging
 
 logger = logging.getLogger(__name__)
