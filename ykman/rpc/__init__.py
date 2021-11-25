@@ -39,19 +39,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class _JsonLoggingFormatter(logging.Formatter):
+    def format(self, record):
+        data = {
+            "time": record.created,
+            "name": record.name,
+            "level": record.levelname,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+            data["exc_text"] = record.exc_text
+        return json.dumps(data)
+
+
 def _init_logging():
     logging.disable(logging.NOTSET)
-    logging.basicConfig(
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-        format=json.dumps(
-            {
-                "time": 123456,
-                "name": "%(name)s",
-                "level": "%(levelname)s",
-                "message": "%(message)s",
-            }
-        ).replace("123456", "%(created)d"),
-    )
+    logging.basicConfig()
+    logging.root.handlers[0].setFormatter(_JsonLoggingFormatter())
 
 
 def _handle_incoming(event, recv, error, cmd_queue):
