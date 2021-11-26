@@ -37,7 +37,6 @@ from ..device import (
     list_all_devices,
     get_name,
     read_info,
-    connect_to_device,
 )
 from ..diagnostics import get_diagnostics
 from yubikit.core import TRANSPORT
@@ -210,28 +209,12 @@ class AbstractDeviceNode(RpcNode):
 class UsbDeviceNode(AbstractDeviceNode):
     def __init__(self, device, info):
         super().__init__(device, info)
-        self._interfaces = device.pid.get_interfaces()
 
     def _supports_connection(self, conn_type):
-        return self._interfaces.supports_connection(conn_type)
+        return self._device.supports_connection(conn_type)
 
     def _create_connection(self, conn_type):
-        if self._device.supports_connection(conn_type):
-            connection = self._device.open_connection(conn_type)
-        elif self._info and self._info.serial:
-            connection = connect_to_device(self._info.serial, [conn_type])[0]
-        else:
-            pids = scan_devices()[0]
-            if (
-                sum(
-                    n
-                    for pid, n in pids.items()
-                    if pid.get_interfaces().supports_connection(conn_type)
-                )
-                != 1
-            ):
-                raise ValueError("Unable to uniquely identify device")
-            connection = connect_to_device(connection_types=[conn_type])[0]
+        connection = self._device.open_connection(conn_type)
         return ConnectionNode(self._device.transport, connection, self._info)
 
     @child(condition=lambda self: self._supports_connection(SmartCardConnection))
