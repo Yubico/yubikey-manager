@@ -32,6 +32,7 @@ from .fido import Ctap2Node
 from .yubiotp import YubiOtpNode
 from .management import ManagementNode
 from .. import __version__ as ykman_version
+from ..base import PID
 from ..device import (
     scan_devices,
     list_all_devices,
@@ -48,6 +49,7 @@ from yubikit.management import CAPABILITY
 from ..pcsc import list_devices, YK_READER_NAME
 from smartcard.Exceptions import SmartcardException
 from dataclasses import asdict
+from typing import Mapping, Tuple
 
 import os
 import logging
@@ -119,17 +121,17 @@ class ReadersNode(RpcNode):
 
 class _ScanDevices:
     def __init__(self):
-        self._state = 0
+        self._state: Tuple[Mapping[PID, int], int] = ({}, 0)
         self._caching = False
 
     def __call__(self):
-        if not self._caching or not self._state:
-            self._state = scan_devices()[1]
+        if not self._caching or not self._state[1]:
+            self._state = scan_devices()
         return self._state
 
     def __enter__(self):
         self._caching = True
-        self._state = 0
+        self._state = ({}, 0)
 
     def __exit__(self, exc_type, exc, exc_tb):
         self._caching = False
@@ -149,14 +151,15 @@ class DevicesNode(RpcNode):
 
     @action(closes_child=False)
     def scan(self, *ignored):
-        return dict(state=self._get_state())
+        return self.get_data()
 
     def get_data(self):
-        return dict(state=self._get_state())
+        state = self._get_state()
+        return dict(state=state[1], pids=state[0])
 
     def list_children(self):
         state = self._get_state()
-        if state != self._list_state:
+        if state[1] != self._list_state:
             self._devices = {}
             self._device_mapping = {}
             for dev, info in list_all_devices():
@@ -166,7 +169,11 @@ class DevicesNode(RpcNode):
                 self._device_mapping[dev_id] = (dev, info)
                 name = get_name(info, dev.pid.get_type() if dev.pid else None)
                 self._devices[dev_id] = dict(pid=dev.pid, name=name, serial=info.serial)
-            self._list_state = state
+            if len(state[0]) == len(self._devices):
+                self._list_state = state[1]
+            else:
+                logger.warning("Not all devices identified")
+                self._list_state = 0
 
         return self._devices
 
