@@ -73,6 +73,11 @@ class StateResetException(RpcException):
         )
 
 
+class TimeoutException(RpcException):
+    def __init__(self):
+        super().__init__("timeout", "Command timed out waiting for user action")
+
+
 class ChildResetException(Exception):
     def __init__(self, message):
         self.message = message

@@ -31,6 +31,7 @@ from .base import (
     action,
     child,
     ChildResetException,
+    TimeoutException,
     RpcException,
     encode_bytes,
     decode_bytes,
@@ -39,6 +40,7 @@ from yubikit.core import require_version, NotSupportedError
 from yubikit.core.smartcard import ApduError, SW
 from yubikit.oath import OathSession, CredentialData, OATH_TYPE, HASH_ALGORITHM
 from dataclasses import asdict
+from time import time
 
 
 class AuthRequiredException(RpcException):
@@ -189,14 +191,26 @@ class CredentialNode(RpcNode):
     @action
     def code(self, params, event, signal):
         timestamp = params.pop("timestamp", None)
-        code = self.session.calculate_code(self.credential, timestamp)
-        return asdict(code)
+        try:
+            start = time()
+            code = self.session.calculate_code(self.credential, timestamp)
+            return asdict(code)
+        except ApduError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and time() - start > 5:
+                raise TimeoutException()
+            raise
 
     @action
     def calculate(self, params, event, signal):
         challenge = decode_bytes(params.pop("challenge"))
-        response = self.session.calculate(self.credential.id, challenge)
-        return dict(response=response)
+        try:
+            start = time()
+            response = self.session.calculate(self.credential.id, challenge)
+            return dict(response=response)
+        except ApduError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and time() - start > 5:
+                raise TimeoutException()
+            raise
 
     @action
     def delete(self, params, event, signal):
