@@ -29,7 +29,7 @@ packages = [
 [tool.poetry.dependencies]
 python = "^3.6"
 dataclasses = {version = "^0.8", python = "<3.7"}
-cryptography = ">=2.1, <36"
+cryptography = ">=2.1, <37"
 pyOpenSSL = {version = ">=0.15.1", optional = true}
 pyscard = "^1.9 || ^2.0"
 fido2 = ">=0.9, <1.0"
