@@ -137,6 +137,12 @@ class DO(IntEnum):
     CARDHOLDER_CERTIFICATE = 0x7F21
     ATT_CERTIFICATE = 0xFC
     KDF = 0xF9
+    NAME = 0x5B
+    LOGIN_DATA = 0x5E
+    LANGUAGE_PREF = 0x5F2D
+    SEX = 0x5F35
+    URL = 0x5F50
+    CARDHOLDER_DATA = 0x65
 
 
 @unique
@@ -157,6 +163,31 @@ class OID(bytes, Enum):
             return getattr(cls, name.upper())
         except AttributeError:
             raise ValueError("Unsupported curve: " + name)
+
+
+@unique
+class SEX(IntEnum):
+    NOT_KNOWN = 0x30
+    MALE = 0x31
+    FEMALE = 0x32
+    NOT_APPLICABLE = 0x39
+
+    def __str__(self):
+        if self == SEX.NOT_KNOWN:
+            return "Not known"
+        elif self == SEX.MALE:
+            return "Male"
+        elif self == SEX.FEMALE:
+            return "Female"
+        elif self == SEX.NOT_APPLICABLE:
+            return "Not applicable"
+
+    @classmethod
+    def for_name(cls, name):
+        try:
+            return getattr(cls, name.upper())
+        except AttributeError:
+            raise ValueError("Unsupported sex: " + name)
 
 
 def _get_curve_name(key):
@@ -589,6 +620,69 @@ class OpenPgpController(object):
         require_version(self.version, (5, 2, 0))
         self._app.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.indx, 0)
         return self.read_certificate(key_slot)
+
+    def set_name(self, name):
+        """Requires Admin PIN verification."""
+        if len(name) > 39:
+            raise ValueError("Name has to be between 0 and 39 characters.")
+
+        name = name.encode()
+
+        self._put_data(DO.NAME, name)
+
+    def set_login_data(self, login_data):
+        """Requires Admin PIN verification."""
+        login_data = login_data.encode()
+
+        self._put_data(DO.LOGIN_DATA, login_data)
+
+    def set_language_pref(self, language_pref):
+        """Requires Admin PIN verification."""
+        if len(language_pref) < 2 or len(language_pref) > 8:
+            raise ValueError(
+                "Language preference has to be between 2 and 8 characters."
+            )
+
+        language_pref = language_pref.encode()
+
+        self._put_data(DO.LANGUAGE_PREF, language_pref)
+
+    def set_sex(self, sex):
+        """Requires Admin PIN verification."""
+        sex = struct.pack(">B", sex)
+
+        self._put_data(DO.SEX, sex)
+
+    def set_url(self, url):
+        """Requires Admin PIN verification."""
+        url = url.encode()
+
+        self._put_data(DO.URL, url)
+
+    def get_name(self):
+        data = self._get_data(DO.CARDHOLDER_DATA)
+        len = data[3]
+        name = data[4 : len + 4]
+
+        return name.decode()
+
+    def get_login_data(self):
+        return self._get_data(DO.LOGIN_DATA).decode()
+
+    def get_language_pref(self):
+        data = self._get_data(DO.CARDHOLDER_DATA)
+        name_len = data[3]
+        len = data[name_len + 6]
+        lang = data[name_len + len + 9 : name_len + len + 9]
+
+        return lang.decode()
+
+    def get_sex(self):
+        sex = self._get_data(DO.CARDHOLDER_DATA)[-1]
+        return SEX(sex)
+
+    def get_url(self):
+        return self._get_data(DO.URL).decode()
 
 
 def get_openpgp_info(controller: OpenPgpController) -> str:

@@ -28,7 +28,7 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info
+from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info, SEX
 from .util import (
     cli_fail,
     click_force_option,
@@ -414,3 +414,178 @@ def import_certificate(ctx, key, cert, admin_pin):
     except Exception as e:
         logger.debug("Failed to import", exc_info=e)
         cli_fail("Failed to import certificate")
+
+
+@openpgp.group("data")
+def data():
+    """
+    Manage and get data.
+    """
+
+
+@data.command("name")
+@click.option("-n", "--name", help="New name.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def name(ctx, name, admin_pin):
+    """
+    Return and change the saved name.
+
+    Overwrite it when a new name and pin is set.
+    """
+    controller = ctx.obj["controller"]
+
+    if name is not None:
+        if admin_pin is None:
+            admin_pin = click_prompt("Enter ADMIN PIN", hide_input=True)
+
+        try:
+            controller.verify_admin(admin_pin)
+            controller.set_name(name)
+        except Exception as e:
+            logger.debug("Failed to set new name", exc_info=e)
+            cli_fail("Failed to set new name")
+
+    try:
+        name = controller.get_name()
+    except Exception as e:
+        logger.debug("Failed to get name", exc_info=e)
+        # cli_fail("Failed to get name")
+        raise e
+
+    click.echo(f"Name is {name}.")
+
+
+@data.command("login_data")
+@click.option("-l", "--login_data", help="New login_data.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def login_data(ctx, login_data, admin_pin):
+    """
+    Return and change the saved login data.
+
+    Overwrite it when a new login data and pin is set.
+    """
+    controller = ctx.obj["controller"]
+
+    if login_data is not None:
+        if admin_pin is None:
+            admin_pin = click_prompt("Enter ADMIN PIN", hide_input=True)
+
+        try:
+            controller.verify_admin(admin_pin)
+            controller.set_login_data(login_data)
+        except Exception as e:
+            logger.debug("Failed to set new login data", exc_info=e)
+            cli_fail("Failed to set new login data")
+
+    try:
+        login_data = controller.get_login_data()
+    except Exception as e:
+        logger.debug("Failed to get login data", exc_info=e)
+        cli_fail("Failed to get login data")
+
+    click.echo(f"Login data is {login_data}.")
+
+
+@data.command("lang")
+@click.option("-l", "--language_pref", help="New language preference.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def lang(ctx, language_pref, admin_pin):
+    """
+    Return and change the saved language preference.
+
+    Overwrite it when a new language preference and pin is set.
+    """
+    controller = ctx.obj["controller"]
+
+    if language_pref is not None:
+        if admin_pin is None:
+            admin_pin = click_prompt("Enter ADMIN PIN", hide_input=True)
+
+        try:
+            controller.verify_admin(admin_pin)
+            controller.set_language_pref(language_pref)
+        except Exception as e:
+            logger.debug("Failed to set new language preference", exc_info=e)
+            cli_fail("Failed to set new language preference")
+
+    try:
+        language_pref = controller.get_language_pref()
+    except Exception as e:
+        logger.debug("Failed to get language preference", exc_info=e)
+        cli_fail("Failed to get language preference")
+
+    click.echo(f"Language preference is {language_pref}.")
+
+
+@data.command("sex")
+@click.option("-s", "--sex", help="New sex.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def sex(ctx, sex, admin_pin):
+    """
+    Return and change the saved sex.
+
+    Overwrite it when a new sex and pin is set.
+    Possible options are not_kown, male, female and not_applicable
+    """
+    controller = ctx.obj["controller"]
+
+    if sex is not None:
+        try:
+            sex = SEX.for_name(sex)
+        except Exception as e:
+            logger.debug(f"Invalid sex {sex}", exc_info=e)
+            cli_fail(f"Invalid sex {sex}")
+
+        if admin_pin is None:
+            admin_pin = click_prompt("Enter ADMIN PIN", hide_input=True)
+
+        try:
+            controller.verify_admin(admin_pin)
+            controller.set_sex(sex)
+        except Exception as e:
+            logger.debug("Failed to set new sex", exc_info=e)
+            cli_fail("Failed to set new sex")
+
+    try:
+        sex = controller.get_sex()
+    except Exception as e:
+        logger.debug("Failed to get sex", exc_info=e)
+        cli_fail("Failed to get sex")
+
+    click.echo(f"Sex is {sex}.")
+
+
+@data.command("url")
+@click.option("-u", "--url", help="New url.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def url(ctx, url, admin_pin):
+    """
+    Return and change the saved url.
+
+    Overwrite it when a new url and pin is set.
+    """
+    controller = ctx.obj["controller"]
+
+    if url is not None:
+        if admin_pin is None:
+            admin_pin = click_prompt("Enter ADMIN PIN", hide_input=True)
+
+        try:
+            controller.verify_admin(admin_pin)
+            controller.set_url(url)
+        except Exception as e:
+            logger.debug("Failed to set new url", exc_info=e)
+            cli_fail("Failed to set new url")
+
+    try:
+        url = controller.get_url()
+    except Exception as e:
+        logger.debug("Failed to get url", exc_info=e)
+        cli_fail("Failed to get url")
+
+    click.echo(f"Url is {url}.")
