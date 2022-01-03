@@ -86,3 +86,48 @@ class TestAdminPin:
             "change-admin-pin",
             input=old_new_new(NON_DEFAULT_ADMIN_PIN, DEFAULT_ADMIN_PIN),
         )
+
+
+class TestForceSignature:
+    def test_set_force_sig(self, ykman_cli):
+        ykman_cli(
+            "openpgp",
+            "access",
+            "set-signature-policy",
+            "ALWAYS",
+            "-a",
+            DEFAULT_ADMIN_PIN,
+        )
+
+        output = ykman_cli("openpgp", "info").output
+        assert "Always" in output
+
+        ykman_cli(
+            "openpgp", "access", "set-signature-policy", "ONCE", "-a", DEFAULT_ADMIN_PIN
+        )
+
+        output = ykman_cli("openpgp", "info").output
+        assert "Once" in output
+
+    def test_set_force_sig_prompt(self, ykman_cli):
+        ykman_cli(
+            "openpgp",
+            "access",
+            "set-signature-policy",
+            "ALWAYS",
+            input=DEFAULT_ADMIN_PIN,
+        )
+
+        output = ykman_cli("openpgp", "info").output
+        assert "Always" in output
+
+        ykman_cli(
+            "openpgp",
+            "access",
+            "set-signature-policy",
+            "ONCE",
+            input=DEFAULT_ADMIN_PIN,
+        )
+
+        output = ykman_cli("openpgp", "info").output
+        assert "Once" in output

@@ -28,7 +28,13 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info
+from ..openpgp import (
+    OpenPgpController,
+    KEY_SLOT,
+    TOUCH_MODE,
+    PIN_POLICY,
+    get_openpgp_info,
+)
 from .util import (
     CliFail,
     click_force_option,
@@ -235,6 +241,33 @@ def change_admin(ctx, admin_pin, new_admin_pin):
         )
 
     controller.change_admin(admin_pin, new_admin_pin)
+
+
+@access.command("set-signature-policy")
+@click.argument("policy", metavar="POLICY", type=EnumChoice(PIN_POLICY))
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def set_signature_policy(ctx, policy, admin_pin):
+    """
+    Set Signature PIN policy.
+
+    \b
+    POLICY  Signature PIN policy to set (always, once).
+
+    The Signature PIN policy is used to control whether the PIN is
+    always required when using the Signature key, or if it is required
+    only once per session.
+    """
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    try:
+        controller.verify_admin(admin_pin)
+        controller.set_signature_pin_policy(policy)
+    except Exception:
+        raise CliFail("Failed to set new Signature PIN policy")
 
 
 @openpgp.group("keys")
