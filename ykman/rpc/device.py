@@ -69,6 +69,11 @@ class RootNode(RpcNode):
             result = {}
         return result
 
+    def get_child(self, name):
+        self._child = self.create_child(name)
+        self._child_name = name
+        return self._child
+
     def get_data(self):
         return dict(version=ykman_version)
 
@@ -99,6 +104,10 @@ class ReadersNode(RpcNode):
         self._state = set()
         self._readers = {}
         self._reader_mapping = {}
+
+    @action(closes_child=False)
+    def scan(self, *ignored):
+        return self.list_children()
 
     def list_children(self):
         devices = [
@@ -195,6 +204,13 @@ class AbstractDeviceNode(RpcNode):
             self._child = None
             name = self._child_name
             self._child_name = None
+            raise NoSuchNodeException(name)
+
+    def create_child(self, name):
+        try:
+            return super().create_child(name)
+        except (SmartcardException, OSError) as e:
+            logger.error(f"Unable to create child {name}", exc_info=e)
             raise NoSuchNodeException(name)
 
     def get_data(self):
