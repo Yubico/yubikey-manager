@@ -1,3 +1,12 @@
+* Version 4.0.8 (unreleased)
+ ** Bugfix: Fix error message for invalid modhex when programing a YubiOTP credential.
+ ** Bugfix: Fix issue with displaying a Steam credential when it is the only account.
+ ** Bugfix: Prevent installation of files in site-packages root.
+ ** Bugfix: Fix cleanup logic in PIV for protected management key.
+ ** Add support for token identifier when programming slot-based HOTP.
+ ** Add support for programming NDEF in text mode.
+ ** Dependency: Add support for Cryptography <= 38.
+
 * Version 4.0.7 (released 2021-09-08)
  ** Bugfix release: Fix broken naming for "YubiKey 4", and a small OATH issue with
     touch Steam credentials.
