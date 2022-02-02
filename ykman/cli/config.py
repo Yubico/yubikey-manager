@@ -42,7 +42,7 @@ from .util import (
     EnumChoice,
     cli_fail,
 )
-import os
+import secrets
 import re
 import click
 import logging
@@ -134,7 +134,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     if clear:
         set_code = CLEAR_LOCK_CODE
     elif generate:
-        set_code = os.urandom(16)
+        set_code = secrets.token_bytes(16)
         click.echo(f"Using a randomly generated lock code: {set_code.hex()}")
         force or click.confirm(
             "Lock configuration with this lock code?", abort=True, err=True

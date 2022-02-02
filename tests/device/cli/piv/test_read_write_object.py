@@ -1,4 +1,4 @@
-import os
+import secrets
 
 from cryptography.hazmat.primitives import serialization
 from ....util import generate_self_signed_certificate
@@ -44,7 +44,7 @@ class TestReadWriteObject:
         assert data == output_data
 
     def test_read_write_read_is_noop(self, ykman_cli):
-        data = os.urandom(32)
+        data = secrets.token_bytes(32)
 
         ykman_cli(
             "piv",
@@ -79,7 +79,7 @@ class TestReadWriteObject:
         assert output2 == data
 
     def test_read_write_aliases(self, ykman_cli):
-        data = os.urandom(32)
+        data = secrets.token_bytes(32)
 
         with io.StringIO() as buf:
             with contextlib.redirect_stderr(buf):

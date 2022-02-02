@@ -20,7 +20,7 @@ from typing import Optional, List, Mapping
 import hmac
 import hashlib
 import struct
-import os
+import secrets
 import re
 
 
@@ -280,7 +280,7 @@ class OathSession:
 
     def validate(self, key: bytes) -> None:
         response = _hmac_sha1(key, self._challenge)
-        challenge = os.urandom(8)
+        challenge = secrets.token_bytes(8)
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
         resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
         verification = _hmac_sha1(key, challenge)
@@ -291,7 +291,7 @@ class OathSession:
         self._challenge = None
 
     def set_key(self, key: bytes) -> None:
-        challenge = os.urandom(8)
+        challenge = secrets.token_bytes(8)
         response = _hmac_sha1(key, challenge)
         self.protocol.send_apdu(
             0,

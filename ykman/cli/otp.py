@@ -71,7 +71,7 @@ from ..otp import (
 from threading import Event
 from time import time
 import logging
-import os
+import secrets
 import struct
 import click
 import webbrowser
@@ -391,7 +391,7 @@ def yubiotp(
 
     if not private_id:
         if generate_private_id:
-            private_id = os.urandom(6)
+            private_id = secrets.token_bytes(6)
             click.echo(f"Using a randomly generated private ID: {private_id.hex()}")
         elif force:
             ctx.fail(
@@ -404,7 +404,7 @@ def yubiotp(
 
     if not key:
         if generate_key:
-            key = os.urandom(16)
+            key = secrets.token_bytes(16)
             click.echo(f"Using a randomly generated secret key: {key.hex()}")
         elif force:
             ctx.fail(
@@ -565,7 +565,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
                 "set the KEY argument or set the --generate flag."
             )
         elif generate:
-            key = os.urandom(20)
+            key = secrets.token_bytes(20)
             if totp:
                 b32key = b32encode(key).decode()
                 click.echo(f"Using a randomly generated key (Base32): {b32key}")

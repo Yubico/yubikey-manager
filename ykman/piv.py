@@ -50,7 +50,7 @@ from collections import OrderedDict
 from datetime import datetime
 import logging
 import struct
-import os
+import secrets
 
 from typing import Union, Mapping, Optional, List, Type, cast
 
@@ -158,7 +158,7 @@ def derive_management_key(pin: str, salt: bytes) -> bytes:
 
 def generate_random_management_key(algorithm: MANAGEMENT_KEY_TYPE) -> bytes:
     """Generates a new random management key."""
-    return os.urandom(algorithm.key_len)
+    return secrets.token_bytes(algorithm.key_len)
 
 
 class PivmanData:
@@ -315,7 +315,7 @@ def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
             derive_management_key(old_pin, cast(bytes, pivman.salt)),
         )
         session.verify_pin(new_pin)
-        new_salt = os.urandom(16)
+        new_salt = secrets.token_bytes(16)
         new_key = derive_management_key(new_pin, new_salt)
         session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
         pivman.salt = new_salt
@@ -395,7 +395,7 @@ def generate_chuid() -> bytes:
 
     return (
         Tlv(0x30, FASC_N)
-        + Tlv(0x34, os.urandom(16))
+        + Tlv(0x34, secrets.token_bytes(16))
         + Tlv(0x35, EXPIRY)
         + Tlv(0x3E)
         + Tlv(TAG_LRC)
@@ -405,7 +405,7 @@ def generate_chuid() -> bytes:
 def generate_ccc() -> bytes:
     """Generates a CCC (Card Capability Container)."""
     return (
-        Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
+        Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + secrets.token_bytes(14))
         + Tlv(0xF1, b"\x21")
         + Tlv(0xF2, b"\x21")
         + Tlv(0xF3)

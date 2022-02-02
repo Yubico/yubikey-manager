@@ -58,7 +58,7 @@ from enum import Enum, IntEnum, unique
 from typing import Optional, Union, Type, cast
 
 import logging
-import os
+import secrets
 import re
 
 
@@ -488,7 +488,7 @@ class PivSession:
             Tlv(TAG_DYN_AUTH, Tlv(TAG_AUTH_WITNESS)),
         )
         witness = Tlv.unpack(TAG_AUTH_WITNESS, Tlv.unpack(TAG_DYN_AUTH, response))
-        challenge = os.urandom(key_type.challenge_len)
+        challenge = secrets.token_bytes(key_type.challenge_len)
 
         backend = default_backend()
         cipher_key = _parse_management_key(key_type, management_key)
