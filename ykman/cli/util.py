@@ -28,6 +28,7 @@
 import functools
 import click
 import sys
+from typing import NoReturn
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
@@ -224,6 +225,6 @@ def prompt_timeout(timeout=0.5):
         timer.cancel()
 
 
-def cli_fail(message: str, code: int = 1):
+def cli_fail(message: str, code: int = 1) -> NoReturn:
     click.echo(f"Error: {message}", err=True)
     sys.exit(code)
