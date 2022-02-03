@@ -5,7 +5,7 @@ Python 3.6 (or later) library and command line tool for configuring a YubiKey.
 If you're looking for the full graphical application, which also includes the command line tool, it's https://developers.yubico.com/yubikey-manager-qt/[here].
 
 === Usage
-For more usage information and examples, see the https://support.yubico.com/support/solutions/articles/15000012643-yubikey-manager-cli-ykman-user-guide[YubiKey Manager CLI User Manual].
+For more usage information and examples, see the https://docs.yubico.com/software/yubikey/tools/ykman/Using_the_ykman_CLI.html[YubiKey Manager CLI User Manual].
 
 ....
 Usage: ykman [OPTIONS] COMMAND [ARGS]...

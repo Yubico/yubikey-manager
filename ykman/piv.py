@@ -262,6 +262,7 @@ def pivman_set_mgm_key(
 ) -> None:
     """Set a new management key, while keeping PivmanData in sync."""
     pivman = get_pivman_data(session)
+    pivman_prot = None
 
     if store_on_device or (not store_on_device and pivman.has_stored_key):
         # Ensure we have access to protected data before overwriting key
@@ -278,26 +279,29 @@ def pivman_set_mgm_key(
     if pivman.has_derived_key:
         # Clear salt for old derived keys.
         pivman.salt = None
+
     # Set flag for stored or not stored key.
     pivman.mgm_key_protected = store_on_device
 
     # Update readable pivman data
     session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
-    if store_on_device:
-        # Store key in protected pivman data
-        pivman_prot.key = new_key
-        session.put_object(OBJECT_ID_PIVMAN_PROTECTED_DATA, pivman_prot.get_bytes())
-    elif not store_on_device and pivman.has_stored_key:
-        # If new key should not be stored and there is an old stored key,
-        # try to clear it.
-        try:
-            pivman_prot.key = None
-            session.put_object(
-                OBJECT_ID_PIVMAN_PROTECTED_DATA,
-                pivman_prot.get_bytes(),
-            )
-        except ApduError as e:
-            logger.debug("No PIN provided, can't clear key...", exc_info=e)
+
+    if pivman_prot is not None:
+        if store_on_device:
+            # Store key in protected pivman data
+            pivman_prot.key = new_key
+            session.put_object(OBJECT_ID_PIVMAN_PROTECTED_DATA, pivman_prot.get_bytes())
+        elif pivman_prot.key:
+            # If new key should not be stored and there is an old stored key,
+            # try to clear it.
+            try:
+                pivman_prot.key = None
+                session.put_object(
+                    OBJECT_ID_PIVMAN_PROTECTED_DATA,
+                    pivman_prot.get_bytes(),
+                )
+            except ApduError as e:
+                logger.debug("No PIN provided, can't clear key...", exc_info=e)
 
 
 def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
