@@ -532,7 +532,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     "--totp",
     is_flag=True,
     required=False,
-    help="Use a base32 encoded key for TOTP credentials.",
+    help="Use a base32 encoded key (optionally padded) for TOTP credentials.",
 )
 @click.option(
     "-g",
@@ -548,6 +548,9 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     Program a challenge-response credential.
 
     If KEY is not given, an interactive prompt will ask for it.
+
+    \b
+    KEY     A key given in hex (or base32, if --totp is specified).
     """
     session = ctx.obj["session"]
 
@@ -568,9 +571,9 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             key = os.urandom(20)
             if totp:
                 b32key = b32encode(key).decode()
-                click.echo(f"Using a randomly generated key (Base32): {b32key}")
+                click.echo(f"Using a randomly generated key (base32): {b32key}")
             else:
-                click.echo(f"Using a randomly generated key: {key.hex()}")
+                click.echo(f"Using a randomly generated key (hex): {key.hex()}")
         elif totp:
             while True:
                 key = click_prompt("Enter a secret key (base32)")
