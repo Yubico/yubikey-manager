@@ -169,8 +169,8 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
 
             # Use stored key, if available
             if keys.keyring_available and device_id in keys:
-                key = bytes.fromhex(keys.get_secret(device_id))
                 try:
+                    key = bytes.fromhex(keys.get_secret(device_id))
                     _validate(ctx, key, False)
                     return
                 except ApduError as e:
@@ -178,13 +178,17 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
                     if e.sw == SW.INCORRECT_PARAMETERS:
                         del keys[device_id]
                         keys.write()
+                except Exception as e:
+                    # Other error, fall though to prompt
+                    logger.warning("Error authenticating", exc_info=e)
 
             # Prompt for password
             password = click_prompt(prompt, hide_input=True)
             key = session.derive_key(password)
             _validate(ctx, key, remember)
-        except Exception:
+        except ApduError:
             cli_fail("Authentication to the YubiKey failed. Wrong password?")
+
     elif password:
         cli_fail("Password provided, but no password is set.")
 
