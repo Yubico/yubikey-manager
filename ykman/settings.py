@@ -27,18 +27,17 @@
 
 import os
 import json
+import keyring
 from pathlib import Path
+from cryptography.fernet import Fernet
 
 
-HOME_CONFIG = "~/.ykman"
 XDG_DATA_HOME = os.environ.get("XDG_DATA_HOME", "~/.local/share") + "/ykman"
 XDG_CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", "~/.config") + "/ykman"
 
-USE_XDG = "YKMAN_XDG_EXPERIMENTAL" in os.environ
-
 
 class Settings(dict):
-    _config_dir = HOME_CONFIG
+    _config_dir = XDG_CONFIG_HOME
 
     def __init__(self, name):
         self.fname = Path(self._config_dir).expanduser().resolve() / (name + ".json")
@@ -63,8 +62,39 @@ class Settings(dict):
 
 
 class Configuration(Settings):
-    _config_dir = XDG_CONFIG_HOME if USE_XDG else HOME_CONFIG
+    _config_dir = XDG_CONFIG_HOME
 
 
 class AppData(Settings):
-    _config_dir = XDG_DATA_HOME if USE_XDG else HOME_CONFIG
+    _config_dir = XDG_DATA_HOME
+    _service = "yubioath"
+    _username = "wrap_key"
+
+    def __init__(self, name):
+        super().__init__(name)
+
+        try:
+            wrap_key = keyring.get_password(self._service, self._username)
+        except keyring.errors.KeyringError:
+            return
+
+        if wrap_key is None:
+            key = Fernet.generate_key()
+            keyring.set_password(self._service, self._username, key.decode())
+            self._fernet = Fernet(key)
+        else:
+            self._fernet = Fernet(wrap_key)
+
+    @property
+    def keyring_available(self) -> bool:
+        return hasattr(self, "_fernet")
+
+    def get_secret(self, key: str):
+        if not self.keyring_available:
+            raise ValueError("Keyring locked or unavailable")
+        return json.loads(self._fernet.decrypt(self[key].encode()))
+
+    def put_secret(self, key: str, value) -> None:
+        if not self.keyring_available:
+            raise ValueError("Keyring locked or unavailable")
+        self[key] = self._fernet.encrypt(json.dumps(value).encode()).decode()
