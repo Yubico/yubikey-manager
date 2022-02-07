@@ -223,6 +223,11 @@ class CredentialNode(RpcNode):
     def rename(self, params, event, signal):
         name = params.pop("name")
         issuer = params.pop("issuer", None)
-        new_id = self.session.rename_credential(self.credential.id, name, issuer)
-        self.refresh()
-        return dict(credential_id=new_id)
+        try:
+            new_id = self.session.rename_credential(self.credential.id, name, issuer)
+            self.refresh()
+            return dict(credential_id=new_id)
+        except ApduError as e:
+            if e.sw == SW.INCORRECT_PARAMETERS:
+                raise ValueError("Issuer/name too long")
+            raise e

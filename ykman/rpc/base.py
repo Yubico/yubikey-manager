@@ -56,6 +56,11 @@ class RpcException(Exception):
         super().__init__(message)
 
 
+class InvalidParametersException(RpcException):
+    def __init__(self, message):
+        super().__init__("invalid-command", f"Invalid parameters: {message}")
+
+
 class NoSuchActionException(RpcException):
     def __init__(self, name):
         super().__init__("invalid-command", f"No such action: {name}")
@@ -127,7 +132,8 @@ class RpcNode:
         except ChildResetException as e:
             self._close_child()
             raise StateResetException(e.message, traversed)
-
+        except ValueError as e:
+            raise InvalidParametersException(e)
         raise NoSuchActionException(action)
 
     def close(self):
