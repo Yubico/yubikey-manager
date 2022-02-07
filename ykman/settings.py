@@ -29,7 +29,7 @@ import os
 import json
 import keyring
 from pathlib import Path
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 
 XDG_DATA_HOME = os.environ.get("XDG_DATA_HOME", "~/.local/share") + "/ykman"
@@ -92,7 +92,10 @@ class AppData(Settings):
     def get_secret(self, key: str):
         if not self.keyring_available:
             raise ValueError("Keyring locked or unavailable")
-        return json.loads(self._fernet.decrypt(self[key].encode()))
+        try:
+            return json.loads(self._fernet.decrypt(self[key].encode()))
+        except InvalidToken:
+            raise ValueError("Undecryptable value")
 
     def put_secret(self, key: str, value) -> None:
         if not self.keyring_available:
