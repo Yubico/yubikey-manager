@@ -80,7 +80,7 @@ def oath(ctx):
     """
     session = OathSession(ctx.obj["conn"])
     ctx.obj["session"] = session
-    ctx.obj["settings"] = AppData("oath")
+    ctx.obj["oath_keys"] = AppData("oath_keys")
 
 
 @oath.command()
@@ -94,7 +94,7 @@ def info(ctx):
     click.echo(f"OATH version: {version[0]}.{version[1]}.{version[2]}")
     click.echo("Password protection: " + ("enabled" if session.locked else "disabled"))
 
-    keys = ctx.obj["settings"].get("keys", {})
+    keys = ctx.obj["oath_keys"]
     if session.locked and session.device_id in keys:
         click.echo("The password for this YubiKey is remembered by ykman.")
 
@@ -123,11 +123,10 @@ def reset(ctx):
     old_id = session.device_id
     session.reset()
 
-    settings = ctx.obj["settings"]
-    keys = settings.setdefault("keys", {})
+    keys = ctx.obj["oath_keys"]
     if old_id in keys:
         del keys[old_id]
-        settings.write()
+        keys.write()
 
     click.echo("Success! All OATH accounts have been deleted from the YubiKey.")
 
@@ -137,35 +136,59 @@ click_password_option = click.option(
 )
 
 
+click_remember_option = click.option(
+    "-r",
+    "--remember",
+    is_flag=True,
+    help="Remember the password on this machine.",
+)
+
+
 def _validate(ctx, key, remember):
-    try:
-        session = ctx.obj["session"]
-        session.validate(key)
-        if remember:
-            settings = ctx.obj["settings"]
-            keys = settings.setdefault("keys", {})
-            keys[session.device_id] = key.hex()
-            settings.write()
-            click.echo("Password remembered.")
-    except Exception:
-        cli_fail("Authentication to the YubiKey failed. Wrong password?")
+    session = ctx.obj["session"]
+    keys = ctx.obj["oath_keys"]
+    session.validate(key)
+    if remember:
+        keys.put_secret(session.device_id, key.hex())
+        keys.write()
+        click.echo("Password remembered.")
 
 
 def _init_session(ctx, password, remember, prompt="Enter the password"):
     session = ctx.obj["session"]
-    settings = ctx.obj["settings"]
-    keys = settings.setdefault("keys", {})
+    keys = ctx.obj["oath_keys"]
     device_id = session.device_id
 
     if session.locked:
-        if password:  # If password argument given, use it
-            key = session.derive_key(password)
-        elif device_id in keys:  # If remembered, use key
-            key = bytes.fromhex(keys[device_id])
-        else:  # Prompt for password
+        try:
+            # Use password, if given as argument
+            if password:
+                key = session.derive_key(password)
+                _validate(ctx, key, remember)
+                return
+
+            # Use stored key, if available
+            if keys.keyring_available and device_id in keys:
+                try:
+                    key = bytes.fromhex(keys.get_secret(device_id))
+                    _validate(ctx, key, False)
+                    return
+                except ApduError as e:
+                    # Delete wrong key and fall through to prompt
+                    if e.sw == SW.INCORRECT_PARAMETERS:
+                        del keys[device_id]
+                        keys.write()
+                except Exception as e:
+                    # Other error, fall though to prompt
+                    logger.warning("Error authenticating", exc_info=e)
+
+            # Prompt for password
             password = click_prompt(prompt, hide_input=True)
             key = session.derive_key(password)
-        _validate(ctx, key, remember)
+            _validate(ctx, key, remember)
+        except ApduError:
+            cli_fail("Authentication to the YubiKey failed. Wrong password?")
+
     elif password:
         cli_fail("Password provided, but no password is set.")
 
@@ -185,7 +208,8 @@ def access():
     help="Clear the current password.",
 )
 @click.option("-n", "--new-password", help="Provide a new password as an argument.")
-def change(ctx, password, clear, new_password):
+@click_remember_option
+def change(ctx, password, clear, new_password, remember):
     """
     Change the password used to protect OATH accounts.
 
@@ -198,29 +222,36 @@ def change(ctx, password, clear, new_password):
     _init_session(ctx, password, False, prompt="Enter the current password")
 
     session = ctx.obj["session"]
-    settings = ctx.obj["settings"]
-    keys = settings.setdefault("keys", {})
+    keys = ctx.obj["oath_keys"]
     device_id = session.device_id
 
     if clear:
         session.unset_key()
         if device_id in keys:
             del keys[device_id]
-            settings.write()
+            keys.write()
 
         click.echo("Password cleared from YubiKey.")
     else:
+        if remember:
+            if not keys.keyring_available:
+                cli_fail(
+                    "Failed to remember password, the keyring is locked or unavailable."
+                )
         if not new_password:
             new_password = click_prompt(
                 "Enter the new password", hide_input=True, confirmation_prompt=True
             )
         key = session.derive_key(new_password)
+        if remember:
+            keys.put_secret(device_id, key.hex())
+            keys.write()
+            click.echo("Password remembered.")
+        elif device_id in keys:
+            del keys[device_id]
+            keys.write()
         session.set_key(key)
         click.echo("Password updated.")
-        if device_id in keys:
-            keys[device_id] = key.hex()
-            settings.write()
-            click.echo("Password remembered.")
 
 
 @access.command()
@@ -233,29 +264,35 @@ def remember(ctx, password):
     """
     session = ctx.obj["session"]
     device_id = session.device_id
-    settings = ctx.obj["settings"]
-    keys = settings.setdefault("keys", {})
+    keys = ctx.obj["oath_keys"]
 
     if not session.locked:
         if device_id in keys:
             del keys[session.device_id]
-            settings.write()
+            keys.write()
         click.echo("This YubiKey is not password protected.")
     else:
+        if not keys.keyring_available:
+            cli_fail(
+                "Failed to remember password, the keyring is locked or unavailable."
+            )
         if not password:
             password = click_prompt("Enter the password", hide_input=True)
         key = session.derive_key(password)
-        _validate(ctx, key, True)
+        try:
+            _validate(ctx, key, True)
+        except Exception:
+            cli_fail("Authentication to the YubiKey failed. Wrong password?")
 
 
 def _clear_all_passwords(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
 
-    settings = AppData("oath")
-    if "keys" in settings:
-        del settings["keys"]
-        settings.write()
+    keys = AppData("oath_keys")
+    if keys:
+        keys.clear()
+        keys.write()
     click.echo("All passwords have been forgotten.")
     ctx.exit()
 
@@ -277,23 +314,15 @@ def forget(ctx):
     """
     session = ctx.obj["session"]
     device_id = session.device_id
-    settings = ctx.obj["settings"]
-    keys = settings.setdefault("keys", {})
+    keys = ctx.obj["oath_keys"]
 
     if device_id in keys:
         del keys[session.device_id]
-        settings.write()
+        keys.write()
         click.echo("Password forgotten.")
     else:
         click.echo("No password stored for this YubiKey.")
 
-
-click_remember_option = click.option(
-    "-r",
-    "--remember",
-    is_flag=True,
-    help="Remember the password on this machine.",
-)
 
 click_touch_option = click.option(
     "-t", "--touch", is_flag=True, help="Require touch on YubiKey to generate code."

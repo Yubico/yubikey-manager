@@ -54,6 +54,7 @@ exe = EXE(
     upx=True,
     console=True,
     manifest="ykman.exe.manifest",
+    version="resources/win/version_info.txt",
 )
 coll = COLLECT(
     exe,
