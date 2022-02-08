@@ -36,11 +36,17 @@ from .base import (
     encode_bytes,
     decode_bytes,
 )
+from ..settings import AppData
 from yubikit.core import require_version, NotSupportedError
 from yubikit.core.smartcard import ApduError, SW
 from yubikit.oath import OathSession, CredentialData, OATH_TYPE, HASH_ALGORITHM
 from dataclasses import asdict
 from time import time
+import hmac
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AuthRequiredException(RpcException):
@@ -48,10 +54,29 @@ class AuthRequiredException(RpcException):
         super().__init__("auth-required", "Authentication is required")
 
 
+def _get_keys():
+    return AppData("oath_keys")
+
+
 class OathNode(RpcNode):
     def __init__(self, connection):
         super().__init__()
         self.session = OathSession(connection)
+
+        if self.session.locked:
+            keys = _get_keys()
+            if keys.keyring_available and self.session.device_id in keys:
+                try:
+                    key = bytes.fromhex(keys.get_secret(self.session.device_id))
+                    self._do_validate(key)
+                except ApduError as e:
+                    # Delete wrong key and fall through to prompt
+                    if e.sw == SW.INCORRECT_PARAMETERS:
+                        del keys[self.session.device_id]
+                        keys.write()
+                except Exception as e:
+                    # Other error, fall though to prompt
+                    logger.warning("Error authenticating", exc_info=e)
 
     def __call__(self, *args, **kwargs):
         try:
@@ -63,16 +88,35 @@ class OathNode(RpcNode):
             raise ChildResetException(f"SW: {e.sw:x}")
 
     def get_data(self):
+        keys = _get_keys()
         return dict(
             version=self.session.version,
             device_id=self.session.device_id,
             has_key=self.session.has_key,
             locked=self.session.locked,
+            remembered=self.session.device_id in keys,
         )
 
     @action
     def derive(self, params, event, signal):
         return dict(key=self.session.derive_key(params.pop("password")))
+
+    @action
+    def forget(self, params, event, signal):
+        keys = _get_keys()
+        del keys[self.session.device_id]
+        keys.write()
+        return dict()
+
+    def _remember_key(self, key):
+        keys = _get_keys()
+        if key is None:
+            if self.session.device_id in keys:
+                del keys[self.session.device_id]
+                keys.write()
+        else:
+            keys.put_secret(self.session.device_id, key.hex())
+            keys.write()
 
     def _get_key(self, params):
         has_key = "key" in params
@@ -85,29 +129,52 @@ class OathNode(RpcNode):
             return decode_bytes(params.pop("key"))
         raise ValueError("One of 'key' and 'password' must be provided.")
 
+    def _do_validate(self, key):
+        self.session.validate(key)
+        salt = os.urandom(32)
+        digest = hmac.new(salt, key, "sha256").digest()
+        self._key_verifier = (salt, digest)
+
     @action
     def validate(self, params, event, signal):
-        try:
-            self.session.validate(self._get_key(params))
-            return dict(unlocked=True)
-        except ApduError as e:
-            if e.sw == SW.INCORRECT_PARAMETERS:
-                return dict(unlocked=False)
-            raise e
+        remember = params.pop("remember", False)
+        key = self._get_key(params)
+        if self.session.locked:
+            try:
+                self._do_validate(key)
+                if remember:
+                    self._remember_key(key)
+                result = True
+            except ApduError as e:
+                if e.sw == SW.INCORRECT_PARAMETERS:
+                    return dict(success=False)
+                raise e
+        elif hasattr(self, "_key_verifier"):
+            salt, digest = self._key_verifier
+            verify = hmac.new(salt, key, "sha256").digest()
+            result = hmac.compare_digest(digest, verify)
+        else:
+            result = False
+        return dict(success=result)
 
     @action
     def set_key(self, params, event, signal):
-        self.session.set_key(self._get_key(params))
+        remember = params.pop("remember", False)
+        key = self._get_key(params)
+        self.session.set_key(key)
+        self._remember_key(key if remember else None)
         return dict()
 
     @action(condition=lambda self: self.session.has_key)
     def unset_key(self, params, event, signal):
         self.session.unset_key()
+        self._remember_key(None)
         return dict()
 
     @action
     def reset(self, params, event, signal):
         self.session.reset()
+        self._remember_key(None)
         return dict()
 
     @child(condition=lambda self: not self.session.locked)
