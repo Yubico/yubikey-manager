@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Yubico AB
+# Copyright (c) 2022 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -25,37 +25,52 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ykman import __version__ as ykman_version
-from ykman.util import get_windows_version
-from ykman.logging import init_logging
 from yubikit.logging import LOG_LEVEL
-from datetime import datetime
-import platform
 import logging
-import ctypes
-import sys
-import os
 
 
+logging.addLevelName(LOG_LEVEL.TRAFFIC, LOG_LEVEL.TRAFFIC.name)
 logger = logging.getLogger(__name__)
 
 
-def log_sys_info(log):
-    log(f"ykman: {ykman_version}")
-    log(f"Python: {sys.version}")
-    log(f"Platform: {sys.platform}")
-    log(f"Arch: {platform.machine()}")
-    if sys.platform == "win32":
-        log(f"Windows version: {get_windows_version()}")
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-    else:
-        is_admin = os.getuid() == 0
-    log(f"Running as admin: {is_admin}")
-    log("System date: %s", datetime.today().strftime("%Y-%m-%d"))
+def _print_box(*lines):
+    w = max([len(ln) for ln in lines])
+    bar = "#" * (w + 4)
+    box = ["", bar]
+    for ln in [""] + list(lines) + [""]:
+        box.append(f"# {ln.ljust(w)} #")
+    box.append(bar)
+    return "\n".join(box)
 
 
-def setup(log_level_name, log_file=None):
-    log_level = LOG_LEVEL[log_level_name.upper()]
-    init_logging(log_level, log_file=log_file)
+TRAFFIC_WARNING = (
+    "WARNING: All data sent to/from the YubiKey will be logged!",
+    "This data may contain sensitive values, such as secret keys, PINs or passwords!",
+)
 
-    log_sys_info(logger.debug)
+DEBUG_WARNING = (
+    "WARNING: Sensitive data may be logged!",
+    "Some personally identifying information may be logged, such as usernames!",
+)
+
+
+def set_log_level(level: LOG_LEVEL):
+    logging.getLogger().setLevel(level)
+
+    logger.info(f"Logging at level: {level.name}")
+    if level <= LOG_LEVEL.TRAFFIC:
+        logger.warning(_print_box(*TRAFFIC_WARNING))
+    elif level <= LOG_LEVEL.DEBUG:
+        logger.warning(_print_box(*DEBUG_WARNING))
+
+
+def init_logging(log_level: LOG_LEVEL, log_file=None):
+    logging.basicConfig(
+        force=log_file is None,  # Replace the default logger if logging to stderr
+        datefmt="%H:%M:%S",
+        filename=log_file,
+        format="%(levelname)s %(asctime)s.%(msecs)d [%(name)s.%(funcName)s:%(lineno)d] "
+        "%(message)s",
+    )
+
+    set_log_level(log_level)
