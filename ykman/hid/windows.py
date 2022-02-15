@@ -17,9 +17,11 @@
 
 from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 from yubikit.core.otp import OtpConnection
+from yubikit.logging import LOG_LEVEL
 
 from ctypes import WinDLL, WinError  # type: ignore
 from ctypes import wintypes, LibraryLoader
+from typing import Dict, Optional
 import ctypes
 import platform
 import logging
@@ -100,7 +102,8 @@ HANDLE = ctypes.c_void_p
 PHIDP_PREPARSED_DATA = ctypes.c_void_p  # pylint: disable=invalid-name
 
 # This is a HANDLE.
-INVALID_HANDLE_VALUE = 0xFFFFFFFF
+# INVALID_HANDLE_VALUE = 0xFFFFFFFF
+INVALID_HANDLE_VALUE = (1 << 8 * ctypes.sizeof(ctypes.c_void_p)) - 1
 
 # Status codes
 FILE_SHARE_READ = 0x00000001
@@ -203,10 +206,13 @@ class WinHidOtpConnection(OtpConnection):
         result = hid.HidD_GetFeature(self.handle, buf, ctypes.sizeof(buf))
         if not result:
             raise WinError()
-        return buf.raw[1:]
+        data = buf.raw[1:]
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
+        return data
 
     def send(self, data):
-        buf = ctypes.create_string_buffer(b"\0" + bytes(data))
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
+        buf = ctypes.create_string_buffer(b"\0" + data)
         result = hid.HidD_SetFeature(self.handle, buf, ctypes.sizeof(buf))
         if not result:
             raise WinError()
@@ -312,9 +318,23 @@ def list_paths():
         setupapi.SetupDiDestroyDeviceInfoList(collection)
 
 
+_device_cache: Dict[bytes, Optional[OtpYubiKeyDevice]] = {}
+
+
 def list_devices():
+    stale = set(_device_cache)
     devices = []
     for pid, path in list_paths():
+        stale.discard(path)
+
+        # Check if path already cached
+        if path in _device_cache:
+            dev = _device_cache[path]
+            if dev is not None:
+                devices.append(dev)
+            continue
+
+        _device_cache[path] = None
         device = kernel32.CreateFileA(
             path,
             0,
@@ -325,15 +345,21 @@ def list_devices():
             None,
         )
         if device == INVALID_HANDLE_VALUE:
-            logger.debug("Failed reading HID descriptor: INVALID_HANDLE")
+            logger.debug("Couldn't read HID descriptor for %s", path)
             continue
         try:
             usage = get_usage(device)
             if usage == USAGE_OTP:
-                devices.append(OtpYubiKeyDevice(path, pid, WinHidOtpConnection))
-        except Exception as e:
-            logger.debug("Failed reading HID descriptor: %s", e)
+                dev = OtpYubiKeyDevice(path, pid, WinHidOtpConnection)
+                _device_cache[path] = dev
+                devices.append(dev)
+        except Exception:
+            logger.debug("Couldn't read Usage Page for %s:", path, exc_info=True)
             continue
         finally:
             kernel32.CloseHandle(device)
+
+        # Remove entries from the cache that were not seen
+        for path in stale:
+            del _device_cache[path]
     return devices
