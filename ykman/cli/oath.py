@@ -122,6 +122,7 @@ def reset(ctx):
     click.echo("Resetting OATH data...")
     old_id = session.device_id
     session.reset()
+    logger.info("OATH application data reset")
 
     settings = ctx.obj["settings"]
     keys = settings.setdefault("keys", {})
@@ -204,6 +205,7 @@ def change(ctx, password, clear, new_password):
 
     if clear:
         session.unset_key()
+        logger.info("Password removed")
         if device_id in keys:
             del keys[device_id]
             settings.write()
@@ -216,6 +218,7 @@ def change(ctx, password, clear, new_password):
             )
         key = session.derive_key(new_password)
         session.set_key(key)
+        logger.info("New password set")
         click.echo("Password updated.")
         if device_id in keys:
             keys[device_id] = key.hex()
@@ -514,6 +517,7 @@ def _add_cred(ctx, data, touch, force):
 
     try:
         session.put_credential(data, touch)
+        logger.info("Credential added")
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
             cli_fail("No space left on the YubiKey for OATH accounts.")
@@ -679,6 +683,7 @@ def rename(ctx, query, name, force, password, remember):
             )
         ):
             session.rename_credential(cred.id, name, issuer)
+            logger.info("Credential renamed")
             click.echo(f"Renamed {_string_id(cred)} to {new_id.decode()}.")
         else:
             click.echo("Rename aborted by user.")
@@ -719,6 +724,7 @@ def delete(ctx, query, force, password, remember):
             )
         ):
             session.delete_credential(cred.id)
+            logger.info("Credential deleted")
             click.echo(f"Deleted {_string_id(cred)}.")
         else:
             click.echo("Deletion aborted by user.")

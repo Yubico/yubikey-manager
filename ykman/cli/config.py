@@ -164,6 +164,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
             use_code,
             set_code,
         )
+        logger.info("Lock code updated")
     except Exception:
         if info.is_locked:
             cli_fail("Failed to change the lock code. Wrong current code?")
@@ -342,6 +343,7 @@ def usb(
             reboot,
             lock_code,
         )
+        logger.info("USB application configuration updated")
     except Exception:
         cli_fail("Failed to configure USB applications.")
 
@@ -441,6 +443,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
             False,  # No need to reboot for NFC.
             lock_code,
         )
+        logger.info("NFC application configuration updated")
     except Exception:
         cli_fail("Failed to configure NFC applications.")
 
@@ -595,6 +598,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     try:
         mgmt.set_mode(mode, chalresp_timeout, autoeject)
+        logger.info("USB mode updated")
         click.echo(
             "Mode set! You must remove and re-insert your YubiKey "
             "for this change to take effect."

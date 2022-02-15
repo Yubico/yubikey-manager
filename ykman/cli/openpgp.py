@@ -73,6 +73,10 @@ def int_in_range(minval, maxval):
     return inner
 
 
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
 @ykman_group(SmartCardConnection)
 @click.pass_context
 @click_postpone_execution
@@ -121,6 +125,7 @@ def reset(ctx):
     """
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     ctx.obj["controller"].reset()
+    logger.info("OpenPGP application data reset")
     click.echo("Success! All data has been cleared and default PINs are set.")
     echo_default_pins()
 
@@ -170,6 +175,7 @@ def set_pin_retries(
 
         controller.verify_admin(admin_pin)
         controller.set_pin_retries(pin_retries, reset_code_retries, admin_pin_retries)
+        logger.info("Number of PIN/Reset Code/Admin PIN retries set")
 
         if resets_pins:
             click.echo("Default PINs are set.")
@@ -225,7 +231,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
-    prompt = f"Set touch policy of {key.value.lower()} key to {policy_name}?"
+    prompt = f"Set touch policy of {key.name} key to {policy_name}?"
     if policy.is_fixed:
         prompt = (
             "WARNING: This touch policy cannot be changed without deleting the "
@@ -237,6 +243,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
         try:
             controller.verify_admin(admin_pin)
             controller.set_touch(key, policy)
+            logger.info(f"Touch policy for slot {key.name} set")
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 cli_fail("Touch policy not allowed.")
@@ -271,6 +278,7 @@ def import_key(ctx, key, private_key, admin_pin):
     try:
         controller.verify_admin(admin_pin)
         controller.import_key(key, private_key)
+        logger.info(f"Private key imported for slot {key.name}")
     except Exception:
         cli_fail("Failed to import attestation key.")
 
@@ -314,6 +322,10 @@ def attest(ctx, key, certificate, pin, format):
             controller.verify_pin(pin)
             cert = controller.attest(key)
             certificate.write(cert.public_bytes(encoding=format))
+            logger.info(
+                f"Attestation certificate for slot {key.name} written to "
+                f"{_fname(certificate)}"
+            )
         except Exception:
             cli_fail("Attestation failed")
 
@@ -346,8 +358,9 @@ def export_certificate(ctx, key, format, certificate):
     try:
         cert = controller.read_certificate(key)
     except ValueError:
-        cli_fail(f"Failed to read certificate from {key.name}")
+        cli_fail(f"Failed to read certificate from slot {key.name}")
     certificate.write(cert.public_bytes(encoding=format))
+    logger.info(f"Certificate for slot {key.name} exported to {_fname(certificate)}")
 
 
 @certificates.command("delete")
@@ -371,6 +384,7 @@ def delete_certificate(ctx, key, admin_pin):
     try:
         controller.verify_admin(admin_pin)
         controller.delete_certificate(key)
+        logger.info(f"Certificate for slot {key.name} deleted")
     except Exception:
         cli_fail("Failed to delete certificate.")
 

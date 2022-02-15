@@ -84,8 +84,8 @@ def fido(ctx):
     conn = ctx.obj["conn"]
     try:
         ctx.obj["ctap2"] = Ctap2(conn)
-    except (ValueError, CtapError) as e:
-        logger.info("FIDO device does not support CTAP2: %s", e)
+    except (ValueError, CtapError):
+        logger.info("FIDO device does not support CTAP2", exc_info=True)
 
 
 @fido.command()
@@ -213,12 +213,12 @@ def reset(ctx, force):
                     return keys[0].open_connection(FidoConnection)
 
     if not force:
-        if not click.confirm(
+        click.confirm(
             "WARNING! This will delete all FIDO credentials, including FIDO U2F "
             "credentials, and restore factory settings. Proceed?",
             err=True,
-        ):
-            ctx.abort()
+            abort=True,
+        )
         if is_fips:
             destroy_input = click_prompt(
                 "WARNING! This is a YubiKey FIPS device. This command will also "
@@ -239,6 +239,7 @@ def reset(ctx, force):
                 fips_reset(conn)
             else:
                 Ctap2(conn).reset()
+        logger.info("FIDO application data reset")
     except CtapError as e:
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
             cli_fail(
@@ -392,6 +393,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             change_pin(pin, new_pin)
         else:
             set_pin(new_pin)
+    logger.info("FIDO PIN updated")
 
 
 def _require_pin(ctx, pin, feature="This feature"):
@@ -553,6 +555,7 @@ def creds_delete(ctx, query, pin, force):
         ):
             try:
                 credman.delete_cred(cred_id)
+                logger.info("Credential deleted")
             except CtapError:
                 cli_fail("Failed to delete resident credential.")
     else:
@@ -655,8 +658,10 @@ def bio_enroll(ctx, name, pin):
             elif e.code == CtapError.ERR.USER_ACTION_TIMEOUT:
                 cli_fail("Failed to add fingerprint due to user inactivity.")
             cli_fail(f"Failed to add fingerprint: {e.code.name}")
+    logger.info("Fingerprint template registered")
     click.echo("Capture complete.")
     bio.set_name(template_id, name)
+    logger.info("Fingerprint template name set")
 
 
 @bio.command("rename")
@@ -683,6 +688,7 @@ def bio_rename(ctx, template_id, name, pin):
         cli_fail(f"No fingerprint matching ID={template_id}.")
 
     bio.set_name(key, name)
+    logger.info("Fingerprint template renamed")
 
 
 @bio.command("delete")
@@ -721,5 +727,6 @@ def bio_delete(ctx, template_id, pin, force):
     if force or click.confirm(f"Delete fingerprint {_format_fp(key, name)}?"):
         try:
             bio.remove_enrollment(key)
+            logger.info("Fingerprint template deleted")
         except CtapError as e:
             cli_fail(f"Failed to delete fingerprint: {e.code.name}")

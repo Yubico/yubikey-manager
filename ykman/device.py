@@ -339,7 +339,7 @@ def _read_info_ccid(conn, key_type, interfaces):
             # Workaround to "de-select" the Management Applet needed for NEO
             conn.send_and_receive(b"\xa4\x04\x00\x08")
     except ApplicationNotAvailableError:
-        logger.debug("Unable to select Management application, use fallback.")
+        logger.debug("Couldn't select Management application, use fallback")
 
     # Synthesize data
     capabilities = CAPABILITY(0)
@@ -351,17 +351,18 @@ def _read_info_ccid(conn, key_type, interfaces):
         if version is None:
             version = otp_version
     except ApplicationNotAvailableError:
-        logger.debug("Unable to select OTP application")
+        logger.debug("Couldn't select OTP application, serial unknown")
         serial = None
 
     if version is None:
+        logger.debug("Firmware version unknown, using 3.0.0 as a baseline")
         version = Version(3, 0, 0)  # Guess, no way to know
 
     # Scan for remaining capabilities
+    logger.debug("Scan for available applications...")
     protocol = SmartCardProtocol(conn)
     for aid, code in SCAN_APPLETS.items():
         try:
-            logger.debug("Check for %s", code)
             protocol.select(aid)
             capabilities |= code
             logger.debug("Found applet: aid: %s, capability: %s", aid, code)
@@ -461,6 +462,8 @@ def _read_info_ctap(conn, key_type, interfaces):
         mgmt = ManagementSession(conn)
         return mgmt.read_device_info()
     except Exception:  # SKY 1, NEO, or YKP
+        logger.debug("Unable to get info via Management application, use fallback")
+
         # Best guess version
         if key_type == YUBIKEY.YKP:
             version = Version(4, 0, 0)
@@ -489,6 +492,8 @@ def _read_info_ctap(conn, key_type, interfaces):
 
 def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
     """Read out a DeviceInfo object from a YubiKey, or attempt to synthesize one."""
+
+    logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
     if pid:
         key_type: Optional[YUBIKEY] = pid.get_type()
         interfaces = pid.get_interfaces()
@@ -531,6 +536,7 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
                 | CAPABILITY.OPENPGP
                 | CAPABILITY.PIV
             )
+
         info.config.enabled_capabilities[TRANSPORT.USB] = usb_enabled
 
     # YK4-based FIPS version
@@ -559,6 +565,7 @@ def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
             info.supported_capabilities.pop(TRANSPORT.NFC, None)
             info.config.enabled_capabilities.pop(TRANSPORT.NFC, None)
 
+    logger.debug("Device info, after tweaks: %s", info)
     return info
 
 
