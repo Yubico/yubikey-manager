@@ -108,12 +108,10 @@ click_slot_argument = click.argument(
 )
 
 
-def _failed_to_write_msg(ctx, exc_info):
-    logger.error("Failed to write to device", exc_info=exc_info)
-    cli_fail(
-        "Failed to write to the YubiKey. Make sure the device does not "
-        'have restricted access (see "ykman otp --help" for more info).'
-    )
+_WRITE_FAIL_MSG = (
+    "Failed to write to the YubiKey. Make sure the device does not "
+    'have restricted access (see "ykman otp --help" for more info).'
+)
 
 
 def _confirm_slot_overwrite(slot_state, slot):
@@ -179,7 +177,7 @@ def otp(ctx, access_code):
         try:
             access_code = parse_access_code_hex(access_code)
         except Exception as e:
-            ctx.fail("Failed to parse access code: " + str(e))
+            ctx.fail(f"Failed to parse access code: {e}")
 
     ctx.obj["access_code"] = access_code
 
@@ -213,8 +211,8 @@ def swap(ctx):
     click.echo("Swapping slots...")
     try:
         session.swap_slots()
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -249,8 +247,8 @@ def ndef(ctx, slot, prefix, ndef_type):
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -273,8 +271,8 @@ def delete(ctx, slot, force):
     click.echo(f"Deleting the configuration in slot {slot}...")
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -456,8 +454,8 @@ def yubiotp(
             access_code,
             access_code,
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
     if config_output:
         serial = serial or session.get_serial()
@@ -531,8 +529,8 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -616,8 +614,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -659,8 +657,8 @@ def calculate(ctx, slot, challenge, totp, digits):
         else:
             try:
                 challenge = time_challenge(int(challenge))
-            except Exception as e:
-                logger.error("Error", exc_info=e)
+            except Exception:
+                logger.exception("Error parsing challenge")
                 ctx.fail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
         challenge = bytes.fromhex(challenge)
@@ -680,8 +678,8 @@ def calculate(ctx, slot, challenge, totp, digits):
             value = response.hex()
 
         click.echo(value)
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 def parse_modhex_or_bcd(value):
@@ -780,8 +778,8 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -886,5 +884,5 @@ def settings(
             new_access_code,
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        cli_fail(_WRITE_FAIL_MSG)

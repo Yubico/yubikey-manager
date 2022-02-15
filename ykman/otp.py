@@ -118,8 +118,8 @@ def prepare_upload_key(
             body=json.dumps(data, indent=False, sort_keys=True).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": user_agent},
         )
-    except Exception as e:
-        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
+    except Exception:
+        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=True)
         raise PrepareUploadFailed(None, None, [PrepareUploadError.CONNECTION_FAILED])
 
     resp = httpconn.getresponse()

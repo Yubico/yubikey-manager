@@ -164,8 +164,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
             use_code,
             set_code,
         )
-    except Exception as e:
-        logger.error("Setting the lock code failed", exc_info=e)
+    except Exception:
         if info.is_locked:
             cli_fail("Failed to change the lock code. Wrong current code?")
         cli_fail("Failed to set the lock code.")
@@ -343,8 +342,7 @@ def usb(
             reboot,
             lock_code,
         )
-    except Exception as e:
-        logger.error("Failed to write config", exc_info=e)
+    except Exception:
         cli_fail("Failed to configure USB applications.")
 
 
@@ -443,8 +441,7 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
             False,  # No need to reboot for NFC.
             lock_code,
         )
-    except Exception as e:
-        logger.error("Failed to write config", exc_info=e)
+    except Exception:
         cli_fail("Failed to configure NFC applications.")
 
 
@@ -602,9 +599,8 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             "Mode set! You must remove and re-insert your YubiKey "
             "for this change to take effect."
         )
-    except Exception as e:
-        logger.debug("Failed to switch mode", exc_info=e)
-        click.echo(
+    except Exception:
+        cli_fail(
             "Failed to switch mode on the YubiKey. Make sure your "
             "YubiKey does not have an access code set."
         )

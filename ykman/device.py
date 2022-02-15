@@ -70,9 +70,8 @@ logger = logging.getLogger(__name__)
 
 class ConnectionNotAvailableException(ValueError):
     def __init__(self, connection_types):
-        super().__init__(
-            f"No eligiable connections are available ({connection_types})."
-        )
+        types_str = ", ".join([c.__name__ for c in connection_types])
+        super().__init__(f"No eligiable connections are available ({types_str}).")
         self.connection_types = connection_types
 
 
@@ -85,7 +84,7 @@ def _warn_once(message, e_type=Exception):
                 return f()
             except e_type:
                 if not warned:
-                    print("WARNING:", message, file=sys.stderr)
+                    logger.warning(message)
                     warned.append(True)
                 raise
 
@@ -95,7 +94,7 @@ def _warn_once(message, e_type=Exception):
 
 
 @_warn_once(
-    "PC/SC not available. Smart card protocols will not function.",
+    "PC/SC not available. Smart card (CCID) protocols will not function.",
     EstablishContextException,
 )
 def list_ccid_devices():
@@ -137,8 +136,8 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
     for list_devs in CONNECTION_LIST_MAPPING.values():
         try:
             devs = list_devs()
-        except Exception as e:
-            logger.error("Unable to list devices for connection", exc_info=e)
+        except Exception:
+            logger.debug("Device listing error", exc_info=True)
             devs = []
         merged.update(Counter(d.pid for d in devs if d.pid is not None))
         fingerprints.update({d.fingerprint for d in devs})
@@ -195,8 +194,8 @@ class _UsbCompositeDevice(YkmanDevice):
                     logger.debug("Match on serial: %s", info.serial)
                     return conn
                 conn.close()
-            except Exception as e:
-                logger.error("Failed opening device", exc_info=e)
+            except Exception:
+                logger.exception("Failed opening device")
 
         raise ValueError("Failed to connect to the device")
 
@@ -215,8 +214,8 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
         iface = _usb_interface_for(connection_type)
         try:
             devs = list_devs()
-        except Exception as e:
-            logger.error("Unable to list devices for connection", exc_info=e)
+        except Exception:
+            logger.exception("Unable to list devices for connection")
             devs = []
 
         for dev in devs:
@@ -235,9 +234,9 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
                             info,
                         )
                     )
-                except Exception as e:
+                except Exception:
                     pids[dev.pid] = False
-                    logger.error("Failed opening device", exc_info=e)
+                    logger.exception("Failed opening device")
             else:
                 refs[1][iface].setdefault(dev.pid, []).append(dev)
         handled_pids.update({pid for pid, handled in pids.items() if handled})
@@ -261,9 +260,9 @@ def connect_to_device(
     for connection_type in connection_types:
         try:
             devs = CONNECTION_LIST_MAPPING[connection_type]()
-        except Exception as e:
-            logger.error(
-                f"Error listing connection of type {connection_type}", exc_info=e
+        except Exception:
+            logger.debug(
+                f"Error listing connection of type {connection_type}", exc_info=True
             )
             failed_connections.add(connection_type)
             continue
@@ -312,8 +311,8 @@ def _otp_read_data(conn) -> Tuple[Version, Optional[int]]:
     serial: Optional[int] = None
     try:
         serial = otp.get_serial()
-    except Exception as e:
-        logger.debug("Unable to read serial over OTP, no serial", exc_info=e)
+    except Exception:
+        logger.debug("Unable to read serial over OTP, no serial", exc_info=True)
     return version, serial
 
 
@@ -368,12 +367,11 @@ def _read_info_ccid(conn, key_type, interfaces):
             logger.debug("Found applet: aid: %s, capability: %s", aid, code)
         except ApplicationNotAvailableError:
             logger.debug("Missing applet: aid: %s, capability: %s", aid, code)
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "Error selecting aid: %s, capability: %s",
                 aid,
                 code,
-                exc_info=e,
             )
 
     # Assume U2F on devices >= 3.3.0

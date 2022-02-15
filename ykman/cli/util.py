@@ -38,6 +38,9 @@ from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
 from contextlib import contextmanager
 from threading import Timer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EnumChoice(click.Choice):
@@ -225,6 +228,11 @@ def prompt_timeout(timeout=0.5):
         timer.cancel()
 
 
+class Failure(Exception):
+    def __init__(self, message, status=1):
+        super().__init__(message)
+        self.status = status
+
+
 def cli_fail(message: str, code: int = 1) -> NoReturn:
-    click.echo(f"Error: {message}", err=True)
-    sys.exit(code)
+    raise Failure(message, status=code)

@@ -240,7 +240,6 @@ def set_touch(ctx, key, policy, admin_pin, force):
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 cli_fail("Touch policy not allowed.")
-            logger.debug("Failed to set touch policy", exc_info=e)
             cli_fail("Failed to set touch policy.")
 
 
@@ -267,14 +266,12 @@ def import_key(ctx, key, private_key, admin_pin):
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         private_key = parse_private_key(private_key.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
+    except Exception:
         cli_fail("Failed to parse private key.")
     try:
         controller.verify_admin(admin_pin)
         controller.import_key(key, private_key)
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
+    except Exception:
         cli_fail("Failed to import attestation key.")
 
 
@@ -317,8 +314,7 @@ def attest(ctx, key, certificate, pin, format):
             controller.verify_pin(pin)
             cert = controller.attest(key)
             certificate.write(cert.public_bytes(encoding=format))
-        except Exception as e:
-            logger.debug("Failed to attest", exc_info=e)
+        except Exception:
             cli_fail("Attestation failed")
 
 
@@ -375,8 +371,7 @@ def delete_certificate(ctx, key, admin_pin):
     try:
         controller.verify_admin(admin_pin)
         controller.delete_certificate(key)
-    except Exception as e:
-        logger.debug("Failed to delete ", exc_info=e)
+    except Exception:
         cli_fail("Failed to delete certificate.")
 
 
@@ -403,14 +398,12 @@ def import_certificate(ctx, key, cert, admin_pin):
 
     try:
         certs = parse_certificates(cert.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
+    except Exception:
         cli_fail("Failed to parse certificate.")
     if len(certs) != 1:
         cli_fail("Can only import one certificate.")
     try:
         controller.verify_admin(admin_pin)
         controller.import_certificate(key, certs[0])
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
+    except Exception:
         cli_fail("Failed to import certificate")

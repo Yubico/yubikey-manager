@@ -165,7 +165,6 @@ def reset(ctx, force):
     if isinstance(conn, CtapPcscDevice):  # NFC
         readers = list_ccid(conn._name)
         if not readers or readers[0].reader.name != conn._name:
-            logger.error(f"Multiple readers matched: {readers}")
             cli_fail("Unable to isolate NFC reader.")
         dev = readers[0]
         logger.debug(f"use: {dev}")
@@ -241,7 +240,6 @@ def reset(ctx, force):
             else:
                 Ctap2(conn).reset()
     except CtapError as e:
-        logger.error("Reset failed", exc_info=e)
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
             cli_fail(
                 "Reset failed. You need to touch your YubiKey to confirm the reset."
@@ -254,7 +252,6 @@ def reset(ctx, force):
         else:
             cli_fail(f"Reset failed: {e.code.name}")
     except ApduError as e:  # From fips_reset
-        logger.error("Reset failed", exc_info=e)
         if e.code == SW.COMMAND_NOT_ALLOWED:
             cli_fail(
                 "Reset failed. Reset must be triggered within 5 seconds after the "
@@ -262,8 +259,7 @@ def reset(ctx, force):
             )
         else:
             cli_fail("Reset failed.")
-    except Exception as e:
-        logger.error(e)
+    except Exception:
         cli_fail("Reset failed.")
 
 
@@ -352,14 +348,12 @@ def change_pin(ctx, pin, new_pin, u2f):
                 client_pin.change_pin(pin, new_pin)
 
         except CtapError as e:
-            logger.error("Failed to change PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 cli_fail("New PIN doesn't meet policy requirements.")
             else:
                 _fail_pin_error(ctx, e, "Failed to change PIN: %s")
 
         except ApduError as e:
-            logger.error("Failed to change PIN", exc_info=e)
             if e.code == SW.VERIFY_FAIL_NO_RETRY:
                 cli_fail("Wrong PIN.")
             elif e.code == SW.AUTH_METHOD_BLOCKED:
@@ -372,7 +366,6 @@ def change_pin(ctx, pin, new_pin, u2f):
         try:
             client_pin.set_pin(new_pin)
         except CtapError as e:
-            logger.error("Failed to set PIN", exc_info=e)
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 cli_fail("PIN is too long.")
             else:
@@ -435,14 +428,12 @@ def verify(ctx, pin):
                 pin, ClientPin.PERMISSION.GET_ASSERTION, "ykman.example.com"
             )
         except CtapError as e:
-            logger.error("PIN verification failed", exc_info=e)
-            cli_fail(f"Error: {e}")
+            cli_fail(f"PIN verification failed: {e}")
     elif is_fips_version(ctx.obj["info"].version):
         _fail_if_not_valid_pin(ctx, pin, True)
         try:
             fips_verify_pin(ctx.obj["conn"], pin)
         except ApduError as e:
-            logger.error("PIN verification failed", exc_info=e)
             if e.code == SW.VERIFY_FAIL_NO_RETRY:
                 cli_fail("Wrong PIN.")
             elif e.code == SW.AUTH_METHOD_BLOCKED:
@@ -513,7 +504,6 @@ def _init_credman(ctx, pin):
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
     except CtapError as e:
-        logger.error("Ctap error", exc_info=e)
         _fail_pin_error(ctx, e, "PIN error: %s")
 
     return CredentialManagement(ctap2, client_pin.protocol, token)
@@ -563,8 +553,7 @@ def creds_delete(ctx, query, pin, force):
         ):
             try:
                 credman.delete_cred(cred_id)
-            except CtapError as e:
-                logger.error("Failed to delete resident credential", exc_info=e)
+            except CtapError:
                 cli_fail("Failed to delete resident credential.")
     else:
         cli_fail("Multiple matches, make the query more specific.")
@@ -606,7 +595,6 @@ def _init_bio(ctx, pin):
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.BIO_ENROLL)
     except CtapError as e:
-        logger.error("Ctap error", exc_info=e)
         _fail_pin_error(ctx, e, "PIN error: %s")
 
     return FPBioEnrollment(ctap2, client_pin.protocol, token)
@@ -656,10 +644,9 @@ def bio_enroll(ctx, name, pin):
             if remaining:
                 click.echo(f"{remaining} more scans needed.")
         except CaptureError as e:
-            logger.error(f"Capture error: {e.code}")
+            logger.debug(f"Capture error: {e.code}")
             click.echo("Capture failed. Re-center your finger, and try again.")
         except CtapError as e:
-            logger.error("Failed to add fingerprint template", exc_info=e)
             if e.code == CtapError.ERR.FP_DATABASE_FULL:
                 cli_fail(
                     "Fingerprint storage full. "
@@ -735,5 +722,4 @@ def bio_delete(ctx, template_id, pin, force):
         try:
             bio.remove_enrollment(key)
         except CtapError as e:
-            logger.error("Failed to delete fingerprint template", exc_info=e)
             cli_fail(f"Failed to delete fingerprint: {e.code.name}")

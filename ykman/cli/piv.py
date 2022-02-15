@@ -256,8 +256,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo("Default PINs are set:")
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
-    except Exception as e:
-        logger.error("Failed to set PIN retries", exc_info=e)
+    except Exception:
         cli_fail("Setting pin retries failed.")
 
 
@@ -299,12 +298,8 @@ def change_pin(ctx, pin, new_pin):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug(
-                "Failed to change the PIN, %d tries left", attempts, exc_info=e
-            )
             cli_fail("PIN change failed - %d tries left." % attempts)
         else:
-            logger.debug("PIN is blocked.", exc_info=e)
             cli_fail("PIN is blocked.")
 
 
@@ -344,10 +339,8 @@ def change_puk(ctx, puk, new_puk):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug("Failed to change PUK, %d tries left", attempts, exc_info=e)
             cli_fail("PUK change failed - %d tries left." % attempts)
         else:
-            logger.debug("PUK is blocked.", exc_info=e)
             cli_fail("PUK is blocked.")
 
 
@@ -479,8 +472,7 @@ def change_management_key(
         pivman_set_mgm_key(
             session, new_management_key, algorithm, touch=touch, store_on_device=protect
         )
-    except ApduError as e:
-        logger.error("Failed to change management key", exc_info=e)
+    except ApduError:
         cli_fail("Changing the management key failed.")
 
 
@@ -505,10 +497,8 @@ def unblock_pin(ctx, puk, new_pin):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug("Failed to unblock PIN, %d tries left", attempts, exc_info=e)
             cli_fail("PIN unblock failed - %d tries left." % attempts)
         else:
-            logger.debug("PUK is blocked.", exc_info=e)
             cli_fail("PUK is blocked.")
 
 
@@ -601,8 +591,8 @@ def import_key(
             password = password.encode()
         try:
             private_key = parse_private_key(data, password)
-        except InvalidPasswordError as e:
-            logger.error("Error parsing key", exc_info=e)
+        except InvalidPasswordError:
+            logger.debug("Error parsing key", exc_info=True)
             if password is None:
                 password = click_prompt(
                     "Enter password to decrypt key",
@@ -640,8 +630,7 @@ def attest(ctx, slot, certificate, format):
     session = ctx.obj["session"]
     try:
         cert = session.attest_key(slot)
-    except ApduError as e:
-        logger.error("Attestation failed", exc_info=e)
+    except ApduError:
         cli_fail("Attestation failed.")
     certificate.write(cert.public_bytes(encoding=format))
 
@@ -753,8 +742,8 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
             password = password.encode()
         try:
             certs = parse_certificates(data, password)
-        except InvalidPasswordError as e:
-            logger.error("Error parsing certificate", exc_info=e)
+        except InvalidPasswordError:
+            logger.debug("Error parsing certificate", exc_info=True)
             if password is None:
                 password = click_prompt(
                     "Enter password to decrypt certificate",
@@ -813,12 +802,12 @@ def export_certificate(ctx, format, slot, certificate):
     session = ctx.obj["session"]
     try:
         cert = session.get_certificate(slot)
+        certificate.write(cert.public_bytes(encoding=format))
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             cli_fail("No certificate found.")
         else:
-            logger.error("Failed to read certificate from slot %s", slot, exc_info=e)
-    certificate.write(cert.public_bytes(encoding=format))
+            cli_fail("Failed reading certificate.")
 
 
 @cert.command("generate")
@@ -875,8 +864,7 @@ def generate_certificate(
             )
             session.put_certificate(slot, cert)
             session.put_object(OBJECT_ID.CHUID, generate_chuid())
-    except ApduError as e:
-        logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
+    except ApduError:
         cli_fail("Certificate generation failed.")
 
 
@@ -1021,16 +1009,12 @@ def write_object(ctx, pin, management_key, object_id, data):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
-    def do_write_object():
-        try:
-            session.put_object(object_id, data.read())
-        except ApduError as e:
-            logger.debug("Failed writing object", exc_info=e)
-            if e.sw == SW.INCORRECT_PARAMETERS:
-                cli_fail("Something went wrong, is the object id valid?")
-            raise
-
-    do_write_object()
+    try:
+        session.put_object(object_id, data.read())
+    except ApduError as e:
+        if e.sw == SW.INCORRECT_PARAMETERS:
+            cli_fail("Something went wrong, is the object id valid?")
+        cli_fail("Error writing object")
 
 
 @objects.command("generate")
@@ -1167,6 +1151,5 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
 
         with prompt_timeout():
             session.authenticate(key_type, management_key)
-    except Exception as e:
-        logger.error("Authentication with management key failed.", exc_info=e)
+    except Exception:
         cli_fail("Authentication with management key failed.")

@@ -268,8 +268,8 @@ def pivman_set_mgm_key(
         # Ensure we have access to protected data before overwriting key
         try:
             pivman_prot = get_pivman_protected_data(session)
-        except Exception as e:
-            logger.debug("Failed to initialize protected pivman data", exc_info=e)
+        except Exception:
+            logger.debug("Failed to initialize protected pivman data", exc_info=True)
             if store_on_device:
                 raise
 
@@ -300,8 +300,8 @@ def pivman_set_mgm_key(
                     OBJECT_ID_PIVMAN_PROTECTED_DATA,
                     pivman_prot.get_bytes(),
                 )
-            except ApduError as e:
-                logger.debug("No PIN provided, can't clear key...", exc_info=e)
+            except ApduError:
+                logger.debug("No PIN provided, can't clear key...", exc_info=True)
 
 
 def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
@@ -488,7 +488,7 @@ def get_piv_info(session: PivSession) -> str:
                 issuer_cn = cn[0].value if cn else "None"
             except ValueError as e:
                 # Malformed certificates may throw ValueError
-                logger.debug("Failed parsing certificate", exc_info=e)
+                logger.debug("Failed parsing certificate", exc_info=True)
                 lines.append(f"\tMalformed certificate: {e}")
                 continue
 
@@ -500,13 +500,13 @@ def get_piv_info(session: PivSession) -> str:
             serial = cert.serial_number
             try:
                 not_before: Optional[datetime] = cert.not_valid_before
-            except ValueError as e:
-                logger.debug("Failed reading not_valid_before", exc_info=e)
+            except ValueError:
+                logger.debug("Failed reading not_valid_before", exc_info=True)
                 not_before = None
             try:
                 not_after: Optional[datetime] = cert.not_valid_after
-            except ValueError as e:
-                logger.debug("Failed reading not_valid_after", exc_info=e)
+            except ValueError:
+                logger.debug("Failed reading not_valid_after", exc_info=True)
                 not_after = None
             # Print out everything
             lines.append(f"\tAlgorithm:\t{key_algo}")
@@ -618,13 +618,8 @@ def generate_self_signed_certificate(
         .not_valid_after(valid_to)
     )
 
-    try:
-        return sign_certificate_builder(
-            session, slot, key_type, builder, hash_algorithm
-        )
-    except ApduError as e:
-        logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
-        raise
+    logger.info(f"Generating certificate in slot: {slot}")
+    return sign_certificate_builder(session, slot, key_type, builder, hash_algorithm)
 
 
 def generate_csr(
@@ -639,12 +634,5 @@ def generate_csr(
         parse_rfc4514_string(subject_str)
     )
 
-    try:
-        return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
-    except ApduError as e:
-        logger.error(
-            "Failed to generate Certificate Signing Request for slot %s",
-            slot,
-            exc_info=e,
-        )
-        raise
+    logger.info(f"Generating CSR for slot: {slot}")
+    return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
