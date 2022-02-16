@@ -73,6 +73,9 @@ class TRANSPORT(str, Enum):
     USB = "usb"
     NFC = "nfc"
 
+    def __str__(self):
+        return super().__str__().upper()
+
 
 @unique
 class AID(bytes, Enum):

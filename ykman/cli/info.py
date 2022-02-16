@@ -46,8 +46,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SHOWN_CAPABILITIES = set(CAPABILITY)
-
 
 def print_app_status_table(supported_apps, enabled_apps):
     usb_supported = supported_apps.get(TRANSPORT.USB, 0)
@@ -55,7 +53,7 @@ def print_app_status_table(supported_apps, enabled_apps):
     nfc_supported = supported_apps.get(TRANSPORT.NFC, 0)
     nfc_enabled = enabled_apps.get(TRANSPORT.NFC, 0)
     rows = []
-    for app in SHOWN_CAPABILITIES:
+    for app in CAPABILITY:
         if app & usb_supported:
             if app & usb_enabled:
                 usb_status = "Enabled"
@@ -71,9 +69,9 @@ def print_app_status_table(supported_apps, enabled_apps):
                     nfc_status = "Disabled"
             else:
                 nfc_status = "Not available"
-            rows.append([str(app), usb_status, nfc_status])
+            rows.append([app.display_name, usb_status, nfc_status])
         else:
-            rows.append([str(app), usb_status])
+            rows.append([app.display_name, usb_status])
 
     column_l: List[int] = []
     for row in rows:
