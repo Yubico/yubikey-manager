@@ -376,15 +376,23 @@ for cmd in COMMANDS:
 
 
 class _DefaultFormatter(logging.Formatter):
+    def __init__(self, show_trace=False):
+        self.show_trace = show_trace
+
     def format(self, record):
-        return f"{record.levelname}: {record.getMessage()}"
+        message = f"{record.levelname}: {record.getMessage()}"
+        if self.show_trace and record.exc_info:
+            print("SHOW TRACE")
+            message += self.formatException(record.exc_info)
+        return message
 
 
 def main():
     # Set up default logging
     handler = logging.StreamHandler()
     handler.setLevel(logging.WARNING)
-    handler.setFormatter(_DefaultFormatter())
+    formatter = _DefaultFormatter()
+    handler.setFormatter(formatter)
     logging.getLogger().addHandler(handler)
 
     sys.argv = apply_aliases(sys.argv)
@@ -397,7 +405,6 @@ def main():
     try:
         cli(obj={})
     except Exception as e:
-        msg = "An error has occured (re-run with logging for more info)"
         status = 1
         if isinstance(e, Failure):
             status = e.status
@@ -409,6 +416,9 @@ def main():
             )
         elif isinstance(e, ValueError):
             msg = f"{e}"
+        else:
+            msg = "An unexpected error has occured"
+            formatter.show_trace = True
         logger.exception(msg)
         sys.exit(status)
 
