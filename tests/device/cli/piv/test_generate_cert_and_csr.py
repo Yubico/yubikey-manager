@@ -78,7 +78,7 @@ class TestNonDefaultMgmKey:
         fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode("ascii")
 
         output = ykman_cli("piv", "info").output
-        assert "Fingerprint:\t" + fingerprint in output
+        assert fingerprint in output
 
     @condition.fips(False)
     @condition.check(not_roca)
@@ -214,7 +214,7 @@ class TestProtectedMgmKey:
         fingerprint = b2a_hex(cert.fingerprint(hashes.SHA256())).decode("ascii")
 
         output = ykman_cli("piv", "info").output
-        assert "Fingerprint:\t" + fingerprint in output
+        assert fingerprint in output
 
     @condition.fips(False)
     @condition.check(not_roca)

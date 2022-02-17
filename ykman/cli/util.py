@@ -38,6 +38,8 @@ from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
 from contextlib import contextmanager
 from threading import Timer
+from enum import Enum
+from typing import List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -236,3 +238,41 @@ class Failure(Exception):
 
 def cli_fail(message: str, code: int = 1) -> NoReturn:
     raise Failure(message, status=code)
+
+
+def pretty_print(value, level: int = 0) -> List[str]:
+    """Pretty-prints structured data, as that returned by get_diagnostics.
+
+    Returns a list of strings which can be printed as lines.
+    """
+    indent = "  " * level
+    lines = []
+    if isinstance(value, list):
+        for v in value:
+            lines.extend(pretty_print(v, level))
+    elif isinstance(value, dict):
+        res = []
+        mlen = 0
+        for k, v in value.items():
+            if isinstance(k, Enum):
+                k = k.name or str(k)
+            p = pretty_print(v, level + 1)
+            ml = len(p) > 1 or isinstance(v, (list, dict))
+            if not ml:
+                mlen = max(mlen, len(k))
+            res.append((k, p, ml))
+        mlen += len(indent) + 1
+        for k, p, ml in res:
+            k_line = f"{indent}{k}:".ljust(mlen)
+            if ml:
+                lines.append(k_line)
+                lines.extend(p)
+                if lines[-1] != "":
+                    lines.append("")
+            else:
+                lines.append(f"{k_line} {p[0].lstrip()}")
+    elif isinstance(value, bytes):
+        lines.append(f"{indent}{value.hex()}")
+    else:
+        lines.append(f"{indent}{value}")
+    return lines

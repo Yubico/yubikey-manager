@@ -70,6 +70,10 @@ class CAPABILITY(IntFlag):
     OPENPGP = 0x08
     HSMAUTH = 0x100
 
+    def __str__(self):
+        name = "|".join(c.name for c in CAPABILITY if c in self)
+        return f"{name}: {hex(self)}"
+
     @property
     def display_name(self):
         if self == CAPABILITY.U2F:

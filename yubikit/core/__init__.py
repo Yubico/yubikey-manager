@@ -52,6 +52,9 @@ class Version(NamedTuple):
     minor: int
     patch: int
 
+    def __str__(self):
+        return "%d.%d.%d" % self
+
     @classmethod
     def from_bytes(cls, data: bytes) -> "Version":
         return cls(*data)

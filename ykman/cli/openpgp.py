@@ -37,6 +37,7 @@ from .util import (
     click_prompt,
     ykman_group,
     EnumChoice,
+    pretty_print,
 )
 
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
@@ -104,7 +105,7 @@ def info(ctx):
     Display general status of the OpenPGP application.
     """
     controller = ctx.obj["controller"]
-    click.echo(get_openpgp_info(controller))
+    click.echo("\n".join(pretty_print(get_openpgp_info(controller))))
 
 
 @openpgp.command()

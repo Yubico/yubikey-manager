@@ -591,26 +591,26 @@ class OpenPgpController(object):
         return self.read_certificate(key_slot)
 
 
-def get_openpgp_info(controller: OpenPgpController) -> str:
+def get_openpgp_info(controller: OpenPgpController):
     """Get human readable information about the OpenPGP configuration."""
-    lines = []
-    lines.append("OpenPGP version: %d.%d" % controller.get_openpgp_version())
-    lines.append("Application version: %d.%d.%d" % controller.version)
-    lines.append("")
     retries = controller.get_remaining_pin_tries()
-    lines.append(f"PIN tries remaining: {retries.pin}")
-    lines.append(f"Reset code tries remaining: {retries.reset}")
-    lines.append(f"Admin PIN tries remaining: {retries.admin}")
+    data = {
+        "OpenPGP version": "%d.%d" % controller.get_openpgp_version(),
+        "Application version": "%d.%d.%d" % controller.version,
+        "PIN tries remaining": retries.pin,
+        "Reset code tries remaining": retries.reset,
+        "Admin PIN tries remaining": retries.admin,
+    }
+
     # Touch only available on YK4 and later
     if controller.version >= (4, 2, 6):
-        lines.append("")
-        lines.append("Touch policies")
-        lines.append(f"Signature key           {controller.get_touch(KEY_SLOT.SIG)!s}")
-        lines.append(f"Encryption key          {controller.get_touch(KEY_SLOT.ENC)!s}")
-        lines.append(f"Authentication key      {controller.get_touch(KEY_SLOT.AUT)!s}")
+        touch = {
+            "Signature key": controller.get_touch(KEY_SLOT.SIG),
+            "Encryption key": controller.get_touch(KEY_SLOT.ENC),
+            "Authentication key": controller.get_touch(KEY_SLOT.AUT),
+        }
         if controller.supports_attestation:
-            lines.append(
-                f"Attestation key         {controller.get_touch(KEY_SLOT.ATT)!s}"
-            )
+            touch["Attestation key"] = controller.get_touch(KEY_SLOT.ATT)
+        data["Touch policies"] = touch
 
-    return "\n".join(lines)
+    return data

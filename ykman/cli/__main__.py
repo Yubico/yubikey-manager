@@ -32,8 +32,6 @@ from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import USB_INTERFACE
 from yubikit.logging import LOG_LEVEL
 
-import ykman.logging_setup
-
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
 from ..device import (
@@ -46,8 +44,8 @@ from ..device import (
 )
 from ..util import get_windows_version
 from ..logging import init_logging
-from ..diagnostics import get_diagnostics
-from .util import YkmanContextObject, ykman_group, EnumChoice, Failure
+from ..diagnostics import get_diagnostics, sys_info
+from .util import YkmanContextObject, ykman_group, EnumChoice, Failure, pretty_print
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -122,7 +120,7 @@ def print_version(ctx, param, value):
 def print_diagnostics(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo(get_diagnostics())
+    click.echo("\n".join(pretty_print(get_diagnostics())))
     ctx.exit()
 
 
@@ -276,7 +274,7 @@ def cli(ctx, device, log_level, log_file, reader):
 
     if log_level:
         init_logging(log_level, log_file=log_file)
-        ykman.logging_setup.log_sys_info(logger.info)
+        logger.info("\n".join(pretty_print({"System info": sys_info()})))
     elif log_file:
         ctx.fail("--log-file requires specifying --log-level.")
 
@@ -349,7 +347,7 @@ def list_keys(ctx, serials, readers):
             if dev.pid is None:  # Devices from list_all_devices should always have PID.
                 raise AssertionError("PID is None")
             name = get_name(dev_info, dev.pid.get_type())
-            version = "%d.%d.%d" % dev_info.version if dev_info.version else "unknown"
+            version = dev_info.version or "unknown"
             mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
             click.echo(
                 f"{name} ({version}) [{mode}]"

@@ -607,7 +607,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         major_version = info.version[0]
         if major_version < 4:
             if info.version[0] == 0:
-                return "YubiKey (%d.%d.%d)" % info.version
+                return f"YubiKey ({info.version})"
             else:
                 return "YubiKey"
         elif major_version == 4:

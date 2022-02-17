@@ -70,6 +70,7 @@ from .util import (
     click_prompt,
     prompt_timeout,
     EnumChoice,
+    pretty_print,
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
@@ -199,7 +200,8 @@ def info(ctx):
     """
     Display general status of the PIV application.
     """
-    click.echo(get_piv_info(ctx.obj["session"]))
+    info = get_piv_info(ctx.obj["session"])
+    click.echo("\n".join(pretty_print(info)))
 
 
 @piv.command()

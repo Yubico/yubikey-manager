@@ -52,7 +52,7 @@ import logging
 import struct
 import os
 
-from typing import Union, Mapping, Optional, List, Type, cast
+from typing import Union, Mapping, Optional, List, Dict, Type, Any, cast
 
 
 logger = logging.getLogger(__name__)
@@ -421,12 +421,13 @@ def generate_ccc() -> bytes:
     )
 
 
-def get_piv_info(session: PivSession) -> str:
+def get_piv_info(session: PivSession):
     """Get human readable information about the PIV configuration."""
     pivman = get_pivman_data(session)
-    lines = []
-
-    lines.append("PIV version: %d.%d.%d" % session.version)
+    info: Dict[str, Any] = {
+        "PIV version": session.version,
+    }
+    lines: List[Any] = [info]
 
     try:
         pin_data = session.get_pin_metadata()
@@ -436,10 +437,10 @@ def get_piv_info(session: PivSession) -> str:
     except NotSupportedError:
         # Largest possible number of PIN tries to get back is 15
         tries = session.get_pin_attempts()
-        tries_str = "15 or more." if tries == 15 else str(tries)
-    lines.append(f"PIN tries remaining: {tries_str}")
+        tries_str = "15 or more" if tries == 15 else str(tries)
+    info["PIN tries remaining"] = tries_str
     if pivman.puk_blocked:
-        lines.append("PUK blocked.")
+        lines.append("PUK is blocked")
 
     try:
         metadata = session.get_management_key_metadata()
@@ -448,31 +449,31 @@ def get_piv_info(session: PivSession) -> str:
         key_type = metadata.key_type
     except NotSupportedError:
         key_type = MANAGEMENT_KEY_TYPE.TDES
-    lines.append(f"Management key algorithm: {key_type.name}")
+    info["Management key algorithm"] = key_type
 
     if pivman.has_derived_key:
         lines.append("Management key is derived from PIN.")
     if pivman.has_stored_key:
         lines.append("Management key is stored on the YubiKey, protected by PIN.")
 
+    objects: Dict[str, Any] = {}
+    lines.append(objects)
     try:
-        chuid = session.get_object(OBJECT_ID.CHUID).hex()
+        objects["CHUID"] = session.get_object(OBJECT_ID.CHUID)
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
-            chuid = "No data available."
-    lines.append("CHUID:\t" + chuid)
+            objects["CHUID"] = "No data available"
 
     try:
-        ccc = session.get_object(OBJECT_ID.CAPABILITY).hex()
+        objects["CCC"] = session.get_object(OBJECT_ID.CAPABILITY)
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
-            ccc = "No data available."
-    lines.append("CCC: \t" + ccc)
+            objects["CCC"] = "No data available"
 
-    for (slot, cert) in list_certificates(session).items():
-        lines.append(f"Slot {slot:02x}:")
-
-        if isinstance(cert, x509.Certificate):
+    for slot, cert in list_certificates(session).items():
+        cert_data: Dict[str, Any] = {}
+        objects[f"Slot {slot:02x}"] = cert_data
+        if cert:
             try:
                 # Try to read out full DN, fallback to only CN.
                 # Support for DN was added in crytography 2.5
@@ -489,7 +490,7 @@ def get_piv_info(session: PivSession) -> str:
             except ValueError as e:
                 # Malformed certificates may throw ValueError
                 logger.debug("Failed parsing certificate", exc_info=True)
-                lines.append(f"\tMalformed certificate: {e}")
+                cert_data["Error"] = f"Malformed certificate: {e}"
                 continue
 
             fingerprint = cert.fingerprint(hashes.SHA256()).hex()
@@ -508,24 +509,25 @@ def get_piv_info(session: PivSession) -> str:
             except ValueError:
                 logger.debug("Failed reading not_valid_after", exc_info=True)
                 not_after = None
-            # Print out everything
-            lines.append(f"\tAlgorithm:\t{key_algo}")
-            if print_dn:
-                lines.append(f"\tSubject DN:\t{subject_dn}")
-                lines.append(f"\tIssuer DN:\t{issuer_dn}")
-            else:
-                lines.append(f"\tSubject CN:\t{subject_cn}")
-                lines.append(f"\tIssuer CN:\t{issuer_cn}")
-            lines.append(f"\tSerial:\t\t{serial}")
-            lines.append(f"\tFingerprint:\t{fingerprint}")
-            if not_before:
-                lines.append(f"\tNot before:\t{not_before}")
-            if not_after:
-                lines.append(f"\tNot after:\t{not_after}")
-        else:
-            lines.append("\tError: Failed to parse certificate.")
 
-    return "\n".join(lines)
+            # Print out everything
+            cert_data["Algorithm"] = key_algo
+            if print_dn:
+                cert_data["Subject DN"] = subject_dn
+                cert_data["Issuer DN"] = issuer_dn
+            else:
+                cert_data["Subject CN"] = subject_cn
+                cert_data["Issuer CN"] = issuer_cn
+            cert_data["Serial"] = serial
+            cert_data["Fingerprint"] = fingerprint
+            if not_before:
+                cert_data["Not before"] = not_before
+            if not_after:
+                cert_data["Not after"] = not_after
+        else:
+            cert_data["Error"] = "Failed to parse certificate"
+
+    return lines
 
 
 def sign_certificate_builder(
