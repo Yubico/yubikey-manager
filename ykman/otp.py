@@ -35,7 +35,6 @@ from http.client import HTTPSConnection
 from datetime import datetime
 from typing import Iterable, Optional
 
-import re
 import json
 import struct
 import random
@@ -167,11 +166,9 @@ def generate_static_pw(
 
 def parse_oath_key(val: str) -> bytes:
     """Parse a secret key encoded as either Hex or Base32."""
-    val = val.upper()
-    if re.match(r"^([0-9A-F]{2})+$", val):  # hex
+    try:
         return bytes.fromhex(val)
-    else:
-        # Key should be b32 encoded
+    except ValueError:
         return parse_b32_key(val)
 
 
