@@ -53,6 +53,9 @@ from dataclasses import dataclass
 from typing import Optional, Union, Mapping
 import abc
 import struct
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @unique
@@ -68,14 +71,18 @@ class CAPABILITY(IntFlag):
     HSMAUTH = 0x100
 
     def __str__(self):
+        name = "|".join(c.name for c in CAPABILITY if c in self)
+        return f"{name}: {hex(self)}"
+
+    @property
+    def display_name(self):
         if self == CAPABILITY.U2F:
             return "FIDO U2F"
         elif self == CAPABILITY.OPENPGP:
             return "OpenPGP"
         elif self == CAPABILITY.HSMAUTH:
             return "YubiHSM Auth"
-        else:
-            return getattr(self, "name", super().__str__())
+        return self.name or ", ".join(c.display_name for c in CAPABILITY if c in self)
 
 
 @unique
@@ -302,8 +309,8 @@ class Mode:
 
     @classmethod
     def from_code(cls, code: int) -> "Mode":
-        code = code & 0b00000111
-        return cls(_MODES[code])
+        # Mode is determined from the lowest 3 bits
+        return cls(_MODES[code & 0b00000111])
 
 
 SLOT_DEVICE_CONFIG = 0x11
@@ -440,6 +447,10 @@ class ManagementSession:
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")
+        logger.debug(
+            "Management session initialized for "
+            f"connection={type(connection).__name__}, version={self.version}"
+        )
 
     def close(self) -> None:
         self.backend.close()
@@ -465,9 +476,15 @@ class ManagementSession:
         if new_lock_code is not None and len(new_lock_code) != 16:
             raise ValueError("Lock code must be 16 bytes")
         config = config or DeviceConfig({}, None, None, None)
+        logger.debug(
+            f"Writing device config: {config}, reboot: {reboot}, "
+            f"current lock code: {cur_lock_code is not None}, "
+            f"new lock code: {new_lock_code is not None}"
+        )
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
         )
+        logger.info("Device config written")
 
     def set_mode(
         self,
@@ -475,6 +492,10 @@ class ManagementSession:
         chalresp_timeout: int = 0,
         auto_eject_timeout: Optional[int] = None,
     ) -> None:
+        logger.debug(
+            f"Set mode: {mode}, chalresp_timeout: {chalresp_timeout}, "
+            f"auto_eject_timeout: {auto_eject_timeout}"
+        )
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
             usb_enabled = CAPABILITY(0)
@@ -484,6 +505,8 @@ class ManagementSession:
                 usb_enabled |= CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
             if USB_INTERFACE.FIDO in mode.interfaces:
                 usb_enabled |= CAPABILITY.U2F | CAPABILITY.FIDO2
+            logger.debug(f"Delegating to DeviceConfig with usb_enabled: {usb_enabled}")
+            # N.B: reboot=False, since we're using the older set_mode command
             self.write_device_config(
                 DeviceConfig(
                     {TRANSPORT.USB: usb_enabled},
@@ -503,3 +526,4 @@ class ManagementSession:
                 # N.B. This is little endian!
                 struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
             )
+            logger.info("Mode configuration written")

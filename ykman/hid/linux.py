@@ -26,7 +26,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core.otp import OtpConnection
+from yubikit.logging import LOG_LEVEL
 from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
+from typing import Set
 
 import glob
 import fcntl
@@ -55,9 +57,12 @@ class HidrawConnection(OtpConnection):
     def receive(self):
         buf = bytearray(1 + 8)
         fcntl.ioctl(self.handle, USB_GET_REPORT, buf, True)
-        return buf[1:]
+        data = buf[1:]
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
+        return data
 
     def send(self, data):
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
         buf = bytearray([0])  # Prepend the report ID.
         buf.extend(data)
         fcntl.ioctl(self.handle, USB_SET_REPORT, buf, True)
@@ -95,20 +100,29 @@ def get_usage(dev):
                 return usage_page, usage
 
 
+# Cache for continuously failing devices
+_failed_cache: Set[str] = set()
+
+
 def list_devices():
+    stale = set(_failed_cache)
     devices = []
     for hidraw in glob.glob("/dev/hidraw*"):
-        usage = None
+        stale.discard(hidraw)
         try:
             with open(hidraw, "rb") as f:
                 bustype, vid, pid = get_info(f)
-                if vid == YUBICO_VID:
-                    usage = get_usage(f)
-        except Exception as e:
-            logger.debug("Failed opening HID device", exc_info=e)
+                if vid == YUBICO_VID and get_usage(f) == USAGE_OTP:
+                    devices.append(OtpYubiKeyDevice(hidraw, pid, HidrawConnection))
+        except Exception:
+            if hidraw not in _failed_cache:
+                logger.debug(
+                    f"Couldn't read HID descriptor for {hidraw}", exc_info=True
+                )
+                _failed_cache.add(hidraw)
             continue
 
-        if usage == USAGE_OTP:
-            devices.append(OtpYubiKeyDevice(hidraw, pid, HidrawConnection))
+    # Remove entries from the cache that were not seen
+    _failed_cache.difference_update(hidraw)
 
     return devices

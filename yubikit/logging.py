@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Yubico AB
+# Copyright (c) 2022 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -25,37 +25,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ykman import __version__ as ykman_version
-from ykman.util import get_windows_version
-from ykman.logging import init_logging
-from yubikit.logging import LOG_LEVEL
-from datetime import datetime
-import platform
+from enum import IntEnum, unique
 import logging
-import ctypes
-import sys
-import os
 
 
-logger = logging.getLogger(__name__)
-
-
-def log_sys_info(log):
-    log(f"ykman: {ykman_version}")
-    log(f"Python: {sys.version}")
-    log(f"Platform: {sys.platform}")
-    log(f"Arch: {platform.machine()}")
-    if sys.platform == "win32":
-        log(f"Windows version: {get_windows_version()}")
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-    else:
-        is_admin = os.getuid() == 0
-    log(f"Running as admin: {is_admin}")
-    log("System date: %s", datetime.today().strftime("%Y-%m-%d"))
-
-
-def setup(log_level_name, log_file=None):
-    log_level = LOG_LEVEL[log_level_name.upper()]
-    init_logging(log_level, log_file=log_file)
-
-    log_sys_info(logger.debug)
+@unique
+class LOG_LEVEL(IntEnum):
+    NOTSET = logging.NOTSET
+    TRAFFIC = 5  # Used for logging YubiKey traffic
+    DEBUG = logging.DEBUG
+    INFO = logging.INFO
+    WARNING = logging.WARNING
+    ERROR = logging.ERROR

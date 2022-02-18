@@ -28,7 +28,6 @@
 import functools
 import click
 import sys
-from typing import NoReturn
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
@@ -38,6 +37,11 @@ from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
 from contextlib import contextmanager
 from threading import Timer
+from enum import Enum
+from typing import List
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EnumChoice(click.Choice):
@@ -199,16 +203,21 @@ def click_prompt(prompt, err=True, **kwargs):
     Note that we change the default of err to be True, since that's how we typically
     use it.
     """
+    logger.debug(f"Input requested ({prompt})")
     if not sys.stdin.isatty():  # Piped from stdin, see if there is data
+        logger.debug("TTY detected, reading line from stdin...")
         line = sys.stdin.readline()
         if line:
             return line.rstrip("\n")
+        logger.debug("No data available on stdin")
 
     # No piped data, use standard prompt
+    logger.debug("Using interactive prompt...")
     return click.prompt(prompt, err=err, **kwargs)
 
 
 def prompt_for_touch():
+    logger.debug("Prompting user to touch YubiKey...")
     try:
         click.echo("Touch your YubiKey...", err=True)
     except Exception:
@@ -225,6 +234,45 @@ def prompt_timeout(timeout=0.5):
         timer.cancel()
 
 
-def cli_fail(message: str, code: int = 1) -> NoReturn:
-    click.echo(f"Error: {message}", err=True)
-    sys.exit(code)
+class CliFail(Exception):
+    def __init__(self, message, status=1):
+        super().__init__(message)
+        self.status = status
+
+
+def pretty_print(value, level: int = 0) -> List[str]:
+    """Pretty-prints structured data, as that returned by get_diagnostics.
+
+    Returns a list of strings which can be printed as lines.
+    """
+    indent = "  " * level
+    lines = []
+    if isinstance(value, list):
+        for v in value:
+            lines.extend(pretty_print(v, level))
+    elif isinstance(value, dict):
+        res = []
+        mlen = 0
+        for k, v in value.items():
+            if isinstance(k, Enum):
+                k = k.name or str(k)
+            p = pretty_print(v, level + 1)
+            ml = len(p) > 1 or isinstance(v, (list, dict))
+            if not ml:
+                mlen = max(mlen, len(k))
+            res.append((k, p, ml))
+        mlen += len(indent) + 1
+        for k, p, ml in res:
+            k_line = f"{indent}{k}:".ljust(mlen)
+            if ml:
+                lines.append(k_line)
+                lines.extend(p)
+                if lines[-1] != "":
+                    lines.append("")
+            else:
+                lines.append(f"{k_line} {p[0].lstrip()}")
+    elif isinstance(value, bytes):
+        lines.append(f"{indent}{value.hex()}")
+    else:
+        lines.append(f"{indent}{value}")
+    return lines

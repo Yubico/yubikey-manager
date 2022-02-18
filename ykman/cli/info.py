@@ -33,7 +33,7 @@ from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 
-from .util import cli_fail
+from .util import CliFail
 from ..device import is_fips_version, get_name, connect_to_device
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
@@ -46,8 +46,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SHOWN_CAPABILITIES = set(CAPABILITY)
-
 
 def print_app_status_table(supported_apps, enabled_apps):
     usb_supported = supported_apps.get(TRANSPORT.USB, 0)
@@ -55,7 +53,7 @@ def print_app_status_table(supported_apps, enabled_apps):
     nfc_supported = supported_apps.get(TRANSPORT.NFC, 0)
     nfc_enabled = enabled_apps.get(TRANSPORT.NFC, 0)
     rows = []
-    for app in SHOWN_CAPABILITIES:
+    for app in CAPABILITY:
         if app & usb_supported:
             if app & usb_enabled:
                 usb_status = "Enabled"
@@ -71,9 +69,9 @@ def print_app_status_table(supported_apps, enabled_apps):
                     nfc_status = "Disabled"
             else:
                 nfc_status = "Not available"
-            rows.append([str(app), usb_status, nfc_status])
+            rows.append([app.display_name, usb_status, nfc_status])
         else:
-            rows.append([str(app), usb_status])
+            rows.append([app.display_name, usb_status])
 
     column_l: List[int] = []
     for row in rows:
@@ -203,4 +201,4 @@ def info(ctx, check_fips):
             ctx.obj["conn"].close()
             _check_fips_status(pid, info)
         else:
-            cli_fail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")
+            raise CliFail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")

@@ -17,6 +17,7 @@
 
 from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 from yubikit.core.otp import OtpConnection
+from yubikit.logging import LOG_LEVEL
 
 import ctypes
 import ctypes.util
@@ -205,16 +206,18 @@ class MacHidOtpConnection(OtpConnection):
         if result != K_IO_RETURN_SUCCESS:
             raise OSError(f"Failed to read report from device: {result}")
 
-        return buf.raw[:]
+        data = buf.raw[:]
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
+        return data
 
     def send(self, data):
-        buf = bytes(data)
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
         result = iokit.IOHIDDeviceSetReport(
             self.handle,
             K_IO_HID_REPORT_TYPE_FEATURE,
             0,
-            buf,
-            len(buf),
+            data,
+            len(data),
         )
 
         # Non-zero status indicates failure

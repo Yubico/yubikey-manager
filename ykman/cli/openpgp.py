@@ -30,13 +30,14 @@ import click
 from ..util import parse_certificates, parse_private_key
 from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info
 from .util import (
-    cli_fail,
+    CliFail,
     click_force_option,
     click_format_option,
     click_postpone_execution,
     click_prompt,
     ykman_group,
     EnumChoice,
+    pretty_print,
 )
 
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
@@ -73,6 +74,10 @@ def int_in_range(minval, maxval):
     return inner
 
 
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
 @ykman_group(SmartCardConnection)
 @click.pass_context
 @click_postpone_execution
@@ -100,7 +105,7 @@ def info(ctx):
     Display general status of the OpenPGP application.
     """
     controller = ctx.obj["controller"]
-    click.echo(get_openpgp_info(controller))
+    click.echo("\n".join(pretty_print(get_openpgp_info(controller))))
 
 
 @openpgp.command()
@@ -121,6 +126,7 @@ def reset(ctx):
     """
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     ctx.obj["controller"].reset()
+    logger.info("OpenPGP application data reset")
     click.echo("Success! All data has been cleared and default PINs are set.")
     echo_default_pins()
 
@@ -170,6 +176,7 @@ def set_pin_retries(
 
         controller.verify_admin(admin_pin)
         controller.set_pin_retries(pin_retries, reset_code_retries, admin_pin_retries)
+        logger.info("Number of PIN/Reset Code/Admin PIN retries set")
 
         if resets_pins:
             click.echo("Default PINs are set.")
@@ -217,15 +224,15 @@ def set_touch(ctx, key, policy, admin_pin, force):
     policy_name = policy.name.lower().replace("_", "-")
 
     if policy not in controller.supported_touch_policies:
-        cli_fail(f"Touch policy {policy_name} not supported by this YubiKey.")
+        raise CliFail(f"Touch policy {policy_name} not supported by this YubiKey.")
 
     if key == KEY_SLOT.ATT and not controller.supports_attestation:
-        cli_fail("Attestation is not supported by this YubiKey.")
+        raise CliFail("Attestation is not supported by this YubiKey.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
-    prompt = f"Set touch policy of {key.value.lower()} key to {policy_name}?"
+    prompt = f"Set touch policy of {key.name} key to {policy_name}?"
     if policy.is_fixed:
         prompt = (
             "WARNING: This touch policy cannot be changed without deleting the "
@@ -237,11 +244,11 @@ def set_touch(ctx, key, policy, admin_pin, force):
         try:
             controller.verify_admin(admin_pin)
             controller.set_touch(key, policy)
+            logger.info(f"Touch policy for slot {key.name} set")
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                cli_fail("Touch policy not allowed.")
-            logger.debug("Failed to set touch policy", exc_info=e)
-            cli_fail("Failed to set touch policy.")
+                raise CliFail("Touch policy not allowed.")
+            raise CliFail("Failed to set touch policy.")
 
 
 @keys.command("import")
@@ -267,15 +274,14 @@ def import_key(ctx, key, private_key, admin_pin):
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         private_key = parse_private_key(private_key.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
-        cli_fail("Failed to parse private key.")
+    except Exception:
+        raise CliFail("Failed to parse private key.")
     try:
         controller.verify_admin(admin_pin)
         controller.import_key(key, private_key)
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
-        cli_fail("Failed to import attestation key.")
+        logger.info(f"Private key imported for slot {key.name}")
+    except Exception:
+        raise CliFail("Failed to import attestation key.")
 
 
 @keys.command()
@@ -317,9 +323,12 @@ def attest(ctx, key, certificate, pin, format):
             controller.verify_pin(pin)
             cert = controller.attest(key)
             certificate.write(cert.public_bytes(encoding=format))
-        except Exception as e:
-            logger.debug("Failed to attest", exc_info=e)
-            cli_fail("Attestation failed")
+            logger.info(
+                f"Attestation certificate for slot {key.name} written to "
+                f"{_fname(certificate)}"
+            )
+        except Exception:
+            raise CliFail("Attestation failed")
 
 
 @openpgp.group("certificates")
@@ -345,13 +354,14 @@ def export_certificate(ctx, key, format, certificate):
     controller = ctx.obj["controller"]
 
     if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
-        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+        raise CliFail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     try:
         cert = controller.read_certificate(key)
     except ValueError:
-        cli_fail(f"Failed to read certificate from {key.name}")
+        raise CliFail(f"Failed to read certificate from slot {key.name}")
     certificate.write(cert.public_bytes(encoding=format))
+    logger.info(f"Certificate for slot {key.name} exported to {_fname(certificate)}")
 
 
 @certificates.command("delete")
@@ -368,16 +378,16 @@ def delete_certificate(ctx, key, admin_pin):
     controller = ctx.obj["controller"]
 
     if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
-        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+        raise CliFail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         controller.verify_admin(admin_pin)
         controller.delete_certificate(key)
-    except Exception as e:
-        logger.debug("Failed to delete ", exc_info=e)
-        cli_fail("Failed to delete certificate.")
+        logger.info(f"Certificate for slot {key.name} deleted")
+    except Exception:
+        raise CliFail("Failed to delete certificate.")
 
 
 @certificates.command("import")
@@ -396,21 +406,19 @@ def import_certificate(ctx, key, cert, admin_pin):
     controller = ctx.obj["controller"]
 
     if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
-        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+        raise CliFail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
     try:
         certs = parse_certificates(cert.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
-        cli_fail("Failed to parse certificate.")
+    except Exception:
+        raise CliFail("Failed to parse certificate.")
     if len(certs) != 1:
-        cli_fail("Can only import one certificate.")
+        raise CliFail("Can only import one certificate.")
     try:
         controller.verify_admin(admin_pin)
         controller.import_certificate(key, certs[0])
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
-        cli_fail("Failed to import certificate")
+    except Exception:
+        raise CliFail("Failed to import certificate")

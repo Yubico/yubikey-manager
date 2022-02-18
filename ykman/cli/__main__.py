@@ -30,8 +30,7 @@ from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import USB_INTERFACE
-
-import ykman.logging_setup
+from yubikit.logging import LOG_LEVEL
 
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
@@ -44,8 +43,9 @@ from ..device import (
     ConnectionNotAvailableException,
 )
 from ..util import get_windows_version
-from ..diagnostics import get_diagnostics
-from .util import YkmanContextObject, ykman_group, cli_fail
+from ..logging import init_logging
+from ..diagnostics import get_diagnostics, sys_info
+from .util import YkmanContextObject, ykman_group, EnumChoice, CliFail, pretty_print
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -61,6 +61,7 @@ import click
 import ctypes
 import time
 import sys
+
 import logging
 
 
@@ -97,16 +98,16 @@ def retrying_connect(serial, connections, attempts=10, state=None):
     while True:
         try:
             return connect_to_device(serial, connections)
-        except ConnectionNotAvailableException as e:
-            logger.error("Failed opening connection", exc_info=e)
+        except (NotImplementedError, ConnectionNotAvailableException):
             raise  # No need to retry
         except Exception as e:
-            logger.error("Failed opening connection", exc_info=e)
+            logger.debug("Failed opening connection", exc_info=True)
             try:
                 _, state = _scan_changes(state)
                 logger.debug("State changed, re-try connect...")
             except TimeoutError:
-                raise e
+                logger.debug("Timeout", exc_info=True)
+                raise e from None  # Raise the original exception
 
 
 def print_version(ctx, param, value):
@@ -119,14 +120,14 @@ def print_version(ctx, param, value):
 def print_diagnostics(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo(get_diagnostics())
+    click.echo("\n".join(pretty_print(get_diagnostics())))
     ctx.exit()
 
 
 def _disabled_interface(connections, cmd_name):
     interfaces = [USB_INTERFACE_MAPPING[c] for c in connections]
     req = ", ".join((t.name for t in interfaces))
-    cli_fail(
+    raise CliFail(
         f"Command '{cmd_name}' requires one of the following USB interfaces "
         f"to be enabled: '{req}'.\n\n"
         "Use 'ykman config usb' to set the enabled USB interfaces."
@@ -142,10 +143,10 @@ def _run_cmd_for_serial(cmd, connections, serial):
             conn = connect_to_device(serial)[0]
             conn.close()
             _disabled_interface(connections, cmd)
-        except ValueError:
-            cli_fail(
+        except Exception:
+            raise CliFail(
                 f"Failed connecting to a YubiKey with serial: {serial}.\n"
-                "Make sure the application has the required permissions."
+                "Make sure the application has the required permissions.",
             )
 
 
@@ -163,15 +164,14 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
                         conn.close()
                         conn = dev.open_connection(FidoConnection)
                     return conn, dev, info
-                except Exception as e:
-                    logger.error("Failure connecting to card", exc_info=e)
-                    cli_fail(f"Failed to connect: {e}")
+                except Exception:
+                    raise CliFail("Failed to connect to YubiKey")
             elif len(readers) > 1:
-                cli_fail("Multiple YubiKeys on external readers detected.")
+                raise CliFail("Multiple YubiKeys on external readers detected.")
             else:
-                cli_fail("No YubiKey found on external reader.")
+                raise CliFail("No YubiKey found on external reader.")
         else:
-            ctx.fail("Not a CCID command.")
+            raise CliFail("Not a CCID command.")
 
     # Find all connected devices
     devices, state = scan_devices()
@@ -182,9 +182,9 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
             devices, state = _scan_changes(state)
             n_devs = sum(devices.values())
         except TimeoutError:
-            cli_fail("No YubiKey detected!")
+            raise CliFail("No YubiKey detected!")
     if n_devs > 1:
-        cli_fail(
+        raise CliFail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
             "which one to use."
         )
@@ -195,7 +195,9 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
         if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
             if WIN_CTAP_RESTRICTED and connections == FidoConnection:
                 # FIDO-only command on Windows without Admin won't work.
-                cli_fail("FIDO access on Windows requires running as Administrator.")
+                raise CliFail(
+                    "FIDO access on Windows requires running as Administrator."
+                )
             return retrying_connect(None, connections, state=state)
     _disabled_interface(connections, cmd)
 
@@ -219,7 +221,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     "-l",
     "--log-level",
     default=None,
-    type=click.Choice(ykman.logging_setup.LOG_LEVEL_NAMES, case_sensitive=False),
+    type=EnumChoice(LOG_LEVEL),
     help="Enable logging at given verbosity level.",
 )
 @click.option(
@@ -271,7 +273,10 @@ def cli(ctx, device, log_level, log_file, reader):
     ctx.obj = YkmanContextObject()
 
     if log_level:
-        ykman.logging_setup.setup(log_level, log_file=log_file)
+        init_logging(log_level, log_file=log_file)
+        logger.info("\n".join(pretty_print({"System info": sys_info()})))
+    elif log_file:
+        ctx.fail("--log-file requires specifying --log-level.")
 
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
@@ -292,7 +297,7 @@ def cli(ctx, device, log_level, log_file, reader):
     if connections:
         if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
             # FIDO-only command on Windows without Admin won't work.
-            cli_fail("FIDO access on Windows requires running as Administrator.")
+            raise CliFail("FIDO access on Windows requires running as Administrator.")
 
         def resolve():
             items = getattr(resolve, "items", None)
@@ -342,7 +347,7 @@ def list_keys(ctx, serials, readers):
             if dev.pid is None:  # Devices from list_all_devices should always have PID.
                 raise AssertionError("PID is None")
             name = get_name(dev_info, dev.pid.get_type())
-            version = "%d.%d.%d" % dev_info.version if dev_info.version else "unknown"
+            version = dev_info.version or "unknown"
             mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
             click.echo(
                 f"{name} ({version}) [{mode}]"
@@ -368,7 +373,26 @@ for cmd in COMMANDS:
     cli.add_command(cmd)
 
 
+class _DefaultFormatter(logging.Formatter):
+    def __init__(self, show_trace=False):
+        self.show_trace = show_trace
+
+    def format(self, record):
+        message = f"{record.levelname}: {record.getMessage()}"
+        if self.show_trace and record.exc_info:
+            print("SHOW TRACE")
+            message += self.formatException(record.exc_info)
+        return message
+
+
 def main():
+    # Set up default logging
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.WARNING)
+    formatter = _DefaultFormatter()
+    handler.setFormatter(formatter)
+    logging.getLogger().addHandler(handler)
+
     sys.argv = apply_aliases(sys.argv)
     try:
         # --full-help triggers --help, hidden commands will already have read it by now.
@@ -378,15 +402,23 @@ def main():
 
     try:
         cli(obj={})
-    except ApplicationNotAvailableError as e:
-        logger.error("Error", exc_info=e)
-        cli_fail(
-            "The functionality required for this command is not enabled or not "
-            "available on this YubiKey."
-        )
-    except ValueError as e:
-        logger.error("Error", exc_info=e)
-        cli_fail(str(e))
+    except Exception as e:
+        status = 1
+        if isinstance(e, CliFail):
+            status = e.status
+            msg = e.args[0]
+        elif isinstance(e, ApplicationNotAvailableError):
+            msg = (
+                "The functionality required for this command is not enabled or not "
+                "available on this YubiKey."
+            )
+        elif isinstance(e, ValueError):
+            msg = f"{e}"
+        else:
+            msg = "An unexpected error has occured"
+            formatter.show_trace = True
+        logger.exception(msg)
+        sys.exit(status)
 
 
 if __name__ == "__main__":

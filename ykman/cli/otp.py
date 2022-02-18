@@ -46,7 +46,7 @@ from yubikit.core.otp import (
 
 from .util import (
     ykman_group,
-    cli_fail,
+    CliFail,
     click_force_option,
     click_callback,
     click_parse_b32_key,
@@ -108,12 +108,10 @@ click_slot_argument = click.argument(
 )
 
 
-def _failed_to_write_msg(ctx, exc_info):
-    logger.error("Failed to write to device", exc_info=exc_info)
-    cli_fail(
-        "Failed to write to the YubiKey. Make sure the device does not "
-        'have restricted access (see "ykman otp --help" for more info).'
-    )
+_WRITE_FAIL_MSG = (
+    "Failed to write to the YubiKey. Make sure the device does not "
+    'have restricted access (see "ykman otp --help" for more info).'
+)
 
 
 def _confirm_slot_overwrite(slot_state, slot):
@@ -123,6 +121,10 @@ def _confirm_slot_overwrite(slot_state, slot):
             abort=True,
             err=True,
         )
+
+
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
 
 
 @ykman_group(OtpConnection)
@@ -179,7 +181,7 @@ def otp(ctx, access_code):
         try:
             access_code = parse_access_code_hex(access_code)
         except Exception as e:
-            ctx.fail("Failed to parse access code: " + str(e))
+            ctx.fail(f"Failed to parse access code: {e}")
 
     ctx.obj["access_code"] = access_code
 
@@ -213,8 +215,8 @@ def swap(ctx):
     click.echo("Swapping slots...")
     try:
         session.swap_slots()
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -242,15 +244,15 @@ def ndef(ctx, slot, prefix, ndef_type):
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not info.has_transport(TRANSPORT.NFC):
-        cli_fail("This YubiKey does not support NFC.")
+        raise CliFail("This YubiKey does not support NFC.")
 
     if not state.is_configured(slot):
-        cli_fail(f"Slot {slot} is empty.")
+        raise CliFail(f"Slot {slot} is empty.")
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -264,7 +266,7 @@ def delete(ctx, slot, force):
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
-        cli_fail("Not possible to delete an empty slot.")
+        raise CliFail("Not possible to delete an empty slot.")
     force or click.confirm(
         f"Do you really want to delete the configuration of slot {slot}?",
         abort=True,
@@ -273,8 +275,8 @@ def delete(ctx, slot, force):
     click.echo(f"Deleting the configuration in slot {slot}...")
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -384,7 +386,8 @@ def yubiotp(
             try:
                 serial = session.get_serial()
             except CommandError:
-                cli_fail("Serial number not set, public ID must be provided")
+                raise CliFail("Serial number not set, public ID must be provided")
+
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo(f"Using YubiKey serial as public ID: {public_id}")
         elif force:
@@ -426,9 +429,9 @@ def yubiotp(
             key = click_prompt("Enter secret key")
             key = bytes.fromhex(key)
 
-    if not upload and not force:
-        upload = click.confirm("Upload credential to YubiCloud?", abort=False, err=True)
     if upload:
+        click.confirm("Upload credential to YubiCloud?", abort=True, err=True)
+
         try:
             upload_url = prepare_upload_key(
                 key,
@@ -438,9 +441,10 @@ def yubiotp(
                 user_agent="ykman/" + __version__,
             )
             click.echo("Upload to YubiCloud initiated successfully.")
+            logger.info("Initiated YubiCloud upload")
         except PrepareUploadFailed as e:
             error_msg = "\n".join(e.messages())
-            cli_fail("Upload to YubiCloud failed.\n" + error_msg)
+            raise CliFail("Upload to YubiCloud failed.\n" + error_msg)
 
     force or click.confirm(
         f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
@@ -456,15 +460,17 @@ def yubiotp(
             access_code,
             access_code,
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
     if config_output:
         serial = serial or session.get_serial()
         csv = format_csv(serial, public_id, private_id, key, access_code)
         config_output.write(csv + "\n")
+        logger.info(f"Configuration parameters written to {_fname(config_output)}")
 
     if upload:
+        logger.info("Launching browser for YubiCloud upload")
         click.echo("Opening upload form in browser: " + upload_url)
         webbrowser.open_new_tab(upload_url)
 
@@ -531,8 +537,8 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -616,8 +622,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -651,7 +657,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 
     # Check that slot is not empty
     if not session.get_config_state().is_configured(slot):
-        cli_fail("Cannot perform challenge-response on an empty slot.")
+        raise CliFail("Cannot perform challenge-response on an empty slot.")
 
     if totp:  # Challenge omitted or timestamp
         if challenge is None:
@@ -659,8 +665,8 @@ def calculate(ctx, slot, challenge, totp, digits):
         else:
             try:
                 challenge = time_challenge(int(challenge))
-            except Exception as e:
-                logger.error("Error", exc_info=e)
+            except Exception:
+                logger.exception("Error parsing challenge")
                 ctx.fail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
         challenge = bytes.fromhex(challenge)
@@ -680,8 +686,8 @@ def calculate(ctx, slot, challenge, totp, digits):
             value = response.hex()
 
         click.echo(value)
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 def parse_modhex_or_bcd(value):
@@ -780,8 +786,8 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -842,13 +848,13 @@ def settings(
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
     if delete_access_code and not ctx.obj["access_code"]:
-        cli_fail(
+        raise CliFail(
             "--delete-access-code used without providing an access code "
             '(see "ykman otp --help" for more info).'
         )
 
     if not session.get_config_state().is_configured(slot):
-        cli_fail("Not possible to update settings on an empty slot.")
+        raise CliFail("Not possible to update settings on an empty slot.")
 
     if new_access_code is None:
         if not delete_access_code:
@@ -886,5 +892,5 @@ def settings(
             new_access_code,
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)

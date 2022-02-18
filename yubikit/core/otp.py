@@ -26,6 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from . import Connection, CommandError, TimeoutError, Version
+from yubikit.logging import LOG_LEVEL
 
 from time import sleep
 from threading import Event
@@ -157,11 +158,11 @@ class OtpProtocol:
             on_keepalive = lambda x: None  # noqa
         frame = _format_frame(slot, payload)
 
-        logger.debug("SEND: %s", frame.hex())
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", frame.hex())
         response = self._read_frame(
             self._send_frame(frame), event or Event(), on_keepalive
         )
-        logger.debug("RECV: %s", response.hex())
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", response.hex())
         return response
 
     def _receive(self):

@@ -52,6 +52,9 @@ class Version(NamedTuple):
     minor: int
     patch: int
 
+    def __str__(self):
+        return "%d.%d.%d" % self
+
     @classmethod
     def from_bytes(cls, data: bytes) -> "Version":
         return cls(*data)
@@ -72,6 +75,9 @@ class TRANSPORT(str, Enum):
 
     USB = "usb"
     NFC = "nfc"
+
+    def __str__(self):
+        return super().__str__().upper()
 
 
 @unique

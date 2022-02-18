@@ -31,6 +31,9 @@ from enum import Enum, IntEnum, unique
 from typing import Tuple
 import abc
 import struct
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
@@ -121,6 +124,7 @@ class SmartCardProtocol:
         self._touch_workaround = self.connection.transport == TRANSPORT.USB and (
             (4, 2, 0) <= version <= (4, 2, 6)
         )
+        logger.debug(f"Touch workaround enabled={self._touch_workaround}")
 
     def select(self, aid: bytes) -> bytes:
         try:
@@ -142,6 +146,7 @@ class SmartCardProtocol:
             and self._last_long_resp > 0
             and time() - self._last_long_resp < 2
         ):
+            logger.debug("Sending dummy APDU as touch workaround")
             self.connection.send_and_receive(
                 _encode_short_apdu(0, 0, 0, 0, b"")
             )  # Dummy APDU, returns error

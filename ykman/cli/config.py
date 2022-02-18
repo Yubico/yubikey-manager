@@ -40,7 +40,7 @@ from .util import (
     click_force_option,
     click_prompt,
     EnumChoice,
-    cli_fail,
+    CliFail,
 )
 import os
 import re
@@ -89,7 +89,7 @@ def config(ctx):
 def _require_config(ctx):
     info = ctx.obj["info"]
     if info.version < (5, 0, 0):
-        cli_fail(
+        raise CliFail(
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."
         )
@@ -125,7 +125,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     app = ctx.obj["controller"]
 
     if sum(1 for arg in [new_lock_code, generate, clear] if arg) > 1:
-        cli_fail(
+        raise CliFail(
             "Invalid options: Only one of --new-lock-code, --generate, "
             "and --clear may be used."
         )
@@ -153,7 +153,9 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         use_code = _parse_lock_code(ctx, lock_code)
     else:
         if lock_code:
-            cli_fail("No lock code is currently set. Use --new-lock-code to set one.")
+            raise CliFail(
+                "No lock code is currently set. Use --new-lock-code to set one."
+            )
         use_code = None
 
     # Set new lock code
@@ -164,11 +166,92 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
             use_code,
             set_code,
         )
-    except Exception as e:
-        logger.error("Setting the lock code failed", exc_info=e)
+        logger.info("Lock code updated")
+    except Exception:
         if info.is_locked:
-            cli_fail("Failed to change the lock code. Wrong current code?")
-        cli_fail("Failed to set the lock code.")
+            raise CliFail("Failed to change the lock code. Wrong current code?")
+        raise CliFail("Failed to set the lock code.")
+
+
+def _configure_applications(
+    ctx,
+    config,
+    changes,
+    transport,
+    enable,
+    disable,
+    lock_code,
+    force,
+):
+    _require_config(ctx)
+
+    info = ctx.obj["info"]
+    supported = info.supported_capabilities.get(transport)
+    enabled = info.config.enabled_capabilities.get(transport)
+
+    if enable & disable:
+        ctx.fail("Invalid options.")
+
+    if not supported:
+        raise CliFail(f"{transport} not supported on this YubiKey.")
+
+    unsupported = ~supported & (enable | disable)
+    if unsupported:
+        raise CliFail(
+            f"{unsupported.display_name} not supported over {transport} on this "
+            "YubiKey."
+        )
+    new_enabled = (enabled | enable) & ~disable
+
+    if transport == TRANSPORT.USB:
+        if sum(CAPABILITY) & new_enabled == 0:
+            ctx.fail(f"Can not disable all applications over {transport}.")
+
+        reboot = USB_INTERFACE.for_capabilities(
+            enabled
+        ) != USB_INTERFACE.for_capabilities(new_enabled)
+    else:
+        reboot = False
+
+    if enable:
+        changes.append(f"Enable {enable.display_name}")
+    if disable:
+        changes.append(f"Disable {disable.display_name}")
+    if reboot:
+        changes.append("The YubiKey will reboot")
+
+    is_locked = info.is_locked
+
+    if force and is_locked and not lock_code:
+        raise CliFail("Configuration is locked - please supply the --lock-code option.")
+    if lock_code and not is_locked:
+        raise CliFail(
+            "Configuration is not locked - please remove the --lock-code option."
+        )
+
+    click.echo(f"{transport} configuration changes:")
+    for change in changes:
+        click.echo(f"  {change}")
+    force or click.confirm("Proceed?", abort=True, err=True)
+
+    if is_locked and not lock_code:
+        lock_code = prompt_lock_code()
+
+    if lock_code:
+        lock_code = _parse_lock_code(ctx, lock_code)
+
+    config.enabled_capabilities = {transport: new_enabled}
+
+    app = ctx.obj["controller"]
+    try:
+        app.write_device_config(
+            config,
+            reboot,
+            lock_code,
+        )
+        logger.info(f"{transport} application configuration updated")
+    except Exception:
+        raise CliFail(f"Failed to configure {transport} applications.")
 
 
 @config.command()
@@ -241,12 +324,6 @@ def usb(
     """
     _require_config(ctx)
 
-    def ensure_not_all_disabled(ctx, usb_enabled):
-        for app in CAPABILITY:
-            if app & usb_enabled:
-                return
-        ctx.fail("Can not disable all applications over USB.")
-
     if not (
         list_enabled
         or enable_all
@@ -259,93 +336,43 @@ def usb(
     ):
         ctx.fail("No configuration options chosen.")
 
-    info = ctx.obj["info"]
-    usb_supported = info.supported_capabilities[TRANSPORT.USB]
-    usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
-    usb_interfaces = USB_INTERFACE.for_capabilities(usb_enabled)
-    flags = info.config.device_flags
-
-    if enable_all:
-        enable = [c for c in CAPABILITY if c in usb_supported]
-
-    _ensure_not_invalid_options(ctx, enable, disable)
-
     if touch_eject and no_touch_eject:
         ctx.fail("Invalid options.")
 
-    if not usb_supported:
-        cli_fail("USB not supported on this YubiKey.")
-
     if list_enabled:
-        _list_apps(ctx, usb_enabled)
+        _list_apps(ctx, TRANSPORT.USB)
+
+    config = DeviceConfig({}, autoeject_timeout, chalresp_timeout, None)
+    changes = []
+    info = ctx.obj["info"]
+
+    if enable_all:
+        enable = info.supported_capabilities.get(TRANSPORT.USB)
+    else:
+        enable = CAPABILITY(sum(enable))
+    disable = CAPABILITY(sum(disable))
 
     if touch_eject:
-        flags |= DEVICE_FLAG.EJECT
+        config.device_flags = info.config.device_flags | DEVICE_FLAG.EJECT
+        changes.append("Enable touch-eject")
     if no_touch_eject:
-        flags &= ~DEVICE_FLAG.EJECT
-
-    for app in enable:
-        if app & usb_supported:
-            usb_enabled |= app
-        else:
-            cli_fail(f"{app.name} not supported over USB on this YubiKey.")
-    for app in disable:
-        if app & usb_supported:
-            usb_enabled &= ~app
-        else:
-            cli_fail(f"{app.name} not supported over USB on this YubiKey.")
-
-    ensure_not_all_disabled(ctx, usb_enabled)
-
-    reboot = usb_interfaces != USB_INTERFACE.for_capabilities(usb_enabled)
-
-    f_confirm = ""
-    if enable:
-        f_confirm += f"Enable {', '.join(str(app) for app in enable)}.\n"
-    if disable:
-        f_confirm += f"Disable {', '.join(str(app) for app in disable)}.\n"
-    if touch_eject:
-        f_confirm += "Set touch eject.\n"
-    elif no_touch_eject:
-        f_confirm += "Disable touch eject.\n"
+        config.device_flags = info.config.device_flags & ~DEVICE_FLAG.EJECT
+        changes.append("Disable touch-eject")
     if autoeject_timeout:
-        f_confirm += f"Set autoeject timeout to {autoeject_timeout}.\n"
+        changes.append(f"Set auto-eject timeout to {autoeject_timeout}")
     if chalresp_timeout:
-        f_confirm += f"Set challenge-response timeout to {chalresp_timeout}.\n"
-    if reboot:
-        f_confirm += "This will cause the YubiKey to reboot.\n"
-    f_confirm += "Configure USB?"
+        changes.append(f"Set challenge-response timeout to {chalresp_timeout}")
 
-    is_locked = info.is_locked
-
-    if force and is_locked and not lock_code:
-        cli_fail("Configuration is locked - please supply the --lock-code option.")
-    if lock_code and not is_locked:
-        cli_fail("Configuration is not locked - please remove the --lock-code option.")
-
-    force or click.confirm(f_confirm, abort=True, err=True)
-
-    if is_locked and not lock_code:
-        lock_code = prompt_lock_code()
-
-    if lock_code:
-        lock_code = _parse_lock_code(ctx, lock_code)
-
-    app = ctx.obj["controller"]
-    try:
-        app.write_device_config(
-            DeviceConfig(
-                {TRANSPORT.USB: usb_enabled},
-                autoeject_timeout,
-                chalresp_timeout,
-                flags,
-            ),
-            reboot,
-            lock_code,
-        )
-    except Exception as e:
-        logger.error("Failed to write config", exc_info=e)
-        cli_fail("Failed to configure USB applications.")
+    _configure_applications(
+        ctx,
+        config,
+        changes,
+        TRANSPORT.USB,
+        enable,
+        disable,
+        lock_code,
+        force,
+    )
 
 
 @config.command()
@@ -385,78 +412,44 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
     if not (list_enabled or enable_all or enable or disable_all or disable):
         ctx.fail("No configuration options chosen.")
 
-    info = ctx.obj["info"]
-    nfc_supported = info.supported_capabilities.get(TRANSPORT.NFC)
-    nfc_enabled = info.config.enabled_capabilities.get(TRANSPORT.NFC)
-
-    if enable_all:
-        enable = [c for c in CAPABILITY if c in nfc_supported]
-
-    if disable_all:
-        disable = [c for c in CAPABILITY if c in nfc_enabled]
-
-    _ensure_not_invalid_options(ctx, enable, disable)
-
-    if not nfc_supported:
-        cli_fail("NFC not available on this YubiKey.")
-
     if list_enabled:
-        _list_apps(ctx, nfc_enabled)
+        _list_apps(ctx, TRANSPORT.NFC)
 
-    for app in enable:
-        if app & nfc_supported:
-            nfc_enabled |= app
-        else:
-            cli_fail(f"{app.name} not supported over NFC on this YubiKey.")
-    for app in disable:
-        if app & nfc_supported:
-            nfc_enabled &= ~app
-        else:
-            cli_fail(f"{app.name} not supported over NFC on this YubiKey.")
+    config = DeviceConfig({}, None, None, None)
+    info = ctx.obj["info"]
 
-    f_confirm = ""
-    if enable:
-        f_confirm += f"Enable {', '.join(str(app) for app in enable)}.\n"
-    if disable:
-        f_confirm += f"Disable {', '.join(str(app) for app in disable)}.\n"
-    f_confirm += "Configure NFC?"
+    nfc_supported = info.supported_capabilities.get(TRANSPORT.NFC)
+    if enable_all:
+        enable = nfc_supported
+    else:
+        enable = CAPABILITY(sum(enable))
+    if disable_all:
+        disable = nfc_supported
+    else:
+        disable = CAPABILITY(sum(disable))
 
-    is_locked = info.is_locked
-
-    if force and is_locked and not lock_code:
-        cli_fail("Configuration is locked - please supply the --lock-code option.")
-    if lock_code and not is_locked:
-        cli_fail("Configuration is not locked - please remove the --lock-code option.")
-
-    force or click.confirm(f_confirm, abort=True, err=True)
-
-    if is_locked and not lock_code:
-        lock_code = prompt_lock_code()
-
-    if lock_code:
-        lock_code = _parse_lock_code(ctx, lock_code)
-
-    app = ctx.obj["controller"]
-    try:
-        app.write_device_config(
-            DeviceConfig({TRANSPORT.NFC: nfc_enabled}, None, None, None),
-            False,  # No need to reboot for NFC.
-            lock_code,
-        )
-    except Exception as e:
-        logger.error("Failed to write config", exc_info=e)
-        cli_fail("Failed to configure NFC applications.")
+    _configure_applications(
+        ctx,
+        config,
+        [],
+        TRANSPORT.NFC,
+        enable,
+        disable,
+        lock_code,
+        force,
+    )
 
 
-def _list_apps(ctx, enabled):
+def _list_apps(ctx, transport):
+    enabled = ctx.obj["info"].config.enabled_capabilities.get(transport)
     for app in CAPABILITY:
         if app & enabled:
-            click.echo(str(app))
+            click.echo(app.display_name)
     ctx.exit()
 
 
 def _ensure_not_invalid_options(ctx, enable, disable):
-    if any(a in enable for a in disable):
+    if enable & disable:
         ctx.fail("Invalid options.")
 
 
@@ -583,14 +576,14 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     if not force:
         if mode == my_mode:
-            cli_fail(f"Mode is already {mode}, nothing to do...", 0)
+            raise CliFail(f"Mode is already {mode}, nothing to do...", 0)
         elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
-            cli_fail(
+            raise CliFail(
                 "Mode switching is not supported on this YubiKey!\n"
                 "Use --force to attempt to set it anyway."
             )
         elif mode.interfaces not in interfaces_supported:
-            cli_fail(
+            raise CliFail(
                 f"Mode {mode} is not supported on this YubiKey!\n"
                 + "Use --force to attempt to set it anyway."
             )
@@ -598,13 +591,13 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     try:
         mgmt.set_mode(mode, chalresp_timeout, autoeject)
+        logger.info("USB mode updated")
         click.echo(
             "Mode set! You must remove and re-insert your YubiKey "
             "for this change to take effect."
         )
-    except Exception as e:
-        logger.debug("Failed to switch mode", exc_info=e)
-        click.echo(
+    except Exception:
+        raise CliFail(
             "Failed to switch mode on the YubiKey. Make sure your "
             "YubiKey does not have an access code set."
         )

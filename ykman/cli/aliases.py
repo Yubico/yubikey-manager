@@ -25,13 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import click
+import logging
 
 """
 Command line aliases to support commands which have moved.
 """
 
 
+logger = logging.getLogger(__name__)
 ignore = None
 
 
@@ -121,11 +122,9 @@ def apply_aliases(argv):
         if i is not None:
             if f:
                 argv = f(argv, alias, i)
-                click.echo(
-                    "WARNING: "
+                logger.warning(
                     "The use of this command is deprecated and will be removed!\n"
-                    "Replace with: ykman " + " ".join(argv[1:]) + "\n",
-                    err=True,
+                    "Replace with: ykman " + " ".join(argv[1:]),
                 )
             break  # Only handle first match
     return argv

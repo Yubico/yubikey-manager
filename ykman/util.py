@@ -113,8 +113,8 @@ def parse_private_key(data, password):
         except ValueError as e:
             # Cryptography raises ValueError if decryption fails.
             raise InvalidPasswordError(e)
-        except Exception as e:
-            logger.debug("Failed to parse PEM private key ", exc_info=e)
+        except Exception:
+            logger.debug("Failed to parse PEM private key ", exc_info=True)
 
     # PKCS12
     if is_pkcs12(data):
@@ -125,8 +125,8 @@ def parse_private_key(data, password):
         return serialization.load_der_private_key(
             data, password, backend=default_backend()
         )
-    except Exception as e:
-        logger.debug("Failed to parse private key as DER", exc_info=e)
+    except Exception:
+        logger.debug("Failed to parse private key as DER", exc_info=True)
 
     # All parsing failed
     raise ValueError("Could not parse private key.")
@@ -148,8 +148,8 @@ def parse_certificates(data, password):
                             PEM_IDENTIFIER + cert, default_backend()
                         )
                     )
-                except Exception as e:
-                    logger.debug("Failed to parse PEM certificate", exc_info=e)
+                except Exception:
+                    logger.debug("Failed to parse PEM certificate", exc_info=True)
         # Could be valid PEM but not certificates.
         if not certs:
             raise ValueError("PEM file does not contain any certificate(s)")
@@ -162,8 +162,8 @@ def parse_certificates(data, password):
     # DER
     try:
         return [x509.load_der_x509_certificate(data, default_backend())]
-    except Exception as e:
-        logger.debug("Failed to parse certificate as DER", exc_info=e)
+    except Exception:
+        logger.debug("Failed to parse certificate as DER", exc_info=True)
 
     raise ValueError("Could not parse certificate.")
 
@@ -200,8 +200,8 @@ def is_pkcs12(data):
     try:
         header = Tlv.parse_from(Tlv.unpack(0x30, data))[0]
         return header.tag == 0x02 and header.value == b"\x03"
-    except ValueError as e:
-        logger.debug("Unable to parse TLV", exc_info=e)
+    except ValueError:
+        logger.debug("Unable to parse TLV", exc_info=True)
     return False
 
 

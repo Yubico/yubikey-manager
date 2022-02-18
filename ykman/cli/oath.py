@@ -28,7 +28,7 @@
 import click
 import logging
 from .util import (
-    cli_fail,
+    CliFail,
     click_force_option,
     click_postpone_execution,
     click_callback,
@@ -127,6 +127,7 @@ def reset(ctx):
     if old_id in keys:
         del keys[old_id]
         keys.write()
+        logger.info("Deleted remembered access key")
 
     click.echo("Success! All OATH accounts have been deleted from the YubiKey.")
 
@@ -151,6 +152,7 @@ def _validate(ctx, key, remember):
     if remember:
         keys.put_secret(session.device_id, key.hex())
         keys.write()
+        logger.info("Access key remembered")
         click.echo("Password remembered.")
 
 
@@ -163,12 +165,14 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
         try:
             # Use password, if given as argument
             if password:
+                logger.debug("Access key required, using provided password")
                 key = session.derive_key(password)
                 _validate(ctx, key, remember)
                 return
 
             # Use stored key, if available
             if keys.keyring_available and device_id in keys:
+                logger.debug("Access key required, using remembered key")
                 try:
                     key = bytes.fromhex(keys.get_secret(device_id))
                     _validate(ctx, key, False)
@@ -176,6 +180,7 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
                 except ApduError as e:
                     # Delete wrong key and fall through to prompt
                     if e.sw == SW.INCORRECT_PARAMETERS:
+                        logger.debug("Remembered key incorrect, deleting key")
                         del keys[device_id]
                         keys.write()
                 except Exception as e:
@@ -187,10 +192,10 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
             key = session.derive_key(password)
             _validate(ctx, key, remember)
         except ApduError:
-            cli_fail("Authentication to the YubiKey failed. Wrong password?")
+            raise CliFail("Authentication to the YubiKey failed. Wrong password?")
 
     elif password:
-        cli_fail("Password provided, but no password is set.")
+        raise CliFail("Password provided, but no password is set.")
 
 
 @oath.group()
@@ -230,12 +235,13 @@ def change(ctx, password, clear, new_password, remember):
         if device_id in keys:
             del keys[device_id]
             keys.write()
+            logger.info("Deleted remembered access key")
 
         click.echo("Password cleared from YubiKey.")
     else:
         if remember:
             if not keys.keyring_available:
-                cli_fail(
+                raise CliFail(
                     "Failed to remember password, the keyring is locked or unavailable."
                 )
         if not new_password:
@@ -270,10 +276,11 @@ def remember(ctx, password):
         if device_id in keys:
             del keys[session.device_id]
             keys.write()
+            logger.info("Deleted remembered access key")
         click.echo("This YubiKey is not password protected.")
     else:
         if not keys.keyring_available:
-            cli_fail(
+            raise CliFail(
                 "Failed to remember password, the keyring is locked or unavailable."
             )
         if not password:
@@ -282,7 +289,7 @@ def remember(ctx, password):
         try:
             _validate(ctx, key, True)
         except Exception:
-            cli_fail("Authentication to the YubiKey failed. Wrong password?")
+            raise CliFail("Authentication to the YubiKey failed. Wrong password?")
 
 
 def _clear_all_passwords(ctx, param, value):
@@ -319,6 +326,7 @@ def forget(ctx):
     if device_id in keys:
         del keys[session.device_id]
         keys.write()
+        logger.info("Deleted remembered access key")
         click.echo("Password forgotten.")
     else:
         click.echo("No password stored for this YubiKey.")
@@ -512,7 +520,7 @@ def _add_cred(ctx, data, touch, force):
         ctx.fail("Secret must be at least 2 bytes.")
 
     if touch and version < (4, 2, 6):
-        cli_fail("Require touch is not supported on this YubiKey.")
+        raise CliFail("Require touch is not supported on this YubiKey.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
         ctx.fail("Counter only supported for HOTP accounts.")
@@ -520,7 +528,7 @@ def _add_cred(ctx, data, touch, force):
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
         version < (4, 3, 1) or is_fips_version(version)
     ):
-        cli_fail("Algorithm SHA512 not supported on this YubiKey.")
+        raise CliFail("Algorithm SHA512 not supported on this YubiKey.")
 
     creds = session.list_credentials()
     cred_id = data.get_id()
@@ -539,16 +547,16 @@ def _add_cred(ctx, data, touch, force):
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
-        cli_fail("Choose a name that is not a subset of an existing account.")
+        raise CliFail("Choose a name that is not a subset of an existing account.")
 
     try:
         session.put_credential(data, touch)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            cli_fail("No space left on the YubiKey for OATH accounts.")
+            raise CliFail("No space left on the YubiKey for OATH accounts.")
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
-            cli_fail("The command failed. Is there enough space on the YubiKey?")
+            raise CliFail("The command failed. Is there enough space on the YubiKey?")
         else:
             raise
 
@@ -626,14 +634,14 @@ def code(ctx, show_hidden, query, single, password, remember):
                 code = session.calculate_code(cred)
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                cli_fail("Touch account timed out!")
+                raise CliFail("Touch account timed out!")
         entries[cred] = code
 
     elif single and len(creds) > 1:
         _error_multiple_hits(ctx, creds)
 
     elif single and len(creds) == 0:
-        cli_fail("No matching account found.")
+        raise CliFail("No matching account found.")
 
     if single and creds:
         if is_steam(cred):
@@ -696,7 +704,7 @@ def rename(ctx, query, name, force, password, remember):
 
         new_id = _format_cred_id(issuer, name, cred.oath_type, cred.period)
         if any(cred.id == new_id for cred in creds):
-            cli_fail(
+            raise CliFail(
                 f"Another account with ID {new_id.decode()} "
                 "already exists on this YubiKey."
             )
