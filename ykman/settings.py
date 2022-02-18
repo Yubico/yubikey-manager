@@ -67,7 +67,7 @@ class Configuration(Settings):
 
 class AppData(Settings):
     _config_dir = XDG_DATA_HOME
-    _service = "yubioath"
+    _service = "ykman"
     _username = "wrap_key"
 
     def __init__(self, name):
