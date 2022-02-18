@@ -1,4 +1,4 @@
-* Version 4.0.8 (unreleased)
+* Version 4.0.8 (released 2022-01-31)
  ** Bugfix: Fix error message for invalid modhex when programing a YubiOTP credential.
  ** Bugfix: Fix issue with displaying a Steam credential when it is the only account.
  ** Bugfix: Prevent installation of files in site-packages root.
