@@ -222,7 +222,6 @@ def reset(ctx):
 
     click.echo("Resetting PIV data...")
     ctx.obj["session"].reset()
-    logger.info("PIV application data reset")
 
     click.echo("Success! All PIV data have been cleared from the YubiKey.")
     click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
@@ -261,7 +260,6 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     )
     try:
         session.set_pin_attempts(pin_retries, puk_retries)
-        logger.info("Number of PIN/PUK retries set")
         click.echo("Default PINs are set:")
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
@@ -303,7 +301,6 @@ def change_pin(ctx, pin, new_pin):
 
     try:
         pivman_change_pin(session, pin, new_pin)
-        logger.info("PIN changed")
         click.echo("New PIN set.")
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -345,7 +342,6 @@ def change_puk(ctx, puk, new_puk):
 
     try:
         session.change_puk(puk, new_puk)
-        logger.info("PUK changed")
         click.echo("New PUK set.")
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -483,7 +479,6 @@ def change_management_key(
         pivman_set_mgm_key(
             session, new_management_key, algorithm, touch=touch, store_on_device=protect
         )
-        logger.info("Management key changed")
     except ApduError:
         cli_fail("Changing the management key failed.")
 
@@ -505,7 +500,6 @@ def unblock_pin(ctx, puk, new_pin):
         )
     try:
         session.unblock_pin(puk, new_pin)
-        logger.info("PIN unblocked")
         click.echo("PIN unblocked")
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -626,7 +620,6 @@ def import_key(
 
     _ensure_authenticated(ctx, pin, management_key)
     session.put_key(slot, private_key, pin_policy, touch_policy)
-    logger.info(f"Private key imported into slot {slot}")
 
 
 @keys.command()
@@ -803,9 +796,7 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
         _verify_pin_if_needed(ctx, session, do_verify, pin)
 
     session.put_certificate(slot, cert_to_import)
-    logger.info(f"Certificate imported into slot {slot}")
     session.put_object(OBJECT_ID.CHUID, generate_chuid())
-    logger.info("CHUID updated")
 
 
 @cert.command("export")
@@ -888,9 +879,7 @@ def generate_certificate(
                 session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
         session.put_certificate(slot, cert)
-        logger.info(f"Self-signed certificate imported into slot {slot}.")
         session.put_object(OBJECT_ID.CHUID, generate_chuid())
-        logger.info("CHUID updated")
     except ApduError:
         cli_fail("Certificate generation failed.")
 
@@ -959,9 +948,7 @@ def delete_certificate(ctx, management_key, pin, slot):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
     session.delete_certificate(slot)
-    logger.info("Certificate in slot {slot} deleted")
     session.put_object(OBJECT_ID.CHUID, generate_chuid())
-    logger.info("CHUID updated")
 
 
 @piv.group("objects")
@@ -1042,7 +1029,6 @@ def write_object(ctx, pin, management_key, object_id, data):
 
     try:
         session.put_object(object_id, data.read())
-        logger.info(f"Imported object {object_id}")
     except ApduError as e:
         if e.sw == SW.INCORRECT_PARAMETERS:
             cli_fail("Something went wrong, is the object id valid?")
@@ -1075,7 +1061,6 @@ def generate_object(ctx, pin, management_key, object_id):
         session.put_object(OBJECT_ID.CAPABILITY, generate_ccc())
     else:
         ctx.fail("Unsupported object ID for generate.")
-    logger.info(f"Generated object {object_id}")
 
 
 def _prompt_management_key(prompt="Enter a management key [blank to use default key]"):

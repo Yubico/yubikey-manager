@@ -122,13 +122,13 @@ def reset(ctx):
     click.echo("Resetting OATH data...")
     old_id = session.device_id
     session.reset()
-    logger.info("OATH application data reset")
 
     settings = ctx.obj["settings"]
     keys = settings.setdefault("keys", {})
     if old_id in keys:
         del keys[old_id]
         settings.write()
+        logger.info("Deleted remembered access key")
 
     click.echo("Success! All OATH accounts have been deleted from the YubiKey.")
 
@@ -147,6 +147,7 @@ def _validate(ctx, key, remember):
             keys = settings.setdefault("keys", {})
             keys[session.device_id] = key.hex()
             settings.write()
+            logger.info("Access key remembered")
             click.echo("Password remembered.")
     except Exception:
         cli_fail("Authentication to the YubiKey failed. Wrong password?")
@@ -160,8 +161,10 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
 
     if session.locked:
         if password:  # If password argument given, use it
+            logger.debug("Access key required, using provided password")
             key = session.derive_key(password)
         elif device_id in keys:  # If remembered, use key
+            logger.debug("Access key required, using remembered key")
             key = bytes.fromhex(keys[device_id])
         else:  # Prompt for password
             password = click_prompt(prompt, hide_input=True)
@@ -205,10 +208,10 @@ def change(ctx, password, clear, new_password):
 
     if clear:
         session.unset_key()
-        logger.info("Password removed")
         if device_id in keys:
             del keys[device_id]
             settings.write()
+            logger.info("Deleted remembered access key")
 
         click.echo("Password cleared from YubiKey.")
     else:
@@ -218,11 +221,11 @@ def change(ctx, password, clear, new_password):
             )
         key = session.derive_key(new_password)
         session.set_key(key)
-        logger.info("New password set")
         click.echo("Password updated.")
         if device_id in keys:
             keys[device_id] = key.hex()
             settings.write()
+            logger.info("New access key remembered")
             click.echo("Password remembered.")
 
 
@@ -243,6 +246,7 @@ def remember(ctx, password):
         if device_id in keys:
             del keys[session.device_id]
             settings.write()
+            logger.info("Deleted remembered access key")
         click.echo("This YubiKey is not password protected.")
     else:
         if not password:
@@ -286,6 +290,7 @@ def forget(ctx):
     if device_id in keys:
         del keys[session.device_id]
         settings.write()
+        logger.info("Deleted remembered access key")
         click.echo("Password forgotten.")
     else:
         click.echo("No password stored for this YubiKey.")
@@ -517,7 +522,6 @@ def _add_cred(ctx, data, touch, force):
 
     try:
         session.put_credential(data, touch)
-        logger.info("Credential added")
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
             cli_fail("No space left on the YubiKey for OATH accounts.")
@@ -683,7 +687,6 @@ def rename(ctx, query, name, force, password, remember):
             )
         ):
             session.rename_credential(cred.id, name, issuer)
-            logger.info("Credential renamed")
             click.echo(f"Renamed {_string_id(cred)} to {new_id.decode()}.")
         else:
             click.echo("Rename aborted by user.")
@@ -724,7 +727,6 @@ def delete(ctx, query, force, password, remember):
             )
         ):
             session.delete_credential(cred.id)
-            logger.info("Credential deleted")
             click.echo(f"Deleted {_string_id(cred)}.")
         else:
             click.echo("Deletion aborted by user.")

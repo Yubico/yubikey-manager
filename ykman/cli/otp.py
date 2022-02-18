@@ -194,7 +194,6 @@ def info(ctx):
     """
     session = ctx.obj["session"]
     state = session.get_config_state()
-    logger.debug(f"YubiOTP state: {state}")
     slot1 = state.is_configured(1)
     slot2 = state.is_configured(2)
 
@@ -216,7 +215,6 @@ def swap(ctx):
     click.echo("Swapping slots...")
     try:
         session.swap_slots()
-        logger.info("YubiOTP slots swapped")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -253,7 +251,6 @@ def ndef(ctx, slot, prefix, ndef_type):
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
-        logger.info("NDEF configuration updated")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -278,7 +275,6 @@ def delete(ctx, slot, force):
     click.echo(f"Deleting the configuration in slot {slot}...")
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
-        logger.info(f"Slot {slot} deleted")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -464,7 +460,6 @@ def yubiotp(
             access_code,
             access_code,
         )
-        logger.info(f"YubiOTP configuration written to YubiKey slot {slot}")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -542,7 +537,6 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-        logger.info(f"Static password written to YubiKey slot {slot}")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -628,7 +622,6 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-        logger.info(f"Challenge-response credential written to YubiKey slot {slot}")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -793,7 +786,6 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-        logger.info(f"OATH-HOTP credential written to YubiKey slot {slot}")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)
 
@@ -900,6 +892,5 @@ def settings(
             new_access_code,
             ctx.obj["access_code"],
         )
-        logger.info(f"Configuration updated for YubiKey slot {slot}")
     except CommandError:
         cli_fail(_WRITE_FAIL_MSG)

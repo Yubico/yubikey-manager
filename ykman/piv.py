@@ -230,11 +230,13 @@ class PivmanProtectedData:
 
 def get_pivman_data(session: PivSession) -> PivmanData:
     """Reads out the Pivman data from a YubiKey."""
+    logger.debug("Reading pivman data")
     try:
         return PivmanData(session.get_object(OBJECT_ID_PIVMAN_DATA))
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             # No data there, initialise a new object.
+            logger.debug("No data, initializing blank")
             return PivmanData()
         raise
 
@@ -244,11 +246,13 @@ def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
 
     This function requires PIN verification prior to being called.
     """
+    logger.debug("Reading protected pivman data")
     try:
         return PivmanProtectedData(session.get_object(OBJECT_ID_PIVMAN_PROTECTED_DATA))
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             # No data there, initialise a new object.
+            logger.debug("No data, initializing blank")
             return PivmanProtectedData()
         raise
 
@@ -278,6 +282,7 @@ def pivman_set_mgm_key(
 
     if pivman.has_derived_key:
         # Clear salt for old derived keys.
+        logger.debug("Clearing salt in pivman data")
         pivman.salt = None
 
     # Set flag for stored or not stored key.
@@ -289,11 +294,13 @@ def pivman_set_mgm_key(
     if pivman_prot is not None:
         if store_on_device:
             # Store key in protected pivman data
+            logger.debug("Storing key in protected pivman data")
             pivman_prot.key = new_key
             session.put_object(OBJECT_ID_PIVMAN_PROTECTED_DATA, pivman_prot.get_bytes())
         elif pivman_prot.key:
             # If new key should not be stored and there is an old stored key,
             # try to clear it.
+            logger.debug("Clearing old key in protected pivman data")
             try:
                 pivman_prot.key = None
                 session.put_object(
@@ -310,6 +317,7 @@ def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
 
     pivman = get_pivman_data(session)
     if pivman.has_derived_key:
+        logger.debug("Has derived management key, update for new PIN")
         session.authenticate(
             MANAGEMENT_KEY_TYPE.TDES,
             derive_management_key(old_pin, cast(bytes, pivman.salt)),
@@ -351,6 +359,9 @@ def check_key(
     """
     try:
         test_data = b"test"
+        logger.debug(
+            "Testing private key by creating a test signature, and verifying it"
+        )
 
         test_sig = session.sign(
             slot,
@@ -375,10 +386,12 @@ def check_key(
 
     except ApduError as e:
         if e.sw in (SW.INCORRECT_PARAMETERS, SW.WRONG_PARAMETERS_P1P2):
+            logger.debug(f"Couldn't create signature: SW={e.sw:04x}")
             return False
         raise
 
     except InvalidSignature:
+        logger.debug("Signature verification failed")
         return False
 
 
@@ -538,6 +551,7 @@ def sign_certificate_builder(
     hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.Certificate:
     """Sign a Certificate."""
+    logger.debug("Signing a certificate")
     dummy_key = _dummy_key(key_type)
     cert = builder.sign(dummy_key, hash_algorithm(), default_backend())
 
@@ -566,6 +580,7 @@ def sign_csr_builder(
     hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Sign a CSR."""
+    logger.debug("Signing a CSR")
     key_type = KEY_TYPE.from_public_key(public_key)
     dummy_key = _dummy_key(key_type)
     csr = builder.sign(dummy_key, hash_algorithm(), default_backend())
@@ -607,6 +622,7 @@ def generate_self_signed_certificate(
     hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.Certificate:
     """Generate a self-signed certificate using a private key in a slot."""
+    logger.debug("Generating a self-signed certificate")
     key_type = KEY_TYPE.from_public_key(public_key)
 
     subject = parse_rfc4514_string(subject_str)
@@ -620,7 +636,6 @@ def generate_self_signed_certificate(
         .not_valid_after(valid_to)
     )
 
-    logger.info(f"Generating certificate in slot: {slot}")
     return sign_certificate_builder(session, slot, key_type, builder, hash_algorithm)
 
 
@@ -632,9 +647,9 @@ def generate_csr(
     hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot."""
+    logger.debug("Generating a CSR")
     builder = x509.CertificateSigningRequestBuilder().subject_name(
         parse_rfc4514_string(subject_str)
     )
 
-    logger.info(f"Generating CSR for slot: {slot}")
     return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)

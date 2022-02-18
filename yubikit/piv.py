@@ -449,37 +449,48 @@ class PivSession:
             self.protocol.apdu_format = ApduFormat.EXTENDED
         self._current_pin_retries = 3
         self._max_pin_retries = 3
+        logger.debug(f"PIV session initialized (version={self.version})")
 
     @property
     def version(self) -> Version:
         return self._version
 
     def reset(self) -> None:
+        logger.debug("Preparing PIV reset")
+
         # Block PIN
+        logger.debug("Verify PIN with invalid attempts until blocked")
         counter = self.get_pin_attempts()
         while counter > 0:
             try:
                 self.verify_pin("")
             except InvalidPinError as e:
                 counter = e.attempts_remaining
+        logger.debug("PIN is blocked")
 
         # Block PUK
+        logger.debug("Verify PUK with invalid attempts until blocked")
         counter = 1
         while counter > 0:
             try:
                 self._change_reference(INS_RESET_RETRY, PIN_P2, "", "")
             except InvalidPinError as e:
                 counter = e.attempts_remaining
+        logger.debug("PUK is blocked")
 
         # Reset
+        logger.debug("Sending reset")
         self.protocol.send_apdu(0, INS_RESET, 0, 0)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
+
+        logger.info("PIV application data reset performed")
 
     def authenticate(
         self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
     ) -> None:
         key_type = MANAGEMENT_KEY_TYPE(key_type)
+        logger.debug(f"Authenticating with key type: {key_type}")
         response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
@@ -519,6 +530,8 @@ class PivSession:
         require_touch: bool = False,
     ) -> None:
         key_type = MANAGEMENT_KEY_TYPE(key_type)
+        logger.debug(f"Setting management key of type: {key_type}")
+
         if key_type != MANAGEMENT_KEY_TYPE.TDES:
             require_version(self.version, (5, 4, 0))
         if len(management_key) != key_type.key_len:
@@ -531,8 +544,10 @@ class PivSession:
             0xFE if require_touch else 0xFF,
             int2bytes(key_type) + Tlv(SLOT_CARD_MANAGEMENT, management_key),
         )
+        logger.info("Management key set")
 
     def verify_pin(self, pin: str) -> None:
+        logger.debug("Verifying PIN")
         try:
             self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
             self._current_pin_retries = self._max_pin_retries
@@ -544,41 +559,55 @@ class PivSession:
             raise InvalidPinError(retries)
 
     def get_pin_attempts(self) -> int:
+        logger.debug("Getting PIN attempts")
         try:
             return self.get_pin_metadata().attempts_remaining
         except NotSupportedError:
             try:
                 self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2)
                 # Already verified, no way to know true count
+                logger.debug("Using cached value, may be incorrect.")
                 return self._current_pin_retries
             except ApduError as e:
                 retries = _retries_from_sw(self.version, e.sw)
                 if retries is None:
                     raise
                 self._current_pin_retries = retries
+                logger.debug("Using value from empty verify")
                 return retries
 
     def change_pin(self, old_pin: str, new_pin: str) -> None:
+        logger.debug("Changing PIN")
         self._change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)
+        logger.info("New PIN set")
 
     def change_puk(self, old_puk: str, new_puk: str) -> None:
+        logger.debug("Changing PUK")
         self._change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk)
+        logger.info("New PUK set")
 
     def unblock_pin(self, puk: str, new_pin: str) -> None:
+        logger.debug("Using PUK to set new PIN")
         self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
+        logger.info("New PIN set")
 
     def set_pin_attempts(self, pin_attempts: int, puk_attempts: int) -> None:
+        logger.debug(f"Setting PIN/PUK attempts ({pin_attempts}, {puk_attempts})")
         self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
         self._max_pin_retries = pin_attempts
         self._current_pin_retries = pin_attempts
+        logger.info("PIN/PUK attempts set")
 
     def get_pin_metadata(self) -> PinMetadata:
+        logger.debug("Getting PIN metadata")
         return self._get_pin_puk_metadata(PIN_P2)
 
     def get_puk_metadata(self) -> PinMetadata:
+        logger.debug("Getting PUK metadata")
         return self._get_pin_puk_metadata(PUK_P2)
 
     def get_management_key_metadata(self) -> ManagementKeyMetadata:
+        logger.debug("Getting management key metadata")
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(
             self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT)
@@ -591,6 +620,8 @@ class PivSession:
         )
 
     def get_slot_metadata(self, slot: SLOT) -> SlotMetadata:
+        slot = SLOT(slot)
+        logger.debug(f"Getting metadata for slot {slot}")
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, slot))
         policy = data[TAG_METADATA_POLICY]
@@ -610,34 +641,49 @@ class PivSession:
         hash_algorithm: hashes.HashAlgorithm,
         padding: Optional[AsymmetricPadding] = None,
     ) -> bytes:
+        slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
+        logger.debug(
+            f"Signing data with key in slot {slot} of type {key_type} using "
+            f"hash={hash_algorithm}, padding={padding}"
+        )
         padded = _pad_message(key_type, message, hash_algorithm, padding)
         return self._use_private_key(slot, key_type, padded, False)
 
     def decrypt(
         self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
     ) -> bytes:
+        slot = SLOT(slot)
         if len(cipher_text) == 1024 // 8:
             key_type = KEY_TYPE.RSA1024
         elif len(cipher_text) == 2048 // 8:
             key_type = KEY_TYPE.RSA2048
         else:
             raise ValueError("Invalid length of ciphertext")
+        logger.debug(
+            f"Decrypting data with key in slot {slot} of type {key_type} using ",
+            f"padding={padding}",
+        )
         padded = self._use_private_key(slot, key_type, cipher_text, False)
         return _unpad_message(padded, padding)
 
     def calculate_secret(
         self, slot: SLOT, peer_public_key: ec.EllipticCurvePublicKey
     ) -> bytes:
+        slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(peer_public_key)
         if key_type.algorithm != ALGORITHM.EC:
             raise ValueError("Unsupported key type")
+        logger.debug(
+            f"Performing key agreement with key in slot {slot} of type {key_type}"
+        )
         data = peer_public_key.public_bytes(
             Encoding.X962, PublicFormat.UncompressedPoint
         )
         return self._use_private_key(slot, key_type, data, True)
 
     def get_object(self, object_id: int) -> bytes:
+        logger.debug(f"Reading data from object slot {hex(object_id)}")
         if object_id == OBJECT_ID.DISCOVERY:
             expected: int = OBJECT_ID.DISCOVERY
         else:
@@ -665,8 +711,11 @@ class PivSession:
             0xFF,
             Tlv(TAG_OBJ_ID, int2bytes(object_id)) + Tlv(TAG_OBJ_DATA, data or b""),
         )
+        logger.info(f"Data written to object slot {hex(object_id)}")
 
     def get_certificate(self, slot: SLOT) -> x509.Certificate:
+        slot = SLOT(slot)
+        logger.debug(f"Reading certificate in slot {slot}")
         try:
             data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
         except ValueError:
@@ -684,6 +733,8 @@ class PivSession:
             raise BadResponseError("Invalid certificate", e)
 
     def put_certificate(self, slot: SLOT, certificate: x509.Certificate) -> None:
+        slot = SLOT(slot)
+        logger.debug(f"Storing certificate in slot {slot}")
         cert_data = certificate.public_bytes(Encoding.DER)
         data = (
             Tlv(TAG_CERTIFICATE, cert_data) + Tlv(TAG_CERT_INFO, b"\0") + Tlv(TAG_LRC)
@@ -691,6 +742,8 @@ class PivSession:
         self.put_object(OBJECT_ID.from_slot(slot), data)
 
     def delete_certificate(self, slot: SLOT) -> None:
+        slot = SLOT(slot)
+        logger.debug(f"Deleting certificate in slot {slot}")
         self.put_object(OBJECT_ID.from_slot(slot))
 
     def put_key(
@@ -703,6 +756,7 @@ class PivSession:
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
     ) -> None:
+        slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
         check_key_support(self.version, key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
@@ -726,7 +780,12 @@ class PivSession:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
             data += Tlv(TAG_TOUCH_POLICY, int2bytes(touch_policy))
+
+        logger.debug(
+            f"Importing key with pin_policy={pin_policy}, touch_policy={touch_policy}"
+        )
         self.protocol.send_apdu(0, INS_IMPORT_KEY, key_type, slot, data)
+        logger.info(f"Private key imported in slot {slot} of type {key_type}")
         return key_type
 
     def generate_key(
@@ -736,6 +795,7 @@ class PivSession:
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
     ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
+        slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
         check_key_support(self.version, key_type, pin_policy, touch_policy, True)
         data: bytes = Tlv(TAG_GEN_ALGORITHM, int2bytes(key_type))
@@ -743,14 +803,21 @@ class PivSession:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
             data += Tlv(TAG_TOUCH_POLICY, int2bytes(touch_policy))
+
+        logger.debug(
+            f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
+        )
         response = self.protocol.send_apdu(
             0, INS_GENERATE_ASYMMETRIC, 0, slot, Tlv(0xAC, data)
         )
+        logger.info(f"Private key generated in slot {slot} of type {key_type}")
         return _parse_device_public_key(key_type, Tlv.unpack(0x7F49, response))
 
     def attest_key(self, slot: SLOT) -> x509.Certificate:
         require_version(self.version, (4, 3, 0))
+        slot = SLOT(slot)
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
+        logger.debug(f"Attested key in slot {slot}")
         return x509.load_der_x509_certificate(response, default_backend())
 
     def _change_reference(self, ins, p2, value1, value2):

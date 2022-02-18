@@ -50,6 +50,9 @@ from hashlib import sha1
 from threading import Event
 from enum import unique, IntEnum, IntFlag
 from typing import TypeVar, Optional, Union, Callable
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
@@ -727,6 +730,11 @@ class YubiOtpSession:
             )
         else:
             raise TypeError("Unsupported connection type")
+        logger.debug(
+            "YubiOTP session initialized for "
+            f"connection={type(connection).__name__}, version={self.version}, "
+            f"state={self.get_config_state()}"
+        )
 
     def close(self) -> None:
         self.backend.close()
@@ -744,9 +752,12 @@ class YubiOtpSession:
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
 
     def _write_config(self, slot, config, cur_acc_code):
+        has_acc = bool(cur_acc_code)
+        logger.debug(f"Writing configuration to slot {slot}, access code: {has_acc}")
         self._status = self.backend.write_update(
             slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
         )
+        logger.info("Configuration written")
 
     def put_configuration(
         self,
@@ -759,6 +770,11 @@ class YubiOtpSession:
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
             )
+        slot = SLOT(slot)
+        logger.debug(
+            f"Writing configuration of type {type(configuration).__name__} to "
+            f"slot {slot}"
+        )
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             configuration.get_config(acc_code),
@@ -781,6 +797,8 @@ class YubiOtpSession:
                 "The access code cannot be updated on this YubiKey. "
                 "Instead, delete the slot and configure it anew."
             )
+        slot = SLOT(slot)
+        logger.debug(f"Writing configuration update to slot {slot}")
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
             configuration.get_config(acc_code),
@@ -788,9 +806,12 @@ class YubiOtpSession:
         )
 
     def swap_slots(self) -> None:
+        logger.debug("Swapping touch slots")
         self._write_config(CONFIG_SLOT.SWAP, b"", None)
 
     def delete_slot(self, slot: SLOT, cur_acc_code: Optional[bytes] = None) -> None:
+        slot = SLOT(slot)
+        logger.debug(f"Deleting slot {slot}")
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             b"\0" * CONFIG_SIZE,
@@ -800,6 +821,7 @@ class YubiOtpSession:
     def set_scan_map(
         self, scan_map: bytes, cur_acc_code: Optional[bytes] = None
     ) -> None:
+        logger.debug("Writing scan map")
         self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
 
     def set_ndef_configuration(
@@ -809,6 +831,8 @@ class YubiOtpSession:
         cur_acc_code: Optional[bytes] = None,
         ndef_type: NDEF_TYPE = NDEF_TYPE.URI,
     ) -> None:
+        slot = SLOT(slot)
+        logger.debug(f"Writing NDEF configuration for slot {slot} of type {ndef_type}")
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
             _build_ndef_config(uri, ndef_type),
@@ -823,6 +847,8 @@ class YubiOtpSession:
         on_keepalive: Optional[Callable[[int], None]] = None,
     ) -> bytes:
         require_version(self.version, (2, 2, 0))
+        slot = SLOT(slot)
+        logger.debug(f"Calculating response for slot {slot}")
 
         # Pad challenge with byte different from last
         challenge = challenge.ljust(

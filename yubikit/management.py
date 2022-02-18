@@ -447,6 +447,10 @@ class ManagementSession:
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")
+        logger.debug(
+            "Management session initialized for "
+            f"connection={type(connection).__name__}, version={self.version}"
+        )
 
     def close(self) -> None:
         self.backend.close()
@@ -480,6 +484,7 @@ class ManagementSession:
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
         )
+        logger.info("Device config written")
 
     def set_mode(
         self,
@@ -521,3 +526,4 @@ class ManagementSession:
                 # N.B. This is little endian!
                 struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
             )
+            logger.info("Mode configuration written")

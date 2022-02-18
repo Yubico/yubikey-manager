@@ -204,16 +204,21 @@ def click_prompt(prompt, err=True, **kwargs):
     Note that we change the default of err to be True, since that's how we typically
     use it.
     """
+    logger.debug(f"Input requested ({prompt})")
     if not sys.stdin.isatty():  # Piped from stdin, see if there is data
+        logger.debug("TTY detected, reading line from stdin...")
         line = sys.stdin.readline()
         if line:
             return line.rstrip("\n")
+        logger.debug("No data available on stdin")
 
     # No piped data, use standard prompt
+    logger.debug("Using interactive prompt...")
     return click.prompt(prompt, err=err, **kwargs)
 
 
 def prompt_for_touch():
+    logger.debug("Prompting user to touch YubiKey...")
     try:
         click.echo("Touch your YubiKey...", err=True)
     except Exception:
