@@ -4,11 +4,9 @@ from yubikit.core import Tlv, bytes2int
 from yubikit.core.otp import modhex_encode, modhex_decode
 from yubikit.management import FORM_FACTOR
 from ykman.util import is_pkcs12, is_pem, parse_private_key, parse_certificates
-from ykman.util import _parse_pkcs12_pyopenssl, _parse_pkcs12_cryptography
+from ykman.util import _parse_pkcs12
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
 from .util import open_file
-from cryptography.hazmat.primitives.serialization import pkcs12
-from OpenSSL import crypto
 
 import unittest
 
@@ -118,11 +116,8 @@ class TestUtilityFunctions(unittest.TestCase):
         with open_file("rsa_2048_key_cert.pfx") as rsa_2048_key_cert_pfx:
             data = rsa_2048_key_cert_pfx.read()
 
-        key1, certs1 = _parse_pkcs12_cryptography(pkcs12, data, None)
-        key2, certs2 = _parse_pkcs12_pyopenssl(crypto, data, None)
-        self.assertEqual(key1.private_numbers(), key2.private_numbers())
-        self.assertEqual(1, len(certs1))
-        self.assertEqual(certs1, certs2)
+        key, certs = _parse_pkcs12(data, None)
+        self.assertEqual(1, len(certs))
 
     def test_is_pem(self):
         self.assertFalse(is_pem(b"just a byte string"))
