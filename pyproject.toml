@@ -35,6 +35,7 @@ pyscard = "^1.9 || ^2.0"
 fido2 = ">=0.9, <1.0"
 click = "^6.0 || ^7.0 || ^8.0"
 pywin32 = {version = ">=223", platform = "win32"}
+keyring = "<23.5"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.0"
