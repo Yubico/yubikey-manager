@@ -28,7 +28,7 @@
 from binascii import a2b_hex
 from yubikit.core import AID
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
-from .util import EnumChoice, ykman_command, cli_fail
+from .util import EnumChoice, ykman_command, CliFail
 from typing import Tuple, Optional
 
 import re
@@ -172,4 +172,4 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
             _print_response(resp, sw, no_pretty)
 
             if check is not None and sw != check:
-                cli_fail(f"Aborted due to error (expected SW={check:04X}).")
+                raise CliFail(f"Aborted due to error (expected SW={check:04X}).")

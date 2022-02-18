@@ -46,7 +46,7 @@ from yubikit.core.otp import (
 
 from .util import (
     ykman_group,
-    cli_fail,
+    CliFail,
     click_force_option,
     click_callback,
     click_parse_b32_key,
@@ -216,7 +216,7 @@ def swap(ctx):
     try:
         session.swap_slots()
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -244,15 +244,15 @@ def ndef(ctx, slot, prefix, ndef_type):
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not info.has_transport(TRANSPORT.NFC):
-        cli_fail("This YubiKey does not support NFC.")
+        raise CliFail("This YubiKey does not support NFC.")
 
     if not state.is_configured(slot):
-        cli_fail(f"Slot {slot} is empty.")
+        raise CliFail(f"Slot {slot} is empty.")
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -266,7 +266,7 @@ def delete(ctx, slot, force):
     session = ctx.obj["session"]
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
-        cli_fail("Not possible to delete an empty slot.")
+        raise CliFail("Not possible to delete an empty slot.")
     force or click.confirm(
         f"Do you really want to delete the configuration of slot {slot}?",
         abort=True,
@@ -276,7 +276,7 @@ def delete(ctx, slot, force):
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -386,7 +386,7 @@ def yubiotp(
             try:
                 serial = session.get_serial()
             except CommandError:
-                cli_fail("Serial number not set, public ID must be provided")
+                raise CliFail("Serial number not set, public ID must be provided")
 
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo(f"Using YubiKey serial as public ID: {public_id}")
@@ -444,7 +444,7 @@ def yubiotp(
             logger.info("Initiated YubiCloud upload")
         except PrepareUploadFailed as e:
             error_msg = "\n".join(e.messages())
-            cli_fail("Upload to YubiCloud failed.\n" + error_msg)
+            raise CliFail("Upload to YubiCloud failed.\n" + error_msg)
 
     force or click.confirm(
         f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
@@ -461,7 +461,7 @@ def yubiotp(
             access_code,
         )
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
     if config_output:
         serial = serial or session.get_serial()
@@ -538,7 +538,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
             ctx.obj["access_code"],
         )
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -623,7 +623,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             ctx.obj["access_code"],
         )
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -657,7 +657,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 
     # Check that slot is not empty
     if not session.get_config_state().is_configured(slot):
-        cli_fail("Cannot perform challenge-response on an empty slot.")
+        raise CliFail("Cannot perform challenge-response on an empty slot.")
 
     if totp:  # Challenge omitted or timestamp
         if challenge is None:
@@ -687,7 +687,7 @@ def calculate(ctx, slot, challenge, totp, digits):
 
         click.echo(value)
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 def parse_modhex_or_bcd(value):
@@ -787,7 +787,7 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             ctx.obj["access_code"],
         )
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -848,13 +848,13 @@ def settings(
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
     if delete_access_code and not ctx.obj["access_code"]:
-        cli_fail(
+        raise CliFail(
             "--delete-access-code used without providing an access code "
             '(see "ykman otp --help" for more info).'
         )
 
     if not session.get_config_state().is_configured(slot):
-        cli_fail("Not possible to update settings on an empty slot.")
+        raise CliFail("Not possible to update settings on an empty slot.")
 
     if new_access_code is None:
         if not delete_access_code:
@@ -893,4 +893,4 @@ def settings(
             ctx.obj["access_code"],
         )
     except CommandError:
-        cli_fail(_WRITE_FAIL_MSG)
+        raise CliFail(_WRITE_FAIL_MSG)

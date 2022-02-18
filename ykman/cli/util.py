@@ -28,7 +28,6 @@
 import functools
 import click
 import sys
-from typing import NoReturn
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
@@ -235,14 +234,10 @@ def prompt_timeout(timeout=0.5):
         timer.cancel()
 
 
-class Failure(Exception):
+class CliFail(Exception):
     def __init__(self, message, status=1):
         super().__init__(message)
         self.status = status
-
-
-def cli_fail(message: str, code: int = 1) -> NoReturn:
-    raise Failure(message, status=code)
 
 
 def pretty_print(value, level: int = 0) -> List[str]:

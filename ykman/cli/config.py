@@ -40,7 +40,7 @@ from .util import (
     click_force_option,
     click_prompt,
     EnumChoice,
-    cli_fail,
+    CliFail,
 )
 import os
 import re
@@ -89,7 +89,7 @@ def config(ctx):
 def _require_config(ctx):
     info = ctx.obj["info"]
     if info.version < (5, 0, 0):
-        cli_fail(
+        raise CliFail(
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."
         )
@@ -125,7 +125,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     app = ctx.obj["controller"]
 
     if sum(1 for arg in [new_lock_code, generate, clear] if arg) > 1:
-        cli_fail(
+        raise CliFail(
             "Invalid options: Only one of --new-lock-code, --generate, "
             "and --clear may be used."
         )
@@ -153,7 +153,9 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         use_code = _parse_lock_code(ctx, lock_code)
     else:
         if lock_code:
-            cli_fail("No lock code is currently set. Use --new-lock-code to set one.")
+            raise CliFail(
+                "No lock code is currently set. Use --new-lock-code to set one."
+            )
         use_code = None
 
     # Set new lock code
@@ -167,8 +169,8 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
         logger.info("Lock code updated")
     except Exception:
         if info.is_locked:
-            cli_fail("Failed to change the lock code. Wrong current code?")
-        cli_fail("Failed to set the lock code.")
+            raise CliFail("Failed to change the lock code. Wrong current code?")
+        raise CliFail("Failed to set the lock code.")
 
 
 def _configure_applications(
@@ -191,11 +193,11 @@ def _configure_applications(
         ctx.fail("Invalid options.")
 
     if not supported:
-        cli_fail(f"{transport} not supported on this YubiKey.")
+        raise CliFail(f"{transport} not supported on this YubiKey.")
 
     unsupported = ~supported & (enable | disable)
     if unsupported:
-        cli_fail(
+        raise CliFail(
             f"{unsupported.display_name} not supported over {transport} on this "
             "YubiKey."
         )
@@ -221,9 +223,11 @@ def _configure_applications(
     is_locked = info.is_locked
 
     if force and is_locked and not lock_code:
-        cli_fail("Configuration is locked - please supply the --lock-code option.")
+        raise CliFail("Configuration is locked - please supply the --lock-code option.")
     if lock_code and not is_locked:
-        cli_fail("Configuration is not locked - please remove the --lock-code option.")
+        raise CliFail(
+            "Configuration is not locked - please remove the --lock-code option."
+        )
 
     click.echo(f"{transport} configuration changes:")
     for change in changes:
@@ -247,7 +251,7 @@ def _configure_applications(
         )
         logger.info(f"{transport} application configuration updated")
     except Exception:
-        cli_fail(f"Failed to configure {transport} applications.")
+        raise CliFail(f"Failed to configure {transport} applications.")
 
 
 @config.command()
@@ -572,14 +576,14 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
 
     if not force:
         if mode == my_mode:
-            cli_fail(f"Mode is already {mode}, nothing to do...", 0)
+            raise CliFail(f"Mode is already {mode}, nothing to do...", 0)
         elif key_type in (YUBIKEY.YKS, YUBIKEY.YKP):
-            cli_fail(
+            raise CliFail(
                 "Mode switching is not supported on this YubiKey!\n"
                 "Use --force to attempt to set it anyway."
             )
         elif mode.interfaces not in interfaces_supported:
-            cli_fail(
+            raise CliFail(
                 f"Mode {mode} is not supported on this YubiKey!\n"
                 + "Use --force to attempt to set it anyway."
             )
@@ -593,7 +597,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             "for this change to take effect."
         )
     except Exception:
-        cli_fail(
+        raise CliFail(
             "Failed to switch mode on the YubiKey. Make sure your "
             "YubiKey does not have an access code set."
         )

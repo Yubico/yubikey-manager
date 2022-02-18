@@ -33,7 +33,7 @@ from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 
-from .util import cli_fail
+from .util import CliFail
 from ..device import is_fips_version, get_name, connect_to_device
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
@@ -201,4 +201,4 @@ def info(ctx, check_fips):
             ctx.obj["conn"].close()
             _check_fips_status(pid, info)
         else:
-            cli_fail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")
+            raise CliFail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")

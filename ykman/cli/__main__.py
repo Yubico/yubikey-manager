@@ -45,7 +45,7 @@ from ..device import (
 from ..util import get_windows_version
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
-from .util import YkmanContextObject, ykman_group, EnumChoice, Failure, pretty_print
+from .util import YkmanContextObject, ykman_group, EnumChoice, CliFail, pretty_print
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -127,7 +127,7 @@ def print_diagnostics(ctx, param, value):
 def _disabled_interface(connections, cmd_name):
     interfaces = [USB_INTERFACE_MAPPING[c] for c in connections]
     req = ", ".join((t.name for t in interfaces))
-    raise Failure(
+    raise CliFail(
         f"Command '{cmd_name}' requires one of the following USB interfaces "
         f"to be enabled: '{req}'.\n\n"
         "Use 'ykman config usb' to set the enabled USB interfaces."
@@ -144,7 +144,7 @@ def _run_cmd_for_serial(cmd, connections, serial):
             conn.close()
             _disabled_interface(connections, cmd)
         except Exception:
-            raise Failure(
+            raise CliFail(
                 f"Failed connecting to a YubiKey with serial: {serial}.\n"
                 "Make sure the application has the required permissions.",
             )
@@ -165,13 +165,13 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
                         conn = dev.open_connection(FidoConnection)
                     return conn, dev, info
                 except Exception:
-                    raise Failure("Failed to connect to YubiKey")
+                    raise CliFail("Failed to connect to YubiKey")
             elif len(readers) > 1:
-                raise Failure("Multiple YubiKeys on external readers detected.")
+                raise CliFail("Multiple YubiKeys on external readers detected.")
             else:
-                raise Failure("No YubiKey found on external reader.")
+                raise CliFail("No YubiKey found on external reader.")
         else:
-            raise Failure("Not a CCID command.")
+            raise CliFail("Not a CCID command.")
 
     # Find all connected devices
     devices, state = scan_devices()
@@ -182,9 +182,9 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
             devices, state = _scan_changes(state)
             n_devs = sum(devices.values())
         except TimeoutError:
-            raise Failure("No YubiKey detected!")
+            raise CliFail("No YubiKey detected!")
     if n_devs > 1:
-        raise Failure(
+        raise CliFail(
             "Multiple YubiKeys detected. Use --device SERIAL to specify "
             "which one to use."
         )
@@ -195,7 +195,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
         if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
             if WIN_CTAP_RESTRICTED and connections == FidoConnection:
                 # FIDO-only command on Windows without Admin won't work.
-                raise Failure(
+                raise CliFail(
                     "FIDO access on Windows requires running as Administrator."
                 )
             return retrying_connect(None, connections, state=state)
@@ -297,7 +297,7 @@ def cli(ctx, device, log_level, log_file, reader):
     if connections:
         if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
             # FIDO-only command on Windows without Admin won't work.
-            raise Failure("FIDO access on Windows requires running as Administrator.")
+            raise CliFail("FIDO access on Windows requires running as Administrator.")
 
         def resolve():
             items = getattr(resolve, "items", None)
@@ -404,7 +404,7 @@ def main():
         cli(obj={})
     except Exception as e:
         status = 1
-        if isinstance(e, Failure):
+        if isinstance(e, CliFail):
             status = e.status
             msg = e.args[0]
         elif isinstance(e, ApplicationNotAvailableError):

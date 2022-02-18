@@ -28,7 +28,7 @@
 import click
 import logging
 from .util import (
-    cli_fail,
+    CliFail,
     click_force_option,
     click_postpone_execution,
     click_callback,
@@ -150,7 +150,7 @@ def _validate(ctx, key, remember):
             logger.info("Access key remembered")
             click.echo("Password remembered.")
     except Exception:
-        cli_fail("Authentication to the YubiKey failed. Wrong password?")
+        raise CliFail("Authentication to the YubiKey failed. Wrong password?")
 
 
 def _init_session(ctx, password, remember, prompt="Enter the password"):
@@ -171,7 +171,7 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
             key = session.derive_key(password)
         _validate(ctx, key, remember)
     elif password:
-        cli_fail("Password provided, but no password is set.")
+        raise CliFail("Password provided, but no password is set.")
 
 
 @oath.group()
@@ -491,7 +491,7 @@ def _add_cred(ctx, data, touch, force):
         ctx.fail("Secret must be at least 2 bytes.")
 
     if touch and version < (4, 2, 6):
-        cli_fail("Require touch is not supported on this YubiKey.")
+        raise CliFail("Require touch is not supported on this YubiKey.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
         ctx.fail("Counter only supported for HOTP accounts.")
@@ -499,7 +499,7 @@ def _add_cred(ctx, data, touch, force):
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
         version < (4, 3, 1) or is_fips_version(version)
     ):
-        cli_fail("Algorithm SHA512 not supported on this YubiKey.")
+        raise CliFail("Algorithm SHA512 not supported on this YubiKey.")
 
     creds = session.list_credentials()
     cred_id = data.get_id()
@@ -518,16 +518,16 @@ def _add_cred(ctx, data, touch, force):
 
     #  YK4 has an issue with credential overwrite in firmware versions < 4.3.5
     if firmware_overwrite_issue and cred_is_subset:
-        cli_fail("Choose a name that is not a subset of an existing account.")
+        raise CliFail("Choose a name that is not a subset of an existing account.")
 
     try:
         session.put_credential(data, touch)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            cli_fail("No space left on the YubiKey for OATH accounts.")
+            raise CliFail("No space left on the YubiKey for OATH accounts.")
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
-            cli_fail("The command failed. Is there enough space on the YubiKey?")
+            raise CliFail("The command failed. Is there enough space on the YubiKey?")
         else:
             raise
 
@@ -605,14 +605,14 @@ def code(ctx, show_hidden, query, single, password, remember):
                 code = session.calculate_code(cred)
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                cli_fail("Touch account timed out!")
+                raise CliFail("Touch account timed out!")
         entries[cred] = code
 
     elif single and len(creds) > 1:
         _error_multiple_hits(ctx, creds)
 
     elif single and len(creds) == 0:
-        cli_fail("No matching account found.")
+        raise CliFail("No matching account found.")
 
     if single and creds:
         if is_steam(cred):
@@ -675,7 +675,7 @@ def rename(ctx, query, name, force, password, remember):
 
         new_id = _format_cred_id(issuer, name, cred.oath_type, cred.period)
         if any(cred.id == new_id for cred in creds):
-            cli_fail(
+            raise CliFail(
                 f"Another account with ID {new_id.decode()} "
                 "already exists on this YubiKey."
             )

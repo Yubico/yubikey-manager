@@ -1,7 +1,7 @@
 from yubikit.core import TRANSPORT
 from ykman.cli.__main__ import cli, _DefaultFormatter
 from ykman.cli.aliases import apply_aliases
-from ykman.cli.util import Failure
+from ykman.cli.util import CliFail
 from click.testing import CliRunner
 from functools import partial
 import logging
@@ -28,7 +28,7 @@ def _ykman_cli(*argv, **kwargs):
     runner = CliRunner(mix_stderr=False)
     result = runner.invoke(cli, argv[1:], obj={}, **kwargs)
     if result.exit_code != 0:
-        if isinstance(result.exception, Failure):
+        if isinstance(result.exception, CliFail):
             raise SystemExit()
         raise result.exception
     return result
