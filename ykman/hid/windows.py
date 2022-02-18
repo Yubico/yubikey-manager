@@ -21,7 +21,7 @@ from yubikit.logging import LOG_LEVEL
 
 from ctypes import WinDLL, WinError  # type: ignore
 from ctypes import wintypes, LibraryLoader
-from typing import Dict, Optional
+from typing import Dict, cast
 import ctypes
 import platform
 import logging
@@ -318,7 +318,8 @@ def list_paths():
         setupapi.SetupDiDestroyDeviceInfoList(collection)
 
 
-_device_cache: Dict[bytes, Optional[OtpYubiKeyDevice]] = {}
+_SKIP = cast(OtpYubiKeyDevice, object())
+_device_cache: Dict[bytes, OtpYubiKeyDevice] = {}
 
 
 def list_devices():
@@ -328,13 +329,12 @@ def list_devices():
         stale.discard(path)
 
         # Check if path already cached
-        if path in _device_cache:
-            dev = _device_cache[path]
-            if dev is not None:
+        dev = _device_cache.get(path)
+        if dev:
+            if dev is not _SKIP:
                 devices.append(dev)
             continue
 
-        _device_cache[path] = None
         device = kernel32.CreateFileA(
             path,
             0,
@@ -346,20 +346,22 @@ def list_devices():
         )
         if device == INVALID_HANDLE_VALUE:
             logger.debug("Couldn't read HID descriptor for %s", path)
-            continue
-        try:
-            usage = get_usage(device)
-            if usage == USAGE_OTP:
-                dev = OtpYubiKeyDevice(path, pid, WinHidOtpConnection)
-                _device_cache[path] = dev
-                devices.append(dev)
-        except Exception:
-            logger.debug("Couldn't read Usage Page for %s:", path, exc_info=True)
-            continue
-        finally:
-            kernel32.CloseHandle(device)
+        else:
+            try:
+                usage = get_usage(device)
+                if usage == USAGE_OTP:
+                    dev = OtpYubiKeyDevice(path, pid, WinHidOtpConnection)
+                    _device_cache[path] = dev
+                    devices.append(dev)
+                    continue
+            except Exception:
+                logger.debug("Couldn't read Usage Page for %s:", path, exc_info=True)
+            finally:
+                kernel32.CloseHandle(device)
+        _device_cache[path] = _SKIP
 
-        # Remove entries from the cache that were not seen
-        for path in stale:
-            del _device_cache[path]
+    # Remove entries from the cache that were not seen
+    for path in stale:
+        del _device_cache[path]
+
     return devices

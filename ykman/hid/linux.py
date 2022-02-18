@@ -119,6 +119,7 @@ def list_devices():
                 logger.debug(
                     f"Couldn't read HID descriptor for {hidraw}", exc_info=True
                 )
+                _failed_cache.add(hidraw)
             continue
 
     # Remove entries from the cache that were not seen
