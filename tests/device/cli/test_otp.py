@@ -332,7 +332,9 @@ class TestSlotProgramming:
 
     def test_ykman_program_chalresp_slot_2_generated(self, ykman_cli):
         output = ykman_cli("otp", "chalresp", "2", "-f", "-g").output
-        assert re.match("Using a randomly generated key: [0-9a-f]{40}$", output)
+        assert re.match(
+            r"Using a randomly generated key \(hex\): [0-9a-f]{40}$", output
+        )
         self._check_slot_2_programmed(ykman_cli)
 
     def test_ykman_program_chalresp_slot_2_generated_fails_if_also_given(
