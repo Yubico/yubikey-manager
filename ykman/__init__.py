@@ -35,4 +35,4 @@ from .device import (  # noqa
 )
 
 
-__version__ = "4.1.0-dev0"
+__version__ = "5.0.0-dev0"
