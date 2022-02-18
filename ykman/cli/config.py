@@ -468,7 +468,7 @@ def _parse_lock_code(ctx, lock_code):
 
 def _parse_interface_string(interface):
     for iface in USB_INTERFACE:
-        if iface.name.startswith(interface):
+        if (iface.name or "").startswith(interface):
             return iface
     raise ValueError()
 

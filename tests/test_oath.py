@@ -61,15 +61,15 @@ class TestOathFunctions(unittest.TestCase):
     def test_derive_key(self):
         self.assertEqual(
             b"\xb0}\xa1\xe7\xde\x87\xf8\x9a\x87\xa2\xb5\x98\xea\xa2\x18\x8c",
-            _derive_key(b"\0\0\0\0\0\0\0\0", u"foobar"),
+            _derive_key(b"\0\0\0\0\0\0\0\0", "foobar"),
         )
         self.assertEqual(
             b"\xda\x81\x8ek,\xf0\xa2\xd0\xbf\x19\xb3\xdd\xd3K\x83\xf5",
-            _derive_key(b"12345678", u"Hallå världen!"),
+            _derive_key(b"12345678", "Hallå världen!"),
         )
         self.assertEqual(
             b"\xf3\xdf\xa7\x81T\xc8\x102\x99E\xfb\xc4\xb55\xe57",
-            _derive_key(b"saltsalt", u"Ťᶒśƫ ᵽĥřӓşḛ"),
+            _derive_key(b"saltsalt", "Ťᶒśƫ ᵽĥřӓşḛ"),
         )
 
     def test_parse_uri_issuer(self):

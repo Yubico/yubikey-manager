@@ -26,10 +26,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import Tlv
+from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from functools import partial
 from typing import Tuple
 import ctypes
 
@@ -46,7 +46,7 @@ class InvalidPasswordError(Exception):
     """Raised when parsing key/certificate and the password might be wrong/missing."""
 
 
-def _parse_pkcs12_cryptography(pkcs12, data, password):
+def _parse_pkcs12(data, password):
     try:
         key, cert, cas = pkcs12.load_key_and_certificates(
             data, password, default_backend()
@@ -54,47 +54,6 @@ def _parse_pkcs12_cryptography(pkcs12, data, password):
         return key, [cert] + cas
     except ValueError as e:  # cryptography raises ValueError on wrong password
         raise InvalidPasswordError(e)
-
-
-def _parse_pkcs12_pyopenssl(crypto, data, password):
-    try:
-        p12 = crypto.load_pkcs12(data, password)
-        key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-        key = serialization.load_pem_private_key(
-            key_pem, password=None, backend=default_backend()
-        )
-
-        certs = [p12.get_certificate()]
-        cas = p12.get_ca_certificates()
-        if cas:
-            certs.extend(cas)
-        certs_pem = [
-            crypto.dump_certificate(crypto.FILETYPE_PEM, cert) for cert in certs
-        ]
-        certs = [
-            x509.load_pem_x509_certificate(cert_pem, default_backend())
-            for cert_pem in certs_pem
-        ]
-        return key, certs
-    except crypto.Error as e:
-        raise InvalidPasswordError(e)
-
-
-def _parse_pkcs12_unsupported(data, password):
-    raise ValueError("PKCS#12 support requires cryptography >= 2.5 or pyOpenSSL")
-
-
-try:  # This requires cryptography 2.5.
-    from cryptography.hazmat.primitives.serialization import pkcs12
-
-    _parse_pkcs12 = partial(_parse_pkcs12_cryptography, pkcs12)
-except ImportError:  # Use pyOpenSSL as a backup
-    try:
-        from OpenSSL import crypto
-
-        _parse_pkcs12 = partial(_parse_pkcs12_pyopenssl, crypto)
-    except ImportError:  # Can't support PKCS#12
-        _parse_pkcs12 = _parse_pkcs12_unsupported  # type: ignore
 
 
 def parse_private_key(data, password):

@@ -176,7 +176,7 @@ def format_oath_code(response: bytes, digits: int = 6) -> str:
     """Formats an OATH code from a hash response."""
     offs = response[-1] & 0xF
     code = struct.unpack_from(">I", response[offs:])[0] & 0x7FFFFFFF
-    return ("%%0%dd" % digits) % (code % 10 ** digits)
+    return ("%%0%dd" % digits) % (code % 10**digits)
 
 
 def time_challenge(timestamp: int, period: int = 30) -> bytes:
