@@ -43,7 +43,7 @@ from yubikit.core.otp import (
     modhex_decode,
     OtpConnection,
 )
-from yubikit.support import is_fips_version
+from yubikit.support import is_yk4_fips_version
 
 from .util import (
     ykman_group,
@@ -200,7 +200,7 @@ def info(ctx):
     click.echo(f"Slot 1: {slot1 and 'programmed' or 'empty'}")
     click.echo(f"Slot 2: {slot2 and 'programmed' or 'empty'}")
 
-    if is_fips_version(session.version):
+    if is_yk4_fips_version(session.version):
         click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(session) else 'No'}")
 
 

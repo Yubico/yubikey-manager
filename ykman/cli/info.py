@@ -32,7 +32,7 @@ from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
-from yubikit.support import get_name, is_fips_version
+from yubikit.support import get_name, is_yk4_fips_version
 
 from .util import CliFail
 from ..device import connect_to_device
@@ -198,7 +198,7 @@ def info(ctx, check_fips):
     )
 
     if check_fips:
-        if is_fips_version(info.version):
+        if is_yk4_fips_version(info.version):
             ctx.obj["conn"].close()
             _check_fips_status(pid, info)
         else:
