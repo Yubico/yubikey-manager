@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import Connection, TRANSPORT
+from yubikit.core import Connection, PID, TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -34,7 +34,7 @@ from yubikit.management import (
     USB_INTERFACE,
 )
 from yubikit.support import read_info
-from .base import PID, YkmanDevice
+from .base import YkmanDevice
 from .hid import (
     list_otp_devices as _list_otp_devices,
     list_ctap_devices as _list_ctap_devices,
