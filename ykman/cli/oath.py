@@ -48,8 +48,8 @@ from yubikit.oath import (
     parse_b32_key,
     _format_cred_id,
 )
+from yubikit.support import is_fips_version
 from ..oath import is_steam, calculate_steam, is_hidden
-from ..device import is_fips_version
 from ..settings import AppData
 
 

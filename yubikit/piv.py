@@ -31,17 +31,17 @@ from .core import (
     bytes2int,
     Version,
     Tlv,
-    AID,
     CommandError,
     NotSupportedError,
     BadResponseError,
 )
 from .core.smartcard import (
+    SW,
+    AID,
+    ApduError,
+    ApduFormat,
     SmartCardConnection,
     SmartCardProtocol,
-    ApduError,
-    SW,
-    ApduFormat,
 )
 
 from cryptography import x509

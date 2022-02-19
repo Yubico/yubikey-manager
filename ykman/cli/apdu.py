@@ -26,8 +26,13 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from binascii import a2b_hex
-from yubikit.core import AID
-from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
+from yubikit.core.smartcard import (
+    SmartCardConnection,
+    SmartCardProtocol,
+    ApduError,
+    SW,
+    AID,
+)
 from .util import EnumChoice, ykman_command, CliFail
 from typing import Tuple, Optional
 

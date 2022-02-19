@@ -25,11 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT
+from ..base import YkmanDevice
+from yubikit.core import TRANSPORT, YUBIKEY, PID
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import USB_INTERFACE
 from yubikit.logging import LOG_LEVEL
-from ..base import YUBIKEY, YkmanDevice
 
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
@@ -61,7 +61,7 @@ def _pid_from_name(name):
         interfaces |= USB_INTERFACE.FIDO
 
     key_type = YUBIKEY.NEO if "NEO" in name else YUBIKEY.YK4
-    return key_type.get_pid(interfaces)
+    return PID.of(key_type, interfaces)
 
 
 class ScardYubiKeyDevice(YkmanDevice):

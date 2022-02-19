@@ -1,7 +1,6 @@
 import pytest
 
-from yubikit.core import AID
-from yubikit.core.smartcard import ApduError, SW
+from yubikit.core.smartcard import ApduError, AID, SW
 from yubikit.management import CAPABILITY
 from yubikit.oath import (
     OathSession,
@@ -9,7 +8,7 @@ from yubikit.oath import (
     HASH_ALGORITHM,
     OATH_TYPE,
 )
-from ykman.device import is_fips_version
+from yubikit.support import is_fips_version
 from . import condition
 
 

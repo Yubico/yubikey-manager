@@ -37,6 +37,7 @@ from fido2.ctap2 import (
 from fido2.pcsc import CtapPcscDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
+from yubikit.support import is_fips_version
 from time import sleep
 from .util import (
     click_postpone_execution,
@@ -48,7 +49,6 @@ from .util import (
 from .util import CliFail
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
-from ..device import is_fips_version
 from ..pcsc import list_devices as list_ccid
 from smartcard.Exceptions import NoCardException, CardConnectionException
 from typing import Optional

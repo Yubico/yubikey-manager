@@ -43,6 +43,7 @@ from yubikit.core.otp import (
     modhex_decode,
     OtpConnection,
 )
+from yubikit.support import is_fips_version
 
 from .util import (
     ykman_group,
@@ -56,7 +57,6 @@ from .util import (
     EnumChoice,
 )
 from .. import __version__
-from ..device import is_fips_version
 from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
     PrepareUploadFailed,

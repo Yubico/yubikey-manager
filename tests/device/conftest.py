@@ -78,7 +78,7 @@ connection_scope = os.environ.get("CONNECTION_SCOPE", "function")
 @pytest.fixture(scope=connection_scope)
 @condition.transport(TRANSPORT.USB)
 def otp_connection(device, info):
-    if USB_INTERFACE.OTP in device.pid.get_interfaces():
+    if USB_INTERFACE.OTP in device.pid.usb_interfaces:
         with connect_to_device(info.serial, [OtpConnection])[0] as c:
             yield c
 
@@ -86,7 +86,7 @@ def otp_connection(device, info):
 @pytest.fixture(scope=connection_scope)
 @condition.transport(TRANSPORT.USB)
 def fido_connection(device, info):
-    if USB_INTERFACE.FIDO in device.pid.get_interfaces():
+    if USB_INTERFACE.FIDO in device.pid.usb_interfaces:
         with connect_to_device(info.serial, [FidoConnection])[0] as c:
             yield c
 
@@ -96,7 +96,7 @@ def ccid_connection(device, info):
     if device.transport == TRANSPORT.NFC:
         with device.open_connection(SmartCardConnection) as c:
             yield c
-    elif USB_INTERFACE.CCID in device.pid.get_interfaces():
+    elif USB_INTERFACE.CCID in device.pid.usb_interfaces:
         with connect_to_device(info.serial, [SmartCardConnection])[0] as c:
             yield c
     else:

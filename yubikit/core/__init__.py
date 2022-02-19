@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from enum import Enum, unique
+from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
     Type,
     List,
@@ -81,20 +81,68 @@ class TRANSPORT(str, Enum):
 
 
 @unique
-class AID(bytes, Enum):
-    """YubiKey Application smart card AID values."""
+class USB_INTERFACE(IntFlag):
+    """YubiKey USB interface identifiers."""
 
-    OTP = bytes.fromhex("a0000005272001")
-    MANAGEMENT = bytes.fromhex("a000000527471117")
-    OPENPGP = bytes.fromhex("d27600012401")
-    OATH = bytes.fromhex("a0000005272101")
-    PIV = bytes.fromhex("a000000308")
-    FIDO = bytes.fromhex("a0000006472f0001")
-    HSMAUTH = bytes.fromhex("a000000527210701")
+    OTP = 0x01
+    FIDO = 0x02
+    CCID = 0x04
+
+    def supports_connection(self, connection_type) -> bool:
+        return connection_type.usb_interface in self
+
+
+@unique
+class YUBIKEY(Enum):
+    """YubiKey hardware platforms."""
+
+    YKS = "YubiKey Standard"
+    NEO = "YubiKey NEO"
+    SKY = "Security Key by Yubico"
+    YKP = "YubiKey Plus"
+    YK4 = "YubiKey"  # This includes YubiKey 5
+
+
+@unique
+class PID(IntEnum):
+    """USB Product ID values for YubiKey devices."""
+
+    YKS_OTP = 0x0010
+    NEO_OTP = 0x0110
+    NEO_OTP_CCID = 0x0111
+    NEO_CCID = 0x0112
+    NEO_FIDO = 0x0113
+    NEO_OTP_FIDO = 0x0114
+    NEO_FIDO_CCID = 0x0115
+    NEO_OTP_FIDO_CCID = 0x0116
+    SKY_FIDO = 0x0120
+    YK4_OTP = 0x0401
+    YK4_FIDO = 0x0402
+    YK4_OTP_FIDO = 0x0403
+    YK4_CCID = 0x0404
+    YK4_OTP_CCID = 0x0405
+    YK4_FIDO_CCID = 0x0406
+    YK4_OTP_FIDO_CCID = 0x0407
+    YKP_OTP_FIDO = 0x0410
+
+    @property
+    def yubikey_type(self) -> YUBIKEY:
+        return YUBIKEY[self.name.split("_", 1)[0]]
+
+    @property
+    def usb_interfaces(self) -> USB_INTERFACE:
+        return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
+
+    @classmethod
+    def of(cls, key_type: YUBIKEY, interfaces: USB_INTERFACE) -> "PID":
+        suffix = "_".join(t.name or str(t) for t in USB_INTERFACE if t in interfaces)
+        return cls[key_type.name + "_" + suffix]
 
 
 class Connection(abc.ABC):
     """A connection to a YubiKey"""
+
+    _usb_interface = USB_INTERFACE(0)
 
     def close(self) -> None:
         """Close the device, releasing any held resources."""
@@ -104,6 +152,11 @@ class Connection(abc.ABC):
 
     def __exit__(self, typ, value, traceback):
         self.close()
+
+    @classmethod
+    @property
+    def usb_interface(cls) -> USB_INTERFACE:
+        return cls._usb_interface
 
 
 T_Connection = TypeVar("T_Connection", bound=Connection)

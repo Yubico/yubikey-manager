@@ -14,7 +14,7 @@ def try_connection(conn_type):
 
 @condition.transport(TRANSPORT.USB)
 def test_switch_interfaces(pid):
-    interfaces = pid.get_interfaces()
+    interfaces = pid.usb_interfaces
     if USB_INTERFACE.FIDO in interfaces:
         assert try_connection(FidoConnection)
     if USB_INTERFACE.OTP in interfaces:

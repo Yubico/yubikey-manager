@@ -26,14 +26,19 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import (
-    AID,
     Tlv,
     NotSupportedError,
     require_version,
     int2bytes,
     bytes2int,
 )
-from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
+from yubikit.core.smartcard import (
+    SmartCardConnection,
+    SmartCardProtocol,
+    ApduError,
+    AID,
+    SW,
+)
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend

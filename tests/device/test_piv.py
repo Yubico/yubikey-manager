@@ -7,8 +7,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 
-from yubikit.core import AID, NotSupportedError
-from yubikit.core.smartcard import ApduError
+from yubikit.core import NotSupportedError
+from yubikit.core.smartcard import AID, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.piv import (
     PivSession,
@@ -20,6 +20,7 @@ from yubikit.piv import (
     MANAGEMENT_KEY_TYPE,
     InvalidPinError,
 )
+from yubikit.support import is_fips_version
 from ykman.piv import (
     check_key,
     get_pivman_data,
@@ -29,7 +30,6 @@ from ykman.piv import (
     pivman_set_mgm_key,
 )
 from ykman.util import parse_certificates, parse_private_key
-from ykman.device import is_fips_version
 from ..util import open_file
 from . import condition
 

@@ -27,7 +27,7 @@
 
 
 from .base import YkmanDevice
-from .device import list_all_devices, scan_devices, get_name, read_info
+from .device import list_all_devices, scan_devices
 from .pcsc import list_devices as list_ccid
 
 from yubikit.core import TRANSPORT
@@ -35,6 +35,7 @@ from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.management import DeviceInfo
+from yubikit.support import get_name, read_info
 from smartcard.Exceptions import NoCardException, CardConnectionException
 
 from time import sleep
@@ -76,7 +77,7 @@ class ScriptingDevice:
         return getattr(self._wrapped, attr)
 
     def __str__(self):
-        name = get_name(self._info, self.pid.get_type() if self.pid else None)
+        name = get_name(self._info, self.pid.yubikey_type if self.pid else None)
         serial = self._info.serial
         return f"{name} ({serial})" if serial else name
 

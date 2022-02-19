@@ -1,6 +1,5 @@
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import CAPABILITY
-from ykman.base import YUBIKEY
 from .. import condition
 
 import contextlib
@@ -23,7 +22,7 @@ def not_sky(device, info):
             and _fido_only(info.supported_capabilities[TRANSPORT.USB])
         )
     else:
-        return device.pid.get_type() != YUBIKEY.SKY
+        return device.pid.yubikey_type != YUBIKEY.SKY
 
 
 class TestConfigUSB:

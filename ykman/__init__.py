@@ -25,13 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .base import YUBIKEY, PID, YkmanDevice  # noqa
+from .base import YkmanDevice  # noqa
 from .device import (  # noqa
     scan_devices,
     list_all_devices,
     connect_to_device,
-    get_name,
-    read_info,
 )
 
 

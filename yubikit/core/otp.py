@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Connection, CommandError, TimeoutError, Version
+from . import Connection, CommandError, TimeoutError, Version, USB_INTERFACE
 from yubikit.logging import LOG_LEVEL
 
 from time import sleep
@@ -46,6 +46,8 @@ class CommandRejectedError(CommandError):
 
 
 class OtpConnection(Connection, metaclass=abc.ABCMeta):
+    _usb_interface = USB_INTERFACE.OTP
+
     @abc.abstractmethod
     def receive(self) -> bytes:
         """Reads an 8 byte feature report"""

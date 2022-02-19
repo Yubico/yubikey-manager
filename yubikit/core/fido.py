@@ -25,10 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Connection
+from . import Connection, USB_INTERFACE
 from fido2.ctap import CtapDevice
 
 
 # Make CtapDevice a Connection
 FidoConnection = CtapDevice
+FidoConnection.usb_interface = USB_INTERFACE.FIDO
 Connection.register(FidoConnection)

@@ -1,4 +1,4 @@
-from ykman.device import is_fips_version
+from yubikit.support import is_fips_version
 from inspect import signature, Parameter, isgeneratorfunction
 from makefun import wraps
 

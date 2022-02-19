@@ -25,18 +25,16 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import ApplicationNotAvailableError
+from yubikit.core import USB_INTERFACE, ApplicationNotAvailableError
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import USB_INTERFACE
+from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
 
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
 from ..device import (
-    read_info,
-    get_name,
     list_all_devices,
     scan_devices,
     connect_to_device,
@@ -125,7 +123,7 @@ def print_diagnostics(ctx, param, value):
 
 
 def _disabled_interface(connections, cmd_name):
-    interfaces = [USB_INTERFACE_MAPPING[c] for c in connections]
+    interfaces = [c.usb_intrface for c in connections]
     req = ", ".join(t.name or str(t) for t in interfaces)
     raise CliFail(
         f"Command '{cmd_name}' requires one of the following USB interfaces "
@@ -192,7 +190,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     # Only one connected device, check if any needed interfaces are available
     pid = next(iter(devices.keys()))
     for c in connections:
-        if USB_INTERFACE_MAPPING[c] & pid.get_interfaces():
+        if USB_INTERFACE_MAPPING[c] & pid.usb_interfaces:
             if WIN_CTAP_RESTRICTED and connections == FidoConnection:
                 # FIDO-only command on Windows without Admin won't work.
                 raise CliFail(
@@ -346,7 +344,7 @@ def list_keys(ctx, serials, readers):
         else:
             if dev.pid is None:  # Devices from list_all_devices should always have PID.
                 raise AssertionError("PID is None")
-            name = get_name(dev_info, dev.pid.get_type())
+            name = get_name(dev_info, dev.pid.yubikey_type)
             version = dev_info.version or "unknown"
             mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
             click.echo(
@@ -361,7 +359,7 @@ def list_keys(ctx, serials, readers):
         for pid, count in devs.items():
             if pid not in pids:
                 for _ in range(count):
-                    name = pid.get_type().value
+                    name = pid.yubikey_type.value
                     mode = pid.name.split("_", 1)[1].replace("_", "+")
                     click.echo(f"{name} [{mode}] <access denied>")
 

@@ -25,7 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Version, TRANSPORT, Connection, CommandError, ApplicationNotAvailableError
+from . import (
+    Version,
+    TRANSPORT,
+    USB_INTERFACE,
+    Connection,
+    CommandError,
+    ApplicationNotAvailableError,
+)
 from time import time
 from enum import Enum, IntEnum, unique
 from typing import Tuple
@@ -34,17 +41,6 @@ import struct
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
-    @property
-    @abc.abstractmethod
-    def transport(self) -> TRANSPORT:
-        """Get the transport type of the connection (USB or NFC)"""
-
-    @abc.abstractmethod
-    def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
-        """Sends a command APDU and returns the response"""
 
 
 class ApduError(CommandError):
@@ -67,6 +63,19 @@ class ApduFormat(str, Enum):
 
 
 @unique
+class AID(bytes, Enum):
+    """YubiKey Application smart card AID values."""
+
+    OTP = bytes.fromhex("a0000005272001")
+    MANAGEMENT = bytes.fromhex("a000000527471117")
+    OPENPGP = bytes.fromhex("d27600012401")
+    OATH = bytes.fromhex("a0000005272101")
+    PIV = bytes.fromhex("a000000308")
+    FIDO = bytes.fromhex("a0000006472f0001")
+    HSMAUTH = bytes.fromhex("a000000527210701")
+
+
+@unique
 class SW(IntEnum):
     NO_INPUT_DATA = 0x6285
     VERIFY_FAIL_NO_RETRY = 0x63C0
@@ -85,6 +94,19 @@ class SW(IntEnum):
     INVALID_INSTRUCTION = 0x6D00
     COMMAND_ABORTED = 0x6F00
     OK = 0x9000
+
+
+class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
+    _usb_interface = USB_INTERFACE.CCID
+
+    @property
+    @abc.abstractmethod
+    def transport(self) -> TRANSPORT:
+        """Get the transport type of the connection (USB or NFC)"""
+
+    @abc.abstractmethod
+    def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
+        """Sends a command APDU and returns the response"""
 
 
 INS_SELECT = 0xA4
