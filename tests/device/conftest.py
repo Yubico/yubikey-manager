@@ -29,7 +29,7 @@ def _device(pytestconfig):
             pytest.exit("No/Multiple readers matched")
         dev = readers[0]
         with dev.open_connection(SmartCardConnection) as conn:
-            info = read_info(None, conn)
+            info = read_info(conn)
     else:
         devices = list_all_devices()
         if len(devices) != 1:

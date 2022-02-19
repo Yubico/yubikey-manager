@@ -57,7 +57,7 @@ def mgmt_info(pid, conn):
         data.append(f"Failed to read device info via Management: {e!r}")
 
     try:
-        info = read_info(pid, conn)
+        info = read_info(conn, pid)
         data.append(
             {
                 "DeviceInfo": asdict(info),

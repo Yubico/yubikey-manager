@@ -160,7 +160,7 @@ class _PidGroup:
         if len(self._resolved) < max(self._devcount.values()):
             try:
                 with dev.open_connection(conn_type) as conn:
-                    info = read_info(dev.pid, conn)
+                    info = read_info(conn, dev.pid)
                 key = self._key(info)
                 self._infos[key] = info
                 self._resolved.setdefault(key, {})[iface] = dev
@@ -182,7 +182,7 @@ class _PidGroup:
                 dev = devs.pop()
                 try:
                     conn = dev.open_connection(conn_type)
-                    info = read_info(dev.pid, conn)
+                    info = read_info(conn, dev.pid)
                     dev_key = self._key(info)
                     if dev_key in self._infos:
                         self._resolved.setdefault(dev_key, {})[iface] = dev
@@ -236,7 +236,6 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
                 group.add(connection_type, dev)
         except Exception:
             logger.exception("Unable to list devices for connection")
-
     devices = []
     for group in groups.values():
         devices.extend(group.get_devices())
@@ -273,7 +272,7 @@ def connect_to_device(
                 retry_ccid.append(dev)
                 logger.debug("CCID No card present, will retry")
                 continue
-            info = read_info(dev.pid, conn)
+            info = read_info(conn, dev.pid)
             if serial and info.serial != serial:
                 conn.close()
             else:
@@ -293,7 +292,7 @@ def connect_to_device(
             except NoCardException:
                 continue
             retry_ccid.remove(dev)
-            info = read_info(dev.pid, conn)
+            info = read_info(conn, dev.pid)
             if serial and info.serial != serial:
                 conn.close()
             else:

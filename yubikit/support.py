@@ -254,16 +254,28 @@ def _read_info_ctap(conn, key_type, interfaces):
         )
 
 
-def read_info(pid: Optional[PID], conn: Connection) -> DeviceInfo:
-    """Read out a DeviceInfo object from a YubiKey, or attempt to synthesize one."""
+def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
+    """Reads out DeviceInfo from a YubiKey, or attempts to synthesize the data.
+
+    Reading DeviceInfo from a ManagementSession is only supported for newer YubiKeys.
+    This function attempts to read that information, but will fall back to gathering the
+    data using other mechanisms if needed. It will also make adjustments to the data if
+    required, for example to "fix" known bad values.
+
+    The *pid* parameter must be provided whenever the YubiKey is connected via USB,
+    else the result may be incorrect.
+    """
 
     logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
     if pid:
         key_type: Optional[YUBIKEY] = pid.yubikey_type
         interfaces = pid.usb_interfaces
-    else:  # No PID for NFC connections
+    elif isinstance(conn, SmartCardConnection) and conn.transport == TRANSPORT.NFC:
+        # No PID for NFC connections
         key_type = None
         interfaces = USB_INTERFACE(0)
+    else:
+        raise ValueError("PID must be provided for non-NFC connections")
 
     if isinstance(conn, SmartCardConnection):
         info = _read_info_ccid(conn, key_type, interfaces)
