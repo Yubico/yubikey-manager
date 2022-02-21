@@ -534,9 +534,9 @@ def get_piv_info(session: PivSession):
             cert_data["Serial"] = serial
             cert_data["Fingerprint"] = fingerprint
             if not_before:
-                cert_data["Not before"] = not_before
+                cert_data["Not before"] = not_before.isoformat()
             if not_after:
-                cert_data["Not after"] = not_after
+                cert_data["Not after"] = not_after.isoformat()
         else:
             cert_data["Error"] = "Failed to parse certificate"
 
