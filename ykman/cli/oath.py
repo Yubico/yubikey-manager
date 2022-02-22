@@ -171,7 +171,7 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
                 return
 
             # Use stored key, if available
-            if keys.keyring_available and device_id in keys:
+            if device_id in keys:
                 logger.debug("Access key required, using remembered key")
                 try:
                     key = bytes.fromhex(keys.get_secret(device_id))
@@ -240,7 +240,9 @@ def change(ctx, password, clear, new_password, remember):
         click.echo("Password cleared from YubiKey.")
     else:
         if remember:
-            if not keys.keyring_available:
+            try:
+                keys.ensure_unlocked()
+            except ValueError:
                 raise CliFail(
                     "Failed to remember password, the keyring is locked or unavailable."
                 )
@@ -279,7 +281,9 @@ def remember(ctx, password):
             logger.info("Deleted remembered access key")
         click.echo("This YubiKey is not password protected.")
     else:
-        if not keys.keyring_available:
+        try:
+            keys.ensure_unlocked()
+        except ValueError:
             raise CliFail(
                 "Failed to remember password, the keyring is locked or unavailable."
             )
