@@ -68,6 +68,14 @@ class Configuration(Settings):
     _config_dir = XDG_CONFIG_HOME
 
 
+class KeystoreError(Exception):
+    """Error accessing the OS keystore"""
+
+
+class UnwrapValueError(Exception):
+    """Error unwrapping a particular secret value"""
+
+
 class AppData(Settings):
     _config_dir = XDG_DATA_HOME
 
@@ -85,7 +93,7 @@ class AppData(Settings):
             try:
                 wrap_key = keyring.get_password(self._service, self._username)
             except keyring.errors.KeyringError:
-                raise ValueError("Keyring locked or unavailable")
+                raise KeystoreError("Keyring locked or unavailable")
 
             if wrap_key is None:
                 key = Fernet.generate_key()
@@ -99,7 +107,7 @@ class AppData(Settings):
         try:
             return json.loads(self._fernet.decrypt(self[key].encode()))
         except InvalidToken:
-            raise ValueError("Undecryptable value")
+            raise UnwrapValueError("Undecryptable value")
 
     def put_secret(self, key: str, value) -> None:
         self.ensure_unlocked()
