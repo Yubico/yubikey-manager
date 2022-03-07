@@ -122,7 +122,9 @@ def info(ctx):
 
         bio_enroll = ctap2.info.options.get("bioEnroll")
         if bio_enroll:
-            uv_retries, _ = client_pin.get_uv_retries()
+            uv_retries = client_pin.get_uv_retries()
+            if isinstance(uv_retries, tuple):
+                uv_retries = uv_retries[0]
             if uv_retries:
                 click.echo(
                     f"Fingerprints registered, with {uv_retries} attempt(s) "
