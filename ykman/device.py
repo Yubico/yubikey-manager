@@ -60,7 +60,7 @@ from smartcard.Exceptions import NoCardException
 
 from time import sleep
 from collections import Counter
-from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type, cast
+from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type, cast, Hashable
 import sys
 import ctypes
 import logging
@@ -160,11 +160,84 @@ def _usb_interface_for(connection_type):
     return next(i for i in USB_INTERFACE if i.supports_connection(connection_type))
 
 
+class _PidGroup:
+    def __init__(self):
+        self._infos: Dict[Hashable, DeviceInfo] = {}
+        self._resolved: Dict[Hashable, Dict[USB_INTERFACE, YkmanDevice]] = {}
+        self._unresolved: Dict[USB_INTERFACE, List[YkmanDevice]] = {}
+        self._devcount: Dict[USB_INTERFACE, int] = Counter()
+
+    def _key(self, info):
+        return (
+            info.serial,
+            info.version,
+            info.form_factor,
+            str(info.supported_capabilities),
+            info.config.get_bytes(False),
+            info.is_locked,
+            info.is_fips,
+            info.is_sky,
+        )
+
+    def add(self, conn_type, dev):
+        logger.debug(f"Add device for {conn_type}: {dev}")
+        iface = _usb_interface_for(conn_type)
+        self._devcount[iface] += 1
+        if len(self._resolved) < max(self._devcount.values()):
+            try:
+                with dev.open_connection(conn_type) as conn:
+                    info = read_info(dev.pid, conn)
+                key = self._key(info)
+                self._infos[key] = info
+                self._resolved.setdefault(key, {})[iface] = dev
+                logger.debug(f"Resolved device {info.serial}")
+                return
+            except Exception:
+                logger.warning("Failed opening device", exc_info=True)
+        self._unresolved.setdefault(iface, []).append(dev)
+
+    def connect(self, key, conn_type):
+        iface = _usb_interface_for(conn_type)
+        dev = self._resolved[key].get(iface)
+        if dev:
+            return dev.open_connection(conn_type)
+        devs = self._unresolved.get(iface, [])
+        failed = []
+        try:
+            while devs:
+                dev = devs.pop()
+                try:
+                    conn = dev.open_connection(conn_type)
+                    info = read_info(dev.pid, conn)
+                    dev_key = self._key(info)
+                    if dev_key in self._infos:
+                        self._resolved.setdefault(dev_key, {})[iface] = dev
+                        logger.debug(f"Resolved device {info.serial}")
+                        if dev_key == key:
+                            return conn
+                    conn.close()
+                except Exception:
+                    logger.warning("Failed opening device", exc_info=True)
+                    failed.append(dev)
+        finally:
+            devs.extend(failed)
+        raise ValueError("Failed to connect to the device")
+
+    def get_devices(self):
+        results = []
+        for key, info in self._infos.items():
+            dev = next(iter(self._resolved[key].values()))
+            results.append(
+                (_UsbCompositeDevice(self, key, dev.fingerprint, dev.pid), info)
+            )
+        return results
+
+
 class _UsbCompositeDevice(YkmanDevice):
-    def __init__(self, transport, fingerprint, pid, info, refs):
-        super().__init__(transport, fingerprint, pid)
-        self.info = info
-        self._refs = refs
+    def __init__(self, group, key, fingerprint, pid):
+        super().__init__(TRANSPORT.USB, fingerprint, pid)
+        self._group = group
+        self._key = key
 
     def supports_connection(self, connection_type):
         return cast(PID, self.pid).get_interfaces().supports_connection(connection_type)
@@ -172,32 +245,7 @@ class _UsbCompositeDevice(YkmanDevice):
     def open_connection(self, connection_type):
         if not self.supports_connection(connection_type):
             raise ValueError("Unsupported Connection type")
-        iface = _usb_interface_for(connection_type)
-        dev = self._refs[0][iface].get(self.info.serial or self.fingerprint)
-
-        # Device already known
-        if dev:
-            return dev.open_connection(connection_type)
-
-        # Lookup among remaining
-        devs = self._refs[1][iface].get(self.pid, [])
-        logger.debug("Available device candidates: %s", devs)
-        while devs:
-            candidate = devs.pop()
-            logger.debug("Checking candidate: %s", candidate)
-            try:
-                conn = candidate.open_connection(connection_type)
-                info = read_info(self.pid, conn)
-                ref_key = info.serial or candidate.fingerprint
-                self._refs[0][iface][ref_key] = candidate
-                if self.info.serial == info.serial:
-                    logger.debug("Match on serial: %s", info.serial)
-                    return conn
-                conn.close()
-            except Exception:
-                logger.exception("Failed opening device")
-
-        raise ValueError("Failed to connect to the device")
+        return self._group.connect(self._key, connection_type)
 
 
 def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
@@ -205,42 +253,19 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
 
     Returns a list of (device, info) tuples for each connected device.
     """
-    handled_pids = set()
-    pids: Dict[PID, bool] = {}
-    refs: Tuple = ({i: {} for i in USB_INTERFACE}, {i: {} for i in USB_INTERFACE})
-    devices: List[Tuple[YkmanDevice, DeviceInfo]] = []
+    groups: Dict[PID, _PidGroup] = {}
 
     for connection_type, list_devs in CONNECTION_LIST_MAPPING.items():
-        iface = _usb_interface_for(connection_type)
         try:
-            devs = list_devs()
+            for dev in list_devs():
+                group = groups.setdefault(dev.pid, _PidGroup())
+                group.add(connection_type, dev)
         except Exception:
             logger.exception("Unable to list devices for connection")
-            devs = []
 
-        for dev in devs:
-            if dev.pid not in handled_pids and pids.get(dev.pid, True):
-                try:
-                    with dev.open_connection(connection_type) as conn:
-                        info = read_info(dev.pid, conn)
-                    pids[dev.pid] = True
-                    ref_key = info.serial or dev.fingerprint
-                    refs[0][iface][ref_key] = dev
-                    devices.append(
-                        (
-                            _UsbCompositeDevice(
-                                dev.transport, dev.fingerprint, dev.pid, info, refs
-                            ),
-                            info,
-                        )
-                    )
-                except Exception:
-                    pids[dev.pid] = False
-                    logger.exception("Failed opening device")
-            else:
-                refs[1][iface].setdefault(dev.pid, []).append(dev)
-        handled_pids.update({pid for pid, handled in pids.items() if handled})
-
+    devices = []
+    for group in groups.values():
+        devices.extend(group.get_devices())
     return devices
 
 
