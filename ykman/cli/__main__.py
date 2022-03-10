@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import USB_INTERFACE, ApplicationNotAvailableError
+from yubikit.core import ApplicationNotAvailableError
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -67,13 +67,6 @@ logger = logging.getLogger(__name__)
 
 
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
-
-
-USB_INTERFACE_MAPPING = {
-    SmartCardConnection: USB_INTERFACE.CCID,
-    OtpConnection: USB_INTERFACE.OTP,
-    FidoConnection: USB_INTERFACE.FIDO,
-}
 
 
 WIN_CTAP_RESTRICTED = (
@@ -190,7 +183,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     # Only one connected device, check if any needed interfaces are available
     pid = next(iter(devices.keys()))
     for c in connections:
-        if USB_INTERFACE_MAPPING[c] & pid.usb_interfaces:
+        if pid.usb_interfaces.supports_connection(c):
             if WIN_CTAP_RESTRICTED and connections == FidoConnection:
                 # FIDO-only command on Windows without Admin won't work.
                 raise CliFail(
