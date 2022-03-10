@@ -214,7 +214,7 @@ class _UsbCompositeDevice(YkmanDevice):
         self._key = key
 
     def supports_connection(self, connection_type):
-        return cast(PID, self.pid).usb_interfaces.supports_connection(connection_type)
+        return cast(PID, self.pid).supports_connection(connection_type)
 
     def open_connection(self, connection_type):
         if not self.supports_connection(connection_type):

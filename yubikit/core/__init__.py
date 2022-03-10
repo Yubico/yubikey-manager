@@ -37,6 +37,7 @@ from typing import (
     Hashable,
     NamedTuple,
     Callable,
+    ClassVar,
 )
 import re
 import abc
@@ -88,9 +89,6 @@ class USB_INTERFACE(IntFlag):
     FIDO = 0x02
     CCID = 0x04
 
-    def supports_connection(self, connection_type) -> bool:
-        return connection_type.usb_interface in self
-
 
 @unique
 class YUBIKEY(Enum):
@@ -101,6 +99,21 @@ class YUBIKEY(Enum):
     SKY = "Security Key by Yubico"
     YKP = "YubiKey Plus"
     YK4 = "YubiKey"  # This includes YubiKey 5
+
+
+class Connection(abc.ABC):
+    """A connection to a YubiKey"""
+
+    usb_interface: ClassVar[USB_INTERFACE] = USB_INTERFACE(0)
+
+    def close(self) -> None:
+        """Close the device, releasing any held resources."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        self.close()
 
 
 @unique
@@ -138,25 +151,8 @@ class PID(IntEnum):
         suffix = "_".join(t.name or str(t) for t in USB_INTERFACE if t in interfaces)
         return cls[key_type.name + "_" + suffix]
 
-
-class Connection(abc.ABC):
-    """A connection to a YubiKey"""
-
-    _usb_interface = USB_INTERFACE(0)
-
-    def close(self) -> None:
-        """Close the device, releasing any held resources."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, value, traceback):
-        self.close()
-
-    @classmethod
-    @property
-    def usb_interface(cls) -> USB_INTERFACE:
-        return cls._usb_interface
+    def supports_connection(self, connection_type: Type[Connection]) -> bool:
+        return connection_type.usb_interface in self.usb_interfaces
 
 
 T_Connection = TypeVar("T_Connection", bound=Connection)
@@ -174,10 +170,7 @@ class YubiKeyDevice(abc.ABC):
         """Get the transport used to communicate with this YubiKey"""
         return self._transport
 
-    # mypy will not accept abstract types in Type[T_Connection]
-    def supports_connection(
-        self, connection_type: Union[Type[T_Connection], Callable[..., T_Connection]]
-    ) -> bool:
+    def supports_connection(self, connection_type: Type[Connection]) -> bool:
         """Check if a YubiKeyDevice supports a specific Connection type"""
         return False
 

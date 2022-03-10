@@ -183,7 +183,7 @@ def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
     # Only one connected device, check if any needed interfaces are available
     pid = next(iter(devices.keys()))
     for c in connections:
-        if pid.usb_interfaces.supports_connection(c):
+        if pid.supports_connection(c):
             if WIN_CTAP_RESTRICTED and connections == FidoConnection:
                 # FIDO-only command on Windows without Admin won't work.
                 raise CliFail(

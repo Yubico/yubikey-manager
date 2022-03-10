@@ -97,7 +97,7 @@ class SW(IntEnum):
 
 
 class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
-    _usb_interface = USB_INTERFACE.CCID
+    usb_interface = USB_INTERFACE.CCID
 
     @property
     @abc.abstractmethod

@@ -46,7 +46,7 @@ class CommandRejectedError(CommandError):
 
 
 class OtpConnection(Connection, metaclass=abc.ABCMeta):
-    _usb_interface = USB_INTERFACE.OTP
+    usb_interface = USB_INTERFACE.OTP
 
     @abc.abstractmethod
     def receive(self) -> bytes:
