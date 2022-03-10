@@ -123,7 +123,7 @@ def print_diagnostics(ctx, param, value):
 
 
 def _disabled_interface(connections, cmd_name):
-    interfaces = [c.usb_intrface for c in connections]
+    interfaces = [c.usb_interface for c in connections]
     req = ", ".join(t.name or str(t) for t in interfaces)
     raise CliFail(
         f"Command '{cmd_name}' requires one of the following USB interfaces "
