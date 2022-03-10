@@ -442,6 +442,9 @@ def _read_info_otp(conn, key_type, interfaces):
             serial = otp.get_serial()  # Rejected if reclaim (or not API_SERIAL_VISIBLE)
             break
         except CommandRejectedError:
+            if otp and interfaces == USB_INTERFACE.OTP:
+                break  # Can't be reclaim with only one interface
+            logger.debug("Potential reclaim, sleep...", exc_info=True)
             sleep(0.5)  # Potential reclaim
     else:
         otp = YubiOtpSession(conn)

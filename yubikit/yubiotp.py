@@ -594,7 +594,7 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
 
 
 class ConfigState:
-    """The confgiuration state of the YubiOTP application."""
+    """The configuration state of the YubiOTP application."""
 
     def __init__(self, version: Version, touch_level: int):
         self.version = version
@@ -617,13 +617,20 @@ class ConfigState:
         return self.flags & CFGSTATE.LED_INV != 0
 
     def __repr__(self):
-        return "ConfigState(configured: %s, touch_triggered: %s, led_inverted: %s)" % (
-            (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO)),
-            (self.is_touch_triggered(SLOT.ONE), self.is_touch_triggered(SLOT.TWO))
-            if self.version[0] >= 3
-            else None,
-            self.is_led_inverted(),
-        )
+        items = []
+        try:
+            items.append(
+                "configured: (%s, %s)"
+                % (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO))
+            )
+            items.append(
+                "touch_triggered: (%s, %s)"
+                % (self.is_touch_triggered(SLOT.ONE), self.is_touch_triggered(SLOT.TWO))
+            )
+            items.append("led_inverted: %s" % self.is_led_inverted())
+        except NotSupportedError:
+            pass
+        return f"ConfigState({', '.join(items)})"
 
 
 class _Backend(abc.ABC):
