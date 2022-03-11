@@ -25,8 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ..base import YkmanDevice, PID
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, PID
+from ..base import YkmanDevice
 
 YUBICO_VID = 0x1050
 

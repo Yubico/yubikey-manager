@@ -31,6 +31,7 @@ import sys
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
+from yubikit.management import DeviceInfo
 from yubikit.oath import parse_b32_key
 from collections import OrderedDict
 from collections.abc import MutableMapping
@@ -276,3 +277,7 @@ def pretty_print(value, level: int = 0) -> List[str]:
     else:
         lines.append(f"{indent}{value}")
     return lines
+
+
+def is_yk4_fips(info: DeviceInfo) -> bool:
+    return info.version[0] == 4 and info.is_fips

@@ -44,11 +44,11 @@ from .util import (
     click_force_option,
     ykman_group,
     prompt_timeout,
+    is_yk4_fips,
 )
 from .util import CliFail
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
-from ..device import is_fips_version
 from ..pcsc import list_devices as list_ccid
 from smartcard.Exceptions import NoCardException, CardConnectionException
 from typing import Optional
@@ -97,7 +97,7 @@ def info(ctx):
     conn = ctx.obj["conn"]
     ctap2 = ctx.obj.get("ctap2")
 
-    if is_fips_version(ctx.obj["info"].version):
+    if is_yk4_fips(ctx.obj["info"]):
         click.echo("FIPS Approved Mode: " + ("Yes" if is_in_fips_mode(conn) else "No"))
     elif ctap2:
         client_pin = ClientPin(ctap2)  # N.B. All YubiKeys with CTAP2 support PIN.
@@ -196,7 +196,7 @@ def reset(ctx, force):
         n_keys = len(list_ctap_devices())
         if n_keys > 1:
             raise CliFail("Only one YubiKey can be connected to perform a reset.")
-        is_fips = is_fips_version(ctx.obj["info"].version)
+        is_fips = is_yk4_fips(ctx.obj["info"])
 
         ctap2 = ctx.obj.get("ctap2")
         if not is_fips and not ctap2:
@@ -305,7 +305,7 @@ def change_pin(ctx, pin, new_pin, u2f):
     6 characters long.
     """
 
-    is_fips = is_fips_version(ctx.obj["info"].version)
+    is_fips = is_yk4_fips(ctx.obj["info"])
 
     if is_fips and not u2f:
         raise CliFail(
@@ -314,7 +314,7 @@ def change_pin(ctx, pin, new_pin, u2f):
 
     if u2f and not is_fips:
         raise CliFail(
-            "This is not a YubiKey FIPS, and therefore does not support a U2F PIN. "
+            "This is not a YubiKey 4 FIPS, and therefore does not support a U2F PIN. "
             "To set the FIDO2 PIN, remove the --u2f option."
         )
 
@@ -435,7 +435,7 @@ def verify(ctx, pin):
             )
         except CtapError as e:
             raise CliFail(f"PIN verification failed: {e}")
-    elif is_fips_version(ctx.obj["info"].version):
+    elif is_yk4_fips(ctx.obj["info"]):
         _fail_if_not_valid_pin(ctx, pin, True)
         try:
             fips_verify_pin(ctx.obj["conn"], pin)

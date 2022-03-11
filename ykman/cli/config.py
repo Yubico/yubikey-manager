@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import (
     ManagementSession,
     DeviceConfig,
@@ -34,7 +34,6 @@ from yubikit.management import (
     DEVICE_FLAG,
     Mode,
 )
-from .. import YUBIKEY
 from .util import (
     click_postpone_execution,
     click_force_option,
@@ -207,9 +206,7 @@ def _configure_applications(
         if sum(CAPABILITY) & new_enabled == 0:
             ctx.fail(f"Can not disable all applications over {transport}.")
 
-        reboot = USB_INTERFACE.for_capabilities(
-            enabled
-        ) != USB_INTERFACE.for_capabilities(new_enabled)
+        reboot = enabled.usb_interfaces != new_enabled.usb_interfaces
     else:
         reboot = False
 
@@ -486,7 +483,7 @@ def _parse_mode_string(ctx, param, mode):
         if mode[0] in ["+", "-"]:
             info = ctx.obj["info"]
             usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
-            interfaces = USB_INTERFACE.for_capabilities(usb_enabled)
+            interfaces = usb_enabled.usb_interfaces
             for mod in re.findall(r"[+-][A-Z]+", mode.upper()):
                 interface = _parse_interface_string(mod[1:])
                 if mod.startswith("+"):
@@ -557,12 +554,12 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     info = ctx.obj["info"]
     mgmt = ctx.obj["controller"]
     usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
-    my_mode = Mode(USB_INTERFACE.for_capabilities(usb_enabled))
+    my_mode = Mode(usb_enabled.usb_interfaces)
     usb_supported = info.supported_capabilities[TRANSPORT.USB]
-    interfaces_supported = USB_INTERFACE.for_capabilities(usb_supported)
+    interfaces_supported = usb_supported.usb_interfaces
     pid = ctx.obj["pid"]
     if pid:
-        key_type = pid.get_type()
+        key_type = pid.yubikey_type
     else:
         key_type = None
 

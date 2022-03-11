@@ -80,7 +80,7 @@ class TestNonDefaultMgmKey:
         output = ykman_cli("piv", "info").output
         assert fingerprint in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9a", "RSA1024")
@@ -88,7 +88,7 @@ class TestNonDefaultMgmKey:
     def test_generate_self_signed_slot_9a_eccp256(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9a", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9c", "RSA1024")
@@ -96,7 +96,7 @@ class TestNonDefaultMgmKey:
     def test_generate_self_signed_slot_9c_eccp256(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9c", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9d", "RSA1024")
@@ -104,7 +104,7 @@ class TestNonDefaultMgmKey:
     def test_generate_self_signed_slot_9d_eccp256(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9d", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9e", "RSA1024")
@@ -145,7 +145,7 @@ class TestNonDefaultMgmKey:
 
         assert subject_input == subject_output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9a", "RSA1024")
@@ -153,7 +153,7 @@ class TestNonDefaultMgmKey:
     def test_generate_csr_slot_9a_eccp256(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9a", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9c", "RSA1024")
@@ -161,7 +161,7 @@ class TestNonDefaultMgmKey:
     def test_generate_csr_slot_9c_eccp256(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9c", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9d", "RSA1024")
@@ -169,7 +169,7 @@ class TestNonDefaultMgmKey:
     def test_generate_csr_slot_9d_eccp256(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9d", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9e", "RSA1024")
@@ -216,7 +216,7 @@ class TestProtectedMgmKey:
         output = ykman_cli("piv", "info").output
         assert fingerprint in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9a", "RSA1024")
@@ -224,7 +224,7 @@ class TestProtectedMgmKey:
     def test_generate_self_signed_slot_9a_eccp256(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9a", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9c", "RSA1024")
@@ -232,7 +232,7 @@ class TestProtectedMgmKey:
     def test_generate_self_signed_slot_9c_eccp256(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9c", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9d", "RSA1024")
@@ -240,7 +240,7 @@ class TestProtectedMgmKey:
     def test_generate_self_signed_slot_9d_eccp256(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9d", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_self_signed_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_self_signed(ykman_cli, "9e", "RSA1024")
@@ -273,7 +273,7 @@ class TestProtectedMgmKey:
 
         assert subject_input == subject_output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9a_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9a", "RSA1024")
@@ -281,7 +281,7 @@ class TestProtectedMgmKey:
     def test_generate_csr_slot_9a_eccp256(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9a", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9c_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9c", "RSA1024")
@@ -289,7 +289,7 @@ class TestProtectedMgmKey:
     def test_generate_csr_slot_9c_eccp256(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9c", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9d_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9d", "RSA1024")
@@ -297,7 +297,7 @@ class TestProtectedMgmKey:
     def test_generate_csr_slot_9d_eccp256(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9d", "ECCP256")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_slot_9e_rsa1024(self, ykman_cli):
         self._test_generate_csr(ykman_cli, "9e", "RSA1024")

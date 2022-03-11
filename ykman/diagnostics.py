@@ -2,7 +2,6 @@ from . import __version__ as ykman_version
 from .util import get_windows_version
 from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
-from .device import read_info, get_name
 from .piv import get_piv_info
 from .openpgp import OpenPgpController, get_openpgp_info
 
@@ -13,6 +12,7 @@ from yubikit.management import ManagementSession
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.piv import PivSession
 from yubikit.oath import OathSession
+from yubikit.support import read_info, get_name
 from fido2.ctap import CtapError
 from fido2.ctap2 import Ctap2, ClientPin
 
@@ -57,11 +57,11 @@ def mgmt_info(pid, conn):
         data.append(f"Failed to read device info via Management: {e!r}")
 
     try:
-        info = read_info(pid, conn)
+        info = read_info(conn, pid)
         data.append(
             {
                 "DeviceInfo": asdict(info),
-                "Name": get_name(info, pid.get_type()),
+                "Name": get_name(info, pid.yubikey_type),
             }
         )
     except Exception as e:

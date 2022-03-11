@@ -1,7 +1,6 @@
 import pytest
 
-from yubikit.core import AID
-from yubikit.core.smartcard import ApduError, SW
+from yubikit.core.smartcard import ApduError, AID, SW
 from yubikit.management import CAPABILITY
 from yubikit.oath import (
     OathSession,
@@ -9,7 +8,6 @@ from yubikit.oath import (
     HASH_ALGORITHM,
     OATH_TYPE,
 )
-from ykman.device import is_fips_version
 from . import condition
 
 
@@ -152,11 +150,12 @@ def _ids_hmac(params):
 
 class TestHmacVectors:
     @pytest.mark.parametrize("params", HMAC_PARAMS, ids=_ids_hmac)
-    def test_vector(self, session, params):
+    def test_vector(self, info, session, params):
         key, challenge, hash_algorithm, expected = params
         if hash_algorithm == HASH_ALGORITHM.SHA512:
-            if session.version < (4, 3, 1) or is_fips_version(session.version):
-                pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
+            if info.version[0] == 4:
+                if info.is_fips or info.version < (4, 3, 1):
+                    pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
         cred = session.put_credential(
             CredentialData("test", OATH_TYPE.TOTP, hash_algorithm, key)
         )
@@ -196,11 +195,12 @@ class TestTotpVectors:
     @pytest.mark.parametrize(
         "params", TOTP_PARAMS, ids=lambda x: "{1.name}-{0}".format(*x)
     )
-    def test_vector(self, session, params, digits):
+    def test_vector(self, info, session, params, digits):
         timestamp, hash_algorithm, value, key = params
         if hash_algorithm == HASH_ALGORITHM.SHA512:
-            if session.version < (4, 3, 1) or is_fips_version(session.version):
-                pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
+            if info.version[0] == 4:
+                if info.is_fips or info.version < (4, 3, 1):
+                    pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
 
         cred = session.put_credential(
             CredentialData("test", OATH_TYPE.TOTP, hash_algorithm, key, digits)

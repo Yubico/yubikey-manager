@@ -51,7 +51,9 @@ def _parse_pkcs12(data, password):
         key, cert, cas = pkcs12.load_key_and_certificates(
             data, password, default_backend()
         )
-        return key, [cert] + cas
+        if cert:
+            cas.insert(0, cert)
+        return key, cas
     except ValueError as e:  # cryptography raises ValueError on wrong password
         raise InvalidPasswordError(e)
 

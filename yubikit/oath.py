@@ -4,10 +4,9 @@ from .core import (
     require_version,
     Version,
     Tlv,
-    AID,
     BadResponseError,
 )
-from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 
 from urllib.parse import unquote, urlparse, parse_qs
 from functools import total_ordering

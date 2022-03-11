@@ -31,8 +31,8 @@ from .core import (
     require_version,
     Version,
     Tlv,
-    AID,
     TRANSPORT,
+    USB_INTERFACE,
     NotSupportedError,
     BadResponseError,
     ApplicationNotAvailableError,
@@ -45,7 +45,7 @@ from .core.otp import (
     CommandRejectedError,
 )
 from .core.fido import FidoConnection
-from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from enum import IntEnum, IntFlag, unique
@@ -84,32 +84,14 @@ class CAPABILITY(IntFlag):
             return "YubiHSM Auth"
         return self.name or ", ".join(c.display_name for c in CAPABILITY if c in self)
 
-
-@unique
-class USB_INTERFACE(IntFlag):
-    """YubiKey USB interface identifiers."""
-
-    OTP = 0x01
-    FIDO = 0x02
-    CCID = 0x04
-
-    def supports_connection(self, connection_type) -> bool:
-        if issubclass(connection_type, SmartCardConnection):
-            return USB_INTERFACE.CCID in self
-        if issubclass(connection_type, FidoConnection):
-            return USB_INTERFACE.FIDO in self
-        if issubclass(connection_type, OtpConnection):
-            return USB_INTERFACE.OTP in self
-        return False
-
-    @staticmethod
-    def for_capabilities(capabilities: CAPABILITY) -> "USB_INTERFACE":
+    @property
+    def usb_interfaces(self) -> USB_INTERFACE:
         ifaces = USB_INTERFACE(0)
-        if capabilities & CAPABILITY.OTP:
+        if self & CAPABILITY.OTP:
             ifaces |= USB_INTERFACE.OTP
-        if capabilities & (CAPABILITY.U2F | CAPABILITY.FIDO2):
+        if self & (CAPABILITY.U2F | CAPABILITY.FIDO2):
             ifaces |= USB_INTERFACE.FIDO
-        if capabilities & (
+        if self & (
             CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP | CAPABILITY.HSMAUTH
         ):
             ifaces |= USB_INTERFACE.CCID

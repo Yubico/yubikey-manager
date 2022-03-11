@@ -26,7 +26,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .core import (
-    AID,
     TRANSPORT,
     Version,
     bytes2int,
@@ -42,7 +41,7 @@ from .core.otp import (
     OtpProtocol,
     CommandRejectedError,
 )
-from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 
 import abc
 import struct

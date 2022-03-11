@@ -32,9 +32,10 @@ from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
+from yubikit.support import get_name
 
-from .util import CliFail
-from ..device import is_fips_version, get_name, connect_to_device
+from .util import CliFail, is_yk4_fips
+from ..device import connect_to_device
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
@@ -159,8 +160,8 @@ def info(ctx, check_fips):
         interfaces = None
         key_type = None
     else:
-        interfaces = pid.get_interfaces()
-        key_type = pid.get_type()
+        interfaces = pid.usb_interfaces
+        key_type = pid.yubikey_type
     device_name = get_name(info, key_type)
 
     click.echo(f"Device type: {device_name}")
@@ -197,7 +198,7 @@ def info(ctx, check_fips):
     )
 
     if check_fips:
-        if is_fips_version(info.version):
+        if is_yk4_fips(info):
             ctx.obj["conn"].close()
             _check_fips_status(pid, info)
         else:

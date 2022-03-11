@@ -54,9 +54,9 @@ from .util import (
     click_prompt,
     prompt_for_touch,
     EnumChoice,
+    is_yk4_fips,
 )
 from .. import __version__
-from ..device import is_fips_version
 from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
     PrepareUploadFailed,
@@ -200,7 +200,7 @@ def info(ctx):
     click.echo(f"Slot 1: {slot1 and 'programmed' or 'empty'}")
     click.echo(f"Slot 2: {slot2 and 'programmed' or 'empty'}")
 
-    if is_fips_version(session.version):
+    if is_yk4_fips(ctx.obj["info"]):
         click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(session) else 'No'}")
 
 
