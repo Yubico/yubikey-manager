@@ -310,6 +310,10 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
 
         info.config.enabled_capabilities[TRANSPORT.USB] = usb_enabled
 
+    # SKY identified by PID
+    if key_type == YUBIKEY.SKY:
+        info.is_sky = True
+
     # YK4-based FIPS version
     if (4, 4, 0) <= info.version < (4, 5, 0):
         info.is_fips = True
