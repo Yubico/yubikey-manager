@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-@condition.fips(True)
+@condition.yk4_fips(True)
 @condition.capability(CAPABILITY.PIV)
 def ensure_piv(ykman_cli):
     ykman_cli("piv", "reset", "-f")

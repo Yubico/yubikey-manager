@@ -38,6 +38,7 @@ from .util import (
     prompt_for_touch,
     prompt_timeout,
     EnumChoice,
+    is_yk4_fips,
 )
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.oath import (
@@ -48,7 +49,6 @@ from yubikit.oath import (
     parse_b32_key,
     _format_cred_id,
 )
-from yubikit.support import is_yk4_fips_version
 from ..oath import is_steam, calculate_steam, is_hidden
 from ..settings import AppData
 
@@ -98,7 +98,7 @@ def info(ctx):
     if session.locked and session.device_id in keys:
         click.echo("The password for this YubiKey is remembered by ykman.")
 
-    if is_yk4_fips_version(version):
+    if is_yk4_fips(ctx.obj["info"]):
         click.echo(f"FIPS Approved Mode: {'Yes' if session.locked else 'No'}")
 
 
@@ -530,7 +530,7 @@ def _add_cred(ctx, data, touch, force):
         ctx.fail("Counter only supported for HOTP accounts.")
 
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
-        version < (4, 3, 1) or is_yk4_fips_version(version)
+        version < (4, 3, 1) or is_yk4_fips(ctx.obj["info"])
     ):
         raise CliFail("Algorithm SHA512 not supported on this YubiKey.")
 

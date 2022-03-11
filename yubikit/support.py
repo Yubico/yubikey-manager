@@ -59,11 +59,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def is_yk4_fips_version(version: Version) -> bool:
-    """True if a given firmware version indicates a YubiKey (4) FIPS"""
-    return (4, 4, 0) <= version < (4, 5, 0)
-
-
 def _otp_read_data(conn) -> Tuple[Version, Optional[int]]:
     otp = YubiOtpSession(conn)
     version = otp.version
@@ -316,7 +311,7 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
         info.config.enabled_capabilities[TRANSPORT.USB] = usb_enabled
 
     # YK4-based FIPS version
-    if is_yk4_fips_version(info.version):
+    if (4, 4, 0) <= info.version < (4, 5, 0):
         info.is_fips = True
 
     # Set nfc_enabled if missing (pre YubiKey 5)
@@ -387,7 +382,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
             else:
                 return "YubiKey"
         elif major_version == 4:
-            if is_yk4_fips_version(info.version):  # YK4 FIPS
+            if info.is_fips:
                 device_name = "YubiKey FIPS"
             elif usb_supported == CAPABILITY.OTP | CAPABILITY.U2F:
                 device_name = "YubiKey Edge"

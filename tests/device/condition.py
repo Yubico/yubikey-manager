@@ -1,4 +1,3 @@
-from yubikit.support import is_yk4_fips_version
 from inspect import signature, Parameter, isgeneratorfunction
 from makefun import wraps
 
@@ -78,8 +77,8 @@ def max_version(major, minor=0, micro=0):
     return check(lambda version: version <= vers, f"Version > {vers}")
 
 
-def fips(status=True):
+def yk4_fips(status=True):
     return check(
-        lambda version: status == is_yk4_fips_version(version),
-        f"Requires FIPS = {status}",
+        lambda info: status == (info.is_fips and info.version[0] == 4),
+        f"Requires YK4 FIPS = {status}",
     )

@@ -10,12 +10,12 @@ class TestYkmanInfo:
             assert "Serial number:" in output
         assert "Firmware version:" in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     def test_ykman_info_does_not_report_fips_for_non_fips_device(self, ykman_cli):
         with pytest.raises(SystemExit):
             ykman_cli("info", "--check-fips")
 
-    @condition.fips(True)
+    @condition.yk4_fips(True)
     def test_ykman_info_reports_fips_status(self, ykman_cli):
         info = ykman_cli("info", "--check-fips").output
         assert "FIPS Approved Mode:" in info

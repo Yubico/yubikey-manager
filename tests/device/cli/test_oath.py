@@ -46,7 +46,7 @@ class TestOATH:
         output = ykman_cli("oath", "info").output
         assert "version:" in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     def test_info_does_not_indicate_fips_mode_for_non_fips_key(self, ykman_cli):
         info = ykman_cli("oath", "info").output
         assert "FIPS:" not in info
@@ -230,7 +230,7 @@ class TestOATH:
         ykman_cli("oath", "accounts", "list")
         ykman_cli("oath", "accounts", "delete", "😃", "-f")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.min_version(4, 3, 1)
     def test_oath_sha512(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "abba", "abba", "--algorithm", "SHA512")
@@ -262,7 +262,7 @@ class TestOATH:
 
 class TestOathFips:
     @pytest.fixture(autouse=True)
-    @condition.fips(True)
+    @condition.yk4_fips(True)
     def check_fips(self):
         pass
 
