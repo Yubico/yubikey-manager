@@ -70,18 +70,19 @@ def _otp_read_data(conn) -> Tuple[Version, Optional[int]]:
     return version, serial
 
 
-AID_U2F_YUBICO = b"\xa0\x00\x00\x05\x27\x10\x02"  # Old U2F AID
+# Old U2F AID, only used to detect the presence of the applet
+_AID_U2F_YUBICO = bytes.fromhex("a0000005271002")
 
-SCAN_APPLETS = {
-    # AID.OTP: CAPABILITY.OTP,  # NB: OTP will be checked elsewhere
-    AID.FIDO: CAPABILITY.U2F,
-    AID_U2F_YUBICO: CAPABILITY.U2F,
-    AID.PIV: CAPABILITY.PIV,
-    AID.OPENPGP: CAPABILITY.OPENPGP,
-    AID.OATH: CAPABILITY.OATH,
-}
+_SCAN_APPLETS = (
+    # OTP will be checked elsewhere and thus isn't needed here
+    (AID.FIDO, CAPABILITY.U2F),
+    (_AID_U2F_YUBICO, CAPABILITY.U2F),
+    (AID.PIV, CAPABILITY.PIV),
+    (AID.OPENPGP, CAPABILITY.OPENPGP),
+    (AID.OATH, CAPABILITY.OATH),
+)
 
-BASE_NEO_APPS = CAPABILITY.OTP | CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
+_BASE_NEO_APPS = CAPABILITY.OTP | CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
 
 
 def _read_info_ccid(conn, key_type, interfaces):
@@ -117,7 +118,7 @@ def _read_info_ccid(conn, key_type, interfaces):
     # Scan for remaining capabilities
     logger.debug("Scan for available applications...")
     protocol = SmartCardProtocol(conn)
-    for aid, code in SCAN_APPLETS.items():
+    for aid, code in _SCAN_APPLETS:
         try:
             protocol.select(aid)
             capabilities |= code
@@ -185,7 +186,7 @@ def _read_info_otp(conn, key_type, interfaces):
 
     version = otp.version
     if key_type == YUBIKEY.NEO:
-        usb_supported = BASE_NEO_APPS
+        usb_supported = _BASE_NEO_APPS
         if USB_INTERFACE.FIDO in interfaces or version >= (3, 3, 0):
             usb_supported |= CAPABILITY.U2F
         capabilities = {
@@ -231,7 +232,7 @@ def _read_info_ctap(conn, key_type, interfaces):
 
         supported_apps = {TRANSPORT.USB: CAPABILITY.U2F}
         if key_type == YUBIKEY.NEO:
-            supported_apps[TRANSPORT.USB] |= BASE_NEO_APPS
+            supported_apps[TRANSPORT.USB] |= _BASE_NEO_APPS
             supported_apps[TRANSPORT.NFC] = supported_apps[TRANSPORT.USB]
 
         return DeviceInfo(
