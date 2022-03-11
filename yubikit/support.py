@@ -258,8 +258,7 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
     data using other mechanisms if needed. It will also make adjustments to the data if
     required, for example to "fix" known bad values.
 
-    The *pid* parameter must be provided whenever the YubiKey is connected via USB,
-    else the result may be incorrect.
+    The *pid* parameter must be provided whenever the YubiKey is connected via USB.
     """
 
     logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
