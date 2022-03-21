@@ -183,6 +183,60 @@ def set_pin_retries(
             echo_default_pins()
 
 
+@access.command("change-pin")
+@click.option("-P", "--pin", help="Current PIN code.")
+@click.option("-n", "--new-pin", help="A new PIN.")
+@click.pass_context
+def change_pin(ctx, pin, new_pin):
+    """
+    Change PIN.
+
+    The PIN has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if pin is None:
+        pin = click_prompt("Enter PIN", hide_input=True)
+
+    if new_pin is None:
+        new_pin = click_prompt(
+            "New PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.change_pin(pin, new_pin)
+
+
+@access.command("change-admin-pin")
+@click.option("-a", "--admin-pin", help="Current Admin PIN.")
+@click.option("-n", "--new-admin-pin", help="New Admin PIN.")
+@click.pass_context
+def change_admin(ctx, admin_pin, new_admin_pin):
+    """
+    Change Admin PIN.
+
+    The Admin PIN has a minimum length of 8, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if new_admin_pin is None:
+        new_admin_pin = click_prompt(
+            "New Admin PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.change_admin(admin_pin, new_admin_pin)
+
+
 @openpgp.group("keys")
 def keys():
     """Manage private keys."""
