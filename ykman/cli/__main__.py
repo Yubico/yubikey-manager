@@ -371,7 +371,6 @@ class _DefaultFormatter(logging.Formatter):
     def format(self, record):
         message = f"{record.levelname}: {record.getMessage()}"
         if self.show_trace and record.exc_info:
-            print("SHOW TRACE")
             message += self.formatException(record.exc_info)
         return message
 
