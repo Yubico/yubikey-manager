@@ -122,7 +122,7 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
     if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
         from .hid.windows import list_paths
 
-        counter = Counter()
+        counter: Counter[PID] = Counter()
         for pid, path in list_paths():
             if pid not in merged:
                 try:

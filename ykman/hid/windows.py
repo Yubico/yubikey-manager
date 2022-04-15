@@ -19,13 +19,17 @@ from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 from yubikit.core.otp import OtpConnection
 from yubikit.logging import LOG_LEVEL
 
-from ctypes import WinDLL, WinError  # type: ignore
 from ctypes import wintypes, LibraryLoader
 from typing import Dict, cast
 import ctypes
 import platform
 import logging
 import re
+import sys
+
+# Only typecheck this file on Windows
+assert sys.platform == "win32"  # nosec
+from ctypes import WinDLL, WinError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
