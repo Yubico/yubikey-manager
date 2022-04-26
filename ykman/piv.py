@@ -45,12 +45,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import NameOID, ObjectIdentifier
 from collections import OrderedDict
 from datetime import datetime
 import logging
 import struct
 import os
+import re
 
 from typing import Union, Mapping, Optional, List, Dict, Type, Any, cast
 
@@ -113,6 +114,9 @@ def _parse(value: str) -> List[List[str]]:
     return name
 
 
+_DOTTED_STRING_RE = re.compile(r"\d(\.\d+)+")
+
+
 def parse_rfc4514_string(value: str) -> x509.Name:
     """Parses an RFC 4514 string into a x509.Name.
 
@@ -126,9 +130,13 @@ def parse_rfc4514_string(value: str) -> x509.Name:
             if "=" not in part:
                 raise ValueError("Invalid RFC 4514 string")
             k, v = part.split("=", 1)
-            if k not in _NAME_ATTRIBUTES:
+            if k in _NAME_ATTRIBUTES:
+                attr = _NAME_ATTRIBUTES[k]
+            elif _DOTTED_STRING_RE.fullmatch(k):
+                attr = ObjectIdentifier(k)
+            else:
                 raise ValueError(f"Unsupported attribute: '{k}'")
-            parts.append(x509.NameAttribute(_NAME_ATTRIBUTES[k], v))
+            parts.append(x509.NameAttribute(attr, v))
         attributes.insert(0, x509.RelativeDistinguishedName(parts))
 
     return x509.Name(attributes)
