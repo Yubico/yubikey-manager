@@ -45,6 +45,7 @@ from .management import (
     ManagementSession,
     DeviceInfo,
     DeviceConfig,
+    Mode,
     USB_INTERFACE,
     CAPABILITY,
     FORM_FACTOR,
@@ -53,21 +54,10 @@ from .management import (
 from .yubiotp import YubiOtpSession
 
 from time import sleep
-from typing import Optional, Tuple
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def _otp_read_data(conn) -> Tuple[Version, Optional[int]]:
-    otp = YubiOtpSession(conn)
-    version = otp.version
-    serial: Optional[int] = None
-    try:
-        serial = otp.get_serial()
-    except Exception:
-        logger.debug("Unable to read serial over OTP, no serial", exc_info=True)
-    return version, serial
 
 
 # Old U2F AID, only used to detect the presence of the applet
@@ -102,14 +92,19 @@ def _read_info_ccid(conn, key_type, interfaces):
     capabilities = CAPABILITY(0)
 
     # Try to read serial (and version if needed) from OTP application
+    serial = None
     try:
-        otp_version, serial = _otp_read_data(conn)
-        capabilities |= CAPABILITY.OTP
+        otp = YubiOtpSession(conn)
         if version is None:
-            version = otp_version
+            version = otp.version
+        try:
+            serial = otp.get_serial()
+        except Exception:
+            logger.debug("Unable to read serial over OTP, no serial", exc_info=True)
+
+        capabilities |= CAPABILITY.OTP
     except ApplicationNotAvailableError:
         logger.debug("Couldn't select OTP application, serial unknown")
-        serial = None
 
     if version is None:
         logger.debug("Firmware version unknown, using 3.0.0 as a baseline")
@@ -266,7 +261,8 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
     elif isinstance(conn, SmartCardConnection) and conn.transport == TRANSPORT.NFC:
         # No PID for NFC connections
         key_type = None
-        interfaces = USB_INTERFACE(0)
+        otp = YubiOtpSession(conn)
+        interfaces = Mode.from_code(otp._status[6]).interfaces
     else:
         raise ValueError("PID must be provided for non-NFC connections")
 

@@ -292,7 +292,10 @@ class Mode:
     @classmethod
     def from_code(cls, code: int) -> "Mode":
         # Mode is determined from the lowest 3 bits
-        return cls(_MODES[code & 0b00000111])
+        try:
+            return cls(_MODES[code & 0b00000111])
+        except IndexError:
+            raise ValueError("Invalid mode code")
 
 
 SLOT_DEVICE_CONFIG = 0x11
@@ -359,17 +362,25 @@ P1_DEVICE_CONFIG = 0x11
 class _ManagementSmartCardBackend(_Backend):
     def __init__(self, smartcard_connection):
         self.protocol = SmartCardProtocol(smartcard_connection)
-        select_bytes = self.protocol.select(AID.MANAGEMENT)
-        if select_bytes[-2:] == b"\x90\x00":
-            # YubiKey Edge incorrectly appends SW twice.
-            select_bytes = select_bytes[:-2]
-        select_str = select_bytes.decode()
-        self.version = Version.from_string(select_str)
-        # For YubiKey NEO, we use the OTP application for further commands
-        if self.version[0] == 3:
-            # Workaround to "de-select" on NEO, otherwise it gets stuck.
-            self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
-            self.protocol.select(AID.OTP)
+        try:
+            select_bytes = self.protocol.select(AID.MANAGEMENT)
+            if select_bytes[-2:] == b"\x90\x00":
+                # YubiKey Edge incorrectly appends SW twice.
+                select_bytes = select_bytes[:-2]
+            select_str = select_bytes.decode()
+            self.version = Version.from_string(select_str)
+            # For YubiKey NEO, we use the OTP application for further commands
+            if self.version[0] == 3:
+                # Workaround to "de-select" on NEO, otherwise it gets stuck.
+                self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
+                self.protocol.select(AID.OTP)
+        except ApplicationNotAvailableError:
+            if smartcard_connection.transport == TRANSPORT.NFC:
+                # Probably NEO over NFC
+                status = self.protocol.select(AID.OTP)
+                self.version = Version.from_bytes(status[:3])
+            else:
+                raise
 
     def close(self):
         self.protocol.close()
