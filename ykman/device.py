@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 class ConnectionNotAvailableException(ValueError):
     def __init__(self, connection_types):
         super().__init__(
-            f"No eligiable connections are available ({connection_types})."
+            f"No eligible connections are available ({connection_types})."
         )
         self.connection_types = connection_types
 
