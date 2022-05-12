@@ -153,7 +153,7 @@ class TestHmacVectors:
     def test_vector(self, info, session, params):
         key, challenge, hash_algorithm, expected = params
         if hash_algorithm == HASH_ALGORITHM.SHA512:
-            if info.version[0] == 4:
+            if info.version[0] <= 4:
                 if info.is_fips or info.version < (4, 3, 1):
                     pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
         cred = session.put_credential(
@@ -198,7 +198,7 @@ class TestTotpVectors:
     def test_vector(self, info, session, params, digits):
         timestamp, hash_algorithm, value, key = params
         if hash_algorithm == HASH_ALGORITHM.SHA512:
-            if info.version[0] == 4:
+            if info.version[0] <= 4:
                 if info.is_fips or info.version < (4, 3, 1):
                     pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
 

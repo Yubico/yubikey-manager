@@ -95,7 +95,7 @@ def ccid_connection(device, info):
     if device.transport == TRANSPORT.NFC:
         with device.open_connection(SmartCardConnection) as c:
             yield c
-    if device.pid.supports_connection(SmartCardConnection):
+    elif device.pid.supports_connection(SmartCardConnection):
         with connect_to_device(info.serial, [SmartCardConnection])[0] as c:
             yield c
     else:
