@@ -41,6 +41,8 @@ elif sys.platform.startswith("win32"):
     from . import windows as backend
 elif sys.platform.startswith("darwin"):
     from . import macos as backend
+elif sys.platform.startswith("freebsd"):
+    from . import freebsd as backend
 else:
 
     class backend:
@@ -83,7 +85,6 @@ try:
                 except ValueError:
                     logger.debug(f"Unsupported Yubico device with PID: {desc.pid:02x}")
         return devs
-
 
 except Exception:
     # CTAP not supported on this platform
