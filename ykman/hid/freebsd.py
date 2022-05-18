@@ -199,10 +199,10 @@ class UhidConnection(OtpConnection):
 
     @staticmethod
     def get_usage(dev):
-        data = ctypes.create_string_buffer(4096)
+        c_data = ctypes.create_string_buffer(4096)
         desc = usb_gen_descriptor(
-            ugd_data=ctypes.addressof(data),
-            ugd_maxlen=ctypes.sizeof(data),
+            ugd_data=ctypes.addressof(c_data),
+            ugd_maxlen=ctypes.sizeof(c_data),
             ugd_report_type=3,
         )
         ret = libc.ioctl(dev, USB_GET_REPORT_DESC, ctypes.pointer(desc))
@@ -214,6 +214,7 @@ class UhidConnection(OtpConnection):
         USAGE_PAGE = 0x04
         USAGE = 0x08
 
+        data = c_data.raw
         usage, usage_page = (None, None)
         while data and not (usage and usage_page):
             head, data = struct.unpack_from(">B", data)[0], data[1:]
@@ -244,12 +245,12 @@ class UhidConnection(OtpConnection):
 
         value = ovalue.value[: olen.value].decode()
         m = vendor_re.search(value)
-        vid = m.group(1) if m else None
+        vid = int(m.group(1), 16) if m else None
         m = product_re.search(value)
-        pid = m.group(1) if m else None
+        pid = int(m.group(1), 16) if m else None
         m = sernum_re.search(value)
         serial = m.group(1) if m else None
-        return (int(vid, 16), int(pid, 16), serial)
+        return (vid, pid, serial)
 
     @staticmethod
     def list_devices():
