@@ -235,7 +235,8 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
                 group = groups.setdefault(dev.pid, _PidGroup())
                 group.add(connection_type, dev)
         except Exception:
-            logger.exception("Unable to list devices for connection")
+            logger.warning("111Unable to list devices for connection")
+            raise EstablishContextException("Fail")
     devices = []
     for group in groups.values():
         devices.extend(group.get_devices())
