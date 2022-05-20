@@ -234,9 +234,11 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
             for dev in list_devs():
                 group = groups.setdefault(dev.pid, _PidGroup())
                 group.add(connection_type, dev)
+        except EstablishContextException as e:
+            logger.warning("PC/SC not available.", exc_info=e)
+            raise e
         except Exception:
-            logger.warning("111Unable to list devices for connection")
-            raise EstablishContextException("Fail")
+            logger.warning("Unable to list devices for connection.")
     devices = []
     for group in groups.values():
         devices.extend(group.get_devices())
