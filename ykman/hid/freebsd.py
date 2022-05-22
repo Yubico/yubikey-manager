@@ -29,12 +29,30 @@
 #
 # To avoid attaching the Yubikey as a keyboard, do:
 #
-#     usbconfig ugenX.Y power_off
 #     usbconfig ugenX.Y add_quirk UQ_KBD_IGNORE
-#     usbconfig ugenX.Y power_on
+#     usbconfig ugenX.Y reset
 #
 # The list of available devices is shown using `usbconfig list`
-
+# You can make these changes permanent by altering loader.conf.
+#
+# Starting from FreeBSD 13 hidraw(4) can be enabled using:
+#
+#     sysrc kld_list+="hidraw hkbd"
+#     cat >>/boot/loader.conf<<EOF
+#     hw.usb.usbhid.enable="1"
+#     hw.usb.quirk.0="0x1050 0x0010 0 0xffff UQ_KBD_IGNORE"  # YKS_OTP
+#     hw.usb.quirk.1="0x1050 0x0110 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP
+#     hw.usb.quirk.2="0x1050 0x0111 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP_CCID
+#     hw.usb.quirk.3="0x1050 0x0114 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP_FIDO
+#     hw.usb.quirk.4="0x1050 0x0116 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP_FIDO_CCID
+#     hw.usb.quirk.5="0x1050 0x0401 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP
+#     hw.usb.quirk.6="0x1050 0x0403 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP_FIDO
+#     hw.usb.quirk.7="0x1050 0x0405 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP_CCID
+#     hw.usb.quirk.8="0x1050 0x0407 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP_FIDO_CCID
+#     hw.usb.quirk.9="0x1050 0x0410 0 0xffff UQ_KBD_IGNORE"  # YKP_OTP_FIDO
+#     EOF
+#     reboot
+#
 from yubikit.core.otp import OtpConnection
 from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
 
