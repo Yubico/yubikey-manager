@@ -43,9 +43,20 @@ from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 from smartcard.Exceptions import NoCardException
 
-from time import sleep
+from time import sleep, time
 from collections import Counter
-from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type, cast, Hashable
+from typing import (
+    Dict,
+    Mapping,
+    List,
+    Tuple,
+    Optional,
+    Iterable,
+    Type,
+    cast,
+    Hashable,
+    Set,
+)
 import sys
 import ctypes
 import logging
@@ -135,11 +146,14 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
 
 
 class _PidGroup:
-    def __init__(self):
+    def __init__(self, pid):
+        self._pid = pid
         self._infos: Dict[Hashable, DeviceInfo] = {}
         self._resolved: Dict[Hashable, Dict[USB_INTERFACE, YkmanDevice]] = {}
         self._unresolved: Dict[USB_INTERFACE, List[YkmanDevice]] = {}
         self._devcount: Dict[USB_INTERFACE, int] = Counter()
+        self._fingerprints: Set[Hashable] = set()
+        self._ctime = time()
 
     def _key(self, info):
         return (
@@ -153,11 +167,12 @@ class _PidGroup:
             info.is_sky,
         )
 
-    def add(self, conn_type, dev):
+    def add(self, conn_type, dev, force_resolve=False):
         logger.debug(f"Add device for {conn_type}: {dev}")
         iface = conn_type.usb_interface
+        self._fingerprints.add(dev.fingerprint)
         self._devcount[iface] += 1
-        if len(self._resolved) < max(self._devcount.values()):
+        if force_resolve or len(self._resolved) < max(self._devcount.values()):
             try:
                 with dev.open_connection(conn_type) as conn:
                     info = read_info(conn, dev.pid)
@@ -172,9 +187,11 @@ class _PidGroup:
 
     def connect(self, key, conn_type):
         iface = conn_type.usb_interface
-        dev = self._resolved[key].get(iface)
-        if dev:
-            return dev.open_connection(conn_type)
+
+        resolved = self._resolved[key].get(iface)
+        if resolved:
+            return resolved.open_connection(conn_type)
+
         devs = self._unresolved.get(iface, [])
         failed = []
         try:
@@ -195,6 +212,24 @@ class _PidGroup:
                     failed.append(dev)
         finally:
             devs.extend(failed)
+
+        if self._devcount[iface] < len(self._infos):
+            logger.debug(f"Checking for more devices over {iface!s}")
+            for dev in CONNECTION_LIST_MAPPING[conn_type]():
+                if self._pid == dev.pid and dev.fingerprint not in self._fingerprints:
+                    self.add(conn_type, dev, True)
+
+            resolved = self._resolved[key].get(iface)
+            if resolved:
+                return resolved.open_connection(conn_type)
+
+        # Retry if we are within a 5 second period after creation,
+        # as not all USB interface become usable at the exact same time.
+        if time() < self._ctime + 5:
+            logger.debug("Device not found, retry in 1s")
+            sleep(1.0)
+            return self.connect(key, conn_type)
+
         raise ValueError("Failed to connect to the device")
 
     def get_devices(self):
@@ -232,7 +267,7 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
     for connection_type, list_devs in CONNECTION_LIST_MAPPING.items():
         try:
             for dev in list_devs():
-                group = groups.setdefault(dev.pid, _PidGroup())
+                group = groups.setdefault(dev.pid, _PidGroup(dev.pid))
                 group.add(connection_type, dev)
         except Exception:
             logger.exception("Unable to list devices for connection")
