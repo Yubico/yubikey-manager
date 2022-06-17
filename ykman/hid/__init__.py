@@ -84,7 +84,6 @@ try:
                     logger.debug(f"Unsupported Yubico device with PID: {desc.pid:02x}")
         return devs
 
-
 except Exception:
     # CTAP not supported on this platform
 

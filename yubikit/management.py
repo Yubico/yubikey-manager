@@ -298,7 +298,7 @@ class Mode:
             raise ValueError("Invalid mode!")
 
     def __repr__(self):
-        return "+".join(t.name for t in USB_INTERFACE if t in self.interfaces)
+        return "+".join(t.name or str(t) for t in USB_INTERFACE if t in self.interfaces)
 
     @classmethod
     def from_code(cls, code: int) -> "Mode":
