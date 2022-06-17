@@ -237,7 +237,7 @@ def _format_code(credential, timestamp, truncated):
     digits = truncated[0]
 
     return Code(
-        str((bytes2int(truncated[1:]) & 0x7FFFFFFF) % 10 ** digits).rjust(digits, "0"),
+        str((bytes2int(truncated[1:]) & 0x7FFFFFFF) % 10**digits).rjust(digits, "0"),
         valid_from,
         valid_to,
     )

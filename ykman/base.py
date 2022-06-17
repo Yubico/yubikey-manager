@@ -43,7 +43,7 @@ class YUBIKEY(Enum):
 
     def get_pid(self, interfaces: USB_INTERFACE) -> "PID":
         suffix = "_".join(
-            t.name for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
+            t.name or str(t) for t in USB_INTERFACE if t in USB_INTERFACE(interfaces)
         )
         return PID[self.name + "_" + suffix]
 
