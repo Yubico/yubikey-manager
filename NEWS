@@ -1,3 +1,7 @@
+* Version 4.0.9 (released 2022-06-17)
+ ** Dependency: Add support for python-fido2 1.x
+ ** Fix: Drop stated support for Click 6 as features from 7 are being used.
+
 * Version 4.0.8 (released 2022-01-31)
  ** Bugfix: Fix error message for invalid modhex when programing a YubiOTP credential.
  ** Bugfix: Fix issue with displaying a Steam credential when it is the only account.

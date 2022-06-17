@@ -40,7 +40,7 @@ pywin32 = {version = ">=223", platform = "win32"}
 pytest = "^6.0"
 pyOpenSSL = "^17.0"
 makefun = "^1.9.5"
-pyinstaller = {version = "^4.6", python = "<3.11"}
+pyinstaller = {version = "^5.1", python = "<3.11"}
 
 [tool.poetry.scripts]
 ykman = "ykman.cli.__main__:main"

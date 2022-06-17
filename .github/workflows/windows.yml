@@ -52,15 +52,6 @@ jobs:
           ref: v4.7
           path: pyinstaller
 
-      - name: Build PyInstaller from source
-        shell: bash
-        run: |
-          cd pyinstaller/bootloader
-          python waf distclean all
-          cd ../../
-          poetry run pip uninstall -y pyinstaller
-          poetry run pip install ./pyinstaller
-
       - name: Build exe
         shell: bash
         run: |
