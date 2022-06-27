@@ -138,43 +138,45 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
         if not apdus and not app:
             ctx.fail("No commands provided.")
 
-    protocol = SmartCardProtocol(ctx.obj["conn"])
-    is_first = True
+    dev = ctx.obj["device"]
+    with dev.open_connection(SmartCardConnection) as conn:
+        protocol = SmartCardProtocol(conn)
+        is_first = True
 
-    if app:
-        is_first = False
-        click.echo("SELECT AID: " + _hex(app))
-        resp = protocol.select(app)
-        _print_response(resp, SW.OK, no_pretty)
+        if app:
+            is_first = False
+            click.echo("SELECT AID: " + _hex(app))
+            resp = protocol.select(app)
+            _print_response(resp, SW.OK, no_pretty)
 
-    if send_apdu:  # Compatibility mode (full APDUs)
-        for apdu in send_apdu:
-            if not is_first:
-                click.echo()
-            else:
-                is_first = False
-            apdu = a2b_hex(apdu)
-            click.echo("SEND: " + _hex(apdu))
-            resp, sw = protocol.connection.send_and_receive(apdu)
-            _print_response(resp, sw, no_pretty)
-    else:  # Standard mode
-        for apdu, check in apdus:
-            if not is_first:
-                click.echo()
-            else:
-                is_first = False
-            header, body = apdu[:4], apdu[4]
-            req = _hex(struct.pack(">BBBB", *header))
-            if body:
-                req += " -- " + _hex(body)
-            click.echo("SEND: " + req)
-            try:
-                resp = protocol.send_apdu(*apdu)
-                sw = SW.OK
-            except ApduError as e:
-                resp = e.data
-                sw = e.sw
-            _print_response(resp, sw, no_pretty)
+        if send_apdu:  # Compatibility mode (full APDUs)
+            for apdu in send_apdu:
+                if not is_first:
+                    click.echo()
+                else:
+                    is_first = False
+                apdu = a2b_hex(apdu)
+                click.echo("SEND: " + _hex(apdu))
+                resp, sw = protocol.connection.send_and_receive(apdu)
+                _print_response(resp, sw, no_pretty)
+        else:  # Standard mode
+            for apdu, check in apdus:
+                if not is_first:
+                    click.echo()
+                else:
+                    is_first = False
+                header, body = apdu[:4], apdu[4]
+                req = _hex(struct.pack(">BBBB", *header))
+                if body:
+                    req += " -- " + _hex(body)
+                click.echo("SEND: " + req)
+                try:
+                    resp = protocol.send_apdu(*apdu)
+                    sw = SW.OK
+                except ApduError as e:
+                    resp = e.data
+                    sw = e.sw
+                _print_response(resp, sw, no_pretty)
 
-            if check is not None and sw != check:
-                raise CliFail(f"Aborted due to error (expected SW={check:04X}).")
+                if check is not None and sw != check:
+                    raise CliFail(f"Aborted due to error (expected SW={check:04X}).")

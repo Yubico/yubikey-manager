@@ -35,7 +35,6 @@ from yubikit.oath import OathSession
 from yubikit.support import get_name
 
 from .util import CliFail, is_yk4_fips
-from ..device import connect_to_device
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
@@ -101,33 +100,33 @@ def print_app_status_table(supported_apps, enabled_apps):
     click.echo(f_table, nl=False)
 
 
-def get_overall_fips_status(pid, info):
+def get_overall_fips_status(device, info):
     statuses = {}
 
     usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
 
     statuses["OTP"] = False
     if usb_enabled & CAPABILITY.OTP:
-        with connect_to_device(info.serial, [OtpConnection])[0] as conn:
+        with device.open_connection(OtpConnection) as conn:
             otp_app = YubiOtpSession(conn)
             statuses["OTP"] = otp_in_fips_mode(otp_app)
 
     statuses["OATH"] = False
     if usb_enabled & CAPABILITY.OATH:
-        with connect_to_device(info.serial, [SmartCardConnection])[0] as conn:
+        with device.open_connection(SmartCardConnection) as conn:
             oath_app = OathSession(conn)
             statuses["OATH"] = oath_in_fips_mode(oath_app)
 
     statuses["FIDO U2F"] = False
     if usb_enabled & CAPABILITY.U2F:
-        with connect_to_device(info.serial, [FidoConnection])[0] as conn:
+        with device.open_connection(FidoConnection) as conn:
             statuses["FIDO U2F"] = ctap_in_fips_mode(conn)
 
     return statuses
 
 
-def _check_fips_status(pid, info):
-    fips_status = get_overall_fips_status(pid, info)
+def _check_fips_status(device, info):
+    fips_status = get_overall_fips_status(device, info)
     click.echo()
 
     click.echo(f"FIPS Approved Mode: {'Yes' if all(fips_status.values()) else 'No'}")
@@ -199,7 +198,7 @@ def info(ctx, check_fips):
 
     if check_fips:
         if is_yk4_fips(info):
-            ctx.obj["conn"].close()
-            _check_fips_status(pid, info)
+            device = ctx.obj["device"]
+            _check_fips_status(device, info)
         else:
             raise CliFail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")

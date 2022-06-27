@@ -1,4 +1,4 @@
-from ykman.device import connect_to_device, list_all_devices, read_info
+from ykman.device import list_all_devices, read_info
 from ykman.pcsc import list_devices
 from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
@@ -77,26 +77,23 @@ connection_scope = os.environ.get("CONNECTION_SCOPE", "function")
 @pytest.fixture(scope=connection_scope)
 @condition.transport(TRANSPORT.USB)
 def otp_connection(device, info):
-    if device.pid.supports_connection(OtpConnection):
-        with connect_to_device(info.serial, [OtpConnection])[0] as c:
+    if device.supports_connection(OtpConnection):
+        with device.open_connection(OtpConnection) as c:
             yield c
 
 
 @pytest.fixture(scope=connection_scope)
 @condition.transport(TRANSPORT.USB)
 def fido_connection(device, info):
-    if device.pid.supports_connection(FidoConnection):
-        with connect_to_device(info.serial, [FidoConnection])[0] as c:
+    if device.supports_connection(FidoConnection):
+        with device.open_connection(FidoConnection) as c:
             yield c
 
 
 @pytest.fixture(scope=connection_scope)
 def ccid_connection(device, info):
-    if device.transport == TRANSPORT.NFC:
+    if device.supports_connection(SmartCardConnection):
         with device.open_connection(SmartCardConnection) as c:
-            yield c
-    elif device.pid.supports_connection(SmartCardConnection):
-        with connect_to_device(info.serial, [SmartCardConnection])[0] as c:
             yield c
     else:
         pytest.skip("CCID connection not available")
