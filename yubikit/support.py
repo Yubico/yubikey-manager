@@ -125,6 +125,10 @@ def _read_info_ccid(conn, key_type, interfaces):
                 "Error selecting aid: %s, capability: %s", aid, code, exc_info=True
             )
 
+    if not capabilities and not key_type:
+        # NFC, no capabilities, probably not a YubiKey.
+        raise ValueError("Device does not seem to be a YubiKey")
+
     # Assume U2F on devices >= 3.3.0
     if USB_INTERFACE.FIDO in interfaces or version >= (3, 3, 0):
         capabilities |= CAPABILITY.U2F
