@@ -78,6 +78,7 @@ class SW(IntEnum):
     FILE_NOT_FOUND = 0x6A82
     NO_SPACE = 0x6A84
     REFERENCE_DATA_NOT_FOUND = 0x6A88
+    APPLET_SELECT_FAILED = 0x6999
     WRONG_PARAMETERS_P1P2 = 0x6B00
     INVALID_INSTRUCTION = 0x6D00
     COMMAND_ABORTED = 0x6F00
@@ -128,6 +129,7 @@ class SmartCardProtocol:
         except ApduError as e:
             if e.sw in (
                 SW.FILE_NOT_FOUND,
+                SW.APPLET_SELECT_FAILED,
                 SW.INVALID_INSTRUCTION,
                 SW.WRONG_PARAMETERS_P1P2,
             ):
