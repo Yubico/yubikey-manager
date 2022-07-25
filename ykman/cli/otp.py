@@ -615,8 +615,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 @click.option(
     "-d",
     "--digits",
-    type=click.Choice(["6", "8"]),
-    default="6",
+    type=click.Choice(["0", "6", "8"]),
+    default="0",
     help="Number of digits in generated TOTP code (default: 6).",
 )
 @click.pass_context
@@ -657,7 +657,11 @@ def calculate(ctx, slot, challenge, totp, digits):
                 setattr(on_keepalive, "prompted", True)
 
         response = session.calculate_hmac_sha1(slot, challenge, event, on_keepalive)
-        if totp:
+
+        if totp and digits == "0":
+            digits = "6"
+
+        if digits != "0":
             value = format_oath_code(response, int(digits))
         else:
             value = response.hex()
