@@ -26,6 +26,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import TRANSPORT, YUBIKEY
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.fido import FidoConnection
 from yubikit.management import (
     ManagementSession,
     DeviceConfig,
@@ -82,7 +85,19 @@ def config(ctx):
       Generate and set a random application lock code:
       $ ykman config set-lock-code --generate
     """
-    ctx.obj["controller"] = ManagementSession(ctx.obj["conn"])
+    dev = ctx.obj["device"]
+    for conn_type in (SmartCardConnection, OtpConnection, FidoConnection):
+        if dev.supports_connection(conn_type):
+            try:
+                conn = dev.open_connection(conn_type)
+                ctx.call_on_close(conn.close)
+                ctx.obj["controller"] = ManagementSession(conn)
+                return
+            except Exception:
+                logger.warning(
+                    f"Failed connecting to the YubiKey over {conn_type}", exc_info=True
+                )
+    raise CliFail("Couldn't connect to the YubiKey.")
 
 
 def _require_config(ctx):

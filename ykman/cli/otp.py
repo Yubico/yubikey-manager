@@ -43,6 +43,7 @@ from yubikit.core.otp import (
     modhex_decode,
     OtpConnection,
 )
+from yubikit.core.smartcard import SmartCardConnection
 
 from .util import (
     ykman_group,
@@ -127,7 +128,7 @@ def _fname(fobj):
     return getattr(fobj, "name", fobj)
 
 
-@ykman_group(OtpConnection)
+@ykman_group([OtpConnection, SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 @click.option(
@@ -173,7 +174,18 @@ def otp(ctx, access_code):
       $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code
     """
 
-    ctx.obj["session"] = YubiOtpSession(ctx.obj["conn"])
+    """
+    # TODO: Require OTP for chalresp, or FW < 5.?. Require CCID for HashOTP
+    dev = ctx.obj["device"]
+    if dev.supports_connection(OtpConnection):
+        conn = dev.open_connection(OtpConnection)
+    else:
+        conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+
+    ctx.obj["session"] = YubiOtpSession(conn)
+    """
+
     if access_code is not None:
         if access_code == "-":
             access_code = click_prompt("Enter the access code", hide_input=True)
@@ -186,13 +198,26 @@ def otp(ctx, access_code):
     ctx.obj["access_code"] = access_code
 
 
+def _get_session(ctx, types=[OtpConnection, SmartCardConnection]):
+    dev = ctx.obj["device"]
+    for conn_type in types:
+        if dev.supports_connection(conn_type):
+            conn = dev.open_connection(conn_type)
+            ctx.call_on_close(conn.close)
+            return YubiOtpSession(conn)
+    raise CliFail(
+        "The connection type required for this command is not supported/enabled on the "
+        "YubiKey"
+    )
+
+
 @otp.command()
 @click.pass_context
 def info(ctx):
     """
     Display general status of the YubiKey OTP slots.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     state = session.get_config_state()
     slot1 = state.is_configured(1)
     slot2 = state.is_configured(2)
@@ -211,7 +236,7 @@ def swap(ctx):
     """
     Swaps the two slot configurations.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     click.echo("Swapping slots...")
     try:
         session.swap_slots()
@@ -241,7 +266,7 @@ def ndef(ctx, slot, prefix, ndef_type):
     - For TEXT the default is an empty string
     """
     info = ctx.obj["info"]
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     state = session.get_config_state()
     if not info.has_transport(TRANSPORT.NFC):
         raise CliFail("This YubiKey does not support NFC.")
@@ -263,7 +288,7 @@ def delete(ctx, slot, force):
     """
     Deletes the configuration stored in a slot.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
         raise CliFail("Not possible to delete an empty slot.")
@@ -366,7 +391,7 @@ def yubiotp(
     """
 
     info = ctx.obj["info"]
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     serial = None
 
     if public_id and serial_public_id:
@@ -514,7 +539,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     preferred keyboard layout.
     """
 
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     if password and len(password) > 38:
         ctx.fail("Password too long (maximum length is 38 characters).")
@@ -575,7 +600,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     \b
     KEY     A key given in hex (or base32, if --totp is specified).
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     if key:
         if generate:
@@ -650,7 +675,12 @@ def calculate(ctx, slot, challenge, totp, digits):
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
     credential, and read the response. Supports output as a OATH-TOTP code.
     """
-    session = ctx.obj["session"]
+    dev = ctx.obj["device"]
+    if dev.transport == TRANSPORT.NFC:
+        session = _get_session(ctx, [SmartCardConnection])
+    else:
+        # Calculate over USB is only available over OtpConnection
+        session = _get_session(ctx, [OtpConnection])
 
     if not challenge and not totp:
         challenge = click_prompt("Enter a challenge (hex)")
@@ -730,7 +760,7 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     OMP+TT+MUI as 12 characters. If omitted, a default value of "ubhe" will be used for
     OMP+TT, and the YubiKey serial number will be used as MUI.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     mh1 = False
     mh2 = False
@@ -842,7 +872,7 @@ def settings(
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     if new_access_code and delete_access_code:
         ctx.fail("--new-access-code conflicts with --delete-access-code.")

@@ -177,7 +177,7 @@ def fido_info():
                     )
                     try:
                         ctap2 = Ctap2(conn)
-                        ctap_data = {"Ctap2Info": ctap2.info.data}
+                        ctap_data: Dict[str, Any] = {"Ctap2Info": asdict(ctap2.info)}
                         if ctap2.info.options.get("clientPin"):
                             client_pin = ClientPin(ctap2)
                             ctap_data["PIN retries"] = client_pin.get_pin_retries()

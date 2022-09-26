@@ -101,7 +101,10 @@ def openpgp(ctx):
       Require touch to use the authentication key:
       $ ykman openpgp keys set-touch aut on
     """
-    ctx.obj["controller"] = OpenPgpController(ctx.obj["conn"])
+    dev = ctx.obj["device"]
+    conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+    ctx.obj["controller"] = OpenPgpController(conn)
 
 
 @openpgp.command()

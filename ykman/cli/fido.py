@@ -81,7 +81,10 @@ def fido(ctx):
       $ ykman fido access change-pin --pin 123456 --new-pin 654321
 
     """
-    conn = ctx.obj["conn"]
+    dev = ctx.obj["device"]
+    conn = dev.open_connection(FidoConnection)
+    ctx.call_on_close(conn.close)
+    ctx.obj["conn"] = conn
     try:
         ctx.obj["ctap2"] = Ctap2(conn)
     except (ValueError, CtapError):
@@ -123,8 +126,6 @@ def info(ctx):
         bio_enroll = ctap2.info.options.get("bioEnroll")
         if bio_enroll:
             uv_retries = client_pin.get_uv_retries()
-            if isinstance(uv_retries, tuple):
-                uv_retries = uv_retries[0]
             if uv_retries:
                 click.echo(
                     f"Fingerprints registered, with {uv_retries} attempt(s) "

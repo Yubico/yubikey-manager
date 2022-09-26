@@ -190,6 +190,26 @@ class TestOATH:
             c in STEAM_CHAR_TABLE for c in code
         ), f"{code!r} contains non-steam characters"
 
+    def test_oath_code_output_no_touch(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "TOTP:normal", "aaaa")
+        ykman_cli("oath", "accounts", "add", "Steam:normal", "aaba")
+        ykman_cli("oath", "accounts", "add", "-o", "HOTP", "HOTP:normal", "abaa")
+
+        lines = ykman_cli("oath", "accounts", "code").output.strip().splitlines()
+        entries = {line.split()[0]: line for line in lines}
+        assert "HOTP Account" in entries["HOTP:normal"]
+
+        code = entries["Steam:normal"].split()[-1]
+        assert 5 == len(code), f"cred wrong length: {code!r}"
+        assert all(
+            c in STEAM_CHAR_TABLE for c in code
+        ), f"{code!r} contains non-steam characters"
+
+        code = entries["TOTP:normal"].split()[-1]
+        assert 6 == len(code)
+        int(code)
+
+    @condition.min_version(4)
     def test_oath_code_output(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "TOTP:normal", "aaaa")
         ykman_cli("oath", "accounts", "add", "--touch", "TOTP:touch", "aaab")
@@ -213,6 +233,7 @@ class TestOATH:
         assert 6 == len(code)
         int(code)
 
+    @condition.min_version(4)
     def test_oath_totp_steam_touch_not_in_code_output(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "--touch", "Steam:steam-cred", "abba")
         ykman_cli("oath", "accounts", "add", "TOTP:totp-cred", "abba")

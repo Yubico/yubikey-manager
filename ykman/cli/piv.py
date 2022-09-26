@@ -189,7 +189,11 @@ def piv(ctx):
       Reset all PIV data and restore default settings:
       $ ykman piv reset
     """
-    session = PivSession(ctx.obj["conn"])
+
+    dev = ctx.obj["device"]
+    conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+    session = PivSession(conn)
     ctx.obj["session"] = session
     ctx.obj["pivman_data"] = get_pivman_data(session)
 

@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import Connection, PID, TRANSPORT
+from yubikit.core import Connection, PID, TRANSPORT, YUBIKEY
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -43,21 +43,23 @@ from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 from smartcard.Exceptions import NoCardException
 
-from time import sleep
+from time import sleep, time
 from collections import Counter
-from typing import Dict, Mapping, List, Tuple, Optional, Iterable, Type, cast, Hashable
+from typing import (
+    Dict,
+    Mapping,
+    List,
+    Tuple,
+    Iterable,
+    Type,
+    Hashable,
+    Set,
+)
 import sys
 import ctypes
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-class ConnectionNotAvailableException(ValueError):
-    def __init__(self, connection_types):
-        types_str = ", ".join([c.__name__ for c in connection_types])
-        super().__init__(f"No eligiable connections are available ({types_str}).")
-        self.connection_types = connection_types
 
 
 def _warn_once(message, e_type=Exception):
@@ -96,7 +98,7 @@ def list_otp_devices():
     return _list_otp_devices()
 
 
-CONNECTION_LIST_MAPPING = {
+_CONNECTION_LIST_MAPPING = {
     SmartCardConnection: list_ccid_devices,
     OtpConnection: list_otp_devices,
     FidoConnection: list_ctap_devices,
@@ -111,7 +113,7 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
     """
     fingerprints = set()
     merged: Dict[PID, int] = {}
-    for list_devs in CONNECTION_LIST_MAPPING.values():
+    for list_devs in _CONNECTION_LIST_MAPPING.values():
         try:
             devs = list_devs()
         except Exception:
@@ -122,7 +124,7 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
     if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
         from .hid.windows import list_paths
 
-        counter = Counter()
+        counter: Counter[PID] = Counter()
         for pid, path in list_paths():
             if pid not in merged:
                 try:
@@ -135,11 +137,14 @@ def scan_devices() -> Tuple[Mapping[PID, int], int]:
 
 
 class _PidGroup:
-    def __init__(self):
+    def __init__(self, pid):
+        self._pid = pid
         self._infos: Dict[Hashable, DeviceInfo] = {}
         self._resolved: Dict[Hashable, Dict[USB_INTERFACE, YkmanDevice]] = {}
         self._unresolved: Dict[USB_INTERFACE, List[YkmanDevice]] = {}
         self._devcount: Dict[USB_INTERFACE, int] = Counter()
+        self._fingerprints: Set[Hashable] = set()
+        self._ctime = time()
 
     def _key(self, info):
         return (
@@ -153,11 +158,12 @@ class _PidGroup:
             info.is_sky,
         )
 
-    def add(self, conn_type, dev):
+    def add(self, conn_type, dev, force_resolve=False):
         logger.debug(f"Add device for {conn_type}: {dev}")
         iface = conn_type.usb_interface
+        self._fingerprints.add(dev.fingerprint)
         self._devcount[iface] += 1
-        if len(self._resolved) < max(self._devcount.values()):
+        if force_resolve or len(self._resolved) < max(self._devcount.values()):
             try:
                 with dev.open_connection(conn_type) as conn:
                     info = read_info(conn, dev.pid)
@@ -170,11 +176,16 @@ class _PidGroup:
                 logger.warning("Failed opening device", exc_info=True)
         self._unresolved.setdefault(iface, []).append(dev)
 
+    def supports_connection(self, conn_type):
+        return conn_type.usb_interface in self._devcount
+
     def connect(self, key, conn_type):
         iface = conn_type.usb_interface
-        dev = self._resolved[key].get(iface)
-        if dev:
-            return dev.open_connection(conn_type)
+
+        resolved = self._resolved[key].get(iface)
+        if resolved:
+            return resolved.open_connection(conn_type)
+
         devs = self._unresolved.get(iface, [])
         failed = []
         try:
@@ -189,12 +200,34 @@ class _PidGroup:
                         logger.debug(f"Resolved device {info.serial}")
                         if dev_key == key:
                             return conn
+                    elif self._pid.yubikey_type == YUBIKEY.NEO and not devs:
+                        self._resolved.setdefault(key, {})[iface] = dev
+                        logger.debug("Resolved last NEO device without serial")
+                        return conn
                     conn.close()
                 except Exception:
                     logger.warning("Failed opening device", exc_info=True)
                     failed.append(dev)
         finally:
             devs.extend(failed)
+
+        if self._devcount[iface] < len(self._infos):
+            logger.debug(f"Checking for more devices over {iface!s}")
+            for dev in _CONNECTION_LIST_MAPPING[conn_type]():
+                if self._pid == dev.pid and dev.fingerprint not in self._fingerprints:
+                    self.add(conn_type, dev, True)
+
+            resolved = self._resolved[key].get(iface)
+            if resolved:
+                return resolved.open_connection(conn_type)
+
+        # Retry if we are within a 5 second period after creation,
+        # as not all USB interface become usable at the exact same time.
+        if time() < self._ctime + 5:
+            logger.debug("Device not found, retry in 1s")
+            sleep(1.0)
+            return self.connect(key, conn_type)
+
         raise ValueError("Failed to connect to the device")
 
     def get_devices(self):
@@ -214,25 +247,39 @@ class _UsbCompositeDevice(YkmanDevice):
         self._key = key
 
     def supports_connection(self, connection_type):
-        return cast(PID, self.pid).supports_connection(connection_type)
+        return self._group.supports_connection(connection_type)
 
     def open_connection(self, connection_type):
         if not self.supports_connection(connection_type):
             raise ValueError("Unsupported Connection type")
+
+        # Allow for ~3s reclaim time on NEO for CCID
+        assert self.pid  # nosec
+        if self.pid.yubikey_type == YUBIKEY.NEO and issubclass(
+            connection_type, SmartCardConnection
+        ):
+            for _ in range(6):
+                try:
+                    return self._group.connect(self._key, connection_type)
+                except (NoCardException, ValueError):
+                    sleep(0.5)
+
         return self._group.connect(self._key, connection_type)
 
 
-def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
+def list_all_devices(
+    connection_types: Iterable[Type[Connection]] = _CONNECTION_LIST_MAPPING.keys(),
+) -> List[Tuple[YkmanDevice, DeviceInfo]]:
     """Connects to all attached YubiKeys and reads device info from them.
 
     Returns a list of (device, info) tuples for each connected device.
     """
     groups: Dict[PID, _PidGroup] = {}
 
-    for connection_type, list_devs in CONNECTION_LIST_MAPPING.items():
+    for connection_type in connection_types:
         try:
-            for dev in list_devs():
-                group = groups.setdefault(dev.pid, _PidGroup())
+            for dev in _CONNECTION_LIST_MAPPING[connection_type]():
+                group = groups.setdefault(dev.pid, _PidGroup(dev.pid))
                 group.add(connection_type, dev)
         except Exception:
             logger.exception("Unable to list devices for connection")
@@ -240,64 +287,3 @@ def list_all_devices() -> List[Tuple[YkmanDevice, DeviceInfo]]:
     for group in groups.values():
         devices.extend(group.get_devices())
     return devices
-
-
-def connect_to_device(
-    serial: Optional[int] = None,
-    connection_types: Iterable[Type[Connection]] = CONNECTION_LIST_MAPPING.keys(),
-) -> Tuple[Connection, YkmanDevice, DeviceInfo]:
-    """Looks for a YubiKey to connect to.
-
-    :param serial: Used to filter devices by serial number, if present.
-    :param connection_types: Filter connection types.
-    :return: An open connection to the device, the device reference, and the device
-        information read from the device.
-    """
-    failed_connections = set()
-    retry_ccid = []
-    for connection_type in connection_types:
-        try:
-            devs = CONNECTION_LIST_MAPPING[connection_type]()
-        except Exception:
-            logger.debug(
-                f"Error listing connection of type {connection_type}", exc_info=True
-            )
-            failed_connections.add(connection_type)
-            continue
-
-        for dev in devs:
-            try:
-                conn = dev.open_connection(connection_type)
-            except NoCardException:
-                retry_ccid.append(dev)
-                logger.debug("CCID No card present, will retry")
-                continue
-            info = read_info(conn, dev.pid)
-            if serial and info.serial != serial:
-                conn.close()
-            else:
-                return conn, dev, info
-
-    if set(connection_types) == failed_connections:
-        raise ConnectionNotAvailableException(connection_types)
-
-    # NEO ejects the card when other interfaces are used, and returns it after ~3s.
-    for _ in range(6):
-        if not retry_ccid:
-            break
-        sleep(0.5)
-        for dev in retry_ccid[:]:
-            try:
-                conn = dev.open_connection(SmartCardConnection)
-            except NoCardException:
-                continue
-            retry_ccid.remove(dev)
-            info = read_info(conn, dev.pid)
-            if serial and info.serial != serial:
-                conn.close()
-            else:
-                return conn, dev, info
-
-    if serial:
-        raise ValueError("YubiKey with given serial not found")
-    raise ValueError("No YubiKey found with the given interface(s)")

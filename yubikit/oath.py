@@ -254,6 +254,7 @@ class OathSession:
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
         self.protocol.enable_touch_workaround(self._version)
+        self._neo_unlock_workaround = self.version < (3, 0, 0)
         logger.debug(
             f"OATH session initialized (version={self.version}, "
             f"has_key={self._has_key})"
@@ -297,6 +298,7 @@ class OathSession:
                 "Response from validation does not match verification!"
             )
         self._challenge = None
+        self._neo_unlock_workaround = False
 
     def set_key(self, key: bytes) -> None:
         challenge = os.urandom(8)
@@ -314,6 +316,10 @@ class OathSession:
         )
         logger.info("New access code set")
         self._has_key = True
+        if self._neo_unlock_workaround:
+            logger.debug("Performing NEO workaround, re-select and unlock")
+            self._challenge = _parse_select(self.protocol.select(AID.OATH))[2]
+            self.validate(key)
 
     def unset_key(self) -> None:
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))

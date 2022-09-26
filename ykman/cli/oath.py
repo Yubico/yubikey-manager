@@ -78,8 +78,11 @@ def oath(ctx):
       Set a password for the OATH application:
       $ ykman oath access change-password
     """
-    session = OathSession(ctx.obj["conn"])
-    ctx.obj["session"] = session
+
+    dev = ctx.obj["device"]
+    conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+    ctx.obj["session"] = OathSession(conn)
     ctx.obj["oath_keys"] = AppData("oath_keys")
 
 

@@ -34,12 +34,7 @@ from yubikit.logging import LOG_LEVEL
 
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
-from ..device import (
-    list_all_devices,
-    scan_devices,
-    connect_to_device,
-    ConnectionNotAvailableException,
-)
+from ..device import scan_devices, list_all_devices
 from ..util import get_windows_version
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
@@ -85,22 +80,6 @@ def _scan_changes(state, attempts=10):
     raise TimeoutError("Timed out waiting for state change")
 
 
-def retrying_connect(serial, connections, attempts=10, state=None):
-    while True:
-        try:
-            return connect_to_device(serial, connections)
-        except (NotImplementedError, ConnectionNotAvailableException):
-            raise  # No need to retry
-        except Exception as e:
-            logger.debug("Failed opening connection", exc_info=True)
-            try:
-                _, state = _scan_changes(state)
-                logger.debug("State changed, re-try connect...")
-            except TimeoutError:
-                logger.debug("Timeout", exc_info=True)
-                raise e from None  # Raise the original exception
-
-
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
@@ -115,82 +94,73 @@ def print_diagnostics(ctx, param, value):
     ctx.exit()
 
 
-def _disabled_interface(connections, cmd_name):
-    interfaces = [c.usb_interface for c in connections]
-    req = ", ".join(t.name or str(t) for t in interfaces)
-    raise CliFail(
-        f"Command '{cmd_name}' requires one of the following USB interfaces "
-        f"to be enabled: '{req}'.\n\n"
-        "Use 'ykman config usb' to set the enabled USB interfaces."
-    )
-
-
-def _run_cmd_for_serial(cmd, connections, serial):
-    try:
-        return retrying_connect(serial, connections)
-    except ValueError:
-        try:
-            # Serial not found, see if it's among other interfaces in USB enabled:
-            conn = connect_to_device(serial)[0]
-            conn.close()
-            _disabled_interface(connections, cmd)
-        except Exception:
-            raise CliFail(
-                f"Failed connecting to a YubiKey with serial: {serial}.\n"
-                "Make sure the application has the required permissions.",
-            )
-
-
-def _run_cmd_for_single(ctx, cmd, connections, reader_name=None):
-    # Use a specific CCID reader
-    if reader_name:
-        if SmartCardConnection in connections or cmd in (fido.name, otp.name):
-            readers = list_ccid(reader_name)
-            if len(readers) == 1:
-                dev = readers[0]
-                try:
-                    conn = dev.open_connection(SmartCardConnection)
+def require_reader(connection_types, reader):
+    if SmartCardConnection in connection_types or FidoConnection in connection_types:
+        readers = list_ccid(reader)
+        if len(readers) == 1:
+            dev = readers[0]
+            try:
+                with dev.open_connection(SmartCardConnection) as conn:
                     info = read_info(conn, dev.pid)
-                    if cmd == fido.name:
-                        conn.close()
-                        conn = dev.open_connection(FidoConnection)
-                    return conn, dev, info
-                except Exception:
-                    raise CliFail("Failed to connect to YubiKey")
-            elif len(readers) > 1:
-                raise CliFail("Multiple YubiKeys on external readers detected.")
-            else:
-                raise CliFail("No YubiKey found on external reader.")
+                return dev, info
+            except Exception:
+                raise CliFail("Failed to connect to YubiKey")
+        elif len(readers) > 1:
+            raise CliFail("Multiple external readers match name.")
         else:
-            raise CliFail("Not a CCID command.")
+            raise CliFail("No YubiKey found on external reader.")
+    else:
+        raise CliFail("Not a CCID command.")
 
+
+def require_device(connection_types, serial=None):
     # Find all connected devices
     devices, state = scan_devices()
     n_devs = sum(devices.values())
+    if serial is None:
+        if n_devs == 0:  # The device might not yet be ready, wait a bit
+            try:
+                devices, state = _scan_changes(state)
+                n_devs = sum(devices.values())
+            except TimeoutError:
+                raise CliFail("No YubiKey detected!")
+        if n_devs > 1:
+            raise CliFail(
+                "Multiple YubiKeys detected. Use --device SERIAL to specify "
+                "which one to use."
+            )
 
-    if n_devs == 0:  # The device might not yet be ready, wait a bit
-        try:
+        # Only one connected device, check if any needed interfaces are available
+        pid = next(iter(devices.keys()))
+        supported = [c for c in connection_types if pid.supports_connection(c)]
+        if WIN_CTAP_RESTRICTED and supported == [FidoConnection]:
+            # FIDO-only command on Windows without Admin won't work.
+            raise CliFail("FIDO access on Windows requires running as Administrator.")
+        if not supported:
+            interfaces = [c.usb_interface for c in connection_types]
+            req = ", ".join(t.name or str(t) for t in interfaces)
+            raise CliFail(
+                f"Command requires one of the following USB interfaces "
+                f"to be enabled: '{req}'.\n\n"
+                "Use 'ykman config usb' to set the enabled USB interfaces."
+            )
+
+        devs = list_all_devices(supported)
+        if len(devs) != 1:
+            raise CliFail("Failed to connect to YubiKey.")
+        return devs[0]
+    else:
+        for _ in (0, 1):  # If no match initially, wait a bit for state change.
+            devs = list_all_devices(connection_types)
+            for dev, nfo in devs:
+                if nfo.serial == serial:
+                    return dev, nfo
             devices, state = _scan_changes(state)
-            n_devs = sum(devices.values())
-        except TimeoutError:
-            raise CliFail("No YubiKey detected!")
-    if n_devs > 1:
-        raise CliFail(
-            "Multiple YubiKeys detected. Use --device SERIAL to specify "
-            "which one to use."
-        )
 
-    # Only one connected device, check if any needed interfaces are available
-    pid = next(iter(devices.keys()))
-    for c in connections:
-        if pid.supports_connection(c):
-            if WIN_CTAP_RESTRICTED and connections == FidoConnection:
-                # FIDO-only command on Windows without Admin won't work.
-                raise CliFail(
-                    "FIDO access on Windows requires running as Administrator."
-                )
-            return retrying_connect(None, connections, state=state)
-    _disabled_interface(connections, cmd)
+        raise CliFail(
+            f"Failed connecting to a YubiKey with serial: {serial}.\n"
+            "Make sure the application has the required permissions.",
+        )
 
 
 @ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
@@ -293,17 +263,16 @@ def cli(ctx, device, log_level, log_file, reader):
         def resolve():
             items = getattr(resolve, "items", None)
             if not items:
-                if device is not None:
-                    items = _run_cmd_for_serial(subcmd.name, connections, device)
+                if reader is not None:
+                    items = require_reader(connections, reader)
                 else:
-                    items = _run_cmd_for_single(ctx, subcmd.name, connections, reader)
-                ctx.call_on_close(items[0].close)
+                    items = require_device(connections, device)
                 setattr(resolve, "items", items)
             return items
 
-        ctx.obj.add_resolver("conn", lambda: resolve()[0])
-        ctx.obj.add_resolver("pid", lambda: resolve()[1].pid)
-        ctx.obj.add_resolver("info", lambda: resolve()[2])
+        ctx.obj.add_resolver("device", lambda: resolve()[0])
+        ctx.obj.add_resolver("pid", lambda: resolve()[0].pid)
+        ctx.obj.add_resolver("info", lambda: resolve()[1])
 
 
 @cli.command("list")
@@ -371,7 +340,6 @@ class _DefaultFormatter(logging.Formatter):
     def format(self, record):
         message = f"{record.levelname}: {record.getMessage()}"
         if self.show_trace and record.exc_info:
-            print("SHOW TRACE")
             message += self.formatException(record.exc_info)
         return message
 
