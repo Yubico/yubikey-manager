@@ -108,19 +108,33 @@ class TOUCH_MODE(IntEnum):  # noqa: N801
 
 
 @unique
+class PIN_POLICY(IntEnum):  # noqa: N801
+    ONCE = 0x00
+    ALWAYS = 0x01
+
+    def __str__(self):
+        if self == PIN_POLICY.ONCE:
+            return "Once"
+        elif self == PIN_POLICY.ALWAYS:
+            return "Always"
+
+
+@unique
 class INS(IntEnum):  # noqa: N801
-    GET_DATA = 0xCA
-    GET_VERSION = 0xF1
-    SET_PIN_RETRIES = 0xF2
     VERIFY = 0x20
-    TERMINATE = 0xE6
+    CHANGE_PIN = 0x24
+    RESET_RETRY_COUNTER = 0x2C
     ACTIVATE = 0x44
     GENERATE_ASYM = 0x47
+    SELECT_DATA = 0xA5
+    SEND_REMAINING = 0xC0
+    GET_DATA = 0xCA
     PUT_DATA = 0xDA
     PUT_DATA_ODD = 0xDB
+    TERMINATE = 0xE6
+    GET_VERSION = 0xF1
+    SET_PIN_RETRIES = 0xF2
     GET_ATTESTATION = 0xFB
-    SEND_REMAINING = 0xC0
-    SELECT_DATA = 0xA5
 
 
 class PinRetries(NamedTuple):
@@ -130,6 +144,7 @@ class PinRetries(NamedTuple):
 
 
 PW1 = 0x81
+PW2 = 0x82  # Resetting Code
 PW3 = 0x83
 INVALID_PIN = b"\0" * 8
 TOUCH_METHOD_BUTTON = 0x20
@@ -139,9 +154,10 @@ TOUCH_METHOD_BUTTON = 0x20
 class DO(IntEnum):
     AID = 0x4F
     PW_STATUS = 0xC4
-    CARDHOLDER_CERTIFICATE = 0x7F21
-    ATT_CERTIFICATE = 0xFC
+    RESETTING_CODE = 0xD3
     KDF = 0xF9
+    ATT_CERTIFICATE = 0xFC
+    CARDHOLDER_CERTIFICATE = 0x7F21
 
 
 @unique
@@ -298,6 +314,8 @@ class KdfData:
         kdf = _KDFS[self.kdf_algorithm]
         if pw == PW1:
             salt = self.pw1_salt_bytes
+        elif pw == PW2:
+            salt = self.pw2_salt_bytes or self.pw1_salt_bytes
         elif pw == PW3:
             salt = self.pw3_salt_bytes or self.pw1_salt_bytes
         else:
@@ -374,6 +392,17 @@ class OpenPgpController(object):
         data = self._get_data(DO.PW_STATUS)
         return PinRetries(*data[4:7])
 
+    def get_signature_pin_policy(self):
+        data = self._get_data(DO.PW_STATUS)
+
+        return PIN_POLICY(data[0])
+
+    def set_signature_pin_policy(self, pin_policy):
+        """Requires Admin PIN verification."""
+        data = struct.pack(">B", pin_policy)
+
+        self._put_data(DO.PW_STATUS, data)
+
     def _block_pins(self):
         retries = self.get_remaining_pin_tries()
 
@@ -415,6 +444,47 @@ class OpenPgpController(object):
 
     def verify_admin(self, admin_pin):
         self._verify(PW3, admin_pin)
+
+    def _change(self, pw, pin, new_pin):
+        try:
+            pin = self._get_kdf().process(pw, pin.encode())
+            new_pin = self._get_kdf().process(pw, new_pin.encode())
+            self._app.send_apdu(0, INS.CHANGE_PIN, 0, pw, pin + new_pin)
+        except ApduError as e:
+            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+                raise ValueError("Conditions of use not satisfied.")
+            else:
+                pw_remaining = self.get_remaining_pin_tries()[pw - PW1]
+                raise ValueError(f"Invalid PIN, {pw_remaining} tries remaining.")
+
+    def change_pin(self, pin, new_pin):
+        self._change(PW1, pin, new_pin)
+
+    def change_admin(self, admin_pin, new_admin_pin):
+        self._change(PW3, admin_pin, new_admin_pin)
+
+    def change_reset_code(self, reset_code):
+        data = self._get_kdf().process(PW2, reset_code.encode())
+        self._put_data(DO.RESETTING_CODE, data)
+
+    def reset_pin(self, new_pin, reset_code=None):
+        p1 = 2
+        data = self._get_kdf().process(PW1, new_pin.encode())
+        if reset_code:
+            rc = self._get_kdf().process(PW2, reset_code.encode())
+            p1 = 0
+            data = rc + data
+
+        try:
+            self._app.send_apdu(0, INS.RESET_RETRY_COUNTER, p1, PW1, data)
+        except ApduError as e:
+            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+                raise ValueError("Conditions of use not satisfied.")
+            else:
+                reset_remaining = self.get_remaining_pin_tries().reset
+                raise ValueError(
+                    f"Invalid Reset Code, {reset_remaining} tries remaining."
+                )
 
     @property
     def supported_touch_policies(self):
@@ -605,6 +675,7 @@ def get_openpgp_info(controller: OpenPgpController):
         "PIN tries remaining": retries.pin,
         "Reset code tries remaining": retries.reset,
         "Admin PIN tries remaining": retries.admin,
+        "Signature PIN": controller.get_signature_pin_policy(),
     }
 
     # Touch only available on YK4 and later

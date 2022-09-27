@@ -28,7 +28,13 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info
+from ..openpgp import (
+    OpenPgpController,
+    KEY_SLOT,
+    TOUCH_MODE,
+    PIN_POLICY,
+    get_openpgp_info,
+)
 from .util import (
     CliFail,
     click_force_option,
@@ -184,6 +190,158 @@ def set_pin_retries(
         if resets_pins:
             click.echo("Default PINs are set.")
             echo_default_pins()
+
+
+@access.command("change-pin")
+@click.option("-P", "--pin", help="Current PIN code.")
+@click.option("-n", "--new-pin", help="A new PIN.")
+@click.pass_context
+def change_pin(ctx, pin, new_pin):
+    """
+    Change PIN.
+
+    The PIN has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if pin is None:
+        pin = click_prompt("Enter PIN", hide_input=True)
+
+    if new_pin is None:
+        new_pin = click_prompt(
+            "New PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.change_pin(pin, new_pin)
+
+
+@access.command("change-reset-code")
+@click.option("-a", "--admin-pin", help="Admin PIN.")
+@click.option("-r", "--reset-code", help="A new Reset Code.")
+@click.pass_context
+def change_reset_code(ctx, admin_pin, reset_code):
+    """
+    Change Reset Code.
+
+    The Reset Code has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if reset_code is None:
+        reset_code = click_prompt(
+            "New Reset Code",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.verify_admin(admin_pin)
+    controller.change_reset_code(reset_code)
+
+
+@access.command("change-admin-pin")
+@click.option("-a", "--admin-pin", help="Current Admin PIN.")
+@click.option("-n", "--new-admin-pin", help="New Admin PIN.")
+@click.pass_context
+def change_admin(ctx, admin_pin, new_admin_pin):
+    """
+    Change Admin PIN.
+
+    The Admin PIN has a minimum length of 8, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if new_admin_pin is None:
+        new_admin_pin = click_prompt(
+            "New Admin PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.change_admin(admin_pin, new_admin_pin)
+
+
+@access.command("unblock-pin")
+@click.option(
+    "-a", "--admin-pin", help='Admin PIN. Use "-" as a value to prompt for input.'
+)
+@click.option("-r", "--reset-code", help="Reset Code.")
+@click.option("-n", "--new-pin", help="A new PIN.")
+@click.pass_context
+def unblock_pin(ctx, admin_pin, reset_code, new_pin):
+    """
+    Unblock PIN.
+
+    If the PIN is lost or blocked you can reset it to a new value using either the
+    Reset Code OR the Admin PIN.
+
+    The new PIN has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if reset_code is not None and admin_pin is not None:
+        raise CliFail(
+            "Invalid options: Only one of --reset-code and --admin-pin may be used."
+        )
+
+    if admin_pin == "-":
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if reset_code is None and admin_pin is None:
+        reset_code = click_prompt("Enter Reset Code", hide_input=True)
+
+    if new_pin is None:
+        new_pin = click_prompt(
+            "New PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    if admin_pin:
+        controller.verify_admin(admin_pin)
+    controller.reset_pin(new_pin, reset_code)
+
+
+@access.command("set-signature-policy")
+@click.argument("policy", metavar="POLICY", type=EnumChoice(PIN_POLICY))
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.pass_context
+def set_signature_policy(ctx, policy, admin_pin):
+    """
+    Set Signature PIN policy.
+
+    \b
+    POLICY  Signature PIN policy to set (always, once).
+
+    The Signature PIN policy is used to control whether the PIN is
+    always required when using the Signature key, or if it is required
+    only once per session.
+    """
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    try:
+        controller.verify_admin(admin_pin)
+        controller.set_signature_pin_policy(policy)
+    except Exception:
+        raise CliFail("Failed to set new Signature PIN policy")
 
 
 @openpgp.group("keys")
