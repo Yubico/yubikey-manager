@@ -121,19 +121,20 @@ class PIN_POLICY(IntEnum):  # noqa: N801
 
 @unique
 class INS(IntEnum):  # noqa: N801
-    GET_DATA = 0xCA
-    GET_VERSION = 0xF1
-    SET_PIN_RETRIES = 0xF2
-    CHANGE_PIN = 0x24
     VERIFY = 0x20
-    TERMINATE = 0xE6
+    CHANGE_PIN = 0x24
+    RESET_RETRY_COUNTER = 0x2C
     ACTIVATE = 0x44
     GENERATE_ASYM = 0x47
+    SELECT_DATA = 0xA5
+    SEND_REMAINING = 0xC0
+    GET_DATA = 0xCA
     PUT_DATA = 0xDA
     PUT_DATA_ODD = 0xDB
+    TERMINATE = 0xE6
+    GET_VERSION = 0xF1
+    SET_PIN_RETRIES = 0xF2
     GET_ATTESTATION = 0xFB
-    SEND_REMAINING = 0xC0
-    SELECT_DATA = 0xA5
 
 
 class PinRetries(NamedTuple):
@@ -143,6 +144,7 @@ class PinRetries(NamedTuple):
 
 
 PW1 = 0x81
+PW2 = 0x82  # Resetting Code
 PW3 = 0x83
 INVALID_PIN = b"\0" * 8
 TOUCH_METHOD_BUTTON = 0x20
@@ -152,9 +154,10 @@ TOUCH_METHOD_BUTTON = 0x20
 class DO(IntEnum):
     AID = 0x4F
     PW_STATUS = 0xC4
-    CARDHOLDER_CERTIFICATE = 0x7F21
-    ATT_CERTIFICATE = 0xFC
+    RESETTING_CODE = 0xD3
     KDF = 0xF9
+    ATT_CERTIFICATE = 0xFC
+    CARDHOLDER_CERTIFICATE = 0x7F21
 
 
 @unique
@@ -311,6 +314,8 @@ class KdfData:
         kdf = _KDFS[self.kdf_algorithm]
         if pw == PW1:
             salt = self.pw1_salt_bytes
+        elif pw == PW2:
+            salt = self.pw2_salt_bytes or self.pw1_salt_bytes
         elif pw == PW3:
             salt = self.pw3_salt_bytes or self.pw1_salt_bytes
         else:
@@ -457,6 +462,29 @@ class OpenPgpController(object):
 
     def change_admin(self, admin_pin, new_admin_pin):
         self._change(PW3, admin_pin, new_admin_pin)
+
+    def change_reset_code(self, reset_code):
+        data = self._get_kdf().process(PW2, reset_code.encode())
+        self._put_data(DO.RESETTING_CODE, data)
+
+    def reset_pin(self, new_pin, reset_code=None):
+        p1 = 2
+        data = self._get_kdf().process(PW1, new_pin.encode())
+        if reset_code:
+            rc = self._get_kdf().process(PW2, reset_code.encode())
+            p1 = 0
+            data = rc + data
+
+        try:
+            self._app.send_apdu(0, INS.RESET_RETRY_COUNTER, p1, PW1, data)
+        except ApduError as e:
+            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+                raise ValueError("Conditions of use not satisfied.")
+            else:
+                reset_remaining = self.get_remaining_pin_tries().reset
+                raise ValueError(
+                    f"Invalid Reset Code, {reset_remaining} tries remaining."
+                )
 
     @property
     def supported_touch_policies(self):

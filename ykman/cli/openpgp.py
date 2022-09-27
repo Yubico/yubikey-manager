@@ -219,6 +219,34 @@ def change_pin(ctx, pin, new_pin):
     controller.change_pin(pin, new_pin)
 
 
+@access.command("change-reset-code")
+@click.option("-a", "--admin-pin", help="Admin PIN.")
+@click.option("-r", "--reset-code", help="A new Reset Code.")
+@click.pass_context
+def change_reset_code(ctx, admin_pin, reset_code):
+    """
+    Change Reset Code.
+
+    The Reset Code has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if reset_code is None:
+        reset_code = click_prompt(
+            "New Reset Code",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.verify_admin(admin_pin)
+    controller.change_reset_code(reset_code)
+
+
 @access.command("change-admin-pin")
 @click.option("-a", "--admin-pin", help="Current Admin PIN.")
 @click.option("-n", "--new-admin-pin", help="New Admin PIN.")
@@ -244,6 +272,49 @@ def change_admin(ctx, admin_pin, new_admin_pin):
         )
 
     controller.change_admin(admin_pin, new_admin_pin)
+
+
+@access.command("unblock-pin")
+@click.option(
+    "-a", "--admin-pin", help='Admin PIN. Use "-" as a value to prompt for input.'
+)
+@click.option("-r", "--reset-code", help="Reset Code.")
+@click.option("-n", "--new-pin", help="A new PIN.")
+@click.pass_context
+def unblock_pin(ctx, admin_pin, reset_code, new_pin):
+    """
+    Unblock PIN.
+
+    If the PIN is lost or blocked you can reset it to a new value using either the
+    Reset Code OR the Admin PIN.
+
+    The new PIN has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if reset_code is not None and admin_pin is not None:
+        raise CliFail(
+            "Invalid options: Only one of --reset-code and --admin-pin may be used."
+        )
+
+    if admin_pin == "-":
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if reset_code is None and admin_pin is None:
+        reset_code = click_prompt("Enter Reset Code", hide_input=True)
+
+    if new_pin is None:
+        new_pin = click_prompt(
+            "New PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    if admin_pin:
+        controller.verify_admin(admin_pin)
+    controller.reset_pin(new_pin, reset_code)
 
 
 @access.command("set-signature-policy")
