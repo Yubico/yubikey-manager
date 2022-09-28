@@ -33,7 +33,7 @@ from yubikit.core.smartcard import (
     SW,
     AID,
 )
-from .util import EnumChoice, ykman_command, CliFail
+from .util import EnumChoice, CliFail, click_command
 from typing import Tuple, Optional
 
 import re
@@ -90,20 +90,20 @@ def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
             )
 
 
-@ykman_command(SmartCardConnection, hidden="--full-help" not in sys.argv)
+@click_command(connections=[SmartCardConnection], hidden="--full-help" not in sys.argv)
 @click.pass_context
 @click.option(
-    "-x", "--no-pretty", is_flag=True, help="Print only the hex output of a response"
+    "-x", "--no-pretty", is_flag=True, help="print only the hex output of a response"
 )
 @click.option(
     "-a",
     "--app",
     type=EnumChoice(AID),
     required=False,
-    help="Select application",
+    help="select application",
 )
 @click.argument("apdu", nargs=-1)
-@click.option("-s", "--send-apdu", multiple=True, help="Provide full APDUs")
+@click.option("-s", "--send-apdu", multiple=True, help="provide full APDUs")
 def apdu(ctx, no_pretty, app, apdu, send_apdu):
     """
     Execute arbitary APDUs.

@@ -46,8 +46,8 @@ from yubikit.core.otp import (
 from yubikit.core.smartcard import SmartCardConnection
 
 from .util import (
-    ykman_group,
     CliFail,
+    click_group,
     click_force_option,
     click_callback,
     click_parse_b32_key,
@@ -128,14 +128,14 @@ def _fname(fobj):
     return getattr(fobj, "name", fobj)
 
 
-@ykman_group([OtpConnection, SmartCardConnection])
+@click_group(connections=[OtpConnection, SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 @click.option(
     "--access-code",
     required=False,
     metavar="HEX",
-    help='A 6 byte access code. Use "-" as a value to prompt for input.',
+    help='6 byte access code (use "-" as a value to prompt for input)',
 )
 def otp(ctx, access_code):
     """
@@ -230,13 +230,19 @@ def info(ctx):
 
 
 @otp.command()
-@click.confirmation_option("-f", "--force", prompt="Swap the two slots of the YubiKey?")
+@click_force_option
 @click.pass_context
-def swap(ctx):
+def swap(ctx, force):
     """
     Swaps the two slot configurations.
     """
     session = _get_session(ctx)
+    force or click.confirm(
+        "Swap the two slots of the YubiKey?",
+        abort=True,
+        err=True,
+    )
+
     click.echo("Swapping slots...")
     try:
         session.swap_slots()
@@ -247,14 +253,14 @@ def swap(ctx):
 @otp.command()
 @click_slot_argument
 @click.pass_context
-@click.option("-p", "--prefix", help="Added before the NDEF payload. Typically a URI.")
+@click.option("-p", "--prefix", help="added before the NDEF payload, typically a URI")
 @click.option(
     "-t",
     "--ndef-type",
     type=EnumChoice(NDEF_TYPE),
     default="URI",
     show_default=True,
-    help="NDEF payload type.",
+    help="NDEF payload type",
 )
 def ndef(ctx, slot, prefix, ndef_type):
     """
@@ -310,7 +316,7 @@ def delete(ctx, slot, force):
     "-P",
     "--public-id",
     required=False,
-    help="Public identifier prefix.",
+    help="public identifier prefix",
     metavar="MODHEX",
 )
 @click.option(
@@ -319,7 +325,7 @@ def delete(ctx, slot, force):
     required=False,
     metavar="HEX",
     callback=parse_hex(6),
-    help="6 byte private identifier.",
+    help="6 byte private identifier",
 )
 @click.option(
     "-k",
@@ -327,48 +333,47 @@ def delete(ctx, slot, force):
     required=False,
     metavar="HEX",
     callback=parse_hex(16),
-    help="16 byte secret key.",
+    help="16 byte secret key",
 )
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter keystroke after emitting the OTP.",
+    help="don't send an Enter keystroke after emitting the OTP",
 )
 @click.option(
     "-S",
     "--serial-public-id",
     is_flag=True,
     required=False,
-    help="Use YubiKey serial number as public ID. Conflicts with --public-id.",
+    help="use YubiKey serial number as public ID (can't be used with --public-id)",
 )
 @click.option(
     "-g",
     "--generate-private-id",
     is_flag=True,
     required=False,
-    help="Generate a random private ID. Conflicts with --private-id.",
+    help="generate a random private ID (can't be used with --private-id)",
 )
 @click.option(
     "-G",
     "--generate-key",
     is_flag=True,
     required=False,
-    help="Generate a random secret key. Conflicts with --key.",
+    help="generate a random secret key (can't be used with --key)",
 )
 @click.option(
     "-u",
     "--upload",
     is_flag=True,
     required=False,
-    help="Upload credential to YubiCloud (opens in browser). Conflicts with --force.",
+    help="upload credential to YubiCloud (opens a browser, can't be used with --force)",
 )
 @click.option(
     "-O",
     "--config-output",
     type=click.File("a"),
     required=False,
-    help="File to output the configuration to. "
-    "If the file exists, it will be appended to.",
+    help="file to output the configuration to (existing file will be appended to)",
 )
 @click_force_option
 @click.pass_context
@@ -503,7 +508,7 @@ def yubiotp(
 @otp.command()
 @click_slot_argument
 @click.argument("password", required=False)
-@click.option("-g", "--generate", is_flag=True, help="Generate a random password.")
+@click.option("-g", "--generate", is_flag=True, help="generate a random password")
 @click.option(
     "-l",
     "--length",
@@ -511,7 +516,7 @@ def yubiotp(
     type=click.IntRange(1, 38),
     default=38,
     show_default=True,
-    help="Length of generated password.",
+    help="length of generated password",
 )
 @click.option(
     "-k",
@@ -519,12 +524,12 @@ def yubiotp(
     type=EnumChoice(KEYBOARD_LAYOUT),
     default="MODHEX",
     show_default=True,
-    help="Keyboard layout to use for the static password.",
+    help="keyboard layout to use for the static password",
 )
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter keystroke after outputting the password.",
+    help="don't send an Enter keystroke after outputting the password",
 )
 @click_force_option
 @click.pass_context
@@ -573,21 +578,21 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     "-t",
     "--touch",
     is_flag=True,
-    help="Require touch on the YubiKey to generate a response.",
+    help="require touch on the YubiKey to generate a response",
 )
 @click.option(
     "-T",
     "--totp",
     is_flag=True,
     required=False,
-    help="Use a base32 encoded key (optionally padded) for TOTP credentials.",
+    help="use a base32 encoded key (optionally padded) for TOTP credentials",
 )
 @click.option(
     "-g",
     "--generate",
     is_flag=True,
     required=False,
-    help="Generate a random secret key. Conflicts with KEY argument.",
+    help="generate a random secret key (can't be used with KEY argument)",
 )
 @click_force_option
 @click.pass_context
@@ -658,14 +663,14 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     "-T",
     "--totp",
     is_flag=True,
-    help="Generate a TOTP code, use the current time if challenge is omitted.",
+    help="generate a TOTP code, use the current time if challenge is omitted",
 )
 @click.option(
     "-d",
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="Number of digits in generated TOTP code (default: 6).",
+    help="number of digits in generated TOTP code (default: 6)",
 )
 @click.pass_context
 def calculate(ctx, slot, challenge, totp, digits):
@@ -739,14 +744,14 @@ def parse_modhex_or_bcd(value):
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="Number of digits in generated code (default is 6).",
+    help="number of digits in generated code (default is 6)",
 )
-@click.option("-c", "--counter", type=int, default=0, help="Initial counter value.")
-@click.option("-i", "--identifier", help="Token identifier.")
+@click.option("-c", "--counter", type=int, default=0, help="initial counter value")
+@click.option("-i", "--identifier", help="token identifier")
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter keystroke after outputting the code.",
+    help="don't send an Enter keystroke after outputting the code",
 )
 @click_force_option
 @click.pass_context
@@ -829,17 +834,16 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     "--new-access-code",
     metavar="HEX",
     required=False,
-    help='Set a new 6 byte access code for the slot. Use "-" as a value to prompt for '
-    "input.",
+    help='a new 6 byte access code to set (use "-" as a value to prompt for input)',
 )
 @click.option(
-    "--delete-access-code", is_flag=True, help="Remove access code from the slot."
+    "--delete-access-code", is_flag=True, help="remove access code from the slot"
 )
 @click.option(
     "--enter/--no-enter",
     default=True,
     show_default=True,
-    help="Should send 'Enter' keystroke after slot output.",
+    help="send an Enter keystroke after slot output",
 )
 @click.option(
     "-p",
@@ -847,14 +851,14 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     type=click.Choice(["0", "20", "40", "60"]),
     default="0",
     show_default=True,
-    help="Throttle output speed by adding a delay (in ms) between characters emitted.",
+    help="throttle output speed by adding a delay (in ms) between characters emitted",
 )
 @click.option(
     "--use-numeric-keypad",
     is_flag=True,
     show_default=True,
-    help="Use scancodes for numeric keypad when sending digits."
-    " Helps with some keyboard layouts. ",
+    help="use scancodes for numeric keypad when sending digits "
+    "(helps for some keyboard layouts)",
 )
 def settings(
     ctx,

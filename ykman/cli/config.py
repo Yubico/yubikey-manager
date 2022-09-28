@@ -38,6 +38,7 @@ from yubikit.management import (
     Mode,
 )
 from .util import (
+    click_group,
     click_postpone_execution,
     click_force_option,
     click_prompt,
@@ -60,7 +61,7 @@ def prompt_lock_code():
     return click_prompt("Enter your lock code", hide_input=True)
 
 
-@click.group()
+@click_group(connections=[SmartCardConnection, OtpConnection, FidoConnection])
 @click.pass_context
 @click_postpone_execution
 def config(ctx):
@@ -112,19 +113,19 @@ def _require_config(ctx):
 @config.command("set-lock-code")
 @click.pass_context
 @click_force_option
-@click.option("-l", "--lock-code", metavar="HEX", help="Current lock code.")
+@click.option("-l", "--lock-code", metavar="HEX", help="current lock code")
 @click.option(
     "-n",
     "--new-lock-code",
     metavar="HEX",
-    help="New lock code. Conflicts with --generate.",
+    help="new lock code (can't be used with --generate)",
 )
-@click.option("-c", "--clear", is_flag=True, help="Clear the lock code.")
+@click.option("-c", "--clear", is_flag=True, help="clear the lock code")
 @click.option(
     "-g",
     "--generate",
     is_flag=True,
-    help="Generate a random lock code. Conflicts with --new-lock-code.",
+    help="generate a random lock code (can't be used with --new-lock-code)",
 )
 def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     """
@@ -274,40 +275,40 @@ def _configure_applications(
     "--enable",
     multiple=True,
     type=EnumChoice(CAPABILITY),
-    help="Enable applications.",
+    help="enable applications",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
     type=EnumChoice(CAPABILITY),
-    help="Disable applications.",
+    help="disable applications",
 )
 @click.option(
-    "-l", "--list", "list_enabled", is_flag=True, help="List enabled applications."
+    "-l", "--list", "list_enabled", is_flag=True, help="list enabled applications"
 )
-@click.option("-a", "--enable-all", is_flag=True, help="Enable all applications.")
+@click.option("-a", "--enable-all", is_flag=True, help="enable all applications")
 @click.option(
     "-L",
     "--lock-code",
     metavar="HEX",
-    help="Current application configuration lock code.",
+    help="current application configuration lock code",
 )
 @click.option(
     "--touch-eject",
     is_flag=True,
-    help="When set, the button toggles the state"
-    " of the smartcard between ejected and inserted. (CCID only).",
+    help="when set, the button toggles the state"
+    " of the smartcard between ejected and inserted (CCID only)",
 )
-@click.option("--no-touch-eject", is_flag=True, help="Disable touch eject (CCID only).")
+@click.option("--no-touch-eject", is_flag=True, help="disable touch eject (CCID only)")
 @click.option(
     "--autoeject-timeout",
     required=False,
     type=int,
     default=None,
     metavar="SECONDS",
-    help="When set, the smartcard will automatically eject"
-    " after the given time. Implies --touch-eject.",
+    help="when set, the smartcard will automatically eject"
+    " after the given time (implies --touch-eject)",
 )
 @click.option(
     "--chalresp-timeout",
@@ -315,8 +316,8 @@ def _configure_applications(
     type=int,
     default=None,
     metavar="SECONDS",
-    help="Sets the timeout when waiting for touch"
-    " for challenge-response in the OTP application.",
+    help="sets the timeout when waiting for touch for challenge-response in the OTP "
+    "application",
 )
 def usb(
     ctx,
@@ -395,25 +396,25 @@ def usb(
     "--enable",
     multiple=True,
     type=EnumChoice(CAPABILITY),
-    help="Enable applications.",
+    help="enable applications",
 )
 @click.option(
     "-d",
     "--disable",
     multiple=True,
     type=EnumChoice(CAPABILITY),
-    help="Disable applications.",
+    help="disable applications",
 )
-@click.option("-a", "--enable-all", is_flag=True, help="Enable all applications.")
-@click.option("-D", "--disable-all", is_flag=True, help="Disable all applications")
+@click.option("-a", "--enable-all", is_flag=True, help="enable all applications")
+@click.option("-D", "--disable-all", is_flag=True, help="disable all applications")
 @click.option(
-    "-l", "--list", "list_enabled", is_flag=True, help="List enabled applications"
+    "-l", "--list", "list_enabled", is_flag=True, help="list enabled applications"
 )
 @click.option(
     "-L",
     "--lock-code",
     metavar="HEX",
-    help="Current application configuration lock code.",
+    help="current application configuration lock code",
 )
 def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, force):
     """
@@ -521,9 +522,9 @@ def _parse_mode_string(ctx, param, mode):
 @click.option(
     "--touch-eject",
     is_flag=True,
-    help="When set, the button "
+    help="when set, the button "
     "toggles the state of the smartcard between ejected and inserted "
-    "(CCID mode only).",
+    "(CCID only)",
 )
 @click.option(
     "--autoeject-timeout",
@@ -531,8 +532,8 @@ def _parse_mode_string(ctx, param, mode):
     type=int,
     default=0,
     metavar="SECONDS",
-    help="When set, the smartcard will automatically eject after the "
-    "given time. Implies --touch-eject (CCID mode only).",
+    help="when set, the smartcard will automatically eject after the given time "
+    "(implies --touch-eject, CCID only)",
 )
 @click.option(
     "--chalresp-timeout",
@@ -540,7 +541,7 @@ def _parse_mode_string(ctx, param, mode):
     type=int,
     default=0,
     metavar="SECONDS",
-    help="Sets the timeout when waiting for touch for challenge response.",
+    help="sets the timeout when waiting for touch for challenge response",
 )
 @click_force_option
 @click.pass_context

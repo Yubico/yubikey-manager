@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .util import click_force_option
+from .util import click_force_option, click_command
 from .. import scripting  # noqa - make sure this file gets included by PyInstaller.
 
 import sys
@@ -51,7 +51,7 @@ def _add_warning(obj):
     return obj
 
 
-@click.command(
+@click_command(
     "script",
     context_settings=dict(ignore_unknown_options=True),
     hidden="--full-help" not in sys.argv,
@@ -63,7 +63,7 @@ def _add_warning(obj):
     type=click.Path(exists=True),
     multiple=True,
     metavar="DIR",
-    help="Specify additional path(s) to load python modules from.",
+    help="specify additional path(s) to load python modules from",
 )
 @click.argument("script", type=click.File("rb"), metavar="FILE")
 @click.argument("arguments", nargs=-1, type=click.UNPROCESSED)
