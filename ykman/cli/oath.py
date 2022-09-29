@@ -34,7 +34,7 @@ from .util import (
     click_callback,
     click_parse_b32_key,
     click_prompt,
-    ykman_group,
+    click_group,
     prompt_for_touch,
     prompt_timeout,
     EnumChoice,
@@ -56,7 +56,7 @@ from ..settings import AppData
 logger = logging.getLogger(__name__)
 
 
-@ykman_group(SmartCardConnection)
+@click_group(connections=[SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 def oath(ctx):
@@ -107,19 +107,21 @@ def info(ctx):
 
 @oath.command()
 @click.pass_context
-@click.confirmation_option(
-    "-f",
-    "--force",
-    prompt="WARNING! This will delete all stored OATH accounts and restore factory "
-    "settings. Proceed?",
-)
-def reset(ctx):
+@click_force_option
+def reset(ctx, force):
     """
     Reset all OATH data.
 
     This action will delete all accounts and restore factory settings for
     the OATH application on the YubiKey.
     """
+
+    force or click.confirm(
+        prompt="WARNING! This will delete all stored OATH accounts and restore factory "
+        "settings. Proceed?",
+        abort=True,
+        err=True,
+    )
 
     session = ctx.obj["session"]
     click.echo("Resetting OATH data...")
@@ -136,7 +138,7 @@ def reset(ctx):
 
 
 click_password_option = click.option(
-    "-p", "--password", help="Provide a password to unlock the YubiKey."
+    "-p", "--password", help="the password to unlock the YubiKey"
 )
 
 
@@ -144,7 +146,7 @@ click_remember_option = click.option(
     "-r",
     "--remember",
     is_flag=True,
-    help="Remember the password on this machine.",
+    help="remember the password on this machine",
 )
 
 
@@ -213,9 +215,9 @@ def access():
     "-c",
     "--clear",
     is_flag=True,
-    help="Clear the current password.",
+    help="remove the current password",
 )
-@click.option("-n", "--new-password", help="Provide a new password as an argument.")
+@click.option("-n", "--new-password", help="provide a new password as an argument")
 @click_remember_option
 def change(ctx, password, clear, new_password, remember):
     """
@@ -320,7 +322,7 @@ def _clear_all_passwords(ctx, param, value):
     is_eager=True,
     expose_value=False,
     callback=_clear_all_passwords,
-    help="Remove all stored passwords.",
+    help="remove all stored passwords",
 )
 def forget(ctx):
     """
@@ -340,12 +342,12 @@ def forget(ctx):
 
 
 click_touch_option = click.option(
-    "-t", "--touch", is_flag=True, help="Require touch on YubiKey to generate code."
+    "-t", "--touch", is_flag=True, help="require touch on YubiKey to generate code"
 )
 
 
 click_show_hidden_option = click.option(
-    "-H", "--show-hidden", is_flag=True, help="Include hidden accounts."
+    "-H", "--show-hidden", is_flag=True, help="include hidden accounts"
 )
 
 
@@ -389,7 +391,7 @@ def accounts():
     "--oath-type",
     type=EnumChoice(OATH_TYPE),
     default=OATH_TYPE.TOTP.name,
-    help="Time-based (TOTP) or counter-based (HOTP) account.",
+    help="time-based (TOTP) or counter-based (HOTP) account",
     show_default=True,
 )
 @click.option(
@@ -397,7 +399,7 @@ def accounts():
     "--digits",
     type=click.Choice(["6", "7", "8"]),
     default="6",
-    help="Number of digits in generated code.",
+    help="number of digits in generated code",
     show_default=True,
 )
 @click.option(
@@ -406,20 +408,20 @@ def accounts():
     type=EnumChoice(HASH_ALGORITHM),
     default=HASH_ALGORITHM.SHA1.name,
     show_default=True,
-    help="Algorithm to use for code generation.",
+    help="algorithm to use for code generation",
 )
 @click.option(
     "-c",
     "--counter",
     type=click.INT,
     default=0,
-    help="Initial counter value for HOTP accounts.",
+    help="initial counter value for HOTP accounts",
 )
-@click.option("-i", "--issuer", help="Issuer of the account (optional).")
+@click.option("-i", "--issuer", help="issuer of the account (optional)")
 @click.option(
     "-P",
     "--period",
-    help="Number of seconds a TOTP code is valid.",
+    help="number of seconds a TOTP code is valid",
     default=30,
     show_default=True,
 )
@@ -571,8 +573,8 @@ def _add_cred(ctx, data, touch, force):
 @accounts.command()
 @click_show_hidden_option
 @click.pass_context
-@click.option("-o", "--oath-type", is_flag=True, help="Display the OATH type.")
-@click.option("-P", "--period", is_flag=True, help="Display the period.")
+@click.option("-o", "--oath-type", is_flag=True, help="display the OATH type")
+@click.option("-P", "--period", is_flag=True, help="display the period")
 @click_password_option
 @click_remember_option
 def list(ctx, show_hidden, oath_type, period, password, remember):
@@ -606,7 +608,7 @@ def list(ctx, show_hidden, oath_type, period, password, remember):
     "-s",
     "--single",
     is_flag=True,
-    help="Ensure only a single match, and output only the code.",
+    help="ensure only a single match, and output only the code",
 )
 @click_password_option
 @click_remember_option
@@ -684,12 +686,12 @@ def code(ctx, show_hidden, query, single, password, remember):
 @click.pass_context
 @click.argument("query")
 @click.argument("name")
-@click.option("-f", "--force", is_flag=True, help="Confirm rename without prompting")
+@click.option("-f", "--force", is_flag=True, help="confirm rename without prompting")
 @click_password_option
 @click_remember_option
 def rename(ctx, query, name, force, password, remember):
     """
-    Rename an account (Requires YubiKey 5.3 or later).
+    Rename an account (requires YubiKey 5.3 or later).
 
     \b
     QUERY  A query to match a single account (as shown in "list").
@@ -734,7 +736,7 @@ def rename(ctx, query, name, force, password, remember):
 @accounts.command()
 @click.pass_context
 @click.argument("query")
-@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
+@click.option("-f", "--force", is_flag=True, help="confirm deletion without prompting")
 @click_password_option
 @click_remember_option
 def delete(ctx, query, force, password, remember):

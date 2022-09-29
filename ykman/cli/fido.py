@@ -42,7 +42,7 @@ from .util import (
     click_postpone_execution,
     click_prompt,
     click_force_option,
-    ykman_group,
+    click_group,
     prompt_timeout,
     is_yk4_fips,
 )
@@ -63,7 +63,7 @@ FIPS_PIN_MIN_LENGTH = 6
 PIN_MIN_LENGTH = 4
 
 
-@ykman_group(FidoConnection)
+@click_group(connections=[FidoConnection])
 @click.pass_context
 @click_postpone_execution
 def fido(ctx):
@@ -290,10 +290,13 @@ def access():
 
 @access.command("change-pin")
 @click.pass_context
-@click.option("-P", "--pin", help="Current PIN code.")
-@click.option("-n", "--new-pin", help="A new PIN.")
+@click.option("-P", "--pin", help="current PIN code")
+@click.option("-n", "--new-pin", help="a new PIN")
 @click.option(
-    "-u", "--u2f", is_flag=True, help="Set FIDO U2F PIN instead of FIDO2 PIN."
+    "-u",
+    "--u2f",
+    is_flag=True,
+    help="set FIDO U2F PIN instead of FIDO2 PIN (YubiKey 4 FIPS only)",
 )
 def change_pin(ctx, pin, new_pin, u2f):
     """
@@ -416,7 +419,7 @@ def _require_pin(ctx, pin, feature="This feature"):
 
 @access.command("verify-pin")
 @click.pass_context
-@click.option("-P", "--pin", help="Current PIN code.")
+@click.option("-P", "--pin", help="current PIN code")
 def verify(ctx, pin):
     """
     Verify the FIDO PIN against a YubiKey.
@@ -518,7 +521,7 @@ def _init_credman(ctx, pin):
 
 @creds.command("list")
 @click.pass_context
-@click.option("-P", "--pin", help="PIN code.")
+@click.option("-P", "--pin", help="PIN code")
 def creds_list(ctx, pin):
     """
     List credentials.
@@ -531,8 +534,8 @@ def creds_list(ctx, pin):
 @creds.command("delete")
 @click.pass_context
 @click.argument("query")
-@click.option("-P", "--pin", help="PIN code.")
-@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
+@click.option("-P", "--pin", help="PIN code")
+@click.option("-f", "--force", is_flag=True, help="confirm deletion without prompting")
 def creds_delete(ctx, query, pin, force):
     """
     Delete a credential.
@@ -614,10 +617,10 @@ def _format_fp(template_id, name):
 
 @bio.command("list")
 @click.pass_context
-@click.option("-P", "--pin", help="PIN code.")
+@click.option("-P", "--pin", help="PIN code")
 def bio_list(ctx, pin):
     """
-    List registered fingerprint.
+    List registered fingerprints.
 
     Lists fingerprints by ID and (if available) label.
     """
@@ -630,7 +633,7 @@ def bio_list(ctx, pin):
 @bio.command("add")
 @click.pass_context
 @click.argument("name")
-@click.option("-P", "--pin", help="PIN code.")
+@click.option("-P", "--pin", help="PIN code")
 def bio_enroll(ctx, name, pin):
     """
     Add a new fingerprint.
@@ -673,7 +676,7 @@ def bio_enroll(ctx, name, pin):
 @click.pass_context
 @click.argument("template_id", metavar="ID")
 @click.argument("name")
-@click.option("-P", "--pin", help="PIN code.")
+@click.option("-P", "--pin", help="PIN code")
 def bio_rename(ctx, template_id, name, pin):
     """
     Set the label for a fingerprint.
@@ -699,8 +702,8 @@ def bio_rename(ctx, template_id, name, pin):
 @bio.command("delete")
 @click.pass_context
 @click.argument("template_id", metavar="ID")
-@click.option("-P", "--pin", help="PIN code.")
-@click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
+@click.option("-P", "--pin", help="PIN code")
+@click.option("-f", "--force", is_flag=True, help="confirm deletion without prompting")
 def bio_delete(ctx, template_id, pin, force):
     """
     Delete a fingerprint.

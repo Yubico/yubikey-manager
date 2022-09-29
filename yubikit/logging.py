@@ -31,9 +31,9 @@ import logging
 
 @unique
 class LOG_LEVEL(IntEnum):
-    NOTSET = logging.NOTSET
-    TRAFFIC = 5  # Used for logging YubiKey traffic
-    DEBUG = logging.DEBUG
-    INFO = logging.INFO
-    WARNING = logging.WARNING
     ERROR = logging.ERROR
+    WARNING = logging.WARNING
+    INFO = logging.INFO
+    DEBUG = logging.DEBUG
+    TRAFFIC = 5  # Used for logging YubiKey traffic
+    NOTSET = logging.NOTSET

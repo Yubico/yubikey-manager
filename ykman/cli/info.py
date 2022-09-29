@@ -34,7 +34,7 @@ from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 from yubikit.support import get_name
 
-from .util import CliFail, is_yk4_fips
+from .util import CliFail, is_yk4_fips, click_command
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
@@ -140,11 +140,10 @@ def _check_fips_status(device, info):
 @click.option(
     "-c",
     "--check-fips",
-    help="Check if YubiKey is in FIPS Approved mode (available on YubiKey 4 FIPS "
-    "only).",
+    help="check if YubiKey is in FIPS Approved mode (YubiKey 4 FIPS only)",
     is_flag=True,
 )
-@click.command()
+@click_command(connections=[SmartCardConnection, OtpConnection, FidoConnection])
 @click.pass_context
 def info(ctx, check_fips):
     """

@@ -38,7 +38,7 @@ from ..device import scan_devices, list_all_devices
 from ..util import get_windows_version
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
-from .util import YkmanContextObject, ykman_group, EnumChoice, CliFail, pretty_print
+from .util import YkmanContextObject, click_group, EnumChoice, CliFail, pretty_print
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -163,18 +163,19 @@ def require_device(connection_types, serial=None):
         )
 
 
-@ykman_group(context_settings=CLICK_CONTEXT_SETTINGS)
+@click_group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option(
     "-d",
     "--device",
     type=int,
     metavar="SERIAL",
-    help="Specify which YubiKey to interact with by serial number.",
+    help="specify which YubiKey to interact with by serial number",
 )
 @click.option(
     "-r",
     "--reader",
-    help="Use an external smart card reader. Conflicts with --device and list.",
+    help="specify a YubiKey by smart card reader name "
+    "(can't be used with --device or list)",
     metavar="NAME",
     default=None,
 )
@@ -182,16 +183,15 @@ def require_device(connection_types, serial=None):
     "-l",
     "--log-level",
     default=None,
-    type=EnumChoice(LOG_LEVEL),
-    help="Enable logging at given verbosity level.",
+    type=EnumChoice(LOG_LEVEL, hidden=[LOG_LEVEL.NOTSET]),
+    help="enable logging at given verbosity level",
 )
 @click.option(
     "--log-file",
     default=None,
     type=str,
     metavar="FILE",
-    help="Write logs to the given FILE instead of standard error; "
-    "ignored unless --log-level is also set.",
+    help="write log to FILE instead of printing to stderr (requires --log-level)",
 )
 @click.option(
     "--diagnose",
@@ -199,7 +199,7 @@ def require_device(connection_types, serial=None):
     callback=print_diagnostics,
     expose_value=False,
     is_eager=True,
-    help="Show diagnostics information useful for troubleshooting.",
+    help="show diagnostics information useful for troubleshooting",
 )
 @click.option(
     "-v",
@@ -208,13 +208,13 @@ def require_device(connection_types, serial=None):
     callback=print_version,
     expose_value=False,
     is_eager=True,
-    help="Show version information about the app",
+    help="show version information about the app",
 )
 @click.option(
     "--full-help",
     is_flag=True,
     expose_value=False,
-    help="Show --help, including hidden commands, and exit.",
+    help="show --help output, including hidden commands",
 )
 @click.pass_context
 def cli(ctx, device, log_level, log_file, reader):
@@ -256,11 +256,14 @@ def cli(ctx, device, log_level, log_file, reader):
         subcmd, "connections", [SmartCardConnection, FidoConnection, OtpConnection]
     )
     if connections:
-        if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
-            # FIDO-only command on Windows without Admin won't work.
-            raise CliFail("FIDO access on Windows requires running as Administrator.")
 
         def resolve():
+            if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
+                # FIDO-only command on Windows without Admin won't work.
+                raise CliFail(
+                    "FIDO access on Windows requires running as Administrator."
+                )
+
             items = getattr(resolve, "items", None)
             if not items:
                 if reader is not None:
@@ -280,12 +283,10 @@ def cli(ctx, device, log_level, log_file, reader):
     "-s",
     "--serials",
     is_flag=True,
-    help="Output only serial "
-    "numbers, one per line (devices without serial will be omitted).",
+    help="output only serial numbers, one per line "
+    "(devices without serial will be omitted)",
 )
-@click.option(
-    "-r", "--readers", is_flag=True, help="List available smart card readers."
-)
+@click.option("-r", "--readers", is_flag=True, help="list available smart card readers")
 @click.pass_context
 def list_keys(ctx, serials, readers):
     """

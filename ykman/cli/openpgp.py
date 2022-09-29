@@ -41,7 +41,7 @@ from .util import (
     click_format_option,
     click_postpone_execution,
     click_prompt,
-    ykman_group,
+    click_group,
     EnumChoice,
     pretty_print,
 )
@@ -84,7 +84,7 @@ def _fname(fobj):
     return getattr(fobj, "name", fobj)
 
 
-@ykman_group(SmartCardConnection)
+@click_group(connections=[SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 def openpgp(ctx):
@@ -118,21 +118,22 @@ def info(ctx):
 
 
 @openpgp.command()
-@click.confirmation_option(
-    "-f",
-    "--force",
-    prompt="WARNING! This will delete "
-    "all stored OpenPGP keys and data and restore "
-    "factory settings?",
-)
+@click_force_option
 @click.pass_context
-def reset(ctx):
+def reset(ctx, force):
     """
     Reset all OpenPGP data.
 
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
     """
+    force or click.confirm(
+        prompt="WARNING! This will delete all stored OpenPGP keys and data and restore "
+        "factory settings. Proceed?",
+        abort=True,
+        err=True,
+    )
+
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     ctx.obj["controller"].reset()
     logger.info("OpenPGP application data reset")
@@ -159,7 +160,7 @@ def access():
 @click.argument(
     "admin-pin-retries", type=click.IntRange(1, 99), metavar="ADMIN-PIN-RETRIES"
 )
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="admin PIN for OpenPGP")
 @click_force_option
 @click.pass_context
 def set_pin_retries(
@@ -193,12 +194,12 @@ def set_pin_retries(
 
 
 @access.command("change-pin")
-@click.option("-P", "--pin", help="Current PIN code.")
-@click.option("-n", "--new-pin", help="A new PIN.")
+@click.option("-P", "--pin", help="current PIN code")
+@click.option("-n", "--new-pin", help="a new PIN")
 @click.pass_context
 def change_pin(ctx, pin, new_pin):
     """
-    Change PIN.
+    Change the PIN.
 
     The PIN has a minimum length of 6, and supports any type of
     alphanumeric characters.
@@ -220,12 +221,12 @@ def change_pin(ctx, pin, new_pin):
 
 
 @access.command("change-reset-code")
-@click.option("-a", "--admin-pin", help="Admin PIN.")
-@click.option("-r", "--reset-code", help="A new Reset Code.")
+@click.option("-a", "--admin-pin", help="Admin PIN")
+@click.option("-r", "--reset-code", help="a new Reset Code")
 @click.pass_context
 def change_reset_code(ctx, admin_pin, reset_code):
     """
-    Change Reset Code.
+    Change the Reset Code.
 
     The Reset Code has a minimum length of 6, and supports any type of
     alphanumeric characters.
@@ -248,12 +249,12 @@ def change_reset_code(ctx, admin_pin, reset_code):
 
 
 @access.command("change-admin-pin")
-@click.option("-a", "--admin-pin", help="Current Admin PIN.")
-@click.option("-n", "--new-admin-pin", help="New Admin PIN.")
+@click.option("-a", "--admin-pin", help="current Admin PIN")
+@click.option("-n", "--new-admin-pin", help="new Admin PIN")
 @click.pass_context
 def change_admin(ctx, admin_pin, new_admin_pin):
     """
-    Change Admin PIN.
+    Change the Admin PIN.
 
     The Admin PIN has a minimum length of 8, and supports any type of
     alphanumeric characters.
@@ -276,14 +277,14 @@ def change_admin(ctx, admin_pin, new_admin_pin):
 
 @access.command("unblock-pin")
 @click.option(
-    "-a", "--admin-pin", help='Admin PIN. Use "-" as a value to prompt for input.'
+    "-a", "--admin-pin", help='admin PIN (use "-" as a value to prompt for input)'
 )
-@click.option("-r", "--reset-code", help="Reset Code.")
-@click.option("-n", "--new-pin", help="A new PIN.")
+@click.option("-r", "--reset-code", help="Reset Code")
+@click.option("-n", "--new-pin", help="a new PIN")
 @click.pass_context
 def unblock_pin(ctx, admin_pin, reset_code, new_pin):
     """
-    Unblock PIN.
+    Unblock the PIN (using Reset Code or Admin PIN).
 
     If the PIN is lost or blocked you can reset it to a new value using either the
     Reset Code OR the Admin PIN.
@@ -319,11 +320,11 @@ def unblock_pin(ctx, admin_pin, reset_code, new_pin):
 
 @access.command("set-signature-policy")
 @click.argument("policy", metavar="POLICY", type=EnumChoice(PIN_POLICY))
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 def set_signature_policy(ctx, policy, admin_pin):
     """
-    Set Signature PIN policy.
+    Set the Signature PIN policy.
 
     \b
     POLICY  Signature PIN policy to set (always, once).
@@ -352,12 +353,12 @@ def keys():
 @keys.command("set-touch")
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("policy", metavar="POLICY", type=EnumChoice(TOUCH_MODE))
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click_force_option
 @click.pass_context
 def set_touch(ctx, key, policy, admin_pin, force):
     """
-    Set touch policy for OpenPGP keys.
+    Set the touch policy for OpenPGP keys.
 
     \b
     KEY     Key slot to set (sig, enc, aut or att).
@@ -413,7 +414,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
 
 
 @keys.command("import")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
@@ -447,7 +448,7 @@ def import_key(ctx, key, private_key, admin_pin):
 
 @keys.command()
 @click.pass_context
-@click.option("-P", "--pin", help="PIN code.")
+@click.option("-P", "--pin", help="PIN code")
 @click_format_option
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT, hidden=[KEY_SLOT.ATT]))
 @click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
@@ -526,7 +527,7 @@ def export_certificate(ctx, key, format, certificate):
 
 
 @certificates.command("delete")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 def delete_certificate(ctx, key, admin_pin):
@@ -552,7 +553,7 @@ def delete_certificate(ctx, key, admin_pin):
 
 
 @certificates.command("import")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")

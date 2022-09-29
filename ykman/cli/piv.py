@@ -61,8 +61,8 @@ from ..piv import (
     generate_csr,
 )
 from .util import (
-    ykman_group,
     CliFail,
+    click_group,
     click_force_option,
     click_format_option,
     click_postpone_execution,
@@ -135,21 +135,21 @@ click_object_argument = click.argument(
 click_management_key_option = click.option(
     "-m",
     "--management-key",
-    help="The management key.",
+    help="the management key",
     callback=click_parse_management_key,
 )
-click_pin_option = click.option("-P", "--pin", help="PIN code.")
+click_pin_option = click.option("-P", "--pin", help="PIN code")
 click_pin_policy_option = click.option(
     "--pin-policy",
     type=EnumChoice(PIN_POLICY),
     default=PIN_POLICY.DEFAULT.name,
-    help="PIN policy for slot.",
+    help="PIN policy for slot",
 )
 click_touch_policy_option = click.option(
     "--touch-policy",
     type=EnumChoice(TOUCH_POLICY),
     default=TOUCH_POLICY.DEFAULT.name,
-    help="Touch policy for slot.",
+    help="touch policy for slot",
 )
 click_hash_option = click.option(
     "-a",
@@ -157,7 +157,7 @@ click_hash_option = click.option(
     type=click.Choice(["SHA1", "SHA256", "SHA384", "SHA512"], case_sensitive=False),
     default="SHA256",
     show_default=True,
-    help="Hash algorithm.",
+    help="hash algorithm",
     callback=click_parse_hash,
 )
 
@@ -166,7 +166,7 @@ def _fname(fobj):
     return getattr(fobj, "name", fobj)
 
 
-@ykman_group(SmartCardConnection)
+@click_group(connections=[SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 def piv(ctx):
@@ -210,19 +210,20 @@ def info(ctx):
 
 @piv.command()
 @click.pass_context
-@click.confirmation_option(
-    "-f",
-    "--force",
-    prompt="WARNING! This will delete all stored PIV data and restore factory settings."
-    " Proceed?",
-)
-def reset(ctx):
+@click_force_option
+def reset(ctx, force):
     """
     Reset all PIV data.
 
     This action will wipe all data and restore factory settings for
     the PIV application on the YubiKey.
     """
+    force or click.confirm(
+        prompt="WARNING! This will delete all stored PIV data and restore factory "
+        "settings. Proceed?",
+        abort=True,
+        err=True,
+    )
 
     click.echo("Resetting PIV data...")
     ctx.obj["session"].reset()
@@ -273,8 +274,8 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
 
 @access.command("change-pin")
 @click.pass_context
-@click.option("-P", "--pin", help="Current PIN code.")
-@click.option("-n", "--new-pin", help="A new PIN.")
+@click.option("-P", "--pin", help="current PIN code")
+@click.option("-n", "--new-pin", help="a new PIN to set")
 def change_pin(ctx, pin, new_pin):
     """
     Change the PIN code.
@@ -316,8 +317,8 @@ def change_pin(ctx, pin, new_pin):
 
 @access.command("change-puk")
 @click.pass_context
-@click.option("-p", "--puk", help="Current PUK code.")
-@click.option("-n", "--new-puk", help="A new PUK code.")
+@click.option("-p", "--puk", help="current PUK code")
+@click.option("-n", "--new-puk", help="a new PUK code to set")
 def change_puk(ctx, puk, new_puk):
     """
     Change the PUK code.
@@ -362,24 +363,24 @@ def change_puk(ctx, puk, new_puk):
     "-t",
     "--touch",
     is_flag=True,
-    help="Require touch on YubiKey when prompted for management key.",
+    help="require touch on YubiKey when prompted for management key",
 )
 @click.option(
     "-n",
     "--new-management-key",
-    help="A new management key.",
+    help="a new management key to set",
     callback=click_parse_management_key,
 )
 @click.option(
     "-m",
     "--management-key",
-    help="Current management key.",
+    help="current management key",
     callback=click_parse_management_key,
 )
 @click.option(
     "-a",
     "--algorithm",
-    help="Management key algorithm.",
+    help="management key algorithm",
     type=EnumChoice(MANAGEMENT_KEY_TYPE),
     default=MANAGEMENT_KEY_TYPE.TDES.name,
     show_default=True,
@@ -388,16 +389,16 @@ def change_puk(ctx, puk, new_puk):
     "-p",
     "--protect",
     is_flag=True,
-    help="Store new management key on the YubiKey, protected by PIN."
-    " A random key will be used if no key is provided.",
+    help="store new management key on the YubiKey, protected by PIN "
+    "(a random key will be used if no key is provided)",
 )
 @click.option(
     "-g",
     "--generate",
     is_flag=True,
-    help="Generate a random management key. "
-    "Implied by --protect unless --new-management-key is also given. "
-    "Conflicts with --new-management-key.",
+    help="generate a random management key "
+    "(implied by --protect unless --new-management-key is also given, "
+    "can't be used with --new-management-key)",
 )
 @click_force_option
 def change_management_key(
@@ -527,7 +528,7 @@ def keys():
 @click.option(
     "-a",
     "--algorithm",
-    help="Algorithm to use in key generation.",
+    help="algorithm to use in key generation",
     type=EnumChoice(KEY_TYPE),
     default=KEY_TYPE.RSA2048.name,
     show_default=True,
@@ -584,7 +585,7 @@ def generate_key(
 @click_touch_policy_option
 @click_slot_argument
 @click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
-@click.option("-p", "--password", help="Password used to decrypt the private key.")
+@click.option("-p", "--password", help="password used to decrypt the private key")
 def import_key(
     ctx, management_key, pin, slot, private_key, pin_policy, touch_policy, password
 ):
@@ -661,9 +662,9 @@ def attest(ctx, slot, certificate, format):
     "-v",
     "--verify",
     is_flag=True,
-    help="Verify that the public key matches the private key in the slot.",
+    help="verify that the public key matches the private key in the slot",
 )
-@click.option("-P", "--pin", help="PIN code (used for --verify).")
+@click.option("-P", "--pin", help="PIN code (used for --verify)")
 @click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
 def export(ctx, slot, public_key_output, format, verify, pin):
     """
@@ -733,12 +734,12 @@ def cert():
 @click.pass_context
 @click_management_key_option
 @click_pin_option
-@click.option("-p", "--password", help="A password may be needed to decrypt the data.")
+@click.option("-p", "--password", help="a password may be needed to decrypt the data")
 @click.option(
     "-v",
     "--verify",
     is_flag=True,
-    help="Verify that the certificate matches the private key in the slot.",
+    help="verify that the certificate matches the private key in the slot",
 )
 @click_slot_argument
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
@@ -839,13 +840,13 @@ def export_certificate(ctx, format, slot, certificate):
 @click.option(
     "-s",
     "--subject",
-    help="Subject for the certificate, as an RFC 4514 string.",
+    help="subject for the certificate, as an RFC 4514 string",
     required=True,
 )
 @click.option(
     "-d",
     "--valid-days",
-    help="Number of days until the certificate expires.",
+    help="number of days until the certificate expires",
     type=click.INT,
     default=365,
     show_default=True,
@@ -897,7 +898,7 @@ def generate_certificate(
 @click.option(
     "-s",
     "--subject",
-    help="Subject for the requested certificate, as an RFC 4514 string.",
+    help="subject for the requested certificate, as an RFC 4514 string",
     required=True,
 )
 @click_hash_option
