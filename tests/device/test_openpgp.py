@@ -1,7 +1,7 @@
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from ykman.openpgp import OpenPgpController, KEY_SLOT
+from ykman._openpgp import OpenPgpController, KEY_SLOT
 from yubikit.management import CAPABILITY
 from yubikit.core.smartcard import ApduError
 from . import condition
