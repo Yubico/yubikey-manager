@@ -28,17 +28,17 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.7"
-cryptography = ">=2.6, <39"
-pyscard = "^2.0, <2.0.4"
+cryptography = ">=3.0, <41"
+pyscard = "^2.0"
 fido2 = "^1.0"
-click = "^7.0 || ^8.0"
+click = "^8.0"
 pywin32 = {version = ">=223", platform = "win32"}
 keyring = "^23.4"
 
 [tool.poetry.dev-dependencies]
-pytest = "^7.0"
+pytest = "^7.1"
 makefun = "^1.9.5"
-pyinstaller = {version = "^5.1", python = "<3.11"}
+pyinstaller = {version = "^5.4", python = "<3.11"}
 
 [tool.poetry.scripts]
 ykman = "ykman._cli.__main__:main"
