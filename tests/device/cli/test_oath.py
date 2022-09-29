@@ -4,8 +4,6 @@ from ykman.oath import STEAM_CHAR_TABLE
 from yubikit.management import CAPABILITY
 from .. import condition
 from base64 import b32encode
-import contextlib
-import io
 import pytest
 
 
@@ -65,20 +63,6 @@ class TestOATH:
         ykman_cli("oath", "accounts", "add", "test-name-space", "ab ba")
         creds = ykman_cli("oath", "accounts", "list").output
         assert "test-name-space" in creds
-
-    def test_oath_add_credential_alias(self, ykman_cli):
-        with io.StringIO() as buf:
-            with contextlib.redirect_stderr(buf):
-                ykman_cli("oath", "add", "test-name", "abba")
-                ykman_cli("oath", "code", "test-name")
-                creds = ykman_cli("oath", "list").output
-                ykman_cli("oath", "delete", "test-name", "-f")
-            err = buf.getvalue()
-        assert "test-name" in creds
-        assert "oath accounts add" in err
-        assert "oath accounts code" in err
-        assert "oath accounts list" in err
-        assert "oath accounts delete" in err
 
     def test_oath_hidden_cred(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "_hidden:name", "abba")

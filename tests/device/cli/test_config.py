@@ -2,8 +2,6 @@ from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import CAPABILITY
 from .. import condition
 
-import contextlib
-import io
 import pytest
 
 
@@ -135,18 +133,6 @@ class TestConfigUSB:
         assert "OATH" not in output
         assert "PIV" not in output
         assert "OpenPGP" not in output
-
-    def test_mode_alias(self, ykman_cli, await_reboot):
-        with io.StringIO() as buf:
-            with contextlib.redirect_stderr(buf):
-                ykman_cli("mode", "ccid", "-f")
-                await_reboot()
-                output = ykman_cli("config", "usb", "--list").output
-                assert "FIDO U2F" not in output
-                assert "FIDO2" not in output
-                assert "OTP" not in output
-            err = buf.getvalue()
-        assert "config mode ccid" in err
 
 
 class TestConfigNFC:
