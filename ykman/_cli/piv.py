@@ -154,7 +154,7 @@ click_touch_policy_option = click.option(
 click_hash_option = click.option(
     "-a",
     "--hash-algorithm",
-    type=click.Choice(["SHA1", "SHA256", "SHA384", "SHA512"], case_sensitive=False),
+    type=click.Choice(["SHA256", "SHA384", "SHA512"], case_sensitive=False),
     default="SHA256",
     show_default=True,
     help="hash algorithm",
