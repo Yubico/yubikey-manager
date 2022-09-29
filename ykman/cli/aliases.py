@@ -25,10 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import sys
 import logging
 
 """
 Command line aliases to support commands which have moved.
+The old commands are no longer supported and will fail, but will show their replacement.
 """
 
 
@@ -122,9 +124,9 @@ def apply_aliases(argv):
         if i is not None:
             if f:
                 argv = f(argv, alias, i)
-                logger.warning(
-                    "The use of this command is deprecated and will be removed!\n"
-                    "Replace with: ykman " + " ".join(argv[1:]),
+                logger.exception(
+                    "This command has moved! Use ykman " + " ".join(argv[1:])
                 )
+                sys.exit(1)
             break  # Only handle first match
     return argv
