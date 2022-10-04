@@ -3,7 +3,7 @@ from .util import get_windows_version
 from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
 from .piv import get_piv_info
-from .openpgp import OpenPgpController, get_openpgp_info
+from ._openpgp import OpenPgpController, get_openpgp_info
 
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection

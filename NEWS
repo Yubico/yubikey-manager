@@ -1,3 +1,24 @@
+* Version 5.0.0 (unreleased)
+ ** Various cleanups and improvements to the API.
+ ** Improvements to the handling of YubiKeys and connections.
+ ** Command aliases for ykman 3.x (introduced in ykman 4.0) have now been dropped.
+ ** Installers for ykman are now provided for Windows (amd64) and MacOS (universal2).
+ ** Logging has been improved, and a new TRAFFIC level has been introduced.
+ ** The codebase has been improved for scripting usage, either directly as a Python
+    module, or via the new "ykman script" command.
+    See doc/Scripting.adoc, doc/Library_Usage.adoc, and examples/ for more details.
+ ** PIV: Add support for dotted-string OIDs when parsing RFC4514 strings.
+ ** PIV: Drop support for signing certificates and CSRs with SHA-1.
+ ** FIDO: Credential management commands have been improved to deal with ambiguity
+    in certain cases.
+ ** OATH: Access Keys ("remembered" passwords) are now stored in the system keyring.
+ ** OpenPGP: Commands have been added to manage PINs.
+ 
+
+* Version 4.0.9 (released 2022-06-17)
+ ** Dependency: Add support for python-fido2 1.x
+  ** Fix: Drop stated support for Click 6 as features from 7 are being used.
+
 * Version 4.0.8 (released 2022-01-31)
  ** Bugfix: Fix error message for invalid modhex when programing a YubiOTP credential.
  ** Bugfix: Fix issue with displaying a Steam credential when it is the only account.

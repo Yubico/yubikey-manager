@@ -25,6 +25,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+"""
+Classes and functions for interacting with the OpenPGP application on a YubiKey.
+
+WARNING: This file is not part of the stable API, and thus changes to is can occur
+without a major version increase of the project.
+
+Keep this in mind when using these classes for scripting purposes!
+"""
+
 from yubikit.core import (
     Tlv,
     NotSupportedError,

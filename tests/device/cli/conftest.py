@@ -1,7 +1,7 @@
 from yubikit.core import TRANSPORT
-from ykman.cli.__main__ import cli, _DefaultFormatter
-from ykman.cli.aliases import apply_aliases
-from ykman.cli.util import CliFail
+from ykman._cli.__main__ import cli, _DefaultFormatter
+from ykman._cli.aliases import apply_aliases
+from ykman._cli.util import CliFail
 from click.testing import CliRunner
 from functools import partial
 import logging

@@ -28,7 +28,7 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import (
+from .._openpgp import (
     OpenPgpController,
     KEY_SLOT,
     TOUCH_MODE,
