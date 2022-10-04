@@ -277,6 +277,12 @@ def list_all_devices(
     groups: Dict[PID, _PidGroup] = {}
 
     for connection_type in connection_types:
+        for base_type in _CONNECTION_LIST_MAPPING:
+            if issubclass(connection_type, base_type):
+                connection_type = base_type
+                break
+        else:
+            raise ValueError("Invalid connection type")
         try:
             for dev in _CONNECTION_LIST_MAPPING[connection_type]():
                 group = groups.setdefault(dev.pid, _PidGroup(dev.pid))
