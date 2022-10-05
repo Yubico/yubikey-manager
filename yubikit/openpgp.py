@@ -23,18 +23,25 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     NoEncryption,
 )
-from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, ed25519, x25519
 
 import os
 import abc
 from enum import Enum, IntEnum, IntFlag, unique
 from dataclasses import dataclass
-from typing import Optional, Tuple, ClassVar, Mapping
-import time
+from typing import (
+    Optional,
+    Tuple,
+    ClassVar,
+    Mapping,
+    Sequence,
+    SupportsBytes,
+    Union,
+    Dict,
+    List,
+)
 import struct
 import logging
-
-from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -42,42 +49,33 @@ DEFAULT_USER_PIN = "123456"
 DEFAULT_ADMIN_PIN = "12345678"
 
 
-class _KeySlot(NamedTuple):
-    value: str
-    indx: int
-    key_id: int
-    fingerprint: int
-    gen_time: int
-    uif: int  # touch policy
-    crt: bytes  # Control Reference Template
-
-
 @unique
-class KEY_SLOT(_KeySlot, Enum):  # noqa: N801
-    SIG = _KeySlot("SIGNATURE", 1, 0xC1, 0xC7, 0xCE, 0xD6, Tlv(0xB6))
-    ENC = _KeySlot("ENCRYPTION", 2, 0xC2, 0xC8, 0xCF, 0xD7, Tlv(0xB8))
-    AUT = _KeySlot("AUTHENTICATION", 3, 0xC3, 0xC9, 0xD0, 0xD8, Tlv(0xA4))
-    ATT = _KeySlot(
-        "ATTESTATION", 4, 0xDA, 0xDB, 0xDD, 0xD9, Tlv(0xB6, Tlv(0x84, b"\x81"))
-    )
-
-
-@unique
-class TOUCH_MODE(IntEnum):  # noqa: N801
+class UIF(IntEnum):  # noqa: N801
     OFF = 0x00
     ON = 0x01
     FIXED = 0x02
     CACHED = 0x03
     CACHED_FIXED = 0x04
 
+    @classmethod
+    def parse(cls, encoded: bytes):
+        return cls(encoded[0])
+
+    def __bytes__(self) -> bytes:
+        return struct.pack(">BB", self, GENERAL_FEATURE_MANAGEMENT.BUTTON)
+
     @property
-    def is_fixed(self):
-        return self in (TOUCH_MODE.FIXED, TOUCH_MODE.CACHED_FIXED)
+    def is_fixed(self) -> bool:
+        return self in (UIF.FIXED, UIF.CACHED_FIXED)
+
+    @property
+    def is_cached(self) -> bool:
+        return self in (UIF.CACHED, UIF.CACHED_FIXED)
 
     def __str__(self):
-        if self == TOUCH_MODE.FIXED:
+        if self == UIF.FIXED:
             return "On (fixed)"
-        if self == TOUCH_MODE.CACHED_FIXED:
+        if self == UIF.CACHED_FIXED:
             return "Cached (fixed)"
         return self.name[0] + self.name[1:].lower()
 
@@ -100,7 +98,6 @@ class INS(IntEnum):  # noqa: N801
     GENERATE_ASYM = 0x47
     GET_CHALLENGE = 0x84
     SELECT_DATA = 0xA5
-    SEND_REMAINING = 0xC0
     GET_DATA = 0xCA
     PUT_DATA = 0xDA
     PUT_DATA_ODD = 0xDB
@@ -115,14 +112,12 @@ _INVALID_PIN = b"\0" * 8
 
 TAG_DISCRETIONARY = 0x73
 TAG_EXTENDED_CAPABILITIES = 0xC0
-TAG_ALGORITHM_ATTRIBUTES_SIG = 0xC1
-TAG_ALGORITHM_ATTRIBUTES_DEC = 0xC2
-TAG_ALGORITHM_ATTRIBUTES_AUT = 0xC3
-TAG_ALGORITHM_ATTRIBUTES_ATT = 0xDA
 TAG_FINGERPRINTS = 0xC5
 TAG_CA_FINGERPRINTS = 0xC6
 TAG_GENERATION_TIMES = 0xCD
 TAG_SIGNATURE_COUNTER = 0x93
+TAG_KEY_INFORMATION = 0xDE
+TAG_PUBLIC_KEY = 0x7F49
 
 
 @unique
@@ -149,6 +144,10 @@ class DO(IntEnum):
     GENERAL_FEATURE_MANAGEMENT = 0x7F74
     CARDHOLDER_RELATED_DATA = 0x65
     APPLICATION_RELATED_DATA = 0x6E
+    ALGORITHM_ATTRIBUTES_SIG = 0xC1
+    ALGORITHM_ATTRIBUTES_DEC = 0xC2
+    ALGORITHM_ATTRIBUTES_AUT = 0xC3
+    ALGORITHM_ATTRIBUTES_ATT = 0xDA
     PW_STATUS_BYTES = 0xC4
     FINGERPRINT_SIG = 0xC7
     FINGERPRINT_DEC = 0xC8
@@ -167,10 +166,10 @@ class DO(IntEnum):
     UIF_DEC = 0xD7
     UIF_AUT = 0xD8
     UIF_ATT = 0xD9
-    KEY_INFORMATION = 0xDE
     SECURITY_SUPPORT_TEMPLATE = 0x7A
     CARDHOLDER_CERTIFICATE = 0x7F21
     KDF = 0xF9
+    ALGORITHM_INFORMATION = 0xFA
 
     ATT_CERTIFICATE = 0xFC
 
@@ -214,6 +213,7 @@ class OpenPgpAid(bytes):
             return -struct.unpack(">I", self[10:14])[0]
 
 
+@unique
 class EXTENDED_CAPABILITY_FLAGS(IntFlag):
     KDF = 1 << 0
     PSO_DEC_ENC_AES = 1 << 1
@@ -255,6 +255,7 @@ class ExtendedLengthInfo:
         )
 
 
+@unique
 class GENERAL_FEATURE_MANAGEMENT(IntFlag):
     TOUCHSCREEN = 1 << 0
     MICROPHONE = 1 << 1
@@ -291,19 +292,19 @@ class ExtendedCapabilities:
 
 @dataclass
 class PwStatus:
-    user_pin_policy: PIN_POLICY
-    user_max_len: int
-    reset_max_len: int
-    admin_max_len: int
-    user_attempts: int
-    reset_attempts: int
-    admin_attempts: int
+    pin_policy_user: PIN_POLICY
+    max_len_user: int
+    max_len_reset: int
+    max_len_admin: int
+    attempts_user: int
+    attempts_reset: int
+    attempts_admin: int
 
     def get_max_len(self, pw: PW) -> int:
-        return getattr(self, f"{pw.name.lower()}_max_len")
+        return getattr(self, f"max_len_{pw.name.lower()}")
 
     def get_attempts(self, pw: PW) -> int:
-        return getattr(self, f"{pw.name.lower()}_attempts")
+        return getattr(self, f"attempts_{pw.name.lower()}")
 
     @classmethod
     def parse(cls, encoded: bytes) -> "PwStatus":
@@ -322,42 +323,282 @@ class PwStatus:
         )
 
 
+@unique
+class CRT(bytes, Enum):
+    SIG = Tlv(0xB6)
+    DEC = Tlv(0xB8)
+    AUT = Tlv(0xA4)
+    ATT = Tlv(0xB6, Tlv(0x84, b"\x81"))
+
+
+@unique
+class KEY_SLOT(IntEnum):  # noqa: N801
+    SIG = 0x01
+    DEC = 0x02
+    AUT = 0x03
+    ATT = 0x81
+
+    @property
+    def algorithm_attributes_do(self) -> DO:
+        return getattr(DO, f"ALGORITHM_ATTRIBUTES_{self.name}")
+
+    @property
+    def uif_do(self) -> DO:
+        return getattr(DO, f"UIF_{self.name}")
+
+    @property
+    def generation_time_do(self) -> DO:
+        return getattr(DO, f"GENERATION_TIME_{self.name}")
+
+    @property
+    def fingerprint_do(self) -> DO:
+        return getattr(DO, f"FINGERPRINT_{self.name}")
+
+    @property
+    def crt(self) -> CRT:
+        return getattr(CRT, self.name)
+
+
+@unique
+class KEY_STATUS(IntEnum):
+    NONE = 0
+    GENERATED = 1
+    IMPORTED = 2
+
+
+KeyInformation = Mapping[KEY_SLOT, KEY_STATUS]
+Fingerprints = Mapping[KEY_SLOT, bytes]
+GenerationTimes = Mapping[KEY_SLOT, int]
+EcPublicKey = Union[
+    ec.EllipticCurvePublicKey,
+    ed25519.Ed25519PublicKey,
+    x25519.X25519PublicKey,
+]
+PublicKey = Union[EcPublicKey, rsa.RSAPublicKey]
+EcPrivateKey = Union[
+    ec.EllipticCurvePrivateKeyWithSerialization,
+    ed25519.Ed25519PrivateKey,
+    x25519.X25519PrivateKey,
+]
+PrivateKey = Union[
+    rsa.RSAPrivateKeyWithSerialization,
+    EcPrivateKey,
+]
+
+
+# mypy doesn't handle abstract dataclasses well
+@dataclass  # type: ignore[misc]
+class AlgorithmAttributes(abc.ABC):
+    _supported_ids: ClassVar[Sequence[int]]
+    algorithm_id: int
+
+    @classmethod
+    def parse(cls, encoded: bytes) -> "AlgorithmAttributes":
+        algorithm_id = encoded[0]
+        for sub_cls in cls.__subclasses__():
+            if algorithm_id in sub_cls._supported_ids:
+                return sub_cls._parse_data(algorithm_id, encoded[1:])
+        raise ValueError("Unsupported algorithm ID")
+
+    @abc.abstractmethod
+    def __bytes__(self) -> bytes:
+        raise NotImplementedError()
+
+    @classmethod
+    @abc.abstractmethod
+    def _parse_data(cls, alg: int, encoded: bytes) -> "AlgorithmAttributes":
+        raise NotImplementedError()
+
+
+@unique
+class RSA_SIZE(IntEnum):
+    RSA2048 = 2048
+    RSA3072 = 3072
+    RSA4096 = 4096
+
+
+@unique
+class RSA_IMPORT_FORMAT(IntEnum):
+    STANDARD = 0
+    STANDARD_W_MOD = 1
+    CRT = 2
+    CRT_W_MOD = 3
+
+
+@dataclass
+class RsaAttributes(AlgorithmAttributes):
+    _supported_ids = [0x01]
+
+    n_len: int
+    e_len: int
+    import_format: RSA_IMPORT_FORMAT
+
+    @classmethod
+    def create(cls, n_len: RSA_SIZE) -> "RsaAttributes":
+        return cls(0x01, n_len, 17, RSA_IMPORT_FORMAT.STANDARD)
+
+    @classmethod
+    def _parse_data(cls, alg, encoded) -> "RsaAttributes":
+        n, e, f = struct.unpack(">HHB", encoded)
+        return cls(alg, n, e, RSA_IMPORT_FORMAT(f))
+
+    def __bytes__(self) -> bytes:
+        return struct.pack(
+            ">BHHB", self.algorithm_id, self.n_len, self.e_len, self.import_format
+        )
+
+
+class CurveOid(bytes):
+    def _get_name(self) -> str:
+        for oid in OID:
+            if oid == self:
+                return oid.name
+        return "Unknown Curve"
+
+    def __str__(self) -> str:
+        return self._get_name()
+
+    def __repr__(self) -> str:
+        name = self._get_name()
+        return f"{name}({self.hex()})"
+
+
+class OID(CurveOid, Enum):
+    SECP256R1 = CurveOid(b"\x2a\x86\x48\xce\x3d\x03\x01\x07")
+    SECP256K1 = CurveOid(b"\x2b\x81\x04\x00\x0a")
+    SECP384R1 = CurveOid(b"\x2b\x81\x04\x00\x22")
+    SECP521R1 = CurveOid(b"\x2b\x81\x04\x00\x23")
+    BrainpoolP256R1 = CurveOid(b"\x2b\x24\x03\x03\x02\x08\x01\x01\x07")
+    BrainpoolP384R1 = CurveOid(b"\x2b\x24\x03\x03\x02\x08\x01\x01\x0b")
+    BrainpoolP512R1 = CurveOid(b"\x2b\x24\x03\x03\x02\x08\x01\x01\x0d")
+    X25519 = CurveOid(b"\x2b\x06\x01\x04\x01\x97\x55\x01\x05\x01")
+    Ed25519 = CurveOid(b"\x2b\x06\x01\x04\x01\xda\x47\x0f\x01")
+
+    @classmethod
+    def _from_key(cls, key: EcPrivateKey) -> CurveOid:
+        name = ""
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            name = key.curve.name.lower()
+        else:
+            if isinstance(key, ed25519.Ed25519PrivateKey):
+                name = "ed25519"
+            elif isinstance(key, x25519.X25519PrivateKey):
+                name = "x25519"
+        for oid in cls:
+            if oid.name.lower() == name:
+                return oid
+        raise ValueError("Unsupported private key")
+
+
+@unique
+class EC_IMPORT_FORMAT(IntEnum):
+    STANDARD = 0
+    STANDARD_W_PUBKEY = 0xFF
+
+
+@dataclass
+class EcAttributes(AlgorithmAttributes):
+    _supported_ids = [0x12, 0x13, 0x16]
+
+    oid: CurveOid
+    import_format: EC_IMPORT_FORMAT
+
+    @classmethod
+    def create(cls, key: KEY_SLOT, oid: CurveOid) -> "EcAttributes":
+        if oid in (OID.Ed25519, OID.X25519):
+            alg = 0x16  # ED
+        elif key == KEY_SLOT.DEC:
+            alg = 0x12  # ECDH
+        else:
+            alg = 0x13  # ECDSA
+        return cls(alg, oid, EC_IMPORT_FORMAT.STANDARD)
+
+    @classmethod
+    def _parse_data(cls, alg, encoded) -> "EcAttributes":
+        if encoded[-1] == 0xFF:
+            f = EC_IMPORT_FORMAT.STANDARD_W_PUBKEY
+            oid = encoded[:-1]
+        else:  # Standard is defined as "format byte not present"
+            f = EC_IMPORT_FORMAT.STANDARD
+            oid = encoded
+
+        return cls(alg, CurveOid(oid), f)
+
+    def __bytes__(self) -> bytes:
+        buf = struct.pack(">B", self.algorithm_id) + self.oid
+        if self.import_format == EC_IMPORT_FORMAT.STANDARD_W_PUBKEY:
+            buf += struct.pack(">B", self.import_format)
+        return buf
+
+
+def _parse_key_information(encoded: bytes) -> KeyInformation:
+    return {
+        KEY_SLOT(encoded[i]): KEY_STATUS(encoded[i + 1])
+        for i in range(0, len(encoded), 2)
+    }
+
+
+def _parse_fingerprints(encoded: bytes) -> Fingerprints:
+    slots = list(KEY_SLOT)
+    return {
+        slots[i]: encoded[o : o + 20] for i, o in enumerate(range(0, len(encoded), 20))
+    }
+
+
+def _parse_timestamps(encoded: bytes) -> GenerationTimes:
+    slots = list(KEY_SLOT)
+    return {
+        slots[i]: bytes2int(encoded[o : o + 4])
+        for i, o in enumerate(range(0, len(encoded), 4))
+    }
+
+
 @dataclass
 class DiscretionaryDataObjects:
     extended_capabilities: ExtendedCapabilities
-    attributes_sig: bytes
-    attributes_dec: bytes
-    attributes_aut: bytes
-    attributes_att: bytes
+    attributes_sig: AlgorithmAttributes
+    attributes_dec: AlgorithmAttributes
+    attributes_aut: AlgorithmAttributes
+    attributes_att: Optional[AlgorithmAttributes]
     pw_status: PwStatus
-    fingerprints: bytes
-    ca_fingerprints: bytes
-    generation_times: bytes
-    key_information: bytes
-    uif_sig: Optional[bytes]
-    uif_dec: Optional[bytes]
-    uif_aut: Optional[bytes]
-    uif_att: Optional[bytes]
+    fingerprints: Fingerprints
+    ca_fingerprints: Fingerprints
+    generation_times: GenerationTimes
+    key_information: KeyInformation
+    uif_sig: UIF
+    uif_dec: UIF
+    uif_aut: UIF
+    uif_att: UIF
 
     @classmethod
     def parse(cls, encoded: bytes) -> "DiscretionaryDataObjects":
         data = Tlv.parse_dict(encoded)
         return cls(
             ExtendedCapabilities.parse(data[TAG_EXTENDED_CAPABILITIES]),
-            data[TAG_ALGORITHM_ATTRIBUTES_SIG],
-            data[TAG_ALGORITHM_ATTRIBUTES_DEC],
-            data[TAG_ALGORITHM_ATTRIBUTES_AUT],
-            data[TAG_ALGORITHM_ATTRIBUTES_ATT],
+            AlgorithmAttributes.parse(data[DO.ALGORITHM_ATTRIBUTES_SIG]),
+            AlgorithmAttributes.parse(data[DO.ALGORITHM_ATTRIBUTES_DEC]),
+            AlgorithmAttributes.parse(data[DO.ALGORITHM_ATTRIBUTES_AUT]),
+            (
+                AlgorithmAttributes.parse(data[DO.ALGORITHM_ATTRIBUTES_ATT])
+                if DO.ALGORITHM_ATTRIBUTES_ATT in data
+                else None
+            ),
             PwStatus.parse(data[DO.PW_STATUS_BYTES]),
-            data[TAG_FINGERPRINTS],
-            data[TAG_CA_FINGERPRINTS],
-            data[TAG_GENERATION_TIMES],
-            data[DO.KEY_INFORMATION],
-            data[DO.UIF_SIG],
-            data[DO.UIF_DEC],
-            data[DO.UIF_AUT],
-            data[DO.UIF_ATT],
+            _parse_fingerprints(data[TAG_FINGERPRINTS]),
+            _parse_fingerprints(data[TAG_CA_FINGERPRINTS]),
+            _parse_timestamps(data[TAG_GENERATION_TIMES]),
+            _parse_key_information(data.get(TAG_KEY_INFORMATION, b"")),
+            (UIF.parse(data[DO.UIF_SIG]) if DO.UIF_SIG in data else UIF.OFF),
+            (UIF.parse(data[DO.UIF_DEC]) if DO.UIF_DEC in data else UIF.OFF),
+            (UIF.parse(data[DO.UIF_AUT]) if DO.UIF_AUT in data else UIF.OFF),
+            (UIF.parse(data[DO.UIF_ATT]) if DO.UIF_ATT in data else UIF.OFF),
         )
+
+    def get_algorithm_attributes(self, key: KEY_SLOT) -> AlgorithmAttributes:
+        return getattr(self, f"attributes_{key.name.lower()}")
+
+    def get_uif(self, key: KEY_SLOT) -> bytes:
+        return getattr(self, f"uif_{key.name.lower()}")
 
 
 @dataclass
@@ -374,14 +615,18 @@ class ApplicationRelatedData:
         return cls(
             OpenPgpAid(data[DO.AID]),
             data[DO.HISTORICAL_BYTES],
-            ExtendedLengthInfo.parse(data[DO.EXTENDED_LENGTH_INFO])
-            if DO.EXTENDED_LENGTH_INFO in data
-            else None,
-            GENERAL_FEATURE_MANAGEMENT(
-                Tlv.unpack(0x81, data[DO.GENERAL_FEATURE_MANAGEMENT])[0]
-            )
-            if DO.GENERAL_FEATURE_MANAGEMENT in data
-            else None,
+            (
+                ExtendedLengthInfo.parse(data[DO.EXTENDED_LENGTH_INFO])
+                if DO.EXTENDED_LENGTH_INFO in data
+                else None
+            ),
+            (
+                GENERAL_FEATURE_MANAGEMENT(
+                    Tlv.unpack(0x81, data[DO.GENERAL_FEATURE_MANAGEMENT])[0]
+                )
+                if DO.GENERAL_FEATURE_MANAGEMENT in data
+                else None
+            ),
             DiscretionaryDataObjects.parse(data[TAG_DISCRETIONARY]),
         )
 
@@ -423,7 +668,7 @@ class Kdf(abc.ABC):
         return KdfNone()
 
     @abc.abstractmethod
-    def get_bytes(self) -> bytes:
+    def __bytes__(self) -> bytes:
         raise NotImplementedError()
 
 
@@ -438,7 +683,7 @@ class KdfNone(Kdf):
     def process(self, pw, pin):
         return pin.encode()
 
-    def get_bytes(self):
+    def __bytes__(self):
         return Tlv(0x81, struct.pack(">B", self.algorithm))
 
 
@@ -458,11 +703,11 @@ class KdfIterSaltedS2k(Kdf):
 
     hash_algorithm: HASH_ALGORITHM
     iteration_count: int
-    user_salt: bytes
-    reset_salt: bytes
-    admin_salt: bytes
-    user_initial_hash: Optional[bytes]
-    admin_initial_hash: Optional[bytes]
+    salt_user: bytes
+    salt_reset: bytes
+    salt_admin: bytes
+    initial_hash_user: Optional[bytes]
+    initial_hash_admin: Optional[bytes]
 
     @staticmethod
     def _do_process(hash_algorithm, iteration_count, data):
@@ -482,19 +727,19 @@ class KdfIterSaltedS2k(Kdf):
         hash_algorithm: HASH_ALGORITHM = HASH_ALGORITHM.SHA256,
         iteration_count: int = 0x780000,
     ) -> "KdfIterSaltedS2k":
-        user_salt = os.urandom(8)
-        admin_salt = os.urandom(8)
+        salt_user = os.urandom(8)
+        salt_admin = os.urandom(8)
         return cls(
             hash_algorithm,
             iteration_count,
-            user_salt,
+            salt_user,
             os.urandom(8),
-            admin_salt,
+            salt_admin,
             cls._do_process(
-                hash_algorithm, iteration_count, user_salt + DEFAULT_USER_PIN.encode()
+                hash_algorithm, iteration_count, salt_user + DEFAULT_USER_PIN.encode()
             ),
             cls._do_process(
-                hash_algorithm, iteration_count, admin_salt + DEFAULT_ADMIN_PIN.encode()
+                hash_algorithm, iteration_count, salt_admin + DEFAULT_ADMIN_PIN.encode()
             ),
         )
 
@@ -511,120 +756,146 @@ class KdfIterSaltedS2k(Kdf):
         )
 
     def get_salt(self, pw: PW) -> bytes:
-        return getattr(self, f"{pw.name.lower()}_salt")
+        return getattr(self, f"salt_{pw.name.lower()}")
 
     def process(self, pw, pin):
-        salt = self.get_salt(pw) or self.user_salt
+        salt = self.get_salt(pw) or self.salt_user
         data = salt + pin.encode()
         return self._do_process(self.hash_algorithm, self.iteration_count, data)
 
-    def get_bytes(self):
+    def __bytes__(self):
         return (
             Tlv(0x81, struct.pack(">B", self.algorithm))
             + Tlv(0x82, struct.pack(">B", self.hash_algorithm))
             + Tlv(0x83, struct.pack(">I", self.iteration_count))
-            + Tlv(0x84, self.user_salt)
-            + (Tlv(0x85, self.reset_salt) if self.reset_salt else b"")
-            + (Tlv(0x86, self.admin_salt) if self.admin_salt else b"")
-            + (Tlv(0x87, self.user_initial_hash) if self.user_initial_hash else b"")
-            + (Tlv(0x88, self.admin_initial_hash) if self.admin_initial_hash else b"")
+            + Tlv(0x84, self.salt_user)
+            + (Tlv(0x85, self.salt_reset) if self.salt_reset else b"")
+            + (Tlv(0x86, self.salt_admin) if self.salt_admin else b"")
+            + (Tlv(0x87, self.initial_hash_user) if self.initial_hash_user else b"")
+            + (Tlv(0x88, self.initial_hash_admin) if self.initial_hash_admin else b"")
         )
 
 
-@unique
-class OID(bytes, Enum):
-    SECP256R1 = b"\x2a\x86\x48\xce\x3d\x03\x01\x07"
-    SECP256K1 = b"\x2b\x81\x04\x00\x0a"
-    SECP384R1 = b"\x2b\x81\x04\x00\x22"
-    SECP521R1 = b"\x2b\x81\x04\x00\x23"
-    BRAINPOOLP256R1 = b"\x2b\x24\x03\x03\x02\x08\x01\x01\x07"
-    BRAINPOOLP384R1 = b"\x2b\x24\x03\x03\x02\x08\x01\x01\x0b"
-    BRAINPOOLP512R1 = b"\x2b\x24\x03\x03\x02\x08\x01\x01\x0d"
-    X25519 = b"\x2b\x06\x01\x04\x01\x97\x55\x01\x05\x01"
-    ED25519 = b"\x2b\x06\x01\x04\x01\xda\x47\x0f\x01"
+# mypy doesn't handle abstract dataclasses well
+@dataclass  # type: ignore[misc]
+class PrivateKeyTemplate(abc.ABC):
+    crt: CRT
 
-    @classmethod
-    def for_name(cls, name):
-        try:
-            return getattr(cls, name.upper())
-        except AttributeError:
-            raise ValueError("Unsupported curve: " + name)
+    def _get_template(self) -> Sequence[Tlv]:
+        raise NotImplementedError()
+
+    def __bytes__(self) -> bytes:
+        tlvs = self._get_template()
+        return Tlv(
+            0x4D,
+            self.crt
+            + Tlv(0x7F48, b"".join(tlv[: -tlv.length] for tlv in tlvs))
+            + Tlv(0x5F48, b"".join(tlv.value for tlv in tlvs)),
+        )
 
 
-def _get_curve_name(key):
-    if isinstance(key, ec.EllipticCurvePrivateKey):
-        return key.curve.name
-    cls_name = key.__class__.__name__
-    if "Ed25519" in cls_name:
-        return "ed25519"
-    if "X25519" in cls_name:
-        return "x25519"
-    raise ValueError("Unsupported private key")
+@dataclass
+class RsaKeyTemplate(PrivateKeyTemplate):
+    e: bytes
+    p: bytes
+    q: bytes
+
+    def _get_template(self):
+        return (
+            Tlv(0x91, self.e),
+            Tlv(0x92, self.p),
+            Tlv(0x93, self.q),
+        )
 
 
-def _format_rsa_attributes(key_size):
-    return struct.pack(">BHHB", 0x01, key_size, 32, 0)
+@dataclass
+class RsaCrtKeyTemplate(RsaKeyTemplate):
+    dmp1: bytes
+    dmq1: bytes
+    iqmp: bytes
+    n: bytes
+
+    def _get_template(self):
+        return (
+            *super()._get_template(),
+            Tlv(0x94, self.dmp1),
+            Tlv(0x95, self.dmq1),
+            Tlv(0x96, self.iqmp),
+            Tlv(0x97, self.n),
+        )
 
 
-def _format_ec_attributes(key_slot, curve_name):
-    if curve_name in ("ed25519", "x25519"):
-        algorithm = b"\x16"
-    elif key_slot == KEY_SLOT.ENC:
-        algorithm = b"\x12"
-    else:
-        algorithm = b"\x13"
-    return algorithm + OID.for_name(curve_name)
+@dataclass
+class EcKeyTemplate(PrivateKeyTemplate):
+    private_key: bytes
+    public_key: Optional[bytes]
+
+    def _get_template(self):
+        tlvs: Tuple[Tlv, ...] = (Tlv(0x92, self.private_key),)
+        if self.public_key:
+            tlvs = (*tlvs, Tlv(0x99, self.public_key))
+
+        return tlvs
 
 
-def _get_key_attributes(key, key_slot):
+def _get_key_attributes(key: PrivateKey, key_slot: KEY_SLOT) -> AlgorithmAttributes:
     if isinstance(key, rsa.RSAPrivateKeyWithSerialization):
         if key.private_numbers().public_numbers.e != 65537:
             raise ValueError("RSA keys with e != 65537 are not supported!")
-        return _format_rsa_attributes(key.key_size)
-    curve_name = _get_curve_name(key)
-    return _format_ec_attributes(key_slot, curve_name)
+        return RsaAttributes.create(key.key_size)
+    return EcAttributes.create(key_slot, OID._from_key(key))
 
 
-def _get_key_template(key, key_slot, crt=False):
-    def _pack_tlvs(tlvs):
-        header = b""
-        body = b""
-        for tlv in tlvs:
-            header += tlv[: -tlv.length]
-            body += tlv.value
-        return Tlv(0x7F48, header) + Tlv(0x5F48, body)
-
-    values: Tuple[Tlv, ...]
-
+def _get_key_template(
+    key: PrivateKey, key_slot: KEY_SLOT, use_crt: bool = False
+) -> PrivateKeyTemplate:
     if isinstance(key, rsa.RSAPrivateKeyWithSerialization):
         rsa_numbers = key.private_numbers()
         ln = (key.key_size // 8) // 2
 
-        e = Tlv(0x91, b"\x01\x00\x01")  # e=65537
-        p = Tlv(0x92, int2bytes(rsa_numbers.p, ln))
-        q = Tlv(0x93, int2bytes(rsa_numbers.q, ln))
-        values = (e, p, q)
-        if crt:
-            dp = Tlv(0x94, int2bytes(rsa_numbers.dmp1, ln))
-            dq = Tlv(0x95, int2bytes(rsa_numbers.dmq1, ln))
-            qinv = Tlv(0x96, int2bytes(rsa_numbers.iqmp, ln))
-            n = Tlv(0x97, int2bytes(rsa_numbers.public_numbers.n, 2 * ln))
-            values += (dp, dq, qinv, n)
+        e = b"\x01\x00\x01"  # e=65537
+        p = int2bytes(rsa_numbers.p, ln)
+        q = int2bytes(rsa_numbers.q, ln)
+        if not use_crt:
+            return RsaKeyTemplate(key_slot.crt, e, p, q)
+        else:
+            dp = int2bytes(rsa_numbers.dmp1, ln)
+            dq = int2bytes(rsa_numbers.dmq1, ln)
+            qinv = int2bytes(rsa_numbers.iqmp, ln)
+            n = int2bytes(rsa_numbers.public_numbers.n, 2 * ln)
+            return RsaCrtKeyTemplate(key_slot.crt, e, p, q, dp, dq, qinv, n)
 
     elif isinstance(key, ec.EllipticCurvePrivateKeyWithSerialization):
         ec_numbers = key.private_numbers()
         ln = key.key_size // 8
-
-        privkey = Tlv(0x92, int2bytes(ec_numbers.private_value, ln))
-        values = (privkey,)
-
-    elif _get_curve_name(key) in ("ed25519", "x25519"):
-        privkey = Tlv(
-            0x92, key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        return EcKeyTemplate(
+            key_slot.crt, int2bytes(ec_numbers.private_value, ln), None
         )
-        values = (privkey,)
 
-    return Tlv(0x4D, key_slot.crt + _pack_tlvs(values))
+    elif isinstance(key, (ed25519.Ed25519PrivateKey, x25519.X25519PrivateKey)):
+        return EcKeyTemplate(
+            key_slot.crt,
+            key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()),
+            None,
+        )
+
+    raise ValueError("Unsupported key type")
+
+
+def _parse_rsa_key(data: Mapping[int, bytes]) -> rsa.RSAPublicKey:
+    numbers = rsa.RSAPublicNumbers(bytes2int(data[0x82]), bytes2int(data[0x81]))
+    return numbers.public_key(default_backend())
+
+
+def _parse_ec_key(oid: CurveOid, data: Mapping[int, bytes]) -> EcPrivateKey:
+    pubkey_enc = data[0x86]
+    if oid == OID.X25519:
+        return x25519.X25519PublicKey.from_public_bytes(pubkey_enc)
+    if oid == OID.Ed25519:
+        return ed25519.Ed25519PublicKey.from_public_bytes(pubkey_enc)
+
+    curve = getattr(ec, oid._get_name())
+    return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
 
 
 class OpenPgpSession:
@@ -634,23 +905,33 @@ class OpenPgpSession:
             self.protocol.select(AID.OPENPGP)
         except ApduError as e:
             if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
-                # Not activated
+                # Not activated, activate
                 self.protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
                 self.protocol.select(AID.OPENPGP)
             else:
                 raise
         self._version = self._read_version()
+
+        self.protocol.enable_touch_workaround(self.version)
         if self.version >= (4, 0, 0):
             self.protocol.apdu_format = ApduFormat.EXTENDED
+
+        # Note: This value is cached!
+        # Do not rely on contained information that can change!
         self._app_data = self.get_application_related_data()
 
     @property
     def version(self) -> Version:
         return self._version
 
+    @property
+    def extended_capabilities(self) -> ExtendedCapabilities:
+        """Get the Extended Capabilities from the YubiKey."""
+        return self._app_data.discretionary.extended_capabilities
+
     def get_challenge(self, length: int) -> bytes:
         """Get random data from the YubiKey."""
-        e = self._app_data.discretionary.extended_capabilities
+        e = self.extended_capabilities
         if EXTENDED_CAPABILITY_FLAGS.GET_CHALLENGE not in e.flags:
             raise NotSupportedError("GET_CHALLENGE is not supported")
         if not 0 < length <= e.challenge_max_length:
@@ -658,42 +939,27 @@ class OpenPgpSession:
         return self.protocol.send_apdu(0, INS.GET_CHALLENGE, 0, 0, le=length)
 
     def get_data(self, do: DO) -> bytes:
+        """Get a Data Object from the YubiKey."""
         return self.protocol.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
 
-    def put_data(self, do: DO, data: bytes) -> None:
-        self.protocol.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, data)
+    def put_data(self, do: DO, data: Union[bytes, SupportsBytes]) -> None:
+        """Write a Data Object to the YubiKey."""
+        self.protocol.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, bytes(data))
 
     def get_pin_status(self) -> PwStatus:
+        """Get the current status of PINS."""
         return PwStatus.parse(self.get_data(DO.PW_STATUS_BYTES))
 
     def get_signature_counter(self) -> int:
+        """Get the number of times the signature key has been used."""
         s = SecuritySupportTemplate.parse(self.get_data(DO.SECURITY_SUPPORT_TEMPLATE))
         return s.signature_counter
 
-    def _select_certificate(self, key_slot):
-        try:
-            require_version(self.version, (5, 2, 0))
-            data: bytes = Tlv(0x60, Tlv(0x5C, b"\x7f\x21"))
-            if self.version <= (5, 4, 3):
-                # These use a non-standard byte in the command.
-                data = b"\x06" + data  # 6 is the length of the data.
-            self.protocol.send_apdu(
-                0,
-                INS.SELECT_DATA,
-                3 - key_slot.indx,
-                0x04,
-                data,
-            )
-        except NotSupportedError:
-            if key_slot == KEY_SLOT.AUT:
-                return  # Older version still support AUT, which is the default slot.
-            raise
-
-    def _read_version(self):
+    def _read_version(self) -> Version:
         bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
         return Version(*(_bcd(x) for x in bcd))
 
-    def get_application_related_data(self):
+    def get_application_related_data(self) -> ApplicationRelatedData:
         """Read the Application Related Data."""
         return ApplicationRelatedData.parse(self.get_data(DO.APPLICATION_RELATED_DATA))
 
@@ -702,36 +968,52 @@ class OpenPgpSession:
         data = struct.pack(">B", pin_policy)
         self.put_data(DO.PW_STATUS_BYTES, data)
 
-    def _block_pins(self):
-        status = self.get_pin_status()
-        for _ in range(status.user_attempts):
-            try:
-                self.protocol.send_apdu(0, INS.VERIFY, 0, PW.USER, _INVALID_PIN)
-            except ApduError:
-                pass
-        for _ in range(status.admin_attempts):
-            try:
-                self.protocol.send_apdu(0, INS.VERIFY, 0, PW.ADMIN, _INVALID_PIN)
-            except ApduError:
-                pass
-
     def reset(self) -> None:
         """Performs a factory reset on the OpenPGP application.
 
         WARNING: This will delete all stored keys, certificates and other data.
         """
         require_version(self.version, (1, 0, 6))
-        self._block_pins()
+
+        # Ensure the User and Admin PINs are blocked
+        status = self.get_pin_status()
+        for pw in (PW.USER, PW.ADMIN):
+            for _ in range(status.get_attempts(pw)):
+                try:
+                    self.protocol.send_apdu(0, INS.VERIFY, 0, pw, _INVALID_PIN)
+                except ApduError:
+                    pass
+
+        # Reset the application
         self.protocol.send_apdu(0, INS.TERMINATE, 0, 0)
         self.protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
 
+    def set_pin_attempts(
+        self, user_attempts: int, reset_attempts: int, admin_attempts: int
+    ) -> None:
+        """Set the number of PIN attempts to allow before blocking.
+
+        Requires Admin PIN verification.
+        """
+        if self.version[0] == 1:
+            # YubiKey NEO
+            require_version(self.version, (1, 0, 7))
+        else:
+            require_version(self.version, (4, 3, 1))
+
+        self.protocol.send_apdu(
+            0,
+            INS.SET_PIN_RETRIES,
+            0,
+            0,
+            struct.pack(">BBB", user_attempts, reset_attempts, admin_attempts),
+        )
+
     def get_kdf(self):
         """Get the Key Derivation Function data object."""
-        try:
-            data = self.get_data(DO.KDF)
-        except ApduError:
-            data = b""
-        return Kdf.parse(data)
+        if EXTENDED_CAPABILITY_FLAGS.KDF not in self.extended_capabilities.flags:
+            return KdfNone()
+        return Kdf.parse(self.get_data(DO.KDF))
 
     def set_kdf(self, kdf: Kdf) -> None:
         """Set up a PIN Key Derivation Function.
@@ -743,10 +1025,13 @@ class OpenPgpSession:
 
         This command requires Admin PIN verification.
         """
+        e = self._app_data.discretionary.extended_capabilities
+        if EXTENDED_CAPABILITY_FLAGS.KDF not in e.flags:
+            raise NotSupportedError("KDF is not supported")
 
-        self.put_data(DO.KDF, kdf.get_bytes())
+        self.put_data(DO.KDF, kdf)
 
-    def _verify(self, pw, pin):
+    def _verify(self, pw: PW, pin: str) -> None:
         try:
             pin_enc = self.get_kdf().process(pw, pin)
             self.protocol.send_apdu(0, INS.VERIFY, 0, pw, pin_enc)
@@ -768,11 +1053,16 @@ class OpenPgpSession:
         """
         self._verify(PW.ADMIN, admin_pin)
 
-    def _change(self, pw, pin, new_pin):
+    def _change(self, pw: PW, pin: str, new_pin: str) -> None:
+        kdf = self.get_kdf()
         try:
-            pin = self.get_kdf().process(pw, pin)
-            new_pin = self.get_kdf().process(pw, new_pin)
-            self.protocol.send_apdu(0, INS.CHANGE_PIN, 0, pw, pin + new_pin)
+            self.protocol.send_apdu(
+                0,
+                INS.CHANGE_PIN,
+                0,
+                pw,
+                kdf.process(pw, pin) + kdf.process(pw, new_pin),
+            )
         except ApduError as e:
             if e.sw == SW.CONDITIONS_NOT_SATISFIED:
                 raise ValueError("Conditions of use not satisfied.")
@@ -817,65 +1107,208 @@ class OpenPgpSession:
             if e.sw == SW.CONDITIONS_NOT_SATISFIED:
                 raise ValueError("Conditions of use not satisfied.")
             else:
-                reset_remaining = self.get_pin_status().reset_attempts
+                reset_remaining = self.get_pin_status().attempts_reset
                 raise ValueError(
                     f"Invalid Reset Code, {reset_remaining} tries remaining."
                 )
 
-    @property
-    def supported_touch_policies(self):
-        if self.version < (4, 2, 0):
-            return []
-        if self.version < (5, 2, 1):
-            return [TOUCH_MODE.ON, TOUCH_MODE.OFF, TOUCH_MODE.FIXED]
-        if self.version >= (5, 2, 1):
-            return [
-                TOUCH_MODE.ON,
-                TOUCH_MODE.OFF,
-                TOUCH_MODE.FIXED,
-                TOUCH_MODE.CACHED,
-                TOUCH_MODE.CACHED_FIXED,
-            ]
+    def get_algorithm_attributes(self, key: KEY_SLOT) -> AlgorithmAttributes:
+        """Get the algorithm attributes for one of the key slots."""
+        data = self.get_application_related_data()
+        return data.discretionary.get_algorithm_attributes(key)
 
-    @property
-    def supports_attestation(self):
-        return self.version >= (5, 2, 1)
+    def get_algorithm_information(
+        self,
+    ) -> Mapping[KEY_SLOT, Sequence[AlgorithmAttributes]]:
+        """Get the list of supported algorithm attributes for each key.
 
-    def get_touch(self, key_slot):
-        if not self.supported_touch_policies:
-            raise ValueError("Touch policy is available on YubiKey 4 or later.")
-        if key_slot == KEY_SLOT.ATT and not self.supports_attestation:
-            raise ValueError("Attestation key not available on this device.")
-        data = self.get_data(key_slot.uif)
-        return TOUCH_MODE(data[0])
+        The return value is a mapping of KEY_SLOT to a list of supported algorithm
+        attributes, which can be set using set_algorithm_attributes.
+        """
+        if (
+            EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
+            not in self.extended_capabilities.flags
+        ):
+            raise NotSupportedError("Writing Algorithm Attributes is not supported")
+        buf = self.get_data(DO.ALGORITHM_INFORMATION)
+        try:
+            buf = Tlv.unpack(DO.ALGORITHM_INFORMATION, buf)
+        except ValueError:
+            buf = Tlv.unpack(DO.ALGORITHM_INFORMATION, buf + b"\0\0")[:-2]
 
-    def set_touch(self, key_slot, mode):
-        """Requires Admin PIN verification."""
-        if not self.supported_touch_policies:
-            raise ValueError("Touch policy is available on YubiKey 4 or later.")
-        if mode not in self.supported_touch_policies:
-            raise ValueError("Touch policy not available on this device.")
-        self.put_data(
-            key_slot.uif, struct.pack(">BB", mode, GENERAL_FEATURE_MANAGEMENT.BUTTON)
-        )
+        slots = {slot.algorithm_attributes_do: slot for slot in KEY_SLOT}
+        data: Dict[KEY_SLOT, List[AlgorithmAttributes]] = {}
+        for tlv in Tlv.parse_list(buf):
+            data.setdefault(slots[DO(tlv.tag)], []).append(
+                AlgorithmAttributes.parse(tlv.value)
+            )
 
-    def set_pin_attempts(self, user_tries, reset_tries, admin_tries):
-        """Requires Admin PIN verification."""
-        if self.version[0] == 1:
-            # YubiKey NEO
-            require_version(self.version, (1, 0, 7))
+        return data
+
+    def set_algorithm_attributes(
+        self, key: KEY_SLOT, attributes: AlgorithmAttributes
+    ) -> None:
+        """Sets the algorithm attributes for a key slot.
+
+        WARNING: This will delete any key already stored in the slot if the attributes
+        are changed!
+
+        This command requires Admin PIN verification.
+        """
+        supported = self.get_algorithm_information()
+        if key not in supported:
+            raise NotSupportedError("Key slot not supported")
+        if attributes not in supported[key]:
+            raise NotSupportedError("Algorithm attributes not supported")
+
+        self.put_data(key.algorithm_attributes_do, attributes)
+
+    def get_uif(self, key: KEY_SLOT) -> UIF:
+        """Get the User Interaction Flag (touch requirement) for a key."""
+        try:
+            return UIF.parse(self.get_data(key.uif_do))
+        except ApduError as e:
+            if e.sw == SW.WRONG_PARAMETERS_P1P2:
+                # Not supported
+                return UIF.OFF
+            raise
+
+    def set_uif(self, key: KEY_SLOT, uif: UIF) -> None:
+        """Set the User Interaction Flag (touch requirement) for a key.
+
+        Requires Admin PIN verification.
+        """
+        require_version(self.version, (4, 2, 0))
+        if uif.is_cached:
+            require_version(
+                self.version,
+                (5, 2, 1),
+                "Cached UIF values require YubiKey 5.2.1 or later.",
+            )
+
+        if self.get_uif(key).is_fixed:
+            raise ValueError("Cannot change UIF when set to FIXED.")
+
+        self.put_data(key.uif_do, uif)
+
+    def get_key_information(self) -> KeyInformation:
+        """Get the status of the keys."""
+        return self.get_application_related_data().discretionary.key_information
+
+    def get_generation_times(self) -> GenerationTimes:
+        """Get timestamps for when keys were generated."""
+        return self.get_application_related_data().discretionary.generation_times
+
+    def set_generation_time(self, key: KEY_SLOT, timestamp: int) -> None:
+        """Set the generation timestamp for a key.
+
+        Requires Admin PIN verification.
+        """
+        self.put_data(key.generation_time_do, struct.pack(">I", timestamp))
+
+    def get_fingerprints(self) -> Fingerprints:
+        """Get key fingerprints."""
+        return self.get_application_related_data().discretionary.fingerprints
+
+    def set_fingerprint(self, key: KEY_SLOT, fingerprint: bytes) -> None:
+        """Set the fingerprint for a key.
+
+        Requires Admin PIN verification.
+        """
+        self.put_data(key.fingerprint_do, fingerprint)
+
+    def get_public_key(self, key: KEY_SLOT) -> PublicKey:
+        """Get the public key from a slot."""
+        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x81, 0x00, key.crt)
+        data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        attributes = self.get_algorithm_attributes(key)
+        if isinstance(attributes, EcAttributes):
+            return _parse_ec_key(attributes.oid, data)
+        else:  # RSA
+            return _parse_rsa_key(data)
+
+    def generate_rsa_key(self, key: KEY_SLOT, key_size: RSA_SIZE) -> rsa.RSAPublicKey:
+        """Generate an RSA key in the given slot.
+
+        Requires Admin PIN verification.
+        """
+        if (4, 2, 0) <= self.version < (4, 3, 5):
+            raise NotSupportedError("RSA key generation not supported on this YubiKey")
+
+        if (
+            EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
+            in self.extended_capabilities.flags
+        ):
+            attributes = RsaAttributes.create(key_size)
+            self.set_algorithm_attributes(key, attributes)
+        elif key_size != RSA_SIZE.RSA2048:
+            raise NotSupportedError("Algorithm attributes not supported")
+
+        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key.crt)
+        data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        return _parse_rsa_key(data)
+
+    def generate_ec_key(self, key: KEY_SLOT, curve_oid: CurveOid) -> EcPublicKey:
+        """Generate an EC key in the given slot.
+
+        Requires Admin PIN verification.
+        """
+
+        require_version(self.version, (5, 2, 0))
+
+        if curve_oid not in OID:
+            raise ValueError("Curve OID is not recognized")
+
+        attributes = EcAttributes.create(key, curve_oid)
+        self.set_algorithm_attributes(key, attributes)
+
+        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key.crt)
+        data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        return _parse_ec_key(curve_oid, data)
+
+    def put_key(self, key: KEY_SLOT, private_key: PrivateKey) -> None:
+        """Import a private key into the give slot.
+
+        Requires Admin PIN verification.
+        """
+
+        attributes = _get_key_attributes(private_key, key)
+        if (
+            EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
+            in self.extended_capabilities.flags
+        ):
+            self.set_algorithm_attributes(key, attributes)
         else:
-            require_version(self.version, (4, 3, 1))
+            if not (
+                isinstance(attributes, RsaAttributes)
+                and attributes.n_len == RSA_SIZE.RSA2048
+            ):
+                raise NotSupportedError("This YubiKey only supports RSA 2048 keys")
 
-        self.protocol.send_apdu(
-            0,
-            INS.SET_PIN_RETRIES,
-            0,
-            0,
-            struct.pack(">BBB", user_tries, reset_tries, admin_tries),
-        )
+        template = _get_key_template(private_key, key, self.version < (4, 0, 0))
+        self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, bytes(template))
 
-    def read_certificate(self, key_slot):
+    def _select_certificate(self, key_slot: KEY_SLOT) -> None:
+        try:
+            require_version(self.version, (5, 2, 0))
+            data: bytes = Tlv(0x60, Tlv(0x5C, int2bytes(DO.CARDHOLDER_CERTIFICATE)))
+            if self.version <= (5, 4, 3):
+                # These use a non-standard byte in the command.
+                data = b"\x06" + data  # 6 is the length of the data.
+            self.protocol.send_apdu(
+                0,
+                INS.SELECT_DATA,
+                3 - key_slot,
+                0x04,
+                data,
+            )
+        except NotSupportedError:
+            if key_slot == KEY_SLOT.AUT:
+                return  # Older version still support AUT, which is the default slot.
+            raise
+
+    def get_certificate(self, key_slot: KEY_SLOT) -> x509.Certificate:
+        """Get a certificate from a slot."""
         if key_slot == KEY_SLOT.ATT:
             require_version(self.version, (5, 2, 0))
             data = self.get_data(DO.ATT_CERTIFICATE)
@@ -886,8 +1319,13 @@ class OpenPgpSession:
             raise ValueError("No certificate found!")
         return x509.load_der_x509_certificate(data, default_backend())
 
-    def import_certificate(self, key_slot, certificate):
-        """Requires Admin PIN verification."""
+    def put_certificate(
+        self, key_slot: KEY_SLOT, certificate: x509.Certificate
+    ) -> None:
+        """Imports a certificate into a slot.
+
+        Requires Admin PIN verification.
+        """
         cert_data = certificate.public_bytes(Encoding.DER)
         if key_slot == KEY_SLOT.ATT:
             require_version(self.version, (5, 2, 0))
@@ -896,98 +1334,11 @@ class OpenPgpSession:
             self._select_certificate(key_slot)
             self.put_data(DO.CARDHOLDER_CERTIFICATE, cert_data)
 
-    def import_key(self, key_slot, key, fingerprint=None, timestamp=None):
-        """Requires Admin PIN verification."""
-        if self.version >= (4, 0, 0):
-            attributes = _get_key_attributes(key, key_slot)
-            self.put_data(key_slot.key_id, attributes)
+    def delete_certificate(self, key_slot: KEY_SLOT) -> None:
+        """Deletes a certificate in a slot.
 
-        template = _get_key_template(key, key_slot, self.version < (4, 0, 0))
-        self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, template)
-
-        if fingerprint is not None:
-            self.put_data(key_slot.fingerprint, fingerprint)
-
-        if timestamp is not None:
-            self.put_data(key_slot.gen_time, struct.pack(">I", timestamp))
-
-    def generate_rsa_key(self, key_slot, key_size, timestamp=None):
-        """Requires Admin PIN verification."""
-        if (4, 2, 0) <= self.version < (4, 3, 5):
-            raise NotSupportedError("RSA key generation not supported on this YubiKey")
-
-        if timestamp is None:
-            timestamp = int(time.time())
-
-        neo = self.version < (4, 0, 0)
-        if not neo:
-            attributes = _format_rsa_attributes(key_size)
-            self.put_data(key_slot.key_id, attributes)
-        elif key_size != 2048:
-            raise ValueError("Unsupported key size!")
-        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
-
-        data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
-        numbers = rsa.RSAPublicNumbers(bytes2int(data[0x82]), bytes2int(data[0x81]))
-
-        self.put_data(key_slot.gen_time, struct.pack(">I", timestamp))
-        # TODO: Calculate and write fingerprint
-
-        return numbers.public_key(default_backend())
-
-    def generate_ec_key(self, key_slot, curve_name, timestamp=None):
-        """Requires Admin PIN verification."""
-        require_version(self.version, (5, 2, 0))
-        if timestamp is None:
-            timestamp = int(time.time())
-
-        attributes = _format_ec_attributes(key_slot, curve_name)
-        self.put_data(key_slot.key_id, attributes)
-        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_slot.crt)
-
-        data = Tlv.parse_dict(Tlv.unpack(0x7F49, resp))
-        pubkey_enc = data[0x86]
-
-        self.put_data(key_slot.gen_time, struct.pack(">I", timestamp))
-        # TODO: Calculate and write fingerprint
-
-        if curve_name == "x25519":
-            # Added in 2.0
-            from cryptography.hazmat.primitives.asymmetric import x25519
-
-            return x25519.X25519PublicKey.from_public_bytes(pubkey_enc)
-        if curve_name == "ed25519":
-            # Added in 2.6
-            from cryptography.hazmat.primitives.asymmetric import ed25519
-
-            return ed25519.Ed25519PublicKey.from_public_bytes(pubkey_enc)
-
-        curve = getattr(ec, curve_name.upper())
-        try:
-            # Added in cryptography 2.5
-            return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
-        except AttributeError:
-            return ec.EllipticCurvePublicNumbers.from_encoded_point(
-                curve(), pubkey_enc
-            ).public_key(default_backend())
-
-    def delete_key(self, key_slot):
-        """Requires Admin PIN verification."""
-        if self.version < (4, 0, 0):
-            # Import over the key
-            self.import_key(
-                key_slot,
-                rsa.generate_private_key(65537, 2048, default_backend()),
-                b"\0" * 20,
-                0,
-            )
-        else:
-            # Delete key by changing the key attributes twice.
-            self.put_data(key_slot.key_id, _format_rsa_attributes(4096))
-            self.put_data(key_slot.key_id, _format_rsa_attributes(2048))
-
-    def delete_certificate(self, key_slot):
-        """Requires Admin PIN verification."""
+        Requires Admin PIN verification.
+        """
         if key_slot == KEY_SLOT.ATT:
             require_version(self.version, (5, 2, 0))
             self.put_data(DO.ATT_CERTIFICATE, b"")
@@ -995,8 +1346,14 @@ class OpenPgpSession:
             self._select_certificate(key_slot)
             self.put_data(DO.CARDHOLDER_CERTIFICATE, b"")
 
-    def attest(self, key_slot):
-        """Requires User PIN verification."""
+    def attest_key(self, key_slot: KEY_SLOT) -> x509.Certificate:
+        """Creates an attestation certificate for a key.
+
+        The certificte is written to the certificate slot for the key, and its
+        content is returned.
+
+        Requires User PIN verification.
+        """
         require_version(self.version, (5, 2, 0))
-        self.protocol.send_apdu(0x80, INS.GET_ATTESTATION, key_slot.indx, 0)
-        return self.read_certificate(key_slot)
+        self.protocol.send_apdu(0x80, INS.GET_ATTESTATION, key_slot, 0)
+        return self.get_certificate(key_slot)
