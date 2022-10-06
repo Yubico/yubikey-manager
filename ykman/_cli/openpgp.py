@@ -128,7 +128,7 @@ def reset(ctx, force):
     values.
     """
     force or click.confirm(
-        prompt="WARNING! This will delete all stored OpenPGP keys and data and restore "
+        "WARNING! This will delete all stored OpenPGP keys and data and restore "
         "factory settings. Proceed?",
         abort=True,
         err=True,
