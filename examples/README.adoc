@@ -1,0 +1,16 @@
+== Example scripts
+The files in this repository are examples of scripting with ykman. Scripts can
+be much more flexible and more powerful than invoking the built-in commands in
+`ykman`, and can be used for programming YubiKeys in batches. For an
+introduction on this type of scripting, see
+link:../doc/Scripting.adoc[Scripting].
+
+=== Running a script
+The simplest way to run a script is by passing it to the `ykman` tool:
+
+  ykman script script_file.py [args...]
+
+You can also run the scripts with the standard Python interpreter, though
+`ykman` and its dependencies will need to be available:
+
+  python script_file.py [args...]

@@ -28,15 +28,22 @@
 import logging
 import click
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import OpenPgpController, KEY_SLOT, TOUCH_MODE, get_openpgp_info
+from .._openpgp import (
+    OpenPgpController,
+    KEY_SLOT,
+    TOUCH_MODE,
+    PIN_POLICY,
+    get_openpgp_info,
+)
 from .util import (
-    cli_fail,
+    CliFail,
     click_force_option,
     click_format_option,
     click_postpone_execution,
     click_prompt,
-    ykman_group,
+    click_group,
     EnumChoice,
+    pretty_print,
 )
 
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
@@ -73,7 +80,11 @@ def int_in_range(minval, maxval):
     return inner
 
 
-@ykman_group(SmartCardConnection)
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
+@click_group(connections=[SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 def openpgp(ctx):
@@ -90,7 +101,10 @@ def openpgp(ctx):
       Require touch to use the authentication key:
       $ ykman openpgp keys set-touch aut on
     """
-    ctx.obj["controller"] = OpenPgpController(ctx.obj["conn"])
+    dev = ctx.obj["device"]
+    conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+    ctx.obj["controller"] = OpenPgpController(conn)
 
 
 @openpgp.command()
@@ -100,27 +114,29 @@ def info(ctx):
     Display general status of the OpenPGP application.
     """
     controller = ctx.obj["controller"]
-    click.echo(get_openpgp_info(controller))
+    click.echo("\n".join(pretty_print(get_openpgp_info(controller))))
 
 
 @openpgp.command()
-@click.confirmation_option(
-    "-f",
-    "--force",
-    prompt="WARNING! This will delete "
-    "all stored OpenPGP keys and data and restore "
-    "factory settings?",
-)
+@click_force_option
 @click.pass_context
-def reset(ctx):
+def reset(ctx, force):
     """
     Reset all OpenPGP data.
 
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
     """
+    force or click.confirm(
+        "WARNING! This will delete all stored OpenPGP keys and data and restore "
+        "factory settings. Proceed?",
+        abort=True,
+        err=True,
+    )
+
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     ctx.obj["controller"].reset()
+    logger.info("OpenPGP application data reset")
     click.echo("Success! All data has been cleared and default PINs are set.")
     echo_default_pins()
 
@@ -144,7 +160,7 @@ def access():
 @click.argument(
     "admin-pin-retries", type=click.IntRange(1, 99), metavar="ADMIN-PIN-RETRIES"
 )
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="admin PIN for OpenPGP")
 @click_force_option
 @click.pass_context
 def set_pin_retries(
@@ -170,10 +186,163 @@ def set_pin_retries(
 
         controller.verify_admin(admin_pin)
         controller.set_pin_retries(pin_retries, reset_code_retries, admin_pin_retries)
+        logger.info("Number of PIN/Reset Code/Admin PIN retries set")
 
         if resets_pins:
             click.echo("Default PINs are set.")
             echo_default_pins()
+
+
+@access.command("change-pin")
+@click.option("-P", "--pin", help="current PIN code")
+@click.option("-n", "--new-pin", help="a new PIN")
+@click.pass_context
+def change_pin(ctx, pin, new_pin):
+    """
+    Change the PIN.
+
+    The PIN has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if pin is None:
+        pin = click_prompt("Enter PIN", hide_input=True)
+
+    if new_pin is None:
+        new_pin = click_prompt(
+            "New PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.change_pin(pin, new_pin)
+
+
+@access.command("change-reset-code")
+@click.option("-a", "--admin-pin", help="Admin PIN")
+@click.option("-r", "--reset-code", help="a new Reset Code")
+@click.pass_context
+def change_reset_code(ctx, admin_pin, reset_code):
+    """
+    Change the Reset Code.
+
+    The Reset Code has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if reset_code is None:
+        reset_code = click_prompt(
+            "New Reset Code",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.verify_admin(admin_pin)
+    controller.change_reset_code(reset_code)
+
+
+@access.command("change-admin-pin")
+@click.option("-a", "--admin-pin", help="current Admin PIN")
+@click.option("-n", "--new-admin-pin", help="new Admin PIN")
+@click.pass_context
+def change_admin(ctx, admin_pin, new_admin_pin):
+    """
+    Change the Admin PIN.
+
+    The Admin PIN has a minimum length of 8, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if new_admin_pin is None:
+        new_admin_pin = click_prompt(
+            "New Admin PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    controller.change_admin(admin_pin, new_admin_pin)
+
+
+@access.command("unblock-pin")
+@click.option(
+    "-a", "--admin-pin", help='admin PIN (use "-" as a value to prompt for input)'
+)
+@click.option("-r", "--reset-code", help="Reset Code")
+@click.option("-n", "--new-pin", help="a new PIN")
+@click.pass_context
+def unblock_pin(ctx, admin_pin, reset_code, new_pin):
+    """
+    Unblock the PIN (using Reset Code or Admin PIN).
+
+    If the PIN is lost or blocked you can reset it to a new value using either the
+    Reset Code OR the Admin PIN.
+
+    The new PIN has a minimum length of 6, and supports any type of
+    alphanumeric characters.
+    """
+
+    controller = ctx.obj["controller"]
+
+    if reset_code is not None and admin_pin is not None:
+        raise CliFail(
+            "Invalid options: Only one of --reset-code and --admin-pin may be used."
+        )
+
+    if admin_pin == "-":
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    if reset_code is None and admin_pin is None:
+        reset_code = click_prompt("Enter Reset Code", hide_input=True)
+
+    if new_pin is None:
+        new_pin = click_prompt(
+            "New PIN",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    if admin_pin:
+        controller.verify_admin(admin_pin)
+    controller.reset_pin(new_pin, reset_code)
+
+
+@access.command("set-signature-policy")
+@click.argument("policy", metavar="POLICY", type=EnumChoice(PIN_POLICY))
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
+@click.pass_context
+def set_signature_policy(ctx, policy, admin_pin):
+    """
+    Set the Signature PIN policy.
+
+    \b
+    POLICY  Signature PIN policy to set (always, once).
+
+    The Signature PIN policy is used to control whether the PIN is
+    always required when using the Signature key, or if it is required
+    only once per session.
+    """
+    controller = ctx.obj["controller"]
+
+    if admin_pin is None:
+        admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
+
+    try:
+        controller.verify_admin(admin_pin)
+        controller.set_signature_pin_policy(policy)
+    except Exception:
+        raise CliFail("Failed to set new Signature PIN policy")
 
 
 @openpgp.group("keys")
@@ -184,12 +353,12 @@ def keys():
 @keys.command("set-touch")
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("policy", metavar="POLICY", type=EnumChoice(TOUCH_MODE))
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click_force_option
 @click.pass_context
 def set_touch(ctx, key, policy, admin_pin, force):
     """
-    Set touch policy for OpenPGP keys.
+    Set the touch policy for OpenPGP keys.
 
     \b
     KEY     Key slot to set (sig, enc, aut or att).
@@ -217,15 +386,15 @@ def set_touch(ctx, key, policy, admin_pin, force):
     policy_name = policy.name.lower().replace("_", "-")
 
     if policy not in controller.supported_touch_policies:
-        cli_fail(f"Touch policy {policy_name} not supported by this YubiKey.")
+        raise CliFail(f"Touch policy {policy_name} not supported by this YubiKey.")
 
     if key == KEY_SLOT.ATT and not controller.supports_attestation:
-        cli_fail("Attestation is not supported by this YubiKey.")
+        raise CliFail("Attestation is not supported by this YubiKey.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
-    prompt = f"Set touch policy of {key.value.lower()} key to {policy_name}?"
+    prompt = f"Set touch policy of {key.name} key to {policy_name}?"
     if policy.is_fixed:
         prompt = (
             "WARNING: This touch policy cannot be changed without deleting the "
@@ -237,15 +406,15 @@ def set_touch(ctx, key, policy, admin_pin, force):
         try:
             controller.verify_admin(admin_pin)
             controller.set_touch(key, policy)
+            logger.info(f"Touch policy for slot {key.name} set")
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                cli_fail("Touch policy not allowed.")
-            logger.debug("Failed to set touch policy", exc_info=e)
-            cli_fail("Failed to set touch policy.")
+                raise CliFail("Touch policy not allowed.")
+            raise CliFail("Failed to set touch policy.")
 
 
 @keys.command("import")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
@@ -267,20 +436,19 @@ def import_key(ctx, key, private_key, admin_pin):
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         private_key = parse_private_key(private_key.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
-        cli_fail("Failed to parse private key.")
+    except Exception:
+        raise CliFail("Failed to parse private key.")
     try:
         controller.verify_admin(admin_pin)
         controller.import_key(key, private_key)
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
-        cli_fail("Failed to import attestation key.")
+        logger.info(f"Private key imported for slot {key.name}")
+    except Exception:
+        raise CliFail("Failed to import attestation key.")
 
 
 @keys.command()
 @click.pass_context
-@click.option("-P", "--pin", help="PIN code.")
+@click.option("-P", "--pin", help="PIN code")
 @click_format_option
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT, hidden=[KEY_SLOT.ATT]))
 @click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
@@ -317,9 +485,12 @@ def attest(ctx, key, certificate, pin, format):
             controller.verify_pin(pin)
             cert = controller.attest(key)
             certificate.write(cert.public_bytes(encoding=format))
-        except Exception as e:
-            logger.debug("Failed to attest", exc_info=e)
-            cli_fail("Attestation failed")
+            logger.info(
+                f"Attestation certificate for slot {key.name} written to "
+                f"{_fname(certificate)}"
+            )
+        except Exception:
+            raise CliFail("Attestation failed")
 
 
 @openpgp.group("certificates")
@@ -345,17 +516,18 @@ def export_certificate(ctx, key, format, certificate):
     controller = ctx.obj["controller"]
 
     if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
-        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+        raise CliFail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     try:
         cert = controller.read_certificate(key)
     except ValueError:
-        cli_fail(f"Failed to read certificate from {key.name}")
+        raise CliFail(f"Failed to read certificate from slot {key.name}")
     certificate.write(cert.public_bytes(encoding=format))
+    logger.info(f"Certificate for slot {key.name} exported to {_fname(certificate)}")
 
 
 @certificates.command("delete")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 def delete_certificate(ctx, key, admin_pin):
@@ -368,20 +540,20 @@ def delete_certificate(ctx, key, admin_pin):
     controller = ctx.obj["controller"]
 
     if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
-        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+        raise CliFail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
     try:
         controller.verify_admin(admin_pin)
         controller.delete_certificate(key)
-    except Exception as e:
-        logger.debug("Failed to delete ", exc_info=e)
-        cli_fail("Failed to delete certificate.")
+        logger.info(f"Certificate for slot {key.name} deleted")
+    except Exception:
+        raise CliFail("Failed to delete certificate.")
 
 
 @certificates.command("import")
-@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP.")
+@click.option("-a", "--admin-pin", help="Admin PIN for OpenPGP")
 @click.pass_context
 @click.argument("key", metavar="KEY", type=EnumChoice(KEY_SLOT))
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
@@ -396,21 +568,19 @@ def import_certificate(ctx, key, cert, admin_pin):
     controller = ctx.obj["controller"]
 
     if controller.version < (5, 2, 0) and key != KEY_SLOT.AUT:
-        cli_fail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
+        raise CliFail(f"Certificate slot {key.name} requires YubiKey 5.2.0 or later.")
 
     if admin_pin is None:
         admin_pin = click_prompt("Enter Admin PIN", hide_input=True)
 
     try:
         certs = parse_certificates(cert.read(), password=None)
-    except Exception as e:
-        logger.debug("Failed to parse", exc_info=e)
-        cli_fail("Failed to parse certificate.")
+    except Exception:
+        raise CliFail("Failed to parse certificate.")
     if len(certs) != 1:
-        cli_fail("Can only import one certificate.")
+        raise CliFail("Can only import one certificate.")
     try:
         controller.verify_admin(admin_pin)
         controller.import_certificate(key, certs[0])
-    except Exception as e:
-        logger.debug("Failed to import", exc_info=e)
-        cli_fail("Failed to import certificate")
+    except Exception:
+        raise CliFail("Failed to import certificate")

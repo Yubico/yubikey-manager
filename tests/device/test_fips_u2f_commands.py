@@ -9,7 +9,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-@condition.fips(True)
+@condition.yk4_fips(True)
 @condition.capability(CAPABILITY.U2F)
 @condition.transport(TRANSPORT.USB)
 def preconditions():

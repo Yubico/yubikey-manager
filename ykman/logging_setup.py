@@ -27,6 +27,9 @@
 
 from ykman import __version__ as ykman_version
 from ykman.util import get_windows_version
+from ykman.logging import init_logging
+from yubikit.logging import LOG_LEVEL
+from datetime import datetime
 import platform
 import logging
 import ctypes
@@ -34,17 +37,11 @@ import sys
 import os
 
 
-LOG_LEVELS = [
-    logging.DEBUG,
-    logging.INFO,
-    logging.WARNING,
-    logging.ERROR,
-    logging.CRITICAL,
-]
-LOG_LEVEL_NAMES = [logging.getLevelName(lvl) for lvl in LOG_LEVELS]
+logger = logging.getLogger(__name__)
 
 
 def log_sys_info(log):
+    log(f"ykman: {ykman_version}")
     log(f"Python: {sys.version}")
     log(f"Platform: {sys.platform}")
     log(f"Arch: {platform.machine()}")
@@ -54,28 +51,11 @@ def log_sys_info(log):
     else:
         is_admin = os.getuid() == 0
     log(f"Running as admin: {is_admin}")
+    log("System date: %s", datetime.today().strftime("%Y-%m-%d"))
 
 
 def setup(log_level_name, log_file=None):
-    log_level_value = next(
-        (lvl for lvl in LOG_LEVELS if logging.getLevelName(lvl) == log_level_name), None
-    )
+    log_level = LOG_LEVEL[log_level_name.upper()]
+    init_logging(log_level, log_file=log_file)
 
-    if log_level_value is None:
-        raise ValueError("Unknown log level: " + log_level_name)
-
-    logging.disable(logging.NOTSET)
-    logging.basicConfig(
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-        filename=log_file,
-        format="%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",  # noqa: E501
-        level=log_level_value,
-    )
-
-    logger = logging.getLogger(__name__)
-    logger.info("Initialized logging for level: %s", log_level_name)
-    logger.info("Running ykman version: %s", ykman_version)
     log_sys_info(logger.debug)
-
-
-logging.disable(logging.CRITICAL * 2)

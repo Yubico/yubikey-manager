@@ -1,9 +1,7 @@
-from __future__ import unicode_literals
-
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from ykman.openpgp import OpenPgpController, KEY_SLOT
+from ykman._openpgp import OpenPgpController, KEY_SLOT
 from yubikit.management import CAPABILITY
 from yubikit.core.smartcard import ApduError
 from . import condition
@@ -31,6 +29,7 @@ def not_roca(version):
     return not ((4, 2, 0) <= version < (4, 3, 5))
 
 
+@condition.check(not_roca)
 def test_generate_requires_admin(controller):
     with pytest.raises(ApduError):
         controller.generate_rsa_key(KEY_SLOT.SIG, 2048)
@@ -46,6 +45,7 @@ def test_generate_rsa2048(controller):
 
 @condition.check(not_roca)
 @condition.min_version(4)
+@condition.yk4_fips(False)
 def test_generate_rsa4096(controller):
     controller.verify_admin(DEFAULT_ADMIN_PIN)
     pub = controller.generate_rsa_key(KEY_SLOT.SIG, 4096)
@@ -74,6 +74,12 @@ def test_generate_x25519(controller):
     assert len(pub.public_bytes(Encoding.Raw, PublicFormat.Raw)) == 32
 
 
+def test_import_requires_admin(controller):
+    priv = rsa.generate_private_key(E, 2048, default_backend())
+    with pytest.raises(ApduError):
+        controller.import_key(KEY_SLOT.SIG, priv)
+
+
 def test_import_rsa2048(controller):
     priv = rsa.generate_private_key(E, 2048, default_backend())
     controller.verify_admin(DEFAULT_ADMIN_PIN)
@@ -81,6 +87,7 @@ def test_import_rsa2048(controller):
 
 
 @condition.min_version(4)
+@condition.yk4_fips(False)
 def test_import_rsa4096(controller):
     priv = rsa.generate_private_key(E, 4096, default_backend())
     controller.verify_admin(DEFAULT_ADMIN_PIN)

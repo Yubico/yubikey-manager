@@ -1,0 +1,147 @@
+== Running custom scripts
+The ykman executable lets you run custom python scripts in the context of
+YubiKey Manager.
+
+WARNING: Never run a script without fully understanding what it does!
+
+Scripts are very powerful, and have the power to harm to both your YubiKey and
+your computer.
+
+ONLY run scripts that you fully trust!
+
+See also: link:Library_Usage.adoc[Library Usage].
+
+
+=== Invoking the script
+To run a script, use the `script` subcommand of ykman:
+
+  ykman script myscript.py
+
+You can pass additional arguments used in the script by adding them at the end
+of the command:
+
+  ykman script myscript.py 123456 a_word "a string with spaces"
+
+These arguments are accessible in the standard Python way of using sys.argv:
+
+  import sys
+
+  print(sys.argv[1])  # prints "123456"
+  print(sys.argv[3])  # prints "a string with spaces"
+
+
+=== Scripting utilities
+We include some functions which may be helpful for scripting purposes in
+`ykman/scripting.py`, such as connectiong to one or more YubiKeys to perform
+actions upon them. See "Writing your first script" below for some example
+usage.
+
+
+=== Adding additional dependencies
+By default, the script will run with the full ykman library available, as well
+as the Python dependencies used by the application. If your script needs
+additional dependencies, you can provide an additional location to load Python
+packages from, by using the `--site-dir` argument:
+
+  ykman script --site-dir /path/to/additional/site-packages myscript.py
+
+
+=== Writing your first script
+Create a new file, `myscript.py` and add the following content to it:
+
+[source,py]
+----
+print("Hello, from ykman!")
+----
+
+Now, save the file and run:
+
+  ykman script myscript.py
+
+If everything went as planned, you should see the print output in your
+terminal. Something like:
+
+....
+> ykman script myscript.py
+Hello, from ykman!
+>
+....
+
+Now for something a bit more interesting. Let's connect to a YubiKey and read
+its serial number. Modify the `myscript.py` file to contain the following:
+
+[source,py]
+----
+from ykman import scripting as s
+
+device = s.single()
+print("Found a YubiKey:", device)
+----
+
+Save the file, then run it again using `ykman script`, and you should see
+output similar to:
+
+....
+> ykman script myscript.py
+Found a YubiKey: YubiKey 5 NFC (9681624)
+>
+....
+
+Now, let's pass an argument to our script. We'll modify the script to take a
+serial number, and check for the presense of that particular YubiKey. We'll use
+the `s.multi` function to keep waiting for more YubiKeys until either the
+correct one is found, or the user presses CTRL+C to stop the script. By setting
+`allow_initial=True` we allow there to be YubiKeys connected at the start of
+the function call. By default, the call will fail if there are YubiKeys already
+connected, to prevent accidental programming of the wrong YubiKey.
+
+[source,py]
+----
+from ykman import scripting as s
+import sys
+
+try:
+    target_serial = int(sys.argv[1])
+except:
+    print("Usage: ykman script myscript.py <serial>")
+    sys.exit(1)
+
+for device in s.multi(allow_initial=True):
+    if device.info.serial == target_serial:
+        print("YubiKey found, with serial:", target_serial)
+        break
+    else:
+        print("This is not the YubiKey we are looking for, try again...")
+----
+
+Now if we run the script like before, it will fail:
+
+....
+> ykman script myscript.py
+Usage: ykman script myscript.py <serial>
+>
+....
+
+This is because the script now expects a serial number. If we try it again,
+this time with a serial number, we instead get:
+
+....
+> ykman script myscript.py 7800302
+This is not the YubiKey we are looking for, try again...
+YubiKey found, with serial: 7800302
+....
+
+The serial number we passed to the script is stored in `sys.argv`. Since
+multiple argument can be passed in, the variable will contain a list, and we
+need to tell our script to use the "first" argument, which in our case is the
+serial. The first value in `sys.argv` is always the name of the script, so our
+argument will be the second value, with index `1`.  Arguments passed to the
+script are always of type `string`, so we need to interpret it as a number, and
+`int`. Now, we use `s.multi` to watch for connected YubiKeys. Each one is
+checked against the given serial number, and the script will stop when either
+the correct YubiKey is found, or if the user presses `Ctrl+C` to stop the
+`s.multi` call.
+
+Congratulations! You've written your first script that interacts with a
+YubiKey. There's a lot more that's possible. See the section on
+link:Library_Usage.adoc[Library Usage] for more advanced usage.

@@ -25,10 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT
+from ..base import YkmanDevice
+from yubikit.core import TRANSPORT, YUBIKEY, PID
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import USB_INTERFACE
-from ..base import YUBIKEY, YkmanDevice
+from yubikit.logging import LOG_LEVEL
 
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException
@@ -60,7 +61,7 @@ def _pid_from_name(name):
         interfaces |= USB_INTERFACE.FIDO
 
     key_type = YUBIKEY.NEO if "NEO" in name else YUBIKEY.YK4
-    return key_type.get_pid(interfaces)
+    return PID.of(key_type, interfaces)
 
 
 class ScardYubiKeyDevice(YkmanDevice):
@@ -104,7 +105,9 @@ class ScardSmartCardConnection(SmartCardConnection):
         self.connection = connection
         connection.connect()
         atr = connection.getATR()
-        self._transport = TRANSPORT.USB if atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
+        self._transport = (
+            TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
+        )
 
     @property
     def transport(self):
@@ -115,9 +118,11 @@ class ScardSmartCardConnection(SmartCardConnection):
 
     def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
-        logger.debug("SEND: %s", apdu.hex())
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", apdu.hex())
         data, sw1, sw2 = self.connection.transmit(list(apdu))
-        logger.debug("RECV: %s SW=%02x%02x", bytes(data).hex(), sw1, sw2)
+        logger.log(
+            LOG_LEVEL.TRAFFIC, "RECV: %s SW=%02x%02x", bytes(data).hex(), sw1, sw2
+        )
         return bytes(data), sw1 << 8 | sw2
 
 

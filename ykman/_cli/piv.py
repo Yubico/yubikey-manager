@@ -61,8 +61,8 @@ from ..piv import (
     generate_csr,
 )
 from .util import (
-    ykman_group,
-    cli_fail,
+    CliFail,
+    click_group,
     click_force_option,
     click_format_option,
     click_postpone_execution,
@@ -70,6 +70,7 @@ from .util import (
     click_prompt,
     prompt_timeout,
     EnumChoice,
+    pretty_print,
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
@@ -134,34 +135,38 @@ click_object_argument = click.argument(
 click_management_key_option = click.option(
     "-m",
     "--management-key",
-    help="The management key.",
+    help="the management key",
     callback=click_parse_management_key,
 )
-click_pin_option = click.option("-P", "--pin", help="PIN code.")
+click_pin_option = click.option("-P", "--pin", help="PIN code")
 click_pin_policy_option = click.option(
     "--pin-policy",
     type=EnumChoice(PIN_POLICY),
     default=PIN_POLICY.DEFAULT.name,
-    help="PIN policy for slot.",
+    help="PIN policy for slot",
 )
 click_touch_policy_option = click.option(
     "--touch-policy",
     type=EnumChoice(TOUCH_POLICY),
     default=TOUCH_POLICY.DEFAULT.name,
-    help="Touch policy for slot.",
+    help="touch policy for slot",
 )
 click_hash_option = click.option(
     "-a",
     "--hash-algorithm",
-    type=click.Choice(["SHA1", "SHA256", "SHA384", "SHA512"], case_sensitive=False),
+    type=click.Choice(["SHA256", "SHA384", "SHA512"], case_sensitive=False),
     default="SHA256",
     show_default=True,
-    help="Hash algorithm.",
+    help="hash algorithm",
     callback=click_parse_hash,
 )
 
 
-@ykman_group(SmartCardConnection)
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
+@click_group(connections=[SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 def piv(ctx):
@@ -184,7 +189,11 @@ def piv(ctx):
       Reset all PIV data and restore default settings:
       $ ykman piv reset
     """
-    session = PivSession(ctx.obj["conn"])
+
+    dev = ctx.obj["device"]
+    conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+    session = PivSession(conn)
     ctx.obj["session"] = session
     ctx.obj["pivman_data"] = get_pivman_data(session)
 
@@ -195,27 +204,30 @@ def info(ctx):
     """
     Display general status of the PIV application.
     """
-    click.echo(get_piv_info(ctx.obj["session"]))
+    info = get_piv_info(ctx.obj["session"])
+    click.echo("\n".join(pretty_print(info)))
 
 
 @piv.command()
 @click.pass_context
-@click.confirmation_option(
-    "-f",
-    "--force",
-    prompt="WARNING! This will delete all stored PIV data and restore factory settings."
-    " Proceed?",
-)
-def reset(ctx):
+@click_force_option
+def reset(ctx, force):
     """
     Reset all PIV data.
 
     This action will wipe all data and restore factory settings for
     the PIV application on the YubiKey.
     """
+    force or click.confirm(
+        prompt="WARNING! This will delete all stored PIV data and restore factory "
+        "settings. Proceed?",
+        abort=True,
+        err=True,
+    )
 
     click.echo("Resetting PIV data...")
     ctx.obj["session"].reset()
+
     click.echo("Success! All PIV data have been cleared from the YubiKey.")
     click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
     click.echo("\tPIN:\t123456")
@@ -256,15 +268,14 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo("Default PINs are set:")
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
-    except Exception as e:
-        logger.error("Failed to set PIN retries", exc_info=e)
-        cli_fail("Setting pin retries failed.")
+    except Exception:
+        raise CliFail("Setting pin retries failed.")
 
 
 @access.command("change-pin")
 @click.pass_context
-@click.option("-P", "--pin", help="Current PIN code.")
-@click.option("-n", "--new-pin", help="A new PIN.")
+@click.option("-P", "--pin", help="current PIN code")
+@click.option("-n", "--new-pin", help="a new PIN to set")
 def change_pin(ctx, pin, new_pin):
     """
     Change the PIN code.
@@ -299,19 +310,15 @@ def change_pin(ctx, pin, new_pin):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug(
-                "Failed to change the PIN, %d tries left", attempts, exc_info=e
-            )
-            cli_fail("PIN change failed - %d tries left." % attempts)
+            raise CliFail("PIN change failed - %d tries left." % attempts)
         else:
-            logger.debug("PIN is blocked.", exc_info=e)
-            cli_fail("PIN is blocked.")
+            raise CliFail("PIN is blocked.")
 
 
 @access.command("change-puk")
 @click.pass_context
-@click.option("-p", "--puk", help="Current PUK code.")
-@click.option("-n", "--new-puk", help="A new PUK code.")
+@click.option("-p", "--puk", help="current PUK code")
+@click.option("-n", "--new-puk", help="a new PUK code to set")
 def change_puk(ctx, puk, new_puk):
     """
     Change the PUK code.
@@ -344,11 +351,9 @@ def change_puk(ctx, puk, new_puk):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug("Failed to change PUK, %d tries left", attempts, exc_info=e)
-            cli_fail("PUK change failed - %d tries left." % attempts)
+            raise CliFail("PUK change failed - %d tries left." % attempts)
         else:
-            logger.debug("PUK is blocked.", exc_info=e)
-            cli_fail("PUK is blocked.")
+            raise CliFail("PUK is blocked.")
 
 
 @access.command("change-management-key")
@@ -358,24 +363,24 @@ def change_puk(ctx, puk, new_puk):
     "-t",
     "--touch",
     is_flag=True,
-    help="Require touch on YubiKey when prompted for management key.",
+    help="require touch on YubiKey when prompted for management key",
 )
 @click.option(
     "-n",
     "--new-management-key",
-    help="A new management key.",
+    help="a new management key to set",
     callback=click_parse_management_key,
 )
 @click.option(
     "-m",
     "--management-key",
-    help="Current management key.",
+    help="current management key",
     callback=click_parse_management_key,
 )
 @click.option(
     "-a",
     "--algorithm",
-    help="Management key algorithm.",
+    help="management key algorithm",
     type=EnumChoice(MANAGEMENT_KEY_TYPE),
     default=MANAGEMENT_KEY_TYPE.TDES.name,
     show_default=True,
@@ -384,16 +389,16 @@ def change_puk(ctx, puk, new_puk):
     "-p",
     "--protect",
     is_flag=True,
-    help="Store new management key on the YubiKey, protected by PIN."
-    " A random key will be used if no key is provided.",
+    help="store new management key on the YubiKey, protected by PIN "
+    "(a random key will be used if no key is provided)",
 )
 @click.option(
     "-g",
     "--generate",
     is_flag=True,
-    help="Generate a random management key. "
-    "Implied by --protect unless --new-management-key is also given. "
-    "Conflicts with --new-management-key.",
+    help="generate a random management key "
+    "(implied by --protect unless --new-management-key is also given, "
+    "can't be used with --new-management-key)",
 )
 @click_force_option
 def change_management_key(
@@ -432,7 +437,7 @@ def change_management_key(
 
     # Touch not supported on NEO.
     if touch and session.version < (4, 0, 0):
-        cli_fail("Require touch not supported on this YubiKey.")
+        raise CliFail("Require touch not supported on this YubiKey.")
 
     # If an old stored key needs to be cleared, the PIN is needed.
     if not pin_verified and pivman.has_stored_key:
@@ -470,7 +475,7 @@ def change_management_key(
                 ctx.fail("New management key has the wrong format.")
 
     if len(new_management_key) != algorithm.key_len:
-        cli_fail(
+        raise CliFail(
             "Management key has the wrong length (expected %d bytes)"
             % algorithm.key_len
         )
@@ -479,9 +484,8 @@ def change_management_key(
         pivman_set_mgm_key(
             session, new_management_key, algorithm, touch=touch, store_on_device=protect
         )
-    except ApduError as e:
-        logger.error("Failed to change management key", exc_info=e)
-        cli_fail("Changing the management key failed.")
+    except ApduError:
+        raise CliFail("Changing the management key failed.")
 
 
 @access.command("unblock-pin")
@@ -505,11 +509,9 @@ def unblock_pin(ctx, puk, new_pin):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            logger.debug("Failed to unblock PIN, %d tries left", attempts, exc_info=e)
-            cli_fail("PIN unblock failed - %d tries left." % attempts)
+            raise CliFail("PIN unblock failed - %d tries left." % attempts)
         else:
-            logger.debug("PUK is blocked.", exc_info=e)
-            cli_fail("PUK is blocked.")
+            raise CliFail("PUK is blocked.")
 
 
 @piv.group()
@@ -526,7 +528,7 @@ def keys():
 @click.option(
     "-a",
     "--algorithm",
-    help="Algorithm to use in key generation.",
+    help="algorithm to use in key generation",
     type=EnumChoice(KEY_TYPE),
     default=KEY_TYPE.RSA2048.name,
     show_default=True,
@@ -569,6 +571,10 @@ def generate_key(
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
+    logger.info(
+        f"Private key generated in slot {slot}, public key written to "
+        f"{_fname(public_key_output)}"
+    )
 
 
 @keys.command("import")
@@ -579,7 +585,7 @@ def generate_key(
 @click_touch_policy_option
 @click_slot_argument
 @click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
-@click.option("-p", "--password", help="Password used to decrypt the private key.")
+@click.option("-p", "--password", help="password used to decrypt the private key")
 def import_key(
     ctx, management_key, pin, slot, private_key, pin_policy, touch_policy, password
 ):
@@ -601,8 +607,8 @@ def import_key(
             password = password.encode()
         try:
             private_key = parse_private_key(data, password)
-        except InvalidPasswordError as e:
-            logger.error("Error parsing key", exc_info=e)
+        except InvalidPasswordError:
+            logger.debug("Error parsing key", exc_info=True)
             if password is None:
                 password = click_prompt(
                     "Enter password to decrypt key",
@@ -640,10 +646,12 @@ def attest(ctx, slot, certificate, format):
     session = ctx.obj["session"]
     try:
         cert = session.attest_key(slot)
-    except ApduError as e:
-        logger.error("Attestation failed", exc_info=e)
-        cli_fail("Attestation failed.")
+    except ApduError:
+        raise CliFail("Attestation failed.")
     certificate.write(cert.public_bytes(encoding=format))
+    logger.info(
+        f"Attestation certificate for slot {slot} written to {_fname(certificate)}"
+    )
 
 
 @keys.command()
@@ -654,9 +662,9 @@ def attest(ctx, slot, certificate, format):
     "-v",
     "--verify",
     is_flag=True,
-    help="Verify that the public key matches the private key in the slot.",
+    help="verify that the public key matches the private key in the slot",
 )
-@click.option("-P", "--pin", help="PIN code (used for --verify).")
+@click.option("-P", "--pin", help="PIN code (used for --verify)")
 @click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
 def export(ctx, slot, public_key_output, format, verify, pin):
     """
@@ -682,7 +690,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
         logger.debug("Public key read from YubiKey")
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            cli_fail(f"No key stored in slot {slot.name}.")
+            raise CliFail(f"No key stored in slot {slot.name}.")
     except NotSupportedError:
         try:  # Try attestation
             public_key = session.attest_key(slot).public_key()
@@ -696,14 +704,14 @@ def export(ctx, slot, public_key_output, format, verify, pin):
                     def do_verify():
                         with prompt_timeout():
                             if not check_key(session, slot, public_key):
-                                cli_fail(
+                                raise CliFail(
                                     "This public key is not tied to the private key in "
                                     f"the {slot.name} slot."
                                 )
 
                     _verify_pin_if_needed(ctx, session, do_verify, pin)
             except ApduError:
-                cli_fail(f"Unable to export public key from slot {slot.name}")
+                raise CliFail(f"Unable to export public key from slot {slot.name}.")
 
     key_encoding = format
     public_key_output.write(
@@ -712,6 +720,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
+    logger.info(f"Public key for slot {slot} written to {_fname(public_key_output)}")
 
 
 @piv.group("certificates")
@@ -725,12 +734,12 @@ def cert():
 @click.pass_context
 @click_management_key_option
 @click_pin_option
-@click.option("-p", "--password", help="A password may be needed to decrypt the data.")
+@click.option("-p", "--password", help="a password may be needed to decrypt the data")
 @click.option(
     "-v",
     "--verify",
     is_flag=True,
-    help="Verify that the certificate matches the private key in the slot.",
+    help="verify that the certificate matches the private key in the slot",
 )
 @click_slot_argument
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
@@ -753,8 +762,8 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
             password = password.encode()
         try:
             certs = parse_certificates(data, password)
-        except InvalidPasswordError as e:
-            logger.error("Error parsing certificate", exc_info=e)
+        except InvalidPasswordError:
+            logger.debug("Error parsing certificate", exc_info=True)
             if password is None:
                 password = click_prompt(
                     "Enter password to decrypt certificate",
@@ -784,7 +793,7 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
         def do_verify():
             with prompt_timeout():
                 if not check_key(session, slot, cert_to_import.public_key()):
-                    cli_fail(
+                    raise CliFail(
                         "This certificate is not tied to the private key in the "
                         f"{slot.name} slot."
                     )
@@ -813,12 +822,13 @@ def export_certificate(ctx, format, slot, certificate):
     session = ctx.obj["session"]
     try:
         cert = session.get_certificate(slot)
+        certificate.write(cert.public_bytes(encoding=format))
+        logger.info(f"Certificate from slot {slot} exported to {_fname(certificate)}")
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
-            cli_fail("No certificate found.")
+            raise CliFail("No certificate found.")
         else:
-            logger.error("Failed to read certificate from slot %s", slot, exc_info=e)
-    certificate.write(cert.public_bytes(encoding=format))
+            raise CliFail("Failed reading certificate.")
 
 
 @cert.command("generate")
@@ -830,13 +840,13 @@ def export_certificate(ctx, format, slot, certificate):
 @click.option(
     "-s",
     "--subject",
-    help="Subject for the certificate, as an RFC 4514 string.",
+    help="subject for the certificate, as an RFC 4514 string",
     required=True,
 )
 @click.option(
     "-d",
     "--valid-days",
-    help="Number of days until the certificate expires.",
+    help="number of days until the certificate expires",
     type=click.INT,
     default=365,
     show_default=True,
@@ -873,11 +883,10 @@ def generate_certificate(
             cert = generate_self_signed_certificate(
                 session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
-            session.put_certificate(slot, cert)
-            session.put_object(OBJECT_ID.CHUID, generate_chuid())
-    except ApduError as e:
-        logger.error("Failed to generate certificate for slot %s", slot, exc_info=e)
-        cli_fail("Certificate generation failed.")
+        session.put_certificate(slot, cert)
+        session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    except ApduError:
+        raise CliFail("Certificate generation failed.")
 
 
 @cert.command("request")
@@ -889,7 +898,7 @@ def generate_certificate(
 @click.option(
     "-s",
     "--subject",
-    help="Subject for the requested certificate, as an RFC 4514 string.",
+    help="subject for the requested certificate, as an RFC 4514 string",
     required=True,
 )
 @click_hash_option
@@ -921,9 +930,10 @@ def generate_certificate_signing_request(
         with prompt_timeout():
             csr = generate_csr(session, slot, public_key, subject, hash_algorithm)
     except ApduError:
-        cli_fail("Certificate Signing Request generation failed.")
+        raise CliFail("Certificate Signing Request generation failed.")
 
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
+    logger.info(f"CSR for slot {slot} written to {_fname(csr_output)}")
 
 
 @cert.command("delete")
@@ -987,10 +997,11 @@ def read_object(ctx, pin, object_id, output):
     def do_read_object(retry=True):
         try:
             output.write(session.get_object(object_id))
+            logger.info(f"Exported object {object_id} to {_fname(output)}")
         except ApduError as e:
             if e.sw == SW.FILE_NOT_FOUND:
-                cli_fail("No data found.")
-            elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                raise CliFail("No data found.")
+            elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and retry:
                 _verify_pin(ctx, session, pivman, pin)
                 do_read_object(retry=False)
             else:
@@ -1021,16 +1032,12 @@ def write_object(ctx, pin, management_key, object_id, data):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
-    def do_write_object():
-        try:
-            session.put_object(object_id, data.read())
-        except ApduError as e:
-            logger.debug("Failed writing object", exc_info=e)
-            if e.sw == SW.INCORRECT_PARAMETERS:
-                cli_fail("Something went wrong, is the object id valid?")
-            raise
-
-    do_write_object()
+    try:
+        session.put_object(object_id, data.read())
+    except ApduError as e:
+        if e.sw == SW.INCORRECT_PARAMETERS:
+            raise CliFail("Something went wrong, is the object id valid?")
+        raise CliFail("Error writing object")
 
 
 @objects.command("generate")
@@ -1070,7 +1077,7 @@ def _prompt_management_key(prompt="Enter a management key [blank to use default 
     try:
         return bytes.fromhex(management_key)
     except Exception:
-        cli_fail("Management key has the wrong format.")
+        raise CliFail("Management key has the wrong format.")
 
 
 def _prompt_pin(prompt="Enter PIN"):
@@ -1107,7 +1114,7 @@ def _ensure_authenticated(
 def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     if not pin:
         if no_prompt:
-            cli_fail("PIN required.")
+            raise CliFail("PIN required.")
         else:
             pin = _prompt_pin()
 
@@ -1131,11 +1138,11 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts > 0:
-            cli_fail(f"PIN verification failed, {attempts} tries left.")
+            raise CliFail(f"PIN verification failed, {attempts} tries left.")
         else:
-            cli_fail("PIN is blocked.")
+            raise CliFail("PIN is blocked.")
     except Exception:
-        cli_fail("PIN verification failed.")
+        raise CliFail("PIN verification failed.")
 
 
 def _verify_pin_if_needed(ctx, session, func, pin=None, no_prompt=False):
@@ -1167,6 +1174,5 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
 
         with prompt_timeout():
             session.authenticate(key_type, management_key)
-    except Exception as e:
-        logger.error("Authentication with management key failed.", exc_info=e)
-        cli_fail("Authentication with management key failed.")
+    except Exception:
+        raise CliFail("Authentication with management key failed.")

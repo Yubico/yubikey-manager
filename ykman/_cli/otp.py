@@ -43,10 +43,11 @@ from yubikit.core.otp import (
     modhex_decode,
     OtpConnection,
 )
+from yubikit.core.smartcard import SmartCardConnection
 
 from .util import (
-    ykman_group,
-    cli_fail,
+    CliFail,
+    click_group,
     click_force_option,
     click_callback,
     click_parse_b32_key,
@@ -54,9 +55,9 @@ from .util import (
     click_prompt,
     prompt_for_touch,
     EnumChoice,
+    is_yk4_fips,
 )
 from .. import __version__
-from ..device import is_fips_version
 from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
     PrepareUploadFailed,
@@ -67,6 +68,7 @@ from ..otp import (
     parse_b32_key,
     time_challenge,
     format_oath_code,
+    format_csv,
 )
 from threading import Event
 from time import time
@@ -107,12 +109,10 @@ click_slot_argument = click.argument(
 )
 
 
-def _failed_to_write_msg(ctx, exc_info):
-    logger.error("Failed to write to device", exc_info=exc_info)
-    cli_fail(
-        "Failed to write to the YubiKey. Make sure the device does not "
-        'have restricted access (see "ykman otp --help" for more info).'
-    )
+_WRITE_FAIL_MSG = (
+    "Failed to write to the YubiKey. Make sure the device does not "
+    'have restricted access (see "ykman otp --help" for more info).'
+)
 
 
 def _confirm_slot_overwrite(slot_state, slot):
@@ -124,14 +124,18 @@ def _confirm_slot_overwrite(slot_state, slot):
         )
 
 
-@ykman_group(OtpConnection)
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
+@click_group(connections=[OtpConnection, SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 @click.option(
     "--access-code",
     required=False,
     metavar="HEX",
-    help='A 6 byte access code. Use "-" as a value to prompt for input.',
+    help='6 byte access code (use "-" as a value to prompt for input)',
 )
 def otp(ctx, access_code):
     """
@@ -170,7 +174,18 @@ def otp(ctx, access_code):
       $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code
     """
 
-    ctx.obj["session"] = YubiOtpSession(ctx.obj["conn"])
+    """
+    # TODO: Require OTP for chalresp, or FW < 5.?. Require CCID for HashOTP
+    dev = ctx.obj["device"]
+    if dev.supports_connection(OtpConnection):
+        conn = dev.open_connection(OtpConnection)
+    else:
+        conn = dev.open_connection(SmartCardConnection)
+    ctx.call_on_close(conn.close)
+
+    ctx.obj["session"] = YubiOtpSession(conn)
+    """
+
     if access_code is not None:
         if access_code == "-":
             access_code = click_prompt("Enter the access code", hide_input=True)
@@ -178,9 +193,22 @@ def otp(ctx, access_code):
         try:
             access_code = parse_access_code_hex(access_code)
         except Exception as e:
-            ctx.fail("Failed to parse access code: " + str(e))
+            ctx.fail(f"Failed to parse access code: {e}")
 
     ctx.obj["access_code"] = access_code
+
+
+def _get_session(ctx, types=[OtpConnection, SmartCardConnection]):
+    dev = ctx.obj["device"]
+    for conn_type in types:
+        if dev.supports_connection(conn_type):
+            conn = dev.open_connection(conn_type)
+            ctx.call_on_close(conn.close)
+            return YubiOtpSession(conn)
+    raise CliFail(
+        "The connection type required for this command is not supported/enabled on the "
+        "YubiKey"
+    )
 
 
 @otp.command()
@@ -189,7 +217,7 @@ def info(ctx):
     """
     Display general status of the YubiKey OTP slots.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     state = session.get_config_state()
     slot1 = state.is_configured(1)
     slot2 = state.is_configured(2)
@@ -197,36 +225,42 @@ def info(ctx):
     click.echo(f"Slot 1: {slot1 and 'programmed' or 'empty'}")
     click.echo(f"Slot 2: {slot2 and 'programmed' or 'empty'}")
 
-    if is_fips_version(session.version):
+    if is_yk4_fips(ctx.obj["info"]):
         click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(session) else 'No'}")
 
 
 @otp.command()
-@click.confirmation_option("-f", "--force", prompt="Swap the two slots of the YubiKey?")
+@click_force_option
 @click.pass_context
-def swap(ctx):
+def swap(ctx, force):
     """
     Swaps the two slot configurations.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
+    force or click.confirm(
+        "Swap the two slots of the YubiKey?",
+        abort=True,
+        err=True,
+    )
+
     click.echo("Swapping slots...")
     try:
         session.swap_slots()
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
 @click_slot_argument
 @click.pass_context
-@click.option("-p", "--prefix", help="Added before the NDEF payload. Typically a URI.")
+@click.option("-p", "--prefix", help="added before the NDEF payload, typically a URI")
 @click.option(
     "-t",
     "--ndef-type",
     type=EnumChoice(NDEF_TYPE),
     default="URI",
     show_default=True,
-    help="NDEF payload type.",
+    help="NDEF payload type",
 )
 def ndef(ctx, slot, prefix, ndef_type):
     """
@@ -238,18 +272,18 @@ def ndef(ctx, slot, prefix, ndef_type):
     - For TEXT the default is an empty string
     """
     info = ctx.obj["info"]
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     state = session.get_config_state()
     if not info.has_transport(TRANSPORT.NFC):
-        cli_fail("This YubiKey does not support NFC.")
+        raise CliFail("This YubiKey does not support NFC.")
 
     if not state.is_configured(slot):
-        cli_fail(f"Slot {slot} is empty.")
+        raise CliFail(f"Slot {slot} is empty.")
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -260,10 +294,10 @@ def delete(ctx, slot, force):
     """
     Deletes the configuration stored in a slot.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
-        cli_fail("Not possible to delete an empty slot.")
+        raise CliFail("Not possible to delete an empty slot.")
     force or click.confirm(
         f"Do you really want to delete the configuration of slot {slot}?",
         abort=True,
@@ -272,8 +306,8 @@ def delete(ctx, slot, force):
     click.echo(f"Deleting the configuration in slot {slot}...")
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -282,7 +316,7 @@ def delete(ctx, slot, force):
     "-P",
     "--public-id",
     required=False,
-    help="Public identifier prefix.",
+    help="public identifier prefix",
     metavar="MODHEX",
 )
 @click.option(
@@ -291,7 +325,7 @@ def delete(ctx, slot, force):
     required=False,
     metavar="HEX",
     callback=parse_hex(6),
-    help="6 byte private identifier.",
+    help="6 byte private identifier",
 )
 @click.option(
     "-k",
@@ -299,40 +333,47 @@ def delete(ctx, slot, force):
     required=False,
     metavar="HEX",
     callback=parse_hex(16),
-    help="16 byte secret key.",
+    help="16 byte secret key",
 )
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter keystroke after emitting the OTP.",
+    help="don't send an Enter keystroke after emitting the OTP",
 )
 @click.option(
     "-S",
     "--serial-public-id",
     is_flag=True,
     required=False,
-    help="Use YubiKey serial number as public ID. Conflicts with --public-id.",
+    help="use YubiKey serial number as public ID (can't be used with --public-id)",
 )
 @click.option(
     "-g",
     "--generate-private-id",
     is_flag=True,
     required=False,
-    help="Generate a random private ID. Conflicts with --private-id.",
+    help="generate a random private ID (can't be used with --private-id)",
 )
 @click.option(
     "-G",
     "--generate-key",
     is_flag=True,
     required=False,
-    help="Generate a random secret key. Conflicts with --key.",
+    help="generate a random secret key (can't be used with --key)",
 )
 @click.option(
     "-u",
     "--upload",
     is_flag=True,
     required=False,
-    help="Upload credential to YubiCloud (opens in browser). Conflicts with --force.",
+    help="upload credential to YubiCloud (opens a browser, can't be used with --force)",
+)
+@click.option(
+    "-O",
+    "--config-output",
+    type=click.File("a"),
+    required=False,
+    help="file to output the configuration to (existing file will be appended to)",
 )
 @click_force_option
 @click.pass_context
@@ -348,13 +389,15 @@ def yubiotp(
     generate_private_id,
     generate_key,
     upload,
+    config_output,
 ):
     """
     Program a Yubico OTP credential.
     """
 
     info = ctx.obj["info"]
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
+    serial = None
 
     if public_id and serial_public_id:
         ctx.fail("Invalid options: --public-id conflicts with --serial-public-id.")
@@ -373,7 +416,8 @@ def yubiotp(
             try:
                 serial = session.get_serial()
             except CommandError:
-                cli_fail("Serial number not set, public ID must be provided")
+                raise CliFail("Serial number not set, public ID must be provided")
+
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo(f"Using YubiKey serial as public ID: {public_id}")
         elif force:
@@ -415,9 +459,9 @@ def yubiotp(
             key = click_prompt("Enter secret key")
             key = bytes.fromhex(key)
 
-    if not upload and not force:
-        upload = click.confirm("Upload credential to YubiCloud?", abort=False, err=True)
     if upload:
+        click.confirm("Upload credential to YubiCloud?", abort=True, err=True)
+
         try:
             upload_url = prepare_upload_key(
                 key,
@@ -427,27 +471,36 @@ def yubiotp(
                 user_agent="ykman/" + __version__,
             )
             click.echo("Upload to YubiCloud initiated successfully.")
+            logger.info("Initiated YubiCloud upload")
         except PrepareUploadFailed as e:
             error_msg = "\n".join(e.messages())
-            cli_fail("Upload to YubiCloud failed.\n" + error_msg)
+            raise CliFail("Upload to YubiCloud failed.\n" + error_msg)
 
     force or click.confirm(
         f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
     )
 
+    access_code = ctx.obj["access_code"]
     try:
         session.put_configuration(
             slot,
             YubiOtpSlotConfiguration(public_id, private_id, key).append_cr(
                 not no_enter
             ),
-            ctx.obj["access_code"],
-            ctx.obj["access_code"],
+            access_code,
+            access_code,
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
+
+    if config_output:
+        serial = serial or session.get_serial()
+        csv = format_csv(serial, public_id, private_id, key, access_code)
+        config_output.write(csv + "\n")
+        logger.info(f"Configuration parameters written to {_fname(config_output)}")
 
     if upload:
+        logger.info("Launching browser for YubiCloud upload")
         click.echo("Opening upload form in browser: " + upload_url)
         webbrowser.open_new_tab(upload_url)
 
@@ -455,7 +508,7 @@ def yubiotp(
 @otp.command()
 @click_slot_argument
 @click.argument("password", required=False)
-@click.option("-g", "--generate", is_flag=True, help="Generate a random password.")
+@click.option("-g", "--generate", is_flag=True, help="generate a random password")
 @click.option(
     "-l",
     "--length",
@@ -463,7 +516,7 @@ def yubiotp(
     type=click.IntRange(1, 38),
     default=38,
     show_default=True,
-    help="Length of generated password.",
+    help="length of generated password",
 )
 @click.option(
     "-k",
@@ -471,12 +524,12 @@ def yubiotp(
     type=EnumChoice(KEYBOARD_LAYOUT),
     default="MODHEX",
     show_default=True,
-    help="Keyboard layout to use for the static password.",
+    help="keyboard layout to use for the static password",
 )
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter keystroke after outputting the password.",
+    help="don't send an Enter keystroke after outputting the password",
 )
 @click_force_option
 @click.pass_context
@@ -491,7 +544,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     preferred keyboard layout.
     """
 
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     if password and len(password) > 38:
         ctx.fail("Password too long (maximum length is 38 characters).")
@@ -514,8 +567,8 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -525,21 +578,21 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     "-t",
     "--touch",
     is_flag=True,
-    help="Require touch on the YubiKey to generate a response.",
+    help="require touch on the YubiKey to generate a response",
 )
 @click.option(
     "-T",
     "--totp",
     is_flag=True,
     required=False,
-    help="Use a base32 encoded key (optionally padded) for TOTP credentials.",
+    help="use a base32 encoded key (optionally padded) for TOTP credentials",
 )
 @click.option(
     "-g",
     "--generate",
     is_flag=True,
     required=False,
-    help="Generate a random secret key. Conflicts with KEY argument.",
+    help="generate a random secret key (can't be used with KEY argument)",
 )
 @click_force_option
 @click.pass_context
@@ -552,7 +605,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     \b
     KEY     A key given in hex (or base32, if --totp is specified).
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     if key:
         if generate:
@@ -599,8 +652,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -610,14 +663,14 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     "-T",
     "--totp",
     is_flag=True,
-    help="Generate a TOTP code, use the current time if challenge is omitted.",
+    help="generate a TOTP code, use the current time if challenge is omitted",
 )
 @click.option(
     "-d",
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="Number of digits in generated TOTP code (default: 6).",
+    help="number of digits in generated TOTP code (default: 6)",
 )
 @click.pass_context
 def calculate(ctx, slot, challenge, totp, digits):
@@ -627,14 +680,19 @@ def calculate(ctx, slot, challenge, totp, digits):
     Send a challenge (in hex) to a YubiKey slot with a challenge-response
     credential, and read the response. Supports output as a OATH-TOTP code.
     """
-    session = ctx.obj["session"]
+    dev = ctx.obj["device"]
+    if dev.transport == TRANSPORT.NFC:
+        session = _get_session(ctx, [SmartCardConnection])
+    else:
+        # Calculate over USB is only available over OtpConnection
+        session = _get_session(ctx, [OtpConnection])
 
     if not challenge and not totp:
         challenge = click_prompt("Enter a challenge (hex)")
 
     # Check that slot is not empty
     if not session.get_config_state().is_configured(slot):
-        cli_fail("Cannot perform challenge-response on an empty slot.")
+        raise CliFail("Cannot perform challenge-response on an empty slot.")
 
     if totp:  # Challenge omitted or timestamp
         if challenge is None:
@@ -642,8 +700,8 @@ def calculate(ctx, slot, challenge, totp, digits):
         else:
             try:
                 challenge = time_challenge(int(challenge))
-            except Exception as e:
-                logger.error("Error", exc_info=e)
+            except Exception:
+                logger.exception("Error parsing challenge")
                 ctx.fail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
         challenge = bytes.fromhex(challenge)
@@ -663,8 +721,8 @@ def calculate(ctx, slot, challenge, totp, digits):
             value = response.hex()
 
         click.echo(value)
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 def parse_modhex_or_bcd(value):
@@ -686,14 +744,14 @@ def parse_modhex_or_bcd(value):
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="Number of digits in generated code (default is 6).",
+    help="number of digits in generated code (default is 6)",
 )
-@click.option("-c", "--counter", type=int, default=0, help="Initial counter value.")
-@click.option("-i", "--identifier", help="Token identifier.")
+@click.option("-c", "--counter", type=int, default=0, help="initial counter value")
+@click.option("-i", "--identifier", help="token identifier")
 @click.option(
     "--no-enter",
     is_flag=True,
-    help="Don't send an Enter keystroke after outputting the code.",
+    help="don't send an Enter keystroke after outputting the code",
 )
 @click_force_option
 @click.pass_context
@@ -707,7 +765,7 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     OMP+TT+MUI as 12 characters. If omitted, a default value of "ubhe" will be used for
     OMP+TT, and the YubiKey serial number will be used as MUI.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     mh1 = False
     mh2 = False
@@ -763,8 +821,8 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)
 
 
 @otp.command()
@@ -776,17 +834,16 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     "--new-access-code",
     metavar="HEX",
     required=False,
-    help='Set a new 6 byte access code for the slot. Use "-" as a value to prompt for '
-    "input.",
+    help='a new 6 byte access code to set (use "-" as a value to prompt for input)',
 )
 @click.option(
-    "--delete-access-code", is_flag=True, help="Remove access code from the slot."
+    "--delete-access-code", is_flag=True, help="remove access code from the slot"
 )
 @click.option(
     "--enter/--no-enter",
     default=True,
     show_default=True,
-    help="Should send 'Enter' keystroke after slot output.",
+    help="send an Enter keystroke after slot output",
 )
 @click.option(
     "-p",
@@ -794,14 +851,14 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     type=click.Choice(["0", "20", "40", "60"]),
     default="0",
     show_default=True,
-    help="Throttle output speed by adding a delay (in ms) between characters emitted.",
+    help="throttle output speed by adding a delay (in ms) between characters emitted",
 )
 @click.option(
     "--use-numeric-keypad",
     is_flag=True,
     show_default=True,
-    help="Use scancodes for numeric keypad when sending digits."
-    " Helps with some keyboard layouts. ",
+    help="use scancodes for numeric keypad when sending digits "
+    "(helps for some keyboard layouts)",
 )
 def settings(
     ctx,
@@ -819,19 +876,19 @@ def settings(
     Change the settings for a slot without changing the stored secret.
     All settings not specified will be written with default values.
     """
-    session = ctx.obj["session"]
+    session = _get_session(ctx)
 
     if new_access_code and delete_access_code:
         ctx.fail("--new-access-code conflicts with --delete-access-code.")
 
     if delete_access_code and not ctx.obj["access_code"]:
-        cli_fail(
+        raise CliFail(
             "--delete-access-code used without providing an access code "
             '(see "ykman otp --help" for more info).'
         )
 
     if not session.get_config_state().is_configured(slot):
-        cli_fail("Not possible to update settings on an empty slot.")
+        raise CliFail("Not possible to update settings on an empty slot.")
 
     if new_access_code is None:
         if not delete_access_code:
@@ -869,5 +926,5 @@ def settings(
             new_access_code,
             ctx.obj["access_code"],
         )
-    except CommandError as e:
-        _failed_to_write_msg(ctx, e)
+    except CommandError:
+        raise CliFail(_WRITE_FAIL_MSG)

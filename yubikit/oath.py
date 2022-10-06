@@ -4,10 +4,9 @@ from .core import (
     require_version,
     Version,
     Tlv,
-    AID,
     BadResponseError,
 )
-from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 
 from urllib.parse import unquote, urlparse, parse_qs
 from functools import total_ordering
@@ -22,6 +21,9 @@ import hashlib
 import struct
 import os
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # TLV tags for credential data
@@ -233,7 +235,7 @@ def _format_code(credential, timestamp, truncated):
         valid_to = (time_step + 1) * credential.period
     else:  # HOTP
         valid_from = timestamp
-        valid_to = float("Inf")
+        valid_to = 0x7FFFFFFFFFFFFFFF
     digits = truncated[0]
 
     return Code(
@@ -252,6 +254,11 @@ class OathSession:
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
         self.protocol.enable_touch_workaround(self._version)
+        self._neo_unlock_workaround = self.version < (3, 0, 0)
+        logger.debug(
+            f"OATH session initialized (version={self.version}, "
+            f"has_key={self._has_key})"
+        )
 
     @property
     def version(self) -> Version:
@@ -272,6 +279,7 @@ class OathSession:
     def reset(self) -> None:
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         _, self._salt, self._challenge = _parse_select(self.protocol.select(AID.OATH))
+        logger.info("OATH application data reset performed")
         self._has_key = False
         self._device_id = _get_device_id(self._salt)
 
@@ -279,6 +287,7 @@ class OathSession:
         return _derive_key(self._salt, password)
 
     def validate(self, key: bytes) -> None:
+        logger.debug("Unlocking session")
         response = _hmac_sha1(key, self._challenge)
         challenge = os.urandom(8)
         data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
@@ -289,6 +298,7 @@ class OathSession:
                 "Response from validation does not match verification!"
             )
         self._challenge = None
+        self._neo_unlock_workaround = False
 
     def set_key(self, key: bytes) -> None:
         challenge = os.urandom(8)
@@ -304,10 +314,16 @@ class OathSession:
                 + Tlv(TAG_RESPONSE, response)
             ),
         )
+        logger.info("New access code set")
         self._has_key = True
+        if self._neo_unlock_workaround:
+            logger.debug("Performing NEO workaround, re-select and unlock")
+            self._challenge = _parse_select(self.protocol.select(AID.OATH))[2]
+            self.validate(key)
 
     def unset_key(self) -> None:
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
+        logger.info("Access code removed")
         self._has_key = False
 
     def put_credential(
@@ -319,16 +335,23 @@ class OathSession:
         secret = secret.ljust(HMAC_MINIMUM_KEY_SIZE, b"\0")
         data = Tlv(TAG_NAME, cred_id) + Tlv(
             TAG_KEY,
-            struct.pack("<BB", d.oath_type | d.hash_algorithm, d.digits) + secret,
+            struct.pack(">BB", d.oath_type | d.hash_algorithm, d.digits) + secret,
         )
 
         if touch_required:
-            data += struct.pack(b">BB", TAG_PROPERTY, PROP_REQUIRE_TOUCH)
+            data += struct.pack(">BB", TAG_PROPERTY, PROP_REQUIRE_TOUCH)
 
         if d.counter > 0:
             data += Tlv(TAG_IMF, struct.pack(">I", d.counter))
 
+        logger.debug(
+            f"Importing credential (type={d.oath_type!r}, hash={d.hash_algorithm!r}, "
+            f"digits={d.digits}, period={d.period}, imf={d.counter}, "
+            f"touch_required={touch_required})"
+        )
         self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
+        logger.info("Credential imported")
+
         return Credential(
             self.device_id,
             cred_id,
@@ -348,6 +371,7 @@ class OathSession:
         self.protocol.send_apdu(
             0, INS_RENAME, 0, 0, Tlv(TAG_NAME, credential_id) + Tlv(TAG_NAME, new_id)
         )
+        logger.info("Credential renamed")
         return new_id
 
     def list_credentials(self) -> List[Credential]:
@@ -379,12 +403,14 @@ class OathSession:
 
     def delete_credential(self, credential_id: bytes) -> None:
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
+        logger.info("Credential deleted")
 
     def calculate_all(
         self, timestamp: Optional[int] = None
     ) -> Mapping[Credential, Optional[Code]]:
         timestamp = int(timestamp or time())
         challenge = _get_challenge(timestamp, DEFAULT_PERIOD)
+        logger.debug(f"Calculating all codes for time={timestamp}")
 
         entries = {}
         data = Tlv.parse_list(
@@ -410,6 +436,7 @@ class OathSession:
                     code = _format_code(credential, timestamp, tlv.value)
                 else:
                     # Non-standard period, recalculate
+                    logger.debug(f"Recalculating code for period={period}")
                     code = self.calculate_code(credential, timestamp)
             entries[credential] = code
 
@@ -423,8 +450,13 @@ class OathSession:
 
         timestamp = int(timestamp or time())
         if credential.oath_type == OATH_TYPE.TOTP:
+            logger.debug(
+                f"Calculating TOTP code for time={timestamp}, "
+                f"period={credential.period}"
+            )
             challenge = _get_challenge(timestamp, credential.period)
         else:  # HOTP
+            logger.debug("Calculating HOTP code")
             challenge = b""
 
         response = Tlv.unpack(

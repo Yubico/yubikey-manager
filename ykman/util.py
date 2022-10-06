@@ -26,10 +26,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import Tlv
+from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from functools import partial
 from typing import Tuple
 import ctypes
 
@@ -46,55 +46,16 @@ class InvalidPasswordError(Exception):
     """Raised when parsing key/certificate and the password might be wrong/missing."""
 
 
-def _parse_pkcs12_cryptography(pkcs12, data, password):
+def _parse_pkcs12(data, password):
     try:
         key, cert, cas = pkcs12.load_key_and_certificates(
             data, password, default_backend()
         )
-        return key, [cert] + cas
+        if cert:
+            cas.insert(0, cert)
+        return key, cas
     except ValueError as e:  # cryptography raises ValueError on wrong password
         raise InvalidPasswordError(e)
-
-
-def _parse_pkcs12_pyopenssl(crypto, data, password):
-    try:
-        p12 = crypto.load_pkcs12(data, password)
-        key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-        key = serialization.load_pem_private_key(
-            key_pem, password=None, backend=default_backend()
-        )
-
-        certs = [p12.get_certificate()]
-        cas = p12.get_ca_certificates()
-        if cas:
-            certs.extend(cas)
-        certs_pem = [
-            crypto.dump_certificate(crypto.FILETYPE_PEM, cert) for cert in certs
-        ]
-        certs = [
-            x509.load_pem_x509_certificate(cert_pem, default_backend())
-            for cert_pem in certs_pem
-        ]
-        return key, certs
-    except crypto.Error as e:
-        raise InvalidPasswordError(e)
-
-
-def _parse_pkcs12_unsupported(data, password):
-    raise ValueError("PKCS#12 support requires cryptography >= 2.5 or pyOpenSSL")
-
-
-try:  # This requires cryptography 2.5.
-    from cryptography.hazmat.primitives.serialization import pkcs12
-
-    _parse_pkcs12 = partial(_parse_pkcs12_cryptography, pkcs12)
-except ImportError:  # Use pyOpenSSL as a backup
-    try:
-        from OpenSSL import crypto
-
-        _parse_pkcs12 = partial(_parse_pkcs12_pyopenssl, crypto)
-    except ImportError:  # Can't support PKCS#12
-        _parse_pkcs12 = _parse_pkcs12_unsupported  # type: ignore
 
 
 def parse_private_key(data, password):
@@ -113,8 +74,8 @@ def parse_private_key(data, password):
         except ValueError as e:
             # Cryptography raises ValueError if decryption fails.
             raise InvalidPasswordError(e)
-        except Exception as e:
-            logger.debug("Failed to parse PEM private key ", exc_info=e)
+        except Exception:
+            logger.debug("Failed to parse PEM private key ", exc_info=True)
 
     # PKCS12
     if is_pkcs12(data):
@@ -125,8 +86,8 @@ def parse_private_key(data, password):
         return serialization.load_der_private_key(
             data, password, backend=default_backend()
         )
-    except Exception as e:
-        logger.debug("Failed to parse private key as DER", exc_info=e)
+    except Exception:
+        logger.debug("Failed to parse private key as DER", exc_info=True)
 
     # All parsing failed
     raise ValueError("Could not parse private key.")
@@ -148,8 +109,8 @@ def parse_certificates(data, password):
                             PEM_IDENTIFIER + cert, default_backend()
                         )
                     )
-                except Exception as e:
-                    logger.debug("Failed to parse PEM certificate", exc_info=e)
+                except Exception:
+                    logger.debug("Failed to parse PEM certificate", exc_info=True)
         # Could be valid PEM but not certificates.
         if not certs:
             raise ValueError("PEM file does not contain any certificate(s)")
@@ -162,8 +123,8 @@ def parse_certificates(data, password):
     # DER
     try:
         return [x509.load_der_x509_certificate(data, default_backend())]
-    except Exception as e:
-        logger.debug("Failed to parse certificate as DER", exc_info=e)
+    except Exception:
+        logger.debug("Failed to parse certificate as DER", exc_info=True)
 
     raise ValueError("Could not parse certificate.")
 
@@ -200,8 +161,8 @@ def is_pkcs12(data):
     try:
         header = Tlv.parse_from(Tlv.unpack(0x30, data))[0]
         return header.tag == 0x02 and header.value == b"\x03"
-    except ValueError as e:
-        logger.debug("Unable to parse TLV", exc_info=e)
+    except ValueError:
+        logger.debug("Unable to parse TLV", exc_info=True)
     return False
 
 

@@ -25,15 +25,29 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+"""
+Classes and functions for interacting with the OpenPGP application on a YubiKey.
+
+WARNING: This file is not part of the stable API, and thus changes to is can occur
+without a major version increase of the project.
+
+Keep this in mind when using these classes for scripting purposes!
+"""
+
 from yubikit.core import (
-    AID,
     Tlv,
     NotSupportedError,
     require_version,
     int2bytes,
     bytes2int,
 )
-from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol, ApduError, SW
+from yubikit.core.smartcard import (
+    SmartCardConnection,
+    SmartCardProtocol,
+    ApduError,
+    AID,
+    SW,
+)
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -103,19 +117,33 @@ class TOUCH_MODE(IntEnum):  # noqa: N801
 
 
 @unique
+class PIN_POLICY(IntEnum):  # noqa: N801
+    ONCE = 0x00
+    ALWAYS = 0x01
+
+    def __str__(self):
+        if self == PIN_POLICY.ONCE:
+            return "Once"
+        elif self == PIN_POLICY.ALWAYS:
+            return "Always"
+
+
+@unique
 class INS(IntEnum):  # noqa: N801
-    GET_DATA = 0xCA
-    GET_VERSION = 0xF1
-    SET_PIN_RETRIES = 0xF2
     VERIFY = 0x20
-    TERMINATE = 0xE6
+    CHANGE_PIN = 0x24
+    RESET_RETRY_COUNTER = 0x2C
     ACTIVATE = 0x44
     GENERATE_ASYM = 0x47
+    SELECT_DATA = 0xA5
+    SEND_REMAINING = 0xC0
+    GET_DATA = 0xCA
     PUT_DATA = 0xDA
     PUT_DATA_ODD = 0xDB
+    TERMINATE = 0xE6
+    GET_VERSION = 0xF1
+    SET_PIN_RETRIES = 0xF2
     GET_ATTESTATION = 0xFB
-    SEND_REMAINING = 0xC0
-    SELECT_DATA = 0xA5
 
 
 class PinRetries(NamedTuple):
@@ -125,6 +153,7 @@ class PinRetries(NamedTuple):
 
 
 PW1 = 0x81
+PW2 = 0x82  # Resetting Code
 PW3 = 0x83
 INVALID_PIN = b"\0" * 8
 TOUCH_METHOD_BUTTON = 0x20
@@ -134,9 +163,10 @@ TOUCH_METHOD_BUTTON = 0x20
 class DO(IntEnum):
     AID = 0x4F
     PW_STATUS = 0xC4
-    CARDHOLDER_CERTIFICATE = 0x7F21
-    ATT_CERTIFICATE = 0xFC
+    RESETTING_CODE = 0xD3
     KDF = 0xF9
+    ATT_CERTIFICATE = 0xFC
+    CARDHOLDER_CERTIFICATE = 0x7F21
 
 
 @unique
@@ -293,6 +323,8 @@ class KdfData:
         kdf = _KDFS[self.kdf_algorithm]
         if pw == PW1:
             salt = self.pw1_salt_bytes
+        elif pw == PW2:
+            salt = self.pw2_salt_bytes or self.pw1_salt_bytes
         elif pw == PW3:
             salt = self.pw3_salt_bytes or self.pw1_salt_bytes
         else:
@@ -369,6 +401,17 @@ class OpenPgpController(object):
         data = self._get_data(DO.PW_STATUS)
         return PinRetries(*data[4:7])
 
+    def get_signature_pin_policy(self):
+        data = self._get_data(DO.PW_STATUS)
+
+        return PIN_POLICY(data[0])
+
+    def set_signature_pin_policy(self, pin_policy):
+        """Requires Admin PIN verification."""
+        data = struct.pack(">B", pin_policy)
+
+        self._put_data(DO.PW_STATUS, data)
+
     def _block_pins(self):
         retries = self.get_remaining_pin_tries()
 
@@ -410,6 +453,47 @@ class OpenPgpController(object):
 
     def verify_admin(self, admin_pin):
         self._verify(PW3, admin_pin)
+
+    def _change(self, pw, pin, new_pin):
+        try:
+            pin = self._get_kdf().process(pw, pin.encode())
+            new_pin = self._get_kdf().process(pw, new_pin.encode())
+            self._app.send_apdu(0, INS.CHANGE_PIN, 0, pw, pin + new_pin)
+        except ApduError as e:
+            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+                raise ValueError("Conditions of use not satisfied.")
+            else:
+                pw_remaining = self.get_remaining_pin_tries()[pw - PW1]
+                raise ValueError(f"Invalid PIN, {pw_remaining} tries remaining.")
+
+    def change_pin(self, pin, new_pin):
+        self._change(PW1, pin, new_pin)
+
+    def change_admin(self, admin_pin, new_admin_pin):
+        self._change(PW3, admin_pin, new_admin_pin)
+
+    def change_reset_code(self, reset_code):
+        data = self._get_kdf().process(PW2, reset_code.encode())
+        self._put_data(DO.RESETTING_CODE, data)
+
+    def reset_pin(self, new_pin, reset_code=None):
+        p1 = 2
+        data = self._get_kdf().process(PW1, new_pin.encode())
+        if reset_code:
+            rc = self._get_kdf().process(PW2, reset_code.encode())
+            p1 = 0
+            data = rc + data
+
+        try:
+            self._app.send_apdu(0, INS.RESET_RETRY_COUNTER, p1, PW1, data)
+        except ApduError as e:
+            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+                raise ValueError("Conditions of use not satisfied.")
+            else:
+                reset_remaining = self.get_remaining_pin_tries().reset
+                raise ValueError(
+                    f"Invalid Reset Code, {reset_remaining} tries remaining."
+                )
 
     @property
     def supported_touch_policies(self):
@@ -591,26 +675,27 @@ class OpenPgpController(object):
         return self.read_certificate(key_slot)
 
 
-def get_openpgp_info(controller: OpenPgpController) -> str:
+def get_openpgp_info(controller: OpenPgpController):
     """Get human readable information about the OpenPGP configuration."""
-    lines = []
-    lines.append("OpenPGP version: %d.%d" % controller.get_openpgp_version())
-    lines.append("Application version: %d.%d.%d" % controller.version)
-    lines.append("")
     retries = controller.get_remaining_pin_tries()
-    lines.append(f"PIN tries remaining: {retries.pin}")
-    lines.append(f"Reset code tries remaining: {retries.reset}")
-    lines.append(f"Admin PIN tries remaining: {retries.admin}")
+    data = {
+        "OpenPGP version": "%d.%d" % controller.get_openpgp_version(),
+        "Application version": "%d.%d.%d" % controller.version,
+        "PIN tries remaining": retries.pin,
+        "Reset code tries remaining": retries.reset,
+        "Admin PIN tries remaining": retries.admin,
+        "Signature PIN": controller.get_signature_pin_policy(),
+    }
+
     # Touch only available on YK4 and later
     if controller.version >= (4, 2, 6):
-        lines.append("")
-        lines.append("Touch policies")
-        lines.append(f"Signature key           {controller.get_touch(KEY_SLOT.SIG)!s}")
-        lines.append(f"Encryption key          {controller.get_touch(KEY_SLOT.ENC)!s}")
-        lines.append(f"Authentication key      {controller.get_touch(KEY_SLOT.AUT)!s}")
+        touch = {
+            "Signature key": controller.get_touch(KEY_SLOT.SIG),
+            "Encryption key": controller.get_touch(KEY_SLOT.ENC),
+            "Authentication key": controller.get_touch(KEY_SLOT.AUT),
+        }
         if controller.supports_attestation:
-            lines.append(
-                f"Attestation key         {controller.get_touch(KEY_SLOT.ATT)!s}"
-            )
+            touch["Attestation key"] = controller.get_touch(KEY_SLOT.ATT)
+        data["Touch policies"] = touch
 
-    return "\n".join(lines)
+    return data

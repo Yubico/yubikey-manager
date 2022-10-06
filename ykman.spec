@@ -48,12 +48,14 @@ exe = EXE(
     exclude_binaries=True,
     name="ykman",
     icon="NONE",
+    target_arch="universal2",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     console=True,
     manifest="ykman.exe.manifest",
+    version="resources/win/version_info.txt",
 )
 coll = COLLECT(
     exe,

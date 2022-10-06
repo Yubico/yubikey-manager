@@ -1,10 +1,7 @@
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import CAPABILITY
-from ykman.base import YUBIKEY
 from .. import condition
 
-import contextlib
-import io
 import pytest
 
 
@@ -23,7 +20,7 @@ def not_sky(device, info):
             and _fido_only(info.supported_capabilities[TRANSPORT.USB])
         )
     else:
-        return device.pid.get_type() != YUBIKEY.SKY
+        return device.pid.yubikey_type != YUBIKEY.SKY
 
 
 class TestConfigUSB:
@@ -136,18 +133,6 @@ class TestConfigUSB:
         assert "OATH" not in output
         assert "PIV" not in output
         assert "OpenPGP" not in output
-
-    def test_mode_alias(self, ykman_cli, await_reboot):
-        with io.StringIO() as buf:
-            with contextlib.redirect_stderr(buf):
-                ykman_cli("mode", "ccid", "-f")
-                await_reboot()
-                output = ykman_cli("config", "usb", "--list").output
-                assert "FIDO U2F" not in output
-                assert "FIDO2" not in output
-                assert "OTP" not in output
-            err = buf.getvalue()
-        assert "config mode ccid" in err
 
 
 class TestConfigNFC:

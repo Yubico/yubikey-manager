@@ -32,7 +32,8 @@ from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import parse_b32_key
 from enum import Enum
 from http.client import HTTPSConnection
-from typing import Iterable
+from datetime import datetime
+from typing import Iterable, Optional
 
 import json
 import struct
@@ -117,8 +118,8 @@ def prepare_upload_key(
             body=json.dumps(data, indent=False, sort_keys=True).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": user_agent},
         )
-    except Exception as e:
-        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
+    except Exception:
+        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=True)
         raise PrepareUploadFailed(None, None, [PrepareUploadError.CONNECTION_FAILED])
 
     resp = httpconn.getresponse()
@@ -181,3 +182,26 @@ def format_oath_code(response: bytes, digits: int = 6) -> str:
 def time_challenge(timestamp: int, period: int = 30) -> bytes:
     """Formats a HMAC-SHA1 challenge based on an OATH timestamp and period."""
     return struct.pack(">q", int(timestamp // period))
+
+
+def format_csv(
+    serial: int,
+    public_id: bytes,
+    private_id: bytes,
+    key: bytes,
+    access_code: Optional[bytes] = None,
+    timestamp: Optional[datetime] = None,
+) -> str:
+    """Produces a CSV line in the "Yubico" format (ycfg)."""
+    ts = timestamp or datetime.now()
+    return ",".join(
+        [
+            str(serial),
+            modhex_encode(public_id),
+            private_id.hex(),
+            key.hex(),
+            access_code.hex() if access_code else "",
+            ts.isoformat(timespec="seconds"),
+            "",  # Add trailing comma
+        ]
+    )

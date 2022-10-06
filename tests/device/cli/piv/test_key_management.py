@@ -189,7 +189,7 @@ class TestKeyManagement:
             )
 
     @condition.check(not_roca)
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     def test_generate_key_rsa1024(self, ykman_cli):
         output = ykman_cli(
             "piv",
@@ -219,7 +219,7 @@ class TestKeyManagement:
         ).output
         assert "BEGIN PUBLIC KEY" in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(roca)
     def test_generate_key_rsa1024_cve201715361(self, ykman_cli):
         with pytest.raises(NotSupportedError):
@@ -400,7 +400,7 @@ class TestKeyManagement:
         csr = x509.load_pem_x509_csr(output.encode(), default_backend())
         assert csr.is_signature_valid
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.check(not_roca)
     def test_generate_csr_rsa1024(self, ykman_cli, tmp_file):
         self._test_generate_csr(ykman_cli, tmp_file, "RSA1024")

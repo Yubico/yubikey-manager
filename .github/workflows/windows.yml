@@ -45,21 +45,16 @@ jobs:
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
           pip uninstall -y yubikey-manager
 
-      - name: Clone PyInstaller
-        uses: actions/checkout@v2
-        with:
-          repository: pyinstaller/pyinstaller
-          ref: v4.7
-          path: pyinstaller
-
-      - name: Build exe
+      - name: PyInstaller
         shell: bash
         run: |
           poetry run pyinstaller ykman.spec
           dist/ykman/ykman.exe --version
           [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/ykman dist/ykman-$REF
+
+      - name: Build installer
+        run: |
+          ./resources/win/make_installer.ps1 "4.1.0"
 
       - name: Upload build
         uses: actions/upload-artifact@v1

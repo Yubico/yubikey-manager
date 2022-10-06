@@ -1,6 +1,4 @@
-from ykman.device import get_name
-from ykman.base import YUBIKEY
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import (
     CAPABILITY,
     FORM_FACTOR,
@@ -8,6 +6,7 @@ from yubikit.management import (
     DeviceConfig,
     Version,
 )
+from yubikit.support import get_name
 from typing import cast
 
 

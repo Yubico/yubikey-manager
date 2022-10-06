@@ -56,7 +56,7 @@ class TestSlotStatus:
         output = ykman_cli("otp", "swap", "-f").output
         assert "Swapping slots..." in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     def test_ykman_otp_info_does_not_indicate_fips_mode_for_non_fips_key(
         self, ykman_cli
     ):  # noqa: E501
@@ -179,7 +179,6 @@ class TestSlotProgramming:
             input="vvccccfiluij\n"
             "267e0a88949b\n"
             "b8e31ab90bb8830e3c1fe1b483a8e0d4\n"
-            "n\n"
             "y\n",
         )
         self._check_slot_2_programmed(ykman_cli)
@@ -598,7 +597,7 @@ class TestSlotCalculate:
 
 class TestFipsMode:
     @pytest.fixture(autouse=True)
-    @condition.fips(True)
+    @condition.yk4_fips(True)
     def delete_slots(self, ykman_cli):
         try:
             ykman_cli("otp", "delete", "1", "-f")

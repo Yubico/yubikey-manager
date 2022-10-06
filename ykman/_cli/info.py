@@ -32,9 +32,9 @@ from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
+from yubikit.support import get_name
 
-from .util import cli_fail
-from ..device import is_fips_version, get_name, connect_to_device
+from .util import CliFail, is_yk4_fips, click_command
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
@@ -46,8 +46,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SHOWN_CAPABILITIES = set(CAPABILITY)
-
 
 def print_app_status_table(supported_apps, enabled_apps):
     usb_supported = supported_apps.get(TRANSPORT.USB, 0)
@@ -55,7 +53,7 @@ def print_app_status_table(supported_apps, enabled_apps):
     nfc_supported = supported_apps.get(TRANSPORT.NFC, 0)
     nfc_enabled = enabled_apps.get(TRANSPORT.NFC, 0)
     rows = []
-    for app in SHOWN_CAPABILITIES:
+    for app in CAPABILITY:
         if app & usb_supported:
             if app & usb_enabled:
                 usb_status = "Enabled"
@@ -71,9 +69,9 @@ def print_app_status_table(supported_apps, enabled_apps):
                     nfc_status = "Disabled"
             else:
                 nfc_status = "Not available"
-            rows.append([str(app), usb_status, nfc_status])
+            rows.append([app.display_name, usb_status, nfc_status])
         else:
-            rows.append([str(app), usb_status])
+            rows.append([app.display_name, usb_status])
 
     column_l: List[int] = []
     for row in rows:
@@ -102,33 +100,33 @@ def print_app_status_table(supported_apps, enabled_apps):
     click.echo(f_table, nl=False)
 
 
-def get_overall_fips_status(pid, info):
+def get_overall_fips_status(device, info):
     statuses = {}
 
     usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
 
     statuses["OTP"] = False
     if usb_enabled & CAPABILITY.OTP:
-        with connect_to_device(info.serial, [OtpConnection])[0] as conn:
+        with device.open_connection(OtpConnection) as conn:
             otp_app = YubiOtpSession(conn)
             statuses["OTP"] = otp_in_fips_mode(otp_app)
 
     statuses["OATH"] = False
     if usb_enabled & CAPABILITY.OATH:
-        with connect_to_device(info.serial, [SmartCardConnection])[0] as conn:
+        with device.open_connection(SmartCardConnection) as conn:
             oath_app = OathSession(conn)
             statuses["OATH"] = oath_in_fips_mode(oath_app)
 
     statuses["FIDO U2F"] = False
     if usb_enabled & CAPABILITY.U2F:
-        with connect_to_device(info.serial, [FidoConnection])[0] as conn:
+        with device.open_connection(FidoConnection) as conn:
             statuses["FIDO U2F"] = ctap_in_fips_mode(conn)
 
     return statuses
 
 
-def _check_fips_status(pid, info):
-    fips_status = get_overall_fips_status(pid, info)
+def _check_fips_status(device, info):
+    fips_status = get_overall_fips_status(device, info)
     click.echo()
 
     click.echo(f"FIPS Approved Mode: {'Yes' if all(fips_status.values()) else 'No'}")
@@ -142,11 +140,10 @@ def _check_fips_status(pid, info):
 @click.option(
     "-c",
     "--check-fips",
-    help="Check if YubiKey is in FIPS Approved mode (available on YubiKey 4 FIPS "
-    "only).",
+    help="check if YubiKey is in FIPS Approved mode (YubiKey 4 FIPS only)",
     is_flag=True,
 )
-@click.command()
+@click_command(connections=[SmartCardConnection, OtpConnection, FidoConnection])
 @click.pass_context
 def info(ctx, check_fips):
     """
@@ -161,8 +158,8 @@ def info(ctx, check_fips):
         interfaces = None
         key_type = None
     else:
-        interfaces = pid.get_interfaces()
-        key_type = pid.get_type()
+        interfaces = pid.usb_interfaces
+        key_type = pid.yubikey_type
     device_name = get_name(info, key_type)
 
     click.echo(f"Device type: {device_name}")
@@ -199,8 +196,8 @@ def info(ctx, check_fips):
     )
 
     if check_fips:
-        if is_fips_version(info.version):
-            ctx.obj["conn"].close()
-            _check_fips_status(pid, info)
+        if is_yk4_fips(info):
+            device = ctx.obj["device"]
+            _check_fips_status(device, info)
         else:
-            cli_fail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")
+            raise CliFail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")

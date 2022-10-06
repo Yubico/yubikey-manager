@@ -2,54 +2,59 @@ name: macOS
 
 on: [push, pull_request]
 
+# Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
 jobs:
   build:
 
-    runs-on: macos-latest
+    runs-on: macos-11
+
+    env:
+      PYTHON_VERSION: "3.10.6"
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      CFLAGS: -arch x86_64 -arch arm64
+      ARCHFLAGS: -arch x86_64 -arch arm64
 
     steps:
       - uses: actions/checkout@v2
 
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.10'
+      # setup-python currently does not support universal2 Python
+      - name: Install Python
+        run: |
+          curl https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-macos11.pkg -o ~/python.pkg
+          sudo installer -pkg ~/python.pkg -target /
+          unlink /usr/local/bin/python
+          ln -s /usr/local/bin/python3 /usr/local/bin/python
 
       - name: Install dependencies
         run: |
-          brew update
-          brew install swig
-          python -m pip install --upgrade pip
-          pip install poetry
-          poetry install
+          python3 -m pip install --upgrade pip
+          python3 -m pip install poetry
+          python3 -m poetry install
 
-      - name: Run unit tests
-        run: poetry run pytest -v
-
-      - name: Build
-        run: poetry build
-
-      - name: Install from tar.gz
+      - name: Explicitly use universal versions
         run: |
-          pip install dist/*.tar.gz
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
-
-      - name: Install from wheel
-        run: |
-          pip install dist/*.whl
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
+          # Export exact versions
+          python3 -m poetry export --without-hashes > requirements.txt
+          grep cryptography requirements.txt > cryptography.txt
+          grep cffi requirements.txt > source-reqs.txt
+          grep pyscard requirements.txt >> source-reqs.txt
+          # Remove non-universal packages
+          python3 -m poetry run pip uninstall -y cryptography cffi pyscard
+          # Build cffi from source to get universal build
+          python3 -m poetry run pip install --upgrade -r source-reqs.txt --no-binary :all:
+          # Explicitly install pre-build universal build of cryptography
+          python3 -m poetry run pip download -r cryptography.txt --platform macosx_10_10_universal2 --only-binary :all: --no-deps --dest .
+          python3 -m poetry run pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
 
       - name: PyInstaller
         run: |
-          poetry run pyinstaller ykman.spec
+          python3 -m poetry run pyinstaller ykman.spec
           dist/ykman/ykman --version
           [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/ykman dist/ykman-$REF
+
+      - name: Build installer
+        run: |
+          ./resources/macos/make_installer.sh "4.1.0"
 
       - name: Upload build
         uses: actions/upload-artifact@v1

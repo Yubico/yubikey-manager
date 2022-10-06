@@ -4,8 +4,6 @@ from cryptography.hazmat.primitives import serialization
 from ....util import generate_self_signed_certificate
 from yubikit.core import Tlv
 from yubikit.piv import OBJECT_ID, SLOT
-import contextlib
-import io
 import pytest
 
 
@@ -77,29 +75,6 @@ class TestReadWriteObject:
             "piv", "objects", "export", hex(OBJECT_ID.AUTHENTICATION), "-"
         ).stdout_bytes
         assert output2 == data
-
-    def test_read_write_aliases(self, ykman_cli):
-        data = os.urandom(32)
-
-        with io.StringIO() as buf:
-            with contextlib.redirect_stderr(buf):
-                ykman_cli(
-                    "piv",
-                    "write-object",
-                    hex(OBJECT_ID.AUTHENTICATION),
-                    "-",
-                    "-m",
-                    DEFAULT_MANAGEMENT_KEY,
-                    input=data,
-                )
-
-                output1 = ykman_cli(
-                    "piv", "read-object", hex(OBJECT_ID.AUTHENTICATION), "-"
-                ).stdout_bytes
-            err = buf.getvalue()
-        assert output1 == data
-        assert "piv objects import" in err
-        assert "piv objects export" in err
 
     def test_read_write_certificate_as_object(self, ykman_cli):
         with pytest.raises(SystemExit):

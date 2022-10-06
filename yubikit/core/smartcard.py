@@ -25,23 +25,22 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Version, TRANSPORT, Connection, CommandError, ApplicationNotAvailableError
+from . import (
+    Version,
+    TRANSPORT,
+    USB_INTERFACE,
+    Connection,
+    CommandError,
+    ApplicationNotAvailableError,
+)
 from time import time
 from enum import Enum, IntEnum, unique
 from typing import Tuple
 import abc
 import struct
+import logging
 
-
-class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
-    @property
-    @abc.abstractmethod
-    def transport(self) -> TRANSPORT:
-        """Get the transport type of the connection (USB or NFC)"""
-
-    @abc.abstractmethod
-    def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
-        """Sends a command APDU and returns the response"""
+logger = logging.getLogger(__name__)
 
 
 class ApduError(CommandError):
@@ -64,6 +63,19 @@ class ApduFormat(str, Enum):
 
 
 @unique
+class AID(bytes, Enum):
+    """YubiKey Application smart card AID values."""
+
+    OTP = bytes.fromhex("a0000005272001")
+    MANAGEMENT = bytes.fromhex("a000000527471117")
+    OPENPGP = bytes.fromhex("d27600012401")
+    OATH = bytes.fromhex("a0000005272101")
+    PIV = bytes.fromhex("a000000308")
+    FIDO = bytes.fromhex("a0000006472f0001")
+    HSMAUTH = bytes.fromhex("a000000527210701")
+
+
+@unique
 class SW(IntEnum):
     NO_INPUT_DATA = 0x6285
     VERIFY_FAIL_NO_RETRY = 0x63C0
@@ -83,6 +95,19 @@ class SW(IntEnum):
     INVALID_INSTRUCTION = 0x6D00
     COMMAND_ABORTED = 0x6F00
     OK = 0x9000
+
+
+class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
+    usb_interface = USB_INTERFACE.CCID
+
+    @property
+    @abc.abstractmethod
+    def transport(self) -> TRANSPORT:
+        """Get the transport type of the connection (USB or NFC)"""
+
+    @abc.abstractmethod
+    def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
+        """Sends a command APDU and returns the response"""
 
 
 INS_SELECT = 0xA4
@@ -122,6 +147,7 @@ class SmartCardProtocol:
         self._touch_workaround = self.connection.transport == TRANSPORT.USB and (
             (4, 2, 0) <= version <= (4, 2, 6)
         )
+        logger.debug(f"Touch workaround enabled={self._touch_workaround}")
 
     def select(self, aid: bytes) -> bytes:
         try:
@@ -144,6 +170,7 @@ class SmartCardProtocol:
             and self._last_long_resp > 0
             and time() - self._last_long_resp < 2
         ):
+            logger.debug("Sending dummy APDU as touch workaround")
             self.connection.send_and_receive(
                 _encode_short_apdu(0, 0, 0, 0, b"")
             )  # Dummy APDU, returns error
