@@ -88,6 +88,84 @@ class TestAdminPin:
         )
 
 
+class TestResetPin:
+    def ensure_pin_changed(self, ykman_cli):
+        ykman_cli(
+            "openpgp", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
+        )
+
+    def test_set_and_use_reset_code(self, ykman_cli):
+        reset_code = "12345678"
+
+        ykman_cli(
+            "openpgp",
+            "access",
+            "change-reset-code",
+            "-a",
+            DEFAULT_ADMIN_PIN,
+            "-r",
+            reset_code,
+        )
+
+        ykman_cli(
+            "openpgp",
+            "access",
+            "unblock-pin",
+            "-r",
+            reset_code,
+            "-n",
+            NON_DEFAULT_PIN,
+        )
+
+        self.ensure_pin_changed(ykman_cli)
+
+    def test_set_and_use_reset_code_prompt(self, ykman_cli):
+        reset_code = "87654321"
+
+        ykman_cli(
+            "openpgp",
+            "access",
+            "change-reset-code",
+            input=old_new_new(DEFAULT_ADMIN_PIN, reset_code),
+        )
+
+        ykman_cli(
+            "openpgp",
+            "access",
+            "unblock-pin",
+            input=old_new_new(reset_code, NON_DEFAULT_PIN),
+        )
+
+        ykman_cli(
+            "openpgp", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
+        )
+
+    def test_unblock_pin_with_admin_pin(self, ykman_cli):
+        ykman_cli(
+            "openpgp",
+            "access",
+            "unblock-pin",
+            "-a",
+            DEFAULT_ADMIN_PIN,
+            "-n",
+            NON_DEFAULT_PIN,
+        )
+
+        self.ensure_pin_changed(ykman_cli)
+
+    def test_unblock_pin_with_admin_pin_prompt(self, ykman_cli):
+        ykman_cli(
+            "openpgp",
+            "access",
+            "unblock-pin",
+            "--admin-pin",
+            "-",
+            input=old_new_new(DEFAULT_ADMIN_PIN, NON_DEFAULT_PIN),
+        )
+
+        self.ensure_pin_changed(ykman_cli)
+
+
 class TestForceSignature:
     def test_set_force_sig(self, ykman_cli):
         ykman_cli(

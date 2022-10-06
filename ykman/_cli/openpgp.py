@@ -199,7 +199,7 @@ def set_pin_retries(
 @click.pass_context
 def change_pin(ctx, pin, new_pin):
     """
-    Change the PIN.
+    Change the User PIN.
 
     The PIN has a minimum length of 6, and supports any type of
     alphanumeric characters.
