@@ -170,7 +170,6 @@ class DO(IntEnum):
     CARDHOLDER_CERTIFICATE = 0x7F21
     KDF = 0xF9
     ALGORITHM_INFORMATION = 0xFA
-
     ATT_CERTIFICATE = 0xFC
 
 
@@ -906,6 +905,7 @@ class OpenPgpSession:
         except ApduError as e:
             if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
                 # Not activated, activate
+                logger.warning("Application not active, sending ACTIVATE")
                 self.protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
                 self.protocol.select(AID.OPENPGP)
             else:
@@ -920,8 +920,19 @@ class OpenPgpSession:
         # Do not rely on contained information that can change!
         self._app_data = self.get_application_related_data()
 
+        logger.debug(f"OpenPGP session initialized (version={self.version})")
+
+    def _read_version(self) -> Version:
+        logger.debug("Getting version number")
+        bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
+        return Version(*(_bcd(x) for x in bcd))
+
     @property
     def version(self) -> Version:
+        """Get the firmware version of the key.
+
+        For YubiKey NEO this is the PGP applet version.
+        """
         return self._version
 
     @property
@@ -936,15 +947,19 @@ class OpenPgpSession:
             raise NotSupportedError("GET_CHALLENGE is not supported")
         if not 0 < length <= e.challenge_max_length:
             raise NotSupportedError("Unsupported challenge length")
+
+        logger.debug(f"Getting {length} random bytes")
         return self.protocol.send_apdu(0, INS.GET_CHALLENGE, 0, 0, le=length)
 
     def get_data(self, do: DO) -> bytes:
         """Get a Data Object from the YubiKey."""
+        logger.debug(f"Reading Data Object {do.name} ({do:X})")
         return self.protocol.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
 
     def put_data(self, do: DO, data: Union[bytes, SupportsBytes]) -> None:
         """Write a Data Object to the YubiKey."""
         self.protocol.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, bytes(data))
+        logger.info(f"Wrote Data Object {do.name} ({do:X})")
 
     def get_pin_status(self) -> PwStatus:
         """Get the current status of PINS."""
@@ -955,18 +970,16 @@ class OpenPgpSession:
         s = SecuritySupportTemplate.parse(self.get_data(DO.SECURITY_SUPPORT_TEMPLATE))
         return s.signature_counter
 
-    def _read_version(self) -> Version:
-        bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
-        return Version(*(_bcd(x) for x in bcd))
-
     def get_application_related_data(self) -> ApplicationRelatedData:
         """Read the Application Related Data."""
         return ApplicationRelatedData.parse(self.get_data(DO.APPLICATION_RELATED_DATA))
 
     def set_signature_pin_policy(self, pin_policy: PIN_POLICY) -> None:
         """Requires Admin PIN verification."""
+        logger.debug(f"Setting Signature PIN policy to {pin_policy}")
         data = struct.pack(">B", pin_policy)
         self.put_data(DO.PW_STATUS_BYTES, data)
+        logger.info("Signature PIN policy set")
 
     def reset(self) -> None:
         """Performs a factory reset on the OpenPGP application.
@@ -974,10 +987,12 @@ class OpenPgpSession:
         WARNING: This will delete all stored keys, certificates and other data.
         """
         require_version(self.version, (1, 0, 6))
+        logger.debug("Preparing OpenPGP reset")
 
         # Ensure the User and Admin PINs are blocked
         status = self.get_pin_status()
         for pw in (PW.USER, PW.ADMIN):
+            logger.debug(f"Verify {pw.name} PIN with invalid attempts until blocked")
             for _ in range(status.get_attempts(pw)):
                 try:
                     self.protocol.send_apdu(0, INS.VERIFY, 0, pw, _INVALID_PIN)
@@ -985,13 +1000,18 @@ class OpenPgpSession:
                     pass
 
         # Reset the application
+        logger.debug("Sending TERMINATE, then ACTIVATE")
         self.protocol.send_apdu(0, INS.TERMINATE, 0, 0)
         self.protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
+
+        logger.info("OpenPGP application data reset performed")
 
     def set_pin_attempts(
         self, user_attempts: int, reset_attempts: int, admin_attempts: int
     ) -> None:
         """Set the number of PIN attempts to allow before blocking.
+
+        WARNING: On YubiKey NEO this will reset the PINs to their default values.
 
         Requires Admin PIN verification.
         """
@@ -1001,13 +1021,16 @@ class OpenPgpSession:
         else:
             require_version(self.version, (4, 3, 1))
 
+        attempts = (user_attempts, reset_attempts, admin_attempts)
+        logger.debug(f"Setting PIN attempts to {attempts}")
         self.protocol.send_apdu(
             0,
             INS.SET_PIN_RETRIES,
             0,
             0,
-            struct.pack(">BBB", user_attempts, reset_attempts, admin_attempts),
+            struct.pack(">BBB", *attempts),
         )
+        logger.info("Number of PIN attempts has been changed")
 
     def get_kdf(self):
         """Get the Key Derivation Function data object."""
@@ -1029,11 +1052,14 @@ class OpenPgpSession:
         if EXTENDED_CAPABILITY_FLAGS.KDF not in e.flags:
             raise NotSupportedError("KDF is not supported")
 
+        logger.debug(f"Setting PIN KDF to algorithm: {kdf.algorithm}")
         self.put_data(DO.KDF, kdf)
+        logger.info("KDF settings changed")
 
     def _verify(self, pw: PW, pin: str) -> None:
+        logger.debug(f"Verifying {pw.name} PIN")
+        pin_enc = self.get_kdf().process(pw, pin)
         try:
-            pin_enc = self.get_kdf().process(pw, pin)
             self.protocol.send_apdu(0, INS.VERIFY, 0, pw, pin_enc)
         except ApduError:
             attempts = self.get_pin_status().get_attempts(pw)
@@ -1054,6 +1080,7 @@ class OpenPgpSession:
         self._verify(PW.ADMIN, admin_pin)
 
     def _change(self, pw: PW, pin: str, new_pin: str) -> None:
+        logger.debug(f"Changing {pw.name} PIN")
         kdf = self.get_kdf()
         try:
             self.protocol.send_apdu(
@@ -1069,6 +1096,7 @@ class OpenPgpSession:
             else:
                 remaining = self.get_pin_status().get_attempts(pw)
                 raise ValueError(f"Invalid PIN, {remaining} tries remaining.")
+        logger.info(f"New {pw.name} PIN set")
 
     def change_pin(self, pin: str, new_pin: str) -> None:
         """Change the User PIN."""
@@ -1086,18 +1114,22 @@ class OpenPgpSession:
 
         This command requires Admin PIN verification.
         """
+        logger.debug("Setting a new PIN Reset Code")
         data = self.get_kdf().process(PW.RESET, reset_code)
         self.put_data(DO.RESETTING_CODE, data)
+        logger.info("New Reset Code has been set")
 
     def reset_pin(self, new_pin: str, reset_code: Optional[str] = None) -> None:
         """Resets the User PIN to a new value.
 
         This command requires Admin PIN verification, or the Reset Code.
         """
+        logger.debug("Resetting User PIN")
         p1 = 2
         kdf = self.get_kdf()
         data = kdf.process(PW.USER, new_pin)
         if reset_code:
+            logger.debug("Using Reset Code")
             data = kdf.process(PW.RESET, reset_code) + data
             p1 = 0
 
@@ -1111,9 +1143,11 @@ class OpenPgpSession:
                 raise ValueError(
                     f"Invalid Reset Code, {reset_remaining} tries remaining."
                 )
+        logger.info("New User PIN has been set")
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
         """Get the algorithm attributes for one of the key slots."""
+        logger.debug(f"Getting Algorithm Attributes for {key_ref.name}")
         data = self.get_application_related_data()
         return data.discretionary.get_algorithm_attributes(key_ref)
 
@@ -1130,6 +1164,7 @@ class OpenPgpSession:
             not in self.extended_capabilities.flags
         ):
             raise NotSupportedError("Writing Algorithm Attributes is not supported")
+        logger.debug("Getting supported Algorithm Information")
         buf = self.get_data(DO.ALGORITHM_INFORMATION)
         try:
             buf = Tlv.unpack(DO.ALGORITHM_INFORMATION, buf)
@@ -1155,6 +1190,7 @@ class OpenPgpSession:
 
         This command requires Admin PIN verification.
         """
+        logger.debug("Setting Algorithm Attributes for {key_ref.name}")
         supported = self.get_algorithm_information()
         if key_ref not in supported:
             raise NotSupportedError("Key slot not supported")
@@ -1162,6 +1198,7 @@ class OpenPgpSession:
             raise NotSupportedError("Algorithm attributes not supported")
 
         self.put_data(key_ref.algorithm_attributes_do, attributes)
+        logger.info("Algorithm Attributes have been changed")
 
     def get_uif(self, key_ref: KEY_REF) -> UIF:
         """Get the User Interaction Flag (touch requirement) for a key."""
@@ -1186,17 +1223,21 @@ class OpenPgpSession:
                 "Cached UIF values require YubiKey 5.2.1 or later.",
             )
 
+        logger.debug(f"Setting UIF for {key_ref.name} to {uif.name}")
         if self.get_uif(key_ref).is_fixed:
             raise ValueError("Cannot change UIF when set to FIXED.")
 
         self.put_data(key_ref.uif_do, uif)
+        logger.info(f"UIF changed for {key_ref.name}")
 
     def get_key_information(self) -> KeyInformation:
         """Get the status of the keys."""
+        logger.debug("Getting Key Information")
         return self.get_application_related_data().discretionary.key_information
 
     def get_generation_times(self) -> GenerationTimes:
         """Get timestamps for when keys were generated."""
+        logger.debug("Getting key generation timestamps")
         return self.get_application_related_data().discretionary.generation_times
 
     def set_generation_time(self, key_ref: KEY_REF, timestamp: int) -> None:
@@ -1204,10 +1245,13 @@ class OpenPgpSession:
 
         Requires Admin PIN verification.
         """
+        logger.debug(f"Setting key generation timestamp for {key_ref.name}")
         self.put_data(key_ref.generation_time_do, struct.pack(">I", timestamp))
+        logger.info("Key generation timestamp set for {key_ref.name}")
 
     def get_fingerprints(self) -> Fingerprints:
         """Get key fingerprints."""
+        logger.debug("Getting key fingerprints")
         return self.get_application_related_data().discretionary.fingerprints
 
     def set_fingerprint(self, key_ref: KEY_REF, fingerprint: bytes) -> None:
@@ -1215,10 +1259,13 @@ class OpenPgpSession:
 
         Requires Admin PIN verification.
         """
+        logger.debug(f"Setting key fingerprint for {key_ref.name}")
         self.put_data(key_ref.fingerprint_do, fingerprint)
+        logger.info("Key fingerprint set for {key_ref.name}")
 
     def get_public_key(self, key_ref: KEY_REF) -> PublicKey:
         """Get the public key from a slot."""
+        logger.debug(f"Getting public key for {key_ref.name}")
         resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x81, 0x00, key_ref.crt)
         data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
         attributes = self.get_algorithm_attributes(key_ref)
@@ -1237,6 +1284,7 @@ class OpenPgpSession:
         if (4, 2, 0) <= self.version < (4, 3, 5):
             raise NotSupportedError("RSA key generation not supported on this YubiKey")
 
+        logger.debug(f"Generating RSA private key for {key_ref.name}")
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
             in self.extended_capabilities.flags
@@ -1248,6 +1296,7 @@ class OpenPgpSession:
 
         resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_ref.crt)
         data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        logger.info(f"RSA key generated for {key_ref.name}")
         return _parse_rsa_key(data)
 
     def generate_ec_key(self, key_ref: KEY_REF, curve_oid: CurveOid) -> EcPublicKey:
@@ -1261,11 +1310,13 @@ class OpenPgpSession:
         if curve_oid not in OID:
             raise ValueError("Curve OID is not recognized")
 
+        logger.debug(f"Generating EC private key for {key_ref.name}")
         attributes = EcAttributes.create(key_ref, curve_oid)
         self.set_algorithm_attributes(key_ref, attributes)
 
         resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_ref.crt)
         data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        logger.info(f"EC key generated for {key_ref.name}")
         return _parse_ec_key(curve_oid, data)
 
     def put_key(self, key_ref: KEY_REF, private_key: PrivateKey) -> None:
@@ -1274,6 +1325,7 @@ class OpenPgpSession:
         Requires Admin PIN verification.
         """
 
+        logger.debug(f"Importing a private key for {key_ref.name}")
         attributes = _get_key_attributes(private_key, key_ref)
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
@@ -1289,8 +1341,10 @@ class OpenPgpSession:
 
         template = _get_key_template(private_key, key_ref, self.version < (4, 0, 0))
         self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, bytes(template))
+        logger.info(f"Private key imported for {key_ref.name}")
 
     def _select_certificate(self, key_ref: KEY_REF) -> None:
+        logger.debug(f"Selecting certificate for key {key_ref.name}")
         try:
             require_version(self.version, (5, 2, 0))
             data: bytes = Tlv(0x60, Tlv(0x5C, int2bytes(DO.CARDHOLDER_CERTIFICATE)))
@@ -1311,6 +1365,7 @@ class OpenPgpSession:
 
     def get_certificate(self, key_ref: KEY_REF) -> x509.Certificate:
         """Get a certificate from a slot."""
+        logger.debug(f"Getting certificate for key {key_ref.name}")
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
             data = self.get_data(DO.ATT_CERTIFICATE)
@@ -1327,24 +1382,28 @@ class OpenPgpSession:
         Requires Admin PIN verification.
         """
         cert_data = certificate.public_bytes(Encoding.DER)
+        logger.debug(f"Importing certificate for key {key_ref.name}")
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
             self.put_data(DO.ATT_CERTIFICATE, cert_data)
         else:
             self._select_certificate(key_ref)
             self.put_data(DO.CARDHOLDER_CERTIFICATE, cert_data)
+        logger.info(f"Certificate imported for key {key_ref.name}")
 
     def delete_certificate(self, key_ref: KEY_REF) -> None:
         """Deletes a certificate in a slot.
 
         Requires Admin PIN verification.
         """
+        logger.debug(f"Deleting certificate for key {key_ref.name}")
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
             self.put_data(DO.ATT_CERTIFICATE, b"")
         else:
             self._select_certificate(key_ref)
             self.put_data(DO.CARDHOLDER_CERTIFICATE, b"")
+        logger.info(f"Certificate deleted for key {key_ref.name}")
 
     def attest_key(self, key_ref: KEY_REF) -> x509.Certificate:
         """Creates an attestation certificate for a key.
@@ -1355,5 +1414,7 @@ class OpenPgpSession:
         Requires User PIN verification.
         """
         require_version(self.version, (5, 2, 0))
+        logger.debug(f"Attesting key {key_ref.name}")
         self.protocol.send_apdu(0x80, INS.GET_ATTESTATION, key_ref, 0)
+        logger.info(f"Attestation certificate created for {key_ref.name}")
         return self.get_certificate(key_ref)
