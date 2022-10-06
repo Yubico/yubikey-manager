@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-from cryptography.x509.oid import NameOID, ObjectIdentifier
+from cryptography.x509.oid import NameOID
 from collections import OrderedDict
 from datetime import datetime
 import logging
@@ -133,7 +133,7 @@ def parse_rfc4514_string(value: str) -> x509.Name:
             if k in _NAME_ATTRIBUTES:
                 attr = _NAME_ATTRIBUTES[k]
             elif _DOTTED_STRING_RE.fullmatch(k):
-                attr = ObjectIdentifier(k)
+                attr = x509.ObjectIdentifier(k)
             else:
                 raise ValueError(f"Unsupported attribute: '{k}'")
             parts.append(x509.NameAttribute(attr, v))
