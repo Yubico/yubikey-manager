@@ -670,7 +670,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="number of digits in generated TOTP code (default: 6)",
+    help="number of digits in generated TOTP code (default: 6), "
+    "ignored unless --totp is set",
 )
 @click.pass_context
 def calculate(ctx, slot, challenge, totp, digits):
