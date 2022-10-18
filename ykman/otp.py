@@ -43,11 +43,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-UPLOAD_HOST = "upload.yubico.com"
-UPLOAD_PATH = "/prepare"
+_UPLOAD_HOST = "upload.yubico.com"
+_UPLOAD_PATH = "/prepare"
 
 
-class PrepareUploadError(Enum):
+class _PrepareUploadError(Enum):
     # Defined here
     CONNECTION_FAILED = "Failed to open HTTPS connection."
     NOT_FOUND = "Upload request not recognized by server."
@@ -78,15 +78,13 @@ class PrepareUploadError(Enum):
         return self.value
 
 
-class PrepareUploadFailed(Exception):
+class _PrepareUploadFailed(Exception):
     def __init__(self, status, content, error_ids):
-        super(PrepareUploadFailed, self).__init__(
-            f"Upload to YubiCloud failed with status {status}: {content}"
-        )
+        super().__init__(f"Upload to YubiCloud failed with status {status}: {content}")
         self.status = status
         self.content = content
         self.errors = [
-            e if isinstance(e, PrepareUploadError) else PrepareUploadError[e]
+            e if isinstance(e, _PrepareUploadError) else _PrepareUploadError[e]
             for e in error_ids
         ]
 
@@ -94,7 +92,7 @@ class PrepareUploadFailed(Exception):
         return [e.message() for e in self.errors]
 
 
-def prepare_upload_key(
+def _prepare_upload_key(
     key,
     public_id,
     private_id,
@@ -109,18 +107,18 @@ def prepare_upload_key(
         "private_id": private_id.hex(),
     }
 
-    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
+    httpconn = HTTPSConnection(_UPLOAD_HOST, timeout=1)  # nosec
 
     try:
         httpconn.request(
             "POST",
-            UPLOAD_PATH,
+            _UPLOAD_PATH,
             body=json.dumps(data, indent=False, sort_keys=True).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": user_agent},
         )
     except Exception:
-        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=True)
-        raise PrepareUploadFailed(None, None, [PrepareUploadError.CONNECTION_FAILED])
+        logger.error("Failed to connect to %s", _UPLOAD_HOST, exc_info=True)
+        raise _PrepareUploadFailed(None, None, [_PrepareUploadError.CONNECTION_FAILED])
 
     resp = httpconn.getresponse()
     if resp.status == 200:
@@ -130,19 +128,19 @@ def prepare_upload_key(
         resp_body = resp.read()
         logger.debug("Upload failed with status %d: %s", resp.status, resp_body)
         if resp.status == 404:
-            raise PrepareUploadFailed(
-                resp.status, resp_body, [PrepareUploadError.NOT_FOUND]
+            raise _PrepareUploadFailed(
+                resp.status, resp_body, [_PrepareUploadError.NOT_FOUND]
             )
         elif resp.status == 503:
-            raise PrepareUploadFailed(
-                resp.status, resp_body, [PrepareUploadError.SERVICE_UNAVAILABLE]
+            raise _PrepareUploadFailed(
+                resp.status, resp_body, [_PrepareUploadError.SERVICE_UNAVAILABLE]
             )
         else:
             try:
                 errors = json.loads(resp_body.decode("utf-8")).get("errors")
             except Exception:
                 errors = []
-            raise PrepareUploadFailed(resp.status, resp_body, errors)
+            raise _PrepareUploadFailed(resp.status, resp_body, errors)
 
 
 def is_in_fips_mode(session: YubiOtpSession) -> bool:

@@ -60,8 +60,8 @@ from .util import (
 from .. import __version__
 from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
-    PrepareUploadFailed,
-    prepare_upload_key,
+    _PrepareUploadFailed,
+    _prepare_upload_key,
     is_in_fips_mode,
     generate_static_pw,
     parse_oath_key,
@@ -463,7 +463,7 @@ def yubiotp(
         click.confirm("Upload credential to YubiCloud?", abort=True, err=True)
 
         try:
-            upload_url = prepare_upload_key(
+            upload_url = _prepare_upload_key(
                 key,
                 public_id,
                 private_id,
@@ -472,7 +472,7 @@ def yubiotp(
             )
             click.echo("Upload to YubiCloud initiated successfully.")
             logger.info("Initiated YubiCloud upload")
-        except PrepareUploadFailed as e:
+        except _PrepareUploadFailed as e:
             error_msg = "\n".join(e.messages())
             raise CliFail("Upload to YubiCloud failed.\n" + error_msg)
 
