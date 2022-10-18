@@ -603,7 +603,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     If KEY is not given, an interactive prompt will ask for it.
 
     \b
-    KEY     A key given in hex (or base32, if --totp is specified).
+    KEY     a key given in hex (or base32, if --totp is specified)
     """
     session = _get_session(ctx)
 

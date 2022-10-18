@@ -596,7 +596,7 @@ def creds_delete(ctx, credential_id, pin, force):
     List stored credential IDs using the "list" subcommand.
 
     \b
-    CREDENTIAL_ID       A unique substring match of a Credential ID.
+    CREDENTIAL_ID       a unique substring match of a Credential ID
     """
     credman = _init_credman(ctx, pin)
     credential_id = credential_id.rstrip(".").lower()
@@ -691,7 +691,7 @@ def bio_enroll(ctx, name, pin):
     Add a new fingerprint.
 
     \b
-    NAME        A short readable name for the fingerprint (eg. "Left thumb").
+    NAME        a short readable name for the fingerprint (eg. "Left thumb")
     """
     if len(name.encode()) > 15:
         ctx.fail("Fingerprint name must be a maximum of 15 characters")
@@ -734,8 +734,8 @@ def bio_rename(ctx, template_id, name, pin):
     Set the label for a fingerprint.
 
     \b
-    ID          The ID of the fingerprint to rename (as shown in "list").
-    NAME        A short readable name for the fingerprint (eg. "Left thumb").
+    ID          the ID of the fingerprint to rename (as shown in "list")
+    NAME        a short readable name for the fingerprint (eg. "Left thumb")
     """
     if len(name.encode()) >= 16:
         ctx.fail("Fingerprint name must be a maximum of 15 bytes")

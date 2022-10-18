@@ -250,6 +250,7 @@ def access():
 def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     """
     Set the number of PIN and PUK retry attempts.
+
     NOTE: This will reset the PIN and PUK to their factory defaults.
     """
     session = ctx.obj["session"]
@@ -555,8 +556,8 @@ def generate_key(
     The private key is generated on the YubiKey, and written to one of the slots.
 
     \b
-    SLOT        PIV slot of the private key.
-    PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
+    SLOT        PIV slot of the private key
+    PUBLIC-KEY  file containing the generated public key (use '-' to use stdout)
     """
 
     session = ctx.obj["session"]
@@ -595,8 +596,8 @@ def import_key(
     Write a private key to one of the PIV slots on the YubiKey.
 
     \b
-    SLOT        PIV slot of the private key.
-    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
+    SLOT         PIV slot of the private key
+    PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
     session = ctx.obj["session"]
 
@@ -640,8 +641,8 @@ def attest(ctx, slot, certificate, format):
     YubiKey and therefore doesn't exist outside the device.
 
     \b
-    SLOT        PIV slot of the private key.
-    CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
+    SLOT         PIV slot of the private key
+    CERTIFICATE  file to write attestation certificate to (use '-' to use stdout)
     """
     session = ctx.obj["session"]
     try:
@@ -680,8 +681,8 @@ def export(ctx, slot, public_key_output, format, verify, pin):
     require the PIN to be provided.
 
     \b
-    SLOT        PIV slot of the private key.
-    PUBLIC-KEY  File containing the generated public key. Use '-' to use stdout.
+    SLOT        PIV slot of the private key
+    PUBLIC-KEY  file to write the public key to (use '-' to use stdout)
     """
     session = ctx.obj["session"]
 
@@ -750,8 +751,8 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
     Write a certificate to one of the PIV slots on the YubiKey.
 
     \b
-    SLOT            PIV slot of the certificate.
-    CERTIFICATE     File containing the certificate. Use '-' to use stdin.
+    SLOT            PIV slot of the certificate
+    CERTIFICATE     file containing the certificate (use '-' to use stdin)
     """
     session = ctx.obj["session"]
 
@@ -816,8 +817,8 @@ def export_certificate(ctx, format, slot, certificate):
     Reads a certificate from one of the PIV slots on the YubiKey.
 
     \b
-    SLOT            PIV slot of the certificate.
-    CERTIFICATE File to write certificate to. Use '-' to use stdout.
+    SLOT            PIV slot of the certificate
+    CERTIFICATE     file to write certificate to (use '-' to use stdout)
     """
     session = ctx.obj["session"]
     try:
@@ -862,8 +863,8 @@ def generate_certificate(
     the YubiKey. A private key must already be present in the corresponding key slot.
 
     \b
-    SLOT            PIV slot of the certificate.
-    PUBLIC-KEY      File containing a public key. Use '-' to use stdin.
+    SLOT            PIV slot of the certificate
+    PUBLIC-KEY      file containing a public key (use '-' to use stdin)
     """
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
@@ -911,9 +912,9 @@ def generate_certificate_signing_request(
     A private key must already be present in the corresponding key slot.
 
     \b
-    SLOT        PIV slot of the certificate.
-    PUBLIC-KEY  File containing a public key. Use '-' to use stdin.
-    CSR         File to write CSR to. Use '-' to use stdout.
+    SLOT        PIV slot of the certificate
+    PUBLIC-KEY  file containing a public key (use '-' to use stdin)
+    CSR         file to write CSR to (use '-' to use stdout)
     """
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
@@ -948,7 +949,7 @@ def delete_certificate(ctx, management_key, pin, slot):
     Delete a certificate from a PIV slot on the YubiKey.
 
     \b
-    SLOT            PIV slot of the certificate.
+    SLOT            PIV slot of the certificate
     """
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
@@ -987,8 +988,8 @@ def read_object(ctx, pin, object_id, output):
     Export an arbitrary PIV data object.
 
     \b
-    OBJECT          Name of PIV data object, or ID in HEX.
-    OUTPUT          File to write object to. Use '-' to use stdout.
+    OBJECT          name of PIV data object, or ID in HEX
+    OUTPUT          file to write object to (use '-' to use stdout)
     """
 
     session = ctx.obj["session"]
@@ -1025,8 +1026,8 @@ def write_object(ctx, pin, management_key, object_id, data):
     the range 5f0000 - 5fffff.
 
     \b
-    OBJECT         Name of PIV data object, or ID in HEX.
-    DATA           File containing the data to be written. Use '-' to use stdin.
+    OBJECT         name of PIV data object, or ID in HEX
+    DATA           file containing the data to be written (use '-' to use stdin)
     """
 
     session = ctx.obj["session"]
@@ -1050,12 +1051,12 @@ def generate_object(ctx, pin, management_key, object_id):
     Generate and write data for a supported data object.
 
     \b
-    OBJECT         Name of PIV data object, or ID in HEX.
-
-    \b
-    Supported data objects are:
+    Supported data objects:
       "CHUID" (Card Holder Unique ID)
       "CCC"   (Card Capability Container)
+
+    \b
+    OBJECT         name of PIV data object, or ID in HEX
     """
 
     session = ctx.obj["session"]

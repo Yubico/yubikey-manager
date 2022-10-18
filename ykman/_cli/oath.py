@@ -451,8 +451,8 @@ def add(
     This will add a new OATH account to the YubiKey.
 
     \b
-    NAME    Human readable name of the account, such as a username or e-mail address.
-    SECRET  Base32-encoded secret/key value provided by the server.
+    NAME    human readable name of the account, such as a username or e-mail address
+    SECRET  base32-encoded secret/key value provided by the server
     """
 
     digits = int(digits)
@@ -694,8 +694,8 @@ def rename(ctx, query, name, force, password, remember):
     Rename an account (requires YubiKey 5.3 or later).
 
     \b
-    QUERY  A query to match a single account (as shown in "list").
-    NAME   The name of the account (use "<issuer>:<name>" to specify issuer).
+    QUERY  a query to match a single account (as shown in "list")
+    NAME   the name of the account (use "<issuer>:<name>" to specify issuer)
     """
 
     _init_session(ctx, password, remember)
@@ -746,7 +746,7 @@ def delete(ctx, query, force, password, remember):
     Delete an account from the YubiKey.
 
     \b
-    QUERY  A query to match a single account (as shown in "list").
+    QUERY  a query to match a single account (as shown in "list")
     """
 
     _init_session(ctx, password, remember)

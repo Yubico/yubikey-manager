@@ -153,7 +153,7 @@ def access():
 
 
 @access.command("set-retries")
-@click.argument("pin-retries", type=click.IntRange(1, 99), metavar="PIN-RETRIES")
+@click.argument("user-pin-retries", type=click.IntRange(1, 99), metavar="PIN-RETRIES")
 @click.argument(
     "reset-code-retries", type=click.IntRange(1, 99), metavar="RESET-CODE-RETRIES"
 )
@@ -164,10 +164,10 @@ def access():
 @click_force_option
 @click.pass_context
 def set_pin_retries(
-    ctx, admin_pin, pin_retries, reset_code_retries, admin_pin_retries, force
+    ctx, admin_pin, user_pin_retries, reset_code_retries, admin_pin_retries, force
 ):
     """
-    Set PIN, Reset Code and Admin PIN retries.
+    Set the number of retry attempts for the User PIN, Reset Code, and Admin PIN.
     """
     controller = ctx.obj["controller"]
 
@@ -178,14 +178,16 @@ def set_pin_retries(
     if resets_pins:
         click.echo("WARNING: Setting PIN retries will reset the values for all 3 PINs!")
     if force or click.confirm(
-        f"Set PIN retry counters to: {pin_retries} {reset_code_retries} "
+        f"Set PIN retry counters to: {user_pin_retries} {reset_code_retries} "
         f"{admin_pin_retries}?",
         abort=True,
         err=True,
     ):
 
         controller.verify_admin(admin_pin)
-        controller.set_pin_retries(pin_retries, reset_code_retries, admin_pin_retries)
+        controller.set_pin_retries(
+            user_pin_retries, reset_code_retries, admin_pin_retries
+        )
         logger.info("Number of PIN/Reset Code/Admin PIN retries set")
 
         if resets_pins:
@@ -326,12 +328,12 @@ def set_signature_policy(ctx, policy, admin_pin):
     """
     Set the Signature PIN policy.
 
-    \b
-    POLICY  Signature PIN policy to set (always, once).
-
     The Signature PIN policy is used to control whether the PIN is
     always required when using the Signature key, or if it is required
     only once per session.
+
+    \b
+    POLICY  signature PIN policy to set (always, once)
     """
     controller = ctx.obj["controller"]
 
@@ -360,26 +362,23 @@ def set_touch(ctx, key, policy, admin_pin, force):
     """
     Set the touch policy for OpenPGP keys.
 
-    \b
-    KEY     Key slot to set (sig, enc, aut or att).
-    POLICY  Touch policy to set (on, off, fixed, cached or cached-fixed).
-
-    The touch policy is used to require user interaction for all
-    operations using the private key on the YubiKey. The touch policy is set
-    individually for each key slot. To see the current touch policy, run
-
-    \b
-        $ ykman openpgp info
+    The touch policy is used to require user interaction for all operations using the
+    private key on the YubiKey. The touch policy is set individually for each key slot.
+    To see the current touch policy, run the "openpgp info" subcommand.
 
     Touch policies:
 
     \b
-    Off (default)   No touch required
-    On              Touch required
-    Fixed           Touch required, can't be disabled without deleting the private key
-    Cached          Touch required, cached for 15s after use
-    Cached-Fixed    Touch required, cached for 15s after use, can't be disabled
+    Off (default)   no touch required
+    On              touch required
+    Fixed           touch required, can't be disabled without deleting the private key
+    Cached          touch required, cached for 15s after use
+    Cached-Fixed    touch required, cached for 15s after use, can't be disabled
                     without deleting the private key
+
+    \b
+    KEY     key slot to set (sig, enc, aut or att)
+    POLICY  touch policy to set (on, off, fixed, cached or cached-fixed)
     """
     controller = ctx.obj["controller"]
 
@@ -425,7 +424,7 @@ def import_key(ctx, key, private_key, admin_pin):
     Import a private key for OpenPGP attestation.
 
     \b
-    PRIVATE-KEY File containing the private key. Use '-' to use stdin.
+    PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
     controller = ctx.obj["controller"]
 
@@ -460,8 +459,8 @@ def attest(ctx, key, certificate, pin, format):
     YubiKey and therefore doesn't exist outside the device.
 
     \b
-    KEY         Key slot to attest (sig, enc, aut).
-    CERTIFICATE File to write attestation certificate to. Use '-' to use stdout.
+    KEY          key slot to attest (sig, enc, aut)
+    CERTIFICATE  file to write attestation certificate to (use '-' to use stdout)
     """
 
     controller = ctx.obj["controller"]
@@ -510,8 +509,8 @@ def export_certificate(ctx, key, format, certificate):
     Export an OpenPGP certificate.
 
     \b
-    KEY         Key slot to read from (sig, enc, aut, or att).
-    CERTIFICATE File to write certificate to. Use '-' to use stdout.
+    KEY          key slot to read from (sig, enc, aut, or att)
+    CERTIFICATE  file to write certificate to (use '-' to use stdout)
     """
     controller = ctx.obj["controller"]
 
@@ -562,8 +561,8 @@ def import_certificate(ctx, key, cert, admin_pin):
     Import an OpenPGP certificate.
 
     \b
-    KEY         Key slot to import certificate to (sig, enc, aut, or att).
-    CERTIFICATE File containing the certificate. Use '-' to use stdin.
+    KEY          key slot to import certificate to (sig, enc, aut, or att)
+    CERTIFICATE  file containing the certificate (use '-' to use stdin)
     """
     controller = ctx.obj["controller"]
 
