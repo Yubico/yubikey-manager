@@ -73,6 +73,7 @@ _NAME_ATTRIBUTES = {
     "STREET": NameOID.STREET_ADDRESS,
     "DC": NameOID.DOMAIN_COMPONENT,
     "UID": NameOID.USER_ID,
+    "emailAddress": NameOID.EMAIL_ADDRESS,
 }
 
 
