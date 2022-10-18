@@ -51,9 +51,10 @@ from ..hid import list_ctap_devices
 from ..device import is_fips_version
 from ..pcsc import list_devices as list_ccid
 from smartcard.Exceptions import NoCardException, CardConnectionException
-from collections.abc import Sequence
-from typing import Optional
+from typing import Optional, Sequence, List
 
+import io
+import csv as _csv
 import click
 import logging
 
@@ -484,9 +485,9 @@ def _gen_creds(credman):
             )
 
 
-def _format_table(headings: Sequence[str], rows: list[Sequence[str]]) -> str:
-    all_rows: list[Sequence[str]] = [headings] + rows
-    padded_rows: list[list[str]] = [["" for cell in row] for row in all_rows]
+def _format_table(headings: Sequence[str], rows: List[Sequence[str]]) -> str:
+    all_rows = [headings] + rows
+    padded_rows = [["" for cell in row] for row in all_rows]
 
     max_cols = max(len(row) for row in all_rows)
     for c in range(max_cols):
@@ -520,8 +521,8 @@ def creds():
       $ ykman fido credentials list --pin 123456
 
     \b
-      Delete a credential by user name (PIN will be prompted for):
-      $ ykman fido credentials delete example_user
+      Delete a credential (ID shown in "list" output, PIN will be prompted for):
+      $ ykman fido credentials delete da7fdc
     """
 
 
@@ -542,56 +543,80 @@ def _init_credman(ctx, pin):
 @creds.command("list")
 @click.pass_context
 @click.option("-P", "--pin", help="PIN code.")
-def creds_list(ctx, pin):
+@click.option(
+    "-c",
+    "--csv",
+    is_flag=True,
+    help="output full (comma separated) credential ID, RP ID, user ID, user name, "
+    "display name",
+)
+def creds_list(ctx, pin, csv):
     """
     List credentials.
+
+    Shows a list of credentials stored on the YubiKey.
+
+    The --csv flag will output more complete information about each credential,
+    separated by commas:
+    Credential ID (hex), RP ID, User Name, Display Name, User ID (hex)
     """
-    creds = _init_credman(ctx, pin)
-    click.echo(
-        _format_table(
-            ["RP ID", "User ID", "Username", "Display name"],
-            [
-                (rp_id, user_id.hex(), user_name, display_name)
-                for rp_id, _, user_id, user_name, display_name in _gen_creds(creds)
-            ],
+    credman = _init_credman(ctx, pin)
+    creds = list(_gen_creds(credman))
+    if csv:
+        buf = io.StringIO()
+        _csv.writer(buf).writerows(
+            [cred_id["id"].hex(), rp_id, user_name, display_name, user_id.hex()]
+            for rp_id, cred_id, user_id, user_name, display_name in creds
         )
-    )
+        click.echo(buf.getvalue())
+    else:
+        ln = 4
+        while len(set(c[1]["id"][:ln] for c in creds)) < len(creds):
+            ln += 1
+        click.echo(
+            _format_table(
+                ["Credential ID", "RP ID", "Username", "Display name"],
+                [
+                    (cred_id["id"][:ln].hex() + "...", rp_id, user_name, display_name)
+                    for rp_id, cred_id, _, user_name, display_name in creds
+                ],
+            )
+        )
 
 
 @creds.command("delete")
 @click.pass_context
-@click.argument("query")
+@click.argument("credential_id")
 @click.option("-P", "--pin", help="PIN code.")
 @click.option("-f", "--force", is_flag=True, help="Confirm deletion without prompting")
-def creds_delete(ctx, query, pin, force):
+def creds_delete(ctx, credential_id, pin, force):
     """
     Delete a credential.
 
+    List stored credential IDs using the "list" subcommand.
+
     \b
-    QUERY       A unique substring match of a credentials RP ID, user ID (hex) or name,
-                or credential ID.
+    CREDENTIAL_ID       A unique substring match of a Credential ID.
     """
     credman = _init_credman(ctx, pin)
+    credential_id = credential_id.rstrip(".").lower()
 
     hits = [
-        (rp_id, cred_id, user_id, user_name)
-        for (rp_id, cred_id, user_id, user_name, _) in _gen_creds(credman)
-        if query.lower() in user_name.lower()
-        or query.lower() in rp_id.lower()
-        or user_id.hex().startswith(query.lower())
-        or query.lower() in _format_cred(rp_id, user_id, user_name)
+        (rp_id, cred_id, user_name, display_name)
+        for (rp_id, cred_id, _, user_name, display_name) in _gen_creds(credman)
+        if cred_id["id"].hex().startswith(credential_id)
     ]
     if len(hits) == 0:
         cli_fail("No matches, nothing to be done.")
     elif len(hits) == 1:
-        (rp_id, cred_id, user_id, user_name) = hits[0]
+        (rp_id, cred_id, user_name, display_name) = hits[0]
         if force or click.confirm(
-            f"Delete credential {_format_cred(rp_id, user_id, user_name)}?"
+            f"Delete {rp_id} {user_name} {display_name} ({cred_id['id'].hex()})?"
         ):
             try:
                 credman.delete_cred(cred_id)
             except CtapError as e:
-                logger.error("Failed to delete resident credential", exc_info=e)
+                logger.error("Failed to delete credential", exc_info=e)
                 cli_fail("Failed to delete resident credential.")
     else:
         cli_fail("Multiple matches, make the query more specific.")
