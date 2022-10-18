@@ -545,8 +545,7 @@ def _init_credman(ctx, pin):
     "-c",
     "--csv",
     is_flag=True,
-    help="output full (comma separated) credential ID, RP ID, user name, "
-    "display name, user ID",
+    help="output full credential information as CSV",
 )
 def creds_list(ctx, pin, csv):
     """
@@ -555,14 +554,17 @@ def creds_list(ctx, pin, csv):
     Shows a list of credentials stored on the YubiKey.
 
     The --csv flag will output more complete information about each credential,
-    separated by commas:
-    Credential ID (hex), RP ID, User Name, Display Name, User ID (hex)
+    formatted as a CSV (comma separated values).
     """
     credman = _init_credman(ctx, pin)
     creds = list(_gen_creds(credman))
     if csv:
         buf = io.StringIO()
-        _csv.writer(buf).writerows(
+        writer = _csv.writer(buf)
+        writer.writerow(
+            ["credential_id", "rp_id", "user_name", "user_display_name", "user_id"]
+        )
+        writer.writerows(
             [cred_id["id"].hex(), rp_id, user_name, display_name, user_id.hex()]
             for rp_id, cred_id, user_id, user_name, display_name in creds
         )
