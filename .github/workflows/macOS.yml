@@ -54,7 +54,7 @@ jobs:
 
       - name: Build installer
         run: |
-          ./resources/macos/make_installer.sh "5.0.0-rc.1"
+          ./resources/macos/make_installer.sh "5.0.0"
 
       - name: Upload build
         uses: actions/upload-artifact@v1

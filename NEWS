@@ -1,4 +1,4 @@
-* Version 5.0.0 (unreleased)
+* Version 5.0.0 (released 2022-10-19)
  ** Various cleanups and improvements to the API.
  ** Improvements to the handling of YubiKeys and connections.
  ** Command aliases for ykman 3.x (introduced in ykman 4.0) have now been dropped.
