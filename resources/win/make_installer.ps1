@@ -9,7 +9,7 @@ if(!($args[1])) {
   $SOURCE_DIR="$CWD/$($args[1])" # Location of binary files
 }
 
-echo "Release version : $RELEASE_VERSION"
+echo "Release version: $RELEASE_VERSION"
 echo "Binaries: $SOURCE_DIR"
 
 cd $PSScriptRoot
