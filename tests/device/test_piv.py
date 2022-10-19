@@ -132,7 +132,7 @@ def verify_cert_signature(cert, public_key=None):
 class TestCertificateSignatures:
     @pytest.mark.parametrize("key_type", list(KEY_TYPE))
     @pytest.mark.parametrize(
-        "hash_algorithm", (hashes.SHA1, hashes.SHA256, hashes.SHA384, hashes.SHA512)
+        "hash_algorithm", (hashes.SHA256, hashes.SHA384, hashes.SHA512)
     )
     def test_generate_self_signed_certificate(
         self, info, session, key_type, hash_algorithm
