@@ -9,13 +9,13 @@ jobs:
     runs-on: macos-11
 
     env:
-      PYTHON_VERSION: "3.10.6"
+      PYTHON_VERSION: "3.10.8"
       MACOSX_DEPLOYMENT_TARGET: "11.0"
       CFLAGS: -arch x86_64 -arch arm64
       ARCHFLAGS: -arch x86_64 -arch arm64
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       # setup-python currently does not support universal2 Python
       - name: Install Python
@@ -54,7 +54,7 @@ jobs:
 
       - name: Build installer
         run: |
-          ./resources/macos/make_installer.sh "4.1.0"
+          ./resources/macos/make_installer.sh "5.0.0"
 
       - name: Upload build
         uses: actions/upload-artifact@v1
