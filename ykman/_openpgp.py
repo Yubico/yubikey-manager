@@ -82,7 +82,7 @@ class _KeySlot(NamedTuple):
 
 
 @unique
-class KEY_SLOT(_KeySlot, Enum):  # noqa: N801
+class KEY_SLOT(_KeySlot, Enum):  # type: ignore  # noqa: N801
     SIG = _KeySlot("SIGNATURE", 1, 0xC1, 0xC7, 0xCE, 0xD6, Tlv(0xB6))
     ENC = _KeySlot("ENCRYPTION", 2, 0xC2, 0xC8, 0xCF, 0xD7, Tlv(0xB8))
     AUT = _KeySlot("AUTHENTICATION", 3, 0xC3, 0xC9, 0xD0, 0xD8, Tlv(0xA4))
