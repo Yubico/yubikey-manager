@@ -9,7 +9,7 @@ jobs:
     runs-on: macos-11
 
     env:
-      PYTHON_VERSION: "3.10.8"
+      PYTHON_VERSION: "3.11.0"
       MACOSX_DEPLOYMENT_TARGET: "11.0"
       CFLAGS: -arch x86_64 -arch arm64
       ARCHFLAGS: -arch x86_64 -arch arm64

@@ -1,8 +1,8 @@
 == YubiKey Manager CLI
 image:https://github.com/Yubico/yubikey-manager/workflows/build/badge.svg["Build Status", link="https://github.com/Yubico/yubikey-manager/actions"]
 
-Python 3.6 (or later) library and command line tool for configuring a YubiKey.
-If you're looking for the full graphical application, which also includes the command line tool, it's https://developers.yubico.com/yubikey-manager-qt/[here].
+Python 3.7 (or later) library and command line tool for configuring a YubiKey.
+If you're looking for the graphical application, it's https://developers.yubico.com/yubikey-manager-qt/[here].
 
 === Usage
 For more usage information and examples, see the https://docs.yubico.com/software/yubikey/tools/ykman/Using_the_ykman_CLI.html[YubiKey Manager CLI User Manual].
@@ -156,8 +156,6 @@ enable it, run this command once (for Bash):
 
   $ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
 
-More information on shell completion is available here:
+More information on shell completion (including instructions for zch) is
+available here:
 https://click.palletsprojects.com/en/8.0.x/shell-completion
-
-NOTE: If your version of the Click dependency is older than 8.0 you need to use
-`source_bash` for the variable instead.

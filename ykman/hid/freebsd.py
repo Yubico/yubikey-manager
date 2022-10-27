@@ -63,8 +63,12 @@ import glob
 import fcntl
 import os
 import re
+import sys
 import struct
 import logging
+
+# Don't typecheck this file on Windows
+assert sys.platform != "win32"  # nosec
 
 logger = logging.getLogger(__name__)
 
