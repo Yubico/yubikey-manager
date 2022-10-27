@@ -219,7 +219,7 @@ def reset(ctx, force):
     the PIV application on the YubiKey.
     """
     force or click.confirm(
-        prompt="WARNING! This will delete all stored PIV data and restore factory "
+        "WARNING! This will delete all stored PIV data and restore factory "
         "settings. Proceed?",
         abort=True,
         err=True,

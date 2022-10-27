@@ -117,7 +117,7 @@ def reset(ctx, force):
     """
 
     force or click.confirm(
-        prompt="WARNING! This will delete all stored OATH accounts and restore factory "
+        "WARNING! This will delete all stored OATH accounts and restore factory "
         "settings. Proceed?",
         abort=True,
         err=True,
