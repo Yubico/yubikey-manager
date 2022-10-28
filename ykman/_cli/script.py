@@ -54,7 +54,6 @@ def _add_warning(obj):
 @click_command(
     "script",
     context_settings=dict(ignore_unknown_options=True),
-    hidden="--full-help" not in sys.argv,
 )
 @click.pass_context
 @click.option(
