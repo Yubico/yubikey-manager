@@ -1,3 +1,7 @@
+* Version 5.0.1 (unreleased)
+ ** Bugfix: Fix the interactive confirmation prompt for some CLI commands.
+ ** Add support for Python 3.11.
+
 * Version 5.0.0 (released 2022-10-19)
  ** Various cleanups and improvements to the API.
  ** Improvements to the handling of YubiKeys and connections.

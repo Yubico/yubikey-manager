@@ -21,32 +21,42 @@ Usage: ykman [OPTIONS] COMMAND [ARGS]...
     $ ykman --device 0123456 info
 
 Options:
-  -v, --version                   Show version information about the app
-  -d, --device SERIAL             Specify which YubiKey to interact with by serial number.
-  -l, --log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
-                                  Enable logging at given verbosity level.
-  --log-file FILE                 Write logs to the given FILE instead of standard error; ignored
-                                  unless --log-level is also set.
-
-  -r, --reader NAME               Use an external smart card reader. Conflicts with --device and list.
-  --diagnose                      Show diagnostics information useful for troubleshooting.
-  -h, --help                      Show this message and exit.
+  -d, --device SERIAL             specify which YubiKey to interact with by serial number
+  -r, --reader NAME               specify a YubiKey by smart card reader name (can't be used with --device or list)
+  -l, --log-level [ERROR|WARNING|INFO|DEBUG|TRAFFIC]
+                                  enable logging at given verbosity level
+  --log-file FILE                 write log to FILE instead of printing to stderr (requires --log-level)
+  --diagnose                      show diagnostics information useful for troubleshooting
+  -v, --version                   show version information about the app
+  --full-help                     show --help output, including hidden commands
+  -h, --help                      show this message and exit
 
 Commands:
-  info     Show general information.
-  list     List connected YubiKeys.
-  config   Enable/Disable applications.
-  fido     Manage the FIDO applications.
-  oath     Manage the OATH Application.
-  openpgp  Manage the OpenPGP Application.
-  otp      Manage the OTP Application.
-  piv      Manage the PIV Application.
+  info     show general information
+  list     list connected YubiKeys
+  config   enable or disable applications
+  fido     manage the FIDO applications
+  oath     manage the OATH application
+  openpgp  manage the OpenPGP application
+  otp      manage the YubiOTP application
+  piv      manage the PIV application
 ....
 
 The `--help` argument can also be used to get detailed information about specific
 subcommands:
 
     ykman oath --help
+
+=== Versioning/Compatibility
+This project follows https://semver.org/[Semantic Versioning]. Any project
+depending on yubikey-manager should take care when specifying version ranges to
+not include any untested major version, as it is likely to have backwards
+incompatible changes. For example, you should NOT depend on ">=5", as it has no
+upper bound. Instead, depend on ">=5, <6", as any release before 6 will be
+compatible.
+
+Note that any private variables (names starting with '_') are not part of the
+public API, and may be changed between versions at any time.
 
 === Installation
 YubiKey Manager can be installed independently of platform by using pip (or
@@ -69,11 +79,14 @@ third parties. Please refer to your platforms native package manager for
 detailed instructions on how to install, if available.
 
 ==== Windows
-The command line tool ykman.exe is provided as part of the installer for the
-https://developers.yubico.com/yubikey-manager-qt/[YubiKey Manager] on Windows.
+A Windows installer is available to download from the
+https://github.com/Yubico/yubikey-manager/releases/latest[Releases page].
 
 ==== MacOS
-Packages for MacOS are available from Homebrew and MacPorts.
+A MacOS installer is available to download from the
+https://github.com/Yubico/yubikey-manager/releases/latest[Releases page].
+
+Additionally, packages are available from Homebrew and MacPorts.
 
 ===== Input Monitoring access on MacOS
 When running one of the `ykman otp` commands you may run into an error such as:
@@ -92,9 +105,7 @@ resolve this.
 ==== Linux
 Packages are available for several Linux distributions by third party package
 maintainers.
-Yubico also provides packages for Ubuntu in the yubico/stable PPA (for amd64
-ONLY, other architectures such as arm should use the general `pip` instructions
-above instead):
+Yubico also provides packages for Ubuntu in the yubico/stable PPA:
 
   $ sudo apt-add-repository ppa:yubico/stable
   $ sudo apt update
@@ -144,7 +155,7 @@ so that the key will still function as a USB keyboard:
   EOF
   # reboot
 
-==== Source
+==== From source (for development)
 To install from source, see the link:doc/Development.adoc[development]
 instructions.
 
