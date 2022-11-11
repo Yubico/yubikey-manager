@@ -1,5 +1,6 @@
 * Version 5.0.1 (unreleased)
  ** Bugfix: Fix the interactive confirmation prompt for some CLI commands.
+ ** Bugfix: OpenPGP Signature PIN policy values were swapped.
  ** Add support for Python 3.11.
 
 * Version 5.0.0 (released 2022-10-19)

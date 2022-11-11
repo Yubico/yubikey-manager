@@ -118,14 +118,12 @@ class TOUCH_MODE(IntEnum):  # noqa: N801
 
 @unique
 class PIN_POLICY(IntEnum):  # noqa: N801
-    ONCE = 0x00
-    ALWAYS = 0x01
+    ALWAYS = 0x00
+    ONCE = 0x01
 
     def __str__(self):
-        if self == PIN_POLICY.ONCE:
-            return "Once"
-        elif self == PIN_POLICY.ALWAYS:
-            return "Always"
+        name = self.name
+        return name[0] + name[1:].lower()
 
 
 @unique
@@ -404,7 +402,10 @@ class OpenPgpController(object):
     def get_signature_pin_policy(self):
         data = self._get_data(DO.PW_STATUS)
 
-        return PIN_POLICY(data[0])
+        try:
+            return PIN_POLICY(data[0])
+        except ValueError:
+            return PIN_POLICY.ONCE
 
     def set_signature_pin_policy(self, pin_policy):
         """Requires Admin PIN verification."""
@@ -684,7 +685,7 @@ def get_openpgp_info(controller: OpenPgpController):
         "PIN tries remaining": retries.pin,
         "Reset code tries remaining": retries.reset,
         "Admin PIN tries remaining": retries.admin,
-        "Signature PIN": controller.get_signature_pin_policy(),
+        "Require PIN for signature": controller.get_signature_pin_policy(),
     }
 
     # Touch only available on YK4 and later
