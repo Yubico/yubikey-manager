@@ -843,7 +843,7 @@ def _get_key_attributes(
     if isinstance(private_key, rsa.RSAPrivateKeyWithSerialization):
         if private_key.private_numbers().public_numbers.e != 65537:
             raise ValueError("RSA keys with e != 65537 are not supported!")
-        return RsaAttributes.create(private_key.key_size)
+        return RsaAttributes.create(RSA_SIZE(private_key.key_size))
     return EcAttributes.create(key_ref, OID._from_key(private_key))
 
 
@@ -886,7 +886,7 @@ def _parse_rsa_key(data: Mapping[int, bytes]) -> rsa.RSAPublicKey:
     return numbers.public_key(default_backend())
 
 
-def _parse_ec_key(oid: CurveOid, data: Mapping[int, bytes]) -> EcPrivateKey:
+def _parse_ec_key(oid: CurveOid, data: Mapping[int, bytes]) -> EcPublicKey:
     pubkey_enc = data[0x86]
     if oid == OID.X25519:
         return x25519.X25519PublicKey.from_public_bytes(pubkey_enc)
