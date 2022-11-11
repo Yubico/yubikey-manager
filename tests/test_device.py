@@ -88,3 +88,69 @@ def test_yk5_fips_formfactors():
     assert get_name(fips(info(FORM_FACTOR.USB_C_BIO)), kt) == "YubiKey C Bio FIPS"
     assert get_name(fips(info(FORM_FACTOR.UNKNOWN)), kt) == "YubiKey 5 FIPS"
     assert get_name(fips(info_nfc(FORM_FACTOR.UNKNOWN)), kt) == "YubiKey 5 NFC FIPS"
+
+
+def sky(device_info):
+    device_info.is_sky = True
+    return device_info
+
+
+def test_sky_formfactors():
+    kt = YUBIKEY.YK4
+    assert get_name(sky(info(FORM_FACTOR.USB_A_KEYCHAIN)), kt) == "Security Key A"
+    assert get_name(sky(info_nfc(FORM_FACTOR.USB_A_KEYCHAIN)), kt) == "Security Key NFC"
+    assert get_name(sky(info(FORM_FACTOR.USB_A_NANO)), kt) == "Security Key Nano"
+    assert get_name(sky(info(FORM_FACTOR.USB_C_KEYCHAIN)), kt) == "Security Key C"
+    assert (
+        get_name(sky(info_nfc(FORM_FACTOR.USB_C_KEYCHAIN)), kt) == "Security Key C NFC"
+    )
+    assert get_name(sky(info(FORM_FACTOR.USB_C_NANO)), kt) == "Security Key C Nano"
+    assert get_name(sky(info(FORM_FACTOR.USB_C_LIGHTNING)), kt) == "Security Key Ci"
+    assert get_name(sky(info(FORM_FACTOR.UNKNOWN)), kt) == "Security Key"
+    assert get_name(sky(info_nfc(FORM_FACTOR.UNKNOWN)), kt) == "Security Key NFC"
+
+
+def skyep(device_info):
+    device_info.is_sky = True
+    device_info.serial = 123456
+    return device_info
+
+
+def test_sky_enterprise_formfactors():
+    kt = YUBIKEY.YK4
+    assert (
+        get_name(skyep(info(FORM_FACTOR.USB_A_KEYCHAIN)), kt)
+        == "Security Key A - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info_nfc(FORM_FACTOR.USB_A_KEYCHAIN)), kt)
+        == "Security Key NFC - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info(FORM_FACTOR.USB_A_NANO)), kt)
+        == "Security Key Nano - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info(FORM_FACTOR.USB_C_KEYCHAIN)), kt)
+        == "Security Key C - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info_nfc(FORM_FACTOR.USB_C_KEYCHAIN)), kt)
+        == "Security Key C NFC - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info(FORM_FACTOR.USB_C_NANO)), kt)
+        == "Security Key C Nano - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info(FORM_FACTOR.USB_C_LIGHTNING)), kt)
+        == "Security Key Ci - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info(FORM_FACTOR.UNKNOWN)), kt)
+        == "Security Key - Enterprise Edition"
+    )
+    assert (
+        get_name(skyep(info_nfc(FORM_FACTOR.UNKNOWN)), kt)
+        == "Security Key NFC - Enterprise Edition"
+    )
