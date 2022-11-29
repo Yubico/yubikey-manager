@@ -12,39 +12,15 @@ running the following command from a Terminal:
 If the above runs without error (no output at all), then you should be all set.
 
 
-=== Connecting to a YubiKey
-The first step you'll likely want to do is to establish a Session with a
-YubiKey Application. Depending on which Application you intend to access,
-you'll need to establish a specific type of Connection. The `connect_to_device`
-function lets you search for, and connect to, a YubiKey. Once you are done
-using a Connection, you should close it. This can be done explicitly by calling
-`connection.close()`, or by using a `with` block.
-
-==== Example
-[source,py]
-----
-from ykman.device import connect_to_device
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.piv import PivSession
-
-# Connect to a YubiKey over a SmartCardConnection, which is needed for PIV.
-connection, device, info = connect_to_device(
-    serial=123456,  # Serial number of the YubiKey to connect to, can be omitted
-    connection_types=[SmartCardConnection],  # Possible Connection types to allow
-)
-
-with connection:  # This closes the connection after the block
-    piv = PivSession(connection)
-    attempts = piv.get_pin_attempts()
-    print(f"You have {attempts} PIN attempts left.")
-----
-
-
-=== Listing all connected YubiKeys
-Just using `connect_to_device` allows you to connect to a single YubiKey,
-either by specifying its serial number, or by only having a single YubiKey
-connected. When working with multiple connected YubiKeys you'll likely find a
-need for enumerating these. You can use `list_all_devices` for this purpose.
+=== Listing connected YubiKeys
+The first step you'll likely want to do is to list currently connected
+YubiKeys, and get some information about them. This is what the
+`list_all_devices` function is for. It detects and connects to each attached
+YubiKey, reading some information about it. It returns a list of tuples
+consisting of a YubiKeyDevice and a corresponding DeviceInfo. The DeviceInfo
+can tell you what kind of YubiKey it is, what capabilities it has, its serial
+number, etc. The YubiKeyDevice will let you open a Connection to it, which will
+let you interact with one of the available Applications.
 
 [NOTE]
 ====
@@ -57,14 +33,43 @@ connections.
 ==== Example
 [source,py]
 ----
-from ykman.device import connect_to_device, list_all_devices
+from ykman.device import list_all_devices
 from yubikit.core.smartcard import SmartCardConnection
 
 for device, info in list_all_devices():
     if info.version >= (5, 0, 0):  # The info object provides details about the YubiKey
-        connection, _, _ = connect_to_device(serial=info.serial, connection_types=[SmartCardConnection])
-        with connection:
-            ...  # Do something with the connection.
+        print(f"Found YubiKey with serial number: {info.serial}")
+----
+
+
+=== Connecting to a YubiKey
+To actually do anything with a YubiKey you'll need to create a Connection and
+establish a session with a YubiKey Application. Depending on which Application
+you intend to access, you'll need to establish a specific type of Connection.
+Once you have a reference to a YubiKeyDevice you can call the `open_connection`
+method on it to open a Connection of a specific type. There are three different
+types of Connections, used for different Applications. These are
+`SmartCardConnection`, `OtpConnection` and `FidoConnection`.  Once you are done
+using a Connection, you should close it. This can be done explicitly by calling
+`connection.close()`, or by using a `with` block.
+
+==== Example
+[source,py]
+----
+from ykman.device import list_all_devices
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.piv import PivSession
+
+# Select a connected YubiKeyDevice
+dev, info = list_all_devices()[0]
+
+# Connect to a YubiKey over a SmartCardConnection, which is needed for PIV.
+with dev.open_connection(SmartCardConnection) as connection:
+    # The connection will be automatically closed after this block
+
+    piv = PivSession(connection)
+    attempts = piv.get_pin_attempts()
+    print(f"You have {attempts} PIN attempts left.")
 ----
 
 
@@ -79,7 +84,8 @@ connected YubiKeys changes.
 ==== Example
 [source,py]
 ----
-from ykman.device import connect_to_device, list_all_devices, scan_devices
+from ykman.device import list_all_devices, scan_devices
+from yubikit.core.smartcard import SmartCardConnection
 from time import sleep
 
 handled_serials = set()  # Keep track of YubiKeys we've already handled.
@@ -92,9 +98,7 @@ while True:  # Run this until we stop the script with Ctrl+C
         for device, info in list_all_devices():
             if info.serial not in handled_serials:  # Unhandled YubiKey
                 print(f"Programming YubiKey with serial: {info.serial}")
-                # Since we're not filtering on connection type here the Connection may have any type.
-                with connect_to_device(info.serial)[0] as connection:
-                    ...  # Do something with the connection.
+                ...  # Do something with the device here.
                 handled.add(info.serial)
     else:
         sleep(1.0)  # No change, sleep for 1 second.
