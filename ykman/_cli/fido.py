@@ -479,8 +479,8 @@ def _gen_creds(credman):
                 rp[CredentialManagement.RESULT.RP]["id"],
                 cred[CredentialManagement.RESULT.CREDENTIAL_ID],
                 cred[CredentialManagement.RESULT.USER]["id"],
-                cred[CredentialManagement.RESULT.USER]["name"],
-                cred[CredentialManagement.RESULT.USER]["displayName"],
+                cred[CredentialManagement.RESULT.USER].get("name", ""),
+                cred[CredentialManagement.RESULT.USER].get("displayName", ""),
             )
 
 
