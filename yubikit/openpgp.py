@@ -21,9 +21,14 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     PrivateFormat,
+    PublicFormat,
     NoEncryption,
 )
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, ed25519, x25519
+from cryptography.hazmat.primitives.asymmetric.utils import (
+    Prehashed,
+    encode_dss_signature,
+)
 
 import os
 import abc
@@ -94,9 +99,11 @@ class INS(IntEnum):  # noqa: N801
     VERIFY = 0x20
     CHANGE_PIN = 0x24
     RESET_RETRY_COUNTER = 0x2C
+    PSO = 0x2A
     ACTIVATE = 0x44
     GENERATE_ASYM = 0x47
     GET_CHALLENGE = 0x84
+    INTERNAL_AUTHENTICATE = 0x88
     SELECT_DATA = 0xA5
     GET_DATA = 0xCA
     PUT_DATA = 0xDA
@@ -450,7 +457,7 @@ class RsaAttributes(AlgorithmAttributes):
 class CurveOid(bytes):
     def _get_name(self) -> str:
         for oid in OID:
-            if oid == self:
+            if self.startswith(oid):
                 return oid.name
         return "Unknown Curve"
 
@@ -872,9 +879,12 @@ def _get_key_template(
         return EcKeyTemplate(key_ref.crt, int2bytes(ec_numbers.private_value, ln), None)
 
     elif isinstance(private_key, (ed25519.Ed25519PrivateKey, x25519.X25519PrivateKey)):
+        pkb = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        if isinstance(private_key, x25519.X25519PrivateKey):
+            pkb = pkb[::-1]  # byte order needs to be reversed
         return EcKeyTemplate(
             key_ref.crt,
-            private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()),
+            pkb,
             None,
         )
 
@@ -895,6 +905,38 @@ def _parse_ec_key(oid: CurveOid, data: Mapping[int, bytes]) -> EcPublicKey:
 
     curve = getattr(ec, oid._get_name())
     return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
+
+
+_pkcs1v15_headers = {
+    hashes.MD5: bytes.fromhex("3020300C06082A864886F70D020505000410"),
+    hashes.SHA1: bytes.fromhex("3021300906052B0E03021A05000414"),
+    hashes.SHA224: bytes.fromhex("302D300D06096086480165030402040500041C"),
+    hashes.SHA256: bytes.fromhex("3031300D060960864801650304020105000420"),
+    hashes.SHA384: bytes.fromhex("3041300D060960864801650304020205000430"),
+    hashes.SHA512: bytes.fromhex("3051300D060960864801650304020305000440"),
+    hashes.SHA512_224: bytes.fromhex("302D300D06096086480165030402050500041C"),
+    hashes.SHA512_256: bytes.fromhex("3031300D060960864801650304020605000420"),
+}
+
+
+def _pad_message(attributes, message, hash_algorithm):
+    if attributes.algorithm_id == 0x16:  # EdDSA, never hash
+        return message
+
+    if isinstance(hash_algorithm, Prehashed):
+        hashed = message
+    else:
+        h = hashes.Hash(hash_algorithm, default_backend())
+        h.update(message)
+        hashed = h.finalize()
+
+    if isinstance(attributes, EcAttributes):
+        return hashed
+    if isinstance(attributes, RsaAttributes):
+        try:
+            return _pkcs1v15_headers[type(hash_algorithm)] + hashed
+        except KeyError:
+            raise ValueError(f"Unsupported hash algorithim for RSA: {hash_algorithm}")
 
 
 class OpenPgpSession:
@@ -1056,28 +1098,35 @@ class OpenPgpSession:
         self.put_data(DO.KDF, kdf)
         logger.info("KDF settings changed")
 
-    def _verify(self, pw: PW, pin: str) -> None:
-        logger.debug(f"Verifying {pw.name} PIN")
+    def _verify(self, pw: PW, pin: str, mode: int = 0) -> None:
         pin_enc = self.get_kdf().process(pw, pin)
         try:
-            self.protocol.send_apdu(0, INS.VERIFY, 0, pw, pin_enc)
+            self.protocol.send_apdu(0, INS.VERIFY, 0, pw + mode, pin_enc)
         except ApduError:
             attempts = self.get_pin_status().get_attempts(pw)
             raise ValueError(f"Invalid PIN, {attempts} tries remaining.")
 
-    def verify_pin(self, pin):
+    def verify_pin(self, pin, extended: bool = False):
         """Verify the User PIN.
 
         This will unlock functionality that requires User PIN verification.
+        Note that with `extended=False` (default) only sign operations are allowed.
+        Inversely, with `extended=False` sign operations are NOT allowed.
         """
-        self._verify(PW.USER, pin)
+        logger.debug(f"Verifying User PIN in mode {'82' if extended else '81'}")
+        self._verify(PW.USER, pin, 1 if extended else 0)
 
     def verify_admin(self, admin_pin):
         """Verify the Admin PIN.
 
         This will unlock functionality that requires Admin PIN verification.
         """
+        logger.debug("Verifying Admin PIN")
         self._verify(PW.ADMIN, admin_pin)
+
+    def unverify_pin(self, pw: PW) -> None:
+        logger.debug(f"Resetting verification for {pw.name} PIN")
+        self.protocol.send_apdu(0, INS.VERIFY, 0xFF, pw)
 
     def _change(self, pw: PW, pin: str, new_pin: str) -> None:
         logger.debug(f"Changing {pw.name} PIN")
@@ -1418,3 +1467,71 @@ class OpenPgpSession:
         self.protocol.send_apdu(0x80, INS.GET_ATTESTATION, key_ref, 0)
         logger.info(f"Attestation certificate created for {key_ref.name}")
         return self.get_certificate(key_ref)
+
+    def sign(self, message: bytes, hash_algorithm: hashes.HashAlgorithm) -> bytes:
+        """Signs a message using the SIG key.
+
+        Requires User PIN verification.
+        """
+        attributes = self.get_algorithm_attributes(KEY_REF.SIG)
+        padded = _pad_message(attributes, message, hash_algorithm)
+        logger.debug(f"Signing a message with {attributes}")
+        response = self.protocol.send_apdu(0, INS.PSO, 0x9E, 0x9A, padded)
+        logger.info("Message signed")
+        if attributes.algorithm_id == 0x13:
+            ln = len(response) // 2
+            return encode_dss_signature(
+                int.from_bytes(response[:ln], "big"),
+                int.from_bytes(response[ln:], "big"),
+            )
+        return response
+
+    def decrypt(self, value: Union[bytes, EcPublicKey]) -> bytes:
+        """Decrypts a value using the DEC key.
+
+        For RSA the `value` should be an encrypted block.
+        For ECDH the `value` should be a peer public-key to perform the key exchange
+        with, and the result will be the derived shared secret.
+
+        Requires (extended) User PIN verification.
+        """
+        attributes = self.get_algorithm_attributes(KEY_REF.DEC)
+        logger.debug(f"Decrypting a value with {attributes}")
+
+        if isinstance(value, ec.EllipticCurvePublicKey):
+            data = value.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+        elif isinstance(value, x25519.X25519PublicKey):
+            data = value.public_bytes(Encoding.Raw, PublicFormat.Raw)
+        elif isinstance(value, bytes):
+            data = value
+
+        if isinstance(attributes, RsaAttributes):
+            data = b"\0" + data
+        elif isinstance(attributes, EcAttributes):
+            data = Tlv(0xA6, Tlv(0x7F49, Tlv(0x86, data)))
+
+        response = self.protocol.send_apdu(0, INS.PSO, 0x80, 0x86, data)
+        logger.info("Value decrypted")
+        return response
+
+    def authenticate(
+        self, message: bytes, hash_algorithm: hashes.HashAlgorithm
+    ) -> bytes:
+        """Authenticates a message using the AUT key.
+
+        Requires User PIN verification.
+        """
+        attributes = self.get_algorithm_attributes(KEY_REF.AUT)
+        padded = _pad_message(attributes, message, hash_algorithm)
+        logger.debug(f"Authenticating a message with {attributes}")
+        response = self.protocol.send_apdu(
+            0, INS.INTERNAL_AUTHENTICATE, 0x0, 0x0, padded
+        )
+        logger.info("Message authenticated")
+        if attributes.algorithm_id == 0x13:
+            ln = len(response) // 2
+            return encode_dss_signature(
+                int.from_bytes(response[:ln], "big"),
+                int.from_bytes(response[ln:], "big"),
+            )
+        return response
