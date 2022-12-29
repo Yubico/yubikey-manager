@@ -51,6 +51,7 @@ from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.backends import default_backend
 
 from dataclasses import dataclass
@@ -353,9 +354,12 @@ class SlotMetadata:
 
 def _pad_message(key_type, message, hash_algorithm, padding):
     if key_type.algorithm == ALGORITHM.EC:
-        h = hashes.Hash(hash_algorithm, default_backend())
-        h.update(message)
-        hashed = h.finalize()
+        if isinstance(hash_algorithm, Prehashed):
+            hashed = message
+        else:
+            h = hashes.Hash(hash_algorithm, default_backend())
+            h.update(message)
+            hashed = h.finalize()
         byte_len = key_type.bit_len // 8
         if len(hashed) < byte_len:
             return hashed.rjust(byte_len // 8, b"\0")
