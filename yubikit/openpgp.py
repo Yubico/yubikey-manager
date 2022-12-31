@@ -970,6 +970,11 @@ class OpenPgpSession:
         return Version(*(_bcd(x) for x in bcd))
 
     @property
+    def aid(self) -> OpenPgpAid:
+        """Get the AID used to select the applet."""
+        return self._app_data.aid
+
+    @property
     def version(self) -> Version:
         """Get the firmware version of the key.
 
