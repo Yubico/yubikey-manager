@@ -495,6 +495,12 @@ class OID(CurveOid, Enum):
                 return oid
         raise ValueError("Unsupported private key")
 
+    def __repr__(self) -> str:
+        return repr(self.value)
+
+    def __str__(self) -> str:
+        return str(self.value)
+
 
 @unique
 class EC_IMPORT_FORMAT(IntEnum):
@@ -511,7 +517,7 @@ class EcAttributes(AlgorithmAttributes):
 
     @classmethod
     def create(cls, key_ref: KEY_REF, oid: CurveOid) -> "EcAttributes":
-        if oid in (OID.Ed25519, OID.X25519):
+        if oid == OID.Ed25519:
             alg = 0x16  # ED
         elif key_ref == KEY_REF.DEC:
             alg = 0x12  # ECDH
@@ -1231,6 +1237,19 @@ class OpenPgpSession:
             data.setdefault(slots[DO(tlv.tag)], []).append(
                 AlgorithmAttributes.parse(tlv.value)
             )
+
+        # Fix for invalid entries:
+        # Remove X25519 with EdDSA
+        invalid_cv25519 = EcAttributes(0x16, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
+        for values in data.values():
+            values.remove(invalid_cv25519)
+        cv25519 = EcAttributes(0x12, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
+        # Add X25519 ECDH for DEC
+        if cv25519 not in data[KEY_REF.DEC]:
+            data[KEY_REF.DEC].append(cv25519)
+        # Remove EdDSA from DEC
+        ed25519_attr = EcAttributes(0x16, OID.Ed25519, EC_IMPORT_FORMAT.STANDARD)
+        data[KEY_REF.DEC].remove(ed25519_attr)
 
         return data
 
