@@ -440,8 +440,12 @@ class RsaAttributes(AlgorithmAttributes):
     import_format: RSA_IMPORT_FORMAT
 
     @classmethod
-    def create(cls, n_len: RSA_SIZE) -> "RsaAttributes":
-        return cls(0x01, n_len, 17, RSA_IMPORT_FORMAT.STANDARD)
+    def create(
+        cls,
+        n_len: RSA_SIZE,
+        import_format: RSA_IMPORT_FORMAT = RSA_IMPORT_FORMAT.STANDARD,
+    ) -> "RsaAttributes":
+        return cls(0x01, n_len, 17, import_format)
 
     @classmethod
     def _parse_data(cls, alg, encoded) -> "RsaAttributes":
@@ -518,7 +522,7 @@ class EcAttributes(AlgorithmAttributes):
     @classmethod
     def create(cls, key_ref: KEY_REF, oid: CurveOid) -> "EcAttributes":
         if oid == OID.Ed25519:
-            alg = 0x16  # ED
+            alg = 0x16  # EdDSA
         elif key_ref == KEY_REF.DEC:
             alg = 0x12  # ECDH
         else:
@@ -623,7 +627,8 @@ class ApplicationRelatedData:
 
     @classmethod
     def parse(cls, encoded: bytes) -> "ApplicationRelatedData":
-        data = Tlv.parse_dict(Tlv.unpack(DO.APPLICATION_RELATED_DATA, encoded))
+        outer = Tlv.unpack(DO.APPLICATION_RELATED_DATA, encoded)
+        data = Tlv.parse_dict(outer)
         return cls(
             OpenPgpAid(data[DO.AID]),
             data[DO.HISTORICAL_BYTES],
@@ -639,7 +644,8 @@ class ApplicationRelatedData:
                 if DO.GENERAL_FEATURE_MANAGEMENT in data
                 else None
             ),
-            DiscretionaryDataObjects.parse(data[TAG_DISCRETIONARY]),
+            # Older keys have data in outer dict
+            DiscretionaryDataObjects.parse(data[TAG_DISCRETIONARY] or outer),
         )
 
 
@@ -822,17 +828,17 @@ class RsaKeyTemplate(PrivateKeyTemplate):
 
 @dataclass
 class RsaCrtKeyTemplate(RsaKeyTemplate):
+    iqmp: bytes
     dmp1: bytes
     dmq1: bytes
-    iqmp: bytes
     n: bytes
 
     def _get_template(self):
         return (
             *super()._get_template(),
-            Tlv(0x94, self.dmp1),
-            Tlv(0x95, self.dmq1),
-            Tlv(0x96, self.iqmp),
+            Tlv(0x94, self.iqmp),
+            Tlv(0x95, self.dmp1),
+            Tlv(0x96, self.dmq1),
             Tlv(0x97, self.n),
         )
 
@@ -851,12 +857,17 @@ class EcKeyTemplate(PrivateKeyTemplate):
 
 
 def _get_key_attributes(
-    private_key: PrivateKey, key_ref: KEY_REF
+    private_key: PrivateKey, key_ref: KEY_REF, version: Version
 ) -> AlgorithmAttributes:
     if isinstance(private_key, rsa.RSAPrivateKeyWithSerialization):
         if private_key.private_numbers().public_numbers.e != 65537:
             raise ValueError("RSA keys with e != 65537 are not supported!")
-        return RsaAttributes.create(RSA_SIZE(private_key.key_size))
+        return RsaAttributes.create(
+            RSA_SIZE(private_key.key_size),
+            RSA_IMPORT_FORMAT.CRT_W_MOD
+            if version < (4, 0, 0)
+            else RSA_IMPORT_FORMAT.STANDARD,
+        )
     return EcAttributes.create(key_ref, OID._from_key(private_key))
 
 
@@ -877,7 +888,7 @@ def _get_key_template(
             dq = int2bytes(rsa_numbers.dmq1, ln)
             qinv = int2bytes(rsa_numbers.iqmp, ln)
             n = int2bytes(rsa_numbers.public_numbers.n, 2 * ln)
-            return RsaCrtKeyTemplate(key_ref.crt, e, p, q, dp, dq, qinv, n)
+            return RsaCrtKeyTemplate(key_ref.crt, e, p, q, qinv, dp, dq, n)
 
     elif isinstance(private_key, ec.EllipticCurvePrivateKeyWithSerialization):
         ec_numbers = private_key.private_numbers()
@@ -967,7 +978,6 @@ class OpenPgpSession:
         # Note: This value is cached!
         # Do not rely on contained information that can change!
         self._app_data = self.get_application_related_data()
-
         logger.debug(f"OpenPGP session initialized (version={self.version})")
 
     def _read_version(self) -> Version:
@@ -1224,6 +1234,21 @@ class OpenPgpSession:
             not in self.extended_capabilities.flags
         ):
             raise NotSupportedError("Writing Algorithm Attributes is not supported")
+
+        if self.version < (5, 2, 0):
+            sizes = [RSA_SIZE.RSA2048]
+            if self.version < (4, 0, 0):  # Neo needs CRT
+                fmt = RSA_IMPORT_FORMAT.CRT_W_MOD
+            else:
+                fmt = RSA_IMPORT_FORMAT.STANDARD
+                if self.version[:2] != (4, 4):  # Non-FIPS
+                    sizes.extend([RSA_SIZE.RSA3072, RSA_SIZE.RSA4096])
+            return {
+                KEY_REF.SIG: [RsaAttributes.create(size, fmt) for size in sizes],
+                KEY_REF.DEC: [RsaAttributes.create(size, fmt) for size in sizes],
+                KEY_REF.AUT: [RsaAttributes.create(size, fmt) for size in sizes],
+            }
+
         logger.debug("Getting supported Algorithm Information")
         buf = self.get_data(DO.ALGORITHM_INFORMATION)
         try:
@@ -1238,18 +1263,20 @@ class OpenPgpSession:
                 AlgorithmAttributes.parse(tlv.value)
             )
 
-        # Fix for invalid entries:
-        # Remove X25519 with EdDSA
-        invalid_cv25519 = EcAttributes(0x16, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
-        for values in data.values():
-            values.remove(invalid_cv25519)
-        cv25519 = EcAttributes(0x12, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
-        # Add X25519 ECDH for DEC
-        if cv25519 not in data[KEY_REF.DEC]:
-            data[KEY_REF.DEC].append(cv25519)
-        # Remove EdDSA from DEC
-        ed25519_attr = EcAttributes(0x16, OID.Ed25519, EC_IMPORT_FORMAT.STANDARD)
-        data[KEY_REF.DEC].remove(ed25519_attr)
+        if self.version < (5, 6, 1):
+            # Fix for invalid Curve25519 entries:
+            # Remove X25519 with EdDSA from all keys
+            invalid_x25519 = EcAttributes(0x16, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
+            for values in data.values():
+                values.remove(invalid_x25519)
+            x25519 = EcAttributes(0x12, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
+            # Add X25519 ECDH for DEC
+            if x25519 not in data[KEY_REF.DEC]:
+                data[KEY_REF.DEC].append(x25519)
+            # Remove EdDSA from DEC, ATT
+            ed25519_attr = EcAttributes(0x16, OID.Ed25519, EC_IMPORT_FORMAT.STANDARD)
+            data[KEY_REF.DEC].remove(ed25519_attr)
+            data[KEY_REF.ATT].remove(ed25519_attr)
 
         return data
 
@@ -1320,7 +1347,7 @@ class OpenPgpSession:
         """
         logger.debug(f"Setting key generation timestamp for {key_ref.name}")
         self.put_data(key_ref.generation_time_do, struct.pack(">I", timestamp))
-        logger.info("Key generation timestamp set for {key_ref.name}")
+        logger.info(f"Key generation timestamp set for {key_ref.name}")
 
     def get_fingerprints(self) -> Fingerprints:
         """Get key fingerprints."""
@@ -1399,7 +1426,7 @@ class OpenPgpSession:
         """
 
         logger.debug(f"Importing a private key for {key_ref.name}")
-        attributes = _get_key_attributes(private_key, key_ref)
+        attributes = _get_key_attributes(private_key, key_ref, self.version)
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
             in self.extended_capabilities.flags
@@ -1415,6 +1442,25 @@ class OpenPgpSession:
         template = _get_key_template(private_key, key_ref, self.version < (4, 0, 0))
         self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, bytes(template))
         logger.info(f"Private key imported for {key_ref.name}")
+
+    def delete_key(self, key_ref: KEY_REF) -> None:
+        """Deletes the contents of a key slot.
+
+        Requires Admin PIN verification.
+        """
+        if self.version < (4, 0, 0):
+            # Import over the key
+            self.put_key(
+                key_ref, rsa.generate_private_key(65537, 2048, default_backend())
+            )
+        else:
+            # Delete key by changing the key attributes twice.
+            self.put_data(  # Use put_data to avoid checking for RSA 4096 support
+                key_ref.algorithm_attributes_do, RsaAttributes.create(RSA_SIZE.RSA4096)
+            )
+            self.set_algorithm_attributes(
+                key_ref, RsaAttributes.create(RSA_SIZE.RSA2048)
+            )
 
     def _select_certificate(self, key_ref: KEY_REF) -> None:
         logger.debug(f"Selecting certificate for key {key_ref.name}")
