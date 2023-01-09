@@ -1146,6 +1146,7 @@ class OpenPgpSession:
         self._verify(PW.ADMIN, admin_pin)
 
     def unverify_pin(self, pw: PW) -> None:
+        require_version(self.version, (5, 6, 0))
         logger.debug(f"Resetting verification for {pw.name} PIN")
         self.protocol.send_apdu(0, INS.VERIFY, 0xFF, pw)
 
