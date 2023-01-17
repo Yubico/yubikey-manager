@@ -637,13 +637,7 @@ class OpenPgpController(object):
             return ed25519.Ed25519PublicKey.from_public_bytes(pubkey_enc)
 
         curve = getattr(ec, curve_name.upper())
-        try:
-            # Added in cryptography 2.5
-            return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
-        except AttributeError:
-            return ec.EllipticCurvePublicNumbers.from_encoded_point(
-                curve(), pubkey_enc
-            ).public_key(default_backend())
+        return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
 
     def delete_key(self, key_slot):
         """Requires Admin PIN verification."""

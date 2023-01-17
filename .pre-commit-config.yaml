@@ -17,4 +17,4 @@ repos:
   hooks:
     - id: mypy
       exclude: ^tests/  # keep in sync with mypy.ini
-      additional_dependencies: [types-pyOpenSSL]
+      additional_dependencies: []
