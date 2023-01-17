@@ -28,7 +28,7 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.7"
-cryptography = ">=3.0, <41"
+cryptography = ">=3.0, <42"
 pyscard = "^2.0"
 fido2 = "^1.0"
 click = "^8.0"
