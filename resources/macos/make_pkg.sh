@@ -1,24 +1,19 @@
 #!/bin/bash
 # Script to produce an OS X installer .pkg
 
-if [ "$#" -lt 1 ]; then
-    echo ""
-    echo "      Usage: ./make_installer.sh <Release version> [<binary directory>]"
-    echo ""
-    exit 0
-fi
+set -e
 
+CWD=`pwd`
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SOURCE_DIR="$CWD/ykman"
+RELEASE_VERSION=`$SOURCE_DIR/ykman --version | awk '{print $(NF)}'`
 
-RELEASE_VERSION=$1
-
-if [ -z "$2" ]
+if [ -z "$1" ]
 then
-    SOURCE_DIR="$SCRIPT_DIR/../../dist/ykman"
+	PKG="ykman.pkg"
 else
-    SOURCE_DIR=`pwd`/$2
+	PKG="$1"
 fi
-
 
 echo "Release version : $RELEASE_VERSION"
 echo "Binaries: $SOURCE_DIR"
@@ -33,10 +28,10 @@ cp -r $SOURCE_DIR pkg/root/usr/local/
 
 pkgbuild --root="pkg/root" --identifier "com.yubico.yubikey-manager" --version "$RELEASE_VERSION" "pkg/comp/ykman.pkg"
 
-productbuild  --package-path "pkg/comp" --distribution "distribution.xml" "ykman.pkg"
+productbuild  --package-path "pkg/comp" --distribution "distribution.xml" "$PKG"
 
 # Move to dist
-mv ykman.pkg ../../dist/ykman-$RELEASE_VERSION.pkg
+mv $PKG $CWD/$PKG
 
 # Clean up
 rm -rf pkg

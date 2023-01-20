@@ -49,9 +49,13 @@ jobs:
           dist/ykman/ykman --version
           [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
 
+      - name: Copy scripts
+        shell: bash
+        run: cp -r resources/macos dist/scripts
+
       - name: Build installer
-        run: |
-          ./resources/macos/make_installer.sh "5.0.0"
+        working-directory: ./dist
+        run: ./scripts/make_pkg.sh
 
       - name: Upload build
         uses: actions/upload-artifact@v1
