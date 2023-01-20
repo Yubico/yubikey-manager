@@ -1,28 +1,32 @@
 # Set-PSDebug -Trace 1
 
+$ErrorActionPreference = "Stop"
 
-$RELEASE_VERSION=$args[0] # Release version
-$CWD=pwd
-if(!($args[1])) {
-  $SOURCE_DIR="$PSScriptRoot/../../dist/ykman/"
-} else {
-  $SOURCE_DIR="$CWD/$($args[1])" # Location of binary files
-}
+$CWD = pwd
+$SOURCE_DIR = "$CWD\ykman"
 
-echo "Release version: $RELEASE_VERSION"
+$VERSION = $(& "$SOURCE_DIR\ykman.exe" --version).Split(' ')[-1]
+
+echo "Release version: $VERSION"
 echo "Binaries: $SOURCE_DIR"
+
+$SIMPLE_VERSION = "$($VERSION.Split('-')[0]).0"
 
 cd $PSScriptRoot
 
-((Get-Content -path ykman.wxs.in -Raw) -replace '{RELEASE_VERSION}',$RELEASE_VERSION) | Set-Content -Path ykman.wxs
+((Get-Content -path ykman.wxs.in -Raw) -replace '{RELEASE_VERSION}',$SIMPLE_VERSION) | Set-Content -Path ykman.wxs
 
 $env:SRCDIR = $SOURCE_DIR
+
+echo "Running heat..."
 & "$env:WIX\bin\heat.exe" dir $SOURCE_DIR -out fragment.wxs -gg -scom -srd -sfrag -sreg -dr INSTALLDIR -cg ApplicationFiles -var env.SRCDIR
+echo "Running candle..."
 & "$env:WIX\bin\candle.exe" fragment.wxs "ykman.wxs" -ext WixUtilExtension  -arch "x64"
+echo "Running light..."
 & "$env:WIX\bin\light.exe" -v fragment.wixobj "ykman.wixobj" -ext WixUIExtension -ext WixUtilExtension -o "ykman.msi"
 
 # Move to dist
-$OUTPUT="../../dist/ykman-$RELEASE_VERSION.msi"
+$OUTPUT="$CWD\ykman.msi"
 if (Test-Path $OUTPUT) {
   Remove-Item $OUTPUT
 }

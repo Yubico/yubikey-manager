@@ -1,5 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import re
+import os
+
+with open("ykman/__init__.py") as f:
+    version_file = f.read()
+version = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", version_file, re.M).group(1)
+version_tuple = "(" + version.split("-")[0].replace(".", ", ") + ", 0)"
+
+with open("version_info.txt.in") as f:
+    version_info = f.read()
+version_info = version_info.replace("{VERSION}", version).replace(
+    "{VERSION_TUPLE}", version_tuple
+)
+with open("version_info.txt", "w") as f:
+    f.write(version_info)
+
+
 # This recipe allows PyInstaller to understand the entrypoint.
 # See: https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Setuptools-Entry-Point
 def Entrypoint(dist, group, name, **kwargs):
@@ -55,7 +72,7 @@ exe = EXE(
     upx=True,
     console=True,
     manifest="ykman.exe.manifest",
-    version="resources/win/version_info.txt",
+    version="version_info.txt",
 )
 coll = COLLECT(
     exe,
@@ -67,3 +84,5 @@ coll = COLLECT(
     upx_exclude=[],
     name="ykman",
 )
+
+os.unlink("version_info.txt")

@@ -10,18 +10,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Install Poetry
+        run: pipx install poetry
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11.1'
+          cache: poetry
 
       - name: Install dependencies
         run: |
           choco install swig
-          python -m pip install --upgrade pip
-          pip install poetry
           poetry install
-        shell: powershell
 
       - name: Run unit tests
         run: poetry run pytest -v
@@ -32,6 +33,7 @@ jobs:
       - name: Install from tar.gz
         shell: bash
         run: |
+          python -m pip install --upgrade pip
           pip install dist/*.tar.gz
           ykman --version
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
@@ -52,9 +54,13 @@ jobs:
           dist/ykman/ykman.exe --version
           [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
 
+      - name: Copy scripts
+        shell: bash
+        run: cp -r resources/win dist/scripts
+
       - name: Build installer
-        run: |
-          ./resources/win/make_installer.ps1 "5.0.0"
+        working-directory: ./dist
+        run: .\scripts\make_msi.ps1
 
       - name: Upload build
         uses: actions/upload-artifact@v1
