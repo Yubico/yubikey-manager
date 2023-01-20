@@ -20,9 +20,7 @@ jobs:
           cache: poetry
 
       - name: Install dependencies
-        run: |
-          choco install swig
-          poetry install
+        run: poetry install
 
       - name: Run unit tests
         run: poetry run pytest -v
