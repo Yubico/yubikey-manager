@@ -470,7 +470,7 @@ def get_piv_info(session: PivSession):
         key_type = metadata.key_type
     except NotSupportedError:
         key_type = MANAGEMENT_KEY_TYPE.TDES
-    info["Management key algorithm"] = key_type
+    info["Management key algorithm"] = key_type.name
 
     if pivman.has_derived_key:
         lines.append("Management key is derived from PIN.")
@@ -493,7 +493,7 @@ def get_piv_info(session: PivSession):
 
     for slot, cert in list_certificates(session).items():
         cert_data: Dict[str, Any] = {}
-        objects[f"Slot {slot:02x}"] = cert_data
+        objects[f"Slot {slot}"] = cert_data
         if cert:
             try:
                 # Try to read out full DN, fallback to only CN.

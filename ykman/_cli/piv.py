@@ -74,6 +74,7 @@ from .util import (
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
+
 import click
 import datetime
 import logging
@@ -655,6 +656,38 @@ def attest(ctx, slot, certificate, format):
     )
 
 
+@keys.command("info")
+@click.pass_context
+@click_slot_argument
+def metadata(ctx, slot):
+    """
+    Show metadata about a private key.
+
+    This will show what type of key is stored in a specific slot,
+    whether it was imported into the YubiKey, or generated on-chip,
+    and what the PIN and Touch policies are for using the key.
+
+    \b
+    SLOT        PIV slot of the private key
+    """
+
+    session = ctx.obj["session"]
+    try:
+        metadata = session.get_slot_metadata(slot)
+        info = {
+            "Key slot": slot,
+            "Algorithm": metadata.key_type.name,
+            "Origin": "GENERATED" if metadata.generated else "IMPORTED",
+            "PIN required for use": metadata.pin_policy.name,
+            "Touch required for use": metadata.touch_policy.name,
+        }
+        click.echo("\n".join(pretty_print(info)))
+    except ApduError as e:
+        if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            raise CliFail(f"No key stored in slot {slot}.")
+        raise e
+
+
 @keys.command()
 @click.pass_context
 @click_format_option
@@ -685,13 +718,13 @@ def export(ctx, slot, public_key_output, format, verify, pin):
     PUBLIC-KEY  file to write the public key to (use '-' to use stdout)
     """
     session = ctx.obj["session"]
-
     try:  # Prefer metadata if available
         public_key = session.get_slot_metadata(slot).public_key
         logger.debug("Public key read from YubiKey")
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            raise CliFail(f"No key stored in slot {slot.name}.")
+            raise CliFail(f"No key stored in slot {slot}.")
+        raise CliFail(f"Unable to export public key from slot {slot}.")
     except NotSupportedError:
         try:  # Try attestation
             public_key = session.attest_key(slot).public_key()
@@ -703,16 +736,16 @@ def export(ctx, slot, public_key_output, format, verify, pin):
                 if verify:  # Only needed when read from certificate
 
                     def do_verify():
-                        with prompt_timeout():
+                        with prompt_timeout(timeout=1.0):
                             if not check_key(session, slot, public_key):
                                 raise CliFail(
                                     "This public key is not tied to the private key in "
-                                    f"the {slot.name} slot."
+                                    f"slot {slot}."
                                 )
 
                     _verify_pin_if_needed(ctx, session, do_verify, pin)
             except ApduError:
-                raise CliFail(f"Unable to export public key from slot {slot.name}.")
+                raise CliFail(f"Unable to export public key from slot {slot}.")
 
     key_encoding = format
     public_key_output.write(
@@ -790,13 +823,31 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
     _ensure_authenticated(ctx, pin, management_key)
 
     if verify:
+        public_key = cert_to_import.public_key()
+
+        try:
+            metadata = session.get_slot_metadata(slot)
+            if metadata.pin_policy in (PIN_POLICY.ALWAYS, PIN_POLICY.ONCE):
+                pivman = ctx.obj["pivman_data"]
+                _verify_pin(ctx, session, pivman, pin)
+
+            if metadata.touch_policy in (TOUCH_POLICY.ALWAYS, TOUCH_POLICY.CACHED):
+                timeout = 0.0
+            else:
+                timeout = None
+        except ApduError as e:
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                raise CliFail("No private key in slot {slot}")
+            raise e
+        except NotSupportedError:
+            timeout = 1.0
 
         def do_verify():
-            with prompt_timeout():
-                if not check_key(session, slot, cert_to_import.public_key()):
+            with prompt_timeout(timeout=timeout):
+                if not check_key(session, slot, public_key):
                     raise CliFail(
-                        "This certificate is not tied to the private key in the "
-                        f"{slot.name} slot."
+                        "The public key of the certificate does not match the "
+                        f"private key in slot {slot}"
                     )
 
         _verify_pin_if_needed(ctx, session, do_verify, pin)
@@ -880,7 +931,19 @@ def generate_certificate(
         subject = "CN=" + subject
 
     try:
-        with prompt_timeout():
+        metadata = session.get_slot_metadata(slot)
+        if metadata.touch_policy in (TOUCH_POLICY.ALWAYS, TOUCH_POLICY.CACHED):
+            timeout = 0.0
+        else:
+            timeout = None
+    except ApduError as e:
+        if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            raise CliFail("No private key in slot {slot}")
+    except NotSupportedError:
+        timeout = 1.0
+
+    try:
+        with prompt_timeout(timeout=timeout):
             cert = generate_self_signed_certificate(
                 session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
@@ -928,7 +991,19 @@ def generate_certificate_signing_request(
         subject = "CN=" + subject
 
     try:
-        with prompt_timeout():
+        metadata = session.get_slot_metadata(slot)
+        if metadata.touch_policy in (TOUCH_POLICY.ALWAYS, TOUCH_POLICY.CACHED):
+            timeout = 0.0
+        else:
+            timeout = None
+    except ApduError as e:
+        if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            raise CliFail("No private key in slot {slot}")
+    except NotSupportedError:
+        timeout = 1.0
+
+    try:
+        with prompt_timeout(timeout=timeout):
             csr = generate_csr(session, slot, public_key, subject, hash_algorithm)
     except ApduError:
         raise CliFail("Certificate Signing Request generation failed.")
@@ -1151,6 +1226,7 @@ def _verify_pin_if_needed(ctx, session, func, pin=None, no_prompt=False):
         return func()
     except ApduError as e:
         if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+            logger.debug("Command failed due to PIN required, verifying and retrying")
             pivman = ctx.obj["pivman_data"]
             _verify_pin(ctx, session, pivman, pin, no_prompt)
         else:
