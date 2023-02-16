@@ -1,6 +1,6 @@
 """
 This script will program Yubico OTP credentials for a batch of YubiKeys, outputting
-a .ycfg file with the secret values for upload to a validation server.
+a .csv file with the secret values for upload to a validation server.
 
 YubiKeys are inserted as the script is running, and can be removed once programmed.
 When done, press Ctrl+C to end the batch. If a YubiKey is inserted twice in the same
@@ -18,7 +18,7 @@ import sys
 import struct
 
 
-# ycfg file out output to, given as an argument
+# csv file out output to, given as an argument
 try:
     output_fname = sys.argv[1]
 except IndexError:

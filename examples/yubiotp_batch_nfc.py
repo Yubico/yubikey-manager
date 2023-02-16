@@ -1,6 +1,6 @@
 """
 This script will program Yubico OTP credentials for a batch of YubiKeys, outputting
-a .ycfg file with the secret values for upload to a validation server.
+a .csv file with the secret values for upload to a validation server.
 
 YubiKeys are programmed over NFC using an NFC reader. One YubiKey can be placed
 on the reader at a time. When done, press Ctrl+C to end the batch. If a YubiKey
@@ -21,8 +21,8 @@ import struct
 try:
     # name of the NFC reader to use. Case-insentitive substring matching.
     nfc_reader = sys.argv[1]  # e.g: "hid"
-    # ycfg file out output to, given as an argument
-    output_fname = sys.argv[2]  # e.g: "output.ycfg"
+    # csv file out output to, given as an argument
+    output_fname = sys.argv[2]  # e.g: "output.csv"
 except IndexError:
     print("USAGE: yubiotp_batch_nfc.py <NFC_READER> <OUTPUT_FILE>")
     sys.exit(1)

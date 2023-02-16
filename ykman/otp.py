@@ -190,7 +190,7 @@ def format_csv(
     access_code: Optional[bytes] = None,
     timestamp: Optional[datetime] = None,
 ) -> str:
-    """Produces a CSV line in the "Yubico" format (ycfg)."""
+    """Produces a CSV line in the "Yubico" format."""
     ts = timestamp or datetime.now()
     return ",".join(
         [
