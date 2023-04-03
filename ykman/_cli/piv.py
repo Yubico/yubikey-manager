@@ -918,17 +918,6 @@ def generate_certificate(
     PUBLIC-KEY      file containing a public key (use '-' to use stdin)
     """
     session = ctx.obj["session"]
-    _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
-
-    data = public_key.read()
-    public_key = serialization.load_pem_public_key(data, default_backend())
-
-    now = datetime.datetime.utcnow()
-    valid_to = now + datetime.timedelta(days=valid_days)
-
-    if "=" not in subject:
-        # Old style, common name only.
-        subject = "CN=" + subject
 
     try:
         metadata = session.get_slot_metadata(slot)
@@ -941,6 +930,19 @@ def generate_certificate(
             raise CliFail("No private key in slot {slot}")
     except NotSupportedError:
         timeout = 1.0
+
+    data = public_key.read()
+    public_key = serialization.load_pem_public_key(data, default_backend())
+
+    now = datetime.datetime.utcnow()
+    valid_to = now + datetime.timedelta(days=valid_days)
+
+    if "=" not in subject:
+        # Old style, common name only.
+        subject = "CN=" + subject
+
+    # This verifies PIN, make sure next action is sign
+    _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
 
     try:
         with prompt_timeout(timeout=timeout):
@@ -981,7 +983,6 @@ def generate_certificate_signing_request(
     """
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
-    _verify_pin(ctx, session, pivman, pin)
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(data, default_backend())
@@ -1001,6 +1002,9 @@ def generate_certificate_signing_request(
             raise CliFail("No private key in slot {slot}")
     except NotSupportedError:
         timeout = 1.0
+
+    # This verifies PIN, make sure next action is sign
+    _verify_pin(ctx, session, pivman, pin)
 
     try:
         with prompt_timeout(timeout=timeout):
