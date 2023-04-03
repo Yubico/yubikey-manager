@@ -368,16 +368,20 @@ def _is_preview(version):
 def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
     """Determine the product name of a YubiKey"""
     usb_supported = info.supported_capabilities[TRANSPORT.USB]
+
+    # Guess the key type (over NFC)
     if not key_type:
-        if info.serial is None and _fido_only(usb_supported):
-            key_type = YUBIKEY.SKY
-        elif info.version[0] == 3:
+        if info.version[0] == 3:
             key_type = YUBIKEY.NEO
+        elif info.serial is None and _fido_only(usb_supported):
+            key_type = YUBIKEY.SKY if info.version < (5, 2, 8) else YUBIKEY.YK4
         else:
             key_type = YUBIKEY.YK4
 
+    # Generic name based on key type alone
     device_name = key_type.value
 
+    # Improved name based on configuration
     if key_type == YUBIKEY.SKY:
         if CAPABILITY.FIDO2 not in usb_supported:
             device_name = "FIDO U2F Security Key"  # SKY 1
@@ -401,6 +405,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
         if _is_preview(info.version):
             device_name = "YubiKey Preview"
         elif info.version >= (5, 1, 0):
+            # Dynamic name building for YK5
             is_nano = info.form_factor in (
                 FORM_FACTOR.USB_A_NANO,
                 FORM_FACTOR.USB_C_NANO,
