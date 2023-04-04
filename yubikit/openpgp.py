@@ -581,10 +581,10 @@ class DiscretionaryDataObjects:
     ca_fingerprints: Fingerprints
     generation_times: GenerationTimes
     key_information: KeyInformation
-    uif_sig: UIF
-    uif_dec: UIF
-    uif_aut: UIF
-    uif_att: UIF
+    uif_sig: Optional[UIF]
+    uif_dec: Optional[UIF]
+    uif_aut: Optional[UIF]
+    uif_att: Optional[UIF]
 
     @classmethod
     def parse(cls, encoded: bytes) -> "DiscretionaryDataObjects":
@@ -604,18 +604,15 @@ class DiscretionaryDataObjects:
             _parse_fingerprints(data[TAG_CA_FINGERPRINTS]),
             _parse_timestamps(data[TAG_GENERATION_TIMES]),
             _parse_key_information(data.get(TAG_KEY_INFORMATION, b"")),
-            (UIF.parse(data[DO.UIF_SIG]) if DO.UIF_SIG in data else UIF.OFF),
-            (UIF.parse(data[DO.UIF_DEC]) if DO.UIF_DEC in data else UIF.OFF),
-            (UIF.parse(data[DO.UIF_AUT]) if DO.UIF_AUT in data else UIF.OFF),
-            (UIF.parse(data[DO.UIF_ATT]) if DO.UIF_ATT in data else UIF.OFF),
+            (UIF.parse(data[DO.UIF_SIG]) if DO.UIF_SIG in data else None),
+            (UIF.parse(data[DO.UIF_DEC]) if DO.UIF_DEC in data else None),
+            (UIF.parse(data[DO.UIF_AUT]) if DO.UIF_AUT in data else None),
+            (UIF.parse(data[DO.UIF_ATT]) if DO.UIF_ATT in data else None),
         )
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
         return getattr(self, f"attributes_{key_ref.name.lower()}")
-
-    def get_uif(self, key_ref: KEY_REF) -> bytes:
-        return getattr(self, f"uif_{key_ref.name.lower()}")
-
+    
 
 @dataclass
 class ApplicationRelatedData:
@@ -1317,6 +1314,12 @@ class OpenPgpSession:
         Requires Admin PIN verification.
         """
         require_version(self.version, (4, 2, 0))
+        if key_ref == KEY_REF.ATT:
+            require_version(
+                self.version,
+                (5, 2, 1),
+                "Attestation key requires YubiKey 5.2.1 or later.",
+            )
         if uif.is_cached:
             require_version(
                 self.version,
