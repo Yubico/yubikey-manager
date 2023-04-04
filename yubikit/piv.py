@@ -432,13 +432,7 @@ def _parse_device_public_key(key_type, encoded):
         else:
             curve = ec.SECP384R1
 
-        try:
-            # Added in cryptography 2.5
-            return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
-        except AttributeError:
-            return ec.EllipticCurvePublicNumbers.from_encoded_point(
-                curve(), data[0x86]
-            ).public_key(default_backend())
+        return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
 class PivSession:

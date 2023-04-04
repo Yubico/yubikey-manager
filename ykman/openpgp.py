@@ -33,7 +33,7 @@ def get_openpgp_info(session: OpenPgpSession):
     data = session.get_application_related_data()
     discretionary = data.discretionary
     retries = discretionary.pw_status
-    data = {
+    info = {
         "OpenPGP version": "%d.%d" % data.aid.version,
         "Application version": "%d.%d.%d" % session.version,
         "PIN tries remaining": retries.attempts_user,
@@ -51,6 +51,6 @@ def get_openpgp_info(session: OpenPgpSession):
         }
         if discretionary.attributes_att is not None:
             touch["Attestation key"] = session.get_uif(KEY_REF.ATT)
-        data["Touch policies"] = touch
+        info["Touch policies"] = touch
 
-    return data
+    return info

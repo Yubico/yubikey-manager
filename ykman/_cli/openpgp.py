@@ -45,6 +45,7 @@ import click
 
 logger = logging.getLogger(__name__)
 
+
 class KEY_REF(IntEnum):
     SIG = 0x01
     DEC = 0x02
@@ -54,7 +55,7 @@ class KEY_REF(IntEnum):
 
     def __getattribute__(self, name: str):
         return _KEY_REF(self).__getattribute__(name)
-    
+
 
 def _fname(fobj):
     return getattr(fobj, "name", fobj)

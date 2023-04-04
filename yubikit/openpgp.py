@@ -612,7 +612,7 @@ class DiscretionaryDataObjects:
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
         return getattr(self, f"attributes_{key_ref.name.lower()}")
-    
+
 
 @dataclass
 class ApplicationRelatedData:
