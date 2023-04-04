@@ -3,7 +3,7 @@ from .util import get_windows_version
 from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
 from .piv import get_piv_info
-from ._openpgp import OpenPgpController, get_openpgp_info
+from .openpgp import get_openpgp_info
 
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
@@ -12,6 +12,7 @@ from yubikit.management import ManagementSession
 from yubikit.yubiotp import YubiOtpSession
 from yubikit.piv import PivSession
 from yubikit.oath import OathSession
+from yubikit.openpgp import OpenPgpSession
 from yubikit.support import read_info, get_name
 from fido2.ctap import CtapError
 from fido2.ctap2 import Ctap2, ClientPin
@@ -80,7 +81,7 @@ def piv_info(conn):
 
 def openpgp_info(conn):
     try:
-        openpgp = OpenPgpController(conn)
+        openpgp = OpenPgpSession(conn)
         return get_openpgp_info(openpgp)
     except Exception as e:
         return f"OpenPGP not accessible {e!r}"

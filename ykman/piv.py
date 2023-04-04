@@ -551,12 +551,24 @@ def get_piv_info(session: PivSession):
     return lines
 
 
+_AllowedHashTypes = Union[
+    hashes.SHA224,
+    hashes.SHA256,
+    hashes.SHA384,
+    hashes.SHA512,
+    hashes.SHA3_224,
+    hashes.SHA3_256,
+    hashes.SHA3_384,
+    hashes.SHA3_512,
+]
+
+
 def sign_certificate_builder(
     session: PivSession,
     slot: SLOT,
     key_type: KEY_TYPE,
     builder: x509.CertificateBuilder,
-    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
+    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.Certificate:
     """Sign a Certificate."""
     logger.debug("Signing a certificate")
@@ -585,7 +597,7 @@ def sign_csr_builder(
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
     builder: x509.CertificateSigningRequestBuilder,
-    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
+    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Sign a CSR."""
     logger.debug("Signing a CSR")
@@ -627,7 +639,7 @@ def generate_self_signed_certificate(
     subject_str: str,
     valid_from: datetime,
     valid_to: datetime,
-    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
+    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.Certificate:
     """Generate a self-signed certificate using a private key in a slot."""
     logger.debug("Generating a self-signed certificate")
@@ -652,7 +664,7 @@ def generate_csr(
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
     subject_str: str,
-    hash_algorithm: Type[hashes.HashAlgorithm] = hashes.SHA256,
+    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot."""
     logger.debug("Generating a CSR")

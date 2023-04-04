@@ -120,12 +120,18 @@ SW1_HAS_MORE_DATA = 0x61
 SHORT_APDU_MAX_CHUNK = 0xFF
 
 
-def _encode_short_apdu(cla, ins, p1, p2, data):
-    return struct.pack(">BBBBB", cla, ins, p1, p2, len(data)) + data
+def _encode_short_apdu(cla, ins, p1, p2, data, le=0):
+    buf = struct.pack(">BBBBB", cla, ins, p1, p2, len(data)) + data
+    if le:
+        buf += struct.pack(">B", le)
+    return buf
 
 
-def _encode_extended_apdu(cla, ins, p1, p2, data):
-    return struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
+def _encode_extended_apdu(cla, ins, p1, p2, data, le=0):
+    buf = struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
+    if le:
+        buf += struct.pack(">H", le)
+    return buf
 
 
 class SmartCardProtocol:
@@ -163,7 +169,7 @@ class SmartCardProtocol:
             raise
 
     def send_apdu(
-        self, cla: int, ins: int, p1: int, p2: int, data: bytes = b""
+        self, cla: int, ins: int, p1: int, p2: int, data: bytes = b"", le: int = 0
     ) -> bytes:
         if (
             self._touch_workaround
@@ -180,17 +186,17 @@ class SmartCardProtocol:
             while len(data) > SHORT_APDU_MAX_CHUNK:
                 chunk, data = data[:SHORT_APDU_MAX_CHUNK], data[SHORT_APDU_MAX_CHUNK:]
                 response, sw = self.connection.send_and_receive(
-                    _encode_short_apdu(0x10 | cla, ins, p1, p2, chunk)
+                    _encode_short_apdu(0x10 | cla, ins, p1, p2, chunk, le)
                 )
                 if sw != SW.OK:
                     raise ApduError(response, sw)
             response, sw = self.connection.send_and_receive(
-                _encode_short_apdu(cla, ins, p1, p2, data)
+                _encode_short_apdu(cla, ins, p1, p2, data, le)
             )
             get_data = _encode_short_apdu(0, self._ins_send_remaining, 0, 0, b"")
         elif self.apdu_format is ApduFormat.EXTENDED:
             response, sw = self.connection.send_and_receive(
-                _encode_extended_apdu(cla, ins, p1, p2, data)
+                _encode_extended_apdu(cla, ins, p1, p2, data, le)
             )
             get_data = _encode_extended_apdu(0, self._ins_send_remaining, 0, 0, b"")
         else:
