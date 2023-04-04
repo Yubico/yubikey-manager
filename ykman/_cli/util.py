@@ -107,16 +107,31 @@ class EnumChoice(click.Choice):
     """
 
     def __init__(self, choices_enum, hidden=[]):
+        self.choices_names = [
+            v.name.replace("_", "-") for v in choices_enum if v not in hidden
+        ]
         super().__init__(
-            [v.name.replace("_", "-") for v in choices_enum if v not in hidden],
+            self.choices_names,
             case_sensitive=False,
         )
+        self.hidden = hidden
         self.choices_enum = choices_enum
 
     def convert(self, value, param, ctx):
         if isinstance(value, self.choices_enum):
             return value
-        name = super().convert(value, param, ctx).replace("-", "_")
+
+        try:
+            # Allow aliases
+            self.choices = [
+                k.replace("_", "-")
+                for k, v in self.choices_enum.__members__.items()
+                if v not in self.hidden
+            ]
+            name = super().convert(value, param, ctx).replace("-", "_")
+        finally:
+            self.choices = self.choices_names
+
         return self.choices_enum[name]
 
 

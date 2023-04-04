@@ -51,7 +51,7 @@ class KEY_REF(IntEnum):
     DEC = 0x02
     AUT = 0x03
     ATT = 0x81
-    ENC = 0x02
+    ENC = 0x02  # Alias for backwards compatibility, will be removed in ykman 6
 
     def __getattribute__(self, name: str):
         return _KEY_REF(self).__getattribute__(name)
