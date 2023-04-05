@@ -56,7 +56,7 @@ http://pre-commit.com/[pre-commit] hook.
 
 To use these:
 
-    $ pip install pre-commit black flake8 bandit mypy
+    $ pip install pre-commit
     $ pre-commit install
 
 === Unit tests
