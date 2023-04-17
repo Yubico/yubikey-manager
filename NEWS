@@ -1,4 +1,4 @@
-* Version 5.1.0 (unreleased)
+* Version 5.1.0 (released 2023-04-17)
  ** Add OpenPGP functionality to supported API.
  ** Add PIV key info command to CLI.
  ** PIV: Support signing prehashed data via API.

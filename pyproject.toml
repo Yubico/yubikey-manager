@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "yubikey-manager"
-version = "5.1.0-dev.0"
+version = "5.1.0"
 description = "Tool for managing your YubiKey configuration."
 authors = ["Dain Nilsson <dain@yubico.com>"]
 license = "BSD"
@@ -28,7 +28,7 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.7"
-cryptography = ">=3.0, <42"
+cryptography = ">=3.0, <43"
 pyscard = "^2.0"
 fido2 = "^1.0"
 click = "^8.0"

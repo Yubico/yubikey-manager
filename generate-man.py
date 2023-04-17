@@ -22,7 +22,7 @@ ykman \- YubiKey Manager (ykman)
 [\fI\,OPTIONS\/\fR] \fI\,COMMAND \/\fR[\fI\,ARGS\/\fR]..."""
 )
 
-help_text = check_output(["ykman", "--help"]).decode()
+help_text = check_output(["poetry", "run", "ykman", "--help"]).decode()
 parts = re.split(r"\b[A-Z][a-z]+:\s+", help_text)
 description = re.split(r"\s{2,}", parts[1])[1].strip()
 
