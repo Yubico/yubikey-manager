@@ -178,7 +178,7 @@ class SLOT(IntEnum):
     ATTESTATION = 0xF9
 
     def __str__(self) -> str:
-        return f"{self:02X} ({self.name})"
+        return f"{int(self):02X} ({self.name})"
 
 
 @unique
