@@ -1,3 +1,7 @@
+* Version 5.1.1 (unreleased)
+ ** Bugfix: PIV: string representation of SLOT caused infinite loop on Python <3.11.
+ ** Bugfix: Fix errors in 'ykman config nfc' on YubiKeys without NFC capability.
+
 * Version 5.1.0 (released 2023-04-17)
  ** Add OpenPGP functionality to supported API.
  ** Add PIV key info command to CLI.
