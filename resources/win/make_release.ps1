@@ -13,7 +13,7 @@ $VERSION = $(& "$SOURCE_DIR\ykman.exe" --version).Split(' ')[-1]
 & $PSScriptRoot\make_msi.ps1
 
 echo "Signing .msi"
-$OUTPUT_FILE = "yubikey-manager-$VERSION.win64.msi"
+$OUTPUT_FILE = "yubikey-manager-$VERSION-win64.msi"
 mv ".\ykman.msi" $OUTPUT_FILE
 
 signtool.exe sign /sha1 DD86A2E1383B0E4E1C823B606DDBBCC26E1FF82D /fd SHA256 /t http://timestamp.digicert.com /d "YubiKey Manager CLI" ".\$OUTPUT_FILE"
