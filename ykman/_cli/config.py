@@ -204,11 +204,11 @@ def _configure_applications(
     supported = info.supported_capabilities.get(transport)
     enabled = info.config.enabled_capabilities.get(transport)
 
-    if enable & disable:
-        ctx.fail("Invalid options.")
-
     if not supported:
         raise CliFail(f"{transport} not supported on this YubiKey.")
+
+    if enable & disable:
+        ctx.fail("Invalid options.")
 
     unsupported = ~supported & (enable | disable)
     if unsupported:
@@ -455,6 +455,9 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
 
 def _list_apps(ctx, transport):
     enabled = ctx.obj["info"].config.enabled_capabilities.get(transport)
+    if enabled is None:
+        raise CliFail(f"{transport} not supported on this YubiKey.")
+
     for app in CAPABILITY:
         if app & enabled:
             click.echo(app.display_name)
