@@ -428,6 +428,8 @@ def yubiotp(
         else:
             public_id = click_prompt("Enter public ID")
 
+    if len(public_id) % 2:
+        ctx.fail("Invalid public ID, length must be a multiple of 2.")
     try:
         public_id = modhex_decode(public_id)
     except ValueError:

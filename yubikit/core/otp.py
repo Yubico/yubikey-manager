@@ -83,6 +83,9 @@ def modhex_encode(data: bytes) -> str:
 
 def modhex_decode(string: str) -> bytes:
     """Decode the Modhex (modified hexadecimal) string."""
+    if len(string) % 2:
+        raise ValueError("Length must be a multiple of 2")
+
     return bytes(
         MODHEX_ALPHABET.index(string[i]) << 4 | MODHEX_ALPHABET.index(string[i + 1])
         for i in range(0, len(string), 2)
