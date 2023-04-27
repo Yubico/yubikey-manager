@@ -1,6 +1,7 @@
-* Version 5.1.1 (unreleased)
+* Version 5.1.1 (released 2023-04-27)
  ** Bugfix: PIV: string representation of SLOT caused infinite loop on Python <3.11.
  ** Bugfix: Fix errors in 'ykman config nfc' on YubiKeys without NFC capability.
+ ** Bugfix: Fix error message shown when invalid modhex input length given for YubiOTP.
 
 * Version 5.1.0 (released 2023-04-17)
  ** Add OpenPGP functionality to supported API.
