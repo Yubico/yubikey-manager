@@ -59,6 +59,7 @@ from enum import Enum, IntEnum, unique
 from typing import Optional, Union, Type, cast
 
 import logging
+import gzip
 import os
 import re
 
@@ -722,25 +723,40 @@ class PivSession:
         except ValueError:
             raise BadResponseError("Malformed certificate data object")
 
-        cert_info = data.get(TAG_CERT_INFO)
-        if cert_info and cert_info[0] != 0:
-            raise NotSupportedError("Compressed certificates are not supported")
+        cert_data = data[TAG_CERTIFICATE]
+        cert_info = data[TAG_CERT_INFO][0] if TAG_CERT_INFO in data else 0
+        if cert_info == 1:
+            logger.debug("Certificate is compressed, decompressing...")
+            # Compressed certificate
+            cert_data = gzip.decompress(cert_data)
+        elif cert_info != 0:
+            raise NotSupportedError("Unsupported value in CertInfo")
 
         try:
-            return x509.load_der_x509_certificate(
-                data[TAG_CERTIFICATE], default_backend()
-            )
+            return x509.load_der_x509_certificate(cert_data, default_backend())
         except Exception as e:
             raise BadResponseError("Invalid certificate", e)
 
-    def put_certificate(self, slot: SLOT, certificate: x509.Certificate) -> None:
+    def put_certificate(
+        self, slot: SLOT, certificate: x509.Certificate, compress: bool = False
+    ) -> None:
         slot = SLOT(slot)
         logger.debug(f"Storing certificate in slot {slot}")
         cert_data = certificate.public_bytes(Encoding.DER)
+        logger.debug(f"Certificate is {len(cert_data)} bytes, compression={compress}")
+        if compress:
+            cert_info = b"\1"
+            cert_data = gzip.compress(cert_data)
+            logger.debug(f"Compressed size: {len(cert_data)} bytes")
+        else:
+            cert_info = b"\0"
         data = (
-            Tlv(TAG_CERTIFICATE, cert_data) + Tlv(TAG_CERT_INFO, b"\0") + Tlv(TAG_LRC)
+            Tlv(TAG_CERTIFICATE, cert_data)
+            + Tlv(TAG_CERT_INFO, cert_info)
+            + Tlv(TAG_LRC)
         )
         self.put_object(OBJECT_ID.from_slot(slot), data)
+        logger.info(f"Certificate written to slot {slot}, compression={compress}")
 
     def delete_certificate(self, slot: SLOT) -> None:
         slot = SLOT(slot)

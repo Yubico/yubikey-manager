@@ -775,9 +775,14 @@ def cert():
     is_flag=True,
     help="verify that the certificate matches the private key in the slot",
 )
+@click.option(
+    "-c", "--compress", is_flag=True, help="compresses the certificate before storing"
+)
 @click_slot_argument
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
-def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
+def import_certificate(
+    ctx, management_key, pin, slot, cert, password, verify, compress
+):
     """
     Import an X.509 certificate.
 
@@ -852,7 +857,7 @@ def import_certificate(ctx, management_key, pin, slot, cert, password, verify):
 
         _verify_pin_if_needed(ctx, session, do_verify, pin)
 
-    session.put_certificate(slot, cert_to_import)
+    session.put_certificate(slot, cert_to_import, compress)
     session.put_object(OBJECT_ID.CHUID, generate_chuid())
 
 

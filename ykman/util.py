@@ -97,6 +97,7 @@ def parse_certificates(data, password):
     """
     Identifies, decrypts and returns list of cryptography x509 certificates.
     """
+    logger.debug("Attempting to parse certificate using PEM, PKCS12 and DER")
 
     # PEM
     if is_pem(data):

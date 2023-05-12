@@ -17,6 +17,7 @@ from yubikit.piv import (
     PIN_POLICY,
     TOUCH_POLICY,
     SLOT,
+    OBJECT_ID,
     MANAGEMENT_KEY_TYPE,
     InvalidPinError,
 )
@@ -103,7 +104,6 @@ def import_key(
     key_type=KEY_TYPE.ECCP256,
     pin_policy=PIN_POLICY.DEFAULT,
 ):
-
     if key_type.algorithm == ALGORITHM.RSA:
         private_key = rsa.generate_private_key(
             65537, key_type.bit_len, default_backend()
@@ -284,6 +284,21 @@ class TestKeyManagement:
         reset_state(session)
 
         assert session.get_certificate(SLOT.AUTHENTICATION)
+
+
+class TestCompressedCertificate:
+    def test_put_and_read_compressed_certificate(self, session):
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        cert = get_test_cert()
+        session.put_certificate(SLOT.AUTHENTICATION, cert)
+        session.put_certificate(SLOT.SIGNATURE, cert, compress=True)
+        assert session.get_certificate(SLOT.AUTHENTICATION) == session.get_certificate(
+            SLOT.SIGNATURE
+        )
+        obj1 = session.get_object(OBJECT_ID.from_slot(SLOT.AUTHENTICATION))
+        obj2 = session.get_object(OBJECT_ID.from_slot(SLOT.SIGNATURE))
+        assert obj1 != obj2
+        assert len(obj1) > len(obj2)
 
 
 class TestManagementKeyReadOnly:
