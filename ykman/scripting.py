@@ -72,18 +72,22 @@ class ScriptingDevice:
     def __init__(self, wrapped, info):
         self._wrapped = wrapped
         self._info = info
+        self._name = get_name(info, self.pid.yubikey_type if self.pid else None)
 
     def __getattr__(self, attr):
         return getattr(self._wrapped, attr)
 
     def __str__(self):
-        name = get_name(self._info, self.pid.yubikey_type if self.pid else None)
         serial = self._info.serial
-        return f"{name} ({serial})" if serial else name
+        return f"{self._name} ({serial})" if serial else self._name
 
     @property
     def info(self) -> DeviceInfo:
         return self._info
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     def otp(self) -> OtpConnection:
         return self.open_connection(OtpConnection)
