@@ -64,16 +64,18 @@ def parse_private_key(data, password):
     """
     # PEM
     if is_pem(data):
-        if b"ENCRYPTED" in data:
-            if password is None:
-                raise InvalidPasswordError("No password provided for encrypted key.")
+        encrypted = b"ENCRYPTED" in data
+        if encrypted and password is None:
+            raise InvalidPasswordError("No password provided for encrypted key.")
         try:
             return serialization.load_pem_private_key(
                 data, password, backend=default_backend()
             )
         except ValueError as e:
             # Cryptography raises ValueError if decryption fails.
-            raise InvalidPasswordError(e)
+            if encrypted:
+                raise InvalidPasswordError(e)
+            logger.debug("Failed to parse PEM private key ", exc_info=True)
         except Exception:
             logger.debug("Failed to parse PEM private key ", exc_info=True)
 
