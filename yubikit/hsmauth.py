@@ -48,6 +48,7 @@ from functools import total_ordering
 from enum import IntEnum, unique
 from dataclasses import dataclass
 from typing import Optional, List, Union, Tuple
+import struct
 
 import logging
 
@@ -106,7 +107,7 @@ class ALGORITHM(IntEnum):
     @property
     def pubkey_len(self):
         if self.name.startswith("EC_P256"):
-            return 65
+            return 64
 
 
 def _parse_credential_password(credential_password: bytes) -> bytes:
@@ -467,7 +468,7 @@ class HsmAuthSession:
         self,
         label: str,
         context: bytes,
-        public_key: ec.EllipticCurvePublicKeyWithSerialization,
+        public_key: ec.EllipticCurvePublicKey,
         credential_password: bytes,
         card_crypto: bytes,
     ) -> SessionKeys:
@@ -477,16 +478,21 @@ class HsmAuthSession:
         if not isinstance(public_key.curve, ec.SECP256R1):
             raise ValueError("Unsupported curve")
 
-        ln = ALGORITHM.EC_P256_YUBICO_AUTHENTICATION
         numbers = public_key.public_numbers()
+
+        public_key_data = (
+            struct.pack("!B", 4)
+            + int.to_bytes(numbers.x, public_key.key_size // 8, "big")
+            + int.to_bytes(numbers.y, public_key.key_size // 8, "big")
+        )
 
         return SessionKeys.parse(
             self._calculate_session_keys(
-                label,
-                context,
-                card_crypto,
-                int2bytes((numbers.x + numbers.y), ln),
-                credential_password,
+                label=label,
+                context=context,
+                credential_password=credential_password,
+                card_crypto=card_crypto,
+                public_key=public_key_data,
             )
         )
 
