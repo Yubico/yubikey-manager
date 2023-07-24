@@ -422,7 +422,7 @@ def import_key(ctx, key, private_key, admin_pin):
 @click.argument("certificate", type=click.File("wb"), metavar="CERTIFICATE")
 def attest(ctx, key, certificate, pin, format):
     """
-    Generate a attestation certificate for a key.
+    Generate an attestation certificate for a key.
 
     Attestation is used to show that an asymmetric key was generated on the
     YubiKey and therefore doesn't exist outside the device.
