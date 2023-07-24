@@ -99,7 +99,7 @@ while True:  # Run this until we stop the script with Ctrl+C
             if info.serial not in handled_serials:  # Unhandled YubiKey
                 print(f"Programming YubiKey with serial: {info.serial}")
                 ...  # Do something with the device here.
-                handled.add(info.serial)
+                handled_serials.add(info.serial)
     else:
         sleep(1.0)  # No change, sleep for 1 second.
 ----
