@@ -358,9 +358,10 @@ class _ManagementOtpBackend(_Backend):
         self.protocol.send_and_receive(SLOT_YK4_SET_DEVICE_INFO, config)
 
 
+INS_SET_MODE = 0x16
 INS_READ_CONFIG = 0x1D
 INS_WRITE_CONFIG = 0x1C
-INS_SET_MODE = 0x16
+INS_DEVICE_RESET = 0x1F
 P1_DEVICE_CONFIG = 0x11
 
 
@@ -401,6 +402,9 @@ class _ManagementSmartCardBackend(_Backend):
 
     def write_config(self, config):
         self.protocol.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
+
+    def device_reset(self):
+        self.protocol.send_apdu(0, INS_DEVICE_RESET, 0, 0)
 
 
 CTAP_VENDOR_FIRST = 0x40
@@ -541,3 +545,10 @@ class ManagementSession:
                 struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
             )
             logger.info("Mode configuration written")
+
+    def device_reset(self) -> None:
+        if not isinstance(self.backend, _ManagementSmartCardBackend):
+            raise NotSupportedError("Device reset can only be perfomred over CCID")
+        logger.debug("Performing device reset")
+        self.backend.device_reset()
+        logger.info("Device reset performed")

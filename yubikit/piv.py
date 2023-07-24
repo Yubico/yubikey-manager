@@ -144,8 +144,9 @@ def _parse_management_key(key_type, management_key):
         return algorithms.AES(management_key)
 
 
-# The card management slot is special, we don't include it in SLOT below
+# The following slots are special, we don't include it in SLOT below
 SLOT_CARD_MANAGEMENT = 0x9B
+SLOT_OCC_AUTH = 0x96
 
 
 @unique
@@ -232,6 +233,8 @@ class PIN_POLICY(IntEnum):
     NEVER = 0x1
     ONCE = 0x2
     ALWAYS = 0x3
+    MATCH_ONCE = 0x4
+    MATCH_ALWAYS = 0x5
 
 
 @unique
@@ -250,6 +253,7 @@ DEFAULT_MANAGEMENT_KEY = (
 )
 
 PIN_LEN = 8
+TEMPORARY_PIN_LEN = 16
 
 # Instruction set
 INS_VERIFY = 0x20
@@ -289,6 +293,8 @@ TAG_METADATA_ORIGIN = 0x03
 TAG_METADATA_PUBLIC_KEY = 0x04
 TAG_METADATA_IS_DEFAULT = 0x05
 TAG_METADATA_RETRIES = 0x06
+TAG_METADATA_BIO_CONFIGURED = 0x07
+TAG_METADATA_TEMPORARY_PIN = 0x08
 
 ORIGIN_GENERATED = 1
 ORIGIN_IMPORTED = 2
@@ -300,6 +306,7 @@ INDEX_RETRIES_REMAINING = 1
 
 PIN_P2 = 0x80
 PUK_P2 = 0x81
+UV_P2 = 0x96
 
 
 def _pin_bytes(pin):
@@ -344,6 +351,13 @@ class SlotMetadata:
     @property
     def public_key(self):
         return _parse_device_public_key(self.key_type, self.public_key_encoded)
+
+
+@dataclass
+class BioMetadata:
+    configured: bool
+    attempts_remaining: int
+    temporary_pin: bool
 
 
 def _pad_message(key_type, message, hash_algorithm, padding):
@@ -412,6 +426,12 @@ def check_key_support(
             raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
         if pin_policy == PIN_POLICY.NEVER:
             raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
+
+    # TODO: Detect Bio capabilities
+    if version < () and pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):
+        raise NotSupportedError(
+            "Biometric match PIN policy requires YubiKey 5.6 or later"
+        )
 
 
 def _parse_device_public_key(key_type, encoded):
@@ -567,6 +587,40 @@ class PivSession:
             self._current_pin_retries = retries
             raise InvalidPinError(retries)
 
+    def verify_uv(self) -> bytes:
+        logger.debug("Verifying UV")
+        try:
+            return self.protocol.send_apdu(0, INS_VERIFY, 0, SLOT_OCC_AUTH)
+        except ApduError as e:
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                raise NotSupportedError(
+                    "Biometric verification not supported by this YuibKey"
+                )
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                retries, f"Fingerprint mismatch, {retries} attempts remaining"
+            )
+
+    def verify_temporary_pin(self, pin: bytes) -> None:
+        logger.debug("Verifying temporary PIN")
+        if len(pin) != TEMPORARY_PIN_LEN:
+            raise ValueError(f"Temporary PIN must be exactly {TEMPORARY_PIN_LEN} bytes")
+        try:
+            self.protocol.send_apdu(0, INS_VERIFY, 0, SLOT_OCC_AUTH, Tlv(1, pin))
+        except ApduError as e:
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                raise NotSupportedError(
+                    "Biometric verification not supported by this YuibKey"
+                )
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                retries, f"Invalid temporary PIN, {retries} attempts remaining"
+            )
+
     def get_pin_attempts(self) -> int:
         """Get remaining PIN attempts."""
         logger.debug("Getting PIN attempts")
@@ -679,6 +733,24 @@ class PivSession:
             TOUCH_POLICY(policy[INDEX_TOUCH_POLICY]),
             data[TAG_METADATA_ORIGIN][0] == ORIGIN_GENERATED,
             data[TAG_METADATA_PUBLIC_KEY],
+        )
+
+    def get_bio_metadata(self) -> BioMetadata:
+        logger.debug("Getting bio metadata")
+        try:
+            data = Tlv.parse_dict(
+                self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_OCC_AUTH)
+            )
+        except ApduError as e:
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                raise NotSupportedError(
+                    "Biometric verification not supported by this YuibKey"
+                )
+            raise
+        return BioMetadata(
+            1 == data.get(TAG_METADATA_BIO_CONFIGURED, b"\x00")[0],
+            data[TAG_METADATA_RETRIES][0],
+            1 == data.get(TAG_METADATA_TEMPORARY_PIN, b"\x00")[0],
         )
 
     def sign(
