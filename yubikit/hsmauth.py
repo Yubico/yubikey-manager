@@ -183,22 +183,17 @@ class SessionKeys:
     key_senc: bytes
     key_smac: bytes
     key_srmac: bytes
-    card_crypto: Optional[bytes]
 
     @classmethod
     def parse(cls, response) -> "SessionKeys":
         key_senc = response[:16]
         key_smac = response[16:32]
         key_srmac = response[32:48]
-        card_crypto = None
-        if len(response) == 56:
-            card_crypto = response[48:]
 
         return cls(
             key_senc=key_senc,
             key_smac=key_smac,
             key_srmac=key_srmac,
-            card_crypto=card_crypto,
         )
 
 
