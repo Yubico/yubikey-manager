@@ -31,9 +31,9 @@ from .core import (
     bytes2int,
     Version,
     Tlv,
-    CommandError,
     NotSupportedError,
     BadResponseError,
+    InvalidPinError,
 )
 from .core.smartcard import (
     SW,
@@ -300,14 +300,6 @@ INDEX_RETRIES_REMAINING = 1
 
 PIN_P2 = 0x80
 PUK_P2 = 0x81
-
-
-class InvalidPinError(CommandError):
-    def __init__(self, attempts_remaining):
-        super(InvalidPinError, self).__init__(
-            "Invalid PIN/PUK. Remaining attempts: %d" % attempts_remaining
-        )
-        self.attempts_remaining = attempts_remaining
 
 
 def _pin_bytes(pin):

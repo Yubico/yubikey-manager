@@ -1,5 +1,6 @@
 * Version 5.2.0 (unreleased)
  * PIV Support for compressed certificates.
+ * OpenPGP: Use InvalidPinError for wrong PIN.
 
 * Version 5.1.1 (released 2023-04-27)
  ** Bugfix: PIV: string representation of SLOT caused infinite loop on Python <3.11.

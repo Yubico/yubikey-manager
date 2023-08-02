@@ -2,6 +2,7 @@ from .core import (
     Tlv,
     Version,
     NotSupportedError,
+    InvalidPinError,
     require_version,
     int2bytes,
     bytes2int,
@@ -1120,9 +1121,11 @@ class OpenPgpSession:
         pin_enc = self.get_kdf().process(pw, pin)
         try:
             self.protocol.send_apdu(0, INS.VERIFY, 0, pw + mode, pin_enc)
-        except ApduError:
-            attempts = self.get_pin_status().get_attempts(pw)
-            raise ValueError(f"Invalid PIN, {attempts} tries remaining.")
+        except ApduError as e:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                attempts = self.get_pin_status().get_attempts(pw)
+                raise InvalidPinError(attempts)
+            raise e
 
     def verify_pin(self, pin, extended: bool = False):
         """Verify the User PIN.
@@ -1159,11 +1162,11 @@ class OpenPgpSession:
                 kdf.process(pw, pin) + kdf.process(pw, new_pin),
             )
         except ApduError as e:
-            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
-                raise ValueError("Conditions of use not satisfied.")
-            else:
-                remaining = self.get_pin_status().get_attempts(pw)
-                raise ValueError(f"Invalid PIN, {remaining} tries remaining.")
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                attempts = self.get_pin_status().get_attempts(pw)
+                raise InvalidPinError(attempts)
+            raise e
+
         logger.info(f"New {pw.name} PIN set")
 
     def change_pin(self, pin: str, new_pin: str) -> None:
@@ -1204,13 +1207,12 @@ class OpenPgpSession:
         try:
             self.protocol.send_apdu(0, INS.RESET_RETRY_COUNTER, p1, PW.USER, data)
         except ApduError as e:
-            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
-                raise ValueError("Conditions of use not satisfied.")
-            else:
-                reset_remaining = self.get_pin_status().attempts_reset
-                raise ValueError(
-                    f"Invalid Reset Code, {reset_remaining} tries remaining."
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and not reset_code:
+                attempts = self.get_pin_status().attempts_reset
+                raise InvalidPinError(
+                    attempts, f"Invalid Reset Code, {attempts} remaining"
                 )
+            raise e
         logger.info("New User PIN has been set")
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:

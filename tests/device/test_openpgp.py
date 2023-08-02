@@ -1,7 +1,14 @@
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, ed25519, x25519, padding
 from cryptography.hazmat.primitives import hashes
-from yubikit.openpgp import OpenPgpSession, KEY_REF, RSA_SIZE, OID
+from yubikit.openpgp import (
+    OpenPgpSession,
+    KEY_REF,
+    RSA_SIZE,
+    OID,
+    KdfIterSaltedS2k,
+    KdfNone,
+)
 from yubikit.management import CAPABILITY
 from yubikit.core.smartcard import ApduError
 from . import condition
@@ -187,3 +194,34 @@ def test_generate_x25519(session):
     shared2 = session.decrypt(e_priv.public_key())
 
     assert shared1 == shared2
+
+
+@condition.min_version(5, 2)
+def test_kdf(session):
+    with pytest.raises(ApduError):
+        session.set_kdf(KdfIterSaltedS2k.create())
+
+    session.change_admin(DEFAULT_ADMIN_PIN, NON_DEFAULT_ADMIN_PIN)
+    session.verify_admin(NON_DEFAULT_ADMIN_PIN)
+    session.set_kdf(KdfIterSaltedS2k.create())
+    session.verify_admin(DEFAULT_ADMIN_PIN)
+    session.verify_pin(DEFAULT_PIN)
+
+    session.change_admin(DEFAULT_ADMIN_PIN, NON_DEFAULT_ADMIN_PIN)
+    session.change_pin(DEFAULT_PIN, NON_DEFAULT_PIN)
+    session.verify_pin(NON_DEFAULT_PIN)
+
+    session.set_kdf(KdfNone())
+    session.verify_admin(DEFAULT_ADMIN_PIN)
+    session.verify_pin(DEFAULT_PIN)
+
+
+@condition.min_version(5, 2)
+def test_attestation(session):
+    session.verify_admin(DEFAULT_ADMIN_PIN)
+    pub = session.generate_ec_key(KEY_REF.SIG, OID.SECP256R1)
+
+    session.verify_pin(DEFAULT_PIN)
+    cert = session.attest_key(KEY_REF.SIG)
+
+    assert cert.public_key() == pub
