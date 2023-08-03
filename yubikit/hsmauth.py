@@ -31,12 +31,9 @@ from .core import (
     require_version,
     Version,
     Tlv,
+    InvalidPinError,
 )
-from .core.smartcard import (
-    AID,
-    SmartCardConnection,
-    SmartCardProtocol,
-)
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ApduError, SW
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -88,7 +85,10 @@ CREDENTIAL_PASSWORD_LEN = 16
 MIN_LABEL_LEN = 1
 MAX_LABEL_LEN = 64
 
-DEFAULT_MANAGEMENT_KEY = "00000000000000000000000000000000"
+DEFAULT_MANAGEMENT_KEY = (
+    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+)
+
 INITIAL_RETRY_COUNTER = 8
 
 
@@ -156,6 +156,12 @@ def _password_to_key(password: Union[str, bytes]) -> Tuple[bytes, bytes]:
     ).derive(pw_bytes)
     key_enc, key_mac = key[:16], key[16:]
     return key_enc, key_mac
+
+
+def _retries_from_sw(sw):
+    if sw & 0xFFF0 == SW.VERIFY_FAIL_NO_RETRY:
+        return sw & ~0xFFF0
+    return None
 
 
 @total_ordering
@@ -264,8 +270,17 @@ class HsmAuthSession:
             f"Importing YubiHSM Auth credential (label={label}, algo={algorithm}, "
             f"touch_required={touch_required})"
         )
-        self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
-        logger.info("Credential imported")
+        try:
+            self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
+            logger.info("Credential imported")
+        except ApduError as e:
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                attempts_remaining=retries,
+                message=f"Invalid management key, {retries} attempts remaining",
+            )
 
         return Credential(label, algorithm, INITIAL_RETRY_COUNTER, touch_required)
 
@@ -383,8 +398,17 @@ class HsmAuthSession:
             TAG_LABEL, _parse_label(label)
         )
 
-        self.protocol.send_apdu(0, INS_DELETE, 0, 0, data)
-        logger.info("Credential deleted")
+        try:
+            self.protocol.send_apdu(0, INS_DELETE, 0, 0, data)
+            logger.info("Credential deleted")
+        except ApduError as e:
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                attempts_remaining=retries,
+                message=f"Invalid management key, {retries} attempts remaining",
+            )
 
     def put_management_key(
         self,
@@ -405,8 +429,17 @@ class HsmAuthSession:
             TAG_MANAGEMENT_KEY, new_management_key
         )
 
-        self.protocol.send_apdu(0, INS_PUT_MANAGEMENT_KEY, 0, 0, data)
-        logger.info("New management key set")
+        try:
+            self.protocol.send_apdu(0, INS_PUT_MANAGEMENT_KEY, 0, 0, data)
+            logger.info("New management key set")
+        except ApduError as e:
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                attempts_remaining=retries,
+                message=f"Invalid management key, {retries} attempts remaining",
+            )
 
     def get_management_key_retries(self) -> int:
         """Get retries remaining for Management key"""
@@ -436,8 +469,17 @@ class HsmAuthSession:
             TAG_CREDENTIAL_PASSWORD, _parse_credential_password(credential_password)
         )
 
-        res = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, data)
-        logger.info("Session keys calculated")
+        try:
+            res = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, data)
+            logger.info("Session keys calculated")
+        except ApduError as e:
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                attempts_remaining=retries,
+                message=f"Invalid credential password, {retries} attempts remaining",
+            )
 
         return res
 
