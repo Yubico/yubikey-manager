@@ -28,6 +28,7 @@
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.hsmauth import (
     HsmAuthSession,
+    InvalidPinError,
     ALGORITHM,
     MANAGEMENT_KEY_LEN,
     CREDENTIAL_PASSWORD_LEN,
@@ -35,7 +36,7 @@ from yubikit.hsmauth import (
 )
 from yubikit.core.smartcard import ApduError, SW
 
-from ..util import parse_private_key
+from ..util import parse_private_key, InvalidPasswordError
 
 from ..hsmauth import (
     get_hsmauth_info,
@@ -53,14 +54,32 @@ from .util import (
     pretty_print,
 )
 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 
 import click
+import os
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def handle_credential_error(e: Exception, default_exception_msg):
+    if isinstance(e, InvalidPinError):
+        attempts = e.attempts_remaining
+        if attempts:
+            raise CliFail(f"Wrong management key, {attempts} attempts remaining.")
+        else:
+            raise CliFail("Management key is blocked.")
+    elif isinstance(e, ApduError):
+        if e.sw == SW.AUTH_METHOD_BLOCKED:
+            raise CliFail("A credential with the provided label already exists.")
+        elif e.sw == SW.NO_SPACE:
+            raise CliFail("No space left on the YubiKey for YubiHSM Auth credentials.")
+        elif e.sw == SW.FILE_NOT_FOUND:
+            raise CliFail("Credential with the provided label was not found.")
+        elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+            raise CliFail("The device was not touched.")
+    raise CliFail(default_exception_msg)
 
 
 def _parse_key(key, key_len, key_type):
@@ -105,9 +124,7 @@ def click_parse_management_key(ctx, param, val):
 
 @click_callback()
 def click_parse_enc_key(ctx, param, val):
-    return _parse_key(
-        val, ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len, "Encryption key"
-    )
+    return _parse_key(val, ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len, "ENC key")
 
 
 @click_callback()
@@ -130,14 +147,52 @@ def click_parse_context(ctx, param, val):
     return _parse_hex(val)
 
 
+def _prompt_management_key(prompt="Enter a management key [blank to use default key]"):
+    management_key = click_prompt(
+        prompt, default="", hide_input=True, show_default=False
+    )
+    if management_key == "":
+        return DEFAULT_MANAGEMENT_KEY
+
+    return _parse_key(management_key, MANAGEMENT_KEY_LEN, "Management key")
+
+
+def _prompt_credential_password(prompt="Enter credential password"):
+    credential_password = click_prompt(
+        prompt, default="", hide_input=True, show_default=False
+    )
+
+    return _parse_password(
+        credential_password, CREDENTIAL_PASSWORD_LEN, "Credential password"
+    )
+
+
+def _prompt_symmetric_key(type):
+    symmetric_key = click_prompt(f"Enter {type}", default="", show_default=False)
+
+    return _parse_key(
+        symmetric_key, ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len, "ENC key"
+    )
+
+
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
+click_credential_password_option = click.option(
+    "-c",
+    "--credential-password",
+    help="password to protect credential",
+    callback=click_parse_credential_password,
+)
+
 click_management_key_option = click.option(
     "-m",
     "--management-key",
     help="the management key",
-    default=DEFAULT_MANAGEMENT_KEY,
-    show_default=True,
     callback=click_parse_management_key,
 )
+
 click_touch_option = click.option(
     "-t", "--touch", is_flag=True, help="require touch on YubiKey to access credential"
 )
@@ -191,7 +246,8 @@ def reset(ctx, force):
 
     click.echo("Success! All YubiHSM Auth data have been cleared from the YubiKey.")
     click.echo(
-        f"Your YubiKey now has the default Management Key ({DEFAULT_MANAGEMENT_KEY})."
+        "Your YubiKey now has the default Management Key"
+        f"({DEFAULT_MANAGEMENT_KEY.hex()})."
     )
 
 
@@ -232,125 +288,116 @@ def list(ctx):
 @credentials.command()
 @click.pass_context
 @click.argument("label")
-@click.option("-E", "--enc-key", help="ENC key", callback=click_parse_enc_key)
-@click.option("-M", "--mac-key", help="MAC key", callback=click_parse_mac_key)
-@click.option("-p", "--private-key", type=click.File("rb"))
-@click.option("-P", "--password", help="password used to decrypt the private key")
-@click.option(
-    "-g", "--generate", is_flag=True, help="generate a private key on the YubiKey"
-)
-@click.option(
-    "-c",
-    "--credential-password",
-    help="password to protect credential",
-    callback=click_parse_credential_password,
-)
-@click.option(
-    "-d",
-    "--derivation-password",
-    help="deriviation password for ENC and MAC keys",
-)
+@click_credential_password_option
 @click_management_key_option
 @click_touch_option
-def add(
-    ctx,
-    label,
-    enc_key,
-    mac_key,
-    private_key,
-    password,
-    generate,
-    credential_password,
-    derivation_password,
-    management_key,
-    touch,
-):
-    """
-    Add a new credential.
+def generate(ctx, label, credential_password, management_key, touch):
+    """Generate an asymmetric credential.
 
-    This will add a new YubiHSM Auth credential to the YubiKey.
+    This will generate an asymmetric YubiHSM Auth credential
+    (private key) on the YubiKey.
 
     \b
     LABEL label for the YubiHSM Auth credential
     """
 
-    if enc_key and mac_key and derivation_password:
-        ctx.fail(
-            "--enc-key and --mac-key cannot be combined with --derivation-password"
-        )
+    if not credential_password:
+        credential_password = _prompt_credential_password()
 
-    if enc_key and mac_key and private_key:
-        ctx.fail("--enc-key and --mac-key cannot be combined with --private-key")
-
-    if derivation_password and private_key:
-        ctx.fail("--derivation-password cannot be combined with --private-key")
-
-    if enc_key and not mac_key or mac_key and not enc_key:
-        ctx.fail("--enc-key and --mac-key need to be combined")
+    if not management_key:
+        management_key = _prompt_management_key()
 
     session = ctx.obj["session"]
 
-    if not credential_password:
-        credential_password = _parse_password(
-            click_prompt("Enter Credential password"),
-            CREDENTIAL_PASSWORD_LEN,
-            "Credential password",
+    try:
+        session.generate_credential_asymmetric(
+            management_key, label, credential_password, touch
+        )
+    except Exception as e:
+        handle_credential_error(
+            e, default_exception_msg="Failed to generate asymmetric credential."
         )
 
-    try:
-        if enc_key and mac_key:
-            session.put_credential_symmetric(
-                management_key, label, enc_key, mac_key, credential_password, touch
-            )
-        elif derivation_password:
-            session.put_credential_derived(
-                management_key, label, credential_password, derivation_password, touch
-            )
-        elif private_key:
-            data = private_key.read()
-            private_key = parse_private_key(data, password)
-            if not isinstance(
-                private_key, ec.EllipticCurvePrivateKey
-            ) or not isinstance(private_key.curve, ec.SECP256R1):
-                raise CliFail(
-                    "Private key must be an EC key " "with curve name secp256r1"
-                )
-            session.put_credential_asymmetric(
-                management_key,
-                label,
-                private_key,
-                credential_password,
-                touch,
-            )
-        elif generate:
-            session.generate_credential_asymmetric(
-                management_key, label, credential_password, touch
-            )
 
-        else:
-            ctx.fail(
-                "--enc-key and --mac-key, --derivaion-password "
-                "or --private-key required"
-            )
-    except ApduError as e:
-        if e.sw == SW.AUTH_METHOD_BLOCKED:
-            raise CliFail('A credential with label "%s" already exists.' % label)
-        elif e.sw & 0xFFF0 == SW.VERIFY_FAIL_NO_RETRY:
-            raise CliFail("Wrong management key, %d retries left." % (e.sw & ~0xFFF0))
-        elif e.sw == SW.NO_SPACE:
-            raise CliFail("No space left on the YubiKey for YubiHSM Auth credentials.")
-        else:
-            raise CliFail("Failed to add credential")
+@credentials.command("import")
+@click.pass_context
+@click.argument("label")
+@click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
+@click.option("-p", "--password", help="password used to decrypt the private key")
+@click_credential_password_option
+@click_management_key_option
+@click_touch_option
+def import_credential(
+    ctx, label, private_key, password, credential_password, management_key, touch
+):
+    """Import an asymmetric credential.
+
+    This will import a private key as an asymmetric YubiHSM Auth credential
+    to the YubiKey.
+
+    \b
+    LABEL        label for the YubiHSM Auth credential
+    PRIVATE-KEY  file containing the private key (use '-' to use stdin)
+    """
+    if not credential_password:
+        credential_password = _prompt_credential_password()
+
+    if not management_key:
+        management_key = _prompt_management_key()
+
+    session = ctx.obj["session"]
+
+    data = private_key.read()
+
+    while True:
+        if password is not None:
+            password = password.encode()
+        try:
+            private_key = parse_private_key(data, password)
+        except InvalidPasswordError:
+            logger.debug("Error parsing key", exc_info=True)
+            if password is None:
+                password = click_prompt(
+                    "Enter password to decrypt key",
+                    default="",
+                    hide_input=True,
+                    show_default=False,
+                )
+                continue
+            else:
+                password = None
+                click.echo("Wrong password.")
+            continue
+        break
+
+    try:
+        session.put_credential_asymmetric(
+            management_key,
+            label,
+            private_key,
+            credential_password,
+            touch,
+        )
+    except Exception as e:
+        handle_credential_error(
+            e, default_exception_msg="Failed to import asymmetric credential."
+        )
 
 
 @credentials.command()
 @click.pass_context
 @click.argument("label")
-@click.option("-o", "--output", type=click.File("wb"), help="file to output public key")
+@click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
 @click_format_option
-def get_public_key(ctx, label, output, format):
-    """
-    Get long-term public key for an asymmetric credential.
+def export(ctx, label, public_key_output, format):
+    """Export the public key corresponding to an asymmetric credential.
+
+    This will export the long-term public key corresponding to the
+    asymmetric YubiHSM Auth credential stored on the YubiKey.
+
+    \b
+    LABEL      label for the YubiHSM Auth credential
+    PUBLIC-KEY file to write the public key to (use '-' to use stdout)
     """
 
     session = ctx.obj["session"]
@@ -362,34 +409,121 @@ def get_public_key(ctx, label, output, format):
             encoding=key_encoding,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
-        if output:
-            output.write(public_key_encoded)
-        else:
-            click.echo(public_key_encoded, nl=False)
+
+        public_key_output.write(public_key_encoded)
+
+        logger.info(f"Public key for {label} written to {_fname(public_key_output)}")
     except ApduError as e:
         if e.sw == SW.AUTH_METHOD_BLOCKED:
-            raise CliFail("The entry is not an asymmetric credential")
+            raise CliFail("The entry is not an asymmetric credential.")
         elif e.sw == SW.FILE_NOT_FOUND:
-            raise CliFail("Credential not found")
+            raise CliFail("Credential not found.")
         else:
-            raise CliFail("Failed to get public key")
+            raise CliFail("Unable to export public key.")
 
 
 @credentials.command()
 @click.pass_context
 @click.argument("label")
-def get_challenge(ctx, label):
-    """
-    Get host challenge from credential.
+@click.option("-E", "--enc-key", help="the ENC key", callback=click_parse_enc_key)
+@click.option("-M", "--mac-key", help="the MAC key", callback=click_parse_mac_key)
+@click.option(
+    "-g", "--generate", is_flag=True, help="generate a random encryption and mac key"
+)
+@click_credential_password_option
+@click_management_key_option
+@click_touch_option
+def symmetric(
+    ctx, label, credential_password, management_key, enc_key, mac_key, generate, touch
+):
+    """Import a symmetric credential.
 
-    For symmetric credentials this is a random 8 byte value. For asymmetric
-    credentials this is EPK-OCE.
+    This will import an encryption and mac key as a symmetric YubiHSM Auth credential on
+    the YubiKey.
+
+    \b
+    LABEL  label for the YubiHSM Auth credential
     """
+
+    if not credential_password:
+        credential_password = _prompt_credential_password()
+
+    if not management_key:
+        management_key = _prompt_management_key()
+
+    if generate and (enc_key or mac_key):
+        ctx.fail("--enc-key and --mac-key cannot be combined with --generate")
+
+    if generate:
+        enc_key = os.urandom(ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len)
+        mac_key = os.urandom(ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len)
+        click.echo("Generated ENC and MAC keys:")
+        click.echo("\n".join(pretty_print({"ENC-KEY": enc_key, "MAC-KEY": mac_key})))
+
+    if not enc_key:
+        enc_key = _prompt_symmetric_key("ENC key")
+
+    if not mac_key:
+        mac_key = _prompt_symmetric_key("MAC key")
 
     session = ctx.obj["session"]
 
-    challenge = session.get_challenge(label).hex()
-    click.echo(f"Challenge: {challenge}")
+    try:
+        session.put_credential_symmetric(
+            management_key,
+            label,
+            enc_key,
+            mac_key,
+            credential_password,
+            touch,
+        )
+
+    except Exception as e:
+        handle_credential_error(
+            e, default_exception_msg="Failed to import symmetric credential."
+        )
+
+
+@credentials.command()
+@click.pass_context
+@click.argument("label")
+@click.option(
+    "-d", "--derivation-password", help="deriviation password for ENC and MAC keys"
+)
+@click_credential_password_option
+@click_management_key_option
+@click_touch_option
+def derive(ctx, label, derivation_password, credential_password, management_key, touch):
+    """Import a symmetric credential derived from a password.
+
+    This will import a symmetric YubiHSM Auth credential by deriving
+    ENC and MAC keys from a password.
+
+    \b
+    LABEL  label for the YubiHSM Auth credential
+    """
+
+    if not credential_password:
+        credential_password = _prompt_credential_password()
+
+    if not management_key:
+        management_key = _prompt_management_key()
+
+    if not derivation_password:
+        derivation_password = click_prompt(
+            "Enter derivation password", default="", show_default=False
+        )
+
+    session = ctx.obj["session"]
+
+    try:
+        session.put_credential_derived(
+            management_key, label, credential_password, derivation_password, touch
+        )
+    except Exception as e:
+        handle_credential_error(
+            e, default_exception_msg="Failed to import symmetric credential."
+        )
 
 
 @credentials.command()
@@ -407,6 +541,9 @@ def delete(ctx, label, management_key, force):
     LABEL a label to match a single credential (as shown in "list")
     """
 
+    if not management_key:
+        management_key = _prompt_management_key()
+
     force or click.confirm(
         f"Delete credential: {label} ?",
         abort=True,
@@ -417,115 +554,11 @@ def delete(ctx, label, management_key, force):
 
     try:
         session.delete_credential(management_key, label)
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            raise CliFail("Credential not found")
-        elif e.sw & 0xFFF0 == SW.VERIFY_FAIL_NO_RETRY:
-            raise CliFail("Wrong management key, %d retries left" % (e.sw & ~0xFFF0))
-        else:
-            raise CliFail("Failed to delete credential.")
-
-
-@credentials.command()
-@click.pass_context
-@click.argument("label")
-@click.option(
-    "-c",
-    "--credential-password",
-    help="password to access credential",
-    callback=click_parse_credential_password,
-)
-@click.option(
-    "-C", "--context", help="the authentication context", callback=click_parse_context
-)
-@click.option(
-    "-p",
-    "--public-key",
-    help="the public key of the YubiHSM2 device",
-    type=click.File("rb"),
-)
-@click.option(
-    "-G",
-    "--card-cryptogram",
-    help="the card cryptogram",
-    callback=click_parse_card_crypto,
-)
-def calculate(ctx, label, credential_password, context, public_key, card_cryptogram):
-    """
-    Calculate session credentials.
-
-    This will create session credentials based on the "context"
-    and the credentials on the YubiKey. For symmetric credentials
-    the "context" will be the host + HSM challenge. For asymmetric
-    credentials the "context" will be EPK.OCE + EPK.SD.
-    """
-
-    if not credential_password:
-        credential_password = _parse_password(
-            click_prompt("Enter Credential password"),
-            CREDENTIAL_PASSWORD_LEN,
-            "Credential password",
+    except Exception as e:
+        handle_credential_error(
+            e,
+            default_exception_msg="Failed to delete credential.",
         )
-
-    try:
-        session = ctx.obj["session"]
-        if public_key:
-            data = public_key.read()
-            public_key = serialization.load_pem_public_key(data, default_backend())
-            if not isinstance(public_key, ec.EllipticCurvePublicKey) or not isinstance(
-                public_key.curve, ec.SECP256R1
-            ):
-                raise CliFail(
-                    "Public key must be an EC key " "with curve name secp256r1"
-                )
-            if not card_cryptogram or len(card_cryptogram) != 16:
-                raise CliFail("Card crypto must be 16 bytes long")
-            if not context:
-                context = _parse_hex(click.prompt("Enter context"))
-            if len(context) != 130:
-                raise CliFail("Context must be 130 bytes long (EPK.OCE + EPK.SD)")
-
-            session_credentials = session.calculate_session_keys_asymmetric(
-                label, context, public_key, credential_password, card_cryptogram
-            )
-        else:
-            if card_cryptogram and len(card_cryptogram) != 8:
-                raise CliFail("Card crypto must be 8 bytes long")
-            if not context:
-                context = _parse_hex(click.prompt("Enter context"))
-            if len(context) != 16:
-                raise CliFail("Context must be 130 bytes long (host + HSM challenge)")
-
-            session_credentials = session.calculate_session_keys_symmetric(
-                label,
-                context,
-                credential_password,
-                card_cryptogram,
-            )
-
-        click.echo(
-            "\n".join(
-                pretty_print(
-                    {
-                        "S-ENC": session_credentials.key_senc,
-                        "S-MAC": session_credentials.key_smac,
-                        "S-RMAC": session_credentials.key_srmac,
-                    }
-                )
-            )
-        )
-
-    except ApduError as e:
-        if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-            raise CliFail("Touch required")
-        elif e.sw & 0xFFF0 == SW.VERIFY_FAIL_NO_RETRY:
-            raise CliFail(
-                "Wrong credential password, %d retries left" % (e.sw & ~0xFFF0)
-            )
-        elif e.sw == SW.FILE_NOT_FOUND:
-            raise CliFail("Credential not found")
-        else:
-            raise CliFail("Failed to calculate session credentials.")
 
 
 @hsmauth.group()
@@ -564,6 +597,11 @@ def change(ctx, management_key, new_management_key, generate):
     YubiHSM Auth credentials stored on the YubiKey.
     """
 
+    if not management_key:
+        management_key = _prompt_management_key(
+            "Enter current management key [blank to use default key]"
+        )
+
     session = ctx.obj["session"]
 
     # Can't combine new key with generate.
@@ -594,11 +632,10 @@ def change(ctx, management_key, new_management_key, generate):
 
     try:
         session.put_management_key(management_key, new_management_key)
-    except ApduError as e:
-        if e.sw & 0xFFF0 == SW.VERIFY_FAIL_NO_RETRY:
-            raise CliFail("Wrong management key, %d retries left." % (e.sw & ~0xFFF0))
-        else:
-            raise CliFail("Failed to change management key.")
+    except Exception as e:
+        handle_credential_error(
+            e, default_exception_msg="Failed to change management key."
+        )
 
 
 @access.command()
