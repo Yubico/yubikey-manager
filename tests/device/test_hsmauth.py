@@ -2,7 +2,12 @@ import pytest
 
 from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
-from yubikit.hsmauth import HsmAuthSession, Credential, INITIAL_RETRY_COUNTER
+from yubikit.hsmauth import (
+    HsmAuthSession,
+    Credential,
+    INITIAL_RETRY_COUNTER,
+    InvalidPinError,
+)
 
 from . import condition
 
@@ -91,22 +96,22 @@ class TestCredentialManagement:
         assert credential_retrieved.algorithm == credential.algorithm
         assert credential_retrieved.counter == INITIAL_RETRY_COUNTER
 
-    def test_put_credential_symmetric_wrong_management_key(self, session):
-        with pytest.raises(ApduError):
+    def test_import_credential_symmetric_wrong_management_key(self, session):
+        with pytest.raises(InvalidPinError):
             import_key_derived(session, NON_DEFAULT_MANAGEMENT_KEY)
 
-    def test_put_credential_symmetric_wrong_key_length(self, session):
+    def test_import_credential_symmetric_wrong_key_length(self, session):
         with pytest.raises(ValueError):
             import_key_symmetric(
                 session, DEFAULT_MANAGEMENT_KEY, os.urandom(24), os.urandom(24)
             )
 
-    def test_put_credential_symmetric_exists(self, session):
+    def test_import_credential_symmetric_exists(self, session):
         import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
         with pytest.raises(ApduError):
             import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
 
-    def test_put_credential_symmetric_works(self, session):
+    def test_import_credential_symmetric_works(self, session):
         credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
 
         self.check_credential_in_list(session, credential)
@@ -114,7 +119,7 @@ class TestCredentialManagement:
         session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
 
     @condition.min_version(5, 6)
-    def test_put_credential_asymmetric_unsupported_key(self, session):
+    def test_import_credential_asymmetric_unsupported_key(self, session):
         private_key = ec.generate_private_key(
             ec.SECP224R1, backend=default_backend()
         )  # curve secp224r1 is not supported
@@ -123,7 +128,7 @@ class TestCredentialManagement:
             import_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY, private_key)
 
     @condition.min_version(5, 6)
-    def test_put_credential_asymmetric_works(self, session):
+    def test_import_credential_asymmetric_works(self, session):
         private_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())
         credential = import_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY, private_key)
 
@@ -151,7 +156,7 @@ class TestCredentialManagement:
         session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
 
     @condition.min_version(5, 6)
-    def test_get_public_key_symmetric_credential(self, session):
+    def test_export_public_key_symmetric_credential(self, session):
         credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
 
         with pytest.raises(ApduError):
@@ -162,7 +167,7 @@ class TestCredentialManagement:
     def test_delete_credential_wrong_management_key(self, session):
         credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
 
-        with pytest.raises(ApduError):
+        with pytest.raises(InvalidPinError):
             session.delete_credential(NON_DEFAULT_MANAGEMENT_KEY, credential.label)
 
     def test_delete_credential_non_existing(self, session):
@@ -182,7 +187,7 @@ class TestAccess:
         session.put_management_key(DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_MANAGEMENT_KEY)
 
         # Can't import key with old management key
-        with pytest.raises(ApduError):
+        with pytest.raises(InvalidPinError):
             import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
 
         session.put_management_key(NON_DEFAULT_MANAGEMENT_KEY, DEFAULT_MANAGEMENT_KEY)
@@ -192,7 +197,7 @@ class TestAccess:
         initial_retries = session.get_management_key_retries()
         assert initial_retries == 8
 
-        with pytest.raises(ApduError):
+        with pytest.raises(InvalidPinError):
             import_key_derived(session, NON_DEFAULT_MANAGEMENT_KEY)
 
         post_retries = session.get_management_key_retries()
