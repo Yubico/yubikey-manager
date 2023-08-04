@@ -44,7 +44,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from functools import total_ordering
 from enum import IntEnum, unique
 from dataclasses import dataclass
-from typing import Optional, List, Union, Tuple
+from typing import Optional, List, Union, Tuple, NamedTuple
 import struct
 
 import logging
@@ -184,8 +184,7 @@ class Credential:
         return hash(self.label)
 
 
-@dataclass(frozen=True)
-class SessionKeys:
+class SessionKeys(NamedTuple):
     key_senc: bytes
     key_smac: bytes
     key_srmac: bytes
