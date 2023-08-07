@@ -44,6 +44,7 @@ def eccp256_keypair():
 def tmp_file():
     tmp = tempfile.NamedTemporaryFile(delete=False)
     yield tmp
+    tmp.close()
     os.remove(tmp.name)
 
 
