@@ -33,7 +33,7 @@ def session(ccid_connection):
 def import_key_derived(
     session,
     management_key,
-    credential_password=b"123456",
+    credential_password="123456",
     derivation_password=b"password",
 ) -> Credential:
     credential = session.put_credential_derived(
@@ -47,7 +47,7 @@ def import_key_derived(
 
 
 def import_key_symmetric(
-    session, management_key, key_enc, key_mac, credential_password=b"123456"
+    session, management_key, key_enc, key_mac, credential_password="123456"
 ) -> Credential:
     credential = session.put_credential_symmetric(
         management_key,
@@ -61,7 +61,7 @@ def import_key_symmetric(
 
 
 def import_key_asymmetric(
-    session, management_key, private_key, credential_password=b"12345"
+    session, management_key, private_key, credential_password="123456"
 ) -> Credential:
     credential = session.put_credential_asymmetric(
         management_key,
@@ -74,7 +74,7 @@ def import_key_asymmetric(
 
 
 def generate_key_asymmetric(
-    session, management_key, credential_password=b"12345"
+    session, management_key, credential_password="123456"
 ) -> Credential:
     credential = session.generate_credential_asymmetric(
         management_key,
@@ -206,7 +206,7 @@ class TestAccess:
 
 class TestSessionKeys:
     def test_calculate_session_keys_symmetric(self, session):
-        credential_password = b"1234"
+        credential_password = "1234"
         credential = import_key_derived(
             session,
             DEFAULT_MANAGEMENT_KEY,

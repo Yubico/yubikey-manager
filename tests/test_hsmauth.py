@@ -22,7 +22,7 @@ class TestHsmAuthFunctions:
         assert 16 == len(output1) == len(output2)
 
     def test_parse_credential_password(self):
-        parsed_credential_password = _parse_credential_password(b"123456")
+        parsed_credential_password = _parse_credential_password("123456")
 
         assert (
             b"123456\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
