@@ -31,7 +31,6 @@ from yubikit.hsmauth import (
     InvalidPinError,
     ALGORITHM,
     MANAGEMENT_KEY_LEN,
-    CREDENTIAL_PASSWORD_LEN,
     DEFAULT_MANAGEMENT_KEY,
 )
 from yubikit.core.smartcard import ApduError, SW
@@ -648,18 +647,3 @@ def change(ctx, management_key, new_management_key, generate):
         handle_credential_error(
             e, default_exception_msg="Failed to change management key."
         )
-
-
-@access.command()
-@click.pass_context
-def retries(ctx):
-    """
-    Get management key retries.
-
-    This will retrieve the number of retiries left for the management key.
-    """
-
-    session = ctx.obj["session"]
-
-    retries = session.get_management_key_retries()
-    click.echo(f"Retries left for Management Key: {retries}")
