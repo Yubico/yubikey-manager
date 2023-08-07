@@ -600,7 +600,7 @@ def access():
     help="generate a random management key "
     "(can't be used with --new-management-key)",
 )
-def change(ctx, management_key, new_management_key, generate):
+def change_management_key(ctx, management_key, new_management_key, generate):
     """
     Change the management key.
 

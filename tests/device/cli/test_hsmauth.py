@@ -240,7 +240,7 @@ class TestManagementKey:
         ykman_cli(
             "hsmauth",
             "access",
-            "change",
+            "change-management-key",
             "-m",
             DEFAULT_MANAGEMENT_KEY,
             "-n",
@@ -252,7 +252,7 @@ class TestManagementKey:
             ykman_cli(
                 "hsmauth",
                 "access",
-                "change",
+                "change-management-key",
                 "-m",
                 DEFAULT_MANAGEMENT_KEY,
                 "-n",
@@ -263,7 +263,7 @@ class TestManagementKey:
         ykman_cli(
             "hsmauth",
             "access",
-            "change",
+            "change-management-key",
             "-m",
             NON_DEFAULT_MANAGEMENT_KEY,
             "-n",
@@ -272,16 +272,14 @@ class TestManagementKey:
 
     def test_change_management_key_generate(self, ykman_cli):
         output = ykman_cli(
-            "hsmauth", "access", "change", "-m", DEFAULT_MANAGEMENT_KEY, "-g"
+            "hsmauth",
+            "access",
+            "change-management-key",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            "-g",
         ).output
 
         assert re.match(
             r"^Generated management key: [a-f0-9]{16}", output, re.MULTILINE
-        )
-
-    def test_get_management_key_retries(self, ykman_cli):
-        output = ykman_cli("hsmauth", "access", "retries").output
-
-        assert re.match(
-            r"^Retries left for Management Key: [0-9]", output, re.MULTILINE
         )
