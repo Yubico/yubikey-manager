@@ -41,7 +41,6 @@ from ..util import parse_private_key, InvalidPasswordError
 from ..hsmauth import (
     get_hsmauth_info,
     generate_random_management_key,
-    parse_touch_required,
 )
 from .util import (
     CliFail,
@@ -82,6 +81,20 @@ def handle_credential_error(e: Exception, default_exception_msg):
     raise CliFail(default_exception_msg)
 
 
+def _parse_touch_required(touch_required: bool) -> str:
+    if touch_required:
+        return "On"
+    else:
+        return "Off"
+
+
+def _parse_algorithm(algorithm: ALGORITHM) -> str:
+    if algorithm == ALGORITHM.AES128_YUBICO_AUTHENTICATION:
+        return "Symmetric"
+    else:
+        return "Asymmetric"
+
+
 def _parse_key(key, key_len, key_type):
     try:
         key = bytes.fromhex(key)
@@ -94,19 +107,6 @@ def _parse_key(key, key_len, key_type):
             f"({key_len*2} hexadecimal digits) long"
         )
     return key
-
-
-def _parse_password(pwd, pwd_len, pwd_type):
-    try:
-        pwd = pwd.encode()
-    except Exception:
-        raise ValueError(pwd)
-
-    if len(pwd) > pwd_len:
-        raise ValueError(
-            "%s must be less than or equal to %d bytes long" % (pwd_type, pwd_len)
-        )
-    return pwd
 
 
 def _parse_hex(hex):
@@ -130,11 +130,6 @@ def click_parse_enc_key(ctx, param, val):
 @click_callback()
 def click_parse_mac_key(ctx, param, val):
     return _parse_key(val, ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len, "MAC key")
-
-
-@click_callback()
-def click_parse_credential_password(ctx, param, val):
-    return _parse_password(val, CREDENTIAL_PASSWORD_LEN, "Credential password")
 
 
 @click_callback()
@@ -162,9 +157,7 @@ def _prompt_credential_password(prompt="Enter credential password"):
         prompt, default="", hide_input=True, show_default=False
     )
 
-    return _parse_password(
-        credential_password, CREDENTIAL_PASSWORD_LEN, "Credential password"
-    )
+    return credential_password
 
 
 def _prompt_symmetric_key(type):
@@ -180,10 +173,7 @@ def _fname(fobj):
 
 
 click_credential_password_option = click.option(
-    "-c",
-    "--credential-password",
-    help="password to protect credential",
-    callback=click_parse_credential_password,
+    "-c", "--credential-password", help="password to protect credential"
 )
 
 click_management_key_option = click.option(
@@ -272,15 +262,37 @@ def list(ctx):
     else:
         click.echo(f"Found {len(creds)} item(s)")
 
-        click.echo("Algo\tTouch\tRetries\tLabel")
+        max_size_label = max(len(cred.label) for cred in creds)
+        max_size_type = (
+            10
+            if any(
+                c.algorithm == ALGORITHM.EC_P256_YUBICO_AUTHENTICATION for c in creds
+            )
+            else 9
+        )
+
+        format_str = "{0: <{label_width}}\t{1: <{type_width}}\t{2}\t{3}"
+
+        click.echo(
+            format_str.format(
+                "Label",
+                "Type",
+                "Touch",
+                "Retries",
+                label_width=max_size_label,
+                type_width=max_size_type,
+            )
+        )
 
         for cred in creds:
             click.echo(
-                "{0}\t{1}\t{2}\t{3}".format(
-                    cred.algorithm,
-                    parse_touch_required(cred.touch_required),
-                    cred.counter,
+                format_str.format(
                     cred.label,
+                    _parse_algorithm(cred.algorithm),
+                    _parse_touch_required(cred.touch_required),
+                    cred.counter,
+                    label_width=max_size_label,
+                    type_width=max_size_type,
                 )
             )
 

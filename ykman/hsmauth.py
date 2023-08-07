@@ -43,10 +43,3 @@ def get_hsmauth_info(session: HsmAuthSession):
 def generate_random_management_key() -> bytes:
     """Generate a new random management key."""
     return os.urandom(16)
-
-
-def parse_touch_required(touch_required: bool) -> str:
-    if touch_required:
-        return "On"
-    else:
-        return "Off"
