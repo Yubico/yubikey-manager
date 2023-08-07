@@ -110,13 +110,17 @@ class ALGORITHM(IntEnum):
             return 64
 
 
-def _parse_credential_password(credential_password: bytes) -> bytes:
-    if len(credential_password) > CREDENTIAL_PASSWORD_LEN:
+def _parse_credential_password(credential_password: Union[bytes, str]) -> bytes:
+    if isinstance(credential_password, str):
+        pw = credential_password.encode().ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
+    else:
+        pw = bytes(credential_password)
+
+    if len(pw) != CREDENTIAL_PASSWORD_LEN:
         raise ValueError(
-            "Credential password must be less than or equal to %d bytes long"
-            % CREDENTIAL_PASSWORD_LEN
+            "Credential password must be %d bytes long" % CREDENTIAL_PASSWORD_LEN
         )
-    return credential_password.ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
+    return pw
 
 
 def _parse_label(label: str) -> bytes:
@@ -236,7 +240,7 @@ class HsmAuthSession:
         label: str,
         key: bytes,
         algorithm: ALGORITHM,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
 
@@ -289,7 +293,7 @@ class HsmAuthSession:
         label: str,
         key_enc: bytes,
         key_mac: bytes,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
         """Import a symmetric YubiHSM Auth credential"""
@@ -313,8 +317,8 @@ class HsmAuthSession:
         self,
         management_key: bytes,
         label: str,
-        credential_password: bytes,
-        derivation_password: Union[str, bytes],
+        credential_password: Union[bytes, str],
+        derivation_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
         """Import a symmetric YubiHSM Auth credential derived from password"""
@@ -330,7 +334,7 @@ class HsmAuthSession:
         management_key: bytes,
         label: str,
         private_key: ec.EllipticCurvePrivateKeyWithSerialization,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
         """Import an asymmetric YubiHSM Auth credential"""
@@ -355,7 +359,7 @@ class HsmAuthSession:
         self,
         management_key: bytes,
         label: str,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
         """Generate an asymmetric YubiHSM Auth credential
@@ -450,7 +454,7 @@ class HsmAuthSession:
         self,
         label: str,
         context: bytes,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         card_crypto: Optional[bytes] = None,
         public_key: Optional[bytes] = None,
     ) -> bytes:
@@ -486,7 +490,7 @@ class HsmAuthSession:
         self,
         label: str,
         context: bytes,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         card_crypto: Optional[bytes] = None,
     ) -> SessionKeys:
         """Calculate session keys from symmetric YubiHSM Auth credential"""
@@ -505,7 +509,7 @@ class HsmAuthSession:
         label: str,
         context: bytes,
         public_key: ec.EllipticCurvePublicKey,
-        credential_password: bytes,
+        credential_password: Union[bytes, str],
         card_crypto: bytes,
     ) -> SessionKeys:
         """Calculate session keys from asymmetric YubiHSM Auth credential"""
