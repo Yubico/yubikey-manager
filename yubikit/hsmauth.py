@@ -194,7 +194,7 @@ class SessionKeys(NamedTuple):
     key_srmac: bytes
 
     @classmethod
-    def parse(cls, response) -> "SessionKeys":
+    def parse(cls, response: bytes) -> "SessionKeys":
         key_senc = response[:16]
         key_smac = response[16:32]
         key_srmac = response[32:48]
@@ -318,7 +318,7 @@ class HsmAuthSession:
         management_key: bytes,
         label: str,
         credential_password: Union[bytes, str],
-        derivation_password: Union[bytes, str],
+        derivation_password: str,
         touch_required: bool = False,
     ) -> Credential:
         """Import a symmetric YubiHSM Auth credential derived from password"""
