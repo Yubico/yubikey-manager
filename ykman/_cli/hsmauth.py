@@ -206,7 +206,7 @@ def hsmauth(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display general status of the PIV application.
+    Display general status of the YubiHSM Auth application.
     """
     info = get_hsmauth_info(ctx.obj["session"])
     click.echo("\n".join(pretty_print(info)))
