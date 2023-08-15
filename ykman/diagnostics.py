@@ -4,6 +4,7 @@ from .pcsc import list_readers, list_devices as list_ccid_devices
 from .hid import list_otp_devices, list_ctap_devices
 from .piv import get_piv_info
 from .openpgp import get_openpgp_info
+from .hsmauth import get_hsmauth_info
 
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
@@ -13,6 +14,7 @@ from yubikit.yubiotp import YubiOtpSession
 from yubikit.piv import PivSession
 from yubikit.oath import OathSession
 from yubikit.openpgp import OpenPgpSession
+from yubikit.hsmauth import HsmAuthSession
 from yubikit.support import read_info, get_name
 from fido2.ctap import CtapError
 from fido2.ctap2 import Ctap2, ClientPin
@@ -98,6 +100,14 @@ def oath_info(conn):
         return f"OATH not accessible {e!r}"
 
 
+def hsmauth_info(conn):
+    try:
+        hsmauth = HsmAuthSession(conn)
+        return get_hsmauth_info(hsmauth)
+    except Exception as e:
+        return f"YubiHSM Auth not accessible {e!r}"
+
+
 def ccid_info():
     try:
         readers = {}
@@ -120,6 +130,7 @@ def ccid_info():
                         "PIV": piv_info(conn),
                         "OATH": oath_info(conn),
                         "OpenPGP": openpgp_info(conn),
+                        "YubiHSM Auth": hsmauth_info(conn),
                     }
             except Exception as e:
                 yubikeys[f"{dev!r}"] = f"PC/SC connection failure: {e!r}"
