@@ -94,6 +94,8 @@ INITIAL_RETRY_COUNTER = 8
 
 @unique
 class ALGORITHM(IntEnum):
+    """Algorithms for YubiHSM Auth credentials."""
+
     AES128_YUBICO_AUTHENTICATION = 38
     EC_P256_YUBICO_AUTHENTICATION = 39
 
@@ -169,6 +171,8 @@ def _retries_from_sw(sw):
 @total_ordering
 @dataclass(order=False, frozen=True)
 class Credential:
+    """A YubiHSM Auth credential object."""
+
     label: str
     algorithm: ALGORITHM
     counter: int
@@ -187,6 +191,8 @@ class Credential:
 
 
 class SessionKeys(NamedTuple):
+    """YubiHSM Session Keys."""
+
     key_senc: bytes
     key_smac: bytes
     key_srmac: bytes
@@ -205,15 +211,19 @@ class SessionKeys(NamedTuple):
 
 
 class HsmAuthSession:
+    """A session with the YubiHSM Auth application."""
+
     def __init__(self, connection: SmartCardConnection) -> None:
         self.protocol = SmartCardProtocol(connection)
         self._version = _parse_select(self.protocol.select(AID.HSMAUTH))
 
     @property
     def version(self) -> Version:
+        """The YubiHSM Auth application version."""
         return self._version
 
     def reset(self) -> None:
+        """Perform a factory reset on the YubiHSM Auth application."""
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         logger.info("YubiHSM Auth application data reset performed")
 
@@ -294,7 +304,16 @@ class HsmAuthSession:
         credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
-        """Import a symmetric YubiHSM Auth credential"""
+        """Import a symmetric YubiHSM Auth credential.
+
+        :param management_key: The management key.
+        :param label: The label of the credential.
+        :param key_enc: The static K-ENC.
+        :param key_mac: The static K-MAC.
+        :param credential_password: The password used to protect
+            access to the credential.
+        :param touch_required: The touch requirement policy.
+        """
 
         aes128_key_len = ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len
         if len(key_enc) != aes128_key_len or len(key_mac) != aes128_key_len:
@@ -315,11 +334,19 @@ class HsmAuthSession:
         self,
         management_key: bytes,
         label: str,
-        credential_password: Union[bytes, str],
         derivation_password: str,
+        credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
-        """Import a symmetric YubiHSM Auth credential derived from password"""
+        """Import a symmetric YubiHSM Auth credential derived from password.
+
+        :param management_key: The management key.
+        :param label: The label of the credential.
+        :param derivation_password: The password used to derive the keys from.
+        :param credential_password: The password used to protect
+            access to the credential.
+        :param touch_required: The touch requirement policy.
+        """
 
         key_enc, key_mac = _password_to_key(derivation_password)
 
@@ -335,7 +362,16 @@ class HsmAuthSession:
         credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
-        """Import an asymmetric YubiHSM Auth credential"""
+        """Import an asymmetric YubiHSM Auth credential.
+
+        :param management_key: The management key.
+        :param label: The label of the credential.
+        :param private_key: Private key corresponding to the public
+            authentication key object on the YubiHSM.
+        :param credential_password: The password used to protect
+            access to the credential.
+        :param touch_required: The touch requirement policy.
+        """
 
         require_version(self.version, (5, 6, 0))
         if not isinstance(private_key.curve, ec.SECP256R1):
@@ -360,11 +396,18 @@ class HsmAuthSession:
         credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
-        """Generate an asymmetric YubiHSM Auth credential
+        """Generate an asymmetric YubiHSM Auth credential.
 
         Generates a private key on the YubiKey, whose corresponding
-        public key can be retrieved using `get_public_key`
+        public key can be retrieved using `get_public_key`.
+
+        :param management_key: The management key.
+        :param label: The label of the credential.
+        :param credential_password: The password used to protect
+            access to the credential.
+        :param touch_required: The touch requirement policy.
         """
+
         require_version(self.version, (5, 6, 0))
         return self._put_credential(
             management_key,
@@ -380,6 +423,8 @@ class HsmAuthSession:
 
         This will return the long-term public key "PK-OCE" for an
         asymmetric credential.
+
+        :param label: The label of the credential.
         """
         require_version(self.version, (5, 6, 0))
         data = Tlv(TAG_LABEL, _parse_label(label))
@@ -388,7 +433,11 @@ class HsmAuthSession:
         return ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), res)
 
     def delete_credential(self, management_key: bytes, label: str) -> None:
-        """Delete a YubiHSM Auth credential"""
+        """Delete a YubiHSM Auth credential.
+
+        :param management_key: The management key.
+        :param label: The label of the credential.
+        """
 
         if len(management_key) != MANAGEMENT_KEY_LEN:
             raise ValueError(
@@ -416,7 +465,11 @@ class HsmAuthSession:
         management_key: bytes,
         new_management_key: bytes,
     ) -> None:
-        """Change YubiHSM Auth management key"""
+        """Change YubiHSM Auth management key
+
+        :param management_key: The current management key.
+        :param new_management_key: The new management key.
+        """
 
         if (
             len(management_key) != MANAGEMENT_KEY_LEN
@@ -456,7 +509,6 @@ class HsmAuthSession:
         card_crypto: Optional[bytes] = None,
         public_key: Optional[bytes] = None,
     ) -> bytes:
-        """Calculate session keys from YubiHSM Auth credential"""
 
         data = Tlv(TAG_LABEL, _parse_label(label)) + Tlv(TAG_CONTEXT, context)
 
@@ -491,7 +543,14 @@ class HsmAuthSession:
         credential_password: Union[bytes, str],
         card_crypto: Optional[bytes] = None,
     ) -> SessionKeys:
-        """Calculate session keys from symmetric YubiHSM Auth credential"""
+        """Calculate session keys from a symmetric YubiHSM Auth credential.
+
+        :param label: The label of the credential.
+        :param context: The context (host challenge + hsm challenge).
+        :param credential_password: The password used to protect
+            access to the credential.
+        :param card_crypto: The card cryptogram.
+        """
 
         return SessionKeys.parse(
             self._calculate_session_keys(
@@ -510,7 +569,15 @@ class HsmAuthSession:
         credential_password: Union[bytes, str],
         card_crypto: bytes,
     ) -> SessionKeys:
-        """Calculate session keys from asymmetric YubiHSM Auth credential"""
+        """Calculate session keys from an asymmetric YubiHSM Auth credential.
+
+        :param label: The label of the credential.
+        :param context: The context (EPK.OCE + EPK.SD).
+        :param public_key: The YubiHSM device's public key.
+        :param credential_password: The password used to protect
+            access to the credential.
+        :param card_crypto: The card cryptogram.
+        """
 
         require_version(self.version, (5, 6, 0))
         if not isinstance(public_key.curve, ec.SECP256R1):
@@ -539,6 +606,8 @@ class HsmAuthSession:
 
         For symmetric credentials this is Host Challenge, a random
         8 byte value. For asymmetric credentials this is EPK-OCE.
+
+        :param label: The label of the credential.
         """
         require_version(self.version, (5, 6, 0))
         data = Tlv(TAG_LABEL, _parse_label(label))

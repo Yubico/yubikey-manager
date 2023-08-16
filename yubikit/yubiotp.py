@@ -705,6 +705,8 @@ class _YubiOtpSmartCardBackend(_Backend):
 
 
 class YubiOtpSession:
+    """A session with the YubiOTP application."""
+
     def __init__(self, connection: Union[OtpConnection, SmartCardConnection]):
         if isinstance(connection, OtpConnection):
             otp_protocol = OtpProtocol(connection)
@@ -750,11 +752,13 @@ class YubiOtpSession:
         return self._version
 
     def get_serial(self) -> int:
+        """Get serial number."""
         return bytes2int(
             self.backend.send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4)
         )
 
     def get_config_state(self) -> ConfigState:
+        """Get configuration state of the YubiOTP application."""
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
 
     def _write_config(self, slot, config, cur_acc_code):
@@ -772,6 +776,13 @@ class YubiOtpSession:
         acc_code: Optional[bytes] = None,
         cur_acc_code: Optional[bytes] = None,
     ) -> None:
+        """Write configuration to slot.
+
+        :param slot: The slot to configure.
+        :param configuration: The slot configuration.
+        :param acc_code: The new access code.
+        :param cur_acc_code: The current access code.
+        """
         if not configuration.is_supported_by(self.version):
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
@@ -794,6 +805,13 @@ class YubiOtpSession:
         acc_code: Optional[bytes] = None,
         cur_acc_code: Optional[bytes] = None,
     ) -> None:
+        """Update configuration in slot.
+
+        :param slot: The slot to update the configuration in.
+        :param configuration: The slot configuration.
+        :param acc_code: The new access code.
+        :param cur_acc_code: The current access code.
+        """
         if not configuration.is_supported_by(self.version):
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
@@ -812,10 +830,16 @@ class YubiOtpSession:
         )
 
     def swap_slots(self) -> None:
+        """Swap the two slot configurations."""
         logger.debug("Swapping touch slots")
         self._write_config(CONFIG_SLOT.SWAP, b"", None)
 
     def delete_slot(self, slot: SLOT, cur_acc_code: Optional[bytes] = None) -> None:
+        """Delete configuration stored in slot.
+
+        :param slot: The slot to delete the configuration in.
+        :param cur_acc_code: The current access code.
+        """
         slot = SLOT(slot)
         logger.debug(f"Deleting slot {slot}")
         self._write_config(
@@ -827,6 +851,11 @@ class YubiOtpSession:
     def set_scan_map(
         self, scan_map: bytes, cur_acc_code: Optional[bytes] = None
     ) -> None:
+        """Update scan-codes on YubiKey.
+
+        This updates the scan-codes (or keyboard presses) that the YubiKey
+        will use when typing out OTPs.
+        """
         logger.debug("Writing scan map")
         self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
 
@@ -837,6 +866,13 @@ class YubiOtpSession:
         cur_acc_code: Optional[bytes] = None,
         ndef_type: NDEF_TYPE = NDEF_TYPE.URI,
     ) -> None:
+        """Configure a slot to be used over NDEF (NFC).
+
+        :param slot: The slot to configure.
+        :param uri: URI or static text.
+        :param cur_acc_code: The current access code.
+        :param ndef_type: The NDEF type (text or URI).
+        """
         slot = SLOT(slot)
         logger.debug(f"Writing NDEF configuration for slot {slot} of type {ndef_type}")
         self._write_config(
@@ -852,6 +888,12 @@ class YubiOtpSession:
         event: Optional[Event] = None,
         on_keepalive: Optional[Callable[[int], None]] = None,
     ) -> bytes:
+        """Perform a challenge-response operation using HMAC-SHA1.
+
+        :param slot: The slot to perform the operation against.
+        :param challenge: The challenge.
+        :param event: An event.
+        """
         require_version(self.version, (2, 2, 0))
         slot = SLOT(slot)
         logger.debug(f"Calculating response for slot {slot}")

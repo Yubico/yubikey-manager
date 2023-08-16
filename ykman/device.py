@@ -85,16 +85,19 @@ def _warn_once(message, e_type=Exception):
     EstablishContextException,
 )
 def list_ccid_devices():
+    """List CCID devices."""
     return _list_ccid_devices()
 
 
 @_warn_once("No CTAP HID backend available. FIDO protocols will not function.")
 def list_ctap_devices():
+    """List CTAP devices."""
     return _list_ctap_devices()
 
 
 @_warn_once("No OTP HID backend available. OTP protocols will not function.")
 def list_otp_devices():
+    """List OTP devices."""
     return _list_otp_devices()
 
 
@@ -108,8 +111,8 @@ _CONNECTION_LIST_MAPPING = {
 def scan_devices() -> Tuple[Mapping[PID, int], int]:
     """Scan USB for attached YubiKeys, without opening any connections.
 
-    Returns a dict mapping PID to device count, and a state object which can be used to
-    detect changes in attached devices.
+    :return: A dict mapping PID to device count, and a state object which can be used to
+        detect changes in attached devices.
     """
     fingerprints = set()
     merged: Dict[PID, int] = {}
@@ -270,9 +273,10 @@ class _UsbCompositeDevice(YkmanDevice):
 def list_all_devices(
     connection_types: Iterable[Type[Connection]] = _CONNECTION_LIST_MAPPING.keys(),
 ) -> List[Tuple[YkmanDevice, DeviceInfo]]:
-    """Connects to all attached YubiKeys and reads device info from them.
+    """Connect to all attached YubiKeys and read device info from them.
 
-    Returns a list of (device, info) tuples for each connected device.
+    :param connection_types: An iterable of YubiKey connection types.
+    :return: A list of (device, info) tuples for each connected device.
     """
     groups: Dict[PID, _PidGroup] = {}
 

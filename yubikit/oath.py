@@ -80,6 +80,10 @@ PROP_REQUIRE_TOUCH = 0x02
 
 
 def parse_b32_key(key: str):
+    """Parse Base32 encoded key.
+
+    :param key: The Base32 encoded key.
+    """
     key = key.upper().replace(" ", "")
     key += "=" * (-len(key) % 8)  # Support unpadded
     return b32decode(key)
@@ -96,6 +100,8 @@ def _parse_select(response):
 
 @dataclass
 class CredentialData:
+    """An object holding OATH credential data."""
+
     name: str
     oath_type: OATH_TYPE
     hash_algorithm: HASH_ALGORITHM
@@ -107,6 +113,10 @@ class CredentialData:
 
     @classmethod
     def parse_uri(cls, uri: str) -> "CredentialData":
+        """Parse OATH credential data from URI.
+
+        :param uri: The URI to parse from.
+        """
         parsed = urlparse(uri.strip())
         if parsed.scheme != "otpauth":
             raise ValueError("Invalid URI scheme")
@@ -138,6 +148,8 @@ class CredentialData:
 
 @dataclass
 class Code:
+    """An OATH code object."""
+
     value: str
     valid_from: int
     valid_to: int
@@ -146,6 +158,8 @@ class Code:
 @total_ordering
 @dataclass(order=False, frozen=True)
 class Credential:
+    """An OATH credential object."""
+
     device_id: str
     id: bytes
     issuer: Optional[str]
@@ -246,6 +260,8 @@ def _format_code(credential, timestamp, truncated):
 
 
 class OathSession:
+    """A session with the OATH application."""
+
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
         self._version, self._salt, self._challenge = _parse_select(
@@ -262,21 +278,26 @@ class OathSession:
 
     @property
     def version(self) -> Version:
+        """The OATH application version."""
         return self._version
 
     @property
     def device_id(self) -> str:
+        """The device ID."""
         return self._device_id
 
     @property
     def has_key(self) -> bool:
+        """If True, the YubiKey has an access key."""
         return self._has_key
 
     @property
     def locked(self) -> bool:
+        """If True, the OATH application is password protected."""
         return self._challenge is not None
 
     def reset(self) -> None:
+        """Perform a factory reset on the OATH application."""
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         _, self._salt, self._challenge = _parse_select(self.protocol.select(AID.OATH))
         logger.info("OATH application data reset performed")
@@ -284,9 +305,17 @@ class OathSession:
         self._device_id = _get_device_id(self._salt)
 
     def derive_key(self, password: str) -> bytes:
+        """Derive a key from password.
+
+        :param password: The derivation password.
+        """
         return _derive_key(self._salt, password)
 
     def validate(self, key: bytes) -> None:
+        """Validate authentication with access key.
+
+        :param key: The access key.
+        """
         logger.debug("Unlocking session")
         response = _hmac_sha1(key, self._challenge)
         challenge = os.urandom(8)
@@ -301,6 +330,10 @@ class OathSession:
         self._neo_unlock_workaround = False
 
     def set_key(self, key: bytes) -> None:
+        """Set access key for authentication.
+
+        :param key: The access key.
+        """
         challenge = os.urandom(8)
         response = _hmac_sha1(key, challenge)
         self.protocol.send_apdu(
@@ -322,6 +355,10 @@ class OathSession:
             self.validate(key)
 
     def unset_key(self) -> None:
+        """Remove access code.
+
+        WARNING: This removes authentication.
+        """
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
         logger.info("Access code removed")
         self._has_key = False
@@ -329,6 +366,11 @@ class OathSession:
     def put_credential(
         self, credential_data: CredentialData, touch_required: bool = False
     ) -> Credential:
+        """Add a OATH credential.
+
+        :param credential_data: The credential data.
+        :param touch_required: The touch policy.
+        """
         d = credential_data
         cred_id = d.get_id()
         secret = _hmac_shorten_key(d.secret, d.hash_algorithm)
@@ -365,6 +407,12 @@ class OathSession:
     def rename_credential(
         self, credential_id: bytes, name: str, issuer: Optional[str] = None
     ) -> bytes:
+        """Rename a OATH credential.
+
+        :param credential_id: The id of the credential.
+        :param name: The new name of the credential.
+        :param issuer: The credential issuer.
+        """
         require_version(self.version, (5, 3, 1))
         _, _, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
@@ -375,6 +423,7 @@ class OathSession:
         return new_id
 
     def list_credentials(self) -> List[Credential]:
+        """List OATH credentials."""
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
             data = Tlv.unpack(TAG_NAME_LIST, tlv)
@@ -389,6 +438,11 @@ class OathSession:
         return creds
 
     def calculate(self, credential_id: bytes, challenge: bytes) -> bytes:
+        """Perform a calculate for an OATH credential.
+
+        :param credential_id: The id of the credential.
+        :param challenge: The challenge.
+        """
         resp = Tlv.unpack(
             TAG_RESPONSE,
             self.protocol.send_apdu(
@@ -402,12 +456,20 @@ class OathSession:
         return resp[1:]
 
     def delete_credential(self, credential_id: bytes) -> None:
+        """Delete an OATH credential.
+
+        :param credential_id: The id of the credential.
+        """
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
         logger.info("Credential deleted")
 
     def calculate_all(
         self, timestamp: Optional[int] = None
     ) -> Mapping[Credential, Optional[Code]]:
+        """Calculate codes for all OATH credentials on the YubiKey.
+
+        :param timestamp: A timestamp.
+        """
         timestamp = int(timestamp or time())
         challenge = _get_challenge(timestamp, DEFAULT_PERIOD)
         logger.debug(f"Calculating all codes for time={timestamp}")
@@ -445,6 +507,11 @@ class OathSession:
     def calculate_code(
         self, credential: Credential, timestamp: Optional[int] = None
     ) -> Code:
+        """Calculate code for an OATH credential.
+
+        :param credential: The credential object.
+        :param timestamp: The timestamp.
+        """
         if credential.device_id != self.device_id:
             raise ValueError("Credential does not belong to this YubiKey")
 

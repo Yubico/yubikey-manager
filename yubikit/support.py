@@ -256,6 +256,9 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
     required, for example to "fix" known bad values.
 
     The *pid* parameter must be provided whenever the YubiKey is connected via USB.
+
+    :param conn: A connection to a YubiKey.
+    :param pid: The USB Product ID.
     """
 
     logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
@@ -366,7 +369,11 @@ def _is_preview(version):
 
 
 def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
-    """Determine the product name of a YubiKey"""
+    """Determine the product name of a YubiKey
+
+    :param info: The device info.
+    :param key_type: The YubiKey hardware platform.
+    """
     usb_supported = info.supported_capabilities[TRANSPORT.USB]
 
     # Guess the key type (over NFC)
