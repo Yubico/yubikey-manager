@@ -135,6 +135,8 @@ def _encode_extended_apdu(cla, ins, p1, p2, data, le=0):
 
 
 class SmartCardProtocol:
+    """An implementation of the Smart Card protocol."""
+
     def __init__(
         self,
         smartcard_connection: SmartCardConnection,
@@ -156,6 +158,10 @@ class SmartCardProtocol:
         logger.debug(f"Touch workaround enabled={self._touch_workaround}")
 
     def select(self, aid: bytes) -> bytes:
+        """Perform a SELECT instruction.
+
+        :param aid: The YubiKey application AID value.
+        """
         try:
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
         except ApduError as e:
@@ -171,6 +177,16 @@ class SmartCardProtocol:
     def send_apdu(
         self, cla: int, ins: int, p1: int, p2: int, data: bytes = b"", le: int = 0
     ) -> bytes:
+        """Send APDU message.
+
+        :param cla: The instruction class.
+        :param ins: The instruction code.
+        :param p1: The instruction parameter.
+        :param p2: The instruction parameter.
+        :param data: The command data in bytes.
+        :param le: The maximum number of bytes in the data
+            field of the response.
+        """
         if (
             self._touch_workaround
             and self._last_long_resp > 0

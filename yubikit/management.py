@@ -453,6 +453,7 @@ class ManagementSession:
         return self.backend.version
 
     def read_device_info(self) -> DeviceInfo:
+        """Get detailed information about the YubiKey."""
         require_version(self.version, (4, 1, 0))
         return DeviceInfo.parse(self.backend.read_config(), self.version)
 
@@ -463,6 +464,13 @@ class ManagementSession:
         cur_lock_code: Optional[bytes] = None,
         new_lock_code: Optional[bytes] = None,
     ) -> None:
+        """Write configuration settings for YubiKey.
+
+        :pararm config: The device configuration.
+        :param reboot: If True the YubiKey will reboot.
+        :param cur_lock_code: Current lock code.
+        :param new_lock_code: New lock code.
+        """
         require_version(self.version, (5, 0, 0))
         if cur_lock_code is not None and len(cur_lock_code) != 16:
             raise ValueError("Lock code must be 16 bytes")
@@ -485,6 +493,14 @@ class ManagementSession:
         chalresp_timeout: int = 0,
         auto_eject_timeout: Optional[int] = None,
     ) -> None:
+        """Write connection modes (USB interfaces) for YubiKey.
+
+        :param mode: The connection modes (USB interfaces).
+        :param chalresp_timeout: The timeout when waiting for touch
+            for challenge response.
+        :param auto_eject_timeout: When set, the smartcard will
+            automatically eject after the given time.
+        """
         logger.debug(
             f"Set mode: {mode}, chalresp_timeout: {chalresp_timeout}, "
             f"auto_eject_timeout: {auto_eject_timeout}"

@@ -90,12 +90,15 @@ class ScriptingDevice:
         return self._name
 
     def otp(self) -> OtpConnection:
+        """Establish a OTP connection."""
         return self.open_connection(OtpConnection)
 
     def smart_card(self) -> SmartCardConnection:
+        """Establish a Smart Card connection."""
         return self.open_connection(SmartCardConnection)
 
     def fido(self) -> FidoConnection:
+        """Establish a FIDO connection."""
         return self.open_connection(FidoConnection)
 
 
@@ -103,6 +106,11 @@ YkmanDevice.register(ScriptingDevice)
 
 
 def single(*, prompt=True) -> ScriptingDevice:
+    """Connect to a YubiKey.
+
+    :param prompt: When set, you will be prompted to
+        insert a YubiKey.
+    """
     pids, state = scan_devices()
     n_devs = sum(pids.values())
     if prompt and n_devs == 0:
@@ -120,6 +128,15 @@ def single(*, prompt=True) -> ScriptingDevice:
 def multi(
     *, ignore_duplicates: bool = True, allow_initial: bool = False, prompt: bool = True
 ) -> Generator[ScriptingDevice, None, None]:
+    """Connect to multiple YubiKeys.
+
+
+    :param ignore_duplicates: When set, duplicates are ignored.
+    :param allow_initial: When set, YubiKeys can be connected
+        at the start of the function call.
+    :param prompt: When set, you will be prompted to
+        insert a YubiKey.
+    """
     state = None
     handled_serials: Set[Optional[int]] = set()
     pids, _ = scan_devices()
@@ -162,6 +179,12 @@ def _get_reader(reader) -> YkmanDevice:
 
 
 def single_nfc(reader="", *, prompt=True) -> ScriptingDevice:
+    """Connect to a YubiKey over NFC.
+
+    :param reader: The name of the NFC reader.
+    :param prompt: When set, you will prompted to place
+        a YubiKey on NFC reader.
+    """
     device = _get_reader(reader)
     while True:
         try:
@@ -178,6 +201,15 @@ def single_nfc(reader="", *, prompt=True) -> ScriptingDevice:
 def multi_nfc(
     reader="", *, ignore_duplicates=True, allow_initial=False, prompt=True
 ) -> Generator[ScriptingDevice, None, None]:
+    """Connect to multiple YubiKeys over NFC.
+
+    :param reader: The name of the NFC reader.
+    :param ignore_duplicates: When set, duplicates are ignored.
+    :param allow_initial: When set, YubiKeys can be connected
+        at the start of the function call.
+    :param prompt: When set, you will be prompted to place
+        YubiKeys on the NFC reader.
+    """
     device = _get_reader(reader)
     prompted = False
 

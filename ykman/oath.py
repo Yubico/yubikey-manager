@@ -34,14 +34,17 @@ STEAM_CHAR_TABLE = "23456789BCDFGHJKMNPQRTVWXY"
 
 
 def is_hidden(credential):
+    """Check if OATH credential is hidden."""
     return credential.issuer == "_hidden"
 
 
 def is_steam(credential):
+    """Check if OATH credential is steam."""
     return credential.oath_type == OATH_TYPE.TOTP and credential.issuer == "Steam"
 
 
 def calculate_steam(app, credential, timestamp=None):
+    """Calculate steam codes."""
     timestamp = int(timestamp or time())
     resp = app.calculate(credential.id, struct.pack(">q", timestamp // 30))
     offset = resp[-1] & 0x0F
@@ -54,4 +57,5 @@ def calculate_steam(app, credential, timestamp=None):
 
 
 def is_in_fips_mode(app):
+    """Check if OATH application is in FIPS mode."""
     return app.locked

@@ -118,9 +118,11 @@ _DOTTED_STRING_RE = re.compile(r"\d(\.\d+)+")
 
 
 def parse_rfc4514_string(value: str) -> x509.Name:
-    """Parses an RFC 4514 string into a x509.Name.
+    """Parse an RFC 4514 string into a x509.Name.
 
     See: https://tools.ietf.org/html/rfc4514.html
+
+    :param value: An RFC 4514 string.
     """
     name = _parse(value)
     attributes: List[x509.RelativeDistinguishedName] = []
@@ -159,13 +161,19 @@ def derive_management_key(pin: str, salt: bytes) -> bytes:
 
     NOTE: This method of derivation is deprecated! Protect the management key using
     PivmanProtectedData instead.
+
+    :param pin: The PIN.
+    :param salt: The salt.
     """
     kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())  # nosec
     return kdf.derive(pin.encode("utf-8"))
 
 
 def generate_random_management_key(algorithm: MANAGEMENT_KEY_TYPE) -> bytes:
-    """Generates a new random management key."""
+    """Generate a new random management key.
+
+    :param algorithm: The algorithm for the management key.
+    """
     return os.urandom(algorithm.key_len)
 
 
@@ -237,7 +245,10 @@ class PivmanProtectedData:
 
 
 def get_pivman_data(session: PivSession) -> PivmanData:
-    """Reads out the Pivman data from a YubiKey."""
+    """Read out the Pivman data from a YubiKey.
+
+    :param session: The PIV session.
+    """
     logger.debug("Reading pivman data")
     try:
         return PivmanData(session.get_object(OBJECT_ID_PIVMAN_DATA))
@@ -250,9 +261,11 @@ def get_pivman_data(session: PivSession) -> PivmanData:
 
 
 def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
-    """Reads out the Pivman protected data from a YubiKey.
+    """Read out the Pivman protected data from a YubiKey.
 
     This function requires PIN verification prior to being called.
+
+    :param session: The PIV session.
     """
     logger.debug("Reading protected pivman data")
     try:
@@ -272,7 +285,14 @@ def pivman_set_mgm_key(
     touch: bool = False,
     store_on_device: bool = False,
 ) -> None:
-    """Set a new management key, while keeping PivmanData in sync."""
+    """Set a new management key, while keeping PivmanData in sync.
+
+    :param session: The PIV session.
+    :param new_key: The new management key.
+    :param algorithm: The algorithm for the management key.
+    :param touch: If set, touch is required.
+    :param store_on_device: If set, the management key is stored on device.
+    """
     pivman = get_pivman_data(session)
     pivman_prot = None
 
@@ -320,7 +340,12 @@ def pivman_set_mgm_key(
 
 
 def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
-    """Change the PIN, while keeping PivmanData in sync."""
+    """Change the PIN, while keeping PivmanData in sync.
+
+    :param session: The PIV session.
+    :param old_pin: The old PIN.
+    :param new_pin: The new PIN.
+    """
     session.change_pin(old_pin, new_pin)
 
     pivman = get_pivman_data(session)
@@ -339,9 +364,11 @@ def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
 
 
 def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certificate]]:
-    """Reads out and parses stored certificates.
+    """Read out and parse stored certificates.
 
     Only certificates which are successfully parsed are returned.
+
+    :param session: The PIV session.
     """
     certs = OrderedDict()
     for slot in set(SLOT) - {SLOT.ATTESTATION}:
@@ -364,6 +391,10 @@ def check_key(
 
     This will create a signature using the private key, so the PIN must be verified
     prior to calling this function if the PIN policy requires it.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
     """
     try:
         test_data = b"test"
@@ -404,7 +435,7 @@ def check_key(
 
 
 def generate_chuid() -> bytes:
-    """Generates a CHUID (Cardholder Unique Identifier)."""
+    """Generate a CHUID (Cardholder Unique Identifier)."""
     # Non-Federal Issuer FASC-N
     # [9999-9999-999999-0-1-0000000000300001]
     FASC_N = (
@@ -424,7 +455,7 @@ def generate_chuid() -> bytes:
 
 
 def generate_ccc() -> bytes:
-    """Generates a CCC (Card Capability Container)."""
+    """Generate a CCC (Card Capability Container)."""
     return (
         Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
         + Tlv(0xF1, b"\x21")
@@ -443,7 +474,10 @@ def generate_ccc() -> bytes:
 
 
 def get_piv_info(session: PivSession):
-    """Get human readable information about the PIV configuration."""
+    """Get human readable information about the PIV configuration.
+
+    :param session: The PIV session.
+    """
     pivman = get_pivman_data(session)
     info: Dict[str, Any] = {
         "PIV version": session.version,
@@ -570,7 +604,14 @@ def sign_certificate_builder(
     builder: x509.CertificateBuilder,
     hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.Certificate:
-    """Sign a Certificate."""
+    """Sign a Certificate.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param key_type: The key type.
+    :param builder: The x509 certificate builder object.
+    :param hash_algorithm: The hash algorithm.
+    """
     logger.debug("Signing a certificate")
     dummy_key = _dummy_key(key_type)
     cert = builder.sign(dummy_key, hash_algorithm(), default_backend())
@@ -599,7 +640,15 @@ def sign_csr_builder(
     builder: x509.CertificateSigningRequestBuilder,
     hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
-    """Sign a CSR."""
+    """Sign a CSR.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param builder: The x509 certificate signing request builder
+        object.
+    :param hash_algorithm: The hash algorithm.
+    """
     logger.debug("Signing a CSR")
     key_type = KEY_TYPE.from_public_key(public_key)
     dummy_key = _dummy_key(key_type)
@@ -641,7 +690,16 @@ def generate_self_signed_certificate(
     valid_to: datetime,
     hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.Certificate:
-    """Generate a self-signed certificate using a private key in a slot."""
+    """Generate a self-signed certificate using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param valid_from: The date from when the certificate is valid.
+    :param valid_to: The date when the certificate expires.
+    :param hash_algorithm: The hash algorithm.
+    """
     logger.debug("Generating a self-signed certificate")
     key_type = KEY_TYPE.from_public_key(public_key)
 
@@ -666,7 +724,14 @@ def generate_csr(
     subject_str: str,
     hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
-    """Generate a CSR using a private key in a slot."""
+    """Generate a CSR using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param hash_algorithm: The hash algorithm.
+    """
     logger.debug("Generating a CSR")
     builder = x509.CertificateSigningRequestBuilder().subject_name(
         parse_rfc4514_string(subject_str)

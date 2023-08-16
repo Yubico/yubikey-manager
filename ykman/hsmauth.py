@@ -31,6 +31,7 @@ import os
 
 
 def get_hsmauth_info(session: HsmAuthSession):
+    """Get information about the YubiHSM Auth application."""
     retries = session.get_management_key_retries()
     info = {
         "YubiHSM Auth version": session.version,

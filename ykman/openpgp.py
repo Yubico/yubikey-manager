@@ -29,7 +29,10 @@ from yubikit.openpgp import OpenPgpSession, KEY_REF
 
 
 def get_openpgp_info(session: OpenPgpSession):
-    """Get human readable information about the OpenPGP configuration."""
+    """Get human readable information about the OpenPGP configuration.
+
+    :param session: The OpenPGP session.
+    """
     data = session.get_application_related_data()
     discretionary = data.discretionary
     retries = discretionary.pw_status

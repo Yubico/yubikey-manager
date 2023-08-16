@@ -123,6 +123,8 @@ def _format_frame(slot, payload):
 
 
 class OtpProtocol:
+    """An implementation of the OTP protocol."""
+
     def __init__(self, otp_connection: OtpConnection):
         self.connection = otp_connection
         report = self._receive()
@@ -149,12 +151,12 @@ class OtpProtocol:
         If the command results in a configuration update, the programming sequence
         number is verified and the updated status bytes are returned.
 
-        @param slot  the slot to send to
-        @param data  the data payload to send
-        @param state optional CommandState for listening for user presence requirement
+        :param slot:  The slot to send to.
+        :param data:  The data payload to send.
+        :param state: Optional CommandState for listening for user presence requirement
             and for cancelling a command.
-        @return response data (including CRC) in the case of data, or an updated status
-            struct
+        :return: Response data (including CRC) in the case of data, or an updated status
+            struct.
         """
         payload = (data or b"").ljust(SLOT_DATA_SIZE, b"\0")
         if len(payload) > SLOT_DATA_SIZE:
@@ -180,10 +182,10 @@ class OtpProtocol:
         return report
 
     def read_status(self) -> bytes:
-        """Receive status bytes from YubiKey
+        """Receive status bytes from YubiKey.
 
-        @return status bytes (first 3 bytes are the firmware version)
-        @throws IOException in case of communication error
+        :return: Status bytes (first 3 bytes are the firmware version).
+        :raises IOException: in case of communication error.
         """
         return self._receive()[1:-1]
 

@@ -59,8 +59,11 @@ def _parse_pkcs12(data, password):
 
 
 def parse_private_key(data, password):
-    """
-    Identifies, decrypts and returns a cryptography private key object.
+    """Identify, decrypt and return a cryptography private key object.
+
+    :param data: The private key in bytes.
+    :param password: The password to decrypt the private key
+        (if it is encrypted).
     """
     # PEM
     if is_pem(data):
@@ -96,8 +99,10 @@ def parse_private_key(data, password):
 
 
 def parse_certificates(data, password):
-    """
-    Identifies, decrypts and returns list of cryptography x509 certificates.
+    """Identify, decrypt and return a list of cryptography x509 certificates.
+
+    :param data: The certificate(s) in bytes.
+    :param password: The password to decrypt the certificate(s).
     """
     logger.debug("Attempting to parse certificate using PEM, PKCS12 and DER")
 
@@ -133,10 +138,12 @@ def parse_certificates(data, password):
 
 
 def get_leaf_certificates(certs):
-    """
-    Extracts the leaf certificates from a list of certificates. Leaf
-    certificates are ones whose subject does not appear as issuer among the
-    others.
+    """Extract the leaf certificates from a list of certificates.
+
+    Leaf certificates are ones whose subject does not appear as
+    issuer among theothers.
+
+    :param certs: The list of cryptography x509 certificate objects.
     """
     issuers = [
         cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME) for cert in certs

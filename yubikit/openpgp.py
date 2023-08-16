@@ -1,3 +1,30 @@
+# Copyright (c) 2023 Yubico AB
+# All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or
+#   without modification, are permitted provided that the following
+#   conditions are met:
+#
+#    1. Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#    2. Redistributions in binary form must reproduce the above
+#       copyright notice, this list of conditions and the following
+#       disclaimer in the documentation and/or other materials provided
+#       with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
 from .core import (
     Tlv,
     Version,
@@ -194,7 +221,7 @@ class OpenPgpAid(bytes):
 
     @property
     def version(self) -> Tuple[int, int]:
-        """OpenPGP version (tuple of 2 integers: main version, seconday version)."""
+        """OpenPGP version (tuple of 2 integers: main version, secondary version)."""
         return (_bcd(self[6]), _bcd(self[7]))
 
     @property
@@ -332,6 +359,8 @@ class PwStatus:
 
 @unique
 class CRT(bytes, Enum):
+    """Control Reference Template values."""
+
     SIG = Tlv(0xB6)
     DEC = Tlv(0xB8)
     AUT = Tlv(0xA4)
@@ -396,6 +425,8 @@ PrivateKey = Union[
 # mypy doesn't handle abstract dataclasses well
 @dataclass  # type: ignore[misc]
 class AlgorithmAttributes(abc.ABC):
+    """OpenPGP key algorithm attributes."""
+
     _supported_ids: ClassVar[Sequence[int]]
     algorithm_id: int
 
@@ -617,6 +648,8 @@ class DiscretionaryDataObjects:
 
 @dataclass
 class ApplicationRelatedData:
+    """OpenPGP related data."""
+
     aid: OpenPgpAid
     historical: bytes
     extended_length_info: Optional[ExtendedLengthInfo]
@@ -664,7 +697,7 @@ class Kdf(abc.ABC):
 
     @abc.abstractmethod
     def process(self, pin: str, pw: PW) -> bytes:
-        """Runs the KDF on the input PIN."""
+        """Run the KDF on the input PIN."""
 
     @classmethod
     @abc.abstractmethod
@@ -951,10 +984,12 @@ def _pad_message(attributes, message, hash_algorithm):
         try:
             return _pkcs1v15_headers[type(hash_algorithm)] + hashed
         except KeyError:
-            raise ValueError(f"Unsupported hash algorithim for RSA: {hash_algorithm}")
+            raise ValueError(f"Unsupported hash algorithm for RSA: {hash_algorithm}")
 
 
 class OpenPgpSession:
+    """A session with the OpenPGP application."""
+
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         try:
@@ -1002,7 +1037,10 @@ class OpenPgpSession:
         return self._app_data.discretionary.extended_capabilities
 
     def get_challenge(self, length: int) -> bytes:
-        """Get random data from the YubiKey."""
+        """Get random data from the YubiKey.
+
+        :param length: Length of the returned data.
+        """
         e = self.extended_capabilities
         if EXTENDED_CAPABILITY_FLAGS.GET_CHALLENGE not in e.flags:
             raise NotSupportedError("GET_CHALLENGE is not supported")
@@ -1013,12 +1051,19 @@ class OpenPgpSession:
         return self.protocol.send_apdu(0, INS.GET_CHALLENGE, 0, 0, le=length)
 
     def get_data(self, do: DO) -> bytes:
-        """Get a Data Object from the YubiKey."""
+        """Get a Data Object from the YubiKey.
+
+        :param do: The Data Object to get.
+        """
         logger.debug(f"Reading Data Object {do.name} ({do:X})")
         return self.protocol.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
 
     def put_data(self, do: DO, data: Union[bytes, SupportsBytes]) -> None:
-        """Write a Data Object to the YubiKey."""
+        """Write a Data Object to the YubiKey.
+
+        :param do: The Data Object to write to.
+        :param data: The data to write.
+        """
         self.protocol.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, bytes(data))
         logger.info(f"Wrote Data Object {do.name} ({do:X})")
 
@@ -1036,14 +1081,19 @@ class OpenPgpSession:
         return ApplicationRelatedData.parse(self.get_data(DO.APPLICATION_RELATED_DATA))
 
     def set_signature_pin_policy(self, pin_policy: PIN_POLICY) -> None:
-        """Requires Admin PIN verification."""
+        """Set signature PIN policy.
+
+        Requires Admin PIN verification.
+
+        :param pin_policy: The PIN policy.
+        """
         logger.debug(f"Setting Signature PIN policy to {pin_policy}")
         data = struct.pack(">B", pin_policy)
         self.put_data(DO.PW_STATUS_BYTES, data)
         logger.info("Signature PIN policy set")
 
     def reset(self) -> None:
-        """Performs a factory reset on the OpenPGP application.
+        """Perform a factory reset on the OpenPGP application.
 
         WARNING: This will delete all stored keys, certificates and other data.
         """
@@ -1075,6 +1125,10 @@ class OpenPgpSession:
         WARNING: On YubiKey NEO this will reset the PINs to their default values.
 
         Requires Admin PIN verification.
+
+        :param user_attempts: The User PIN attempts.
+        :param reset_attempts: The Reset Code attempts.
+        :param admin_attempts: The Admin PIN attempts.
         """
         if self.version[0] == 1:
             # YubiKey NEO
@@ -1108,6 +1162,8 @@ class OpenPgpSession:
         If a Reset Code is present, it will be invalidated.
 
         This command requires Admin PIN verification.
+
+        :param kdf: The key derivation function.
         """
         e = self._app_data.discretionary.extended_capabilities
         if EXTENDED_CAPABILITY_FLAGS.KDF not in e.flags:
@@ -1132,7 +1188,11 @@ class OpenPgpSession:
 
         This will unlock functionality that requires User PIN verification.
         Note that with `extended=False` (default) only sign operations are allowed.
-        Inversely, with `extended=False` sign operations are NOT allowed.
+        Inversely, with `extended=True` sign operations are NOT allowed.
+
+        :param pin: The User PIN.
+        :param extended: If `False` only sign operations are allowed,
+            otherwise sign operations are NOT allowed.
         """
         logger.debug(f"Verifying User PIN in mode {'82' if extended else '81'}")
         self._verify(PW.USER, pin, 1 if extended else 0)
@@ -1141,11 +1201,17 @@ class OpenPgpSession:
         """Verify the Admin PIN.
 
         This will unlock functionality that requires Admin PIN verification.
+
+        :param admin_pin: The Admin PIN.
         """
         logger.debug("Verifying Admin PIN")
         self._verify(PW.ADMIN, admin_pin)
 
     def unverify_pin(self, pw: PW) -> None:
+        """Reset verification for PIN.
+
+        :param pw: The User, Admin or Reset PIN
+        """
         require_version(self.version, (5, 6, 0))
         logger.debug(f"Resetting verification for {pw.name} PIN")
         self.protocol.send_apdu(0, INS.VERIFY, 0xFF, pw)
@@ -1170,11 +1236,19 @@ class OpenPgpSession:
         logger.info(f"New {pw.name} PIN set")
 
     def change_pin(self, pin: str, new_pin: str) -> None:
-        """Change the User PIN."""
+        """Change the User PIN.
+
+        :param pin: The current User PIN.
+        :param new_pin: The new User PIN.
+        """
         self._change(PW.USER, pin, new_pin)
 
     def change_admin(self, admin_pin: str, new_admin_pin: str) -> None:
-        """Change the Admin PIN."""
+        """Change the Admin PIN.
+
+        :param admin_pin: The current Admin PIN.
+        :param new_admin_pin: The new Admin PIN.
+        """
         self._change(PW.ADMIN, admin_pin, new_admin_pin)
 
     def set_reset_code(self, reset_code: str) -> None:
@@ -1184,6 +1258,8 @@ class OpenPgpSession:
         blocked, using the reset_pin method.
 
         This command requires Admin PIN verification.
+
+        :param reset_code: The Reset Code for User PIN.
         """
         logger.debug("Setting a new PIN Reset Code")
         data = self.get_kdf().process(PW.RESET, reset_code)
@@ -1191,9 +1267,12 @@ class OpenPgpSession:
         logger.info("New Reset Code has been set")
 
     def reset_pin(self, new_pin: str, reset_code: Optional[str] = None) -> None:
-        """Resets the User PIN to a new value.
+        """Reset the User PIN to a new value.
 
         This command requires Admin PIN verification, or the Reset Code.
+
+        :param new_pin: The new user PIN.
+        :param reset_code: The Reset Code.
         """
         logger.debug("Resetting User PIN")
         p1 = 2
@@ -1216,7 +1295,10 @@ class OpenPgpSession:
         logger.info("New User PIN has been set")
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
-        """Get the algorithm attributes for one of the key slots."""
+        """Get the algorithm attributes for one of the key slots.
+
+        :param key_ref: The key slot.
+        """
         logger.debug(f"Getting Algorithm Attributes for {key_ref.name}")
         data = self.get_application_related_data()
         return data.discretionary.get_algorithm_attributes(key_ref)
@@ -1283,12 +1365,15 @@ class OpenPgpSession:
     def set_algorithm_attributes(
         self, key_ref: KEY_REF, attributes: AlgorithmAttributes
     ) -> None:
-        """Sets the algorithm attributes for a key slot.
+        """Set the algorithm attributes for a key slot.
 
         WARNING: This will delete any key already stored in the slot if the attributes
         are changed!
 
         This command requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param attributes: The algorithm attributes to set.
         """
         logger.debug("Setting Algorithm Attributes for {key_ref.name}")
         supported = self.get_algorithm_information()
@@ -1301,7 +1386,10 @@ class OpenPgpSession:
         logger.info("Algorithm Attributes have been changed")
 
     def get_uif(self, key_ref: KEY_REF) -> UIF:
-        """Get the User Interaction Flag (touch requirement) for a key."""
+        """Get the User Interaction Flag (touch requirement) for a key.
+
+        :param key_ref: The key slot.
+        """
         try:
             return UIF.parse(self.get_data(key_ref.uif_do))
         except ApduError as e:
@@ -1314,6 +1402,9 @@ class OpenPgpSession:
         """Set the User Interaction Flag (touch requirement) for a key.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param uif: The User Interaction Flag.
         """
         require_version(self.version, (4, 2, 0))
         if key_ref == KEY_REF.ATT:
@@ -1350,6 +1441,9 @@ class OpenPgpSession:
         """Set the generation timestamp for a key.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param timestamp: The timestamp.
         """
         logger.debug(f"Setting key generation timestamp for {key_ref.name}")
         self.put_data(key_ref.generation_time_do, struct.pack(">I", timestamp))
@@ -1364,13 +1458,19 @@ class OpenPgpSession:
         """Set the fingerprint for a key.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param fingerprint: The fingerprint.
         """
         logger.debug(f"Setting key fingerprint for {key_ref.name}")
         self.put_data(key_ref.fingerprint_do, fingerprint)
         logger.info("Key fingerprint set for {key_ref.name}")
 
     def get_public_key(self, key_ref: KEY_REF) -> PublicKey:
-        """Get the public key from a slot."""
+        """Get the public key from a slot.
+
+        :param key_ref: The key slot.
+        """
         logger.debug(f"Getting public key for {key_ref.name}")
         resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x81, 0x00, key_ref.crt)
         data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
@@ -1386,6 +1486,9 @@ class OpenPgpSession:
         """Generate an RSA key in the given slot.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param key_size: The size of the RSA key.
         """
         if (4, 2, 0) <= self.version < (4, 3, 5):
             raise NotSupportedError("RSA key generation not supported on this YubiKey")
@@ -1409,6 +1512,9 @@ class OpenPgpSession:
         """Generate an EC key in the given slot.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param curve_oid: The curve OID.
         """
 
         require_version(self.version, (5, 2, 0))
@@ -1426,9 +1532,12 @@ class OpenPgpSession:
         return _parse_ec_key(curve_oid, data)
 
     def put_key(self, key_ref: KEY_REF, private_key: PrivateKey) -> None:
-        """Import a private key into the give slot.
+        """Import a private key into the given slot.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
+        :param private_key: The private key to import.
         """
 
         logger.debug(f"Importing a private key for {key_ref.name}")
@@ -1450,9 +1559,11 @@ class OpenPgpSession:
         logger.info(f"Private key imported for {key_ref.name}")
 
     def delete_key(self, key_ref: KEY_REF) -> None:
-        """Deletes the contents of a key slot.
+        """Delete the contents of a key slot.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The key slot.
         """
         if self.version < (4, 0, 0):
             # Import over the key
@@ -1489,7 +1600,10 @@ class OpenPgpSession:
             raise
 
     def get_certificate(self, key_ref: KEY_REF) -> x509.Certificate:
-        """Get a certificate from a slot."""
+        """Get a certificate from a slot.
+
+        :param key_ref: The slot.
+        """
         logger.debug(f"Getting certificate for key {key_ref.name}")
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
@@ -1502,9 +1616,12 @@ class OpenPgpSession:
         return x509.load_der_x509_certificate(data, default_backend())
 
     def put_certificate(self, key_ref: KEY_REF, certificate: x509.Certificate) -> None:
-        """Imports a certificate into a slot.
+        """Import a certificate into a slot.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The slot.
+        :param certificate: The X.509 certificate to import.
         """
         cert_data = certificate.public_bytes(Encoding.DER)
         logger.debug(f"Importing certificate for key {key_ref.name}")
@@ -1517,9 +1634,11 @@ class OpenPgpSession:
         logger.info(f"Certificate imported for key {key_ref.name}")
 
     def delete_certificate(self, key_ref: KEY_REF) -> None:
-        """Deletes a certificate in a slot.
+        """Delete a certificate in a slot.
 
         Requires Admin PIN verification.
+
+        :param key_ref: The slot.
         """
         logger.debug(f"Deleting certificate for key {key_ref.name}")
         if key_ref == KEY_REF.ATT:
@@ -1531,12 +1650,14 @@ class OpenPgpSession:
         logger.info(f"Certificate deleted for key {key_ref.name}")
 
     def attest_key(self, key_ref: KEY_REF) -> x509.Certificate:
-        """Creates an attestation certificate for a key.
+        """Create an attestation certificate for a key.
 
         The certificte is written to the certificate slot for the key, and its
         content is returned.
 
         Requires User PIN verification.
+
+        :param key_ref: The key slot.
         """
         require_version(self.version, (5, 2, 0))
         logger.debug(f"Attesting key {key_ref.name}")
@@ -1545,9 +1666,12 @@ class OpenPgpSession:
         return self.get_certificate(key_ref)
 
     def sign(self, message: bytes, hash_algorithm: hashes.HashAlgorithm) -> bytes:
-        """Signs a message using the SIG key.
+        """Sign a message using the SIG key.
 
         Requires User PIN verification.
+
+        :param message: The message to sign.
+        :param hash_algorithm: The pre-signature hash algorithm.
         """
         attributes = self.get_algorithm_attributes(KEY_REF.SIG)
         padded = _pad_message(attributes, message, hash_algorithm)
@@ -1563,13 +1687,15 @@ class OpenPgpSession:
         return response
 
     def decrypt(self, value: Union[bytes, EcPublicKey]) -> bytes:
-        """Decrypts a value using the DEC key.
+        """Decrypt a value using the DEC key.
 
         For RSA the `value` should be an encrypted block.
         For ECDH the `value` should be a peer public-key to perform the key exchange
         with, and the result will be the derived shared secret.
 
         Requires (extended) User PIN verification.
+
+        :param value: The value to decrypt.
         """
         attributes = self.get_algorithm_attributes(KEY_REF.DEC)
         logger.debug(f"Decrypting a value with {attributes}")
@@ -1593,9 +1719,12 @@ class OpenPgpSession:
     def authenticate(
         self, message: bytes, hash_algorithm: hashes.HashAlgorithm
     ) -> bytes:
-        """Authenticates a message using the AUT key.
+        """Authenticate a message using the AUT key.
 
         Requires User PIN verification.
+
+        :param message: The message to authenticate.
+        :param hash_algorithm: The pre-authentication hash algorithm.
         """
         attributes = self.get_algorithm_attributes(KEY_REF.AUT)
         padded = _pad_message(attributes, message, hash_algorithm)
