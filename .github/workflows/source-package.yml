@@ -4,8 +4,8 @@ on: [push, pull_request]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
+    name: Build source package.
 
     steps:
       - uses: actions/checkout@v3
@@ -39,3 +39,32 @@ jobs:
         with:
           name: yubikey-manager-source-package
           path: artifacts
+
+  docs:
+    runs-on: ubuntu-latest
+    name: Build sphinx documentation
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+
+      - name: Install python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qq swig libpcsclite-dev
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install
+
+      - name: Build sphinx documentation
+        run: poetry run make -C docs/ html
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v1
+        with:
+          name: yubikey-manager-docs
+          path: docs/_build/html
