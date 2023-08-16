@@ -221,7 +221,7 @@ class OpenPgpAid(bytes):
 
     @property
     def version(self) -> Tuple[int, int]:
-        """OpenPGP version (tuple of 2 integers: main version, seconday version)."""
+        """OpenPGP version (tuple of 2 integers: main version, secondary version)."""
         return (_bcd(self[6]), _bcd(self[7]))
 
     @property
@@ -984,11 +984,11 @@ def _pad_message(attributes, message, hash_algorithm):
         try:
             return _pkcs1v15_headers[type(hash_algorithm)] + hashed
         except KeyError:
-            raise ValueError(f"Unsupported hash algorithim for RSA: {hash_algorithm}")
+            raise ValueError(f"Unsupported hash algorithm for RSA: {hash_algorithm}")
 
 
 class OpenPgpSession:
-    """A session with the OpenPGP appliation."""
+    """A session with the OpenPGP application."""
 
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
