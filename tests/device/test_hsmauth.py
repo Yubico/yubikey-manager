@@ -34,13 +34,13 @@ def import_key_derived(
     session,
     management_key,
     credential_password="123456",
-    derivation_password=b"password",
+    derivation_password="password",
 ) -> Credential:
     credential = session.put_credential_derived(
         management_key,
         "Test PUT credential symmetric (derived)",
-        credential_password,
         derivation_password,
+        credential_password,
     )
 
     return credential
@@ -211,7 +211,7 @@ class TestSessionKeys:
             session,
             DEFAULT_MANAGEMENT_KEY,
             credential_password=credential_password,
-            derivation_password=b"pwd",
+            derivation_password="pwd",
         )
 
         # Example context and session keys
