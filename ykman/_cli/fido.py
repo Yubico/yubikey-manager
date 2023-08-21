@@ -378,7 +378,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             client_pin.set_pin(new_pin)
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                raise CliFail("PIN is too long.")
+                raise CliFail("New PIN doesn't meet policy requirements.")
             else:
                 raise CliFail(f"Failed to set PIN: {e.code}")
 
@@ -397,8 +397,9 @@ def change_pin(ctx, pin, new_pin, u2f):
         _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         change_pin(pin, new_pin)
     else:
-        if len(new_pin) < ctap2.info.min_pin_length:
-            raise CliFail("New PIN is too short.")
+        min_len = ctap2.info.min_pin_length
+        if len(new_pin) < min_len:
+            raise CliFail("New PIN is too short. Minimum length: {min_len}")
         if ctap2.info.options.get("clientPin"):
             change_pin(pin, new_pin)
         else:

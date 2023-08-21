@@ -103,7 +103,7 @@ def config(ctx):
 
 def _require_config(ctx):
     info = ctx.obj["info"]
-    if info.version < (5, 0, 0):
+    if (1, 0, 0) < info.version < (5, 0, 0):
         raise CliFail(
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."

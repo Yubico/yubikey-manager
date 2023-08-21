@@ -309,15 +309,13 @@ def _pin_bytes(pin):
     return pin.ljust(PIN_LEN, b"\xff")
 
 
-def _retries_from_sw(version, sw):
+def _retries_from_sw(sw):
     if sw == SW.AUTH_METHOD_BLOCKED:
         return 0
-    if version < (1, 0, 4):
-        if 0x6300 <= sw <= 0x63FF:
-            return sw & 0xFF
-    else:
-        if 0x63C0 <= sw <= 0x63CF:
-            return sw & 0x0F
+    if sw & 0xFFF0 == 0x63C0:
+        return sw & 0x0F
+    elif sw & 0xFF00 == 0x6300:
+        return sw & 0xFF
     return None
 
 
@@ -563,7 +561,7 @@ class PivSession:
             self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
             self._current_pin_retries = self._max_pin_retries
         except ApduError as e:
-            retries = _retries_from_sw(self.version, e.sw)
+            retries = _retries_from_sw(e.sw)
             if retries is None:
                 raise
             self._current_pin_retries = retries
@@ -581,7 +579,7 @@ class PivSession:
                 logger.debug("Using cached value, may be incorrect.")
                 return self._current_pin_retries
             except ApduError as e:
-                retries = _retries_from_sw(self.version, e.sw)
+                retries = _retries_from_sw(e.sw)
                 if retries is None:
                     raise
                 self._current_pin_retries = retries
@@ -629,10 +627,17 @@ class PivSession:
         :param puk_attempts: The PUK attempts.
         """
         logger.debug(f"Setting PIN/PUK attempts ({pin_attempts}, {puk_attempts})")
-        self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
-        self._max_pin_retries = pin_attempts
-        self._current_pin_retries = pin_attempts
-        logger.info("PIN/PUK attempts set")
+        try:
+            self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
+            self._max_pin_retries = pin_attempts
+            self._current_pin_retries = pin_attempts
+            logger.info("PIN/PUK attempts set")
+        except ApduError as e:
+            if e.sw == SW.INVALID_INSTRUCTION:
+                raise NotSupportedError(
+                    "Setting PIN attempts not supported on this YubiKey"
+                )
+            raise
 
     def get_pin_metadata(self) -> PinMetadata:
         """Get PIN metadata."""
@@ -963,7 +968,7 @@ class PivSession:
                 0, ins, 0, p2, _pin_bytes(value1) + _pin_bytes(value2)
             )
         except ApduError as e:
-            retries = _retries_from_sw(self.version, e.sw)
+            retries = _retries_from_sw(e.sw)
             if retries is None:
                 raise
             if p2 == PIN_P2:

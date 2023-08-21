@@ -496,6 +496,18 @@ def get_piv_info(session: PivSession):
     info["PIN tries remaining"] = tries_str
     if pivman.puk_blocked:
         lines.append("PUK is blocked")
+    else:
+        try:
+            puk_data = session.get_puk_metadata()
+            if puk_data.default_value:
+                lines.append("WARNING: Using default PUK!")
+            tries_str = "%d/%d" % (
+                puk_data.attempts_remaining,
+                puk_data.total_attempts,
+            )
+            info["PUK tries remaining"] = tries_str
+        except NotSupportedError:
+            pass
 
     try:
         metadata = session.get_management_key_metadata()
