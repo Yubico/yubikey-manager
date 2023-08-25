@@ -47,32 +47,10 @@ rm ykman-unsigned.pkg
 echo "Installer signed, submitting for Notarization..."
 
 # Notarize
-RES=$(xcrun altool -t osx -f "$PKG" --primary-bundle-id com.yubico.yubikey-manager --notarize-app -u $1 -p $2)
-echo ${RES}
-ERRORS=${RES:0:9}
-if [ "$ERRORS" != "No errors" ]; then
-	echo "Error uploading for notarization"
-	exit
-fi
-UUID=${RES#*=}
-STATUS=$(xcrun altool --notarization-info $UUID -u $1 -p $2)
-
-while true
-do
-	if [[ "$STATUS" == *"in progress"* ]]; then
-		echo "Notarization still in progress. Sleep 30s."
-		sleep 30
-		echo "Retrieving status again."
-		STATUS=$(xcrun altool --notarization-info $UUID -u $1 -p $2)
-	else
-		echo "Status changed."
-		break
-	fi
-done
-
+STATUS=$(xcrun notarytool submit "$PKG" --apple-id $1 --team-id LQA3CS5MM7 --password $2 --wait)
 echo "Notarization status: ${STATUS}"
 
-if [[ "$STATUS" == *"success"* ]]; then
+if [[ "$STATUS" == *"Accepted"* ]]; then
 	echo "Notarization successfull. Staple the .pkg"
 	xcrun stapler staple -v "$PKG"
 
