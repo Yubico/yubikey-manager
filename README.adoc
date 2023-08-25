@@ -1,5 +1,8 @@
 == YubiKey Manager CLI
-image:https://github.com/Yubico/yubikey-manager/workflows/build/badge.svg["Build Status", link="https://github.com/Yubico/yubikey-manager/actions"]
+image:https://github.com/Yubico/yubikey-manager/actions/workflows/source-package.yml/badge.svg["Source package build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/source-package.yml"]
+image:https://github.com/Yubico/yubikey-manager/actions/workflows/windows.yml/badge.svg["Windows build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/windows.yml"]
+image:https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml/badge.svg["MacOS build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml"]
+image:https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml/badge.svg["Ubuntu build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml"]
 
 Python 3.7 (or later) library and command line tool for configuring a YubiKey.
 If you're looking for the graphical application, it's https://developers.yubico.com/yubikey-manager-qt/[here].
