@@ -1,11 +1,10 @@
-name: Build a source package
+name: Source package
 
 on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build source package.
 
     steps:
       - uses: actions/checkout@v3
