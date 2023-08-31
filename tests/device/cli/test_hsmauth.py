@@ -4,12 +4,22 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from yubikit.management import CAPABILITY
+from yubikit.hsmauth import (
+    TAG_LABEL,
+    TAG_CONTEXT,
+    TAG_CREDENTIAL_PASSWORD,
+    INS_CALCULATE,
+    _parse_label,
+    _parse_credential_password,
+)
+from yubikit.core import Tlv
 from .. import condition
 
 import pytest
 import re
 import os
 import tempfile
+import struct
 
 DEFAULT_MANAGEMENT_KEY = "00000000000000000000000000000000"
 NON_DEFAULT_MANAGEMENT_KEY = "11111111111111111111111111111111"
@@ -49,13 +59,13 @@ def tmp_file():
 
 
 @pytest.fixture(autouse=True)
-@condition.capability(CAPABILITY.OATH)
+@condition.capability(CAPABILITY.HSMAUTH)
 @condition.min_version(5, 4, 3)
 def preconditions(ykman_cli):
     ykman_cli("hsmauth", "reset", "-f")
 
 
-class TestOATH:
+class TestHsmAuth:
     def test_hsmauth_info(self, ykman_cli):
         output = ykman_cli("hsmauth", "info").output
         assert "version:" in output
@@ -68,7 +78,27 @@ class TestOATH:
         )
 
 
+def calculate_session_keys_apdu(label, context, credential_password):
+    data = (
+        Tlv(TAG_LABEL, _parse_label(label))
+        + Tlv(TAG_CONTEXT, context)
+        + Tlv(TAG_CREDENTIAL_PASSWORD, _parse_credential_password(credential_password))
+    )
+
+    apdu = struct.pack("<BBBB", 0, INS_CALCULATE, 0, 0).hex()
+    apdu = apdu + ":" + data.hex() + "=9000"
+
+    return apdu
+
+
 class TestCredentials:
+    def verify_credential_password(self, ykman_cli, credential_password, label):
+        context = b"g\xfc\xf1\xfe\xb5\xf1\xd8\x83\xedv=\xbfI0\x90\xbb"
+        apdu = calculate_session_keys_apdu(label, context, credential_password)
+
+        # Try to calculate session keys using credential password
+        ykman_cli("apdu", "-a", "hsmauth", apdu)
+
     def test_import_credential_symmetric(self, ykman_cli):
         ykman_cli(
             "hsmauth",
@@ -84,6 +114,7 @@ class TestCredentials:
             "-m",
             DEFAULT_MANAGEMENT_KEY,
         )
+        self.verify_credential_password(ykman_cli, "123456", "test-name-sym")
         creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "test-name-sym" in creds
 
@@ -99,7 +130,7 @@ class TestCredentials:
             "-m",
             DEFAULT_MANAGEMENT_KEY,
         ).output
-
+        self.verify_credential_password(ykman_cli, "123456", "test-name-sym-gen")
         assert "Generated ENC and MAC keys" in output
 
     def test_import_credential_symmetric_derived(self, ykman_cli):
@@ -113,6 +144,7 @@ class TestCredentials:
             "-d",
             "password",
         )
+        self.verify_credential_password(ykman_cli, "123456", "test-name-sym-derived")
         creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "test-name-sym-derived" in creds
 
