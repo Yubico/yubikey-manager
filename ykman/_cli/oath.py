@@ -49,7 +49,7 @@ from yubikit.oath import (
     parse_b32_key,
     _format_cred_id,
 )
-from ..oath import is_steam, calculate_steam, is_hidden
+from ..oath import is_steam, calculate_steam, is_hidden, delete_broken_credential
 from ..settings import AppData
 
 
@@ -625,7 +625,19 @@ def code(ctx, show_hidden, query, single, password, remember):
     _init_session(ctx, password, remember)
 
     session = ctx.obj["session"]
-    entries = session.calculate_all()
+    try:
+        entries = session.calculate_all()
+    except ApduError as e:
+        if e.sw == SW.MEMORY_FAILURE:
+            logger.warning("Corrupted data in OATH accounts, attempting to fix")
+            if delete_broken_credential(session):
+                entries = session.calculate_all()
+            else:
+                logger.error("Unable to fix memory failure")
+                raise
+        else:
+            raise
+
     creds = _search(entries.keys(), query, show_hidden)
 
     if len(creds) == 1:
