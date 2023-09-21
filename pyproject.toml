@@ -33,7 +33,7 @@ pyscard = "^2.0"
 fido2 = "^1.0"
 click = "^8.0"
 pywin32 = {version = ">=223", platform = "win32"}
-keyring = "^24"
+keyring = ">=23.4, <25"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.2"
