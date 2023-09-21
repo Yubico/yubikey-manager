@@ -96,6 +96,18 @@ class TestCredentialManagement:
         assert credential_retrieved.algorithm == credential.algorithm
         assert credential_retrieved.counter == INITIAL_RETRY_COUNTER
 
+    def verify_credential_password(
+        self, session, credential_password: str, credential: Credential
+    ):
+        context = b"g\xfc\xf1\xfe\xb5\xf1\xd8\x83\xedv=\xbfI0\x90\xbb"
+
+        # Try to calculate session keys using credential password
+        session.calculate_session_keys_symmetric(
+            label=credential.label,
+            context=context,
+            credential_password=credential_password,
+        )
+
     def test_import_credential_symmetric_wrong_management_key(self, session):
         with pytest.raises(InvalidPinError):
             import_key_derived(session, NON_DEFAULT_MANAGEMENT_KEY)
@@ -112,8 +124,9 @@ class TestCredentialManagement:
             import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
 
     def test_import_credential_symmetric_works(self, session):
-        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY, "1234")
 
+        self.verify_credential_password(session, "1234", credential)
         self.check_credential_in_list(session, credential)
 
         session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
