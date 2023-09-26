@@ -514,6 +514,9 @@ class PivSession:
     def version(self) -> Version:
         return self._version
 
+    def init_scp03(self):
+        return self.protocol.init_scp03()
+
     def reset(self) -> None:
         logger.debug("Preparing PIV reset")
 
