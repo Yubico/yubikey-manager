@@ -746,6 +746,13 @@ class YubiOtpSession:
             f"state={self.get_config_state()}"
         )
 
+    def init_scp03(self):
+        require_version(self.version, (5, 3, 0))
+        backend = self.backend
+        if isinstance(backend, _YubiOtpSmartCardBackend):
+            return backend.protocol.init_scp03()
+        raise NotSupportedError("Requires smart card connection")
+
     def close(self) -> None:
         self.backend.close()
 

@@ -284,6 +284,7 @@ class Scp03Handshake:
         self._protocol = protocol
         self._host_challenge = host_challenge
 
+        logger.debug("Initializing SCP handshake")
         resp = protocol.send_apdu(0x80, 0x50, 0, 0, self._host_challenge)
         self._diversification_data = resp[:10]
         self._key_info = resp[10:13]
@@ -311,3 +312,4 @@ class Scp03Handshake:
 
         self._protocol._set_scp03_state(state)
         self._protocol.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, encrypt=False)
+        logger.debug("SCP session established")

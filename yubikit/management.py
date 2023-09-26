@@ -530,9 +530,11 @@ class ManagementSession:
         return self.backend.version
 
     def init_scp03(self):
+        require_version(self.version, (5, 3, 0))
         backend = self.backend
         if isinstance(backend, _ManagementSmartCardBackend):
             return backend.protocol.init_scp03()
+        raise NotSupportedError("Requires smart card connection")
 
     def read_device_info(self) -> DeviceInfo:
         """Get detailed information about the YubiKey."""

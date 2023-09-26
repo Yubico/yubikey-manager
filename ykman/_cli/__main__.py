@@ -28,7 +28,8 @@
 from yubikit.core import ApplicationNotAvailableError
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol
+from yubikit.core.scp03 import StaticKeys
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
 
@@ -39,7 +40,14 @@ from ..util import get_windows_version
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
 from ..settings import AppData
-from .util import YkmanContextObject, click_group, EnumChoice, CliFail, pretty_print
+from .util import (
+    YkmanContextObject,
+    click_group,
+    EnumChoice,
+    CliFail,
+    pretty_print,
+    click_callback,
+)
 from .info import info
 from .otp import otp
 from .openpgp import openpgp
@@ -190,6 +198,23 @@ def require_device(connection_types, serial=None):
         )
 
 
+@click_callback()
+def parse_scp_keys(ctx, param, val):
+    try:
+        keys = [bytes.fromhex(v) for v in val.split(":")]
+        if not all(len(k) == 16 for k in keys):
+            raise ValueError(
+                "SCP keys must be exactly 16 bytes (32 hexadecimal digits) long."
+            )
+        if len(keys) == 1:
+            return StaticKeys(keys[0], keys[0])
+        if len(keys) == 2:
+            return StaticKeys(keys[0], keys[1])
+        raise ValueError("Must provide 1 or 2 keys for K-ENC and K-MAC")
+    except Exception:
+        raise ValueError(val)
+
+
 @click_group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option(
     "-d",
@@ -216,6 +241,14 @@ def require_device(connection_types, serial=None):
     shell_complete=lambda ctx, param, incomplete: [
         f'"{reader.name}"' for reader in list_readers()
     ],
+)
+@click.option(
+    "-k",
+    "--keys",
+    default=None,
+    callback=parse_scp_keys,
+    metavar="KEYS",
+    help="specify keys for secure messaging, K-ENC:K-MAC",
 )
 @click.option(
     "-l",
@@ -255,7 +288,7 @@ def require_device(connection_types, serial=None):
     help="show --help output, including hidden commands",
 )
 @click.pass_context
-def cli(ctx, device, log_level, log_file, reader):
+def cli(ctx, device, keys, log_level, log_file, reader):
     """
     Configure your YubiKey via the command line.
 
@@ -287,6 +320,8 @@ def cli(ctx, device, log_level, log_file, reader):
             ctx.fail("--device can't be used with this command.")
         if reader:
             ctx.fail("--reader can't be used with this command.")
+        if keys:
+            ctx.fail("--keys can't be used with this command.")
         return
 
     # Commands which need a YubiKey to act on
@@ -294,14 +329,24 @@ def cli(ctx, device, log_level, log_file, reader):
         subcmd, "connections", [SmartCardConnection, FidoConnection, OtpConnection]
     )
     if connections:
+        if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
+            # FIDO-only command on Windows without Admin won't work.
+            raise CliFail("FIDO access on Windows requires running as Administrator.")
+
+        if keys:
+            if SmartCardConnection not in connections:
+                raise CliFail("--keys can only be used with CCID commands")
+            connections = [SmartCardConnection]
+            select = SmartCardProtocol.select
+
+            def select_and_secure(self, *args, **kwargs):
+                resp = select(self, *args, **kwargs)
+                self.init_scp03().authenticate(keys)
+                return resp
+
+            SmartCardProtocol.select = select_and_secure  # type: ignore
 
         def resolve():
-            if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
-                # FIDO-only command on Windows without Admin won't work.
-                raise CliFail(
-                    "FIDO access on Windows requires running as Administrator."
-                )
-
             items = getattr(resolve, "items", None)
             if not items:
                 if reader is not None:

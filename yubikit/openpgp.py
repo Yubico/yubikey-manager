@@ -1020,6 +1020,10 @@ class OpenPgpSession:
         bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
         return Version(*(_bcd(x) for x in bcd))
 
+    def init_scp03(self):
+        require_version(self.version, (5, 3, 0))
+        return self.protocol.init_scp03()
+
     @property
     def aid(self) -> OpenPgpAid:
         """Get the AID used to select the applet."""

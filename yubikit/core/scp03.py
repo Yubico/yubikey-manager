@@ -89,11 +89,10 @@ class StaticKeys(NamedTuple):
 
     key_enc: bytes
     key_mac: bytes
-    key_dek: bytes
 
     @classmethod
     def default(cls) -> "StaticKeys":
-        return cls(_DEFAULT_KEY, _DEFAULT_KEY, _DEFAULT_KEY)
+        return cls(_DEFAULT_KEY, _DEFAULT_KEY)
 
     def derive(self, context: bytes) -> SessionKeys:
         return SessionKeys(
@@ -117,6 +116,7 @@ class Scp03State:
     def generate_host_cryptogram(self, context: bytes, card_cryptogram: bytes) -> bytes:
         gen_card_crypto = _derive(self._keys.key_smac, _CARD_CRYPTOGRAM, context, 0x40)
         if not constant_time.bytes_eq(gen_card_crypto, card_cryptogram):
+            # This means wrong keys
             raise BadResponseError("Wrong card cryptogram")
 
         return _derive(self._keys.key_smac, _HOST_CRYPTOGRAM, context, 0x40)
