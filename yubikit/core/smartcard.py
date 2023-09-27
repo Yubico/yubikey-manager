@@ -31,6 +31,7 @@ from . import (
     USB_INTERFACE,
     Connection,
     CommandError,
+    NotSupportedError,
     ApplicationNotAvailableError,
 )
 from .scp03 import Scp03State, SessionKeys, StaticKeys
@@ -96,6 +97,7 @@ class SW(IntEnum):
     APPLET_SELECT_FAILED = 0x6999
     WRONG_PARAMETERS_P1P2 = 0x6B00
     INVALID_INSTRUCTION = 0x6D00
+    CLASS_NOT_SUPPORTED = 0x6E00
     COMMAND_ABORTED = 0x6F00
     OK = 0x9000
 
@@ -285,7 +287,15 @@ class Scp03Handshake:
         self._host_challenge = host_challenge
 
         logger.debug("Initializing SCP handshake")
-        resp = protocol.send_apdu(0x80, 0x50, 0, 0, self._host_challenge)
+        try:
+            resp = protocol.send_apdu(0x80, 0x50, 0, 0, self._host_challenge)
+        except ApduError as e:
+            if e.sw == SW.CLASS_NOT_SUPPORTED:
+                raise NotSupportedError(
+                    "This YubiKey does not support secure messaging"
+                )
+            raise
+
         self._diversification_data = resp[:10]
         self._key_info = resp[10:13]
         self._card_challenge = resp[13:21]
