@@ -109,7 +109,7 @@ def info(ctx):
         if ctap2.info.options["clientPin"]:
             if ctap2.info.force_pin_change:
                 click.echo(
-                    "NOTE: The FIDO PID is disabled and must be changed before it can "
+                    "NOTE: The FIDO PIN is disabled and must be changed before it can "
                     "be used!"
                 )
             pin_retries, power_cycle = client_pin.get_pin_retries()
