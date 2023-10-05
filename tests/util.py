@@ -21,7 +21,6 @@ def open_file(*relative_path):
 def generate_self_signed_certificate(
     common_name="Test", valid_from=None, valid_to=None
 ):
-
     valid_from = valid_from if valid_from else datetime.datetime.utcnow()
     valid_to = valid_to if valid_to else valid_from + datetime.timedelta(days=1)
 

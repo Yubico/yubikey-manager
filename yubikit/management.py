@@ -75,14 +75,17 @@ class CAPABILITY(IntFlag):
         return f"{name}: {hex(self)}"
 
     @property
-    def display_name(self):
+    def display_name(self) -> str:
         if self == CAPABILITY.U2F:
             return "FIDO U2F"
         elif self == CAPABILITY.OPENPGP:
             return "OpenPGP"
         elif self == CAPABILITY.HSMAUTH:
             return "YubiHSM Auth"
-        return self.name or ", ".join(c.display_name for c in CAPABILITY if c in self)
+        # mypy bug?
+        return self.name or ", ".join(
+            c.display_name for c in CAPABILITY if c in self  # type: ignore
+        )
 
     @property
     def usb_interfaces(self) -> USB_INTERFACE:

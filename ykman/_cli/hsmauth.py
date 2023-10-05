@@ -103,7 +103,7 @@ def _parse_key(key, key_len, key_type):
     if len(key) != key_len:
         raise ValueError(
             f"{key_type} must be exactly {key_len} bytes long "
-            f"({key_len*2} hexadecimal digits) long"
+            f"({key_len * 2} hexadecimal digits) long"
         )
     return key
 

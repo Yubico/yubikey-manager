@@ -27,21 +27,21 @@ packages = [
 
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.8"
 cryptography = ">=3.0, <44"
 pyscard = "^2.0"
 fido2 = "^1.0"
 click = "^8.0"
-pywin32 = {version = ">=223", platform = "win32"}
 keyring = ">=23.4, <25"
+pywin32 = {version = ">=223", platform = "win32"}
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.2"
 makefun = "^1.9.5"
-pyinstaller = {version = "^5.7", python = "<3.12"}
-Sphinx = {version = "^7.1", python = ">=3.8"}
-sphinx-rtd-theme = {version = "^1.2.2", python = ">=3.8"}
-sphinx-autodoc-typehints = {version = "^1.2.4", python = ">=3.8"}
+pyinstaller = {version = "^6.0", python = "<3.13"}
+Sphinx = "^7.1"
+sphinx-rtd-theme = "^1.2.2"
+sphinx-autodoc-typehints = "^1.2.4"
 
 [tool.poetry.scripts]
 ykman = "ykman._cli.__main__:main"

@@ -251,7 +251,6 @@ class HsmAuthSession:
         credential_password: Union[bytes, str],
         touch_required: bool = False,
     ) -> Credential:
-
         if len(management_key) != MANAGEMENT_KEY_LEN:
             raise ValueError(
                 "Management key must be %d bytes long" % MANAGEMENT_KEY_LEN
@@ -509,7 +508,6 @@ class HsmAuthSession:
         card_crypto: Optional[bytes] = None,
         public_key: Optional[bytes] = None,
     ) -> bytes:
-
         data = Tlv(TAG_LABEL, _parse_label(label)) + Tlv(TAG_CONTEXT, context)
 
         if public_key:

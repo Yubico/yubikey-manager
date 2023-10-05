@@ -119,7 +119,7 @@ def _find_match(data, selection):
 
 
 def apply_aliases(argv):
-    for (alias, f) in _aliases:
+    for alias, f in _aliases:
         i = _find_match(argv, alias)
         if i is not None:
             if f:
