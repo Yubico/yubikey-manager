@@ -1,3 +1,8 @@
+* Version 5.2.1 (unreleased)
+ ** Add support for Python 3.12.
+ ** OATH: detect and fix corrupted credentials.
+ ** Bugfix: HSMAUTH: Fix order of CLI arguments.
+
 * Version 5.2.0 (released 2023-08-21)
  ** PIV: Support for compressed certificates.
  ** OpenPGP: Use InvalidPinError for wrong PIN.
@@ -40,7 +45,7 @@
     in certain cases.
  ** OATH: Access Keys ("remembered" passwords) are now stored in the system keyring.
  ** OpenPGP: Commands have been added to manage PINs.
- 
+
 * Version 4.0.9 (released 2022-06-17)
  ** Dependency: Add support for python-fido2 1.x
   ** Fix: Drop stated support for Click 6 as features from 7 are being used.
