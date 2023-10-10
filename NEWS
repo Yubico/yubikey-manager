@@ -1,6 +1,6 @@
-* Version 5.2.1 (unreleased)
+* Version 5.2.1 (released 2023-10-10)
  ** Add support for Python 3.12.
- ** OATH: detect and fix corrupted credentials.
+ ** OATH: detect and remove corrupted credentials.
  ** Bugfix: HSMAUTH: Fix order of CLI arguments.
 
 * Version 5.2.0 (released 2023-08-21)
