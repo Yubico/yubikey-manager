@@ -229,8 +229,8 @@ def cli(ctx, device, log_level, log_file, reader):
       $ ykman list --serials
 
     \b
-      Show information about YubiKey with serial number 0123456:
-      $ ykman --device 0123456 info
+      Show information about YubiKey with serial number 123456:
+      $ ykman --device 123456 info
     """
     ctx.obj = YkmanContextObject()
 
