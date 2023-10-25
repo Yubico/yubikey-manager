@@ -673,6 +673,7 @@ class _YubiOtpOtpBackend(_Backend):
 
 
 INS_CONFIG = 0x01
+INS_YK2_STATUS = 0x03
 
 
 class _YubiOtpSmartCardBackend(_Backend):
@@ -686,6 +687,9 @@ class _YubiOtpSmartCardBackend(_Backend):
 
     def write_update(self, slot, data):
         status = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
+        if not status:  # Some commands don't return status on some YubiKeys
+            status = self.protocol.send_apdu(0, INS_YK2_STATUS, 0, 0)
+
         prev_prog_seq, self._prog_seq = self._prog_seq, status[3]
         if self._prog_seq == prev_prog_seq + 1:
             return status

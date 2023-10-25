@@ -111,6 +111,10 @@ class TestProgrammingState:
         assert not state.is_configured(SLOT.ONE)
         assert not state.is_configured(SLOT.TWO)
 
+    def test_configure_ndef(self, session):
+        session.put_configuration(SLOT.ONE, StaticPasswordSlotConfiguration(b"a"))
+        session.set_ndef_configuration(SLOT.ONE)
+
     @condition.min_version(3)
     @pytest.mark.parametrize("slot", [SLOT.ONE, SLOT.TWO])
     def test_slot_touch_triggered(self, session, read_config, slot):
