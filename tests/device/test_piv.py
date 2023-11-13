@@ -7,8 +7,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
 
-from yubikit.core import AID, NotSupportedError
-from yubikit.core.smartcard import ApduError
+from yubikit.core import NotSupportedError
+from yubikit.core.smartcard import AID, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.piv import (
     PivSession,
@@ -17,6 +17,7 @@ from yubikit.piv import (
     PIN_POLICY,
     TOUCH_POLICY,
     SLOT,
+    OBJECT_ID,
     MANAGEMENT_KEY_TYPE,
     InvalidPinError,
 )
@@ -29,7 +30,6 @@ from ykman.piv import (
     pivman_set_mgm_key,
 )
 from ykman.util import parse_certificates, parse_private_key
-from ykman.device import is_fips_version
 from ..util import open_file
 from . import condition
 
@@ -104,7 +104,6 @@ def import_key(
     key_type=KEY_TYPE.ECCP256,
     pin_policy=PIN_POLICY.DEFAULT,
 ):
-
     if key_type.algorithm == ALGORITHM.RSA:
         private_key = rsa.generate_private_key(
             65537, key_type.bit_len, default_backend()
@@ -133,12 +132,14 @@ def verify_cert_signature(cert, public_key=None):
 class TestCertificateSignatures:
     @pytest.mark.parametrize("key_type", list(KEY_TYPE))
     @pytest.mark.parametrize(
-        "hash_algorithm", (hashes.SHA1, hashes.SHA256, hashes.SHA384, hashes.SHA512)
+        "hash_algorithm", (hashes.SHA256, hashes.SHA384, hashes.SHA512)
     )
-    def test_generate_self_signed_certificate(self, session, key_type, hash_algorithm):
+    def test_generate_self_signed_certificate(
+        self, info, session, key_type, hash_algorithm
+    ):
         if key_type == KEY_TYPE.ECCP384 and session.version < (4, 0, 0):
             pytest.skip("ECCP384 requires YubiKey 4 or later")
-        if key_type == KEY_TYPE.RSA1024 and is_fips_version(session.version):
+        if key_type == KEY_TYPE.RSA1024 and info.is_fips and info.version[0] == 4:
             pytest.skip("RSA1024 not available on YubiKey FIPS")
 
         slot = SLOT.SIGNATURE
@@ -248,7 +249,7 @@ class TestKeyManagement:
         assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 
     @condition.check(not_roca)
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     def test_put_certificate_verifies_key_pairing_rsa1024(self, session):
         self._test_put_key_pairing(session, KEY_TYPE.RSA1024, KEY_TYPE.ECCP256)
 
@@ -283,6 +284,21 @@ class TestKeyManagement:
         reset_state(session)
 
         assert session.get_certificate(SLOT.AUTHENTICATION)
+
+
+class TestCompressedCertificate:
+    def test_put_and_read_compressed_certificate(self, session):
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        cert = get_test_cert()
+        session.put_certificate(SLOT.AUTHENTICATION, cert)
+        session.put_certificate(SLOT.SIGNATURE, cert, compress=True)
+        assert session.get_certificate(SLOT.AUTHENTICATION) == session.get_certificate(
+            SLOT.SIGNATURE
+        )
+        obj1 = session.get_object(OBJECT_ID.from_slot(SLOT.AUTHENTICATION))
+        obj2 = session.get_object(OBJECT_ID.from_slot(SLOT.SIGNATURE))
+        assert obj1 != obj2
+        assert len(obj1) > len(obj2)
 
 
 class TestManagementKeyReadOnly:
@@ -402,14 +418,14 @@ class TestOperations:
         sig = sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
         assert sig
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.min_version(4)
     def test_sign_with_pin_policy_never_does_not_require_pin(self, session):
         generate_key(session, pin_policy=PIN_POLICY.NEVER)
         sig = sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
         assert sig
 
-    @condition.fips(True)
+    @condition.yk4_fips(True)
     def test_pin_policy_never_blocked_on_fips(self, session):
         with pytest.raises(NotSupportedError):
             generate_key(session, pin_policy=PIN_POLICY.NEVER)

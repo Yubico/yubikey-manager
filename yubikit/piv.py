@@ -31,17 +31,17 @@ from .core import (
     bytes2int,
     Version,
     Tlv,
-    AID,
-    CommandError,
     NotSupportedError,
     BadResponseError,
+    InvalidPinError,
 )
 from .core.smartcard import (
+    SW,
+    AID,
+    ApduError,
+    ApduFormat,
     SmartCardConnection,
     SmartCardProtocol,
-    ApduError,
-    SW,
-    ApduFormat,
 )
 
 from cryptography import x509
@@ -51,6 +51,7 @@ from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.backends import default_backend
 
 from dataclasses import dataclass
@@ -58,6 +59,7 @@ from enum import Enum, IntEnum, unique
 from typing import Optional, Union, Type, cast
 
 import logging
+import gzip
 import os
 import re
 
@@ -175,6 +177,9 @@ class SLOT(IntEnum):
     RETIRED20 = 0x95
 
     ATTESTATION = 0xF9
+
+    def __str__(self) -> str:
+        return f"{int(self):02X} ({self.name})"
 
 
 @unique
@@ -297,14 +302,6 @@ PIN_P2 = 0x80
 PUK_P2 = 0x81
 
 
-class InvalidPinError(CommandError):
-    def __init__(self, attempts_remaining):
-        super(InvalidPinError, self).__init__(
-            "Invalid PIN/PUK. Remaining attempts: %d" % attempts_remaining
-        )
-        self.attempts_remaining = attempts_remaining
-
-
 def _pin_bytes(pin):
     pin = pin.encode()
     if len(pin) > PIN_LEN:
@@ -312,15 +309,13 @@ def _pin_bytes(pin):
     return pin.ljust(PIN_LEN, b"\xff")
 
 
-def _retries_from_sw(version, sw):
+def _retries_from_sw(sw):
     if sw == SW.AUTH_METHOD_BLOCKED:
         return 0
-    if version < (1, 0, 4):
-        if 0x6300 <= sw <= 0x63FF:
-            return sw & 0xFF
-    else:
-        if 0x63C0 <= sw <= 0x63CF:
-            return sw & 0x0F
+    if sw & 0xFFF0 == 0x63C0:
+        return sw & 0x0F
+    elif sw & 0xFF00 == 0x6300:
+        return sw & 0xFF
     return None
 
 
@@ -353,9 +348,12 @@ class SlotMetadata:
 
 def _pad_message(key_type, message, hash_algorithm, padding):
     if key_type.algorithm == ALGORITHM.EC:
-        h = hashes.Hash(hash_algorithm, default_backend())
-        h.update(message)
-        hashed = h.finalize()
+        if isinstance(hash_algorithm, Prehashed):
+            hashed = message
+        else:
+            h = hashes.Hash(hash_algorithm, default_backend())
+            h.update(message)
+            hashed = h.finalize()
         byte_len = key_type.bit_len // 8
         if len(hashed) < byte_len:
             return hashed.rjust(byte_len // 8, b"\0")
@@ -428,16 +426,12 @@ def _parse_device_public_key(key_type, encoded):
         else:
             curve = ec.SECP384R1
 
-        try:
-            # Added in cryptography 2.5
-            return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
-        except AttributeError:
-            return ec.EllipticCurvePublicNumbers.from_encoded_point(
-                curve(), data[0x86]
-            ).public_key(default_backend())
+        return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
 class PivSession:
+    """A session with the PIV application."""
+
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.PIV)
@@ -449,37 +443,53 @@ class PivSession:
             self.protocol.apdu_format = ApduFormat.EXTENDED
         self._current_pin_retries = 3
         self._max_pin_retries = 3
+        logger.debug(f"PIV session initialized (version={self.version})")
 
     @property
     def version(self) -> Version:
         return self._version
 
     def reset(self) -> None:
+        logger.debug("Preparing PIV reset")
+
         # Block PIN
+        logger.debug("Verify PIN with invalid attempts until blocked")
         counter = self.get_pin_attempts()
         while counter > 0:
             try:
                 self.verify_pin("")
             except InvalidPinError as e:
                 counter = e.attempts_remaining
+        logger.debug("PIN is blocked")
 
         # Block PUK
+        logger.debug("Verify PUK with invalid attempts until blocked")
         counter = 1
         while counter > 0:
             try:
                 self._change_reference(INS_RESET_RETRY, PIN_P2, "", "")
             except InvalidPinError as e:
                 counter = e.attempts_remaining
+        logger.debug("PUK is blocked")
 
         # Reset
+        logger.debug("Sending reset")
         self.protocol.send_apdu(0, INS_RESET, 0, 0)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
+        logger.info("PIV application data reset performed")
+
     def authenticate(
         self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
     ) -> None:
+        """Authenticate to PIV with management key.
+
+        :param key_type: The management key type.
+        :param management_key: The management key in raw bytes.
+        """
         key_type = MANAGEMENT_KEY_TYPE(key_type)
+        logger.debug(f"Authenticating with key type: {key_type}")
         response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
@@ -518,7 +528,15 @@ class PivSession:
         management_key: bytes,
         require_touch: bool = False,
     ) -> None:
+        """Set a new management key.
+
+        :param key_type: The management key type.
+        :param management_key: The management key in raw bytes.
+        :param require_touch: The touch policy.
+        """
         key_type = MANAGEMENT_KEY_TYPE(key_type)
+        logger.debug(f"Setting management key of type: {key_type}")
+
         if key_type != MANAGEMENT_KEY_TYPE.TDES:
             require_version(self.version, (5, 4, 0))
         if len(management_key) != key_type.key_len:
@@ -531,54 +549,109 @@ class PivSession:
             0xFE if require_touch else 0xFF,
             int2bytes(key_type) + Tlv(SLOT_CARD_MANAGEMENT, management_key),
         )
+        logger.info("Management key set")
 
     def verify_pin(self, pin: str) -> None:
+        """Verify the PIN.
+
+        :param pin: The PIN.
+        """
+        logger.debug("Verifying PIN")
         try:
             self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
             self._current_pin_retries = self._max_pin_retries
         except ApduError as e:
-            retries = _retries_from_sw(self.version, e.sw)
+            retries = _retries_from_sw(e.sw)
             if retries is None:
                 raise
             self._current_pin_retries = retries
             raise InvalidPinError(retries)
 
     def get_pin_attempts(self) -> int:
+        """Get remaining PIN attempts."""
+        logger.debug("Getting PIN attempts")
         try:
             return self.get_pin_metadata().attempts_remaining
         except NotSupportedError:
             try:
                 self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2)
                 # Already verified, no way to know true count
+                logger.debug("Using cached value, may be incorrect.")
                 return self._current_pin_retries
             except ApduError as e:
-                retries = _retries_from_sw(self.version, e.sw)
+                retries = _retries_from_sw(e.sw)
                 if retries is None:
                     raise
                 self._current_pin_retries = retries
+                logger.debug("Using value from empty verify")
                 return retries
 
     def change_pin(self, old_pin: str, new_pin: str) -> None:
+        """Change the PIN.
+
+        :param old_pin: The current PIN.
+        :param new_pin: The new PIN.
+        """
+        logger.debug("Changing PIN")
         self._change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)
+        logger.info("New PIN set")
 
     def change_puk(self, old_puk: str, new_puk: str) -> None:
+        """Change the PUK.
+
+        :param old_puk: The current PUK.
+        :param new_puk: The new PUK.
+        """
+        logger.debug("Changing PUK")
         self._change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk)
+        logger.info("New PUK set")
 
     def unblock_pin(self, puk: str, new_pin: str) -> None:
+        """Reset PIN with PUK.
+
+        :param puk: The PUK.
+        :param new_pin: The new PIN.
+        """
+        logger.debug("Using PUK to set new PIN")
         self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
+        logger.info("New PIN set")
 
     def set_pin_attempts(self, pin_attempts: int, puk_attempts: int) -> None:
-        self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
-        self._max_pin_retries = pin_attempts
-        self._current_pin_retries = pin_attempts
+        """Set PIN retries for PIN and PUK.
+
+        Both PIN and PUK will be reset to default values when this is executed.
+
+        Requires authentication with management key and PIN verification.
+
+        :param pin_attempts: The PIN attempts.
+        :param puk_attempts: The PUK attempts.
+        """
+        logger.debug(f"Setting PIN/PUK attempts ({pin_attempts}, {puk_attempts})")
+        try:
+            self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
+            self._max_pin_retries = pin_attempts
+            self._current_pin_retries = pin_attempts
+            logger.info("PIN/PUK attempts set")
+        except ApduError as e:
+            if e.sw == SW.INVALID_INSTRUCTION:
+                raise NotSupportedError(
+                    "Setting PIN attempts not supported on this YubiKey"
+                )
+            raise
 
     def get_pin_metadata(self) -> PinMetadata:
+        """Get PIN metadata."""
+        logger.debug("Getting PIN metadata")
         return self._get_pin_puk_metadata(PIN_P2)
 
     def get_puk_metadata(self) -> PinMetadata:
+        """Get PUK metadata."""
+        logger.debug("Getting PUK metadata")
         return self._get_pin_puk_metadata(PUK_P2)
 
     def get_management_key_metadata(self) -> ManagementKeyMetadata:
+        """Get management key metadata."""
+        logger.debug("Getting management key metadata")
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(
             self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT)
@@ -591,6 +664,12 @@ class PivSession:
         )
 
     def get_slot_metadata(self, slot: SLOT) -> SlotMetadata:
+        """Get slot metadata.
+
+        :param slot: The slot to get metadata from.
+        """
+        slot = SLOT(slot)
+        logger.debug(f"Getting metadata for slot {slot}")
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, slot))
         policy = data[TAG_METADATA_POLICY]
@@ -610,34 +689,80 @@ class PivSession:
         hash_algorithm: hashes.HashAlgorithm,
         padding: Optional[AsymmetricPadding] = None,
     ) -> bytes:
+        """Sign message with key.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the key to use.
+        :param key_type: The type of the key to sign with.
+        :param message: The message to sign.
+        :param hash_algorithm: The pre-signature hash algorithm to use.
+        :param padding: The pre-signature padding.
+        """
+        slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
+        logger.debug(
+            f"Signing data with key in slot {slot} of type {key_type} using "
+            f"hash={hash_algorithm}, padding={padding}"
+        )
         padded = _pad_message(key_type, message, hash_algorithm, padding)
         return self._use_private_key(slot, key_type, padded, False)
 
     def decrypt(
         self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
     ) -> bytes:
+        """Decrypt cipher text.
+
+        Requires PIN verification.
+
+        :param slot: The slot.
+        :param cipher_text: The cipher text to decrypt.
+        :param padding: The padding of the plain text.
+        """
+        slot = SLOT(slot)
         if len(cipher_text) == 1024 // 8:
             key_type = KEY_TYPE.RSA1024
         elif len(cipher_text) == 2048 // 8:
             key_type = KEY_TYPE.RSA2048
         else:
             raise ValueError("Invalid length of ciphertext")
+        logger.debug(
+            f"Decrypting data with key in slot {slot} of type {key_type} using ",
+            f"padding={padding}",
+        )
         padded = self._use_private_key(slot, key_type, cipher_text, False)
         return _unpad_message(padded, padding)
 
     def calculate_secret(
         self, slot: SLOT, peer_public_key: ec.EllipticCurvePublicKey
     ) -> bytes:
+        """Calculate shared secret using ECDH.
+
+        Requires PIN verification.
+
+        :param slot: The slot.
+        :param peer_public_key: The peer's public key.
+        """
+        slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(peer_public_key)
         if key_type.algorithm != ALGORITHM.EC:
             raise ValueError("Unsupported key type")
+        logger.debug(
+            f"Performing key agreement with key in slot {slot} of type {key_type}"
+        )
         data = peer_public_key.public_bytes(
             Encoding.X962, PublicFormat.UncompressedPoint
         )
         return self._use_private_key(slot, key_type, data, True)
 
     def get_object(self, object_id: int) -> bytes:
+        """Get object by ID.
+
+        Requires PIN verification.
+
+        :param object_id: The object identifier.
+        """
+        logger.debug(f"Reading data from object slot {hex(object_id)}")
         if object_id == OBJECT_ID.DISCOVERY:
             expected: int = OBJECT_ID.DISCOVERY
         else:
@@ -658,6 +783,13 @@ class PivSession:
             raise BadResponseError("Malformed object data", e)
 
     def put_object(self, object_id: int, data: Optional[bytes] = None) -> None:
+        """Write data to PIV object.
+
+        Requires authentication with management key.
+
+        :param object_id: The object identifier.
+        :param data: The object data.
+        """
         self.protocol.send_apdu(
             0,
             INS_PUT_DATA,
@@ -665,32 +797,72 @@ class PivSession:
             0xFF,
             Tlv(TAG_OBJ_ID, int2bytes(object_id)) + Tlv(TAG_OBJ_DATA, data or b""),
         )
+        logger.info(f"Data written to object slot {hex(object_id)}")
 
     def get_certificate(self, slot: SLOT) -> x509.Certificate:
+        """Get certificate from slot.
+
+        :param slot: The slot to get the certificate from.
+        """
+        slot = SLOT(slot)
+        logger.debug(f"Reading certificate in slot {slot}")
         try:
             data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
         except ValueError:
             raise BadResponseError("Malformed certificate data object")
 
-        cert_info = data.get(TAG_CERT_INFO)
-        if cert_info and cert_info[0] != 0:
-            raise NotSupportedError("Compressed certificates are not supported")
+        cert_data = data[TAG_CERTIFICATE]
+        cert_info = data[TAG_CERT_INFO][0] if TAG_CERT_INFO in data else 0
+        if cert_info == 1:
+            logger.debug("Certificate is compressed, decompressing...")
+            # Compressed certificate
+            cert_data = gzip.decompress(cert_data)
+        elif cert_info != 0:
+            raise NotSupportedError("Unsupported value in CertInfo")
 
         try:
-            return x509.load_der_x509_certificate(
-                data[TAG_CERTIFICATE], default_backend()
-            )
+            return x509.load_der_x509_certificate(cert_data, default_backend())
         except Exception as e:
             raise BadResponseError("Invalid certificate", e)
 
-    def put_certificate(self, slot: SLOT, certificate: x509.Certificate) -> None:
+    def put_certificate(
+        self, slot: SLOT, certificate: x509.Certificate, compress: bool = False
+    ) -> None:
+        """Import certificate to slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to import the certificate to.
+        :param certificate: The certificate to import.
+        :param compress: If the certificate should be compressed or not.
+        """
+        slot = SLOT(slot)
+        logger.debug(f"Storing certificate in slot {slot}")
         cert_data = certificate.public_bytes(Encoding.DER)
+        logger.debug(f"Certificate is {len(cert_data)} bytes, compression={compress}")
+        if compress:
+            cert_info = b"\1"
+            cert_data = gzip.compress(cert_data)
+            logger.debug(f"Compressed size: {len(cert_data)} bytes")
+        else:
+            cert_info = b"\0"
         data = (
-            Tlv(TAG_CERTIFICATE, cert_data) + Tlv(TAG_CERT_INFO, b"\0") + Tlv(TAG_LRC)
+            Tlv(TAG_CERTIFICATE, cert_data)
+            + Tlv(TAG_CERT_INFO, cert_info)
+            + Tlv(TAG_LRC)
         )
         self.put_object(OBJECT_ID.from_slot(slot), data)
+        logger.info(f"Certificate written to slot {slot}, compression={compress}")
 
     def delete_certificate(self, slot: SLOT) -> None:
+        """Delete certificate.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to delete the certificate from.
+        """
+        slot = SLOT(slot)
+        logger.debug(f"Deleting certificate in slot {slot}")
         self.put_object(OBJECT_ID.from_slot(slot))
 
     def put_key(
@@ -703,6 +875,16 @@ class PivSession:
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
     ) -> None:
+        """Import a private key to slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to import the key to.
+        :param private_key: The private key to import.
+        :param pin_policy: The PIN policy.
+        :param touch_policy: The touch policy.
+        """
+        slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
         check_key_support(self.version, key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
@@ -726,7 +908,12 @@ class PivSession:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
             data += Tlv(TAG_TOUCH_POLICY, int2bytes(touch_policy))
+
+        logger.debug(
+            f"Importing key with pin_policy={pin_policy}, touch_policy={touch_policy}"
+        )
         self.protocol.send_apdu(0, INS_IMPORT_KEY, key_type, slot, data)
+        logger.info(f"Private key imported in slot {slot} of type {key_type}")
         return key_type
 
     def generate_key(
@@ -736,6 +923,16 @@ class PivSession:
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
     ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
+        """Generate private key in slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to generate the private key in.
+        :param key_type: The key type.
+        :param pin_policy: The PIN policy.
+        :param touch_policy: The touch policy.
+        """
+        slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
         check_key_support(self.version, key_type, pin_policy, touch_policy, True)
         data: bytes = Tlv(TAG_GEN_ALGORITHM, int2bytes(key_type))
@@ -743,14 +940,26 @@ class PivSession:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
             data += Tlv(TAG_TOUCH_POLICY, int2bytes(touch_policy))
+
+        logger.debug(
+            f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
+        )
         response = self.protocol.send_apdu(
             0, INS_GENERATE_ASYMMETRIC, 0, slot, Tlv(0xAC, data)
         )
+        logger.info(f"Private key generated in slot {slot} of type {key_type}")
         return _parse_device_public_key(key_type, Tlv.unpack(0x7F49, response))
 
     def attest_key(self, slot: SLOT) -> x509.Certificate:
+        """Attest key in slot.
+
+        :param slot: The slot where the key has been generated.
+        :return: A X.509 certificate.
+        """
         require_version(self.version, (4, 3, 0))
+        slot = SLOT(slot)
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
+        logger.debug(f"Attested key in slot {slot}")
         return x509.load_der_x509_certificate(response, default_backend())
 
     def _change_reference(self, ins, p2, value1, value2):
@@ -759,7 +968,7 @@ class PivSession:
                 0, ins, 0, p2, _pin_bytes(value1) + _pin_bytes(value2)
             )
         except ApduError as e:
-            retries = _retries_from_sw(self.version, e.sw)
+            retries = _retries_from_sw(e.sw)
             if retries is None:
                 raise
             if p2 == PIN_P2:

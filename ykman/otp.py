@@ -32,9 +32,9 @@ from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import parse_b32_key
 from enum import Enum
 from http.client import HTTPSConnection
-from typing import Iterable
+from datetime import datetime
+from typing import Iterable, Optional
 
-import re
 import json
 import struct
 import random
@@ -43,11 +43,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-UPLOAD_HOST = "upload.yubico.com"
-UPLOAD_PATH = "/prepare"
+_UPLOAD_HOST = "upload.yubico.com"
+_UPLOAD_PATH = "/prepare"
 
 
-class PrepareUploadError(Enum):
+class _PrepareUploadError(Enum):
     # Defined here
     CONNECTION_FAILED = "Failed to open HTTPS connection."
     NOT_FOUND = "Upload request not recognized by server."
@@ -78,15 +78,13 @@ class PrepareUploadError(Enum):
         return self.value
 
 
-class PrepareUploadFailed(Exception):
+class _PrepareUploadFailed(Exception):
     def __init__(self, status, content, error_ids):
-        super(PrepareUploadFailed, self).__init__(
-            f"Upload to YubiCloud failed with status {status}: {content}"
-        )
+        super().__init__(f"Upload to YubiCloud failed with status {status}: {content}")
         self.status = status
         self.content = content
         self.errors = [
-            e if isinstance(e, PrepareUploadError) else PrepareUploadError[e]
+            e if isinstance(e, _PrepareUploadError) else _PrepareUploadError[e]
             for e in error_ids
         ]
 
@@ -94,7 +92,7 @@ class PrepareUploadFailed(Exception):
         return [e.message() for e in self.errors]
 
 
-def prepare_upload_key(
+def _prepare_upload_key(
     key,
     public_id,
     private_id,
@@ -109,18 +107,18 @@ def prepare_upload_key(
         "private_id": private_id.hex(),
     }
 
-    httpconn = HTTPSConnection(UPLOAD_HOST, timeout=1)  # nosec
+    httpconn = HTTPSConnection(_UPLOAD_HOST, timeout=1)  # nosec
 
     try:
         httpconn.request(
             "POST",
-            UPLOAD_PATH,
+            _UPLOAD_PATH,
             body=json.dumps(data, indent=False, sort_keys=True).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": user_agent},
         )
-    except Exception as e:
-        logger.error("Failed to connect to %s", UPLOAD_HOST, exc_info=e)
-        raise PrepareUploadFailed(None, None, [PrepareUploadError.CONNECTION_FAILED])
+    except Exception:
+        logger.error("Failed to connect to %s", _UPLOAD_HOST, exc_info=True)
+        raise _PrepareUploadFailed(None, None, [_PrepareUploadError.CONNECTION_FAILED])
 
     resp = httpconn.getresponse()
     if resp.status == 200:
@@ -130,23 +128,26 @@ def prepare_upload_key(
         resp_body = resp.read()
         logger.debug("Upload failed with status %d: %s", resp.status, resp_body)
         if resp.status == 404:
-            raise PrepareUploadFailed(
-                resp.status, resp_body, [PrepareUploadError.NOT_FOUND]
+            raise _PrepareUploadFailed(
+                resp.status, resp_body, [_PrepareUploadError.NOT_FOUND]
             )
         elif resp.status == 503:
-            raise PrepareUploadFailed(
-                resp.status, resp_body, [PrepareUploadError.SERVICE_UNAVAILABLE]
+            raise _PrepareUploadFailed(
+                resp.status, resp_body, [_PrepareUploadError.SERVICE_UNAVAILABLE]
             )
         else:
             try:
                 errors = json.loads(resp_body.decode("utf-8")).get("errors")
             except Exception:
                 errors = []
-            raise PrepareUploadFailed(resp.status, resp_body, errors)
+            raise _PrepareUploadFailed(resp.status, resp_body, errors)
 
 
 def is_in_fips_mode(session: YubiOtpSession) -> bool:
-    """Check if the OTP application of a FIPS YubiKey is in FIPS approved mode."""
+    """Check if the OTP application of a FIPS YubiKey is in FIPS approved mode.
+
+    :param session: The YubiOTP session.
+    """
     return session.backend.send_and_receive(0x14, b"", 1) == b"\1"  # type: ignore
 
 
@@ -158,29 +159,73 @@ def generate_static_pw(
     keyboard_layout: KEYBOARD_LAYOUT = KEYBOARD_LAYOUT.MODHEX,
     blocklist: Iterable[str] = DEFAULT_PW_CHAR_BLOCKLIST,
 ) -> str:
-    """Generate a random password."""
+    """Generate a random password.
+
+    :param length: The length of the password.
+    :param keyboard_layout: The keyboard layout.
+    :param blocklist: The list of characters to block.
+    """
     chars = [k for k in keyboard_layout.value.keys() if k not in blocklist]
     sr = random.SystemRandom()
     return "".join([sr.choice(chars) for _ in range(length)])
 
 
 def parse_oath_key(val: str) -> bytes:
-    """Parse a secret key encoded as either Hex or Base32."""
-    val = val.upper()
-    if re.match(r"^([0-9A-F]{2})+$", val):  # hex
+    """Parse a secret key encoded as either Hex or Base32.
+
+    :param val: The secret key.
+    """
+    try:
         return bytes.fromhex(val)
-    else:
-        # Key should be b32 encoded
+    except ValueError:
         return parse_b32_key(val)
 
 
 def format_oath_code(response: bytes, digits: int = 6) -> str:
-    """Formats an OATH code from a hash response."""
+    """Format an OATH code from a hash response.
+
+    :param response: The response.
+    :param digits: The number of digits in the OATH code.
+    """
     offs = response[-1] & 0xF
     code = struct.unpack_from(">I", response[offs:])[0] & 0x7FFFFFFF
-    return ("%%0%dd" % digits) % (code % 10 ** digits)
+    return ("%%0%dd" % digits) % (code % 10**digits)
 
 
 def time_challenge(timestamp: int, period: int = 30) -> bytes:
-    """Formats a HMAC-SHA1 challenge based on an OATH timestamp and period."""
+    """Format a HMAC-SHA1 challenge based on an OATH timestamp and period.
+
+    :param timestamp: The timestamp.
+    :param period: The period.
+    """
     return struct.pack(">q", int(timestamp // period))
+
+
+def format_csv(
+    serial: int,
+    public_id: bytes,
+    private_id: bytes,
+    key: bytes,
+    access_code: Optional[bytes] = None,
+    timestamp: Optional[datetime] = None,
+) -> str:
+    """Produce a CSV line in the "Yubico" format.
+
+    :param serial: The serial number.
+    :param public_id: The public ID.
+    :param private_id: The private ID.
+    :param key: The secret key.
+    :param access_code: The access code.
+    """
+    ts = timestamp or datetime.now()
+    return ",".join(
+        [
+            str(serial),
+            modhex_encode(public_id),
+            private_id.hex(),
+            key.hex(),
+            access_code.hex() if access_code else "",
+            ts.isoformat(timespec="seconds"),
+            "",  # Add trailing comma
+        ]
+    )

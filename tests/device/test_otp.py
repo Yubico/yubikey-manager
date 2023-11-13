@@ -8,7 +8,7 @@ from yubikit.yubiotp import (
     StaticPasswordSlotConfiguration,
 )
 from yubikit.management import CAPABILITY, ManagementSession
-from ykman.device import connect_to_device
+from ykman.device import list_all_devices
 from . import condition
 import pytest
 
@@ -28,12 +28,8 @@ def conn_type(request, version, transport):
 @pytest.fixture()
 @condition.capability(CAPABILITY.OTP)
 def session(conn_type, info, device):
-    if device.transport == TRANSPORT.NFC:
-        with device.open_connection(conn_type) as c:
-            yield YubiOtpSession(c)
-    else:
-        with connect_to_device(info.serial, [conn_type])[0] as c:
-            yield YubiOtpSession(c)
+    with device.open_connection(conn_type) as c:
+        yield YubiOtpSession(c)
 
 
 def test_status(info, session):
@@ -61,7 +57,14 @@ def read_config(session, conn_type, info, transport, await_reboot):
             else:
                 ManagementSession(protocol.connection).write_device_config(reboot=True)
                 await_reboot()
-                conn = connect_to_device(info.serial, [SmartCardConnection])[0]
+                devs = list_all_devices([SmartCardConnection])
+                if len(devs) != 1:
+                    raise Exception("More than one YubiKey connected")
+                dev, info2 = devs[0]
+                if info.serial != info2.serial:
+                    raise Exception("Connected YubiKey has wrong serial")
+                conn = dev.open_connection(SmartCardConnection)
+
             otp = YubiOtpSession(conn)
             session.backend = otp.backend
         return otp.get_config_state()
@@ -107,6 +110,10 @@ class TestProgrammingState:
         state = read_config()
         assert not state.is_configured(SLOT.ONE)
         assert not state.is_configured(SLOT.TWO)
+
+    def test_configure_ndef(self, session):
+        session.put_configuration(SLOT.ONE, StaticPasswordSlotConfiguration(b"a"))
+        session.set_ndef_configuration(SLOT.ONE)
 
     @condition.min_version(3)
     @pytest.mark.parametrize("slot", [SLOT.ONE, SLOT.TWO])

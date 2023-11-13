@@ -18,6 +18,11 @@ Make sure the http://www.swig.org/[swig] executable is in your PATH.
 
     $ sudo apt install swig libu2f-udev pcscd libpcsclite-dev
 
+==== Linux (RPM-based distributons)
+
+    # Tested on Fedora 34
+    $ sudo dnf install pcsc-lite-devel python3-devel swig
+
 === Install yubikey-manager from source
 
 Clone the repository:
@@ -51,7 +56,7 @@ http://pre-commit.com/[pre-commit] hook.
 
 To use these:
 
-    $ pip install pre-commit black flake8 bandit mypy
+    $ pip install pre-commit
     $ pre-commit install
 
 === Unit tests

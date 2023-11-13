@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<installer-gui-script minSpecVersion="1">
+    <title>yubikey-manager</title>
+    <pkg-ref id="com.yubico.yubikey-manager"/>
+    <options customize="never" require-scripts="false"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.yubico.yubikey-manager"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.yubico.yubikey-manager" visible="false">
+        <pkg-ref id="com.yubico.yubikey-manager"/>
+    </choice>
+    <pkg-ref id="com.yubico.yubikey-manager" version="0" onConclusion="none">ykman.pkg</pkg-ref>
+</installer-gui-script>

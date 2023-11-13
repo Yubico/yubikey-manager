@@ -2,56 +2,60 @@ name: macOS
 
 on: [push, pull_request]
 
+# Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
 jobs:
   build:
 
-    runs-on: macos-latest
+    runs-on: macos-11
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      CFLAGS: -arch x86_64 -arch arm64
+      ARCHFLAGS: -arch x86_64 -arch arm64
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
+
+      - name: Install Poetry
+        run: pipx install poetry
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.12.0'
+          cache: poetry
 
       - name: Install dependencies
+        run: poetry install
+
+      - name: Explicitly use universal versions
         run: |
-          brew update
-          brew install swig
-          python -m pip install --upgrade pip
-          pip install poetry
-          poetry install
-
-      - name: Run unit tests
-        run: poetry run pytest -v
-
-      - name: Build
-        run: poetry build
-
-      - name: Install from tar.gz
-        run: |
-          pip install dist/*.tar.gz
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
-
-      - name: Install from wheel
-        run: |
-          pip install dist/*.whl
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
+          # Export exact versions
+          poetry export --without-hashes > requirements.txt
+          grep cryptography requirements.txt > cryptography.txt
+          grep cffi requirements.txt > source-reqs.txt
+          grep pyscard requirements.txt >> source-reqs.txt
+          # Remove non-universal packages
+          poetry run pip uninstall -y cryptography cffi pyscard
+          # Build cffi from source to get universal build
+          poetry run pip install --upgrade -r source-reqs.txt --no-binary :all:
+          # Explicitly install pre-build universal build of cryptography
+          poetry run pip download -r cryptography.txt --platform macosx_10_12_universal2 --only-binary :all: --no-deps --dest .
+          poetry run pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
 
       - name: PyInstaller
         run: |
-          pip install pyinstaller
-          pip install dist/*.whl
-          pyinstaller ykman.spec
-          dist/ykman --version
-          [[ -z "$(dist/ykman --version | grep -E "not found|missing")" ]]
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/ykman dist/ykman-$REF
+          poetry run pyinstaller ykman.spec
+          dist/ykman/ykman --version
+          [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
+
+      - name: Copy scripts
+        shell: bash
+        run: cp -r resources/macos dist/scripts
+
+      - name: Build installer
+        working-directory: ./dist
+        run: ./scripts/make_pkg.sh
 
       - name: Upload build
         uses: actions/upload-artifact@v1

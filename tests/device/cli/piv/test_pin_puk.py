@@ -6,8 +6,6 @@ from .util import (
     NON_DEFAULT_PUK,
 )
 
-import contextlib
-import io
 import pytest
 
 
@@ -16,17 +14,6 @@ class TestPin:
         ykman_cli(
             "piv", "access", "change-pin", "-P", DEFAULT_PIN, "-n", NON_DEFAULT_PIN
         )
-        ykman_cli(
-            "piv", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
-        )
-
-    def test_change_pin_alias(self, ykman_cli):
-        with io.StringIO() as buf:
-            with contextlib.redirect_stderr(buf):
-                ykman_cli("piv", "change-pin", "-P", DEFAULT_PIN, "-n", NON_DEFAULT_PIN)
-            err = buf.getvalue()
-        assert "piv access change-pin" in err
-
         ykman_cli(
             "piv", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
         )

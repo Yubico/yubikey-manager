@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from enum import Enum, unique
+from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
     Type,
     List,
@@ -36,6 +36,8 @@ from typing import (
     Optional,
     Hashable,
     NamedTuple,
+    Callable,
+    ClassVar,
 )
 import re
 import abc
@@ -50,6 +52,9 @@ class Version(NamedTuple):
     major: int
     minor: int
     patch: int
+
+    def __str__(self):
+        return "%d.%d.%d" % self
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Version":
@@ -72,22 +77,34 @@ class TRANSPORT(str, Enum):
     USB = "usb"
     NFC = "nfc"
 
+    def __str__(self):
+        return super().__str__().upper()
+
 
 @unique
-class AID(bytes, Enum):
-    """YubiKey Application smart card AID values."""
+class USB_INTERFACE(IntFlag):
+    """YubiKey USB interface identifiers."""
 
-    OTP = bytes.fromhex("a0000005272001")
-    MANAGEMENT = bytes.fromhex("a000000527471117")
-    OPENPGP = bytes.fromhex("d27600012401")
-    OATH = bytes.fromhex("a0000005272101")
-    PIV = bytes.fromhex("a000000308")
-    FIDO = bytes.fromhex("a0000006472f0001")
-    HSMAUTH = bytes.fromhex("a000000527210701")
+    OTP = 0x01
+    FIDO = 0x02
+    CCID = 0x04
+
+
+@unique
+class YUBIKEY(Enum):
+    """YubiKey hardware platforms."""
+
+    YKS = "YubiKey Standard"
+    NEO = "YubiKey NEO"
+    SKY = "Security Key by Yubico"
+    YKP = "YubiKey Plus"
+    YK4 = "YubiKey"  # This includes YubiKey 5
 
 
 class Connection(abc.ABC):
     """A connection to a YubiKey"""
+
+    usb_interface: ClassVar[USB_INTERFACE] = USB_INTERFACE(0)
 
     def close(self) -> None:
         """Close the device, releasing any held resources."""
@@ -97,6 +114,45 @@ class Connection(abc.ABC):
 
     def __exit__(self, typ, value, traceback):
         self.close()
+
+
+@unique
+class PID(IntEnum):
+    """USB Product ID values for YubiKey devices."""
+
+    YKS_OTP = 0x0010
+    NEO_OTP = 0x0110
+    NEO_OTP_CCID = 0x0111
+    NEO_CCID = 0x0112
+    NEO_FIDO = 0x0113
+    NEO_OTP_FIDO = 0x0114
+    NEO_FIDO_CCID = 0x0115
+    NEO_OTP_FIDO_CCID = 0x0116
+    SKY_FIDO = 0x0120
+    YK4_OTP = 0x0401
+    YK4_FIDO = 0x0402
+    YK4_OTP_FIDO = 0x0403
+    YK4_CCID = 0x0404
+    YK4_OTP_CCID = 0x0405
+    YK4_FIDO_CCID = 0x0406
+    YK4_OTP_FIDO_CCID = 0x0407
+    YKP_OTP_FIDO = 0x0410
+
+    @property
+    def yubikey_type(self) -> YUBIKEY:
+        return YUBIKEY[self.name.split("_", 1)[0]]
+
+    @property
+    def usb_interfaces(self) -> USB_INTERFACE:
+        return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
+
+    @classmethod
+    def of(cls, key_type: YUBIKEY, interfaces: USB_INTERFACE) -> "PID":
+        suffix = "_".join(t.name or str(t) for t in USB_INTERFACE if t in interfaces)
+        return cls[key_type.name + "_" + suffix]
+
+    def supports_connection(self, connection_type: Type[Connection]) -> bool:
+        return connection_type.usb_interface in self.usb_interfaces
 
 
 T_Connection = TypeVar("T_Connection", bound=Connection)
@@ -114,11 +170,14 @@ class YubiKeyDevice(abc.ABC):
         """Get the transport used to communicate with this YubiKey"""
         return self._transport
 
-    def supports_connection(self, connection_type: Type[T_Connection]) -> bool:
+    def supports_connection(self, connection_type: Type[Connection]) -> bool:
         """Check if a YubiKeyDevice supports a specific Connection type"""
         return False
 
-    def open_connection(self, connection_type: Type[T_Connection]) -> T_Connection:
+    # mypy will not accept abstract types in Type[T_Connection]
+    def open_connection(
+        self, connection_type: Union[Type[T_Connection], Callable[..., T_Connection]]
+    ) -> T_Connection:
         """Opens a connection to the YubiKey"""
         raise ValueError("Unsupported Connection type")
 
@@ -157,6 +216,19 @@ class ApplicationNotAvailableError(CommandError):
 
 class NotSupportedError(ValueError):
     """Attempting an action that is not supported on this YubiKey"""
+
+
+class InvalidPinError(CommandError, ValueError):
+    """An incorrect PIN/PUK was used, with the number of attempts now remaining.
+
+    WARNING: This exception currently inherits from ValueError for
+    backwards-compatibility reasons. This will no longer be the case with the next major
+    version of the library.
+    """
+
+    def __init__(self, attempts_remaining: int, message: Optional[str] = None):
+        super().__init__(message or f"Invalid PIN/PUK, {attempts_remaining} remaining")
+        self.attempts_remaining = attempts_remaining
 
 
 def require_version(

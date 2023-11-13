@@ -26,7 +26,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .core import (
-    AID,
     TRANSPORT,
     Version,
     bytes2int,
@@ -42,7 +41,7 @@ from .core.otp import (
     OtpProtocol,
     CommandRejectedError,
 )
-from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 
 import abc
 import struct
@@ -50,6 +49,9 @@ from hashlib import sha1
 from threading import Event
 from enum import unique, IntEnum, IntFlag
 from typing import TypeVar, Optional, Union, Callable
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
@@ -195,6 +197,13 @@ SCAN_CODES_SIZE = FIXED_SIZE + UID_SIZE + KEY_SIZE
 
 SHA1_BLOCK_SIZE = 64
 
+
+@unique
+class NDEF_TYPE(IntEnum):
+    TEXT = ord("T")
+    URI = ord("U")
+
+
 DEFAULT_NDEF_URI = "https://my.yubico.com/yk/#"
 
 NDEF_URL_PREFIXES = (
@@ -260,22 +269,25 @@ def _build_update(ext, tkt, cfg, acc_code=None):
     )
 
 
-def _build_ndef_config(uri):
-    uri = uri or DEFAULT_NDEF_URI
-    for i, prefix in enumerate(NDEF_URL_PREFIXES):
-        if uri.startswith(prefix):
-            id_code = i + 1
-            uri = uri[len(prefix) :]
-            break
+def _build_ndef_config(value, ndef_type=NDEF_TYPE.URI):
+    if ndef_type == NDEF_TYPE.URI:
+        if value is None:
+            value = DEFAULT_NDEF_URI
+        for i, prefix in enumerate(NDEF_URL_PREFIXES):
+            if value.startswith(prefix):
+                id_code = i + 1
+                value = value[len(prefix) :]
+                break
+        else:
+            id_code = 0
+        data = bytes([id_code]) + value.encode()
     else:
-        id_code = 0
-    uri_bytes = uri.encode()
-    data_len = 1 + len(uri_bytes)
-    if data_len > NDEF_DATA_SIZE:
+        if value is None:
+            value = ""
+        data = b"\x02en" + value.encode()
+    if len(data) > NDEF_DATA_SIZE:
         raise ValueError("URI payload too large")
-    return struct.pack("<BBB", data_len, ord("U"), id_code) + uri_bytes.ljust(
-        NDEF_DATA_SIZE - 1, b"\0"
-    )
+    return bytes([len(data), ndef_type]) + data.ljust(NDEF_DATA_SIZE, b"\0")
 
 
 @unique
@@ -581,7 +593,7 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
 
 
 class ConfigState:
-    """The confgiuration state of the YubiOTP application."""
+    """The configuration state of the YubiOTP application."""
 
     def __init__(self, version: Version, touch_level: int):
         self.version = version
@@ -604,13 +616,20 @@ class ConfigState:
         return self.flags & CFGSTATE.LED_INV != 0
 
     def __repr__(self):
-        return "ConfigState(configured: %s, touch_triggered: %s, led_inverted: %s)" % (
-            (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO)),
-            (self.is_touch_triggered(SLOT.ONE), self.is_touch_triggered(SLOT.TWO))
-            if self.version[0] >= 3
-            else None,
-            self.is_led_inverted(),
-        )
+        items = []
+        try:
+            items.append(
+                "configured: (%s, %s)"
+                % (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO))
+            )
+            items.append(
+                "touch_triggered: (%s, %s)"
+                % (self.is_touch_triggered(SLOT.ONE), self.is_touch_triggered(SLOT.TWO))
+            )
+            items.append("led_inverted: %s" % self.is_led_inverted())
+        except NotSupportedError:
+            pass
+        return f"ConfigState({', '.join(items)})"
 
 
 class _Backend(abc.ABC):
@@ -654,6 +673,7 @@ class _YubiOtpOtpBackend(_Backend):
 
 
 INS_CONFIG = 0x01
+INS_YK2_STATUS = 0x03
 
 
 class _YubiOtpSmartCardBackend(_Backend):
@@ -667,6 +687,9 @@ class _YubiOtpSmartCardBackend(_Backend):
 
     def write_update(self, slot, data):
         status = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
+        if not status:  # Some commands don't return status on some YubiKeys
+            status = self.protocol.send_apdu(0, INS_YK2_STATUS, 0, 0)
+
         prev_prog_seq, self._prog_seq = self._prog_seq, status[3]
         if self._prog_seq == prev_prog_seq + 1:
             return status
@@ -686,6 +709,8 @@ class _YubiOtpSmartCardBackend(_Backend):
 
 
 class YubiOtpSession:
+    """A session with the YubiOTP application."""
+
     def __init__(self, connection: Union[OtpConnection, SmartCardConnection]):
         if isinstance(connection, OtpConnection):
             otp_protocol = OtpProtocol(connection)
@@ -717,6 +742,11 @@ class YubiOtpSession:
             )
         else:
             raise TypeError("Unsupported connection type")
+        logger.debug(
+            "YubiOTP session initialized for "
+            f"connection={type(connection).__name__}, version={self.version}, "
+            f"state={self.get_config_state()}"
+        )
 
     def close(self) -> None:
         self.backend.close()
@@ -726,17 +756,22 @@ class YubiOtpSession:
         return self._version
 
     def get_serial(self) -> int:
+        """Get serial number."""
         return bytes2int(
             self.backend.send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4)
         )
 
     def get_config_state(self) -> ConfigState:
+        """Get configuration state of the YubiOTP application."""
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
 
     def _write_config(self, slot, config, cur_acc_code):
+        has_acc = bool(cur_acc_code)
+        logger.debug(f"Writing configuration to slot {slot}, access code: {has_acc}")
         self._status = self.backend.write_update(
             slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
         )
+        logger.info("Configuration written")
 
     def put_configuration(
         self,
@@ -745,10 +780,22 @@ class YubiOtpSession:
         acc_code: Optional[bytes] = None,
         cur_acc_code: Optional[bytes] = None,
     ) -> None:
+        """Write configuration to slot.
+
+        :param slot: The slot to configure.
+        :param configuration: The slot configuration.
+        :param acc_code: The new access code.
+        :param cur_acc_code: The current access code.
+        """
         if not configuration.is_supported_by(self.version):
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
             )
+        slot = SLOT(slot)
+        logger.debug(
+            f"Writing configuration of type {type(configuration).__name__} to "
+            f"slot {slot}"
+        )
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             configuration.get_config(acc_code),
@@ -762,6 +809,13 @@ class YubiOtpSession:
         acc_code: Optional[bytes] = None,
         cur_acc_code: Optional[bytes] = None,
     ) -> None:
+        """Update configuration in slot.
+
+        :param slot: The slot to update the configuration in.
+        :param configuration: The slot configuration.
+        :param acc_code: The new access code.
+        :param cur_acc_code: The current access code.
+        """
         if not configuration.is_supported_by(self.version):
             raise NotSupportedError(
                 "This configuration is not supported on this YubiKey version"
@@ -771,6 +825,8 @@ class YubiOtpSession:
                 "The access code cannot be updated on this YubiKey. "
                 "Instead, delete the slot and configure it anew."
             )
+        slot = SLOT(slot)
+        logger.debug(f"Writing configuration update to slot {slot}")
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
             configuration.get_config(acc_code),
@@ -778,9 +834,18 @@ class YubiOtpSession:
         )
 
     def swap_slots(self) -> None:
+        """Swap the two slot configurations."""
+        logger.debug("Swapping touch slots")
         self._write_config(CONFIG_SLOT.SWAP, b"", None)
 
     def delete_slot(self, slot: SLOT, cur_acc_code: Optional[bytes] = None) -> None:
+        """Delete configuration stored in slot.
+
+        :param slot: The slot to delete the configuration in.
+        :param cur_acc_code: The current access code.
+        """
+        slot = SLOT(slot)
+        logger.debug(f"Deleting slot {slot}")
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             b"\0" * CONFIG_SIZE,
@@ -790,6 +855,12 @@ class YubiOtpSession:
     def set_scan_map(
         self, scan_map: bytes, cur_acc_code: Optional[bytes] = None
     ) -> None:
+        """Update scan-codes on YubiKey.
+
+        This updates the scan-codes (or keyboard presses) that the YubiKey
+        will use when typing out OTPs.
+        """
+        logger.debug("Writing scan map")
         self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
 
     def set_ndef_configuration(
@@ -797,10 +868,20 @@ class YubiOtpSession:
         slot: SLOT,
         uri: Optional[str] = None,
         cur_acc_code: Optional[bytes] = None,
+        ndef_type: NDEF_TYPE = NDEF_TYPE.URI,
     ) -> None:
+        """Configure a slot to be used over NDEF (NFC).
+
+        :param slot: The slot to configure.
+        :param uri: URI or static text.
+        :param cur_acc_code: The current access code.
+        :param ndef_type: The NDEF type (text or URI).
+        """
+        slot = SLOT(slot)
+        logger.debug(f"Writing NDEF configuration for slot {slot} of type {ndef_type}")
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
-            _build_ndef_config(uri),
+            _build_ndef_config(uri, ndef_type),
             cur_acc_code,
         )
 
@@ -811,7 +892,15 @@ class YubiOtpSession:
         event: Optional[Event] = None,
         on_keepalive: Optional[Callable[[int], None]] = None,
     ) -> bytes:
+        """Perform a challenge-response operation using HMAC-SHA1.
+
+        :param slot: The slot to perform the operation against.
+        :param challenge: The challenge.
+        :param event: An event.
+        """
         require_version(self.version, (2, 2, 0))
+        slot = SLOT(slot)
+        logger.debug(f"Calculating response for slot {slot}")
 
         # Pad challenge with byte different from last
         challenge = challenge.ljust(

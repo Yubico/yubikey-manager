@@ -1,19 +1,18 @@
-name: Build a source package
+name: Source package
 
 on: [push, pull_request]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -31,7 +30,7 @@ jobs:
           poetry build
           mkdir artifacts
           export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/yubikey-manager-*.tar.gz artifacts/yubikey-manager-$REF.tar.gz
+          mv dist/yubikey_manager-*.tar.gz artifacts/yubikey_manager-$REF.tar.gz
           mv dist/yubikey_manager-*.whl artifacts/yubikey_manager-$REF.whl
 
       - name: Upload artifact
@@ -39,3 +38,32 @@ jobs:
         with:
           name: yubikey-manager-source-package
           path: artifacts
+
+  docs:
+    runs-on: ubuntu-latest
+    name: Build sphinx documentation
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12
+
+      - name: Install python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qq swig libpcsclite-dev
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install
+
+      - name: Build sphinx documentation
+        run: poetry run make -C docs/ html
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v1
+        with:
+          name: yubikey-manager-docs
+          path: docs/_build/html

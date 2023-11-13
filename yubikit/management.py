@@ -31,8 +31,8 @@ from .core import (
     require_version,
     Version,
     Tlv,
-    AID,
     TRANSPORT,
+    USB_INTERFACE,
     NotSupportedError,
     BadResponseError,
     ApplicationNotAvailableError,
@@ -45,7 +45,7 @@ from .core.otp import (
     CommandRejectedError,
 )
 from .core.fido import FidoConnection
-from .core.smartcard import SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from enum import IntEnum, IntFlag, unique
@@ -53,24 +53,9 @@ from dataclasses import dataclass
 from typing import Optional, Union, Mapping
 import abc
 import struct
+import logging
 
-
-@unique
-class USB_INTERFACE(IntFlag):
-    """YubiKey USB interface identifiers."""
-
-    OTP = 0x01
-    FIDO = 0x02
-    CCID = 0x04
-
-    def supports_connection(self, connection_type) -> bool:
-        if issubclass(connection_type, SmartCardConnection):
-            return USB_INTERFACE.CCID in self
-        if issubclass(connection_type, FidoConnection):
-            return USB_INTERFACE.FIDO in self
-        if issubclass(connection_type, OtpConnection):
-            return USB_INTERFACE.OTP in self
-        return False
+logger = logging.getLogger(__name__)
 
 
 @unique
@@ -86,14 +71,34 @@ class CAPABILITY(IntFlag):
     HSMAUTH = 0x100
 
     def __str__(self):
+        name = "|".join(c.name or str(c) for c in CAPABILITY if c in self)
+        return f"{name}: {hex(self)}"
+
+    @property
+    def display_name(self) -> str:
         if self == CAPABILITY.U2F:
             return "FIDO U2F"
         elif self == CAPABILITY.OPENPGP:
             return "OpenPGP"
         elif self == CAPABILITY.HSMAUTH:
             return "YubiHSM Auth"
-        else:
-            return getattr(self, "name", super().__str__())
+        # mypy bug?
+        return self.name or ", ".join(
+            c.display_name for c in CAPABILITY if c in self  # type: ignore
+        )
+
+    @property
+    def usb_interfaces(self) -> USB_INTERFACE:
+        ifaces = USB_INTERFACE(0)
+        if self & CAPABILITY.OTP:
+            ifaces |= USB_INTERFACE.OTP
+        if self & (CAPABILITY.U2F | CAPABILITY.FIDO2):
+            ifaces |= USB_INTERFACE.FIDO
+        if self & (
+            CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP | CAPABILITY.HSMAUTH
+        ):
+            ifaces |= USB_INTERFACE.CCID
+        return ifaces
 
 
 @unique
@@ -209,6 +214,7 @@ class DeviceInfo:
     supported_capabilities: Mapping[TRANSPORT, CAPABILITY]
     is_locked: bool
     is_fips: bool = False
+    is_sky: bool = False
 
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
@@ -223,6 +229,7 @@ class DeviceInfo:
         ff_value = bytes2int(data.get(TAG_FORM_FACTOR, b"\0"))
         form_factor = FORM_FACTOR.from_code(ff_value)
         fips = bool(ff_value & 0x80)
+        sky = bool(ff_value & 0x40)
         if TAG_VERSION in data:
             version = Version.from_bytes(data[TAG_VERSION])
         else:
@@ -253,6 +260,7 @@ class DeviceInfo:
             supported,
             locked,
             fips,
+            sky,
         )
 
 
@@ -282,12 +290,15 @@ class Mode:
             raise ValueError("Invalid mode!")
 
     def __repr__(self):
-        return "+".join(t.name for t in USB_INTERFACE if t in self.interfaces)
+        return "+".join(t.name or str(t) for t in USB_INTERFACE if t in self.interfaces)
 
     @classmethod
     def from_code(cls, code: int) -> "Mode":
-        code = code & 0b00000111
-        return cls(_MODES[code])
+        # Mode is determined from the lowest 3 bits
+        try:
+            return cls(_MODES[code & 0b00000111])
+        except IndexError:
+            raise ValueError("Invalid mode code")
 
 
 SLOT_DEVICE_CONFIG = 0x11
@@ -354,13 +365,25 @@ P1_DEVICE_CONFIG = 0x11
 class _ManagementSmartCardBackend(_Backend):
     def __init__(self, smartcard_connection):
         self.protocol = SmartCardProtocol(smartcard_connection)
-        select_str = self.protocol.select(AID.MANAGEMENT).decode()
-        self.version = Version.from_string(select_str)
-        # For YubiKey NEO, we use the OTP application for further commands
-        if self.version[0] == 3:
-            # Workaround to "de-select" on NEO, otherwise it gets stuck.
-            self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
-            self.protocol.select(AID.OTP)
+        try:
+            select_bytes = self.protocol.select(AID.MANAGEMENT)
+            if select_bytes[-2:] == b"\x90\x00":
+                # YubiKey Edge incorrectly appends SW twice.
+                select_bytes = select_bytes[:-2]
+            select_str = select_bytes.decode()
+            self.version = Version.from_string(select_str)
+            # For YubiKey NEO, we use the OTP application for further commands
+            if self.version[0] == 3:
+                # Workaround to "de-select" on NEO, otherwise it gets stuck.
+                self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
+                self.protocol.select(AID.OTP)
+        except ApplicationNotAvailableError:
+            if smartcard_connection.transport == TRANSPORT.NFC:
+                # Probably NEO over NFC
+                status = self.protocol.select(AID.OTP)
+                self.version = Version.from_bytes(status[:3])
+            else:
+                raise
 
     def close(self):
         self.protocol.close()
@@ -420,6 +443,10 @@ class ManagementSession:
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")
+        logger.debug(
+            "Management session initialized for "
+            f"connection={type(connection).__name__}, version={self.version}"
+        )
 
     def close(self) -> None:
         self.backend.close()
@@ -429,6 +456,7 @@ class ManagementSession:
         return self.backend.version
 
     def read_device_info(self) -> DeviceInfo:
+        """Get detailed information about the YubiKey."""
         require_version(self.version, (4, 1, 0))
         return DeviceInfo.parse(self.backend.read_config(), self.version)
 
@@ -439,15 +467,28 @@ class ManagementSession:
         cur_lock_code: Optional[bytes] = None,
         new_lock_code: Optional[bytes] = None,
     ) -> None:
+        """Write configuration settings for YubiKey.
+
+        :pararm config: The device configuration.
+        :param reboot: If True the YubiKey will reboot.
+        :param cur_lock_code: Current lock code.
+        :param new_lock_code: New lock code.
+        """
         require_version(self.version, (5, 0, 0))
         if cur_lock_code is not None and len(cur_lock_code) != 16:
             raise ValueError("Lock code must be 16 bytes")
         if new_lock_code is not None and len(new_lock_code) != 16:
             raise ValueError("Lock code must be 16 bytes")
         config = config or DeviceConfig({}, None, None, None)
+        logger.debug(
+            f"Writing device config: {config}, reboot: {reboot}, "
+            f"current lock code: {cur_lock_code is not None}, "
+            f"new lock code: {new_lock_code is not None}"
+        )
         self.backend.write_config(
             config.get_bytes(reboot, cur_lock_code, new_lock_code)
         )
+        logger.info("Device config written")
 
     def set_mode(
         self,
@@ -455,6 +496,18 @@ class ManagementSession:
         chalresp_timeout: int = 0,
         auto_eject_timeout: Optional[int] = None,
     ) -> None:
+        """Write connection modes (USB interfaces) for YubiKey.
+
+        :param mode: The connection modes (USB interfaces).
+        :param chalresp_timeout: The timeout when waiting for touch
+            for challenge response.
+        :param auto_eject_timeout: When set, the smartcard will
+            automatically eject after the given time.
+        """
+        logger.debug(
+            f"Set mode: {mode}, chalresp_timeout: {chalresp_timeout}, "
+            f"auto_eject_timeout: {auto_eject_timeout}"
+        )
         if self.version >= (5, 0, 0):
             # Translate into DeviceConfig
             usb_enabled = CAPABILITY(0)
@@ -464,6 +517,8 @@ class ManagementSession:
                 usb_enabled |= CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
             if USB_INTERFACE.FIDO in mode.interfaces:
                 usb_enabled |= CAPABILITY.U2F | CAPABILITY.FIDO2
+            logger.debug(f"Delegating to DeviceConfig with usb_enabled: {usb_enabled}")
+            # N.B: reboot=False, since we're using the older set_mode command
             self.write_device_config(
                 DeviceConfig(
                     {TRANSPORT.USB: usb_enabled},
@@ -483,3 +538,4 @@ class ManagementSession:
                 # N.B. This is little endian!
                 struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
             )
+            logger.info("Mode configuration written")

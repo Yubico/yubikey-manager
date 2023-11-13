@@ -27,18 +27,20 @@
 
 import os
 import json
+import keyring
 from pathlib import Path
+from cryptography.fernet import Fernet, InvalidToken
 
 
-HOME_CONFIG = "~/.ykman"
 XDG_DATA_HOME = os.environ.get("XDG_DATA_HOME", "~/.local/share") + "/ykman"
 XDG_CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", "~/.config") + "/ykman"
 
-USE_XDG = "YKMAN_XDG_EXPERIMENTAL" in os.environ
+KEYRING_SERVICE = os.environ.get("YKMAN_KEYRING_SERVICE", "ykman")
+KEYRING_KEY = os.environ.get("YKMAN_KEYRING_KEY", "wrap_key")
 
 
 class Settings(dict):
-    _config_dir = HOME_CONFIG
+    _config_dir = XDG_CONFIG_HOME
 
     def __init__(self, name):
         self.fname = Path(self._config_dir).expanduser().resolve() / (name + ".json")
@@ -63,8 +65,50 @@ class Settings(dict):
 
 
 class Configuration(Settings):
-    _config_dir = XDG_CONFIG_HOME if USE_XDG else HOME_CONFIG
+    _config_dir = XDG_CONFIG_HOME
+
+
+class KeystoreError(Exception):
+    """Error accessing the OS keystore"""
+
+
+class UnwrapValueError(Exception):
+    """Error unwrapping a particular secret value"""
 
 
 class AppData(Settings):
-    _config_dir = XDG_DATA_HOME if USE_XDG else HOME_CONFIG
+    _config_dir = XDG_DATA_HOME
+
+    def __init__(self, name, keyring_service=KEYRING_SERVICE, keyring_key=KEYRING_KEY):
+        super().__init__(name)
+        self._service = keyring_service
+        self._username = keyring_key
+
+    @property
+    def keyring_unlocked(self) -> bool:
+        return hasattr(self, "_fernet")
+
+    def ensure_unlocked(self):
+        if not self.keyring_unlocked:
+            try:
+                wrap_key = keyring.get_password(self._service, self._username)
+            except keyring.errors.KeyringError:
+                raise KeystoreError("Keyring locked or unavailable")
+
+            if wrap_key is None:
+                key = Fernet.generate_key()
+                keyring.set_password(self._service, self._username, key.decode())
+                self._fernet = Fernet(key)
+            else:
+                self._fernet = Fernet(wrap_key)
+
+    def get_secret(self, key: str):
+        self.ensure_unlocked()
+        try:
+            return json.loads(self._fernet.decrypt(self[key].encode()))
+        except InvalidToken:
+            raise UnwrapValueError("Undecryptable value")
+
+    def put_secret(self, key: str, value) -> None:
+        self.ensure_unlocked()
+        self[key] = self._fernet.encrypt(json.dumps(value).encode()).decode()

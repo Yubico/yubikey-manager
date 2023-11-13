@@ -25,7 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Connection, CommandError, TimeoutError, Version
+from . import Connection, CommandError, TimeoutError, Version, USB_INTERFACE
+from yubikit.logging import LOG_LEVEL
 
 from time import sleep
 from threading import Event
@@ -37,11 +38,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+MODHEX_ALPHABET = "cbdefghijklnrtuv"
+
+
 class CommandRejectedError(CommandError):
     """The issues command was rejected by the YubiKey"""
 
 
 class OtpConnection(Connection, metaclass=abc.ABCMeta):
+    usb_interface = USB_INTERFACE.OTP
+
     @abc.abstractmethod
     def receive(self) -> bytes:
         """Reads an 8 byte feature report"""
@@ -70,18 +76,18 @@ def check_crc(data: bytes) -> bool:
     return calculate_crc(data) == CRC_OK_RESIDUAL
 
 
-_MODHEX = "cbdefghijklnrtuv"
-
-
 def modhex_encode(data: bytes) -> str:
     """Encode a bytes-like object using Modhex (modified hexadecimal) encoding."""
-    return "".join(_MODHEX[b >> 4] + _MODHEX[b & 0xF] for b in data)
+    return "".join(MODHEX_ALPHABET[b >> 4] + MODHEX_ALPHABET[b & 0xF] for b in data)
 
 
 def modhex_decode(string: str) -> bytes:
     """Decode the Modhex (modified hexadecimal) string."""
+    if len(string) % 2:
+        raise ValueError("Length must be a multiple of 2")
+
     return bytes(
-        _MODHEX.index(string[i]) << 4 | _MODHEX.index(string[i + 1])
+        MODHEX_ALPHABET.index(string[i]) << 4 | MODHEX_ALPHABET.index(string[i + 1])
         for i in range(0, len(string), 2)
     )
 
@@ -117,6 +123,8 @@ def _format_frame(slot, payload):
 
 
 class OtpProtocol:
+    """An implementation of the OTP protocol."""
+
     def __init__(self, otp_connection: OtpConnection):
         self.connection = otp_connection
         report = self._receive()
@@ -143,12 +151,12 @@ class OtpProtocol:
         If the command results in a configuration update, the programming sequence
         number is verified and the updated status bytes are returned.
 
-        @param slot  the slot to send to
-        @param data  the data payload to send
-        @param state optional CommandState for listening for user presence requirement
+        :param slot:  The slot to send to.
+        :param data:  The data payload to send.
+        :param state: Optional CommandState for listening for user presence requirement
             and for cancelling a command.
-        @return response data (including CRC) in the case of data, or an updated status
-            struct
+        :return: Response data (including CRC) in the case of data, or an updated status
+            struct.
         """
         payload = (data or b"").ljust(SLOT_DATA_SIZE, b"\0")
         if len(payload) > SLOT_DATA_SIZE:
@@ -157,11 +165,11 @@ class OtpProtocol:
             on_keepalive = lambda x: None  # noqa
         frame = _format_frame(slot, payload)
 
-        logger.debug("SEND: %s", frame.hex())
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", frame.hex())
         response = self._read_frame(
             self._send_frame(frame), event or Event(), on_keepalive
         )
-        logger.debug("RECV: %s", response.hex())
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", response.hex())
         return response
 
     def _receive(self):
@@ -174,10 +182,10 @@ class OtpProtocol:
         return report
 
     def read_status(self) -> bytes:
-        """Receive status bytes from YubiKey
+        """Receive status bytes from YubiKey.
 
-        @return status bytes (first 3 bytes are the firmware version)
-        @throws IOException in case of communication error
+        :return: Status bytes (first 3 bytes are the firmware version).
+        :raises IOException: in case of communication error.
         """
         return self._receive()[1:-1]
 

@@ -19,8 +19,9 @@ import pytest
         r"OU=Sales+CN=J.  Smith,DC=example,DC=net",
         r"CN=James \"Jim\" Smith\, III,DC=example,DC=net",
         r"CN=Before\0dAfter,DC=example,DC=net",
-        # r"1.3.6.1.4.1.1466.0=#04024869", - Not supported.
+        r"1.3.6.1.4.1.1466.0=#04024869",
         r"CN=Lu\C4\8Di\C4\87",
+        r"1.2.840.113549.1.9.1=user@example.com",
     ],
 )
 def test_parse_rfc4514_string(value):

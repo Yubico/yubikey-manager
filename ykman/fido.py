@@ -44,7 +44,10 @@ INS_FIPS_VERIFY_FIPS_MODE = U2F_VENDOR_FIRST + 6
 
 
 def is_in_fips_mode(fido_connection: FidoConnection) -> bool:
-    """Check if a YubiKey FIPS is in FIPS approved mode."""
+    """Check if a YubiKey FIPS is in FIPS approved mode.
+
+    :param fido_connection: A FIDO connection.
+    """
     try:
         ctap = Ctap1(fido_connection)
         ctap.send_apdu(ins=INS_FIPS_VERIFY_FIPS_MODE)
@@ -62,6 +65,10 @@ def fips_change_pin(
     """Change the PIN on a YubiKey FIPS.
 
     If no PIN is set, pass None or an empty string as old_pin.
+
+    :param fido_connection: A FIDO connection.
+    :param old_pin: The old PIN.
+    :param new_pin: The new PIN.
     """
     ctap = Ctap1(fido_connection)
 
@@ -75,7 +82,11 @@ def fips_change_pin(
 
 
 def fips_verify_pin(fido_connection: FidoConnection, pin: str):
-    """Unlock the YubiKey FIPS U2F module for credential creation."""
+    """Unlock the YubiKey FIPS U2F module for credential creation.
+
+    :param fido_connection: A FIDO connection.
+    :param pin: The FIDO PIN.
+    """
     ctap = Ctap1(fido_connection)
     ctap.send_apdu(ins=INS_FIPS_VERIFY_PIN, data=pin.encode())
 
@@ -86,6 +97,8 @@ def fips_reset(fido_connection: FidoConnection):
     Note: This action is only permitted immediately after YubiKey FIPS power-up. It
     also requires the user to touch the flashing button on the YubiKey, and will halt
     until that happens, or the command times out.
+
+    :param fido_connection: A FIDO connection.
     """
     ctap = Ctap1(fido_connection)
     while True:

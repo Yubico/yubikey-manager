@@ -16,6 +16,7 @@ ykman-gui.pkg
 ykman-script.py
 ykman.pkg
 lib/
+**/_build
 
 # Libraries unpacked by Windows VM
 /libjson-c*.dll

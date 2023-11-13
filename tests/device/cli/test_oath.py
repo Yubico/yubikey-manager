@@ -4,8 +4,6 @@ from ykman.oath import STEAM_CHAR_TABLE
 from yubikit.management import CAPABILITY
 from .. import condition
 from base64 import b32encode
-import contextlib
-import io
 import pytest
 
 
@@ -46,7 +44,7 @@ class TestOATH:
         output = ykman_cli("oath", "info").output
         assert "version:" in output
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     def test_info_does_not_indicate_fips_mode_for_non_fips_key(self, ykman_cli):
         info = ykman_cli("oath", "info").output
         assert "FIPS:" not in info
@@ -65,20 +63,6 @@ class TestOATH:
         ykman_cli("oath", "accounts", "add", "test-name-space", "ab ba")
         creds = ykman_cli("oath", "accounts", "list").output
         assert "test-name-space" in creds
-
-    def test_oath_add_credential_alias(self, ykman_cli):
-        with io.StringIO() as buf:
-            with contextlib.redirect_stderr(buf):
-                ykman_cli("oath", "add", "test-name", "abba")
-                ykman_cli("oath", "code", "test-name")
-                creds = ykman_cli("oath", "list").output
-                ykman_cli("oath", "delete", "test-name", "-f")
-            err = buf.getvalue()
-        assert "test-name" in creds
-        assert "oath accounts add" in err
-        assert "oath accounts code" in err
-        assert "oath accounts list" in err
-        assert "oath accounts delete" in err
 
     def test_oath_hidden_cred(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "_hidden:name", "abba")
@@ -112,10 +96,20 @@ class TestOATH:
         creds = ykman_cli("oath", "accounts", "code").output
         assert "test-name2" in creds
 
-    def test_oath_code_query(self, ykman_cli):
+    def test_oath_code_query_single(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "query-me", "abba")
         creds = ykman_cli("oath", "accounts", "code", "query-me").output
         assert "query-me" in creds
+
+    def test_oath_code_query_multiple(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "foo", "abba")
+        ykman_cli("oath", "accounts", "add", "query-me", "abba")
+        ykman_cli("oath", "accounts", "add", "bar", "abba")
+        lines = (
+            ykman_cli("oath", "accounts", "code", "query").output.strip().splitlines()
+        )
+        assert len(lines) == 1
+        assert "query-me" in lines[0]
 
     def test_oath_reset(self, ykman_cli):
         output = ykman_cli("oath", "reset", "-f").output
@@ -156,13 +150,79 @@ class TestOATH:
         words = ykman_cli("oath", "accounts", "code", "hotp-cred").output.split()
         assert "659165" in words
 
+    def test_oath_hotp_code_single(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "-o", "HOTP", "hotp-cred", "abba")
+        words = ykman_cli(
+            "oath", "accounts", "code", "hotp-cred", "--single"
+        ).output.split()
+        assert "659165" in words
+
     def test_oath_totp_steam_code(self, ykman_cli):
-        ykman_cli("oath", "accounts", "add", "-o", "TOTP", "Steam:steam-cred", "abba")
-        cred = ykman_cli("oath", "accounts", "code", "-s", "steam-cred").output.strip()
-        assert 5, len(cred) == f"cred wrong length: {cred!r}"
+        ykman_cli("oath", "accounts", "add", "Steam:steam-cred", "abba")
+        cred = ykman_cli("oath", "accounts", "code", "steam-cred").output.strip()
+        code = cred.split()[-1]
+        assert 5 == len(code), f"cred wrong length: {code!r}"
         assert all(
-            c in STEAM_CHAR_TABLE for c in cred
-        ), f"{cred!r} contains non-steam characters"
+            c in STEAM_CHAR_TABLE for c in code
+        ), f"{code!r} contains non-steam characters"
+
+    def test_oath_totp_steam_code_single(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "Steam:steam-cred", "abba")
+        code = ykman_cli("oath", "accounts", "code", "-s", "steam-cred").output.strip()
+        assert 5 == len(code), f"cred wrong length: {code!r}"
+        assert all(
+            c in STEAM_CHAR_TABLE for c in code
+        ), f"{code!r} contains non-steam characters"
+
+    def test_oath_code_output_no_touch(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "TOTP:normal", "aaaa")
+        ykman_cli("oath", "accounts", "add", "Steam:normal", "aaba")
+        ykman_cli("oath", "accounts", "add", "-o", "HOTP", "HOTP:normal", "abaa")
+
+        lines = ykman_cli("oath", "accounts", "code").output.strip().splitlines()
+        entries = {line.split()[0]: line for line in lines}
+        assert "HOTP Account" in entries["HOTP:normal"]
+
+        code = entries["Steam:normal"].split()[-1]
+        assert 5 == len(code), f"cred wrong length: {code!r}"
+        assert all(
+            c in STEAM_CHAR_TABLE for c in code
+        ), f"{code!r} contains non-steam characters"
+
+        code = entries["TOTP:normal"].split()[-1]
+        assert 6 == len(code)
+        int(code)
+
+    @condition.min_version(4)
+    def test_oath_code_output(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "TOTP:normal", "aaaa")
+        ykman_cli("oath", "accounts", "add", "--touch", "TOTP:touch", "aaab")
+        ykman_cli("oath", "accounts", "add", "Steam:normal", "aaba")
+        ykman_cli("oath", "accounts", "add", "--touch", "Steam:touch", "aabb")
+        ykman_cli("oath", "accounts", "add", "-o", "HOTP", "HOTP:normal", "abaa")
+
+        lines = ykman_cli("oath", "accounts", "code").output.strip().splitlines()
+        entries = {line.split()[0]: line for line in lines}
+        assert "Requires Touch" in entries["TOTP:touch"]
+        assert "Requires Touch" in entries["Steam:touch"]
+        assert "HOTP Account" in entries["HOTP:normal"]
+
+        code = entries["Steam:normal"].split()[-1]
+        assert 5 == len(code), f"cred wrong length: {code!r}"
+        assert all(
+            c in STEAM_CHAR_TABLE for c in code
+        ), f"{code!r} contains non-steam characters"
+
+        code = entries["TOTP:normal"].split()[-1]
+        assert 6 == len(code)
+        int(code)
+
+    @condition.min_version(4)
+    def test_oath_totp_steam_touch_not_in_code_output(self, ykman_cli):
+        ykman_cli("oath", "accounts", "add", "--touch", "Steam:steam-cred", "abba")
+        ykman_cli("oath", "accounts", "add", "TOTP:totp-cred", "abba")
+        lines = ykman_cli("oath", "accounts", "code").output.strip().splitlines()
+        assert "Requires Touch" in lines[0]
 
     def test_oath_delete(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "delete-me", "abba")
@@ -175,7 +235,7 @@ class TestOATH:
         ykman_cli("oath", "accounts", "list")
         ykman_cli("oath", "accounts", "delete", "😃", "-f")
 
-    @condition.fips(False)
+    @condition.yk4_fips(False)
     @condition.min_version(4, 3, 1)
     def test_oath_sha512(self, ykman_cli):
         ykman_cli("oath", "accounts", "add", "abba", "abba", "--algorithm", "SHA512")
@@ -207,7 +267,7 @@ class TestOATH:
 
 class TestOathFips:
     @pytest.fixture(autouse=True)
-    @condition.fips(True)
+    @condition.yk4_fips(True)
     def check_fips(self):
         pass
 

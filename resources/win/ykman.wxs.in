@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <?define ProductVersion="{RELEASE_VERSION}" ?>
+  <?define ProductName="YubiKey Manager CLI" ?>
+
+   <Product Id="*" UpgradeCode="fba0ab59-48d1-4050-82eb-acad31cf2239" Name="$(var.ProductName)" Version="$(var.ProductVersion)" Manufacturer="Yubico AB" Language="1033">
+      <Package InstallerVersion="301" Compressed="yes" InstallScope="perMachine" Platform="x64" Description="$(var.ProductName) $(var.ProductVersion)" />
+      <Media Id="1" Cabinet="ykman.cab" EmbedCab="yes"/>
+
+      <WixVariable Id="WixUIDialogBmp" Value="yubico-msi-background.png" />
+      <WixVariable Id="WixUIBannerBmp" Value="yubico-msi-y-banner.png" />
+
+      <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+
+      <Property Id="PREVIOUSVERSIONSINSTALLED" Secure="yes" />
+
+      <Upgrade Id="fba0ab59-48d1-4050-82eb-acad31cf2239">
+      	<UpgradeVersion
+              Minimum="1.0.0.0"
+              Property="PREVIOUSVERSIONSINSTALLED"
+              IncludeMinimum="yes" IncludeMaximum="no" />
+      </Upgrade>
+
+	  <InstallExecuteSequence>
+	    <RemoveExistingProducts Before="InstallInitialize" />
+	  </InstallExecuteSequence>
+
+      <UI>
+          <UIRef Id="WixUI_InstallDir" />
+          <Publish Dialog="WelcomeDlg"
+            Control="Next"
+            Event="NewDialog"
+            Value="InstallDirDlg"
+            Order="2">1</Publish>
+          <Publish Dialog="InstallDirDlg"
+            Control="Back"
+            Event="NewDialog"
+            Value="WelcomeDlg"
+            Order="2">1</Publish>
+      </UI>
+
+      <Directory Id="TARGETDIR" Name="SourceDir">
+         <Directory Id="ProgramFiles64Folder" Name="PFiles">
+            <Directory Id="YubicoDir" Name="Yubico">
+                <Directory Id="INSTALLDIR" Name="YubiKey Manager CLI">
+                </Directory>
+            </Directory>
+         </Directory>
+         <Directory Id="ProgramMenuFolder">
+         	<Directory Id="ApplicationProgramsFolder" Name="YubiKey Manager CLI"/>
+         </Directory>
+
+         <Component Id='EnvVars' Guid="7e30efe4-dc8b-40ba-a182-76e490de4f37">
+	   <!--<CreateFolder />-->
+           <Environment Id='PathEnvVar' Action='set' System='yes' Name='PATH' Part='last' Value='[INSTALLDIR]'/>
+         </Component>
+      </Directory>
+
+      <DirectoryRef Id="ApplicationProgramsFolder">
+         <Component Id="ApplicationShortcut" Guid="fba0ab59-48d1-4050-82eb-acad31cf2239">
+             <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
+             <RegistryValue Root="HKCU" Key="Software\Yubico\YubiKey Manager CLI" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+             <util:RemoveFolderEx Id="Remove" On="install" Property="INSTALLDIR" />
+         </Component>
+
+      </DirectoryRef>
+
+      <!--
+      <DirectoryRef Id="TARGETDIR">
+        <Merge Id="VCRedist" SourceFile="$(env.MERGEDPATH)" DiskId="1" Language="0"/>
+      </DirectoryRef>
+
+      <Feature Id="VCRedist" Title="Visual C++ Runtime" AllowAdvertise="no" Display="hidden" Level="1">
+        <MergeRef Id="VCRedist"/>
+      </Feature>
+      -->
+
+      <Feature Id="DefaultFeature" Level="1">
+         <ComponentGroupRef Id="ApplicationFiles"/>
+      </Feature>
+
+      <Feature Id="MainApplication" Title="Main Application" Level="1">
+      	<ComponentRef Id="ApplicationShortcut" />
+      </Feature>
+
+      <Feature Id="ModifyPath" Title="Modify Path" Level="1">
+        <ComponentRef Id="EnvVars" />
+      </Feature>
+
+   </Product>
+</Wix>

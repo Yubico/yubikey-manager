@@ -1,7 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-# This is a spec file used by PyInstaller to build a single executable for ykman.
-# See: https://pyinstaller.readthedocs.io/en/stable/spec-files.html
+import re
+import os
+
+with open("ykman/__init__.py") as f:
+    version_file = f.read()
+version = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", version_file, re.M).group(1)
+version_tuple = "(" + version.split("-")[0].replace(".", ", ") + ", 0)"
+
+with open("version_info.txt.in") as f:
+    version_info = f.read()
+version_info = version_info.replace("{VERSION}", version).replace(
+    "{VERSION_TUPLE}", version_tuple
+)
+with open("version_info.txt", "w") as f:
+    f.write(version_info)
+
 
 # This recipe allows PyInstaller to understand the entrypoint.
 # See: https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Setuptools-Entry-Point
@@ -47,17 +61,28 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="ykman",
     icon="NONE",
+    target_arch="universal2",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=True,
+    manifest="ykman.exe.manifest",
+    version="version_info.txt",
 )
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="ykman",
+)
+
+os.unlink("version_info.txt")
