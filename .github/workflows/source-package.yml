@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -34,7 +34,7 @@ jobs:
           mv dist/yubikey_manager-*.whl artifacts/yubikey_manager-$REF.whl
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v3
         with:
           name: yubikey-manager-source-package
           path: artifacts
@@ -44,7 +44,7 @@ jobs:
     name: Build sphinx documentation
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -63,7 +63,7 @@ jobs:
         run: poetry run make -C docs/ html
 
       - name: Upload documentation
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v3
         with:
           name: yubikey-manager-docs
           path: docs/_build/html
