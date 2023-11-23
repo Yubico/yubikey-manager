@@ -8,7 +8,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Poetry
         run: pipx install poetry
@@ -61,7 +61,7 @@ jobs:
         run: .\scripts\make_msi.ps1
 
       - name: Upload build
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v3
         with:
           name: ykman-builds-windows
           path: dist
