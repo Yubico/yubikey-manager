@@ -808,11 +808,11 @@ class PivSession:
         logger.debug(f"Reading certificate in slot {slot}")
         try:
             data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
-        except ValueError:
+            cert_data = data[TAG_CERTIFICATE]
+            cert_info = data[TAG_CERT_INFO][0] if TAG_CERT_INFO in data else 0
+        except (ValueError, KeyError):
             raise BadResponseError("Malformed certificate data object")
 
-        cert_data = data[TAG_CERTIFICATE]
-        cert_info = data[TAG_CERT_INFO][0] if TAG_CERT_INFO in data else 0
         if cert_info == 1:
             logger.debug("Certificate is compressed, decompressing...")
             # Compressed certificate
