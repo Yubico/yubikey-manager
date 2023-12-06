@@ -399,7 +399,7 @@ def change_pin(ctx, pin, new_pin, u2f):
     else:
         min_len = ctap2.info.min_pin_length
         if len(new_pin) < min_len:
-            raise CliFail("New PIN is too short. Minimum length: {min_len}")
+            raise CliFail(f"New PIN is too short. Minimum length: {min_len}")
         if ctap2.info.options.get("clientPin"):
             change_pin(pin, new_pin)
         else:
