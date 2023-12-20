@@ -1,11 +1,12 @@
 import datetime
 import random
 import pytest
+import os
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding, ed25519, x25519
 
 from yubikit.core import NotSupportedError
 from yubikit.core.smartcard import AID, ApduError
@@ -46,6 +47,9 @@ NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
 )
 
 NOW = datetime.datetime.now()
+
+SIGN_KEY_TYPES = list(set(KEY_TYPE) - {KEY_TYPE.X25519})
+ECDH_KEY_TYPES = [KEY_TYPE.ECCP256, KEY_TYPE.ECCP384, KEY_TYPE.X25519]
 
 
 def get_test_cert():
@@ -89,13 +93,26 @@ def assert_mgm_key_is_not(session, key):
 def generate_key(
     session,
     slot=SLOT.AUTHENTICATION,
-    alg=KEY_TYPE.ECCP256,
+    key_type=KEY_TYPE.ECCP256,
     pin_policy=PIN_POLICY.DEFAULT,
 ):
     session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
-    key = session.generate_key(slot, alg, pin_policy=pin_policy)
+    key = session.generate_key(slot, key_type, pin_policy=pin_policy)
     reset_state(session)
     return key
+
+
+def generate_sw_key(key_type):
+    if key_type.algorithm == ALGORITHM.RSA:
+        return rsa.generate_private_key(65537, key_type.bit_len, default_backend())
+    elif key_type == KEY_TYPE.ECCP256:
+        return ec.generate_private_key(ec.SECP256R1(), default_backend())
+    elif key_type == KEY_TYPE.ECCP384:
+        return ec.generate_private_key(ec.SECP384R1(), default_backend())
+    elif key_type == KEY_TYPE.ED25519:
+        return ed25519.Ed25519PrivateKey.generate()
+    elif key_type == KEY_TYPE.X25519:
+        return x25519.X25519PrivateKey.generate()
 
 
 def import_key(
@@ -104,14 +121,7 @@ def import_key(
     key_type=KEY_TYPE.ECCP256,
     pin_policy=PIN_POLICY.DEFAULT,
 ):
-    if key_type.algorithm == ALGORITHM.RSA:
-        private_key = rsa.generate_private_key(
-            65537, key_type.bit_len, default_backend()
-        )
-    elif key_type == KEY_TYPE.ECCP256:
-        private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
-    elif key_type == KEY_TYPE.ECCP384:
-        private_key = ec.generate_private_key(ec.SECP384R1(), default_backend())
+    private_key = generate_sw_key(key_type)
     session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
     session.put_key(slot, private_key, pin_policy)
     reset_state(session)
@@ -121,16 +131,20 @@ def import_key(
 def verify_cert_signature(cert, public_key=None):
     if not public_key:
         public_key = cert.public_key
+
     args = [cert.signature, cert.tbs_certificate_bytes, cert.signature_hash_algorithm]
-    if KEY_TYPE.from_public_key(public_key).algorithm == ALGORITHM.RSA:
+    key_type = KEY_TYPE.from_public_key(public_key)
+    if key_type.algorithm == ALGORITHM.RSA:
         args.insert(2, padding.PKCS1v15())
+    elif key_type == KEY_TYPE.ED25519:
+        args.pop()
     else:
         args[2] = ec.ECDSA(args[2])
     public_key.verify(*args)
 
 
 class TestCertificateSignatures:
-    @pytest.mark.parametrize("key_type", list(KEY_TYPE))
+    @pytest.mark.parametrize("key_type", SIGN_KEY_TYPES)
     @pytest.mark.parametrize(
         "hash_algorithm", (hashes.SHA256, hashes.SHA384, hashes.SHA512)
     )
@@ -141,11 +155,11 @@ class TestCertificateSignatures:
             pytest.skip("ECCP384 requires YubiKey 4 or later")
         if key_type == KEY_TYPE.RSA1024 and info.is_fips and info.version[0] == 4:
             pytest.skip("RSA1024 not available on YubiKey FIPS")
-        if key_type in (KEY_TYPE.RSA3072, KEY_TYPE.RSA4096) and info.version < (
-            5,
-            7,
-            0,
-        ):
+        if key_type in (
+            KEY_TYPE.RSA3072,
+            KEY_TYPE.RSA4096,
+            KEY_TYPE.ED25519,
+        ) and info.version < (5, 7, 0):
             pytest.skip(f"{key_type} requires YubiKey 5.7 or later")
 
         slot = SLOT.SIGNATURE
@@ -156,8 +170,65 @@ class TestCertificateSignatures:
             session, slot, public_key, "CN=alice", NOW, NOW, hash_algorithm
         )
 
-        assert cert.public_key().public_numbers() == public_key.public_numbers()
+        if key_type == KEY_TYPE.ED25519:
+            assert cert.public_key() == public_key
+        else:
+            assert cert.public_key().public_numbers() == public_key.public_numbers()
         verify_cert_signature(cert, public_key)
+
+
+class TestDecrypt:
+    @pytest.mark.parametrize(
+        "key_type",
+        [KEY_TYPE.RSA1024, KEY_TYPE.RSA2048, KEY_TYPE.RSA3072, KEY_TYPE.RSA4096],
+    )
+    def test_import_decrypt(self, session, version, key_type):
+        if key_type in (KEY_TYPE.RSA3072, KEY_TYPE.RSA4096) and version < (5, 7, 0):
+            pytest.skip(f"{key_type} requires YubiKey 5.7 or later")
+
+        public_key = import_key(session, SLOT.KEY_MANAGEMENT, key_type=key_type)
+        pt = os.urandom(32)
+        ct = public_key.encrypt(pt, padding.PKCS1v15())
+
+        session.verify_pin(DEFAULT_PIN)
+        pt2 = session.decrypt(SLOT.KEY_MANAGEMENT, ct, padding.PKCS1v15())
+        assert pt == pt2
+
+
+class TestKeyAgreement:
+    @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
+    def test_generate_ecdh(self, session, version, key_type):
+        if key_type == KEY_TYPE.X25519 and version < (5, 7, 0):
+            pytest.skip("X25519 requires YubiKey 5.7 or later")
+
+        e_priv = generate_sw_key(key_type)
+        public_key = generate_key(session, SLOT.KEY_MANAGEMENT, key_type=key_type)
+        if key_type == KEY_TYPE.X25519:
+            args = (public_key,)
+        else:
+            args = (ec.ECDH(), public_key)
+
+        shared1 = e_priv.exchange(*args)
+        session.verify_pin(DEFAULT_PIN)
+        shared2 = session.calculate_secret(SLOT.KEY_MANAGEMENT, e_priv.public_key())
+        assert shared1 == shared2
+
+    @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
+    def test_import_ecdh(self, session, version, key_type):
+        if key_type == KEY_TYPE.X25519 and version < (5, 7, 0):
+            pytest.skip("X25519 requires YubiKey 5.7 or later")
+
+        e_priv = generate_sw_key(key_type)
+        public_key = import_key(session, SLOT.KEY_MANAGEMENT, key_type=key_type)
+        if key_type == KEY_TYPE.X25519:
+            args = (public_key,)
+        else:
+            args = (ec.ECDH(), public_key)
+
+        shared1 = e_priv.exchange(*args)
+        session.verify_pin(DEFAULT_PIN)
+        shared2 = session.calculate_secret(SLOT.KEY_MANAGEMENT, e_priv.public_key())
+        assert shared1 == shared2
 
 
 class TestKeyManagement:
@@ -230,7 +301,7 @@ class TestKeyManagement:
 
     def _test_put_key_pairing(self, session, alg1, alg2):
         # Set up a key in the slot and create a certificate for it
-        public_key = generate_key(session, SLOT.AUTHENTICATION, alg=alg1)
+        public_key = generate_key(session, SLOT.AUTHENTICATION, key_type=alg1)
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
         session.verify_pin(DEFAULT_PIN)
         cert = generate_self_signed_certificate(
@@ -245,12 +316,12 @@ class TestKeyManagement:
         session.delete_certificate(SLOT.AUTHENTICATION)
 
         # Overwrite the key with one of the same type
-        generate_key(session, SLOT.AUTHENTICATION, alg=alg1)
+        generate_key(session, SLOT.AUTHENTICATION, key_type=alg1)
         session.verify_pin(DEFAULT_PIN)
         assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 
         # Overwrite the key with one of a different type
-        generate_key(session, SLOT.AUTHENTICATION, alg=alg2)
+        generate_key(session, SLOT.AUTHENTICATION, key_type=alg2)
         session.verify_pin(DEFAULT_PIN)
         assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 

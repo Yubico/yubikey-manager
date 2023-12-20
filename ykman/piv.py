@@ -41,7 +41,7 @@ from yubikit.piv import (
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding, ed25519, x25519
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
@@ -151,6 +151,10 @@ def _dummy_key(key_type):
         return ec.generate_private_key(ec.SECP256R1(), default_backend())
     if key_type == KEY_TYPE.ECCP384:
         return ec.generate_private_key(ec.SECP384R1(), default_backend())
+    if key_type == KEY_TYPE.ED25519:
+        return ed25519.Ed25519PrivateKey.generate()
+    if key_type == KEY_TYPE.X25519:
+        return x25519.X25519PrivateKey.generate()
     raise ValueError("Invalid algorithm")
 
 
@@ -640,6 +644,12 @@ _AllowedHashTypes = Union[
 ]
 
 
+def _hash(key_type, hash_algorithm):
+    if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+        return None
+    return hash_algorithm()
+
+
 def sign_certificate_builder(
     session: PivSession,
     slot: SLOT,
@@ -653,17 +663,17 @@ def sign_certificate_builder(
     :param slot: The slot.
     :param key_type: The key type.
     :param builder: The x509 certificate builder object.
-    :param hash_algorithm: The hash algorithm.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519.
     """
     logger.debug("Signing a certificate")
     dummy_key = _dummy_key(key_type)
-    cert = builder.sign(dummy_key, hash_algorithm(), default_backend())
+    cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
 
     sig = session.sign(
         slot,
         key_type,
         cert.tbs_certificate_bytes,
-        hash_algorithm(),
+        _hash(key_type, hash_algorithm),
         padding.PKCS1v15(),  # Only used for RSA
     )
 
@@ -690,12 +700,13 @@ def sign_csr_builder(
     :param public_key: The public key.
     :param builder: The x509 certificate signing request builder
         object.
-    :param hash_algorithm: The hash algorithm.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519.
     """
     logger.debug("Signing a CSR")
     key_type = KEY_TYPE.from_public_key(public_key)
     dummy_key = _dummy_key(key_type)
-    csr = builder.sign(dummy_key, hash_algorithm(), default_backend())
+
+    csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
     seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
 
     # Replace public key
@@ -712,7 +723,7 @@ def sign_csr_builder(
         slot,
         key_type,
         seq[0],
-        hash_algorithm(),
+        _hash(key_type, hash_algorithm),
         padding.PKCS1v15(),  # Only used for RSA
     )
 

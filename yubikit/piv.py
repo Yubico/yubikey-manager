@@ -48,8 +48,13 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    PublicFormat,
+    PrivateFormat,
+    NoEncryption,
+)
+from cryptography.hazmat.primitives.asymmetric import rsa, ec, ed25519, x25519
 from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.backends import default_backend
@@ -88,13 +93,15 @@ class KEY_TYPE(IntEnum):
     RSA4096 = 0x16
     ECCP256 = 0x11
     ECCP384 = 0x14
+    ED25519 = 0xE0
+    X25519 = 0xE1
 
     def __str__(self):
         return self.name
 
     @property
     def algorithm(self):
-        return ALGORITHM.EC if self.name.startswith("ECC") else ALGORITHM.RSA
+        return ALGORITHM.RSA if self.name.startswith("RSA") else ALGORITHM.EC
 
     @property
     def bit_len(self):
@@ -118,6 +125,10 @@ class KEY_TYPE(IntEnum):
             elif curve_name == "secp384r1":
                 return cls.ECCP384
             raise ValueError(f"Unsupported EC curve: {curve_name}")
+        elif isinstance(key, ed25519.Ed25519PublicKey):
+            return cls.ED25519
+        elif isinstance(key, x25519.X25519PublicKey):
+            return cls.X25519
         raise ValueError(f"Unsupported key type: {type(key).__name__}")
 
 
@@ -367,6 +378,8 @@ class BioMetadata:
 
 
 def _pad_message(key_type, message, hash_algorithm, padding):
+    if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+        return message
     if key_type.algorithm == ALGORITHM.EC:
         if isinstance(hash_algorithm, Prehashed):
             hashed = message
@@ -434,7 +447,12 @@ def check_key_support(
             raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
 
     # New key types
-    if version < (5, 7, 0) and key_type in (KEY_TYPE.RSA3072, KEY_TYPE.RSA4096):
+    if version < (5, 7, 0) and key_type in (
+        KEY_TYPE.RSA3072,
+        KEY_TYPE.RSA4096,
+        KEY_TYPE.ED25519,
+        KEY_TYPE.X25519,
+    ):
         raise NotSupportedError(f"{key_type} requires YubiKey 5.7 or later")
 
     # TODO: Detect Bio capabilities
@@ -450,6 +468,10 @@ def _parse_device_public_key(key_type, encoded):
         modulus = bytes2int(data[0x81])
         exponent = bytes2int(data[0x82])
         return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
+    elif key_type == KEY_TYPE.ED25519:
+        return ed25519.Ed25519PublicKey.from_public_bytes(data[0x86])
+    elif key_type == KEY_TYPE.X25519:
+        return x25519.X25519PublicKey.from_public_bytes(data[0x86])
     else:
         if key_type == KEY_TYPE.ECCP256:
             curve: Type[ec.EllipticCurve] = ec.SECP256R1
@@ -802,11 +824,9 @@ class PivSession:
         :param padding: The padding of the plain text.
         """
         slot = SLOT(slot)
-        if len(cipher_text) == 1024 // 8:
-            key_type = KEY_TYPE.RSA1024
-        elif len(cipher_text) == 2048 // 8:
-            key_type = KEY_TYPE.RSA2048
-        else:
+        try:
+            key_type = getattr(KEY_TYPE, f"RSA{len(cipher_text) * 8}")
+        except AttributeError:
             raise ValueError("Invalid length of ciphertext")
         logger.debug(
             f"Decrypting data with key in slot {slot} of type {key_type} using ",
@@ -832,9 +852,12 @@ class PivSession:
         logger.debug(
             f"Performing key agreement with key in slot {slot} of type {key_type}"
         )
-        data = peer_public_key.public_bytes(
-            Encoding.X962, PublicFormat.UncompressedPoint
-        )
+        if key_type == KEY_TYPE.X25519:
+            data = peer_public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+        else:
+            data = peer_public_key.public_bytes(
+                Encoding.X962, PublicFormat.UncompressedPoint
+            )
         return self._use_private_key(slot, key_type, data, True)
 
     def get_object(self, object_id: int) -> bytes:
@@ -970,8 +993,8 @@ class PivSession:
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
         check_key_support(self.version, key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
-        numbers = private_key.private_numbers()
         if key_type.algorithm == ALGORITHM.RSA:
+            numbers = private_key.private_numbers()
             numbers = cast(rsa.RSAPrivateNumbers, numbers)
             if numbers.public_numbers.e != 65537:
                 raise NotSupportedError("RSA exponent must be 65537")
@@ -983,7 +1006,15 @@ class PivSession:
                 + Tlv(0x04, int2bytes(numbers.dmq1, ln))
                 + Tlv(0x05, int2bytes(numbers.iqmp, ln))
             )
+        elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+            data = Tlv(
+                0x07 if key_type == KEY_TYPE.ED25519 else 0x08,
+                private_key.private_bytes(
+                    Encoding.Raw, PrivateFormat.Raw, NoEncryption()
+                ),
+            )
         else:
+            numbers = private_key.private_numbers()
             numbers = cast(ec.EllipticCurvePrivateNumbers, numbers)
             data = Tlv(0x06, int2bytes(numbers.private_value, ln))
         if pin_policy:
