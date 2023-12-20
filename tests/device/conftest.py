@@ -1,6 +1,6 @@
 from ykman.device import list_all_devices, read_info
 from ykman.pcsc import list_devices
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, Version
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -36,6 +36,9 @@ def _device(pytestconfig):
         dev, info = devices[0]
     if info.serial != serial:
         pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
+    version = pytestconfig.getoption("use_version")
+    if version:
+        info.version = Version.from_string(version)
 
     return dev, info
 
