@@ -939,7 +939,7 @@ def generate_certificate(
     data = public_key.read()
     public_key = serialization.load_pem_public_key(data, default_backend())
 
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     valid_to = now + datetime.timedelta(days=valid_days)
 
     if "=" not in subject:

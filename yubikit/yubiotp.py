@@ -633,8 +633,6 @@ class ConfigState:
 
 
 class _Backend(abc.ABC):
-    version: Version
-
     @abc.abstractmethod
     def close(self) -> None:
         ...
