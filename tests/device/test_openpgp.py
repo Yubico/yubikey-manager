@@ -102,14 +102,14 @@ def test_import_ecdh_x25519(session):
 @pytest.mark.parametrize("key_size", [2048, 3072, 4096])
 def test_import_sign_rsa(session, key_size, info):
     if key_size != 2048:
-        if session.version[0] < 4:
+        if info.version[0] < 4:
             pytest.skip(f"RSA {key_size} requires YuibKey 4 or later")
-        elif session.version[0] == 4 and info.is_fips:
+        elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
     priv = rsa.generate_private_key(E, key_size, default_backend())
     session.verify_admin(DEFAULT_ADMIN_PIN)
     session.put_key(KEY_REF.SIG, priv)
-    if session.version[0] < 5:
+    if info.version[0] < 5:
         # Keys don't work without a generation time (or fingerprint)
         session.set_generation_time(KEY_REF.SIG, int(time.time()))
 
@@ -122,14 +122,14 @@ def test_import_sign_rsa(session, key_size, info):
 @pytest.mark.parametrize("key_size", [2048, 3072, 4096])
 def test_import_decrypt_rsa(session, key_size, info):
     if key_size != 2048:
-        if session.version[0] < 4:
+        if info.version[0] < 4:
             pytest.skip(f"RSA {key_size} requires YuibKey 4 or later")
-        elif session.version[0] == 4 and info.is_fips:
+        elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
     priv = rsa.generate_private_key(E, key_size, default_backend())
     session.verify_admin(DEFAULT_ADMIN_PIN)
     session.put_key(KEY_REF.DEC, priv)
-    if session.version[0] < 5:
+    if info.version[0] < 5:
         # Keys don't work without a generation time (or fingerprint)
         session.set_generation_time(KEY_REF.DEC, int(time.time()))
 
@@ -145,13 +145,13 @@ def test_import_decrypt_rsa(session, key_size, info):
 @pytest.mark.parametrize("key_size", [2048, 3072, 4096])
 def test_generate_rsa(session, key_size, info):
     if key_size != 2048:
-        if session.version[0] < 4:
+        if info.version[0] < 4:
             pytest.skip(f"RSA {key_size} requires YuibKey 4 or later")
-        elif session.version[0] == 4 and info.is_fips:
+        elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
     session.verify_admin(DEFAULT_ADMIN_PIN)
     pub = session.generate_rsa_key(KEY_REF.SIG, RSA_SIZE(key_size))
-    if session.version[0] < 5:
+    if info.version[0] < 5:
         # Keys don't work without a generation time (or fingerprint)
         session.set_generation_time(KEY_REF.SIG, int(time.time()))
 

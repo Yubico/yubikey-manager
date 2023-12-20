@@ -137,7 +137,7 @@ class TestCertificateSignatures:
     def test_generate_self_signed_certificate(
         self, info, session, key_type, hash_algorithm
     ):
-        if key_type == KEY_TYPE.ECCP384 and session.version < (4, 0, 0):
+        if key_type == KEY_TYPE.ECCP384 and info.version < (4, 0, 0):
             pytest.skip("ECCP384 requires YubiKey 4 or later")
         if key_type == KEY_TYPE.RSA1024 and info.is_fips and info.version[0] == 4:
             pytest.skip("RSA1024 not available on YubiKey FIPS")
@@ -498,7 +498,7 @@ class TestUnblockPin:
         assert session.get_pin_attempts() == 3
         session.verify_pin(NON_DEFAULT_PIN)
 
-    def test_set_pin_retries_requires_pin_and_mgm_key(self, session):
+    def test_set_pin_retries_requires_pin_and_mgm_key(self, session, version):
         # Fails with no authentication
         with pytest.raises(ApduError):
             session.set_pin_attempts(4, 4)
@@ -512,7 +512,7 @@ class TestUnblockPin:
 
         session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
         # Fails with only management key (requirement added in 0.1.3)
-        if session.version >= (0, 1, 3):
+        if version >= (0, 1, 3):
             with pytest.raises(ApduError):
                 session.set_pin_attempts(4, 4)
 
