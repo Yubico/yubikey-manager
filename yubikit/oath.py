@@ -208,7 +208,7 @@ def _parse_cred_id(cred_id, oath_type):
         else:
             return None, data, DEFAULT_PERIOD
     else:
-        if ":" in data:
+        if ":" in data and data[0] != ":":
             issuer, data = data.split(":", 1)
         else:
             issuer = None
