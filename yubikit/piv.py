@@ -263,6 +263,7 @@ INS_GENERATE_ASYMMETRIC = 0x47
 INS_AUTHENTICATE = 0x87
 INS_GET_DATA = 0xCB
 INS_PUT_DATA = 0xDB
+INS_MOVE_KEY = 0xF6
 INS_GET_METADATA = 0xF7
 INS_ATTEST = 0xF9
 INS_SET_PIN_RETRIES = 0xFA
@@ -1033,6 +1034,30 @@ class PivSession:
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
         logger.debug(f"Attested key in slot {slot}")
         return x509.load_der_x509_certificate(response, default_backend())
+
+    def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
+        """Move key from one slot to another.
+
+        :param from_slot: The slot containing the key to move.
+        :param to_slot: The new slot to move the key to.
+        """
+        require_version(self.version, (5, 7, 0))
+        from_slot = SLOT(from_slot)
+        to_slot = SLOT(to_slot)
+        logger.debug(f"Moving key from slot {from_slot} to {to_slot}")
+        self.protocol.send_apdu(0, INS_MOVE_KEY, to_slot, from_slot)
+        logger.info(f"Key moved from slot {from_slot} to {to_slot}")
+
+    def delete_key(self, slot: SLOT) -> None:
+        """Delete a key in a slot.
+
+        :param slot: The slot containing the key to delete.
+        """
+        require_version(self.version, (5, 7, 0))
+        slot = SLOT(slot)
+        logger.debug(f"Deleting key in slot {slot}")
+        self.protocol.send_apdu(0, INS_MOVE_KEY, 0xFF, slot)
+        logger.info(f"Key deleted in slot {slot}")
 
     def _change_reference(self, ins, p2, value1, value2):
         try:

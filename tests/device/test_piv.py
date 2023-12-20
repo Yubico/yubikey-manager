@@ -623,3 +623,33 @@ class TestMetadata:
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
+
+
+class TestMoveAndDelete:
+    @pytest.fixture(autouse=True)
+    @condition.min_version(5, 7)
+    def preconditions(self):
+        pass
+
+    def test_move_key(self, session):
+        key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        session.put_key(SLOT.AUTHENTICATION, key)
+        data_a = session.get_slot_metadata(SLOT.AUTHENTICATION)
+
+        session.move_key(SLOT.AUTHENTICATION, SLOT.SIGNATURE)
+        data_s = session.get_slot_metadata(SLOT.SIGNATURE)
+
+        assert data_a == data_s
+        with pytest.raises(ApduError):
+            session.get_slot_metadata(SLOT.AUTHENTICATION)
+
+    def test_delete_key(self, session):
+        key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        session.authenticate(MANAGEMENT_KEY_TYPE.TDES, DEFAULT_MANAGEMENT_KEY)
+        session.put_key(SLOT.AUTHENTICATION, key)
+        session.get_slot_metadata(SLOT.AUTHENTICATION)
+
+        session.delete_key(SLOT.AUTHENTICATION)
+        with pytest.raises(ApduError):
+            session.get_slot_metadata(SLOT.AUTHENTICATION)
