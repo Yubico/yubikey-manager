@@ -141,6 +141,7 @@ def test_import_decrypt_rsa(session, key_size, info):
     assert message == plain
 
 
+@condition.check(not_roca)
 @pytest.mark.parametrize("key_size", [2048, 3072, 4096])
 def test_generate_rsa(session, key_size, info):
     if key_size != 2048:
