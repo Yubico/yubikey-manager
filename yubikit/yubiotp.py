@@ -693,9 +693,9 @@ class _YubiOtpSmartCardBackend(_Backend):
             return status
         if self._prog_seq == 0 and prev_prog_seq > 0:
             version = Version.from_bytes(status[:3])
-            if (4, 0) <= version < (5, 5):  # Programming state does not update
-                return status
             if status[4] & 0x1F == 0:
+                return status
+            if (5, 0, 0) <= version < (5, 4, 3):  # Programming state does not update
                 return status
         raise CommandRejectedError("Not updated")
 
