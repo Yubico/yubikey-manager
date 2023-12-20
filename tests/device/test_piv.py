@@ -141,6 +141,12 @@ class TestCertificateSignatures:
             pytest.skip("ECCP384 requires YubiKey 4 or later")
         if key_type == KEY_TYPE.RSA1024 and info.is_fips and info.version[0] == 4:
             pytest.skip("RSA1024 not available on YubiKey FIPS")
+        if key_type in (KEY_TYPE.RSA3072, KEY_TYPE.RSA4096) and info.version < (
+            5,
+            7,
+            0,
+        ):
+            pytest.skip(f"{key_type} requires YubiKey 5.7 or later")
 
         slot = SLOT.SIGNATURE
         public_key = import_key(session, slot, key_type)

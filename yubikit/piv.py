@@ -84,8 +84,13 @@ def require_version(my_version: Version, *args, **kwargs):
 class KEY_TYPE(IntEnum):
     RSA1024 = 0x06
     RSA2048 = 0x07
+    RSA3072 = 0x05
+    RSA4096 = 0x16
     ECCP256 = 0x11
     ECCP384 = 0x14
+
+    def __str__(self):
+        return self.name
 
     @property
     def algorithm(self):
@@ -427,6 +432,10 @@ def check_key_support(
             raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
         if pin_policy == PIN_POLICY.NEVER:
             raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
+
+    # New key types
+    if version < (5, 7, 0) and key_type in (KEY_TYPE.RSA3072, KEY_TYPE.RSA4096):
+        raise NotSupportedError(f"{key_type} requires YubiKey 5.7 or later")
 
     # TODO: Detect Bio capabilities
     if version < () and pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):

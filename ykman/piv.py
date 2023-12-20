@@ -144,14 +144,12 @@ def parse_rfc4514_string(value: str) -> x509.Name:
     return x509.Name(attributes)
 
 
-def _dummy_key(algorithm):
-    if algorithm == KEY_TYPE.RSA1024:
-        return rsa.generate_private_key(65537, 1024, default_backend())  # nosec
-    if algorithm == KEY_TYPE.RSA2048:
-        return rsa.generate_private_key(65537, 2048, default_backend())
-    if algorithm == KEY_TYPE.ECCP256:
+def _dummy_key(key_type):
+    if key_type.algorithm == ALGORITHM.RSA:
+        return rsa.generate_private_key(65537, key_type.bit_len, default_backend())
+    if key_type == KEY_TYPE.ECCP256:
         return ec.generate_private_key(ec.SECP256R1(), default_backend())
-    if algorithm == KEY_TYPE.ECCP384:
+    if key_type == KEY_TYPE.ECCP384:
         return ec.generate_private_key(ec.SECP384R1(), default_backend())
     raise ValueError("Invalid algorithm")
 
