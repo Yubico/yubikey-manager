@@ -67,7 +67,13 @@ class TestPivFunctions:
                     Version(4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
                 )
 
+        for key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+            with pytest.raises(NotSupportedError):
+                check_key_support(
+                    Version(5, 6, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                )
+
         for key_type in KEY_TYPE:
             check_key_support(
-                Version(5, 1, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
+                Version(5, 7, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
             )

@@ -21,6 +21,7 @@ from yubikit.piv import (
     OBJECT_ID,
     MANAGEMENT_KEY_TYPE,
     InvalidPinError,
+    check_key_support,
 )
 from ykman.piv import (
     check_key,
@@ -143,6 +144,20 @@ def verify_cert_signature(cert, public_key=None):
     public_key.verify(*args)
 
 
+def skip_unsupported_key_type(key_type, info):
+    if key_type == KEY_TYPE.RSA1024 and info.is_fips and info.version[0] == 4:
+        pytest.skip("RSA1024 not available on YubiKey FIPS")
+    try:
+        check_key_support(
+            info.version,
+            key_type,
+            PIN_POLICY.DEFAULT,
+            TOUCH_POLICY.DEFAULT,
+        )
+    except NotSupportedError as e:
+        pytest.skip(f"{e}")
+
+
 class TestCertificateSignatures:
     @pytest.mark.parametrize("key_type", SIGN_KEY_TYPES)
     @pytest.mark.parametrize(
@@ -151,16 +166,7 @@ class TestCertificateSignatures:
     def test_generate_self_signed_certificate(
         self, info, session, key_type, hash_algorithm
     ):
-        if key_type == KEY_TYPE.ECCP384 and info.version < (4, 0, 0):
-            pytest.skip("ECCP384 requires YubiKey 4 or later")
-        if key_type == KEY_TYPE.RSA1024 and info.is_fips and info.version[0] == 4:
-            pytest.skip("RSA1024 not available on YubiKey FIPS")
-        if key_type in (
-            KEY_TYPE.RSA3072,
-            KEY_TYPE.RSA4096,
-            KEY_TYPE.ED25519,
-        ) and info.version < (5, 7, 0):
-            pytest.skip(f"{key_type} requires YubiKey 5.7 or later")
+        skip_unsupported_key_type(key_type, info)
 
         slot = SLOT.SIGNATURE
         public_key = import_key(session, slot, key_type)
@@ -182,9 +188,8 @@ class TestDecrypt:
         "key_type",
         [KEY_TYPE.RSA1024, KEY_TYPE.RSA2048, KEY_TYPE.RSA3072, KEY_TYPE.RSA4096],
     )
-    def test_import_decrypt(self, session, version, key_type):
-        if key_type in (KEY_TYPE.RSA3072, KEY_TYPE.RSA4096) and version < (5, 7, 0):
-            pytest.skip(f"{key_type} requires YubiKey 5.7 or later")
+    def test_import_decrypt(self, session, info, key_type):
+        skip_unsupported_key_type(key_type, info)
 
         public_key = import_key(session, SLOT.KEY_MANAGEMENT, key_type=key_type)
         pt = os.urandom(32)
@@ -197,9 +202,8 @@ class TestDecrypt:
 
 class TestKeyAgreement:
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
-    def test_generate_ecdh(self, session, version, key_type):
-        if key_type == KEY_TYPE.X25519 and version < (5, 7, 0):
-            pytest.skip("X25519 requires YubiKey 5.7 or later")
+    def test_generate_ecdh(self, session, info, key_type):
+        skip_unsupported_key_type(key_type, info)
 
         e_priv = generate_sw_key(key_type)
         public_key = generate_key(session, SLOT.KEY_MANAGEMENT, key_type=key_type)
@@ -214,9 +218,8 @@ class TestKeyAgreement:
         assert shared1 == shared2
 
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
-    def test_import_ecdh(self, session, version, key_type):
-        if key_type == KEY_TYPE.X25519 and version < (5, 7, 0):
-            pytest.skip("X25519 requires YubiKey 5.7 or later")
+    def test_import_ecdh(self, session, info, key_type):
+        skip_unsupported_key_type(key_type, info)
 
         e_priv = generate_sw_key(key_type)
         public_key = import_key(session, SLOT.KEY_MANAGEMENT, key_type=key_type)
@@ -649,7 +652,9 @@ class TestMetadata:
         assert data.default_value is False
 
     @pytest.mark.parametrize("key_type", list(KEY_TYPE))
-    def test_slot_metadata_generate(self, session, key_type):
+    def test_slot_metadata_generate(self, session, info, key_type):
+        skip_unsupported_key_type(key_type, info)
+
         slot = SLOT.SIGNATURE
         key = generate_key(session, slot, key_type)
         data = session.get_slot_metadata(slot)
