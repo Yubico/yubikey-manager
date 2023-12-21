@@ -105,6 +105,8 @@ class KEY_TYPE(IntEnum):
 
     @property
     def bit_len(self):
+        if self in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+            return 256
         match = re.search(r"\d+$", self.name)
         if match:
             return int(match.group())
@@ -117,7 +119,6 @@ class KEY_TYPE(IntEnum):
                 return getattr(cls, "RSA%d" % key.key_size)
             except AttributeError:
                 raise ValueError("Unsupported RSA key size: %d" % key.key_size)
-                pass  # Fall through to ValueError
         elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
             if curve_name == "secp256r1":
@@ -836,7 +837,11 @@ class PivSession:
         return _unpad_message(padded, padding)
 
     def calculate_secret(
-        self, slot: SLOT, peer_public_key: ec.EllipticCurvePublicKey
+        self,
+        slot: SLOT,
+        peer_public_key: Union[
+            ec.EllipticCurvePrivateKeyWithSerialization, x25519.X25519PublicKey
+        ],
     ) -> bytes:
         """Calculate shared secret using ECDH.
 

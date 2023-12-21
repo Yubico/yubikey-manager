@@ -758,6 +758,55 @@ def export(ctx, slot, public_key_output, format, verify, pin):
     logger.info(f"Public key for slot {slot} written to {_fname(public_key_output)}")
 
 
+@keys.command("move")
+@click.pass_context
+@click_management_key_option
+@click_pin_option
+@click.argument("source", callback=click_parse_piv_slot)
+@click.argument("dest", callback=click_parse_piv_slot)
+def move_key(ctx, management_key, pin, source, target):
+    """
+    Moves a key.
+
+    Moves a key from one PIV slot into another.
+
+    \b
+    SOURCE            PIV slot of the key to move
+    DEST              PIV slot to move the key into
+    """
+    if source == target:
+        raise CliFail("SOURCE must be different from DEST")
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    try:
+        session.move_key(source, target)
+    except ApduError as e:
+        if e.sw == SW.INCORRECT_PARAMETERS:
+            raise CliFail("DEST slot is not empty")
+        if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            raise CliFail("No key in SOURCE slot")
+        raise
+
+
+@keys.command("delete")
+@click.pass_context
+@click_management_key_option
+@click_pin_option
+@click_slot_argument
+def delete_key(ctx, management_key, pin, slot):
+    """
+    Delete a key.
+
+    Delete a key from a PIV slot on the YubiKey.
+
+    \b
+    SLOT            PIV slot of the key
+    """
+    session = ctx.obj["session"]
+    _ensure_authenticated(ctx, pin, management_key)
+    session.delete_key(slot)
+
+
 @piv.group("certificates")
 def cert():
     """
