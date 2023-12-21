@@ -474,9 +474,11 @@ def verify(ctx, pin):
 
 
 def _init_config(ctx, pin):
-    pin = _require_pin(ctx, pin, "Authenticator Configuration")
-
     ctap2 = ctx.obj.get("ctap2")
+    if not Config.is_supported(ctap2.info):
+        raise CliFail("Authenticator Configuration is not supported on this YubiKey.")
+
+    pin = _require_pin(ctx, pin, "Authenticator Configuration")
     client_pin = ClientPin(ctap2)
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.AUTHENTICATOR_CFG)
@@ -493,6 +495,10 @@ def force_pin_change(ctx, pin):
     """
     Force the PIN to be changed to a new value before use.
     """
+    options = ctx.obj.get("ctap2").info.options
+    if not options.get("setMinPINLength"):
+        raise CliFail("Force change PIN is not supported on this YubiKey.")
+
     config = _init_config(ctx, pin)
     config.set_min_pin_length(force_change_pin=True)
 
@@ -501,7 +507,7 @@ def force_pin_change(ctx, pin):
 @click.pass_context
 @click.option("-P", "--pin", help="PIN code")
 @click.option("-R", "--rp-id", multiple=True, help="RP ID to allow")
-@click.argument("length", type=int)
+@click.argument("length", type=click.IntRange(4))
 def set_min_pin_length(ctx, pin, rp_id, length):
     """
     Set the minimum length allowed for PIN.
@@ -509,11 +515,11 @@ def set_min_pin_length(ctx, pin, rp_id, length):
     Optionally use the --rp option to specify which RPs are allowed to request this
     information.
     """
-    config = _init_config(ctx, pin)
     options = ctx.obj.get("ctap2").info.options
     if not options.get("setMinPINLength"):
         raise CliFail("Set minimum PIN length is not supported on this YubiKey.")
 
+    config = _init_config(ctx, pin)
     if rp_id:
         ctap2 = ctx.obj.get("ctap2")
         cap = ctap2.info.max_rpids_for_min_pin
@@ -871,10 +877,11 @@ def toggle_always_uv(ctx, pin):
     """
     Toggles the state of Always Require User Verification.
     """
-    config = _init_config(ctx, pin)
     options = ctx.obj.get("ctap2").info.options
     if "alwaysUv" not in options:
         raise CliFail("Always Require UV is not supported on this YubiKey.")
+
+    config = _init_config(ctx, pin)
     config.toggle_always_uv()
 
 
@@ -885,8 +892,9 @@ def enable_ep_attestation(ctx, pin):
     """
     Enables Enterprise Attestation for Authenticators pre-configured to support it.
     """
-    config = _init_config(ctx, pin)
     options = ctx.obj.get("ctap2").info.options
     if "ep" not in options:
         raise CliFail("Enterprise Attestation is not supported on this YubiKey.")
+
+    config = _init_config(ctx, pin)
     config.enable_enterprise_attestation()
