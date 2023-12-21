@@ -33,6 +33,7 @@ from fido2.ctap2 import (
     CredentialManagement,
     FPBioEnrollment,
     CaptureError,
+    Config,
 )
 from fido2.pcsc import CtapPcscDevice
 from yubikit.core.fido import FidoConnection
@@ -124,6 +125,7 @@ def info(ctx):
                 click.echo("PIN is set, but has been blocked.")
         else:
             click.echo("PIN is not set.")
+        click.echo(f"Minimum PIN length: {ctap2.info.min_pin_length}")
 
         bio_enroll = ctap2.info.options.get("bioEnroll")
         if bio_enroll:
@@ -145,6 +147,17 @@ def info(ctx):
             click.echo(
                 "Always Require User Verification is turned "
                 + ("on." if always_uv else "off.")
+            )
+
+        remaining_creds = ctap2.info.remaining_disc_creds
+        if remaining_creds is not None:
+            click.echo(f"Credentials storage remaining: {remaining_creds}")
+
+        ep = ctap2.info.options.get("ep")
+        if ep is not None:
+            click.echo(
+                "Enterprise attestation is supported, and "
+                + ("enabled." if ep else "disabled.")
             )
 
     else:
@@ -458,6 +471,57 @@ def verify(ctx, pin):
     else:
         raise CliFail("This YubiKey does not support a FIDO PIN.")
     click.echo("PIN verified.")
+
+
+def _init_config(ctx, pin):
+    pin = _require_pin(ctx, pin, "Authenticator Configuration")
+
+    ctap2 = ctx.obj.get("ctap2")
+    client_pin = ClientPin(ctap2)
+    try:
+        token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.AUTHENTICATOR_CFG)
+    except CtapError as e:
+        _fail_pin_error(ctx, e, "PIN error: %s")
+
+    return Config(ctap2, client_pin.protocol, token)
+
+
+@access.command("force-change")
+@click.pass_context
+@click.option("-P", "--pin", help="PIN code")
+def force_pin_change(ctx, pin):
+    """
+    Force the PIN to be changed to a new value before use.
+    """
+    config = _init_config(ctx, pin)
+    config.set_min_pin_length(force_change_pin=True)
+
+
+@access.command("set-min-length")
+@click.pass_context
+@click.option("-P", "--pin", help="PIN code")
+@click.option("-R", "--rp-id", multiple=True, help="RP ID to allow")
+@click.argument("length", type=int)
+def set_min_pin_length(ctx, pin, rp_id, length):
+    """
+    Set the minimum length allowed for PIN.
+
+    Optionally use the --rp option to specify which RPs are allowed to request this
+    information.
+    """
+    config = _init_config(ctx, pin)
+    options = ctx.obj.get("ctap2").info.options
+    if not options.get("setMinPINLength"):
+        raise CliFail("Set minimum PIN length is not supported on this YubiKey.")
+
+    if rp_id:
+        ctap2 = ctx.obj.get("ctap2")
+        cap = ctap2.info.max_rpids_for_min_pin
+        if len(rp_id) > cap:
+            raise CliFail(
+                f"Authenticator supports up to {cap} RP IDs ({len(rp_id)} given)."
+            )
+    config.set_min_pin_length(min_pin_length=length, rp_ids=rp_id)
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
@@ -791,3 +855,38 @@ def bio_delete(ctx, template_id, pin, force):
             logger.info("Fingerprint template deleted")
         except CtapError as e:
             raise CliFail(f"Failed to delete fingerprint: {e.code.name}")
+
+
+@fido.group("config")
+def config():
+    """
+    Manage FIDO configuration.
+    """
+
+
+@config.command("toggle-always-uv")
+@click.pass_context
+@click.option("-P", "--pin", help="PIN code")
+def toggle_always_uv(ctx, pin):
+    """
+    Toggles the state of Always Require User Verification.
+    """
+    config = _init_config(ctx, pin)
+    options = ctx.obj.get("ctap2").info.options
+    if "alwaysUv" not in options:
+        raise CliFail("Always Require UV is not supported on this YubiKey.")
+    config.toggle_always_uv()
+
+
+@config.command("enable-ep-attestation")
+@click.pass_context
+@click.option("-P", "--pin", help="PIN code")
+def enable_ep_attestation(ctx, pin):
+    """
+    Enables Enterprise Attestation for Authenticators pre-configured to support it.
+    """
+    config = _init_config(ctx, pin)
+    options = ctx.obj.get("ctap2").info.options
+    if "ep" not in options:
+        raise CliFail("Enterprise Attestation is not supported on this YubiKey.")
+    config.enable_enterprise_attestation()
