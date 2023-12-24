@@ -469,7 +469,7 @@ class ManagementSession:
     ) -> None:
         """Write configuration settings for YubiKey.
 
-        :pararm config: The device configuration.
+        :param config: The device configuration.
         :param reboot: If True the YubiKey will reboot.
         :param cur_lock_code: Current lock code.
         :param new_lock_code: New lock code.

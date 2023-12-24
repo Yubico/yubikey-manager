@@ -388,7 +388,7 @@ def main():
         elif isinstance(e, ValueError):
             msg = f"{e}"
         else:
-            msg = "An unexpected error has occured"
+            msg = "An unexpected error has occurred"
             formatter.show_trace = True
         logger.exception(msg)
         sys.exit(status)

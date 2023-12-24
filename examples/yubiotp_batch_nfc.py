@@ -19,7 +19,7 @@ import struct
 
 
 try:
-    # name of the NFC reader to use. Case-insentitive substring matching.
+    # name of the NFC reader to use. Case-insensitive substring matching.
     nfc_reader = sys.argv[1]  # e.g: "hid"
     # csv file out output to, given as an argument
     output_fname = sys.argv[2]  # e.g: "output.csv"

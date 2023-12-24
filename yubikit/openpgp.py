@@ -1652,7 +1652,7 @@ class OpenPgpSession:
     def attest_key(self, key_ref: KEY_REF) -> x509.Certificate:
         """Create an attestation certificate for a key.
 
-        The certificte is written to the certificate slot for the key, and its
+        The certificate is written to the certificate slot for the key, and its
         content is returned.
 
         Requires User PIN verification.
