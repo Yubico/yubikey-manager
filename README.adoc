@@ -115,7 +115,7 @@ Yubico also provides packages for Ubuntu in the yubico/stable PPA:
   $ sudo apt install yubikey-manager
 
 ==== FreeBSD
-Althought not being officially supported on this platform, YubiKey Manager can be
+Although not being officially supported on this platform, YubiKey Manager can be
 installed on FreeBSD. It's available via its ports tree or as pre-built package.
 Should you opt to install and use YubiKey Manager on this platform, please be aware
 that it's **NOT** maintained by Yubico.

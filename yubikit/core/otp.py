@@ -176,7 +176,7 @@ class OtpProtocol:
         report = self.connection.receive()
         if len(report) != FEATURE_RPT_SIZE:
             raise Exception(
-                f"Incorrect reature report size (was {len(report)}, "
+                f"Incorrect feature report size (was {len(report)}, "
                 f"expected {FEATURE_RPT_SIZE})"
             )
         return report

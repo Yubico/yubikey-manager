@@ -141,7 +141,7 @@ def get_leaf_certificates(certs):
     """Extract the leaf certificates from a list of certificates.
 
     Leaf certificates are ones whose subject does not appear as
-    issuer among theothers.
+    issuer among the others.
 
     :param certs: The list of cryptography x509 certificate objects.
     """

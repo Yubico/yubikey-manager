@@ -32,7 +32,7 @@ These arguments are accessible in the standard Python way of using sys.argv:
 
 === Scripting utilities
 We include some functions which may be helpful for scripting purposes in
-`ykman/scripting.py`, such as connectiong to one or more YubiKeys to perform
+`ykman/scripting.py`, such as connecting to one or more YubiKeys to perform
 actions upon them. See "Writing your first script" below for some example
 usage.
 
@@ -88,7 +88,7 @@ Found a YubiKey: YubiKey 5 NFC (9681624)
 ....
 
 Now, let's pass an argument to our script. We'll modify the script to take a
-serial number, and check for the presense of that particular YubiKey. We'll use
+serial number, and check for the presence of that particular YubiKey. We'll use
 the `s.multi` function to keep waiting for more YubiKeys until either the
 correct one is found, or the user presses CTRL+C to stop the script. By setting
 `allow_initial=True` we allow there to be YubiKeys connected at the start of

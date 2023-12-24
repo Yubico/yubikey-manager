@@ -552,7 +552,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
     """
     Manage connection modes (USB Interfaces).
 
-    This command is generaly used with YubiKeys prior to the 5 series.
+    This command is generally used with YubiKeys prior to the 5 series.
     Use "ykman config usb" for more granular control on YubiKey 5 and later.
 
     Get the current connection mode of the YubiKey, or set it to MODE.

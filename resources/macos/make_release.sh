@@ -51,7 +51,7 @@ STATUS=$(xcrun notarytool submit "$PKG" --apple-id $1 --team-id LQA3CS5MM7 --pas
 echo "Notarization status: ${STATUS}"
 
 if [[ "$STATUS" == *"Accepted"* ]]; then
-	echo "Notarization successfull. Staple the .pkg"
+	echo "Notarization successful. Staple the .pkg"
 	xcrun stapler staple -v "$PKG"
 
 	echo "# .pkg stapled. Everything should be ready for release!"

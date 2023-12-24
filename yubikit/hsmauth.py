@@ -79,7 +79,7 @@ INS_PUT_MANAGEMENT_KEY = 0x08
 INS_GET_MANAGEMENT_KEY_RETRIES = 0x09
 INS_GET_PUBLIC_KEY = 0x0A
 
-# Lengths for paramters
+# Lengths for parameters
 MANAGEMENT_KEY_LEN = 16
 CREDENTIAL_PASSWORD_LEN = 16
 MIN_LABEL_LEN = 1
@@ -411,7 +411,7 @@ class HsmAuthSession:
         return self._put_credential(
             management_key,
             label,
-            b"",  # Emtpy byte will generate key
+            b"",  # Empty byte will generate key
             ALGORITHM.EC_P256_YUBICO_AUTHENTICATION,
             credential_password,
             touch_required,
