@@ -46,13 +46,14 @@ from .util import (
     click_group,
     prompt_timeout,
     is_yk4_fips,
+    pretty_print,
 )
 from .util import CliFail
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
 from ..pcsc import list_devices as list_ccid
 from smartcard.Exceptions import NoCardException, CardConnectionException
-from typing import Optional, Sequence, List
+from typing import Optional, Sequence, List, Dict
 
 import io
 import csv as _csv
@@ -102,66 +103,59 @@ def info(ctx):
     """
     conn = ctx.obj["conn"]
     ctap2 = ctx.obj.get("ctap2")
+    info: Dict = {}
+    lines: List = [info]
 
     if is_yk4_fips(ctx.obj["info"]):
-        click.echo("FIPS Approved Mode: " + ("Yes" if is_in_fips_mode(conn) else "No"))
+        info["FIPS Approved Mode"] = "Yes" if is_in_fips_mode(conn) else "No"
     elif ctap2:
         client_pin = ClientPin(ctap2)  # N.B. All YubiKeys with CTAP2 support PIN.
         if ctap2.info.options["clientPin"]:
             if ctap2.info.force_pin_change:
-                click.echo(
+                lines.append(
                     "NOTE: The FIDO PIN is disabled and must be changed before it can "
                     "be used!"
                 )
             pin_retries, power_cycle = client_pin.get_pin_retries()
             if pin_retries:
-                click.echo(f"PIN is set, with {pin_retries} attempt(s) remaining.")
+                info["PIN"] = f"{pin_retries} attempt(s) remaining"
                 if power_cycle:
-                    click.echo(
+                    lines.append(
                         "PIN is temporarily blocked. "
                         "Remove and re-insert the YubiKey to unblock."
                     )
             else:
-                click.echo("PIN is set, but has been blocked.")
+                info["PIN"] = "blocked"
         else:
-            click.echo("PIN is not set.")
-        click.echo(f"Minimum PIN length: {ctap2.info.min_pin_length}")
+            info["PIN"] = "not set"
+        info["Minimum PIN length"] = ctap2.info.min_pin_length
 
         bio_enroll = ctap2.info.options.get("bioEnroll")
         if bio_enroll:
             uv_retries = client_pin.get_uv_retries()
             if uv_retries:
-                click.echo(
-                    f"Fingerprints registered, with {uv_retries} attempt(s) "
-                    "remaining."
-                )
+                info["Fingerprints"] = f"registered, {uv_retries} attempt(s) remaining"
             else:
-                click.echo(
-                    "Fingerprints registered, but blocked until PIN is verified."
-                )
+                info["Fingerprints"] = "registered, blocked until PIN is verified"
         elif bio_enroll is False:
-            click.echo("No fingerprints have been registered.")
+            info["Fingerprints"] = "not registered"
 
         always_uv = ctap2.info.options.get("alwaysUv")
         if always_uv is not None:
-            click.echo(
-                "Always Require User Verification is turned "
-                + ("on." if always_uv else "off.")
-            )
+            info["Always Require UV"] = "on" if always_uv else "off"
 
         remaining_creds = ctap2.info.remaining_disc_creds
         if remaining_creds is not None:
-            click.echo(f"Credentials storage remaining: {remaining_creds}")
+            info["Credential storage remaining"] = remaining_creds
 
         ep = ctap2.info.options.get("ep")
         if ep is not None:
-            click.echo(
-                "Enterprise attestation is supported, and "
-                + ("enabled." if ep else "disabled.")
-            )
+            info["Enterprise Attestation"] = "enabled" if ep else "disabled"
 
     else:
-        click.echo("PIN is not supported.")
+        info["PIN"] = "not supported"
+
+    click.echo("\n".join(pretty_print(lines)))
 
 
 @fido.command("reset")
