@@ -52,6 +52,7 @@ from ..piv import (
     get_pivman_protected_data,
     pivman_set_mgm_key,
     pivman_change_pin,
+    pivman_set_pin_attempts,
     derive_management_key,
     generate_random_management_key,
     generate_chuid,
@@ -266,7 +267,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         err=True,
     )
     try:
-        session.set_pin_attempts(pin_retries, puk_retries)
+        pivman_set_pin_attempts(session, pin_retries, puk_retries)
         click.echo("Default PINs are set:")
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")

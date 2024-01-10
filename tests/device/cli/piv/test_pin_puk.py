@@ -4,9 +4,13 @@ from .util import (
     NON_DEFAULT_PIN,
     DEFAULT_PUK,
     NON_DEFAULT_PUK,
+    DEFAULT_MANAGEMENT_KEY,
 )
+from ... import condition
+from ykman.piv import OBJECT_ID_PIVMAN_DATA, PivmanData
 
 import pytest
+import re
 
 
 class TestPin:
@@ -63,3 +67,51 @@ class TestPuk:
             "change-puk",
             input=old_new_new(NON_DEFAULT_PUK, DEFAULT_PUK),
         )
+
+
+class TestSetRetries:
+    @condition.min_version(5, 3)
+    def test_set_retries(self, ykman_cli):
+        ykman_cli(
+            "piv",
+            "access",
+            "set-retries",
+            "5",
+            "6",
+            input=f"{DEFAULT_MANAGEMENT_KEY}\n{DEFAULT_PIN}\ny\n",
+        )
+
+        o = ykman_cli("piv", "info").output
+        assert re.search(r"PIN tries remaining:\s+5/5", o)
+        assert re.search(r"PUK tries remaining:\s+6/6", o)
+
+    @condition.min_version(5, 3)
+    def test_set_retries_clears_puk_blocked(self, ykman_cli):
+        pivman = PivmanData()
+        pivman.puk_blocked = True
+
+        ykman_cli(
+            "piv",
+            "objects",
+            "import",
+            hex(OBJECT_ID_PIVMAN_DATA),
+            "-",
+            "-m",
+            DEFAULT_MANAGEMENT_KEY,
+            input=pivman.get_bytes(),
+        )
+
+        o = ykman_cli("piv", "info").output
+        assert "PUK is blocked" in o
+
+        ykman_cli(
+            "piv",
+            "access",
+            "set-retries",
+            "3",
+            "3",
+            input=f"{DEFAULT_MANAGEMENT_KEY}\n{DEFAULT_PIN}\ny\n",
+        )
+
+        o = ykman_cli("piv", "info").output
+        assert "PUK is blocked" not in o

@@ -223,7 +223,7 @@ class PivmanData:
 
     def get_bytes(self) -> bytes:
         data = b""
-        if self._flags is not None:
+        if self._flags:
             data += Tlv(0x81, struct.pack(">B", self._flags))
         if self.salt is not None:
             data += Tlv(0x82, self.salt)
@@ -360,6 +360,22 @@ def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
         new_key = derive_management_key(new_pin, new_salt)
         session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
         pivman.salt = new_salt
+        session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
+
+
+def pivman_set_pin_attempts(
+    session: PivSession, pin_attempts: int, puk_attempts: int
+) -> None:
+    """Set the number of PIN and PUK retry attempts, while keeping PivmanData in sync.
+
+    :param session: The PIV session.
+    :param pin_attempts: The PIN attempts.
+    :param puk_attempts: The PUK attempts.
+    """
+    session.set_pin_attempts(pin_attempts, puk_attempts)
+    pivman = get_pivman_data(session)
+    if pivman.puk_blocked:
+        pivman.puk_blocked = False
         session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
 
 
