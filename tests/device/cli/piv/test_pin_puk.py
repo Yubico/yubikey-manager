@@ -68,9 +68,36 @@ class TestPuk:
             input=old_new_new(NON_DEFAULT_PUK, DEFAULT_PUK),
         )
 
+    def test_unblock_pin(self, ykman_cli):
+        for _ in range(3):
+            with pytest.raises(SystemExit):
+                ykman_cli(
+                    "piv",
+                    "access",
+                    "change-pin",
+                    "-P",
+                    NON_DEFAULT_PIN,
+                    "-n",
+                    DEFAULT_PIN,
+                )
+
+        o = ykman_cli("piv", "info").output
+        assert re.search(r"PIN tries remaining:\s+0(/3)?", o)
+
+        with pytest.raises(SystemExit):
+            ykman_cli(
+                "piv", "access", "change-pin", "-p", DEFAULT_PIN, "-n", NON_DEFAULT_PIN
+            )
+
+        o = ykman_cli(
+            "piv", "access", "unblock-pin", "-p", DEFAULT_PUK, "-n", DEFAULT_PIN
+        ).output
+        assert "PIN unblocked" in o
+        o = ykman_cli("piv", "info").output
+        assert re.search(r"PIN tries remaining:\s+3(/3)?", o)
+
 
 class TestSetRetries:
-    @condition.min_version(5, 3)
     def test_set_retries(self, ykman_cli):
         ykman_cli(
             "piv",
@@ -82,8 +109,9 @@ class TestSetRetries:
         )
 
         o = ykman_cli("piv", "info").output
-        assert re.search(r"PIN tries remaining:\s+5/5", o)
-        assert re.search(r"PUK tries remaining:\s+6/6", o)
+        assert re.search(r"PIN tries remaining:\s+5(/5)?", o)
+        if re.search(r"PUK tries remaining", o):
+            assert re.search(r"PUK tries remaining:\s+6/6", o)
 
     @condition.min_version(5, 3)
     def test_set_retries_clears_puk_blocked(self, ykman_cli):
