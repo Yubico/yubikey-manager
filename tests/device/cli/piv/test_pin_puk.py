@@ -6,7 +6,6 @@ from .util import (
     NON_DEFAULT_PUK,
     DEFAULT_MANAGEMENT_KEY,
 )
-from ... import condition
 from ykman.piv import OBJECT_ID_PIVMAN_DATA, PivmanData
 
 import pytest
@@ -98,7 +97,7 @@ class TestPuk:
 
 
 class TestSetRetries:
-    def test_set_retries(self, ykman_cli):
+    def test_set_retries(self, ykman_cli, version):
         ykman_cli(
             "piv",
             "access",
@@ -110,11 +109,22 @@ class TestSetRetries:
 
         o = ykman_cli("piv", "info").output
         assert re.search(r"PIN tries remaining:\s+5(/5)?", o)
-        if re.search(r"PUK tries remaining", o):
+        if version >= (5, 3):
             assert re.search(r"PUK tries remaining:\s+6/6", o)
 
-    @condition.min_version(5, 3)
     def test_set_retries_clears_puk_blocked(self, ykman_cli):
+        for _ in range(3):
+            with pytest.raises(SystemExit):
+                ykman_cli(
+                    "piv",
+                    "access",
+                    "change-puk",
+                    "-p",
+                    NON_DEFAULT_PUK,
+                    "-n",
+                    DEFAULT_PUK,
+                )
+
         pivman = PivmanData()
         pivman.puk_blocked = True
 
