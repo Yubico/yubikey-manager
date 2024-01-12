@@ -255,7 +255,7 @@ def change_admin(ctx, admin_pin, new_admin_pin):
 
 @access.command("unblock-pin")
 @click.option(
-    "-a", "--admin-pin", help='admin PIN (use "-" as a value to prompt for input)'
+    "-a", "--admin-pin", help='Admin PIN (use "-" as a value to prompt for input)'
 )
 @click.option("-r", "--reset-code", help="Reset Code")
 @click.option("-n", "--new-pin", help="a new PIN")

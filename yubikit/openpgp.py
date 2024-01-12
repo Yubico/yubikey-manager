@@ -696,7 +696,7 @@ class Kdf(abc.ABC):
     algorithm: ClassVar[int]
 
     @abc.abstractmethod
-    def process(self, pin: str, pw: PW) -> bytes:
+    def process(self, pw: PW, pin: str) -> bytes:
         """Run the KDF on the input PIN."""
 
     @classmethod
@@ -1147,11 +1147,14 @@ class OpenPgpSession:
         )
         logger.info("Number of PIN attempts has been changed")
 
-    def get_kdf(self):
+    def get_kdf(self) -> Kdf:
         """Get the Key Derivation Function data object."""
         if EXTENDED_CAPABILITY_FLAGS.KDF not in self.extended_capabilities.flags:
-            return KdfNone()
-        return Kdf.parse(self.get_data(DO.KDF))
+            kdf: Kdf = KdfNone()
+        else:
+            kdf = Kdf.parse(self.get_data(DO.KDF))
+        logger.debug(f"Using KDF: {type(kdf).__name__}")
+        return kdf
 
     def set_kdf(self, kdf: Kdf) -> None:
         """Set up a PIN Key Derivation Function.
@@ -1173,14 +1176,27 @@ class OpenPgpSession:
         self.put_data(DO.KDF, kdf)
         logger.info("KDF settings changed")
 
+    def _process_pin(self, kdf: Kdf, pw: PW, pin: str) -> bytes:
+        pin_bytes = kdf.process(pw, pin)
+        pin_len = len(pin_bytes)
+        min_len = 6 if pw is PW.USER else 8
+        max_len = self._app_data.discretionary.pw_status.get_max_len(pw)
+        if not (min_len <= pin_len <= max_len):
+            raise ValueError(
+                f"{pw.name} PIN length must be in the range {min_len}-{max_len}"
+            )
+        return pin_bytes
+
     def _verify(self, pw: PW, pin: str, mode: int = 0) -> None:
-        pin_enc = self.get_kdf().process(pw, pin)
+        pin_enc = self._process_pin(self.get_kdf(), pw, pin)
         try:
             self.protocol.send_apdu(0, INS.VERIFY, 0, pw + mode, pin_enc)
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 attempts = self.get_pin_status().get_attempts(pw)
                 raise InvalidPinError(attempts)
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
+                raise InvalidPinError(0, f"{pw.name} PIN blocked")
             raise e
 
     def verify_pin(self, pin, extended: bool = False):
@@ -1225,12 +1241,14 @@ class OpenPgpSession:
                 INS.CHANGE_PIN,
                 0,
                 pw,
-                kdf.process(pw, pin) + kdf.process(pw, new_pin),
+                self._process_pin(kdf, pw, pin) + self._process_pin(kdf, pw, new_pin),
             )
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 attempts = self.get_pin_status().get_attempts(pw)
                 raise InvalidPinError(attempts)
+            if e.sw == SW.AUTH_METHOD_BLOCKED:
+                raise InvalidPinError(0, f"{pw.name} PIN blocked")
             raise e
 
         logger.info(f"New {pw.name} PIN set")
@@ -1262,7 +1280,7 @@ class OpenPgpSession:
         :param reset_code: The Reset Code for User PIN.
         """
         logger.debug("Setting a new PIN Reset Code")
-        data = self.get_kdf().process(PW.RESET, reset_code)
+        data = self._process_pin(self.get_kdf(), PW.RESET, reset_code)
         self.put_data(DO.RESETTING_CODE, data)
         logger.info("New Reset Code has been set")
 
@@ -1275,22 +1293,26 @@ class OpenPgpSession:
         :param reset_code: The Reset Code.
         """
         logger.debug("Resetting User PIN")
-        p1 = 2
         kdf = self.get_kdf()
-        data = kdf.process(PW.USER, new_pin)
+        data = self._process_pin(kdf, PW.USER, new_pin)
         if reset_code:
             logger.debug("Using Reset Code")
-            data = kdf.process(PW.RESET, reset_code) + data
+            data = self._process_pin(kdf, PW.RESET, reset_code) + data
             p1 = 0
+        else:
+            p1 = 2
 
         try:
             self.protocol.send_apdu(0, INS.RESET_RETRY_COUNTER, p1, PW.USER, data)
         except ApduError as e:
-            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED and not reset_code:
-                attempts = self.get_pin_status().attempts_reset
-                raise InvalidPinError(
-                    attempts, f"Invalid Reset Code, {attempts} remaining"
-                )
+            if reset_code:
+                if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+                    attempts = self.get_pin_status().attempts_reset
+                    raise InvalidPinError(
+                        attempts, f"Invalid Reset Code, {attempts} remaining"
+                    )
+                if e.sw in (SW.AUTH_METHOD_BLOCKED, SW.INCORRECT_PARAMETERS):
+                    raise InvalidPinError(0, "Reset Code blocked")
             raise e
         logger.info("New User PIN has been set")
 
