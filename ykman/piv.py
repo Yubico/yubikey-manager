@@ -223,7 +223,7 @@ class PivmanData:
 
     def get_bytes(self) -> bytes:
         data = b""
-        if self._flags is not None:
+        if self._flags:
             data += Tlv(0x81, struct.pack(">B", self._flags))
         if self.salt is not None:
             data += Tlv(0x82, self.salt)
@@ -363,6 +363,22 @@ def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
         session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
 
 
+def pivman_set_pin_attempts(
+    session: PivSession, pin_attempts: int, puk_attempts: int
+) -> None:
+    """Set the number of PIN and PUK retry attempts, while keeping PivmanData in sync.
+
+    :param session: The PIV session.
+    :param pin_attempts: The PIN attempts.
+    :param puk_attempts: The PUK attempts.
+    """
+    session.set_pin_attempts(pin_attempts, puk_attempts)
+    pivman = get_pivman_data(session)
+    if pivman.puk_blocked:
+        pivman.puk_blocked = False
+        session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
+
+
 def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certificate]]:
     """Read out and parse stored certificates.
 
@@ -494,20 +510,20 @@ def get_piv_info(session: PivSession):
         tries = session.get_pin_attempts()
         tries_str = "15 or more" if tries == 15 else str(tries)
     info["PIN tries remaining"] = tries_str
-    if pivman.puk_blocked:
-        lines.append("PUK is blocked")
-    else:
-        try:
-            puk_data = session.get_puk_metadata()
-            if puk_data.default_value:
-                lines.append("WARNING: Using default PUK!")
-            tries_str = "%d/%d" % (
-                puk_data.attempts_remaining,
-                puk_data.total_attempts,
-            )
-            info["PUK tries remaining"] = tries_str
-        except NotSupportedError:
-            pass
+    try:
+        puk_data = session.get_puk_metadata()
+        if puk_data.attempts_remaining == 0:
+            lines.append("PUK is blocked")
+        elif puk_data.default_value:
+            lines.append("WARNING: Using default PUK!")
+        tries_str = "%d/%d" % (
+            puk_data.attempts_remaining,
+            puk_data.total_attempts,
+        )
+        info["PUK tries remaining"] = tries_str
+    except NotSupportedError:
+        if pivman.puk_blocked:
+            lines.append("PUK is blocked")
 
     try:
         metadata = session.get_management_key_metadata()
