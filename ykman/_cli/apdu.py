@@ -106,7 +106,7 @@ def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
 @click.option("-s", "--send-apdu", multiple=True, help="provide full APDUs")
 def apdu(ctx, no_pretty, app, apdu, send_apdu):
     """
-    Execute arbitary APDUs.
+    Execute arbitrary APDUs.
     Provide APDUs as a hex encoded, space-separated list using the following syntax:
     [CLA]INS[P1P2][:DATA][=EXPECTED_SW]
 
