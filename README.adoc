@@ -76,7 +76,7 @@ Some of the libraries used by yubikey-manager have C-extensions, and may require
 additional dependencies to build, such as http://www.swig.org/[swig] and
 potentially https://pcsclite.apdu.fr/[PCSC lite].
 
-=== Pre-build packages
+=== Pre-built packages
 Pre-built packages specific to your platform may be available from Yubico or
 third parties. Please refer to your platforms native package manager for
 detailed instructions on how to install, if available.
