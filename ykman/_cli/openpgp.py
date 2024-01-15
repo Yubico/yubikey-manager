@@ -264,8 +264,9 @@ def unblock_pin(ctx, admin_pin, reset_code, new_pin):
     """
     Unblock the PIN (using Reset Code or Admin PIN).
 
-    If the PIN is lost or blocked you can reset it to a new value using either the
-    Reset Code OR the Admin PIN.
+    If the PIN is lost or blocked you can reset it to a new value using the Reset Code.
+    Alternatively, the Admin PIN can be used (using the "-a, --admin-pin" option)
+    instead of the Reset Code.
 
     The new PIN has a minimum length of 6, and supports any type of
     alphanumeric characters.
