@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.openpgp import OpenPgpSession, KEY_REF
+from yubikit.openpgp import OpenPgpSession, KEY_REF, KdfNone
 
 
 def get_openpgp_info(session: OpenPgpSession):
@@ -43,6 +43,7 @@ def get_openpgp_info(session: OpenPgpSession):
         "Reset code tries remaining": retries.attempts_reset,
         "Admin PIN tries remaining": retries.attempts_admin,
         "Require PIN for signature": retries.pin_policy_user,
+        "KDF enabled": not isinstance(session.get_kdf(), KdfNone),
     }
 
     # Touch only available on YK4 and later
