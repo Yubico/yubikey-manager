@@ -118,14 +118,15 @@ def require_reader(connection_types, reader):
 
 def list_all_devices(*args, **kwargs):
     devices = _list_all_devices(*args, **kwargs)
-    if devices:
+    with_serial = [(dev, dev_info) for (dev, dev_info) in devices if dev_info.serial]
+    if with_serial:
         history = AppData("history")
         cache = history.setdefault("devices", {})
-        for dev, dev_info in devices:
+        for dev, dev_info in with_serial:
             if dev_info.serial:
                 k = str(dev_info.serial)
                 cache[k] = cache.pop(k, None) or _describe_device(dev, dev_info, False)
-        [cache.pop(k) for k in list(cache.keys())[:-3]]
+        [cache.pop(k) for k in list(cache.keys())[: -max(3, len(with_serial))]]
         history.write()
     return devices
 
