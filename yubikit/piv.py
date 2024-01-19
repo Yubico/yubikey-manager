@@ -868,7 +868,7 @@ class PivSession:
     def get_object(self, object_id: int) -> bytes:
         """Get object by ID.
 
-        Requires PIN verification.
+        Requires PIN verification for protected objects.
 
         :param object_id: The object identifier.
         """
@@ -1083,6 +1083,8 @@ class PivSession:
     def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
         """Move key from one slot to another.
 
+        Requires authentication with management key.
+
         :param from_slot: The slot containing the key to move.
         :param to_slot: The new slot to move the key to.
         """
@@ -1095,6 +1097,8 @@ class PivSession:
 
     def delete_key(self, slot: SLOT) -> None:
         """Delete a key in a slot.
+
+        Requires authentication with management key.
 
         :param slot: The slot containing the key to delete.
         """
