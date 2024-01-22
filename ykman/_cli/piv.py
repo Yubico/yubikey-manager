@@ -764,7 +764,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
 @click_pin_option
 @click.argument("source", callback=click_parse_piv_slot)
 @click.argument("dest", callback=click_parse_piv_slot)
-def move_key(ctx, management_key, pin, source, target):
+def move_key(ctx, management_key, pin, source, dest):
     """
     Moves a key.
 
@@ -774,12 +774,12 @@ def move_key(ctx, management_key, pin, source, target):
     SOURCE            PIV slot of the key to move
     DEST              PIV slot to move the key into
     """
-    if source == target:
+    if source == dest:
         raise CliFail("SOURCE must be different from DEST")
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
     try:
-        session.move_key(source, target)
+        session.move_key(source, dest)
     except ApduError as e:
         if e.sw == SW.INCORRECT_PARAMETERS:
             raise CliFail("DEST slot is not empty")
