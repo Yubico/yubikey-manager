@@ -896,7 +896,7 @@ def _get_key_attributes(
         return RsaAttributes.create(
             RSA_SIZE(private_key.key_size),
             RSA_IMPORT_FORMAT.CRT_W_MOD
-            if version < (4, 0, 0)
+            if 0 < version[0] < 4
             else RSA_IMPORT_FORMAT.STANDARD,
         )
     return EcAttributes.create(key_ref, OID._from_key(private_key))
@@ -1005,7 +1005,7 @@ class OpenPgpSession:
         self._version = self._read_version()
 
         self.protocol.enable_touch_workaround(self.version)
-        if self.version >= (4, 0, 0):
+        if not 0 < self.version[0] < 4:
             self.protocol.apdu_format = ApduFormat.EXTENDED
 
         # Note: This value is cached!
@@ -1339,9 +1339,9 @@ class OpenPgpSession:
         ):
             raise NotSupportedError("Writing Algorithm Attributes is not supported")
 
-        if self.version < (5, 2, 0):
+        if self.version < (5, 2, 0) and self.version[0] > 0:
             sizes = [RSA_SIZE.RSA2048]
-            if self.version < (4, 0, 0):  # Neo needs CRT
+            if 0 < self.version[0] < 4:  # Neo needs CRT
                 fmt = RSA_IMPORT_FORMAT.CRT_W_MOD
             else:
                 fmt = RSA_IMPORT_FORMAT.STANDARD
@@ -1367,7 +1367,7 @@ class OpenPgpSession:
                 AlgorithmAttributes.parse(tlv.value)
             )
 
-        if self.version < (5, 6, 1):
+        if self.version < (5, 6, 1) and self.version[0] > 0:
             # Fix for invalid Curve25519 entries:
             # Remove X25519 with EdDSA from all keys
             invalid_x25519 = EcAttributes(0x16, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
@@ -1397,12 +1397,13 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param attributes: The algorithm attributes to set.
         """
-        logger.debug("Setting Algorithm Attributes for {key_ref.name}")
+        logger.debug(f"Setting Algorithm Attributes for {key_ref.name}")
         supported = self.get_algorithm_information()
-        if key_ref not in supported:
-            raise NotSupportedError("Key slot not supported")
-        if attributes not in supported[key_ref]:
-            raise NotSupportedError("Algorithm attributes not supported")
+        if self.version[0] > 0:  # Don't check support on major version 0
+            if key_ref not in supported:
+                raise NotSupportedError("Key slot not supported")
+            if attributes not in supported[key_ref]:
+                raise NotSupportedError("Algorithm attributes not supported")
 
         self.put_data(key_ref.algorithm_attributes_do, attributes)
         logger.info("Algorithm Attributes have been changed")
@@ -1576,7 +1577,7 @@ class OpenPgpSession:
             ):
                 raise NotSupportedError("This YubiKey only supports RSA 2048 keys")
 
-        template = _get_key_template(private_key, key_ref, self.version < (4, 0, 0))
+        template = _get_key_template(private_key, key_ref, 0 < self.version[0] < 4)
         self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, bytes(template))
         logger.info(f"Private key imported for {key_ref.name}")
 
@@ -1587,7 +1588,7 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
-        if self.version < (4, 0, 0):
+        if 0 < self.version[0] < 4:
             # Import over the key
             self.put_key(
                 key_ref, rsa.generate_private_key(65537, 2048, default_backend())

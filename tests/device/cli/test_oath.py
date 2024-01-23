@@ -243,8 +243,9 @@ class TestOATH:
 
     # NEO credential capacity may vary based on configuration
     @condition.min_version(4)
-    def test_add_32_creds(self, ykman_cli):
-        for i in range(32):
+    def test_add_max_creds(self, ykman_cli, version):
+        n_creds = 32 if version < (5, 7, 0) else 64
+        for i in range(n_creds):
             ykman_cli("oath", "accounts", "add", "test" + str(i), "abba")
             output = ykman_cli("oath", "accounts", "list").output
             lines = output.strip().split("\n")

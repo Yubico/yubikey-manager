@@ -109,7 +109,7 @@ def test_import_sign_rsa(session, key_size, info):
     priv = rsa.generate_private_key(E, key_size, default_backend())
     session.verify_admin(DEFAULT_ADMIN_PIN)
     session.put_key(KEY_REF.SIG, priv)
-    if info.version[0] < 5:
+    if 0 < info.version[0] < 5:
         # Keys don't work without a generation time (or fingerprint)
         session.set_generation_time(KEY_REF.SIG, int(time.time()))
 
@@ -219,6 +219,9 @@ def test_kdf(session):
 
 @condition.min_version(5, 2)
 def test_attestation(session):
+    if not session.get_key_information()[KEY_REF.ATT]:
+        pytest.skip("No attestation key")
+
     session.verify_admin(DEFAULT_ADMIN_PIN)
     pub = session.generate_ec_key(KEY_REF.SIG, OID.SECP256R1)
 
