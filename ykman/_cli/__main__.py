@@ -126,7 +126,8 @@ def list_all_devices(*args, **kwargs):
             if dev_info.serial:
                 k = str(dev_info.serial)
                 cache[k] = cache.pop(k, None) or _describe_device(dev, dev_info, False)
-        [cache.pop(k) for k in list(cache.keys())[: -max(3, len(with_serial))]]
+        # 5, chosen by fair dice roll
+        [cache.pop(k) for k in list(cache.keys())[: -max(5, len(with_serial))]]
         history.write()
     return devices
 
