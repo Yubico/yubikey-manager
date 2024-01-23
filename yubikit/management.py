@@ -76,7 +76,9 @@ class CAPABILITY(IntFlag):
 
     @property
     def display_name(self) -> str:
-        if self == CAPABILITY.U2F:
+        if self == CAPABILITY.OTP:
+            return "Yubico OTP"
+        elif self == CAPABILITY.U2F:
             return "FIDO U2F"
         elif self == CAPABILITY.OPENPGP:
             return "OpenPGP"
