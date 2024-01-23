@@ -583,12 +583,18 @@ def get_piv_info(session: PivSession):
                 key_algo = "Unsupported"
             serial = cert.serial_number
             try:
-                not_before: Optional[datetime] = cert.not_valid_before
+                try:  # Prefer timezone-aware variant (cryptography >= 42)
+                    not_before: Optional[datetime] = cert.not_valid_before_utc
+                except AttributeError:
+                    not_before = cert.not_valid_before
             except ValueError:
                 logger.debug("Failed reading not_valid_before", exc_info=True)
                 not_before = None
             try:
-                not_after: Optional[datetime] = cert.not_valid_after
+                try:  # Prefer timezone-aware variant (cryptography >= 42)
+                    not_after: Optional[datetime] = cert.not_valid_after_utc
+                except AttributeError:
+                    not_after = cert.not_valid_after
             except ValueError:
                 logger.debug("Failed reading not_valid_after", exc_info=True)
                 not_after = None
