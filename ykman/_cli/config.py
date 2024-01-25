@@ -35,6 +35,7 @@ from yubikit.management import (
     CAPABILITY,
     USB_INTERFACE,
     DEVICE_FLAG,
+    FORM_FACTOR,
     Mode,
 )
 from .util import (
@@ -47,6 +48,7 @@ from .util import (
 )
 import os
 import re
+import sys
 import click
 import logging
 
@@ -92,7 +94,7 @@ def config(ctx):
             try:
                 conn = dev.open_connection(conn_type)
                 ctx.call_on_close(conn.close)
-                ctx.obj["controller"] = ManagementSession(conn)
+                ctx.obj["session"] = ManagementSession(conn)
                 return
             except Exception:
                 logger.warning(
@@ -108,6 +110,36 @@ def _require_config(ctx):
             "Configuring applications is not supported on this YubiKey. "
             "Use the `mode` command to configure USB interfaces."
         )
+
+
+@config.command(hidden="--full-help" not in sys.argv)
+@click.pass_context
+@click_force_option
+def reset(ctx, force):
+    """
+    Reset all YubiKey data.
+
+    This action will wipe all data and restore factory settings for
+    all applications on the YubiKey.
+    """
+    transport = ctx.obj["device"].transport
+    info = ctx.obj["info"]
+    is_bio = info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO)
+    has_piv = CAPABILITY.PIV in info.supported_capabilities.get(transport)
+    if not (is_bio and has_piv):
+        raise CliFail("Full device reset is not supported on this YubiKey.")
+
+    force or click.confirm(
+        "WARNING! This will delete all stored data and restore factory "
+        "settings. Proceed?",
+        abort=True,
+        err=True,
+    )
+
+    click.echo("Resetting YubiKey data...")
+    ctx.obj["session"].device_reset()
+
+    click.echo("Success! All data have been cleared from the YubiKey.")
 
 
 @config.command("set-lock-code")
@@ -137,7 +169,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
 
     _require_config(ctx)
     info = ctx.obj["info"]
-    app = ctx.obj["controller"]
+    app = ctx.obj["session"]
 
     if sum(1 for arg in [new_lock_code, generate, clear] if arg) > 1:
         raise CliFail(
@@ -255,7 +287,7 @@ def _configure_applications(
 
     config.enabled_capabilities = {transport: new_enabled}
 
-    app = ctx.obj["controller"]
+    app = ctx.obj["session"]
     try:
         app.write_device_config(
             config,
@@ -571,7 +603,7 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
       $ ykman config mode CCID --touch-eject
     """
     info = ctx.obj["info"]
-    mgmt = ctx.obj["controller"]
+    mgmt = ctx.obj["session"]
     usb_enabled = info.config.enabled_capabilities[TRANSPORT.USB]
     my_mode = Mode(usb_enabled.usb_interfaces)
     usb_supported = info.supported_capabilities[TRANSPORT.USB]

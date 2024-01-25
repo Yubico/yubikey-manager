@@ -517,7 +517,10 @@ class PivSession:
 
         # Block PUK
         logger.debug("Verify PUK with invalid attempts until blocked")
-        counter = 1
+        try:
+            counter = self.get_puk_metadata().attempts_remaining
+        except NotSupportedError:
+            counter = 1
         while counter > 0:
             try:
                 self._change_reference(INS_RESET_RETRY, PIN_P2, "", "")

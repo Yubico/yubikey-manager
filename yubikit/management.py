@@ -548,7 +548,7 @@ class ManagementSession:
 
     def device_reset(self) -> None:
         if not isinstance(self.backend, _ManagementSmartCardBackend):
-            raise NotSupportedError("Device reset can only be perfomred over CCID")
+            raise NotSupportedError("Device reset can only be performed over CCID")
         logger.debug("Performing device reset")
         self.backend.device_reset()
         logger.info("Device reset performed")
