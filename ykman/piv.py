@@ -36,6 +36,7 @@ from yubikit.piv import (
     MANAGEMENT_KEY_TYPE,
     ALGORITHM,
     TAG_LRC,
+    SlotMetadata,
 )
 
 from cryptography import x509
@@ -399,6 +400,17 @@ def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certif
     return certs
 
 
+def _list_keys(session: PivSession) -> Mapping[SLOT, SlotMetadata]:
+    keys = {}
+    for slot in set(SLOT) - {SLOT.ATTESTATION}:
+        try:
+            keys[slot] = session.get_slot_metadata(slot)
+        except ApduError as e:
+            if e.sw != SW.REFERENCE_DATA_NOT_FOUND:
+                raise
+    return keys
+
+
 def check_key(
     session: PivSession,
     slot: SLOT,
@@ -565,9 +577,22 @@ def get_piv_info(session: PivSession):
         if e.sw == SW.FILE_NOT_FOUND:
             objects["CCC"] = "No data available"
 
-    for slot, cert in list_certificates(session).items():
+    certs = list_certificates(session)
+    try:
+        keys = _list_keys(session)
+    except NotSupportedError:
+        keys = {}
+    for slot in set(SLOT) - {SLOT.ATTESTATION}:
+        if slot not in keys and slot not in certs:
+            continue
+
         cert_data: Dict[str, Any] = {}
         objects[f"Slot {slot}"] = cert_data
+        if slot in keys:
+            cert_data["Private key type"] = keys[slot].key_type
+        else:
+            cert_data["Private key type"] = "EMPTY"
+        cert = certs.get(slot, None)
         if cert:
             try:
                 # Try to read out full DN, fallback to only CN.
@@ -612,7 +637,7 @@ def get_piv_info(session: PivSession):
                 not_after = None
 
             # Print out everything
-            cert_data["Algorithm"] = key_algo
+            cert_data["Public key type"] = key_algo
             if print_dn:
                 cert_data["Subject DN"] = subject_dn
                 cert_data["Issuer DN"] = issuer_dn
@@ -625,7 +650,7 @@ def get_piv_info(session: PivSession):
                 cert_data["Not before"] = not_before.isoformat()
             if not_after:
                 cert_data["Not after"] = not_after.isoformat()
-        else:
+        elif slot in certs:
             cert_data["Error"] = "Failed to parse certificate"
 
     return lines
