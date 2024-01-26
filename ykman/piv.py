@@ -46,7 +46,6 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
-from collections import OrderedDict
 from datetime import datetime
 import logging
 import struct
@@ -388,14 +387,14 @@ def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certif
 
     :param session: The PIV session.
     """
-    certs = OrderedDict()
+    certs = {}
     for slot in set(SLOT) - {SLOT.ATTESTATION}:
         try:
             certs[slot] = session.get_certificate(slot)
         except ApduError:
             pass
         except BadResponseError:
-            certs[slot] = None  # type: ignore
+            certs[slot] = None
 
     return certs
 
