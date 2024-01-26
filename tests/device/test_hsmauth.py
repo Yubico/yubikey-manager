@@ -134,7 +134,7 @@ class TestCredentialManagement:
     @condition.min_version(5, 6)
     def test_import_credential_asymmetric_unsupported_key(self, session):
         private_key = ec.generate_private_key(
-            ec.SECP224R1, backend=default_backend()
+            ec.SECP224R1(), backend=default_backend()
         )  # curve secp224r1 is not supported
 
         with pytest.raises(ValueError):
@@ -142,7 +142,7 @@ class TestCredentialManagement:
 
     @condition.min_version(5, 6)
     def test_import_credential_asymmetric_works(self, session):
-        private_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())
+        private_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
         credential = import_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY, private_key)
 
         public_key = private_key.public_key()

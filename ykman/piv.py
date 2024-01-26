@@ -546,9 +546,9 @@ def get_piv_info(session: PivSession):
             ] = f"Configured, {bio.attempts_remaining} attempts remaining"
         else:
             info["Biometrics"] = "Not configured"
-
     except NotSupportedError:
         pass
+
     try:
         metadata = session.get_management_key_metadata()
         if metadata.default_value:

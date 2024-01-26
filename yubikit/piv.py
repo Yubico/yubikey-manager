@@ -786,7 +786,7 @@ class PivSession:
                 self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_OCC_AUTH)
             )
         except ApduError as e:
-            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            if e.sw in (SW.REFERENCE_DATA_NOT_FOUND, SW.INVALID_INSTRUCTION):
                 raise NotSupportedError(
                     "Biometric verification not supported by this YuibKey"
                 )
