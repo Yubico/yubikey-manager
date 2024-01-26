@@ -505,6 +505,14 @@ class PivSession:
     def reset(self) -> None:
         logger.debug("Preparing PIV reset")
 
+        try:
+            if self.get_bio_metadata().configured:
+                raise ValueError(
+                    "Cannot perform PIV reset when biometrics are configured"
+                )
+        except NotSupportedError:
+            pass
+
         # Block PIN
         logger.debug("Verify PIN with invalid attempts until blocked")
         counter = self.get_pin_attempts()
