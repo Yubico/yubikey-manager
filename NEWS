@@ -1,4 +1,4 @@
-* Version 5.3.0 (unreleased)
+* Version 5.3.0 (released 2023-01-30)
  ** FIDO: Add new CLI commands for PIN management and authenticator config
     (force-change, set-min-length, toggle-always-uv, enable-ep-attestation).
  ** PIV: Support new key types on supported devices (RSA 3072/4096, Curve25519).
