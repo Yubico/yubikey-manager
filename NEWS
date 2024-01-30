@@ -1,3 +1,14 @@
+* Version 5.3.0 (unreleased)
+ ** FIDO: Add new CLI commands for PIN management and authenticator config
+    (force-change, set-min-length, toggle-always-uv, enable-ep-attestation).
+ ** PIV: Support new key types on supported devices (RSA 3072/4096, Curve25519).
+ ** PIV: Support for moving and deleting keys on supported devices.
+ ** PIV: Improve handling of legacy "PUK blocked" flag.
+ ** PIV: Improve handling of malformed certificates.
+ ** PIV: Display key information in "piv info" output on supported devices.
+ ** OTP: Fix some commands incorrectly showing errors when used over NFC/CCID.
+ ** Add tab-completion YubiKey serial numbers and NRC readers.
+
 * Version 5.2.1 (released 2023-10-10)
  ** Add support for Python 3.12.
  ** OATH: detect and remove corrupted credentials.
