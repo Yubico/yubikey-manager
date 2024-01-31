@@ -7,7 +7,7 @@
  ** PIV: Improve handling of malformed certificates.
  ** PIV: Display key information in "piv info" output on supported devices.
  ** OTP: Fix some commands incorrectly showing errors when used over NFC/CCID.
- ** Add tab-completion YubiKey serial numbers and NRC readers.
+ ** Add tab-completion for YubiKey serial numbers and NFC readers.
 
 * Version 5.2.1 (released 2023-10-10)
  ** Add support for Python 3.12.
