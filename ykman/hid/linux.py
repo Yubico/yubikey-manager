@@ -126,7 +126,7 @@ def list_devices():
                 _failed_cache.add(hidraw)
             continue
 
-    # Remove entries from the cache that were not seen
-    _failed_cache.difference_update(hidraw)
+        # Remove entries from the cache that were not seen
+        _failed_cache.difference_update(hidraw)
 
     return devices
