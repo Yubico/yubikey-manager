@@ -195,7 +195,12 @@ def change_pin(ctx, pin, new_pin):
             confirmation_prompt=True,
         )
 
-    session.change_pin(pin, new_pin)
+    try:
+        session.change_pin(pin, new_pin)
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("PIN does not meet complexity requirement.")
+        raise
 
 
 @access.command("change-reset-code")
@@ -223,7 +228,12 @@ def change_reset_code(ctx, admin_pin, reset_code):
         )
 
     session.verify_admin(admin_pin)
-    session.set_reset_code(reset_code)
+    try:
+        session.set_reset_code(reset_code)
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("Reset Code does not meet complexity requirement.")
+        raise
 
 
 @access.command("change-admin-pin")
@@ -250,7 +260,12 @@ def change_admin(ctx, admin_pin, new_admin_pin):
             confirmation_prompt=True,
         )
 
-    session.change_admin(admin_pin, new_admin_pin)
+    try:
+        session.change_admin(admin_pin, new_admin_pin)
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("Admin PIN does not meet complexity requirement.")
+        raise
 
 
 @access.command("unblock-pin")
@@ -294,7 +309,13 @@ def unblock_pin(ctx, admin_pin, reset_code, new_pin):
 
     if admin_pin:
         session.verify_admin(admin_pin)
-    session.reset_pin(new_pin, reset_code)
+
+    try:
+        session.reset_pin(new_pin, reset_code)
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("New PIN does not meet complexity requirement.")
+        raise
 
 
 @access.command("set-signature-policy")

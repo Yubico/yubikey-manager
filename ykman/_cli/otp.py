@@ -906,6 +906,8 @@ def settings(
             new_access_code = parse_access_code_hex(new_access_code)
         except Exception as e:
             ctx.fail("Failed to parse access code: " + str(e))
+        if ctx.obj["info"].pin_complexity and len(set(new_access_code)) < 2:
+            raise CliFail("Access code does not meet complexity requirement.")
 
     force or click.confirm(
         f"Update the settings for slot {slot}? "

@@ -77,6 +77,8 @@ def handle_credential_error(e: Exception, default_exception_msg):
             raise CliFail("Credential with the provided label was not found.")
         elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
             raise CliFail("The device was not touched.")
+        elif e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("Credential password does not meet complexity requirement.")
     raise CliFail(default_exception_msg)
 
 

@@ -746,3 +746,20 @@ class TestMoveAndDelete:
         session.delete_key(SLOT.AUTHENTICATION)
         with pytest.raises(ApduError):
             session.get_slot_metadata(SLOT.AUTHENTICATION)
+
+
+class TestPinComplexity:
+    @pytest.fixture(autouse=True)
+    def preconditions(self, info):
+        if not info.pin_complexity:
+            pytest.skip("Requires YubiKey with PIN complexity enabled")
+
+    @pytest.mark.parametrize("pin", ("111111", "22222222", "333333", "4444444"))
+    def test_repeated_pins(self, session, keys, pin):
+        with pytest.raises(ApduError):
+            session.change_pin(keys.pin, pin)
+
+    @pytest.mark.parametrize("pin", ("abc123", "password", "123123"))
+    def test_invalid_pins(self, session, keys, pin):
+        with pytest.raises(ApduError):
+            session.change_pin(keys.pin, pin)

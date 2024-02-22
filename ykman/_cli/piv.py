@@ -275,6 +275,28 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         raise CliFail("Setting pin retries failed.")
 
 
+def _do_change_pin_puk(name, current, new, fn):
+    if not _valid_pin_length(current):
+        raise CliFail(f"Current {name} must be between 6 and 8 characters long.")
+
+    if not _valid_pin_length(new):
+        raise CliFail(f"New {name} must be between 6 and 8 characters long.")
+
+    try:
+        fn()
+        click.echo(f"New {name} set.")
+    except InvalidPinError as e:
+        attempts = e.attempts_remaining
+        if attempts:
+            raise CliFail(f"{name} change failed - %d tries left." % attempts)
+        else:
+            raise CliFail(f"{name} is blocked.")
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail(f"{name} does not meet complexity requirement.")
+        raise
+
+
 @access.command("change-pin")
 @click.pass_context
 @click.option("-P", "--pin", help="current PIN code")
@@ -301,21 +323,9 @@ def change_pin(ctx, pin, new_pin):
             confirmation_prompt=True,
         )
 
-    if not _valid_pin_length(pin):
-        ctx.fail("Current PIN must be between 6 and 8 characters long.")
-
-    if not _valid_pin_length(new_pin):
-        ctx.fail("New PIN must be between 6 and 8 characters long.")
-
-    try:
-        pivman_change_pin(session, pin, new_pin)
-        click.echo("New PIN set.")
-    except InvalidPinError as e:
-        attempts = e.attempts_remaining
-        if attempts:
-            raise CliFail("PIN change failed - %d tries left." % attempts)
-        else:
-            raise CliFail("PIN is blocked.")
+    _do_change_pin_puk(
+        "PIN", pin, new_pin, lambda: pivman_change_pin(session, pin, new_pin)
+    )
 
 
 @access.command("change-puk")
@@ -342,21 +352,7 @@ def change_puk(ctx, puk, new_puk):
             confirmation_prompt=True,
         )
 
-    if not _valid_pin_length(puk):
-        ctx.fail("Current PUK must be between 6 and 8 characters long.")
-
-    if not _valid_pin_length(new_puk):
-        ctx.fail("New PUK must be between 6 and 8 characters long.")
-
-    try:
-        session.change_puk(puk, new_puk)
-        click.echo("New PUK set.")
-    except InvalidPinError as e:
-        attempts = e.attempts_remaining
-        if attempts:
-            raise CliFail("PUK change failed - %d tries left." % attempts)
-        else:
-            raise CliFail("PUK is blocked.")
+    _do_change_pin_puk("PUK", puk, new_puk, lambda: session.change_puk(puk, new_puk))
 
 
 @access.command("change-management-key")
