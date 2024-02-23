@@ -404,8 +404,6 @@ def change_puk(ctx, puk, new_puk):
     "--algorithm",
     help="management key algorithm",
     type=EnumChoice(MANAGEMENT_KEY_TYPE),
-    default=MANAGEMENT_KEY_TYPE.TDES.name,
-    show_default=True,
 )
 @click.option(
     "-p",
@@ -472,6 +470,12 @@ def change_management_key(
                 abort=True,
                 err=True,
             )
+
+    if not algorithm:
+        try:
+            algorithm = session.get_management_key_metadata().key_type
+        except NotSupportedError:
+            algorithm = MANAGEMENT_KEY_TYPE.TDES
 
     if not new_management_key:
         if protect or generate:
