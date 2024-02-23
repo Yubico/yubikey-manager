@@ -19,7 +19,7 @@ class Keys(NamedTuple):
 
 @pytest.fixture
 def keys(ykman_cli, info):
-    if info.pin_complexity:
+    if CAPABILITY.PIV in info.fips_capable:
         new_keys = Keys(
             "123458",
             "12345670",

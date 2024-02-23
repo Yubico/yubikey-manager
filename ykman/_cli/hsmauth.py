@@ -61,7 +61,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def handle_credential_error(e: Exception, default_exception_msg):
+def handle_credential_error(
+    e: Exception, default_exception_msg, target="Credential password"
+):
     if isinstance(e, InvalidPinError):
         attempts = e.attempts_remaining
         if attempts:
@@ -78,7 +80,7 @@ def handle_credential_error(e: Exception, default_exception_msg):
         elif e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
             raise CliFail("The device was not touched.")
         elif e.sw == SW.CONDITIONS_NOT_SATISFIED:
-            raise CliFail("Credential password does not meet complexity requirement.")
+            raise CliFail(f"{target} does not meet complexity requirement.")
     raise CliFail(default_exception_msg)
 
 
@@ -647,5 +649,7 @@ def change_management_key(ctx, management_key, new_management_key, generate):
         session.put_management_key(management_key, new_management_key)
     except Exception as e:
         handle_credential_error(
-            e, default_exception_msg="Failed to change management key."
+            e,
+            default_exception_msg="Failed to change management key.",
+            target="Management key",
         )
