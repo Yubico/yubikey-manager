@@ -3,9 +3,11 @@ from .. import condition
 import pytest
 
 DEFAULT_PIN = "123456"
-NON_DEFAULT_PIN = "654321"
+NON_DEFAULT_PIN = "12345679"
+NON_DEFAULT_PIN_2 = "12345670"
 DEFAULT_ADMIN_PIN = "12345678"
-NON_DEFAULT_ADMIN_PIN = "87654321"
+NON_DEFAULT_ADMIN_PIN = "12345670"
+NON_DEFAULT_ADMIN_PIN_2 = "12345679"
 
 
 def old_new_new(old, new):
@@ -34,7 +36,13 @@ class TestPin:
             "openpgp", "access", "change-pin", "-P", DEFAULT_PIN, "-n", NON_DEFAULT_PIN
         )
         ykman_cli(
-            "openpgp", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
+            "openpgp",
+            "access",
+            "change-pin",
+            "-P",
+            NON_DEFAULT_PIN,
+            "-n",
+            NON_DEFAULT_PIN_2,
         )
 
     def test_change_pin_prompt(self, ykman_cli):
@@ -48,7 +56,7 @@ class TestPin:
             "openpgp",
             "access",
             "change-pin",
-            input=old_new_new(NON_DEFAULT_PIN, DEFAULT_PIN),
+            input=old_new_new(NON_DEFAULT_PIN, NON_DEFAULT_PIN_2),
         )
 
 
@@ -70,7 +78,7 @@ class TestAdminPin:
             "-a",
             NON_DEFAULT_ADMIN_PIN,
             "-n",
-            DEFAULT_ADMIN_PIN,
+            NON_DEFAULT_ADMIN_PIN_2,
         )
 
     def test_change_pin_prompt(self, ykman_cli):
@@ -84,18 +92,24 @@ class TestAdminPin:
             "openpgp",
             "access",
             "change-admin-pin",
-            input=old_new_new(NON_DEFAULT_ADMIN_PIN, DEFAULT_ADMIN_PIN),
+            input=old_new_new(NON_DEFAULT_ADMIN_PIN, NON_DEFAULT_ADMIN_PIN_2),
         )
 
 
 class TestResetPin:
     def ensure_pin_changed(self, ykman_cli):
         ykman_cli(
-            "openpgp", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
+            "openpgp",
+            "access",
+            "change-pin",
+            "-P",
+            NON_DEFAULT_PIN,
+            "-n",
+            NON_DEFAULT_PIN_2,
         )
 
     def test_set_and_use_reset_code(self, ykman_cli):
-        reset_code = "12345678"
+        reset_code = "00112233"
 
         ykman_cli(
             "openpgp",
@@ -120,7 +134,7 @@ class TestResetPin:
         self.ensure_pin_changed(ykman_cli)
 
     def test_set_and_use_reset_code_prompt(self, ykman_cli):
-        reset_code = "87654321"
+        reset_code = "11223344"
 
         ykman_cli(
             "openpgp",
@@ -137,7 +151,13 @@ class TestResetPin:
         )
 
         ykman_cli(
-            "openpgp", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", DEFAULT_PIN
+            "openpgp",
+            "access",
+            "change-pin",
+            "-P",
+            NON_DEFAULT_PIN,
+            "-n",
+            NON_DEFAULT_PIN_2,
         )
 
     def test_unblock_pin_with_admin_pin(self, ykman_cli):
