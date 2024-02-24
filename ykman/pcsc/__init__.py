@@ -41,6 +41,10 @@ from time import sleep
 import subprocess  # nosec
 import logging
 
+import os
+import psutil
+import signal
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +99,7 @@ class ScardYubiKeyDevice(YkmanDevice):
         try:
             return ScardSmartCardConnection(self.reader.createConnection())
         except CardConnectionException as e:
-            if kill_scdaemon():
+            if kill_scdaemon() or kill_yubikey_agent():
                 return ScardSmartCardConnection(self.reader.createConnection())
             raise e
 
@@ -149,6 +153,17 @@ def kill_scdaemon():
             killed = True
     if killed:
         sleep(0.1)
+    return killed
+
+
+def kill_yubikey_agent():
+    killed = False
+    return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])
+    if return_code == 0:
+        killed = True
+    if killed:
+        sleep(0.1)
+
     return killed
 
 
