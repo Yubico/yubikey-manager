@@ -109,15 +109,15 @@ _failed_cache: Set[str] = set()
 
 
 def list_devices():
-    stale = set(_failed_cache)
     devices = []
     for hidraw in glob.glob("/dev/hidraw*"):
-        stale.discard(hidraw)
         try:
             with open(hidraw, "rb") as f:
                 bustype, vid, pid = get_info(f)
                 if vid == YUBICO_VID and get_usage(f) == USAGE_OTP:
                     devices.append(OtpYubiKeyDevice(hidraw, pid, HidrawConnection))
+            if hidraw in _failed_cache:
+                _failed_cache.remove(hidraw)
         except Exception:
             if hidraw not in _failed_cache:
                 logger.debug(
@@ -125,8 +125,5 @@ def list_devices():
                 )
                 _failed_cache.add(hidraw)
             continue
-
-    # Remove entries from the cache that were not seen
-    _failed_cache.difference_update(hidraw)
 
     return devices
