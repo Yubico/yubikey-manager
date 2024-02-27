@@ -76,7 +76,7 @@ def oath(ctx):
 
     \b
       Set a password for the OATH application:
-      $ ykman oath access change-password
+      $ ykman oath access change
     """
 
     dev = ctx.obj["device"]
