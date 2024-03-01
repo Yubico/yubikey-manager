@@ -6,6 +6,7 @@ from .piv import get_piv_info
 from .openpgp import get_openpgp_info
 from .hsmauth import get_hsmauth_info
 
+from yubikit.core import Tlv
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
@@ -51,9 +52,13 @@ def sys_info():
 def mgmt_info(pid, conn):
     data: List[Any] = []
     try:
+        m = ManagementSession(conn)
+        raw_info = m.backend.read_config()
+        if Tlv.parse_dict(raw_info[1:]).get(0x10) == b"\1":
+            raw_info += m.backend.read_config(1)
         data.append(
             {
-                "Raw Info": ManagementSession(conn).backend.read_config(),
+                "Raw Info": raw_info,
             }
         )
     except Exception as e:
