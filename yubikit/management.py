@@ -97,7 +97,11 @@ class CAPABILITY(IntFlag):
         if self & (CAPABILITY.U2F | CAPABILITY.FIDO2):
             ifaces |= USB_INTERFACE.FIDO
         if self & (
-            CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP | CAPABILITY.HSMAUTH
+            0x4  # General CCID bit
+            | CAPABILITY.OATH
+            | CAPABILITY.PIV
+            | CAPABILITY.OPENPGP
+            | CAPABILITY.HSMAUTH
         ):
             ifaces |= USB_INTERFACE.CCID
         return ifaces
