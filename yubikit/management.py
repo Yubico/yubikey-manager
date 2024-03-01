@@ -168,7 +168,13 @@ TAG_UNLOCK = 0x0B
 TAG_REBOOT = 0x0C
 TAG_NFC_SUPPORTED = 0x0D
 TAG_NFC_ENABLED = 0x0E
+TAG_IAP_DETECTION = 0x0F
 TAG_MORE_DATA = 0x10
+TAG_FREE_FORM = 0x11
+TAG_HID_INIT_DELAY = 0x12
+TAG_PART_NUMBER = 0x13
+TAG_PIN_COMPLEXITY = 0x16
+TAG_NFC_RESTRICTED = 0x17
 
 
 @dataclass
@@ -179,6 +185,7 @@ class DeviceConfig:
     auto_eject_timeout: Optional[int] = None
     challenge_response_timeout: Optional[int] = None
     device_flags: Optional[DEVICE_FLAG] = None
+    nfc_restricted: Optional[bool] = None
 
     def get_bytes(
         self,
@@ -205,6 +212,8 @@ class DeviceConfig:
             buf += Tlv(TAG_DEVICE_FLAGS, int2bytes(self.device_flags))
         if new_lock_code:
             buf += Tlv(TAG_CONFIG_LOCK, new_lock_code)
+        if self.nfc_restricted is not None:
+            buf += Tlv(TAG_NFC_RESTRICTED, b"\1" if self.nfc_restricted else b"\0")
         if len(buf) > 0xFF:
             raise NotSupportedError("DeviceConfiguration too large")
         return int2bytes(len(buf)) + buf
@@ -222,6 +231,7 @@ class DeviceInfo:
     is_locked: bool
     is_fips: bool = False
     is_sky: bool = False
+    pin_complexity: bool = False
 
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
@@ -263,9 +273,11 @@ class DeviceInfo:
         if TAG_NFC_SUPPORTED in data:  # YK with NFC
             supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
             enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
+        nfc_restricted = data.get(TAG_NFC_RESTRICTED, b"\0") == b"\1"
+        pin_complexity = data.get(TAG_PIN_COMPLEXITY, b"\0") == b"\1"
 
         return cls(
-            DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags),
+            DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags, nfc_restricted),
             serial,
             version,
             form_factor,
@@ -273,6 +285,7 @@ class DeviceInfo:
             locked,
             fips,
             sky,
+            pin_complexity,
         )
 
 
