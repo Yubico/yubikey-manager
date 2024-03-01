@@ -74,6 +74,21 @@ class CAPABILITY(IntFlag):
         name = "|".join(c.name or str(c) for c in CAPABILITY if c in self)
         return f"{name}: {hex(self)}"
 
+    @classmethod
+    def _from_fips(cls, fips: int) -> "CAPABILITY":
+        c = CAPABILITY(0)
+        if fips & (1 << 0):
+            c |= CAPABILITY.FIDO2
+        if fips & (1 << 1):
+            c |= CAPABILITY.PIV
+        if fips & (1 << 2):
+            c |= CAPABILITY.OPENPGP
+        if fips & (1 << 3):
+            c |= CAPABILITY.OATH
+        if fips & (1 << 4):
+            c |= CAPABILITY.HSMAUTH
+        return c
+
     @property
     def display_name(self) -> str:
         if self == CAPABILITY.OTP:
@@ -176,6 +191,10 @@ TAG_HID_INIT_DELAY = 0x12
 TAG_PART_NUMBER = 0x13
 TAG_PIN_COMPLEXITY = 0x16
 TAG_NFC_RESTRICTED = 0x17
+TAG_FIPS_CAPABLE = 0x14
+TAG_FIPS_APPROVED = 0x15
+TAG_PIN_COMPLEXITY = 0x16
+TAG_NFC_RESTRICTED = 0x17
 TAG_RESET_BLOCKED = 0x18
 
 
@@ -233,6 +252,8 @@ class DeviceInfo:
     is_locked: bool
     is_fips: bool = False
     is_sky: bool = False
+    fips_capable: CAPABILITY = CAPABILITY(0)
+    fips_approved: CAPABILITY = CAPABILITY(0)
     pin_complexity: bool = False
     reset_blocked: CAPABILITY = CAPABILITY(0)
 
@@ -277,6 +298,12 @@ class DeviceInfo:
             supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
             enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
         nfc_restricted = data.get(TAG_NFC_RESTRICTED, b"\0") == b"\1"
+        fips_capable = CAPABILITY._from_fips(
+            bytes2int(data.get(TAG_FIPS_CAPABLE, b"\0"))
+        )
+        fips_approved = CAPABILITY._from_fips(
+            bytes2int(data.get(TAG_FIPS_APPROVED, b"\0"))
+        )
         pin_complexity = data.get(TAG_PIN_COMPLEXITY, b"\0") == b"\1"
         reset_blocked = CAPABILITY(bytes2int(data.get(TAG_RESET_BLOCKED, b"\0")))
 
@@ -289,6 +316,8 @@ class DeviceInfo:
             locked,
             fips,
             sky,
+            fips_capable,
+            fips_approved,
             pin_complexity,
             reset_blocked,
         )
