@@ -472,7 +472,14 @@ def check_key_support(
         )
 
 
-def _parse_device_public_key(key_type, encoded):
+def _parse_device_public_key(
+    key_type, encoded
+) -> Union[
+    rsa.RSAPublicKey,
+    ec.EllipticCurvePublicKey,
+    x25519.X25519PublicKey,
+    ed25519.Ed25519PublicKey,
+]:
     data = Tlv.parse_dict(encoded)
     if key_type.algorithm == ALGORITHM.RSA:
         modulus = bytes2int(data[0x81])
@@ -487,7 +494,6 @@ def _parse_device_public_key(key_type, encoded):
             curve: Type[ec.EllipticCurve] = ec.SECP256R1
         else:
             curve = ec.SECP384R1
-
         return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
@@ -1004,7 +1010,7 @@ class PivSession:
         ],
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> None:
+    ) -> Literal[KEY_TYPE.ECCP256, KEY_TYPE.ECCP384, KEY_TYPE.ED25519, KEY_TYPE.X25519]:
         """Import a private key to slot.
 
         Requires authentication with management key.
@@ -1060,7 +1066,12 @@ class PivSession:
         key_type: KEY_TYPE,
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
+    ) -> Union[
+        rsa.RSAPublicKey,
+        ec.EllipticCurvePublicKey,
+        x25519.X25519PublicKey,
+        ed25519.Ed25519PublicKey,
+    ]:
         """Generate private key in slot.
 
         Requires authentication with management key.
