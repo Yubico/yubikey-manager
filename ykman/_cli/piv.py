@@ -275,12 +275,15 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         raise CliFail("Setting pin retries failed.")
 
 
-def _do_change_pin_puk(name, current, new, fn):
-    if not _valid_pin_length(current):
-        raise CliFail(f"Current {name} must be between 6 and 8 characters long.")
+def _do_change_pin_puk(pin_complexity, name, current, new, fn):
+    def validate_pin_length(pin, prefix):
+        unit = "characters" if pin_complexity else "bytes"
+        pin_len = len(pin) if pin_complexity else len(pin.encode())
+        if not 6 <= pin_len <= 8:
+            raise CliFail(f"{prefix} {name} must be between 6 and 8 {unit} long.")
 
-    if not _valid_pin_length(new):
-        raise CliFail(f"New {name} must be between 6 and 8 characters long.")
+    validate_pin_length(current, "Current")
+    validate_pin_length(new, "New")
 
     try:
         fn()
@@ -305,11 +308,11 @@ def change_pin(ctx, pin, new_pin):
     """
     Change the PIN code.
 
-    The PIN must be between 6 and 8 characters long, and supports any type of
+    The PIN must be between 6 and 8 bytes long, and supports any type of
     alphanumeric characters. For cross-platform compatibility, numeric PINs are
     recommended.
     """
-
+    info = ctx.obj["info"]
     session = ctx.obj["session"]
 
     if not pin:
@@ -324,7 +327,11 @@ def change_pin(ctx, pin, new_pin):
         )
 
     _do_change_pin_puk(
-        "PIN", pin, new_pin, lambda: pivman_change_pin(session, pin, new_pin)
+        info.pin_complexity,
+        "PIN",
+        pin,
+        new_pin,
+        lambda: pivman_change_pin(session, pin, new_pin),
     )
 
 
@@ -337,10 +344,12 @@ def change_puk(ctx, puk, new_puk):
     Change the PUK code.
 
     If the PIN is lost or blocked it can be reset using a PUK.
-    The PUK must be between 6 and 8 characters long, and supports any type of
+    The PUK must be between 6 and 8 bytes long, and supports any type of
     alphanumeric characters.
     """
+    info = ctx.obj["info"]
     session = ctx.obj["session"]
+
     if not puk:
         puk = _prompt_pin("Enter the current PUK")
     if not new_puk:
@@ -352,7 +361,13 @@ def change_puk(ctx, puk, new_puk):
             confirmation_prompt=True,
         )
 
-    _do_change_pin_puk("PUK", puk, new_puk, lambda: session.change_puk(puk, new_puk))
+    _do_change_pin_puk(
+        info.pin_complexity,
+        "PUK",
+        puk,
+        new_puk,
+        lambda: session.change_puk(puk, new_puk),
+    )
 
 
 @access.command("change-management-key")
@@ -1213,10 +1228,6 @@ def _prompt_management_key(prompt="Enter a management key [blank to use default 
 
 def _prompt_pin(prompt="Enter PIN"):
     return click_prompt(prompt, default="", hide_input=True, show_default=False)
-
-
-def _valid_pin_length(pin):
-    return 6 <= len(pin) <= 8
 
 
 def _ensure_authenticated(
