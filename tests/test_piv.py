@@ -1,6 +1,7 @@
 from ykman.piv import generate_random_management_key, parse_rfc4514_string
 
 from yubikit.core import NotSupportedError, Version
+from yubikit.nist_piv.fascn import FASCNBuilder
 from yubikit.piv import (
     KEY_TYPE,
     MANAGEMENT_KEY_TYPE,
@@ -77,3 +78,42 @@ class TestPivFunctions:
             check_key_support(
                 Version(5, 7, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
             )
+
+    def test_fascn_create(self):
+        fascn = (
+            FASCNBuilder()
+            .agency_code([0, 0, 3, 2])
+            .system_code([0, 0, 0, 1])
+            .credential_number([0, 9, 2, 4, 4, 6])
+            .credential_series(0)
+            .individual_credential_issue(1)
+            .person_identifier([1, 1, 1, 2, 2, 2, 3, 3, 3, 3])
+            .organizational_category(1)
+            .organizational_identifier([1, 2, 2, 3])
+            .organization_association_category(2)
+            .build()
+        )
+
+        # https://www.idmanagement.gov/docs/pacs-tig-scepacs.pdf
+        # page 32
+        expected = bytearray.fromhex(
+            "D0439458210C2C19A0846D83685A1082108CE73984108CA3FC"
+        )
+        assert fascn.encode() == expected
+
+    def test_fascn_encode_decode(self):
+        fascn = (
+            FASCNBuilder()
+            .agency_code([0, 0, 3, 2])
+            .system_code([0, 0, 0, 1])
+            .credential_number([0, 9, 2, 4, 4, 6])
+            .credential_series(0)
+            .individual_credential_issue(1)
+            .person_identifier([1, 1, 1, 2, 2, 2, 3, 3, 3, 3])
+            .organizational_category(1)
+            .organizational_identifier([1, 2, 2, 3])
+            .organization_association_category(2)
+            .build()
+        )
+
+        assert fascn == fascn.decode(fascn.encode())
