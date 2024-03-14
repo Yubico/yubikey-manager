@@ -14,6 +14,8 @@ def _fido_only(capabilities):
 
 
 def not_sky(device, info):
+    if info.is_sky:
+        return False
     if device.transport == TRANSPORT.NFC:
         return not (
             info.serial is None
@@ -109,6 +111,7 @@ class TestConfigUSB:
                 "OTP",
             )
 
+    @condition.capability(CAPABILITY.U2F, TRANSPORT.USB)
     def test_mode_command(self, ykman_cli, await_reboot):
         ykman_cli("config", "mode", "ccid", "-f")
         await_reboot()

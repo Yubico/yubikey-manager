@@ -248,7 +248,9 @@ def _configure_applications(
             f"{unsupported.display_name} not supported over {transport} on this "
             "YubiKey."
         )
-    new_enabled = (enabled | enable) & ~disable
+
+    # N.B. NOT (~) of IntFlag doesn't work as expected
+    new_enabled = (enabled | enable) & ~int(disable)
 
     if transport == TRANSPORT.USB:
         if sum(CAPABILITY) & new_enabled == 0:
@@ -635,6 +637,8 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
                 f"Mode {mode} is not supported on this YubiKey!\n"
                 + "Use --force to attempt to set it anyway."
             )
+        elif info.is_sky and USB_INTERFACE.FIDO not in mode.interfaces:
+            raise CliFail("Security Key requires FIDO to be enabled.")
         force or click.confirm(f"Set mode of YubiKey to {mode}?", abort=True, err=True)
 
     try:

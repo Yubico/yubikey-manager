@@ -98,6 +98,7 @@ class CAPABILITY(IntFlag):
             ifaces |= USB_INTERFACE.FIDO
         if self & (
             0x4  # General CCID bit
+            | 0x400  # Management over CCID bit
             | CAPABILITY.OATH
             | CAPABILITY.PIV
             | CAPABILITY.OPENPGP
@@ -558,9 +559,21 @@ class ManagementSession:
             if USB_INTERFACE.OTP in mode.interfaces:
                 usb_enabled |= CAPABILITY.OTP
             if USB_INTERFACE.CCID in mode.interfaces:
-                usb_enabled |= CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
+                usb_enabled |= (
+                    CAPABILITY.OATH
+                    | CAPABILITY.PIV
+                    | CAPABILITY.OPENPGP
+                    | CAPABILITY.HSMAUTH
+                    | 0x400  # Management over CCID bit
+                )
             if USB_INTERFACE.FIDO in mode.interfaces:
                 usb_enabled |= CAPABILITY.U2F | CAPABILITY.FIDO2
+
+            # Overlay with supported capabilities
+            supported = self.read_device_info().supported_capabilities.get(
+                TRANSPORT.USB, 0
+            )
+            usb_enabled = usb_enabled & supported
             logger.debug(f"Delegating to DeviceConfig with usb_enabled: {usb_enabled}")
             # N.B: reboot=False, since we're using the older set_mode command
             self.write_device_config(
