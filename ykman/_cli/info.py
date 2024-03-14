@@ -139,7 +139,7 @@ def _check_fips_status(device, info):
 @click.option(
     "-c",
     "--check-fips",
-    help="check if YubiKey is in FIPS Approved mode (YubiKey 4 FIPS only)",
+    help="check if YubiKey is in FIPS Approved mode (4 Series only)",
     is_flag=True,
 )
 @click_command(connections=[SmartCardConnection, OtpConnection, FidoConnection])
@@ -202,4 +202,6 @@ def info(ctx, check_fips):
             device = ctx.obj["device"]
             _check_fips_status(device, info)
         else:
-            raise CliFail("Unable to check FIPS Approved mode - Not a YubiKey 4 FIPS")
+            raise CliFail(
+                "Unable to check FIPS Approved mode - Not a YubiKey FIPS (4 Series)"
+            )

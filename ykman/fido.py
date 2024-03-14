@@ -44,7 +44,7 @@ INS_FIPS_VERIFY_FIPS_MODE = U2F_VENDOR_FIRST + 6
 
 
 def is_in_fips_mode(fido_connection: FidoConnection) -> bool:
-    """Check if a YubiKey FIPS is in FIPS approved mode.
+    """Check if a YubiKey 4 FIPS is in FIPS approved mode.
 
     :param fido_connection: A FIDO connection.
     """
@@ -62,7 +62,7 @@ def is_in_fips_mode(fido_connection: FidoConnection) -> bool:
 def fips_change_pin(
     fido_connection: FidoConnection, old_pin: Optional[str], new_pin: str
 ):
-    """Change the PIN on a YubiKey FIPS.
+    """Change the PIN on a YubiKey 4 FIPS.
 
     If no PIN is set, pass None or an empty string as old_pin.
 
@@ -82,7 +82,7 @@ def fips_change_pin(
 
 
 def fips_verify_pin(fido_connection: FidoConnection, pin: str):
-    """Unlock the YubiKey FIPS U2F module for credential creation.
+    """Unlock the YubiKey 4 FIPS U2F module for credential creation.
 
     :param fido_connection: A FIDO connection.
     :param pin: The FIDO PIN.
@@ -92,11 +92,11 @@ def fips_verify_pin(fido_connection: FidoConnection, pin: str):
 
 
 def fips_reset(fido_connection: FidoConnection):
-    """Reset the FIDO module of a YubiKey FIPS.
+    """Reset the FIDO module of a YubiKey 4 FIPS.
 
-    Note: This action is only permitted immediately after YubiKey FIPS power-up. It
-    also requires the user to touch the flashing button on the YubiKey, and will halt
-    until that happens, or the command times out.
+    Note: This action is only permitted immediately after YubiKey power-up. It also
+    requires the user to touch the flashing button on the YubiKey, and will halt until
+    that happens, or the command times out.
 
     :param fido_connection: A FIDO connection.
     """

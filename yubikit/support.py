@@ -403,7 +403,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 return "YubiKey"
         elif major_version == 4:
             if info.is_fips:
-                device_name = "YubiKey FIPS"
+                device_name = "YubiKey FIPS (4 Series)"
             elif usb_supported == CAPABILITY.OTP | CAPABILITY.U2F:
                 device_name = "YubiKey Edge"
             else:

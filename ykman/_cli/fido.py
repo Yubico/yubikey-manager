@@ -63,10 +63,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-FIPS_PIN_MIN_LENGTH = 6
-PIN_MIN_LENGTH = 4
-
-
 @click_group(connections=[FidoConnection])
 @click.pass_context
 @click_postpone_execution
@@ -233,10 +229,10 @@ def reset(ctx, force):
         )
         if is_fips:
             destroy_input = click_prompt(
-                "WARNING! This is a YubiKey FIPS device. This command will also "
-                "overwrite the U2F attestation key; this action cannot be undone and "
-                "this YubiKey will no longer be a FIPS compliant device.\n"
-                'To proceed, please enter the text "OVERWRITE"',
+                "WARNING! This is a YubiKey FIPS (4 Series) device. This command will "
+                "also overwrite the U2F attestation key; this action cannot be undone "
+                "and this YubiKey will no longer be a FIPS compliant device.\n"
+                'To proceed, enter the text "OVERWRITE"',
                 default="",
                 show_default=False,
             )
@@ -305,16 +301,17 @@ def access():
     "-u",
     "--u2f",
     is_flag=True,
-    help="set FIDO U2F PIN instead of FIDO2 PIN (YubiKey 4 FIPS only)",
+    help="set FIDO U2F PIN instead of FIDO2 PIN (YubiKey FIPS only)",
 )
 def change_pin(ctx, pin, new_pin, u2f):
     """
     Set or change the PIN code.
 
-    The FIDO2 PIN must be at least 4 characters long, and supports any type
-    of alphanumeric characters.
+    The FIDO2 PIN must be at least 4 characters long, and supports any type of
+    alphanumeric characters. Some YubiKeys can be configured to require a longer
+    PIN.
 
-    On YubiKey FIPS, a PIN can be set for FIDO U2F. That PIN must be at least
+    On YubiKey FIPS (4 Series), a PIN can be set for FIDO U2F. That PIN must be at least
     6 characters long.
     """
 
@@ -322,22 +319,29 @@ def change_pin(ctx, pin, new_pin, u2f):
 
     if is_fips and not u2f:
         raise CliFail(
-            "This is a YubiKey FIPS. To set the U2F PIN, pass the --u2f option."
+            "This is a YubiKey FIPS (4 Series). "
+            "To set the U2F PIN, pass the --u2f option."
         )
 
     if u2f and not is_fips:
         raise CliFail(
-            "This is not a YubiKey 4 FIPS, and therefore does not support a U2F PIN. "
-            "To set the FIDO2 PIN, remove the --u2f option."
+            "This is not a YubiKey FIPS (4 Series), and therefore does not support a "
+            "U2F PIN. To set the FIDO2 PIN, remove the --u2f option."
         )
 
     if is_fips:
         conn = ctx.obj["conn"]
+        min_len = 6
     else:
         ctap2 = ctx.obj.get("ctap2")
         if not ctap2:
             raise CliFail("PIN is not supported on this YubiKey.")
         client_pin = ClientPin(ctap2)
+        min_len = ctap2.info.min_pin_length
+
+    def _fail_if_not_valid_pin(pin=None, name="PIN"):
+        if not pin or len(pin) < min_len:
+            raise CliFail(f"{name} must be at least {min_len} characters long")
 
     def prompt_new_pin():
         return click_prompt(
@@ -347,8 +351,6 @@ def change_pin(ctx, pin, new_pin, u2f):
         )
 
     def change_pin(pin, new_pin):
-        if pin is not None:
-            _fail_if_not_valid_pin(ctx, pin, is_fips)
         try:
             if is_fips:
                 try:
@@ -357,7 +359,7 @@ def change_pin(ctx, pin, new_pin, u2f):
                 except ApduError as e:
                     if e.code == SW.WRONG_LENGTH:
                         pin = _prompt_current_pin()
-                        _fail_if_not_valid_pin(ctx, pin, is_fips)
+                        _fail_if_not_valid_pin(pin)
                         fips_change_pin(conn, pin, new_pin)
                     else:
                         raise
@@ -380,7 +382,7 @@ def change_pin(ctx, pin, new_pin, u2f):
                 raise CliFail(f"Failed to change PIN: SW={e.code:04x}")
 
     def set_pin(new_pin):
-        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
+        _fail_if_not_valid_pin(new_pin)
         try:
             client_pin.set_pin(new_pin)
         except CtapError as e:
@@ -399,14 +401,11 @@ def change_pin(ctx, pin, new_pin, u2f):
 
     if not new_pin:
         new_pin = prompt_new_pin()
+    _fail_if_not_valid_pin(new_pin, "New PIN")
 
     if is_fips:
-        _fail_if_not_valid_pin(ctx, new_pin, is_fips)
         change_pin(pin, new_pin)
     else:
-        min_len = ctap2.info.min_pin_length
-        if len(new_pin) < min_len:
-            raise CliFail(f"New PIN is too short. Minimum length: {min_len}")
         if ctap2.info.options.get("clientPin"):
             change_pin(pin, new_pin)
         else:
@@ -435,7 +434,7 @@ def verify(ctx, pin):
     Verify the FIDO PIN against a YubiKey.
 
     For YubiKeys supporting FIDO2 this will reset the "retries" counter of the PIN.
-    For YubiKey FIPS this will unlock the session, allowing U2F registration.
+    For YubiKey FIPS (4 Series) this will unlock the session, allowing U2F registration.
     """
 
     ctap2 = ctx.obj.get("ctap2")
@@ -450,7 +449,6 @@ def verify(ctx, pin):
         except CtapError as e:
             raise CliFail(f"PIN verification failed: {e}")
     elif is_yk4_fips(ctx.obj["info"]):
-        _fail_if_not_valid_pin(ctx, pin, True)
         try:
             fips_verify_pin(ctx.obj["conn"], pin)
         except ApduError as e:
@@ -517,13 +515,17 @@ def set_min_pin_length(ctx, pin, rp_id, length):
     Optionally use the --rp option to specify which RPs are allowed to request this
     information.
     """
-    options = ctx.obj.get("ctap2").info.options
-    if not options.get("setMinPINLength"):
+    info = ctx.obj["ctap2"].info
+    if not info.options.get("setMinPINLength"):
         raise CliFail("Set minimum PIN length is not supported on this YubiKey.")
     if options.get("alwaysUv") and not options.get("clientPin"):
         raise CliFail(
             "Setting min PIN length requires a PIN to be set when alwaysUv is enabled."
         )
+
+    min_len = info.min_pin_length
+    if length < min_len:
+        raise CliFail(f"Cannot set a minimum length that is shorter than {min_len}.")
 
     config = _init_config(ctx, pin)
     if rp_id:
@@ -539,12 +541,6 @@ def set_min_pin_length(ctx, pin, rp_id, length):
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
     return click_prompt(prompt, hide_input=True)
-
-
-def _fail_if_not_valid_pin(ctx, pin=None, is_fips=False):
-    min_length = FIPS_PIN_MIN_LENGTH if is_fips else PIN_MIN_LENGTH
-    if not pin or len(pin) < min_length:
-        ctx.fail(f"PIN must be over {min_length} characters long")
 
 
 def _gen_creds(credman):
