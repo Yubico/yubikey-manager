@@ -422,7 +422,7 @@ def yubiotp(
             click.echo(f"Using YubiKey serial as public ID: {public_id}")
         elif force:
             ctx.fail(
-                "Public ID not given. Please remove the --force flag, or "
+                "Public ID not given. Remove the --force flag, or "
                 "add the --serial-public-id flag or --public-id option."
             )
         else:
@@ -441,7 +441,7 @@ def yubiotp(
             click.echo(f"Using a randomly generated private ID: {private_id.hex()}")
         elif force:
             ctx.fail(
-                "Private ID not given. Please remove the --force flag, or "
+                "Private ID not given. Remove the --force flag, or "
                 "add the --generate-private-id flag or --private-id option."
             )
         else:
@@ -454,7 +454,7 @@ def yubiotp(
             click.echo(f"Using a randomly generated secret key: {key.hex()}")
         elif force:
             ctx.fail(
-                "Secret key not given. Please remove the --force flag, or "
+                "Secret key not given. Remove the --force flag, or "
                 "add the --generate-key flag or --key option."
             )
         else:
@@ -619,7 +619,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     else:
         if force and not generate:
             ctx.fail(
-                "No secret key given. Please remove the --force flag, "
+                "No secret key given. Remove the --force flag, "
                 "set the KEY argument or set the --generate flag."
             )
         elif generate:

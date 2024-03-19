@@ -270,11 +270,9 @@ def _configure_applications(
     is_locked = info.is_locked
 
     if force and is_locked and not lock_code:
-        raise CliFail("Configuration is locked - please supply the --lock-code option.")
+        raise CliFail("Configuration is locked - supply the --lock-code option.")
     if lock_code and not is_locked:
-        raise CliFail(
-            "Configuration is not locked - please remove the --lock-code option."
-        )
+        raise CliFail("Configuration is not locked - remove the --lock-code option.")
 
     click.echo(f"{transport} configuration changes:")
     for change in changes:

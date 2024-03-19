@@ -52,7 +52,7 @@ class _PrepareUploadError(Enum):
     CONNECTION_FAILED = "Failed to open HTTPS connection."
     NOT_FOUND = "Upload request not recognized by server."
     SERVICE_UNAVAILABLE = (
-        "Service temporarily unavailable, please try again later."  # noqa: E501
+        "Service temporarily unavailable, try again later."  # noqa: E501
     )
 
     # Defined in upload project

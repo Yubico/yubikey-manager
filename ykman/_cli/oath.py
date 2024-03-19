@@ -356,9 +356,7 @@ def _string_id(credential):
 
 
 def _error_multiple_hits(ctx, hits):
-    click.echo(
-        "Error: Multiple matches, please make the query more specific.", err=True
-    )
+    click.echo("Error: Multiple matches, make the query more specific.", err=True)
     click.echo("", err=True)
     for cred in hits:
         click.echo(_string_id(cred), err=True)

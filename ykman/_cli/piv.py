@@ -472,7 +472,7 @@ def change_management_key(
                 click.echo(f"Generated management key: {new_management_key.hex()}")
         elif force:
             ctx.fail(
-                "New management key not given. Please remove the --force "
+                "New management key not given. Remove the --force "
                 "flag, or set the --generate flag or the "
                 "--new-management-key option."
             )
