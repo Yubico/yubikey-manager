@@ -697,7 +697,7 @@ def metadata(ctx, slot):
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No key stored in slot {slot}.")
-        raise e
+        raise
 
 
 @keys.command()
@@ -815,7 +815,12 @@ def delete_key(ctx, management_key, pin, slot):
     """
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
-    session.delete_key(slot)
+    try:
+        session.delete_key(slot)
+    except ApduError as e:
+        if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+            raise CliFail(f"No key stored in slot {slot}.")
+        raise
 
 
 @piv.group("certificates")
@@ -903,8 +908,8 @@ def import_certificate(
                 timeout = None
         except ApduError as e:
             if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-                raise CliFail("No private key in slot {slot}")
-            raise e
+                raise CliFail(f"No private key in slot {slot}")
+            raise
         except NotSupportedError:
             timeout = 1.0
 
@@ -993,7 +998,8 @@ def generate_certificate(
             timeout = None
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            raise CliFail("No private key in slot {slot}")
+            raise CliFail(f"No private key in slot {slot}.")
+        raise
     except NotSupportedError:
         timeout = 1.0
 
@@ -1065,7 +1071,8 @@ def generate_certificate_signing_request(
             timeout = None
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            raise CliFail("No private key in slot {slot}")
+            raise CliFail(f"No private key in slot {slot}.")
+        raise
     except NotSupportedError:
         timeout = 1.0
 
@@ -1183,7 +1190,7 @@ def write_object(ctx, pin, management_key, object_id, data):
     except ApduError as e:
         if e.sw == SW.INCORRECT_PARAMETERS:
             raise CliFail("Something went wrong, is the object id valid?")
-        raise CliFail("Error writing object")
+        raise CliFail("Error writing object.")
 
 
 @objects.command("generate")
