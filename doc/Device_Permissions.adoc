@@ -13,8 +13,8 @@ For smart card based applications, or when accessing a YubiKey over NFC, the
 access is done via pcscd, the PC/SC Smart Card Daemon. It's usually enough to
 have pcscd installed and running for this to work.
 
-Smart card access is required for the `piv`, `oath`, and `openpgp` commands, as
-well as for any command issued over NFC.
+Smart card access is required for the `piv`, `oath`, `openpgp`, and `hsmauth`
+commands, as well as for any command issued over NFC.
 
 
 === Keyboard Access
@@ -27,7 +27,7 @@ Keyboard access is required for the `otp` command.
 
 
 === FIDO Access
-The FIDO protocols are accessed via a USB HID interface. As with keybaord
+The FIDO protocols are accessed via a USB HID interface. As with keyboard
 access, permission is granted through udev. You can find an example udev rules
 file which grants access to a large number (not just YubiKeys) of FIDO devices
 https://github.com/Yubico/libu2f-host/blob/master/70-u2f.rules[here].
