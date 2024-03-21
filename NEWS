@@ -1,3 +1,13 @@
+* Version 5.4.0 (unreleased)
+ * Support for YubiKey Bio Multi-protocol Edition.
+ * CLI: Improve error messages for several failures.
+ * Attempt to send SIGHUP to yubikey-agent if it is blocking the connection.
+ * Bugfix: Allow "fido config" to work when no PIN is set on the YubiKey.
+ * Bugfix: MacOS - Fix race condition resulting in unneeded delay in fido commands over
+   USB.
+ * Bugfix: Linux - Fix error when listing OTP devices when no YubiKeys are attached.
+ * Bugfix: OpenPGP - Fix RSA key generation on YubiKey NEO.
+
 * Version 5.3.0 (released 2024-01-31)
  ** FIDO: Add new CLI commands for PIN management and authenticator config
     (force-change, set-min-length, toggle-always-uv, enable-ep-attestation).
