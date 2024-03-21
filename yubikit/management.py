@@ -176,6 +176,7 @@ TAG_HID_INIT_DELAY = 0x12
 TAG_PART_NUMBER = 0x13
 TAG_PIN_COMPLEXITY = 0x16
 TAG_NFC_RESTRICTED = 0x17
+TAG_RESET_BLOCKED = 0x18
 
 
 @dataclass
@@ -233,6 +234,7 @@ class DeviceInfo:
     is_fips: bool = False
     is_sky: bool = False
     pin_complexity: bool = False
+    reset_blocked: CAPABILITY = CAPABILITY(0)
 
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
@@ -276,6 +278,7 @@ class DeviceInfo:
             enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
         nfc_restricted = data.get(TAG_NFC_RESTRICTED, b"\0") == b"\1"
         pin_complexity = data.get(TAG_PIN_COMPLEXITY, b"\0") == b"\1"
+        reset_blocked = CAPABILITY(bytes2int(data.get(TAG_RESET_BLOCKED, b"\0")))
 
         return cls(
             DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags, nfc_restricted),
@@ -287,6 +290,7 @@ class DeviceInfo:
             fips,
             sky,
             pin_complexity,
+            reset_blocked,
         )
 
 

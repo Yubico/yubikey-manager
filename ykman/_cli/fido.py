@@ -36,6 +36,7 @@ from fido2.ctap2 import (
     Config,
 )
 from fido2.pcsc import CtapPcscDevice
+from yubikit.management import CAPABILITY
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
 from time import sleep
@@ -168,8 +169,14 @@ def reset(ctx, force):
     inserted, and requires a touch on the YubiKey.
     """
 
-    conn = ctx.obj["conn"]
+    info = ctx.obj["info"]
+    if CAPABILITY.FIDO2 in info.reset_blocked:
+        raise CliFail(
+            "Cannot perform FIDO reset when PIV is configured, "
+            "use 'ykman config reset' for full factory reset."
+        )
 
+    conn = ctx.obj["conn"]
     if isinstance(conn, CtapPcscDevice):  # NFC
         readers = list_ccid(conn._name)
         if not readers or readers[0].reader.name != conn._name:

@@ -48,7 +48,6 @@ from .util import (
 )
 import os
 import re
-import sys
 import click
 import logging
 
@@ -68,7 +67,7 @@ def prompt_lock_code():
 @click_postpone_execution
 def config(ctx):
     """
-    Enable or disable applications.
+    Configure the YubiKey, enable or disable applications.
 
     The applications may be enabled and disabled independently
     over different transports (USB and NFC). The configuration may
@@ -112,12 +111,14 @@ def _require_config(ctx):
         )
 
 
-@config.command(hidden="--full-help" not in sys.argv)
+@config.command()
 @click.pass_context
 @click_force_option
 def reset(ctx, force):
     """
     Reset all YubiKey data.
+
+    This command is used with the YubiKey Bio Multi-protocol Edition.
 
     This action will wipe all data and restore factory settings for
     all applications on the YubiKey.
@@ -127,7 +128,10 @@ def reset(ctx, force):
     is_bio = info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO)
     has_piv = CAPABILITY.PIV in info.supported_capabilities.get(transport)
     if not (is_bio and has_piv):
-        raise CliFail("Full device reset is not supported on this YubiKey.")
+        raise CliFail(
+            "Full device reset is not supported on this YubiKey, "
+            "refer to reset commands for specific applications instead."
+        )
 
     force or click.confirm(
         "WARNING! This will delete all stored data and restore factory "

@@ -27,6 +27,7 @@
 
 from yubikit.core import NotSupportedError
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import CAPABILITY
 from yubikit.piv import (
     PivSession,
     InvalidPinError,
@@ -220,6 +221,13 @@ def reset(ctx, force):
     This action will wipe all data and restore factory settings for
     the PIV application on the YubiKey.
     """
+    info = ctx.obj["info"]
+    if CAPABILITY.PIV in info.reset_blocked:
+        raise CliFail(
+            "Cannot perform PIV reset when biometrics are configured, "
+            "use 'ykman config reset' for full factory reset."
+        )
+
     force or click.confirm(
         "WARNING! This will delete all stored PIV data and restore factory "
         "settings. Proceed?",
