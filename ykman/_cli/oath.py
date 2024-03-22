@@ -618,7 +618,7 @@ def code(ctx, show_hidden, query, single, password, remember):
 
     Generate codes from OATH accounts stored on the YubiKey.
     Provide a query string to match one or more specific accounts.
-    Accounts of type HOTP, or those that require touch, requre a single match to be
+    Accounts of type HOTP, or those that require touch, require a single match to be
     triggered.
     """
 
