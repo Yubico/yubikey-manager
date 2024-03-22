@@ -49,7 +49,7 @@ from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from enum import IntEnum, IntFlag, unique
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union, Mapping
 import abc
 import struct
@@ -168,16 +168,17 @@ TAG_UNLOCK = 0x0B
 TAG_REBOOT = 0x0C
 TAG_NFC_SUPPORTED = 0x0D
 TAG_NFC_ENABLED = 0x0E
+TAG_MORE_DATA = 0x10
 
 
 @dataclass
 class DeviceConfig:
     """Management settings for YubiKey which can be configured by the user."""
 
-    enabled_capabilities: Mapping[TRANSPORT, CAPABILITY]
-    auto_eject_timeout: Optional[int]
-    challenge_response_timeout: Optional[int]
-    device_flags: Optional[DEVICE_FLAG]
+    enabled_capabilities: Mapping[TRANSPORT, CAPABILITY] = field(default_factory=dict)
+    auto_eject_timeout: Optional[int] = None
+    challenge_response_timeout: Optional[int] = None
+    device_flags: Optional[DEVICE_FLAG] = None
 
     def get_bytes(
         self,
@@ -229,7 +230,12 @@ class DeviceInfo:
     def parse(cls, encoded: bytes, default_version: Version) -> "DeviceInfo":
         if len(encoded) - 1 != encoded[0]:
             raise BadResponseError("Invalid length")
-        data = Tlv.parse_dict(encoded[1:])
+        return cls.parse_tlvs(Tlv.parse_dict(encoded[1:]), default_version)
+
+    @classmethod
+    def parse_tlvs(
+        cls, data: Mapping[int, bytes], default_version: Version
+    ) -> "DeviceInfo":
         locked = data.get(TAG_CONFIG_LOCK) == b"\1"
         serial = bytes2int(data.get(TAG_SERIAL, b"\0")) or None
         ff_value = bytes2int(data.get(TAG_FORM_FACTOR, b"\0"))
@@ -324,7 +330,7 @@ class _Backend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def read_config(self) -> bytes:
+    def read_config(self, page: int = 0) -> bytes:
         ...
 
     @abc.abstractmethod
@@ -351,8 +357,10 @@ class _ManagementOtpBackend(_Backend):
                 return  # ProgSeq isn't updated by set mode when empty
             raise
 
-    def read_config(self):
-        response = self.protocol.send_and_receive(SLOT_YK4_CAPABILITIES)
+    def read_config(self, page: int = 0):
+        response = self.protocol.send_and_receive(
+            SLOT_YK4_CAPABILITIES, int2bytes(page)
+        )
         r_len = response[0]
         if check_crc(response[: r_len + 1 + 2]):
             return response[: r_len + 1]
@@ -401,8 +409,8 @@ class _ManagementSmartCardBackend(_Backend):
         else:
             self.protocol.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
 
-    def read_config(self):
-        return self.protocol.send_apdu(0, INS_READ_CONFIG, 0, 0)
+    def read_config(self, page: int = 0):
+        return self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0)
 
     def write_config(self, config):
         self.protocol.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
@@ -434,8 +442,8 @@ class _ManagementCtapBackend(_Backend):
     def set_mode(self, data):
         self.ctap.call(CTAP_YUBIKEY_DEVICE_CONFIG, data)
 
-    def read_config(self):
-        return self.ctap.call(CTAP_READ_CONFIG)
+    def read_config(self, page: int = 0):
+        return self.ctap.call(CTAP_READ_CONFIG, int2bytes(page))
 
     def write_config(self, config):
         self.ctap.call(CTAP_WRITE_CONFIG, config)
@@ -468,7 +476,20 @@ class ManagementSession:
     def read_device_info(self) -> DeviceInfo:
         """Get detailed information about the YubiKey."""
         require_version(self.version, (4, 1, 0))
-        return DeviceInfo.parse(self.backend.read_config(), self.version)
+        more_data = True
+        tlvs = {}
+        page = 0
+        while more_data:
+            logger.debug(f"Reading DeviceInfo page: {page}")
+            encoded = self.backend.read_config(page)
+            if len(encoded) - 1 != encoded[0]:
+                raise BadResponseError("Invalid length")
+            data = Tlv.parse_dict(encoded[1:])
+            more_data = data.pop(TAG_MORE_DATA, 0) == b"\1"
+            tlvs.update(data)
+            page += 1
+
+        return DeviceInfo.parse_tlvs(tlvs, self.version)
 
     def write_device_config(
         self,
@@ -489,7 +510,7 @@ class ManagementSession:
             raise ValueError("Lock code must be 16 bytes")
         if new_lock_code is not None and len(new_lock_code) != 16:
             raise ValueError("Lock code must be 16 bytes")
-        config = config or DeviceConfig({}, None, None, None)
+        config = config or DeviceConfig()
         logger.debug(
             f"Writing device config: {config}, reboot: {reboot}, "
             f"current lock code: {cur_lock_code is not None}, "
@@ -534,7 +555,6 @@ class ManagementSession:
                     {TRANSPORT.USB: usb_enabled},
                     auto_eject_timeout,
                     chalresp_timeout,
-                    None,
                 )
             )
         else:
