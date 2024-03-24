@@ -41,10 +41,6 @@ from time import sleep
 import subprocess  # nosec
 import logging
 
-import os
-import psutil
-import signal
-
 logger = logging.getLogger(__name__)
 
 
@@ -158,7 +154,7 @@ def kill_scdaemon():
 
 def kill_yubikey_agent():
     killed = False
-    return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])
+    return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # nosec
     if return_code == 0:
         killed = True
     if killed:
