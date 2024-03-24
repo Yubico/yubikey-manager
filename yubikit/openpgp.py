@@ -895,9 +895,11 @@ def _get_key_attributes(
             raise ValueError("RSA keys with e != 65537 are not supported!")
         return RsaAttributes.create(
             RSA_SIZE(private_key.key_size),
-            RSA_IMPORT_FORMAT.CRT_W_MOD
-            if 0 < version[0] < 4
-            else RSA_IMPORT_FORMAT.STANDARD,
+            (
+                RSA_IMPORT_FORMAT.CRT_W_MOD
+                if 0 < version[0] < 4
+                else RSA_IMPORT_FORMAT.STANDARD
+            ),
         )
     return EcAttributes.create(key_ref, OID._from_key(private_key))
 
@@ -1521,7 +1523,12 @@ class OpenPgpSession:
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
             in self.extended_capabilities.flags
         ):
-            attributes = RsaAttributes.create(key_size)
+            import_format = (
+                RSA_IMPORT_FORMAT.CRT_W_MOD
+                if 0 < self.version[0] < 4  # Use CRT for NEO
+                else RSA_IMPORT_FORMAT.STANDARD
+            )
+            attributes = RsaAttributes.create(key_size, import_format)
             self.set_algorithm_attributes(key_ref, attributes)
         elif key_size != RSA_SIZE.RSA2048:
             raise NotSupportedError("Algorithm attributes not supported")
