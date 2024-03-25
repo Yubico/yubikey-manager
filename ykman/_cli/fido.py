@@ -525,7 +525,7 @@ def set_min_pin_length(ctx, pin, rp_id, length):
     info = ctx.obj["ctap2"].info
     if not info.options.get("setMinPINLength"):
         raise CliFail("Set minimum PIN length is not supported on this YubiKey.")
-    if options.get("alwaysUv") and not options.get("clientPin"):
+    if info.options.get("alwaysUv") and not info.options.get("clientPin"):
         raise CliFail(
             "Setting min PIN length requires a PIN to be set when alwaysUv is enabled."
         )
