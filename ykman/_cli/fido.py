@@ -376,7 +376,7 @@ def change_pin(ctx, pin, new_pin, u2f):
 
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                raise CliFail("New PIN doesn't meet policy requirements.")
+                raise CliFail("New PIN doesn't meet complexity requirements.")
             else:
                 _fail_pin_error(ctx, e, "Failed to change PIN: %s")
 
@@ -394,7 +394,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             client_pin.set_pin(new_pin)
         except CtapError as e:
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                raise CliFail("New PIN doesn't meet policy requirements.")
+                raise CliFail("New PIN doesn't meet complexity requirements.")
             else:
                 raise CliFail(f"Failed to set PIN: {e.code}")
 
