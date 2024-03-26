@@ -1,4 +1,4 @@
-* Version 5.4.0 (released)
+* Version 5.4.0 (released 2024-03-27)
  * Support for YubiKey Bio Multi-protocol Edition.
  * CLI: Improve error messages for several failures.
  * Attempt to send SIGHUP to yubikey-agent if it is blocking the connection.
