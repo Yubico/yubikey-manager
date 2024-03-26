@@ -523,7 +523,11 @@ def unblock_pin(ctx, puk, new_pin):
         puk = click_prompt("Enter PUK", default="", show_default=False, hide_input=True)
     if not new_pin:
         new_pin = click_prompt(
-            "Enter a new PIN", default="", show_default=False, hide_input=True
+            "Enter a new PIN",
+            default="",
+            show_default=False,
+            hide_input=True,
+            confirmation_prompt=True,
         )
     try:
         session.unblock_pin(puk, new_pin)
@@ -534,6 +538,10 @@ def unblock_pin(ctx, puk, new_pin):
             raise CliFail("PIN unblock failed - %d tries left." % attempts)
         else:
             raise CliFail("PUK is blocked.")
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("PIN does not meet complexity requirement.")
+        raise
 
 
 @piv.group()
