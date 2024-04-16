@@ -25,8 +25,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import click
-import logging
 from .util import (
     CliFail,
     click_force_option,
@@ -39,6 +37,7 @@ from .util import (
     prompt_timeout,
     EnumChoice,
     is_yk4_fips,
+    pretty_print,
 )
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.oath import (
@@ -49,9 +48,13 @@ from yubikit.oath import (
     parse_b32_key,
     _format_cred_id,
 )
+from yubikit.management import CAPABILITY
 from ..oath import is_steam, calculate_steam, is_hidden, delete_broken_credential
 from ..settings import AppData
 
+from typing import Dict, List, Any
+import click
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +96,22 @@ def info(ctx):
     Display general status of the OATH application.
     """
     session = ctx.obj["session"]
-    version = session.version
-    click.echo(f"OATH version: {version[0]}.{version[1]}.{version[2]}")
-    click.echo("Password protection: " + ("enabled" if session.locked else "disabled"))
+    info = ctx.obj["info"]
+    data: Dict[str, Any] = {"OATH version": "%d.%d.%d" % session.version}
+    lines: List[Any] = [data]
 
+    if CAPABILITY.OATH in info.fips_capable:
+        # This is a bit ugly as it makes assumptions about the structure of data
+        data["FIPS approved"] = CAPABILITY.OATH in info.fips_approved
+    elif is_yk4_fips(info):
+        data["FIPS approved"] = session.locked
+
+    data["Password protection"] = "enabled" if session.locked else "disabled"
     keys = ctx.obj["oath_keys"]
     if session.locked and session.device_id in keys:
-        click.echo("The password for this YubiKey is remembered by ykman.")
+        lines.append("The password for this YubiKey is remembered by ykman.")
 
-    if is_yk4_fips(ctx.obj["info"]):
-        click.echo(f"FIPS Approved Mode: {'Yes' if session.locked else 'No'}")
+    click.echo("\n".join(pretty_print(lines)))
 
 
 @oath.command()

@@ -27,6 +27,7 @@
 
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.openpgp import OpenPgpSession, UIF, PIN_POLICY, KEY_REF as _KEY_REF
+from yubikit.management import CAPABILITY
 from ..util import parse_certificates, parse_private_key
 from ..openpgp import get_openpgp_info
 from .util import (
@@ -90,8 +91,12 @@ def info(ctx):
     """
     Display general status of the OpenPGP application.
     """
-    session = ctx.obj["session"]
-    click.echo("\n".join(pretty_print(get_openpgp_info(session))))
+    info = ctx.obj["info"]
+    data = get_openpgp_info(ctx.obj["session"])
+    if CAPABILITY.OPENPGP in info.fips_capable:
+        # This is a bit ugly as it makes assumptions about the structure of data
+        data["FIPS approved"] = CAPABILITY.OPENPGP in info.fips_approved
+    click.echo("\n".join(pretty_print(data)))
 
 
 @openpgp.command()

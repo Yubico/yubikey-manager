@@ -98,14 +98,18 @@ def info(ctx):
     """
     Display general status of the FIDO2 application.
     """
-    conn = ctx.obj["conn"]
+    info = ctx.obj["info"]
     ctap2 = ctx.obj.get("ctap2")
-    info: Dict = {}
-    lines: List = [info]
 
-    if is_yk4_fips(ctx.obj["info"]):
-        info["FIPS Approved Mode"] = "Yes" if is_in_fips_mode(conn) else "No"
-    elif ctap2:
+    data: Dict = {}
+    lines: List = [data]
+
+    if CAPABILITY.FIDO2 in info.fips_capable:
+        data["FIPS approved"] = CAPABILITY.FIDO2 in info.fips_approved
+    elif is_yk4_fips(info):
+        data["FIPS approved"] = is_in_fips_mode(ctx.obj["conn"])
+
+    if ctap2:
         client_pin = ClientPin(ctap2)  # N.B. All YubiKeys with CTAP2 support PIN.
         if ctap2.info.options["clientPin"]:
             if ctap2.info.force_pin_change:
@@ -115,42 +119,41 @@ def info(ctx):
                 )
             pin_retries, power_cycle = client_pin.get_pin_retries()
             if pin_retries:
-                info["PIN"] = f"{pin_retries} attempt(s) remaining"
+                data["PIN"] = f"{pin_retries} attempt(s) remaining"
                 if power_cycle:
                     lines.append(
                         "PIN is temporarily blocked. "
                         "Remove and re-insert the YubiKey to unblock."
                     )
             else:
-                info["PIN"] = "blocked"
+                data["PIN"] = "Blocked"
         else:
-            info["PIN"] = "not set"
-        info["Minimum PIN length"] = ctap2.info.min_pin_length
+            data["PIN"] = "Not set"
+        data["Minimum PIN length"] = ctap2.info.min_pin_length
 
         bio_enroll = ctap2.info.options.get("bioEnroll")
         if bio_enroll:
             uv_retries = client_pin.get_uv_retries()
             if uv_retries:
-                info["Fingerprints"] = f"registered, {uv_retries} attempt(s) remaining"
+                data["Fingerprints"] = f"Registered, {uv_retries} attempt(s) remaining"
             else:
-                info["Fingerprints"] = "registered, blocked until PIN is verified"
+                data["Fingerprints"] = "Registered, blocked until PIN is verified"
         elif bio_enroll is False:
-            info["Fingerprints"] = "not registered"
+            data["Fingerprints"] = "Not registered"
 
         always_uv = ctap2.info.options.get("alwaysUv")
         if always_uv is not None:
-            info["Always Require UV"] = "on" if always_uv else "off"
+            data["Always Require UV"] = "On" if always_uv else "Off"
 
         remaining_creds = ctap2.info.remaining_disc_creds
         if remaining_creds is not None:
-            info["Credential storage remaining"] = remaining_creds
+            data["Credential storage remaining"] = remaining_creds
 
         ep = ctap2.info.options.get("ep")
         if ep is not None:
-            info["Enterprise Attestation"] = "enabled" if ep else "disabled"
-
+            data["Enterprise Attestation"] = "Enabled" if ep else "Disabled"
     else:
-        info["PIN"] = "not supported"
+        data["PIN"] = "Not supported"
 
     click.echo("\n".join(pretty_print(lines)))
 

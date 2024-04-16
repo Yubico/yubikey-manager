@@ -33,6 +33,7 @@ from yubikit.hsmauth import (
     MANAGEMENT_KEY_LEN,
     DEFAULT_MANAGEMENT_KEY,
 )
+from yubikit.management import CAPABILITY
 from yubikit.core.smartcard import ApduError, SW
 
 from ..util import parse_private_key, InvalidPasswordError
@@ -212,8 +213,13 @@ def info(ctx):
     """
     Display general status of the YubiHSM Auth application.
     """
-    info = get_hsmauth_info(ctx.obj["session"])
-    click.echo("\n".join(pretty_print(info)))
+    info = ctx.obj["info"]
+    data = get_hsmauth_info(ctx.obj["session"])
+    if CAPABILITY.HSMAUTH in info.fips_capable:
+        # This is a bit ugly as it makes assumptions about the structure of data
+        data["FIPS approved"] = CAPABILITY.HSMAUTH in info.fips_approved
+
+    click.echo("\n".join(pretty_print(data)))
 
 
 @hsmauth.command()

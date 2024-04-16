@@ -199,6 +199,10 @@ def piv(ctx):
     session = PivSession(conn)
     ctx.obj["session"] = session
     ctx.obj["pivman_data"] = get_pivman_data(session)
+    info = ctx.obj["info"]
+    ctx.obj["fips_unready"] = (
+        CAPABILITY.PIV in info.fips_capable and CAPABILITY.PIV not in info.fips_approved
+    )
 
 
 @piv.command()
@@ -207,8 +211,12 @@ def info(ctx):
     """
     Display general status of the PIV application.
     """
-    info = get_piv_info(ctx.obj["session"])
-    click.echo("\n".join(pretty_print(info)))
+    info = ctx.obj["info"]
+    data = get_piv_info(ctx.obj["session"])
+    if CAPABILITY.PIV in info.fips_capable:
+        # This is a bit ugly as it makes assumptions about the structure of data
+        data[0]["FIPS approved"] = CAPABILITY.PIV in info.fips_approved
+    click.echo("\n".join(pretty_print(data)))
 
 
 @piv.command()
@@ -593,6 +601,11 @@ def generate_key(
     PUBLIC-KEY  file containing the generated public key (use '-' to use stdout)
     """
 
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to key generation"
+        )
+
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
@@ -632,6 +645,10 @@ def import_key(
     SLOT         PIV slot of the private key
     PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
+
+    if ctx.obj["fips_unready"]:
+        raise CliFail("YubiKey FIPS must be in FIPS approved mode prior to key import")
+
     session = ctx.obj["session"]
 
     data = private_key.read()
