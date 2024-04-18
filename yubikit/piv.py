@@ -633,10 +633,24 @@ class PivSession:
             self._current_pin_retries = retries
             raise InvalidPinError(retries)
 
-    def verify_uv(self) -> bytes:
+    def verify_uv(
+        self, temporary_pin: bool = False, check_only: bool = False
+    ) -> Optional[bytes]:
         logger.debug("Verifying UV")
+        if temporary_pin and check_only:
+            raise ValueError(
+                "Cannot request temporary PIN when doing check-only verification"
+            )
+
+        if check_only:
+            data = b""
+        elif temporary_pin:
+            data = Tlv(2)
+        else:
+            data = Tlv(3)
+
         try:
-            return self.protocol.send_apdu(0, INS_VERIFY, 0, SLOT_OCC_AUTH)
+            response = self.protocol.send_apdu(0, INS_VERIFY, 0, SLOT_OCC_AUTH, data)
         except ApduError as e:
             if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
                 raise NotSupportedError(
@@ -648,6 +662,7 @@ class PivSession:
             raise InvalidPinError(
                 retries, f"Fingerprint mismatch, {retries} attempts remaining"
             )
+        return response if temporary_pin else None
 
     def verify_temporary_pin(self, pin: bytes) -> None:
         logger.debug("Verifying temporary PIN")
