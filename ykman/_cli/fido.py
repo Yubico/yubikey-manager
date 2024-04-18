@@ -894,6 +894,10 @@ def toggle_always_uv(ctx, pin):
     if not options or "alwaysUv" not in options:
         raise CliFail("Always Require UV is not supported on this YubiKey.")
 
+    info = ctx.obj["info"]
+    if CAPABILITY.FIDO2 in info.fips_capable:
+        raise CliFail("Always Require UV can not be disabled on this YubiKey.")
+
     config = _init_config(ctx, pin)
     config.toggle_always_uv()
 

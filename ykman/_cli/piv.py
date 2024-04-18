@@ -448,7 +448,16 @@ def change_management_key(
     A random key may be generated and stored on the YubiKey, protected by PIN.
     """
     session = ctx.obj["session"]
-    pivman = ctx.obj["pivman_data"]
+
+    if not algorithm:
+        try:
+            algorithm = session.get_management_key_metadata().key_type
+        except NotSupportedError:
+            algorithm = MANAGEMENT_KEY_TYPE.TDES
+
+    info = ctx.obj["info"]
+    if CAPABILITY.PIV in info.fips_capable and algorithm in (MANAGEMENT_KEY_TYPE.TDES,):
+        raise CliFail(f"{algorithm.name} not supported on YubiKey FIPS.")
 
     pin_verified = _ensure_authenticated(
         ctx,
@@ -461,13 +470,14 @@ def change_management_key(
 
     # Can't combine new key with generate.
     if new_management_key and generate:
-        ctx.fail("Invalid options: --new-management-key conflicts with --generate")
+        raise CliFail("Invalid options: --new-management-key conflicts with --generate")
 
     # Touch not supported on NEO.
     if touch and session.version < (4, 0, 0):
         raise CliFail("Require touch not supported on this YubiKey.")
 
     # If an old stored key needs to be cleared, the PIN is needed.
+    pivman = ctx.obj["pivman_data"]
     if not pin_verified and pivman.has_stored_key:
         if pin:
             _verify_pin(ctx, session, pivman, pin, no_prompt=force)
@@ -479,19 +489,13 @@ def change_management_key(
                 err=True,
             )
 
-    if not algorithm:
-        try:
-            algorithm = session.get_management_key_metadata().key_type
-        except NotSupportedError:
-            algorithm = MANAGEMENT_KEY_TYPE.TDES
-
     if not new_management_key:
         if protect or generate:
             new_management_key = generate_random_management_key(algorithm)
             if not protect:
                 click.echo(f"Generated management key: {new_management_key.hex()}")
         elif force:
-            ctx.fail(
+            raise CliFail(
                 "New management key not given. Remove the --force "
                 "flag, or set the --generate flag or the "
                 "--new-management-key option."
@@ -506,7 +510,7 @@ def change_management_key(
                     )
                 )
             except Exception:
-                ctx.fail("New management key has the wrong format.")
+                raise CliFail("New management key has the wrong format.")
 
     if len(new_management_key) != algorithm.key_len:
         raise CliFail(
@@ -605,6 +609,7 @@ def generate_key(
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode prior to key generation"
         )
+    _check_key_support_fips(ctx, algorithm, pin_policy)
 
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
@@ -673,6 +678,10 @@ def import_key(
                 click.echo("Wrong password.")
             continue
         break
+
+    _check_key_support_fips(
+        ctx, KEY_TYPE.from_public_key(private_key.public_key()), pin_policy
+    )
 
     _ensure_authenticated(ctx, pin, management_key)
     session.put_key(slot, private_key, pin_policy, touch_policy)
@@ -1255,7 +1264,7 @@ def generate_object(ctx, pin, management_key, object_id):
     elif OBJECT_ID.CAPABILITY == object_id:
         session.put_object(OBJECT_ID.CAPABILITY, generate_ccc())
     else:
-        ctx.fail("Unsupported object ID for generate.")
+        raise CliFail("Unsupported object ID for generate.")
 
 
 def _prompt_management_key(prompt="Enter a management key [blank to use default key]"):
@@ -1347,7 +1356,7 @@ def _verify_pin_if_needed(ctx, session, func, pin=None, no_prompt=False):
 def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False):
     if not management_key:
         if no_prompt:
-            ctx.fail("Management key required.")
+            raise CliFail("Management key required.")
         else:
             if mgm_key_prompt is None:
                 management_key = _prompt_management_key()
@@ -1363,3 +1372,12 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             session.authenticate(key_type, management_key)
     except Exception:
         raise CliFail("Authentication with management key failed.")
+
+
+def _check_key_support_fips(ctx, key_type, pin_policy):
+    info = ctx.obj["info"]
+    if CAPABILITY.PIV in info.fips_capable:
+        if key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519):
+            raise CliFail(f"Key type {key_type.name} not supported on YubiKey FIPS")
+        if pin_policy in (PIN_POLICY.NEVER,):
+            raise CliFail(f"PIN policy {pin_policy.name} not supported on YubiKey FIPS")

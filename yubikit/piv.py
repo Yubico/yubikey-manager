@@ -63,6 +63,7 @@ from dataclasses import dataclass
 from enum import Enum, IntEnum, unique
 from typing import Optional, Union, Type, cast
 
+import warnings
 import logging
 import gzip
 import os
@@ -423,6 +424,20 @@ def check_key_support(
     This method will return None if the key (with PIN and touch policies) is supported,
     or it will raise a NotSupportedError if it is not.
     """
+    warnings.warn(
+        "and will no longer be allowed starting in python-fido2 2.0",
+        DeprecationWarning,
+    )
+    _do_check_key_support(version, key_type, pin_policy, touch_policy, generate)
+
+
+def _do_check_key_support(
+    version: Version,
+    key_type: KEY_TYPE,
+    pin_policy: PIN_POLICY,
+    touch_policy: TOUCH_POLICY,
+    generate: bool = True,
+) -> None:
     if version[0] == 0 and version > (0, 1, 3):
         return  # Development build, skip version checks
 
@@ -457,12 +472,6 @@ def check_key_support(
         KEY_TYPE.X25519,
     ):
         raise NotSupportedError(f"{key_type} requires YubiKey 5.7 or later")
-
-    # TODO: Detect Bio capabilities
-    if version < () and pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):
-        raise NotSupportedError(
-            "Biometric match PIN policy requires YubiKey 5.6 or later"
-        )
 
 
 def _parse_device_public_key(key_type, encoded):
@@ -1024,7 +1033,7 @@ class PivSession:
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
-        check_key_support(self.version, key_type, pin_policy, touch_policy, False)
+        self._check_key_support(key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
             numbers = private_key.private_numbers()
@@ -1080,7 +1089,7 @@ class PivSession:
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
-        check_key_support(self.version, key_type, pin_policy, touch_policy, True)
+        self._check_key_support(key_type, pin_policy, touch_policy, True)
         data: bytes = Tlv(TAG_GEN_ALGORITHM, int2bytes(key_type))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
@@ -1190,3 +1199,17 @@ class PivSession:
             if e.sw == SW.INCORRECT_PARAMETERS:
                 raise e  # TODO: Different error, No key?
             raise
+
+    def _check_key_support(
+        self,
+        key_type: KEY_TYPE,
+        pin_policy: PIN_POLICY,
+        touch_policy: TOUCH_POLICY,
+        generate: bool,
+    ) -> None:
+        _do_check_key_support(
+            self.version, key_type, pin_policy, touch_policy, generate
+        )
+
+        if pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):
+            self.get_bio_metadata()
