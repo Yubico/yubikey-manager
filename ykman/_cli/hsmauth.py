@@ -593,7 +593,6 @@ def access():
     "-m",
     "--management-key",
     help="current management key",
-    default=DEFAULT_MANAGEMENT_KEY,
     show_default=True,
     callback=click_parse_management_key,
 )
