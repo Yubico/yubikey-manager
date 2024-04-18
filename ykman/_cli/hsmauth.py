@@ -205,6 +205,11 @@ def hsmauth(ctx):
     conn = dev.open_connection(SmartCardConnection)
     ctx.call_on_close(conn.close)
     ctx.obj["session"] = HsmAuthSession(conn)
+    info = ctx.obj["info"]
+    ctx.obj["fips_unready"] = (
+        CAPABILITY.HSMAUTH in info.fips_capable
+        and CAPABILITY.HSMAUTH not in info.fips_approved
+    )
 
 
 @hsmauth.command()
@@ -322,6 +327,11 @@ def generate(ctx, label, credential_password, management_key, touch):
     LABEL label for the YubiHSM Auth credential
     """
 
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+        )
+
     if not credential_password:
         credential_password = _prompt_credential_password()
 
@@ -360,6 +370,11 @@ def import_credential(
     LABEL        label for the YubiHSM Auth credential
     PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+        )
+
     if not credential_password:
         credential_password = _prompt_credential_password()
 
@@ -466,6 +481,11 @@ def symmetric(
     LABEL  label for the YubiHSM Auth credential
     """
 
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+        )
+
     if not credential_password:
         credential_password = _prompt_credential_password()
 
@@ -523,6 +543,11 @@ def derive(ctx, label, derivation_password, credential_password, management_key,
     \b
     LABEL  label for the YubiHSM Auth credential
     """
+
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+        )
 
     if not credential_password:
         credential_password = _prompt_credential_password()

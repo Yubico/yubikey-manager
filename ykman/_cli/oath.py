@@ -87,6 +87,11 @@ def oath(ctx):
     ctx.call_on_close(conn.close)
     ctx.obj["session"] = OathSession(conn)
     ctx.obj["oath_keys"] = AppData("oath_keys")
+    info = ctx.obj["info"]
+    ctx.obj["fips_unready"] = (
+        CAPABILITY.OATH in info.fips_capable
+        and CAPABILITY.OATH not in info.fips_approved
+    )
 
 
 @oath.command()
@@ -235,8 +240,13 @@ def change(ctx, password, clear, new_password, remember):
     Allows you to set or change a password that will be required to access the OATH
     accounts stored on the YubiKey.
     """
-    if clear and new_password:
-        ctx.fail("--clear cannot be combined with --new-password.")
+    if clear:
+        if new_password:
+            raise CliFail("--clear cannot be combined with --new-password.")
+
+        info = ctx.obj["info"]
+        if CAPABILITY.OATH in info.fips_capable:
+            raise CliFail("Removing the password is not allowed on YubiKey FIPS.")
 
     _init_session(ctx, password, False, prompt="Enter the current password")
 
@@ -462,6 +472,11 @@ def add(
     SECRET  base32-encoded secret/key value provided by the server
     """
 
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to adding accounts"
+        )
+
     digits = int(digits)
 
     if not secret:
@@ -489,7 +504,7 @@ def add(
 def click_parse_uri(ctx, param, val):
     try:
         return CredentialData.parse_uri(val)
-    except ValueError:
+    except (ValueError, KeyError):
         raise click.BadParameter("URI seems to have the wrong format.")
 
 
@@ -506,6 +521,11 @@ def uri(ctx, data, touch, force, password, remember):
 
     Use a URI to add a new account to the YubiKey.
     """
+
+    if ctx.obj["fips_unready"]:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to adding accounts"
+        )
 
     if not data:
         while True:
@@ -530,16 +550,16 @@ def _add_cred(ctx, data, touch, force):
     version = session.version
 
     if not (0 < len(data.name) <= 64):
-        ctx.fail("Name must be between 1 and 64 bytes.")
+        raise CliFail("Name must be between 1 and 64 bytes.")
 
     if len(data.secret) < 2:
-        ctx.fail("Secret must be at least 2 bytes.")
+        raise CliFail("Secret must be at least 2 bytes.")
 
     if touch and version < (4, 2, 6):
         raise CliFail("Require touch is not supported on this YubiKey.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
-        ctx.fail("Counter only supported for HOTP accounts.")
+        raise CliFail("Counter only supported for HOTP accounts.")
 
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
         version < (4, 3, 1) or is_yk4_fips(ctx.obj["info"])
