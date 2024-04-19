@@ -272,6 +272,16 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     NOTE: This will reset the PIN and PUK to their factory defaults.
     """
     session = ctx.obj["session"]
+    info = ctx.obj["info"]
+    if CAPABILITY.PIV in info.fips_capable:
+        if not (
+            session.get_pin_metadata().default_value
+            and session.get_puk_metadata().default_value
+        ):
+            raise CliFail(
+                "Retry attempts must be set before PIN/PUK have been changed."
+            )
+
     _ensure_authenticated(
         ctx, pin, management_key, require_pin_and_key=True, no_prompt=force
     )
@@ -1192,6 +1202,15 @@ def read_object(ctx, pin, object_id, output):
 
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
+    if ctx.obj["fips_unready"] and object_id in (
+        OBJECT_ID.PRINTED,
+        OBJECT_ID.FINGERPRINTS,
+        OBJECT_ID.FACIAL,
+        OBJECT_ID.IRIS,
+    ):
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode to export this object."
+        )
 
     def do_read_object(retry=True):
         try:
