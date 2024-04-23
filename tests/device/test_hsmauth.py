@@ -44,7 +44,7 @@ def management_key(session, info):
 def import_key_derived(
     session,
     management_key,
-    credential_password="123457",
+    credential_password="12345679",
     derivation_password="p4ssw0rd",
 ) -> Credential:
     credential = session.put_credential_derived(
@@ -58,7 +58,7 @@ def import_key_derived(
 
 
 def import_key_symmetric(
-    session, management_key, key_enc, key_mac, credential_password="123457"
+    session, management_key, key_enc, key_mac, credential_password="12345679"
 ) -> Credential:
     credential = session.put_credential_symmetric(
         management_key,
@@ -72,7 +72,7 @@ def import_key_symmetric(
 
 
 def import_key_asymmetric(
-    session, management_key, private_key, credential_password="123457"
+    session, management_key, private_key, credential_password="12345679"
 ) -> Credential:
     credential = session.put_credential_asymmetric(
         management_key,
@@ -85,7 +85,7 @@ def import_key_asymmetric(
 
 
 def generate_key_asymmetric(
-    session, management_key, credential_password="123457"
+    session, management_key, credential_password="12345679"
 ) -> Credential:
     credential = session.generate_credential_asymmetric(
         management_key,
@@ -112,7 +112,15 @@ class TestCredentialManagement:
     ):
         context = b"g\xfc\xf1\xfe\xb5\xf1\xd8\x83\xedv=\xbfI0\x90\xbb"
 
-        # Try to calculate session keys using credential password
+        # Try to calculate session keys using wrong credential password
+        with pytest.raises(InvalidPinError):
+            session.calculate_session_keys_symmetric(
+                label=credential.label,
+                context=context,
+                credential_password="wrongvalue",
+            )
+
+        # Try to calculate session keys using correct credential password
         session.calculate_session_keys_symmetric(
             label=credential.label,
             context=context,
@@ -139,9 +147,9 @@ class TestCredentialManagement:
             import_key_derived(session, management_key)
 
     def test_import_credential_symmetric_works(self, session, management_key):
-        credential = import_key_derived(session, management_key, "1234")
+        credential = import_key_derived(session, management_key, "12345679")
 
-        self.verify_credential_password(session, "1234", credential)
+        self.verify_credential_password(session, "12345679", credential)
         self.check_credential_in_list(session, credential)
 
         session.delete_credential(management_key, credential.label)
@@ -236,7 +244,7 @@ class TestAccess:
 
 class TestSessionKeys:
     def test_calculate_session_keys_symmetric(self, session, management_key):
-        credential_password = "1234"
+        credential_password = "a password"
         credential = import_key_derived(
             session,
             management_key,
@@ -276,10 +284,13 @@ class TestHostChallenge:
 
     @condition.min_version(5, 6)
     def test_get_challenge_asymmetric(self, session, management_key):
-        credential = generate_key_asymmetric(session, management_key)
+        credential_password = "12345679"
+        credential = generate_key_asymmetric(
+            session, management_key, credential_password
+        )
 
-        challenge1 = session.get_challenge(credential.label)
-        challenge2 = session.get_challenge(credential.label)
+        challenge1 = session.get_challenge(credential.label, credential_password)
+        challenge2 = session.get_challenge(credential.label, credential_password)
 
         assert len(challenge1) == 65
         assert len(challenge2) == 65

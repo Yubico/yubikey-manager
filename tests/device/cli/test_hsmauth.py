@@ -25,23 +25,25 @@ DEFAULT_MANAGEMENT_KEY = "00000000000000000000000000000000"
 NON_DEFAULT_MANAGEMENT_KEY = "11111111111111111111111111111112"
 
 
-@pytest.fixture
-def management_key(ykman_cli, info):
-    if CAPABILITY.HSMAUTH in info.fips_capable:
+# Test both password and key
+@pytest.fixture(params=[DEFAULT_MANAGEMENT_KEY, "p4ssw0rd"])
+def management_key(request, ykman_cli, info):
+    key = request.param
+    if key == DEFAULT_MANAGEMENT_KEY and CAPABILITY.HSMAUTH in info.fips_capable:
         key = "00000000000000000000000000000001"
+
+    if key != DEFAULT_MANAGEMENT_KEY:
         ykman_cli(
             "hsmauth",
             "access",
-            "change-management-key",
+            "change-management-password",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            "",
             "-n",
             key,
         )
 
-        yield key
-    else:
-        yield DEFAULT_MANAGEMENT_KEY
+    yield key
 
 
 def generate_pem_eccp256_keypair():
@@ -300,7 +302,7 @@ class TestManagementKey:
         ykman_cli(
             "hsmauth",
             "access",
-            "change-management-key",
+            "change-management-password",
             "-m",
             management_key,
             "-n",
@@ -312,7 +314,7 @@ class TestManagementKey:
             ykman_cli(
                 "hsmauth",
                 "access",
-                "change-management-key",
+                "change-management-password",
                 "-m",
                 management_key,
                 "-n",
@@ -323,7 +325,7 @@ class TestManagementKey:
         ykman_cli(
             "hsmauth",
             "access",
-            "change-management-key",
+            "change-management-password",
             "-m",
             NON_DEFAULT_MANAGEMENT_KEY,
             "-n",
@@ -331,6 +333,9 @@ class TestManagementKey:
         )
 
     def test_change_management_key_generate(self, ykman_cli, management_key):
+        if len(management_key) != 32:
+            pytest.skip("string management key")
+
         output = ykman_cli(
             "hsmauth",
             "access",
