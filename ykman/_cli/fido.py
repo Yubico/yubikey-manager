@@ -500,8 +500,8 @@ def force_pin_change(ctx, pin):
     """
     Force the PIN to be changed to a new value before use.
     """
-    options = ctx.obj.get("ctap2").info.options
-    if not options.get("setMinPINLength"):
+    options = ctx.obj["ctap2"].info.options if "ctap2" in ctx.obj else None
+    if options is None or not options.get("setMinPINLength"):
         raise CliFail("Force change PIN is not supported on this YubiKey.")
     if not options.get("clientPin"):
         raise CliFail("No PIN is set.")
@@ -522,8 +522,8 @@ def set_min_pin_length(ctx, pin, rp_id, length):
     Optionally use the --rp option to specify which RPs are allowed to request this
     information.
     """
-    info = ctx.obj["ctap2"].info
-    if not info.options.get("setMinPINLength"):
+    info = ctx.obj["ctap2"].info if "ctap2" in ctx.obj else None
+    if info is None or not info.options.get("setMinPINLength"):
         raise CliFail("Set minimum PIN length is not supported on this YubiKey.")
     if info.options.get("alwaysUv") and not info.options.get("clientPin"):
         raise CliFail(
@@ -887,8 +887,8 @@ def toggle_always_uv(ctx, pin):
     """
     Toggles the state of Always Require User Verification.
     """
-    options = ctx.obj.get("ctap2").info.options
-    if "alwaysUv" not in options:
+    options = ctx.obj.get("ctap2").info.options if "ctap2" in ctx.obj else None
+    if not options or "alwaysUv" not in options:
         raise CliFail("Always Require UV is not supported on this YubiKey.")
 
     config = _init_config(ctx, pin)
@@ -902,8 +902,8 @@ def enable_ep_attestation(ctx, pin):
     """
     Enables Enterprise Attestation for Authenticators pre-configured to support it.
     """
-    options = ctx.obj.get("ctap2").info.options
-    if "ep" not in options:
+    options = ctx.obj.get("ctap2").info.options if "ctap2" in ctx.obj else None
+    if not options or "ep" not in options:
         raise CliFail("Enterprise Attestation is not supported on this YubiKey.")
     if options.get("alwaysUv") and not options.get("clientPin"):
         raise CliFail(
