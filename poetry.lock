@@ -305,13 +305,13 @@ files = [
 
 [[package]]
 name = "exceptiongroup"
-version = "1.2.0"
+version = "1.2.1"
 description = "Backport of PEP 654 (exception groups)"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "exceptiongroup-1.2.0-py3-none-any.whl", hash = "sha256:4bfd3996ac73b41e9b9628b04e079f193850720ea5945fc96a08633c66912f14"},
-    {file = "exceptiongroup-1.2.0.tar.gz", hash = "sha256:91f5c769735f051a4290d52edd0858999b57e5876e9f85937691bd4c9fa3ed68"},
+    {file = "exceptiongroup-1.2.1-py3-none-any.whl", hash = "sha256:5258b9ed329c5bbdd31a309f53cbfb0b155341807f6ff7606a1e801a891b29ad"},
+    {file = "exceptiongroup-1.2.1.tar.gz", hash = "sha256:a4785e48b045528f5bfe627b6ad554ff32def154f42372786903b7abcfe1aa16"},
 ]
 
 [package.extras]
@@ -336,13 +336,13 @@ pcsc = ["pyscard (>=1.9,<3)"]
 
 [[package]]
 name = "idna"
-version = "3.6"
+version = "3.7"
 description = "Internationalized Domain Names in Applications (IDNA)"
 optional = false
 python-versions = ">=3.5"
 files = [
-    {file = "idna-3.6-py3-none-any.whl", hash = "sha256:c05567e9c24a6b9faaa835c4821bad0590fbb9d5779e7caa6e1cc4978e7eb24f"},
-    {file = "idna-3.6.tar.gz", hash = "sha256:9ecdbbd083b06798ae1e86adcbfe8ab1479cf864e4ee30fe4e46a003d12491ca"},
+    {file = "idna-3.7-py3-none-any.whl", hash = "sha256:82fee1fc78add43492d3a1898bfa6d8a904cc97d8427f683ed8e798d07761aa0"},
+    {file = "idna-3.7.tar.gz", hash = "sha256:028ff3aadf0609c1fd278d8ea3089299412a7a8b9bd005dd08b9f8285bcb5cfc"},
 ]
 
 [[package]]
@@ -406,20 +406,20 @@ files = [
 
 [[package]]
 name = "jaraco-classes"
-version = "3.3.1"
+version = "3.4.0"
 description = "Utility functions for Python class constructs"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "jaraco.classes-3.3.1-py3-none-any.whl", hash = "sha256:86b534de565381f6b3c1c830d13f931d7be1a75f0081c57dff615578676e2206"},
-    {file = "jaraco.classes-3.3.1.tar.gz", hash = "sha256:cb28a5ebda8bc47d8c8015307d93163464f9f2b91ab4006e09ff0ce07e8bfb30"},
+    {file = "jaraco.classes-3.4.0-py3-none-any.whl", hash = "sha256:f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790"},
+    {file = "jaraco.classes-3.4.0.tar.gz", hash = "sha256:47a024b51d0239c0dd8c8540c6c7f484be3b8fcf0b2d85c13825780d3b3f3acd"},
 ]
 
 [package.dependencies]
 more-itertools = "*"
 
 [package.extras]
-docs = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (<7.2.5)", "sphinx (>=3.5)", "sphinx-lint"]
+docs = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-lint"]
 testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-enabler (>=2.2)", "pytest-mypy", "pytest-ruff (>=0.2.1)"]
 
 [[package]]
@@ -607,13 +607,13 @@ files = [
 
 [[package]]
 name = "pluggy"
-version = "1.4.0"
+version = "1.5.0"
 description = "plugin and hook calling mechanisms for python"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "pluggy-1.4.0-py3-none-any.whl", hash = "sha256:7db9f7b503d67d1c5b95f59773ebb58a8c1c288129a88665838012cfb07b8981"},
-    {file = "pluggy-1.4.0.tar.gz", hash = "sha256:8c85c2876142a764e5b7548e7d9a0e0ddb46f5185161049a79b7e974454223be"},
+    {file = "pluggy-1.5.0-py3-none-any.whl", hash = "sha256:44e1ad92c8ca002de6377e165f3e0f1be63266ab4d554740532335b9d75ea669"},
+    {file = "pluggy-1.5.0.tar.gz", hash = "sha256:2cffa88e94fdc978c4c574f15f9e59b7f4201d439195c3715ca9e2486f1d0cf1"},
 ]
 
 [package.extras]
@@ -622,13 +622,13 @@ testing = ["pytest", "pytest-benchmark"]
 
 [[package]]
 name = "pycparser"
-version = "2.21"
+version = "2.22"
 description = "C parser in Python"
 optional = false
-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
+python-versions = ">=3.8"
 files = [
-    {file = "pycparser-2.21-py2.py3-none-any.whl", hash = "sha256:8ee45429555515e1f6b185e78100aea234072576aa43ab53aefcae078162fca9"},
-    {file = "pycparser-2.21.tar.gz", hash = "sha256:e644fdec12f7872f86c58ff790da456218b10f863970249516d60a5eaca77206"},
+    {file = "pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc"},
+    {file = "pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6"},
 ]
 
 [[package]]
@@ -648,23 +648,23 @@ windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
 name = "pyinstaller"
-version = "6.5.0"
+version = "6.6.0"
 description = "PyInstaller bundles a Python application and all its dependencies into a single package."
 optional = false
 python-versions = "<3.13,>=3.8"
 files = [
-    {file = "pyinstaller-6.5.0-py3-none-macosx_10_13_universal2.whl", hash = "sha256:81ec15c0deb8c7a0f95bea85b49eecc2df1bdeaf5fe487a41d97de6b0ad29dff"},
-    {file = "pyinstaller-6.5.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:5f432f3fdef053989e0a44134e483131c533dab7637e6afd80c3f7c26e6dbcc9"},
-    {file = "pyinstaller-6.5.0-py3-none-manylinux2014_i686.whl", hash = "sha256:6ffd76a0194dac4df5e66dcfccc7b597f3eaa40ef9a3f63548f260aa2c187512"},
-    {file = "pyinstaller-6.5.0-py3-none-manylinux2014_ppc64le.whl", hash = "sha256:a54968df2228f0128607b1dced41bbff94149d459987fb5cd1a41893e9bb85df"},
-    {file = "pyinstaller-6.5.0-py3-none-manylinux2014_s390x.whl", hash = "sha256:0dae0edbe6d667b6b0ccd8c97a148f86474a82da7ce582296f9025f4c7242ec6"},
-    {file = "pyinstaller-6.5.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:7c76bfcb624803c311fa8fb137e4780d0ec86d11b7d90a8f43f185e2554afdcc"},
-    {file = "pyinstaller-6.5.0-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:6cfee8a74ea2d3a1dc8e99e732a87b314739dc14363778143caac31f8aee9039"},
-    {file = "pyinstaller-6.5.0-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:9d828213aea5401bb33a36ca396f8dc76a59a25bce1d76a13c9ad94ba29fbe42"},
-    {file = "pyinstaller-6.5.0-py3-none-win32.whl", hash = "sha256:61865eee5e0d8f8252722f6d001baec497b7cee79ebe62c33a6ba86ba0c7010d"},
-    {file = "pyinstaller-6.5.0-py3-none-win_amd64.whl", hash = "sha256:e1266498893ce1d6cc7337e8d2acbf7905a10ed2b7c8377270117d6b7b922fc4"},
-    {file = "pyinstaller-6.5.0-py3-none-win_arm64.whl", hash = "sha256:1b3b7d6d3b18d76a833fd5a4d7f4544c5e2c2a4db4a728ea191e62f69d5cc33c"},
-    {file = "pyinstaller-6.5.0.tar.gz", hash = "sha256:b1e55113c5a40cb7041c908a57f212f3ebd3e444dbb245ca2f91d86a76dabec5"},
+    {file = "pyinstaller-6.6.0-py3-none-macosx_10_13_universal2.whl", hash = "sha256:d2705efe79f8749526f65c4bce70ae88eea8b6adfb051f123122e86542fe3802"},
+    {file = "pyinstaller-6.6.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:2aa771693ee3e0a899be3e9d946a24eab9896a98d0d4035f05a22f1193004cfb"},
+    {file = "pyinstaller-6.6.0-py3-none-manylinux2014_i686.whl", hash = "sha256:1fc15e8cebf76361568359a40926aa5746fc0a84ca365fb2ac6caeea014a2cd3"},
+    {file = "pyinstaller-6.6.0-py3-none-manylinux2014_ppc64le.whl", hash = "sha256:7c4a55a5d872c118bc7a5e641c2df46ad18585c002d96adad129b4ee8c104463"},
+    {file = "pyinstaller-6.6.0-py3-none-manylinux2014_s390x.whl", hash = "sha256:97197593344f11f3dd2bdadbab14c61fbc4cdf9cc692a89b047cb671764c1824"},
+    {file = "pyinstaller-6.6.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:00d81ddeee97710245a7ed03b0f9d5a4daf6c3a07adf978487b10991e1e20470"},
+    {file = "pyinstaller-6.6.0-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:b7cab21db6fcfbdab47ee960239d1b44cd95383a4463177bd592613941d67959"},
+    {file = "pyinstaller-6.6.0-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:00996d2090734d9ae4a1e53ed40351b07d593c37118d3e0d435bbcfa8db9edee"},
+    {file = "pyinstaller-6.6.0-py3-none-win32.whl", hash = "sha256:cfe3ed214601de0723cb660994b44934efacb77a1cf0e4cc5133da996bcf36ce"},
+    {file = "pyinstaller-6.6.0-py3-none-win_amd64.whl", hash = "sha256:e2f55fbbdf8a99ea84b39bc5669a68624473c303486d7eb2cd9063b339f0aa28"},
+    {file = "pyinstaller-6.6.0-py3-none-win_arm64.whl", hash = "sha256:abbd591967593dab264bcc3bcb2466c0a1582f19a112e37e916c4212069c7933"},
+    {file = "pyinstaller-6.6.0.tar.gz", hash = "sha256:be6bc2c3073d3e84fb7148d3af33ce9b6a7f01cfb154e06314cd1d4c05798a32"},
 ]
 
 [package.dependencies]
@@ -683,13 +683,13 @@ hook-testing = ["execnet (>=1.5.0)", "psutil", "pytest (>=2.7.3)"]
 
 [[package]]
 name = "pyinstaller-hooks-contrib"
-version = "2024.3"
+version = "2024.5"
 description = "Community maintained hooks for PyInstaller"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "pyinstaller-hooks-contrib-2024.3.tar.gz", hash = "sha256:d18657c29267c63563a96b8fc78db6ba9ae40af6702acb2f8c871df12c75b60b"},
-    {file = "pyinstaller_hooks_contrib-2024.3-py2.py3-none-any.whl", hash = "sha256:6701752d525e1f4eda1eaec2c2affc206171e15c7a4e188a152fcf3ed3308024"},
+    {file = "pyinstaller_hooks_contrib-2024.5-py2.py3-none-any.whl", hash = "sha256:0852249b7fb1e9394f8f22af2c22fa5294c2c0366157969f98c96df62410c4c6"},
+    {file = "pyinstaller_hooks_contrib-2024.5.tar.gz", hash = "sha256:aa5dee25ea7ca317ad46fa16b5afc8dba3b0e43f2847e498930138885efd3cab"},
 ]
 
 [package.dependencies]
@@ -699,25 +699,25 @@ setuptools = ">=42.0.0"
 
 [[package]]
 name = "pyscard"
-version = "2.0.8"
+version = "2.0.9"
 description = "Smartcard module for Python."
 optional = false
 python-versions = "*"
 files = [
-    {file = "pyscard-2.0.8-cp310-cp310-win32.whl", hash = "sha256:405404c61a9c4ae2aa3a8ffff1161e24191e35cedaabfc71ce31369647907189"},
-    {file = "pyscard-2.0.8-cp310-cp310-win_amd64.whl", hash = "sha256:39cb2c6a338272ff8a90848688351f0c2e1c7480cd1e9a23e23bf7f2c8157bcb"},
-    {file = "pyscard-2.0.8-cp311-cp311-win32.whl", hash = "sha256:b9a99b28ee436df345c6b66e045e138ac28838ca56c8b7fe40b3f8e5eb2616f1"},
-    {file = "pyscard-2.0.8-cp311-cp311-win_amd64.whl", hash = "sha256:3202cfd169a81268bdc7bf999ec36304c14c615fd0279237cef9d289a4c063f5"},
-    {file = "pyscard-2.0.8-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:146d8fe241730dd6e5b9ad00f402fafde75a6b3f84589978d23f84f44437277f"},
-    {file = "pyscard-2.0.8-cp312-cp312-win32.whl", hash = "sha256:ee0e4fd349fa2b83a54ab0f75118cba1f7a2ece749d6f7d48ef27a8f23c86fad"},
-    {file = "pyscard-2.0.8-cp312-cp312-win_amd64.whl", hash = "sha256:b67f4ad02ec2aa50f358e256a9a6d1774ab9fb3ea64138de80d1921598807d01"},
-    {file = "pyscard-2.0.8-cp37-cp37m-win32.whl", hash = "sha256:e0fb77eea2a8d36a2f702ec12a1130c4f15c84cd55476942c1e5bc289109d461"},
-    {file = "pyscard-2.0.8-cp37-cp37m-win_amd64.whl", hash = "sha256:91ec9a9c46fdeb020fc34782526cad62c4fa7265d8fedc2ad127b336397d3719"},
-    {file = "pyscard-2.0.8-cp38-cp38-win32.whl", hash = "sha256:0010e6757d67db15e356b3e72ad4bd82a382002f77956d3ec3a61a00f2efc9de"},
-    {file = "pyscard-2.0.8-cp38-cp38-win_amd64.whl", hash = "sha256:17874c5b4082b7302bc4ea2708b7951be18325b03e1d167c520375863544dce1"},
-    {file = "pyscard-2.0.8-cp39-cp39-win32.whl", hash = "sha256:6ea929b857186cbaa7f36417f32fde9c9614c721cb7e3f340d3776a27cf4ebb6"},
-    {file = "pyscard-2.0.8-cp39-cp39-win_amd64.whl", hash = "sha256:4ef80849a320b87d91793a4deb7d43fc2b11ed9eadf96043c107ce27a8125485"},
-    {file = "pyscard-2.0.8.tar.gz", hash = "sha256:2eb16ee0e89ab27759fcb36f032c40a5774ed5926c0e03309837bdeb563a6032"},
+    {file = "pyscard-2.0.9-cp310-cp310-win32.whl", hash = "sha256:c192e48ac21b5c009ab9d6af7af876fa9f8d72ca546c508fb66392c17ba0a018"},
+    {file = "pyscard-2.0.9-cp310-cp310-win_amd64.whl", hash = "sha256:368a12a175a6e0746ff6a86fc98c3949d3eca5cddf4fe1496e747a38d8298e4b"},
+    {file = "pyscard-2.0.9-cp311-cp311-win32.whl", hash = "sha256:bca5e59b964dc10646796937d862880211222fc9834820e4d224b109ca98976f"},
+    {file = "pyscard-2.0.9-cp311-cp311-win_amd64.whl", hash = "sha256:2507af4c90866fd6beb6910503f6f70ae3077805dbc2eb158ce9b44fd775fead"},
+    {file = "pyscard-2.0.9-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:a7bb2c2596f62143a39942487ce7d769334700e66e54cf6a3195091e0eb202db"},
+    {file = "pyscard-2.0.9-cp312-cp312-win32.whl", hash = "sha256:2b78b1d1f9901b4f272628dbf40722116e263d27c3cdd4a75c4c846f42ff7d89"},
+    {file = "pyscard-2.0.9-cp312-cp312-win_amd64.whl", hash = "sha256:8ae085d9b240533a204c5175b5698f2efa5a102327cc5dddef931f17197dcd10"},
+    {file = "pyscard-2.0.9-cp37-cp37m-win32.whl", hash = "sha256:e96f83f36e5e6efdcb375923eb30af64eb5acddf24663c69dcca2ece2f77b47c"},
+    {file = "pyscard-2.0.9-cp37-cp37m-win_amd64.whl", hash = "sha256:8809e98e81ee4f861b1f056d0ffefb93464d4916705cd51342fb28c0da769e55"},
+    {file = "pyscard-2.0.9-cp38-cp38-win32.whl", hash = "sha256:c2c925d2e6ab3d07b8bf77e8d0889069596e9e8cf632ec5096d98346d3a72195"},
+    {file = "pyscard-2.0.9-cp38-cp38-win_amd64.whl", hash = "sha256:d537b8b0f6fa01aaa8f0a5834caf87f6c205e2ba07dc1e5a46b4ca8a8f1a2157"},
+    {file = "pyscard-2.0.9-cp39-cp39-win32.whl", hash = "sha256:438619c916f46b2ad948529859c99182e66736ab49ba86d3a1f68ec48f1a4662"},
+    {file = "pyscard-2.0.9-cp39-cp39-win_amd64.whl", hash = "sha256:b5ee6b4f5fdc618b3c241f0984df9147922e41df13d6a7c01929e87274c6cbda"},
+    {file = "pyscard-2.0.9.tar.gz", hash = "sha256:1b74764289ac2fb6efe0a089e38692934e691f97c87aa561af19d1411bb98822"},
 ]
 
 [package.extras]
@@ -829,18 +829,18 @@ jeepney = ">=0.6"
 
 [[package]]
 name = "setuptools"
-version = "69.2.0"
+version = "69.5.1"
 description = "Easily download, build, install, upgrade, and uninstall Python packages"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "setuptools-69.2.0-py3-none-any.whl", hash = "sha256:c21c49fb1042386df081cb5d86759792ab89efca84cf114889191cd09aacc80c"},
-    {file = "setuptools-69.2.0.tar.gz", hash = "sha256:0ff4183f8f42cd8fa3acea16c45205521a4ef28f73c6391d8a25e92893134f2e"},
+    {file = "setuptools-69.5.1-py3-none-any.whl", hash = "sha256:c636ac361bc47580504644275c9ad802c50415c7522212252c033bd15f301f32"},
+    {file = "setuptools-69.5.1.tar.gz", hash = "sha256:6c1fccdac05a97e598fb0ae3bbed5904ccb317337a51139dcd51453611bbb987"},
 ]
 
 [package.extras]
-docs = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "pygments-github-lexers (==0.0.5)", "rst.linker (>=1.9)", "sphinx (<7.2.5)", "sphinx (>=3.5)", "sphinx-favicon", "sphinx-inline-tabs", "sphinx-lint", "sphinx-notfound-page (>=1,<2)", "sphinx-reredirects", "sphinxcontrib-towncrier"]
-testing = ["build[virtualenv]", "filelock (>=3.4.0)", "importlib-metadata", "ini2toml[lite] (>=0.9)", "jaraco.develop (>=7.21)", "jaraco.envs (>=2.2)", "jaraco.path (>=3.2.0)", "mypy (==1.9)", "packaging (>=23.2)", "pip (>=19.1)", "pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-enabler (>=2.2)", "pytest-home (>=0.5)", "pytest-mypy (>=0.9.1)", "pytest-perf", "pytest-ruff (>=0.2.1)", "pytest-timeout", "pytest-xdist (>=3)", "tomli", "tomli-w (>=1.0.0)", "virtualenv (>=13.0.0)", "wheel"]
+docs = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "pygments-github-lexers (==0.0.5)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-favicon", "sphinx-inline-tabs", "sphinx-lint", "sphinx-notfound-page (>=1,<2)", "sphinx-reredirects", "sphinxcontrib-towncrier"]
+testing = ["build[virtualenv]", "filelock (>=3.4.0)", "importlib-metadata", "ini2toml[lite] (>=0.9)", "jaraco.develop (>=7.21)", "jaraco.envs (>=2.2)", "jaraco.path (>=3.2.0)", "mypy (==1.9)", "packaging (>=23.2)", "pip (>=19.1)", "pytest (>=6,!=8.1.1)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-enabler (>=2.2)", "pytest-home (>=0.5)", "pytest-mypy", "pytest-perf", "pytest-ruff (>=0.2.1)", "pytest-timeout", "pytest-xdist (>=3)", "tomli", "tomli-w (>=1.0.0)", "virtualenv (>=13.0.0)", "wheel"]
 testing-integration = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "jaraco.envs (>=2.2)", "jaraco.path (>=3.2.0)", "packaging (>=23.2)", "pytest", "pytest-enabler", "pytest-xdist", "tomli", "virtualenv (>=13.0.0)", "wheel"]
 
 [[package]]
