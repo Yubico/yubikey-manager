@@ -61,7 +61,7 @@ from cryptography.hazmat.backends import default_backend
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum, unique
-from typing import Optional, Union, Type, cast
+from typing import Literal, Optional, Union, Type, cast
 
 import logging
 import gzip
@@ -200,21 +200,28 @@ class SLOT(IntEnum):
         return f"{int(self):02X} ({self.name})"
 
 
+# https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-73-4.pdf
+# Table 7. PIV Data Containers
 @unique
 class OBJECT_ID(IntEnum):
-    CAPABILITY = 0x5FC107
-    CHUID = 0x5FC102
-    AUTHENTICATION = 0x5FC105  # cert for 9a key
-    FINGERPRINTS = 0x5FC103
-    SECURITY = 0x5FC106
-    FACIAL = 0x5FC108
-    PRINTED = 0x5FC109
-    SIGNATURE = 0x5FC10A  # cert for 9c key
-    KEY_MANAGEMENT = 0x5FC10B  # cert for 9d key
-    CARD_AUTH = 0x5FC101  # cert for 9e key
-    DISCOVERY = 0x7E
-    KEY_HISTORY = 0x5FC10C
-    IRIS = 0x5FC121
+    CAPABILITY = 0x5FC107  # Card Capability Container
+    CHUID = 0x5FC102  # Card Holder Unique Identifier
+    AUTHENTICATION = (
+        0x5FC105  # X.509 Certificate for PIV Authentication (Key Reference '9A')
+    )
+    FINGERPRINTS = 0x5FC103  # Cardholder Fingerprints
+    SECURITY = 0x5FC106  # Security Object
+    FACIAL = 0x5FC108  # Cardholder Facial Image
+    CARD_AUTH = (
+        0x5FC101  # X.509 Certificate for Card Authentication (Key Reference '9E')
+    )
+    SIGNATURE = 0x5FC10A  # X.509 Certificate for Digital Signature (Key Reference '9C')
+    KEY_MANAGEMENT = (
+        0x5FC10B  # X.509 Certificate for Key Management (Key Reference '9D')
+    )
+    PRINTED = 0x5FC109  # Printed Information
+    DISCOVERY = 0x7E  # Discovery Object
+    KEY_HISTORY = 0x5FC10C  # Key History Object
 
     RETIRED1 = 0x5FC10D
     RETIRED2 = 0x5FC10E
@@ -236,6 +243,8 @@ class OBJECT_ID(IntEnum):
     RETIRED18 = 0x5FC11E
     RETIRED19 = 0x5FC11F
     RETIRED20 = 0x5FC120
+
+    IRIS = 0x5FC121  # Cardholder Iris Images
 
     ATTESTATION = 0x5FFF01
 
@@ -465,7 +474,14 @@ def check_key_support(
         )
 
 
-def _parse_device_public_key(key_type, encoded):
+def _parse_device_public_key(
+    key_type, encoded
+) -> Union[
+    rsa.RSAPublicKey,
+    ec.EllipticCurvePublicKey,
+    x25519.X25519PublicKey,
+    ed25519.Ed25519PublicKey,
+]:
     data = Tlv.parse_dict(encoded)
     if key_type.algorithm == ALGORITHM.RSA:
         modulus = bytes2int(data[0x81])
@@ -480,7 +496,6 @@ def _parse_device_public_key(key_type, encoded):
             curve: Type[ec.EllipticCurve] = ec.SECP256R1
         else:
             curve = ec.SECP384R1
-
         return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
@@ -997,7 +1012,7 @@ class PivSession:
         ],
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> None:
+    ) -> Literal[KEY_TYPE.ECCP256, KEY_TYPE.ECCP384, KEY_TYPE.ED25519, KEY_TYPE.X25519]:
         """Import a private key to slot.
 
         Requires authentication with management key.
@@ -1053,7 +1068,12 @@ class PivSession:
         key_type: KEY_TYPE,
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
+    ) -> Union[
+        rsa.RSAPublicKey,
+        ec.EllipticCurvePublicKey,
+        x25519.X25519PublicKey,
+        ed25519.Ed25519PublicKey,
+    ]:
         """Generate private key in slot.
 
         Requires authentication with management key.
