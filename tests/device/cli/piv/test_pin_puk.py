@@ -4,6 +4,7 @@ from .util import (
     NON_DEFAULT_PUK,
 )
 from ykman.piv import OBJECT_ID_PIVMAN_DATA, PivmanData
+from yubikit.management import CAPABILITY
 
 import pytest
 import re
@@ -90,14 +91,14 @@ class TestPuk:
 
 
 class TestSetRetries:
-    def test_set_retries(self, ykman_cli, keys, version):
+    def test_set_retries(self, ykman_cli, default_keys, version):
         ykman_cli(
             "piv",
             "access",
             "set-retries",
             "5",
             "6",
-            input=f"{keys.mgmt}\n{keys.pin}\ny\n",
+            input=f"{default_keys.mgmt}\n{default_keys.pin}\ny\n",
         )
 
         o = ykman_cli("piv", "info").output
@@ -105,7 +106,10 @@ class TestSetRetries:
         if version >= (5, 3):
             assert re.search(r"PUK tries remaining:\s+6/6", o)
 
-    def test_set_retries_clears_puk_blocked(self, ykman_cli, keys):
+    def test_set_retries_clears_puk_blocked(self, ykman_cli, keys, info):
+        if CAPABILITY.PIV in info.fips_capable:
+            pytest.skip("YubiKey FIPS")
+
         for _ in range(3):
             with pytest.raises(SystemExit):
                 ykman_cli(

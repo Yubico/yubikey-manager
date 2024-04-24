@@ -21,7 +21,7 @@ from yubikit.piv import (
     OBJECT_ID,
     MANAGEMENT_KEY_TYPE,
     InvalidPinError,
-    check_key_support,
+    _do_check_key_support,
 )
 from ykman.piv import (
     check_key,
@@ -38,9 +38,9 @@ from typing import NamedTuple
 
 
 DEFAULT_PIN = "123456"
-NON_DEFAULT_PIN = "123457"
+NON_DEFAULT_PIN = "12341235"
 DEFAULT_PUK = "12345678"
-NON_DEFAULT_PUK = "12345679"
+NON_DEFAULT_PUK = "12341236"
 DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
     "010203040506070801020304050607080102030405060708"
 )
@@ -80,22 +80,27 @@ class Keys(NamedTuple):
 
 
 @pytest.fixture
-def keys(session, info):
+def default_keys():
+    yield Keys(DEFAULT_PIN, DEFAULT_PUK, DEFAULT_MANAGEMENT_KEY)
+
+
+@pytest.fixture
+def keys(session, info, default_keys):
     if info.pin_complexity:
         new_keys = Keys(
-            "123458",
-            "12345679",
+            "12345679" if CAPABILITY.PIV in info.fips_capable else "123458",
+            "12345670",
             bytes.fromhex("010203040506070801020304050607080102030405060709"),
         )
-        session.change_pin(DEFAULT_PIN, new_keys.pin)
-        session.change_puk(DEFAULT_PUK, new_keys.puk)
-        session.authenticate(mgm_key_type(session), DEFAULT_MANAGEMENT_KEY)
+        session.change_pin(default_keys.pin, new_keys.pin)
+        session.change_puk(default_keys.puk, new_keys.puk)
+        session.authenticate(mgm_key_type(session), default_keys.mgmt)
         session.set_management_key(mgm_key_type(session), new_keys.mgmt)
         reset_state(session)
 
         yield new_keys
     else:
-        yield Keys(DEFAULT_PIN, DEFAULT_PUK, DEFAULT_MANAGEMENT_KEY)
+        yield default_keys
 
 
 def mgm_key_type(session):
@@ -179,15 +184,14 @@ def verify_cert_signature(cert, public_key=None):
     public_key.verify(*args)
 
 
-def skip_unsupported_key_type(key_type, info):
-    if key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519) and info.is_fips:
-        pytest.skip(f"{key_type.name} not available on YubiKey FIPS")
+def skip_unsupported_key_type(key_type, info, pin_policy=PIN_POLICY.DEFAULT):
     try:
-        check_key_support(
+        _do_check_key_support(
             info.version,
             key_type,
-            PIN_POLICY.DEFAULT,
+            pin_policy,
             TOUCH_POLICY.DEFAULT,
+            fips_restrictions=CAPABILITY.PIV in info.fips_capable,
         )
     except NotSupportedError as e:
         pytest.skip(f"{e}")
@@ -538,6 +542,7 @@ class TestOperations:
         assert sig
 
     @condition.yk4_fips(False)
+    @condition.check(lambda info: CAPABILITY.PIV not in info.fips_capable)
     @condition.min_version(4)
     def test_sign_with_pin_policy_never_does_not_require_pin(self, session, keys):
         generate_key(session, keys, pin_policy=PIN_POLICY.NEVER)
@@ -616,7 +621,11 @@ class TestUnblockPin:
         assert session.get_pin_attempts() == 3
         session.verify_pin(NON_DEFAULT_PIN)
 
-    def test_set_pin_retries_requires_pin_and_mgm_key(self, session, version, keys):
+    def test_set_pin_retries_requires_pin_and_mgm_key(
+        self, session, version, default_keys
+    ):
+        keys = default_keys
+
         # Fails with no authentication
         with pytest.raises(ApduError):
             session.set_pin_attempts(4, 4)
@@ -638,7 +647,8 @@ class TestUnblockPin:
         session.verify_pin(keys.pin)
         session.set_pin_attempts(4, 4)
 
-    def test_set_pin_retries_sets_pin_and_puk_tries(self, session, keys):
+    def test_set_pin_retries_sets_pin_and_puk_tries(self, session, default_keys):
+        keys = default_keys
         pin_tries = 9
         puk_tries = 7
 
@@ -736,7 +746,7 @@ class TestMetadata:
     )
     def test_slot_metadata_put(self, session, info, keys, key, slot, pin_policy):
         key_type = KEY_TYPE.from_public_key(key.public_key())
-        skip_unsupported_key_type(key_type, info)
+        skip_unsupported_key_type(key_type, info, pin_policy)
         session.authenticate(mgm_key_type(session), keys.mgmt)
         session.put_key(slot, key)
         data = session.get_slot_metadata(slot)

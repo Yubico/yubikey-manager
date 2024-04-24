@@ -18,22 +18,31 @@ class Keys(NamedTuple):
 
 
 @pytest.fixture
-def keys(ykman_cli, info):
+def default_keys():
+    yield Keys(DEFAULT_PIN, DEFAULT_PUK, DEFAULT_MANAGEMENT_KEY)
+
+
+@pytest.fixture
+def keys(ykman_cli, info, default_keys):
     if CAPABILITY.PIV in info.fips_capable:
         new_keys = Keys(
-            "123458",
+            "12345679",
             "12345670",
             "010203040506070801020304050607080102030405060709",
         )
 
-        ykman_cli("piv", "access", "change-pin", "-P", DEFAULT_PIN, "-n", new_keys.pin)
-        ykman_cli("piv", "access", "change-puk", "-p", DEFAULT_PUK, "-n", new_keys.puk)
+        ykman_cli(
+            "piv", "access", "change-pin", "-P", default_keys.pin, "-n", new_keys.pin
+        )
+        ykman_cli(
+            "piv", "access", "change-puk", "-p", default_keys.puk, "-n", new_keys.puk
+        )
         ykman_cli(
             "piv",
             "access",
             "change-management-key",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            default_keys.mgmt,
             "-n",
             new_keys.mgmt,
             "-f",
@@ -41,4 +50,4 @@ def keys(ykman_cli, info):
 
         yield new_keys
     else:
-        yield Keys(DEFAULT_PIN, DEFAULT_PUK, DEFAULT_MANAGEMENT_KEY)
+        yield default_keys

@@ -423,9 +423,11 @@ def check_key_support(
 
     This method will return None if the key (with PIN and touch policies) is supported,
     or it will raise a NotSupportedError if it is not.
+
+    THIS FUNCTION IS DEPRECATED! Use PivSession.check_key_support() instead.
     """
     warnings.warn(
-        "and will no longer be allowed starting in python-fido2 2.0",
+        "Deprecated: use PivSession.check_key_support() instead.",
         DeprecationWarning,
     )
     _do_check_key_support(version, key_type, pin_policy, touch_policy, generate)
@@ -437,6 +439,7 @@ def _do_check_key_support(
     pin_policy: PIN_POLICY,
     touch_policy: TOUCH_POLICY,
     generate: bool = True,
+    fips_restrictions: bool = False,
 ) -> None:
     if version[0] == 0 and version > (0, 1, 3):
         return  # Development build, skip version checks
@@ -456,13 +459,11 @@ def _do_check_key_support(
             raise NotSupportedError("RSA key generation not supported on this YubiKey")
 
     # FIPS
-    if (4, 4, 0) <= version < (4, 5, 0):
-        if key_type == KEY_TYPE.RSA1024:
-            raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS (4 Series)")
+    if fips_restrictions or (4, 4, 0) <= version < (4, 5, 0):
+        if key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519):
+            raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
         if pin_policy == PIN_POLICY.NEVER:
-            raise NotSupportedError(
-                "PIN_POLICY.NEVER not allowed on YubiKey FIPS (4 Series)"
-            )
+            raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
 
     # New key types
     if version < (5, 7, 0) and key_type in (
@@ -1033,7 +1034,7 @@ class PivSession:
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
-        self._check_key_support(key_type, pin_policy, touch_policy, False)
+        self.check_key_support(key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
             numbers = private_key.private_numbers()
@@ -1089,7 +1090,7 @@ class PivSession:
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
-        self._check_key_support(key_type, pin_policy, touch_policy, True)
+        self.check_key_support(key_type, pin_policy, touch_policy, True)
         data: bytes = Tlv(TAG_GEN_ALGORITHM, int2bytes(key_type))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
@@ -1200,15 +1201,32 @@ class PivSession:
                 raise e  # TODO: Different error, No key?
             raise
 
-    def _check_key_support(
+    def check_key_support(
         self,
         key_type: KEY_TYPE,
         pin_policy: PIN_POLICY,
         touch_policy: TOUCH_POLICY,
         generate: bool,
+        fips_restrictions: bool = False,
     ) -> None:
+        """Check if a key type is supported by this YubiKey.
+
+        This method will return None if the key (with PIN and touch policies) is
+        supported, or it will raise a NotSupportedError if it is not.
+
+        Set the generate parameter to True to check if generating the key is supported
+        (in addition to importing).
+
+        Set fips_restrictions to True to apply restrictions based on FIPS status.
+        """
+
         _do_check_key_support(
-            self.version, key_type, pin_policy, touch_policy, generate
+            self.version,
+            key_type,
+            pin_policy,
+            touch_policy,
+            generate,
+            fips_restrictions,
         )
 
         if pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):
