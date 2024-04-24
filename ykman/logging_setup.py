@@ -32,6 +32,7 @@ from yubikit.logging import LOG_LEVEL
 from datetime import datetime
 import platform
 import logging
+import warnings
 import ctypes
 import sys
 import os
@@ -55,7 +56,11 @@ def log_sys_info(log):
 
 
 def setup(log_level_name, log_file=None):
-    log_level = LOG_LEVEL[log_level_name.upper()]
-    init_logging(log_level, log_file=log_file)
+    warnings.warn(
+        "logging_setup.setup is deprecated, use logging.init_loging instead",
+        DeprecationWarning,
+    )
 
+    log_level = LOG_LEVEL[log_level_name.upper()]
+    init_logging(log_level, log_file=log_file, replace=log_file is None)
     log_sys_info(logger.debug)

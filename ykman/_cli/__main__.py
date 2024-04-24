@@ -272,7 +272,7 @@ def cli(ctx, device, log_level, log_file, reader):
     ctx.obj = YkmanContextObject()
 
     if log_level:
-        init_logging(log_level, log_file=log_file)
+        init_logging(log_level, log_file=log_file, replace=log_file is None)
         logger.info("\n".join(pretty_print({"System info": sys_info()})))
     elif log_file:
         ctx.fail("--log-file requires specifying --log-level.")
@@ -435,6 +435,7 @@ def main():
             msg = "An unexpected error has occurred"
             formatter.show_trace = True
         logger.exception(msg)
+        logging.shutdown()
         sys.exit(status)
 
 

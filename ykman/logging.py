@@ -64,13 +64,26 @@ def set_log_level(level: LOG_LEVEL):
         logger.warning(_print_box(*DEBUG_WARNING))
 
 
-def init_logging(log_level: LOG_LEVEL, log_file=None):
-    logging.basicConfig(
-        force=log_file is None,  # Replace the default logger if logging to stderr
-        datefmt="%H:%M:%S",
-        filename=log_file,
-        format="%(levelname)s %(asctime)s.%(msecs)d [%(name)s.%(funcName)s:%(lineno)d] "
+def init_logging(log_level: LOG_LEVEL, log_file=None, replace=False):
+    formatter = logging.Formatter(
+        "%(levelname)s %(asctime)s.%(msecs)d [%(name)s.%(funcName)s:%(lineno)d] "
         "%(message)s",
+        "%H:%M:%S",
+        "%",
     )
+    if log_file:
+        handler: logging.Handler = logging.FileHandler(log_file)
+    else:
+        handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
 
+    root = logging.getLogger()
+    if replace:
+        for h in root.handlers[:]:
+            root.removeHandler(h)
+
+    root.addHandler(handler)
     set_log_level(log_level)
+
+    if log_file:
+        logger.warning(f"Logging to file: {log_file}")
