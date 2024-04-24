@@ -16,9 +16,11 @@ KEY = bytes.fromhex("01020304050607080102030405060708")
 
 @pytest.fixture
 @condition.capability(CAPABILITY.OATH)
-def session(ccid_connection):
+def session(ccid_connection, info):
     oath = OathSession(ccid_connection)
     oath.reset()
+    if CAPABILITY.OATH in info.fips_capable:
+        oath.set_key(KEY)
     yield oath
 
 

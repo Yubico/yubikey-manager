@@ -599,14 +599,25 @@ class HsmAuthSession:
             )
         )
 
-    def get_challenge(self, label: str) -> bytes:
+    def get_challenge(
+        self, label: str, credential_password: Union[bytes, str, None] = None
+    ) -> bytes:
         """Get the Host Challenge.
 
-        For symmetric credentials this is Host Challenge, a random
-        8 byte value. For asymmetric credentials this is EPK-OCE.
+        For symmetric credentials this is Host Challenge, a random 8 byte value.
+        For asymmetric credentials this is EPK-OCE.
 
         :param label: The label of the credential.
+        :param credential_password: The password used to protect access to the
+        credential, needed for asymmetric credentials.
         """
         require_version(self.version, (5, 6, 0))
-        data = Tlv(TAG_LABEL, _parse_label(label))
+
+        data: bytes = Tlv(TAG_LABEL, _parse_label(label))
+
+        if credential_password is not None and self.version >= (5, 7, 1):
+            data += Tlv(
+                TAG_CREDENTIAL_PASSWORD, _parse_credential_password(credential_password)
+            )
+
         return self.protocol.send_apdu(0, INS_GET_CHALLENGE, 0, 0, data)

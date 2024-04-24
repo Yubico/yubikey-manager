@@ -56,6 +56,9 @@ class Version(NamedTuple):
     def __str__(self):
         return "%d.%d.%d" % self
 
+    def __bool__(self):
+        return any(self)
+
     @classmethod
     def from_bytes(cls, data: bytes) -> "Version":
         return cls(*data)

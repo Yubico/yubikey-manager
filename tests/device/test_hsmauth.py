@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 import os
 
 DEFAULT_MANAGEMENT_KEY = bytes.fromhex("00000000000000000000000000000000")
-NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex("11111111111111111111111111111111")
+NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex("11111111111111111111111111111112")
 
 
 @pytest.fixture
@@ -30,11 +30,22 @@ def session(ccid_connection):
     yield hsmauth
 
 
+@pytest.fixture
+def management_key(session, info):
+    if CAPABILITY.HSMAUTH in info.fips_capable:
+        key = bytes.fromhex("00000000000000000000000000000001")
+        session.put_management_key(DEFAULT_MANAGEMENT_KEY, key)
+
+        yield key
+    else:
+        yield DEFAULT_MANAGEMENT_KEY
+
+
 def import_key_derived(
     session,
     management_key,
-    credential_password="123456",
-    derivation_password="password",
+    credential_password="12345679",
+    derivation_password="p4ssw0rd",
 ) -> Credential:
     credential = session.put_credential_derived(
         management_key,
@@ -47,7 +58,7 @@ def import_key_derived(
 
 
 def import_key_symmetric(
-    session, management_key, key_enc, key_mac, credential_password="123456"
+    session, management_key, key_enc, key_mac, credential_password="12345679"
 ) -> Credential:
     credential = session.put_credential_symmetric(
         management_key,
@@ -61,7 +72,7 @@ def import_key_symmetric(
 
 
 def import_key_asymmetric(
-    session, management_key, private_key, credential_password="123456"
+    session, management_key, private_key, credential_password="12345679"
 ) -> Credential:
     credential = session.put_credential_asymmetric(
         management_key,
@@ -74,7 +85,7 @@ def import_key_asymmetric(
 
 
 def generate_key_asymmetric(
-    session, management_key, credential_password="123456"
+    session, management_key, credential_password="12345679"
 ) -> Credential:
     credential = session.generate_credential_asymmetric(
         management_key,
@@ -101,49 +112,63 @@ class TestCredentialManagement:
     ):
         context = b"g\xfc\xf1\xfe\xb5\xf1\xd8\x83\xedv=\xbfI0\x90\xbb"
 
-        # Try to calculate session keys using credential password
+        # Try to calculate session keys using wrong credential password
+        with pytest.raises(InvalidPinError):
+            session.calculate_session_keys_symmetric(
+                label=credential.label,
+                context=context,
+                credential_password="wrongvalue",
+            )
+
+        # Try to calculate session keys using correct credential password
         session.calculate_session_keys_symmetric(
             label=credential.label,
             context=context,
             credential_password=credential_password,
         )
 
-    def test_import_credential_symmetric_wrong_management_key(self, session):
+    def test_import_credential_symmetric_wrong_management_key(
+        self, session, management_key
+    ):
         with pytest.raises(InvalidPinError):
             import_key_derived(session, NON_DEFAULT_MANAGEMENT_KEY)
 
-    def test_import_credential_symmetric_wrong_key_length(self, session):
+    def test_import_credential_symmetric_wrong_key_length(
+        self, session, management_key
+    ):
         with pytest.raises(ValueError):
             import_key_symmetric(
-                session, DEFAULT_MANAGEMENT_KEY, os.urandom(24), os.urandom(24)
+                session, management_key, os.urandom(24), os.urandom(24)
             )
 
-    def test_import_credential_symmetric_exists(self, session):
-        import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+    def test_import_credential_symmetric_exists(self, session, management_key):
+        import_key_derived(session, management_key)
         with pytest.raises(ApduError):
-            import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+            import_key_derived(session, management_key)
 
-    def test_import_credential_symmetric_works(self, session):
-        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY, "1234")
+    def test_import_credential_symmetric_works(self, session, management_key):
+        credential = import_key_derived(session, management_key, "12345679")
 
-        self.verify_credential_password(session, "1234", credential)
+        self.verify_credential_password(session, "12345679", credential)
         self.check_credential_in_list(session, credential)
 
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)
 
     @condition.min_version(5, 6)
-    def test_import_credential_asymmetric_unsupported_key(self, session):
+    def test_import_credential_asymmetric_unsupported_key(
+        self, session, management_key
+    ):
         private_key = ec.generate_private_key(
             ec.SECP224R1(), backend=default_backend()
         )  # curve secp224r1 is not supported
 
         with pytest.raises(ValueError):
-            import_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY, private_key)
+            import_key_asymmetric(session, management_key, private_key)
 
     @condition.min_version(5, 6)
-    def test_import_credential_asymmetric_works(self, session):
+    def test_import_credential_asymmetric_works(self, session, management_key):
         private_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
-        credential = import_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY, private_key)
+        credential = import_key_asymmetric(session, management_key, private_key)
 
         public_key = private_key.public_key()
         assert public_key.public_bytes(
@@ -153,11 +178,11 @@ class TestCredentialManagement:
         )
 
         self.check_credential_in_list(session, credential)
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)
 
     @condition.min_version(5, 6)
-    def test_generate_credential_asymmetric_works(self, session):
-        credential = generate_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY)
+    def test_generate_credential_asymmetric_works(self, session, management_key):
+        credential = generate_key_asymmetric(session, management_key)
 
         self.check_credential_in_list(session, credential)
 
@@ -166,47 +191,47 @@ class TestCredentialManagement:
         assert isinstance(public_key, ec.EllipticCurvePublicKey)
         assert isinstance(public_key.curve, ec.SECP256R1)
 
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)
 
     @condition.min_version(5, 6)
-    def test_export_public_key_symmetric_credential(self, session):
-        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+    def test_export_public_key_symmetric_credential(self, session, management_key):
+        credential = import_key_derived(session, management_key)
 
         with pytest.raises(ApduError):
             session.get_public_key(credential.label)
 
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)
 
-    def test_delete_credential_wrong_management_key(self, session):
-        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+    def test_delete_credential_wrong_management_key(self, session, management_key):
+        credential = import_key_derived(session, management_key)
 
         with pytest.raises(InvalidPinError):
             session.delete_credential(NON_DEFAULT_MANAGEMENT_KEY, credential.label)
 
-    def test_delete_credential_non_existing(self, session):
+    def test_delete_credential_non_existing(self, session, management_key):
         with pytest.raises(ApduError):
-            session.delete_credential(DEFAULT_MANAGEMENT_KEY, "Default key")
+            session.delete_credential(management_key, "Default key")
 
-    def test_delete_credential_works(self, session):
-        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+    def test_delete_credential_works(self, session, management_key):
+        credential = import_key_derived(session, management_key)
 
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)
         credentials = session.list_credentials()
         assert len(credentials) == 0
 
 
 class TestAccess:
-    def test_change_management_key(self, session):
-        session.put_management_key(DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_MANAGEMENT_KEY)
+    def test_change_management_key(self, session, management_key):
+        session.put_management_key(management_key, NON_DEFAULT_MANAGEMENT_KEY)
 
         # Can't import key with old management key
         with pytest.raises(InvalidPinError):
-            import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+            import_key_derived(session, management_key)
 
-        session.put_management_key(NON_DEFAULT_MANAGEMENT_KEY, DEFAULT_MANAGEMENT_KEY)
+        session.put_management_key(NON_DEFAULT_MANAGEMENT_KEY, management_key)
 
-    def test_management_key_retries(self, session):
-        session.put_management_key(DEFAULT_MANAGEMENT_KEY, DEFAULT_MANAGEMENT_KEY)
+    def test_management_key_retries(self, session, management_key):
+        session.put_management_key(management_key, management_key)
         initial_retries = session.get_management_key_retries()
         assert initial_retries == 8
 
@@ -218,11 +243,11 @@ class TestAccess:
 
 
 class TestSessionKeys:
-    def test_calculate_session_keys_symmetric(self, session):
-        credential_password = "1234"
+    def test_calculate_session_keys_symmetric(self, session, management_key):
+        credential_password = "a password"
         credential = import_key_derived(
             session,
-            DEFAULT_MANAGEMENT_KEY,
+            management_key,
             credential_password=credential_password,
             derivation_password="pwd",
         )
@@ -246,8 +271,8 @@ class TestSessionKeys:
 
 class TestHostChallenge:
     @condition.min_version(5, 6)
-    def test_get_challenge_symmetric(self, session):
-        credential = import_key_derived(session, DEFAULT_MANAGEMENT_KEY)
+    def test_get_challenge_symmetric(self, session, management_key):
+        credential = import_key_derived(session, management_key)
 
         challenge1 = session.get_challenge(credential.label)
         challenge2 = session.get_challenge(credential.label)
@@ -255,17 +280,20 @@ class TestHostChallenge:
         assert len(challenge2) == 8
         assert challenge1 != challenge2
 
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)
 
     @condition.min_version(5, 6)
-    def test_get_challenge_asymmetric(self, session):
-        credential = generate_key_asymmetric(session, DEFAULT_MANAGEMENT_KEY)
+    def test_get_challenge_asymmetric(self, session, management_key):
+        credential_password = "12345679"
+        credential = generate_key_asymmetric(
+            session, management_key, credential_password
+        )
 
-        challenge1 = session.get_challenge(credential.label)
-        challenge2 = session.get_challenge(credential.label)
+        challenge1 = session.get_challenge(credential.label, credential_password)
+        challenge2 = session.get_challenge(credential.label, credential_password)
 
         assert len(challenge1) == 65
         assert len(challenge2) == 65
         assert challenge1 != challenge2
 
-        session.delete_credential(DEFAULT_MANAGEMENT_KEY, credential.label)
+        session.delete_credential(management_key, credential.label)

@@ -231,7 +231,7 @@ class PivmanData:
             data += Tlv(0x82, self.salt)
         if self.pin_timestamp is not None:
             data += Tlv(0x83, struct.pack(">I", self.pin_timestamp))
-        return Tlv(0x80, data)
+        return Tlv(0x80, data) if data else b""
 
 
 class PivmanProtectedData:
@@ -243,7 +243,7 @@ class PivmanProtectedData:
         data = b""
         if self.key is not None:
             data += Tlv(0x89, self.key)
-        return Tlv(0x88, data)
+        return Tlv(0x88, data) if data else b""
 
 
 def get_pivman_data(session: PivSession) -> PivmanData:
@@ -296,6 +296,7 @@ def pivman_set_mgm_key(
     :param store_on_device: If set, the management key is stored on device.
     """
     pivman = get_pivman_data(session)
+    pivman_old_bytes = pivman.get_bytes()
     pivman_prot = None
 
     if store_on_device or (not store_on_device and pivman.has_stored_key):
@@ -318,8 +319,10 @@ def pivman_set_mgm_key(
     # Set flag for stored or not stored key.
     pivman.mgm_key_protected = store_on_device
 
-    # Update readable pivman data
-    session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
+    # Update readable pivman data, if changed
+    pivman_bytes = pivman.get_bytes()
+    if pivman_old_bytes != pivman_bytes:
+        session.put_object(OBJECT_ID_PIVMAN_DATA, pivman_bytes)
 
     if pivman_prot is not None:
         if store_on_device:

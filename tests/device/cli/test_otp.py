@@ -35,6 +35,11 @@ import re
 import pytest
 
 
+def no_pin_complexity(info):
+    """PIN complexity enabled"""
+    return not info.pin_complexity
+
+
 @pytest.fixture(autouse=True)
 @condition.capability(CAPABILITY.OTP)
 def ensure_otp():
@@ -47,6 +52,7 @@ class TestSlotStatus:
         assert "Slot 1:" in info
         assert "Slot 2:" in info
 
+    @condition.check(no_pin_complexity)
     def test_ykman_swap_slots(self, ykman_cli):
         info = ykman_cli("otp", "info").output
         if "programmed" not in info:
@@ -65,6 +71,7 @@ class TestSlotStatus:
 
 
 class TestReclaimTimeout:
+    @condition.check(no_pin_complexity)
     def test_update_after_reclaim(self, ykman_cli):
         info = ykman_cli("otp", "info").output
         if "programmed" not in info:
@@ -78,6 +85,7 @@ class TestReclaimTimeout:
 
 class TestSlotStaticPassword:
     @pytest.fixture(autouse=True)
+    @condition.check(no_pin_complexity)
     def delete_slot(self, ykman_cli):
         try:
             ykman_cli("otp", "delete", "2", "-f")
@@ -145,6 +153,7 @@ class TestSlotStaticPassword:
 
 class TestSlotProgramming:
     @pytest.fixture(autouse=True)
+    @condition.check(no_pin_complexity)
     def delete_slot(self, ykman_cli):
         try:
             ykman_cli("otp", "delete", "2", "-f")
@@ -567,6 +576,7 @@ class TestSlotProgramming:
 
 class TestSlotCalculate:
     @pytest.fixture(autouse=True)
+    @condition.check(no_pin_complexity)
     def delete_slot(self, ykman_cli):
         try:
             ykman_cli("otp", "delete", "2", "-f")

@@ -7,11 +7,8 @@ from yubikit.piv import OBJECT_ID, SLOT
 import pytest
 
 
-DEFAULT_MANAGEMENT_KEY = "010203040506070801020304050607080102030405060708"
-
-
 class TestReadWriteObject:
-    def test_write_read_preserves_ansi_escapes(self, ykman_cli):
+    def test_write_read_preserves_ansi_escapes(self, ykman_cli, keys):
         red = b"\x00\x1b[31m"
         blue = b"\x00\x1b[34m"
         reset = b"\x00\x1b[0m"
@@ -31,7 +28,7 @@ class TestReadWriteObject:
             "objects",
             "import",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            keys.mgmt,
             "0x5f0001",
             "-",
             input=data,
@@ -41,7 +38,7 @@ class TestReadWriteObject:
         ).stdout_bytes
         assert data == output_data
 
-    def test_read_write_read_is_noop(self, ykman_cli):
+    def test_read_write_read_is_noop(self, ykman_cli, keys):
         data = os.urandom(32)
 
         ykman_cli(
@@ -51,7 +48,7 @@ class TestReadWriteObject:
             hex(OBJECT_ID.AUTHENTICATION),
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            keys.mgmt,
             input=data,
         )
 
@@ -67,7 +64,7 @@ class TestReadWriteObject:
             hex(OBJECT_ID.AUTHENTICATION),
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            keys.mgmt,
             input=output1,
         )
 
@@ -76,7 +73,7 @@ class TestReadWriteObject:
         ).stdout_bytes
         assert output2 == data
 
-    def test_read_write_certificate_as_object(self, ykman_cli):
+    def test_read_write_certificate_as_object(self, ykman_cli, keys):
         with pytest.raises(SystemExit):
             ykman_cli("piv", "objects", "export", hex(OBJECT_ID.AUTHENTICATION), "-")
 
@@ -92,7 +89,7 @@ class TestReadWriteObject:
             hex(OBJECT_ID.AUTHENTICATION),
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            keys.mgmt,
             input=input_tlv,
         )
 

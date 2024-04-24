@@ -25,6 +25,11 @@ def conn_type(request, version, transport):
     return conn_type
 
 
+def no_pin_complexity(info):
+    """PIN complexity enabled"""
+    return not info.pin_complexity
+
+
 @pytest.fixture()
 @condition.capability(CAPABILITY.OTP)
 def session(conn_type, info, device):
@@ -75,6 +80,7 @@ def read_config(session, conn_type, info, transport, await_reboot):
 class TestProgrammingState:
     @pytest.fixture(autouse=True)
     @condition.min_version(2, 1)
+    @condition.check(no_pin_complexity)
     def clear_slots(self, session, read_config):
         state = read_config()
         for slot in (SLOT.ONE, SLOT.TWO):
@@ -137,6 +143,7 @@ class TestProgrammingState:
 class TestChallengeResponse:
     @pytest.fixture(autouse=True)
     @condition.check(not_usb_ccid)
+    @condition.check(no_pin_complexity)
     def clear_slot2(self, session, read_config):
         state = read_config()
         if state.is_configured(SLOT.TWO):

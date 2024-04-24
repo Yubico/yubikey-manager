@@ -34,7 +34,7 @@ from yubikit.yubiotp import YubiOtpSession
 from yubikit.oath import OathSession
 from yubikit.support import get_name
 
-from .util import CliFail, is_yk4_fips, click_command
+from .util import CliFail, is_yk4_fips, click_command, pretty_print
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
@@ -195,6 +195,12 @@ def info(ctx, check_fips):
     print_app_status_table(
         info.supported_capabilities, info.config.enabled_capabilities
     )
+
+    if info.fips_capable:
+        click.echo()
+        click.echo("FIPS approved applications")
+        data = {c.display_name: c in info.fips_approved for c in info.fips_capable}
+        click.echo("\n".join(pretty_print(data)))
 
     if check_fips:
         click.echo()

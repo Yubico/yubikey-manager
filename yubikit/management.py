@@ -74,6 +74,21 @@ class CAPABILITY(IntFlag):
         name = "|".join(c.name or str(c) for c in CAPABILITY if c in self)
         return f"{name}: {hex(self)}"
 
+    @classmethod
+    def _from_fips(cls, fips: int) -> "CAPABILITY":
+        c = CAPABILITY(0)
+        if fips & (1 << 0):
+            c |= CAPABILITY.FIDO2
+        if fips & (1 << 1):
+            c |= CAPABILITY.PIV
+        if fips & (1 << 2):
+            c |= CAPABILITY.OPENPGP
+        if fips & (1 << 3):
+            c |= CAPABILITY.OATH
+        if fips & (1 << 4):
+            c |= CAPABILITY.HSMAUTH
+        return c
+
     @property
     def display_name(self) -> str:
         if self == CAPABILITY.OTP:
@@ -174,9 +189,13 @@ TAG_MORE_DATA = 0x10
 TAG_FREE_FORM = 0x11
 TAG_HID_INIT_DELAY = 0x12
 TAG_PART_NUMBER = 0x13
+TAG_FIPS_CAPABLE = 0x14
+TAG_FIPS_APPROVED = 0x15
 TAG_PIN_COMPLEXITY = 0x16
 TAG_NFC_RESTRICTED = 0x17
 TAG_RESET_BLOCKED = 0x18
+TAG_FPS_VERSION = 0x20
+TAG_STM_VERSION = 0x21
 
 
 @dataclass
@@ -233,8 +252,13 @@ class DeviceInfo:
     is_locked: bool
     is_fips: bool = False
     is_sky: bool = False
+    part_name: bytes = b""
+    fips_capable: CAPABILITY = CAPABILITY(0)
+    fips_approved: CAPABILITY = CAPABILITY(0)
     pin_complexity: bool = False
     reset_blocked: CAPABILITY = CAPABILITY(0)
+    fps_version: Optional[Version] = None
+    stm_version: Optional[Version] = None
 
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
@@ -277,8 +301,17 @@ class DeviceInfo:
             supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
             enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
         nfc_restricted = data.get(TAG_NFC_RESTRICTED, b"\0") == b"\1"
+        part_name = data.get(TAG_PART_NUMBER, b"")
+        fips_capable = CAPABILITY._from_fips(
+            bytes2int(data.get(TAG_FIPS_CAPABLE, b"\0"))
+        )
+        fips_approved = CAPABILITY._from_fips(
+            bytes2int(data.get(TAG_FIPS_APPROVED, b"\0"))
+        )
         pin_complexity = data.get(TAG_PIN_COMPLEXITY, b"\0") == b"\1"
         reset_blocked = CAPABILITY(bytes2int(data.get(TAG_RESET_BLOCKED, b"\0")))
+        fps_version = Version.from_bytes(data.get(TAG_FPS_VERSION, b"\0\0\0"))
+        stm_version = Version.from_bytes(data.get(TAG_STM_VERSION, b"\0\0\0"))
 
         return cls(
             DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags, nfc_restricted),
@@ -289,8 +322,13 @@ class DeviceInfo:
             locked,
             fips,
             sky,
+            part_name,
+            fips_capable,
+            fips_approved,
             pin_complexity,
             reset_blocked,
+            fps_version or None,
+            stm_version or None,
         )
 
 
