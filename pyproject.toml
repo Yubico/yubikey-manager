@@ -32,11 +32,11 @@ cryptography = ">=3.0, <45"
 pyscard = "^2.0"
 fido2 = "^1.0"
 click = "^8.0"
-keyring = ">=23.4, <25"
+keyring = ">=23.4, <26"
 pywin32 = {version = ">=223", platform = "win32"}
 
 [tool.poetry.dev-dependencies]
-pytest = "^7.2"
+pytest = "^8.0"
 makefun = "^1.9.5"
 pyinstaller = {version = "^6.0", python = "<3.13"}
 Sphinx = "^7.1"
