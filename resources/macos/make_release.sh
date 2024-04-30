@@ -14,13 +14,10 @@ CWD=`pwd`
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 echo "Script dir: $SCRIPT_DIR"
 
+echo "Unpack from tar.gz"
 SOURCE_DIR="$CWD/ykman"
-
-# Ensure executable, since we may have unpacked from zip
-chmod +x $SOURCE_DIR/ykman
-
-# Remove Python framework directory as it isn't needed
-rm -rf $SOURCE_DIR/_internal/Python.framework
+rm -rf $SOURCE_DIR
+tar xfa ykman.tar.gz
 
 RELEASE_VERSION=`$SOURCE_DIR/ykman --version | awk '{print $(NF)}'`
 PKG="yubikey-manager-$RELEASE_VERSION-mac.pkg"

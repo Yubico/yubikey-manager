@@ -57,6 +57,11 @@ jobs:
         working-directory: ./dist
         run: ./scripts/make_pkg.sh
 
+      - name: Tar to preserve symlinks
+        run: |
+          tar -czf dist/ykman.tar.gz -C dist "ykman"
+          rm -rf dist/ykman/
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
