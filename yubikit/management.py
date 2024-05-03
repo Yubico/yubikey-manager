@@ -89,6 +89,23 @@ class CAPABILITY(IntFlag):
             c |= CAPABILITY.HSMAUTH
         return c
 
+    @classmethod
+    def _from_aid(cls, aid: AID) -> "CAPABILITY":
+        # TODO: match on prefix?
+        if aid == AID.OTP:
+            return CAPABILITY.OTP
+        if aid == AID.OPENPGP:
+            return CAPABILITY.OPENPGP
+        if aid == AID.OATH:
+            return CAPABILITY.OATH
+        if aid == AID.PIV:
+            return CAPABILITY.PIV
+        if aid == AID.FIDO:
+            return CAPABILITY.FIDO2
+        if aid == AID.HSMAUTH:
+            return CAPABILITY.HSMAUTH
+        raise ValueError("Unhandled AID")
+
     @property
     def display_name(self) -> str:
         if self == CAPABILITY.OTP:

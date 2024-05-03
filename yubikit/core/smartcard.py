@@ -34,7 +34,8 @@ from . import (
     NotSupportedError,
     ApplicationNotAvailableError,
 )
-from .scp03 import Scp03State, SessionKeys, StaticKeys
+from .scp03 import ScpState, SessionKeys, StaticKeys, Key
+from cryptography.hazmat.primitives.asymmetric import ec
 from time import time
 from enum import Enum, IntEnum, unique
 from typing import Tuple, Union, Optional
@@ -76,6 +77,7 @@ class AID(bytes, Enum):
     PIV = bytes.fromhex("a000000308")
     FIDO = bytes.fromhex("a0000006472f0001")
     HSMAUTH = bytes.fromhex("a000000527210701")
+    SCP = bytes.fromhex("a000000151000000")
 
 
 @unique
@@ -152,7 +154,7 @@ class SmartCardProtocol:
         self._ins_send_remaining = ins_send_remaining
         self._touch_workaround = False
         self._last_long_resp = 0.0
-        self._scp03: Optional[Scp03State] = None
+        self._scp: Optional[ScpState] = None
 
     def close(self) -> None:
         self.connection.close()
@@ -194,10 +196,10 @@ class SmartCardProtocol:
             )  # Dummy APDU, returns error
             self._last_long_resp = 0
 
-        if self._scp03:
+        if self._scp:
             cla |= 0x04
             if encrypt:
-                data = self._scp03.encrypt(data)
+                data = self._scp.encrypt(data)
 
             # Calculate and add MAC to data
             if (
@@ -206,11 +208,11 @@ class SmartCardProtocol:
             ):
                 # No chunking, just send short
                 apdu = _encode_short_apdu(cla, ins, p1, p2, data + b"\0" * 8, le)
-                mac = self._scp03.mac(apdu[:-8])
+                mac = self._scp.mac(apdu[:-8])
                 data = data + mac
             else:
                 apdu = _encode_extended_apdu(cla, ins, p1, p2, data + b"\0" * 8, le)
-                mac = self._scp03.mac(apdu[:-8])
+                mac = self._scp.mac(apdu[:-8])
                 data = data + mac
 
         if self.apdu_format is ApduFormat.SHORT:
@@ -240,10 +242,10 @@ class SmartCardProtocol:
 
         buf += response
 
-        if self._scp03 and buf:
-            buf = self._scp03.unmac(buf, sw)
+        if self._scp and buf:
+            buf = self._scp.unmac(buf, sw)
             if buf:
-                buf = self._scp03.decrypt(buf)
+                buf = self._scp.decrypt(buf)
 
         if sw != SW.OK:
             raise ApduError(buf, sw)
@@ -261,7 +263,7 @@ class SmartCardProtocol:
         :param aid: The YubiKey application AID value.
         """
         try:
-            self._scp03 = None
+            self._scp = None
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
         except ApduError as e:
             if e.sw in (
@@ -273,12 +275,20 @@ class SmartCardProtocol:
                 raise ApplicationNotAvailableError()
             raise
 
-    def init_scp03(self, host_challenge: Optional[bytes] = None) -> "Scp03Handshake":
-        self._scp03 = None
-        return Scp03Handshake(self, host_challenge or os.urandom(8))
+    def _set_scp_state(self, state: ScpState) -> None:
+        self._scp = state
 
-    def _set_scp03_state(self, state: Scp03State) -> None:
-        self._scp03 = state
+    def scp03_init(self, keys: Union[SessionKeys, StaticKeys]) -> None:
+        self._scp = None
+        ScpState.scp03_init(self, keys)
+
+    def scp11_init(self, key: Key, pk_sd_ecka: ec.EllipticCurvePublicKey) -> None:
+        self._scp = None
+        ScpState.scp11_init(self, key, pk_sd_ecka)
+
+    def init_scp03(self, host_challenge: Optional[bytes] = None) -> "Scp03Handshake":
+        self._scp = None
+        return Scp03Handshake(self, host_challenge or os.urandom(8))
 
 
 class Scp03Handshake:
@@ -317,9 +327,53 @@ class Scp03Handshake:
         else:
             session_keys = keys
 
-        state = Scp03State(session_keys)
+        state = ScpState(session_keys)
         host_cryptogram = state.generate_host_cryptogram(context, self._card_cryptogram)
 
-        self._protocol._set_scp03_state(state)
+        self._protocol._set_scp_state(state)
         self._protocol.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, encrypt=False)
-        logger.debug("SCP session established")
+        logger.debug("SCP03 session established")
+
+
+class Scp11bHandshake:
+    def __init__(self, protocol: SmartCardProtocol, host_challenge: bytes):
+        self._protocol = protocol
+        self._host_challenge = host_challenge
+
+        logger.debug("Initializing SCP handshake")
+        try:
+            resp = protocol.send_apdu(0x80, 0x50, 0, 0, self._host_challenge)
+        except ApduError as e:
+            if e.sw == SW.CLASS_NOT_SUPPORTED:
+                raise NotSupportedError(
+                    "This YubiKey does not support secure messaging"
+                )
+            raise
+
+        self._diversification_data = resp[:10]
+        self._key_info = resp[10:13]
+        self._card_challenge = resp[13:21]
+        self._card_cryptogram = resp[21:29]
+
+    @property
+    def diversification_data(self):
+        return self._diversification_data
+
+    @property
+    def key_info(self):
+        return self._key_info
+
+    def authenticate(self, keys: Union[StaticKeys, SessionKeys]) -> None:
+        context = self._host_challenge + self._card_challenge
+
+        if isinstance(keys, StaticKeys):
+            session_keys = keys.derive(context)
+        else:
+            session_keys = keys
+
+        state = ScpState(session_keys)
+        host_cryptogram = state.generate_host_cryptogram(context, self._card_cryptogram)
+
+        self._protocol._set_scp_state(state)
+        self._protocol.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, encrypt=False)
+        logger.debug("SCP11 session established")

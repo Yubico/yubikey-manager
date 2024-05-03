@@ -32,6 +32,8 @@ from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol
 from yubikit.core.scp03 import StaticKeys
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
+from yubikit.scp import ScpSession
+from yubikit.management import CAPABILITY
 
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
@@ -333,24 +335,39 @@ def cli(ctx, device, keys, log_level, log_file, reader):
             # FIDO-only command on Windows without Admin won't work.
             raise CliFail("FIDO access on Windows requires running as Administrator.")
 
-        if keys:
-            if SmartCardConnection not in connections:
-                raise CliFail("--keys can only be used with CCID commands")
-            connections = [SmartCardConnection]
-            select = SmartCardProtocol.select
-
-            def select_and_secure(self, *args, **kwargs):
-                resp = select(self, *args, **kwargs)
-                self.init_scp03().authenticate(keys)
-                return resp
-
-            SmartCardProtocol.select = select_and_secure  # type: ignore
-
         def resolve():
             items = getattr(resolve, "items", None)
             if not items:
                 if reader is not None:
                     items = require_reader(connections, reader)
+                    info = items[1]
+                    if info.fips_capable:
+                        pub_key = None
+                        device = items[0]
+                        if info.fips_capable:  # TODO: Check Capability from aid
+                            with device.open_connection(
+                                SmartCardConnection
+                            ) as connection:
+                                scp = ScpSession(connection)
+                                for key_info in scp.get_key_information():
+                                    if key_info.key.kid == 0x13:
+                                        cert = scp.get_certificate_bundle(key_info.key)[
+                                            -1
+                                        ]
+                                        pub_key = cert.public_key()
+                                        break
+
+                        if pub_key:
+                            select = SmartCardProtocol.select
+
+                            def select_and_secure(self, aid, *args, **kwargs):
+                                resp = select(self, aid, *args, **kwargs)
+                                if CAPABILITY._from_aid(aid) in info.fips_capable:
+                                    logging.info("Requiring SCP11")
+                                    self.scp11_init(key_info.key, pub_key)
+                                return resp
+
+                            SmartCardProtocol.select = select_and_secure  # type: ignore
                 else:
                     items = require_device(connections, device)
                 setattr(resolve, "items", items)
@@ -359,6 +376,19 @@ def cli(ctx, device, keys, log_level, log_file, reader):
         ctx.obj.add_resolver("device", lambda: resolve()[0])
         ctx.obj.add_resolver("pid", lambda: resolve()[0].pid)
         ctx.obj.add_resolver("info", lambda: resolve()[1])
+
+        if keys:
+            select = SmartCardProtocol.select
+            if SmartCardConnection not in connections:
+                raise CliFail("--keys can only be used with CCID commands")
+            connections = [SmartCardConnection]
+
+            def select_and_secure(self, *args, **kwargs):
+                resp = select(self, *args, **kwargs)
+                self.init_scp03().authenticate(keys)
+                return resp
+
+            SmartCardProtocol.select = select_and_secure  # type: ignore
 
 
 @cli.command("list")
