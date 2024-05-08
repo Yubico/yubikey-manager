@@ -4,11 +4,10 @@ from .core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
 )
-from .core.scp import Key
 
 from cryptography import x509
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Mapping, Sequence, Union, Optional
 
 
 import logging
@@ -20,15 +19,46 @@ INS_GET_DATA = 0xCA
 INS_STORE_DATA = 0xE2
 
 
+class ScpKey(bytes):
+    @property
+    def kid(self) -> int:
+        return self[0]
+
+    @property
+    def kvn(self) -> int:
+        return self[1]
+
+    def __new__(cls, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
+        """This allows creation by passing either binary data, or kid and kvn."""
+        if isinstance(kid_or_data, int):  # kid and kvn
+            if kvn is None:
+                raise ValueError("Missing kvn")
+            data = bytes([kid_or_data, kvn])
+        else:  # Binary id and version
+            if kvn is not None:
+                raise ValueError("kvn can only be provided if kid_or_data is a kid")
+            data = kid_or_data
+
+        # mypy thinks this is wrong
+        return super(ScpKey, cls).__new__(cls, data)  # type: ignore
+
+    def __init__(self, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
+        if len(self) != 2:
+            raise ValueError("Incorrect length")
+
+    def __repr__(self):
+        return f"ScpKey(kid=0x{self.kid:02x}, kvn=0x{self.kvn:02x})"
+
+
 @dataclass
 class KeyInformation:
-    key: Key
+    key: ScpKey
     componets: Mapping[int, int]
 
     @classmethod
     def parse(cls, data: bytes) -> "KeyInformation":
         return cls(
-            Key(data[:2]),
+            ScpKey(data[:2]),
             dict(zip(data[2::2], data[3::2])),
         )
 
@@ -36,13 +66,14 @@ class KeyInformation:
 @dataclass
 class CaIssuer:
     value: bytes
-    key: Key
+    key: ScpKey
 
     @classmethod
     def parse_list(cls, data: bytes) -> Sequence["CaIssuer"]:
         tlvs = Tlv.parse_list(data)
         return [
-            cls(tlvs[i].value, Key(tlvs[i + 1].value)) for i in range(0, len(tlvs), 2)
+            cls(tlvs[i].value, ScpKey(tlvs[i + 1].value))
+            for i in range(0, len(tlvs), 2)
         ]
 
 
@@ -70,7 +101,7 @@ class ScpSession:
         """20-byte key identifier, key type, key version"""
         return CaIssuer.parse_list(self.get_data(0xFF33 if kloc else 0xFF34))
 
-    def get_certificate_bundle(self, key: Key) -> Sequence[x509.Certificate]:
+    def get_certificate_bundle(self, key: ScpKey) -> Sequence[x509.Certificate]:
         data = Tlv(0xA6, Tlv(0x83, key))
         return [
             x509.load_der_x509_certificate(cert)

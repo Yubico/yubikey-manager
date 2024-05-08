@@ -29,7 +29,11 @@ from yubikit.core import ApplicationNotAvailableError, TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol
-from yubikit.core.scp import StaticKeys
+from yubikit.core.smartcard.scp import (
+    Scp03KeyParams,
+    Scp11KeyParams,
+    StaticKeys,
+)
 from yubikit.scp import ScpSession
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
@@ -381,7 +385,9 @@ def cli(ctx, device, keys, log_level, log_file, reader):
                                             f"Selected FIPS capable {capability}, "
                                             "use SCP"
                                         )
-                                        self.scp11_init(key_info.key, pub_key)
+                                        self.init_scp(
+                                            Scp11KeyParams(key_info.key.kvn, pub_key)
+                                        )
                                 except ValueError:
                                     pass  # Unrecognized AID, ignore it
                                 return resp
@@ -408,7 +414,7 @@ def cli(ctx, device, keys, log_level, log_file, reader):
 
             def select_and_secure(self, *args, **kwargs):
                 resp = orig_select(self, *args, **kwargs)
-                self.scp03_init(keys)
+                self.init_scp(Scp03KeyParams(keys=keys))
                 return resp
 
             SmartCardProtocol.select = select_and_secure  # type: ignore

@@ -25,15 +25,18 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Tlv, BadResponseError
+from .. import Tlv, NotSupportedError, BadResponseError
+from ._defs import ApduError, SW
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import cmac, hashes, serialization, constant_time
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
-from typing import NamedTuple, Tuple, Optional, Union
+from dataclasses import dataclass
+from typing import NamedTuple, Tuple, Optional, Union, Callable
 
 import os
+import abc
 import struct
 import logging
 
@@ -82,37 +85,6 @@ def _init_cipher(key: bytes, counter: int, response=False) -> Cipher:
     )
 
 
-class Key(bytes):
-    @property
-    def kid(self) -> int:
-        return self[0]
-
-    @property
-    def kvn(self) -> int:
-        return self[1]
-
-    def __new__(cls, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
-        """This allows creation by passing either binary data, or kid and kvn."""
-        if isinstance(kid_or_data, int):  # kid and kvn
-            if kvn is None:
-                raise ValueError("Missing kvn")
-            data = bytes([kid_or_data, kvn])
-        else:  # Binary id and version
-            if kvn is not None:
-                raise ValueError("kvn can only be provided if kid_or_data is a kid")
-            data = kid_or_data
-
-        # mypy thinks this is wrong
-        return super(Key, cls).__new__(cls, data)  # type: ignore
-
-    def __init__(self, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
-        if len(self) != 2:
-            raise ValueError("Incorrect length")
-
-    def __repr__(self):
-        return f"Key(kid=0x{self.kid:02x}, kvn=0x{self.kvn:02x})"
-
-
 class SessionKeys(NamedTuple):
     """SCP Session Keys."""
 
@@ -140,6 +112,25 @@ class StaticKeys(NamedTuple):
             _derive(self.key_mac, _KEY_RMAC, context),
             self.key_dek,
         )
+
+
+@dataclass
+class ScpKeyParams(abc.ABC):
+    kvn: int
+
+
+@dataclass
+class Scp03KeyParams(ScpKeyParams):
+    kvn: int = 0
+    keys: Union[StaticKeys, SessionKeys] = StaticKeys.default()
+
+
+@dataclass
+class Scp11KeyParams(ScpKeyParams):
+    pk_sd_ecka: ec.EllipticCurvePublicKey
+
+
+SendApdu = Callable[[int, int, int, int, bytes], bytes]
 
 
 class ScpState:
@@ -198,37 +189,34 @@ class ScpState:
     @classmethod
     def scp03_init(
         cls,
-        protocol,  #: SmartCardProtocol,
-        keys: Union[StaticKeys, SessionKeys],
+        send_apdu: SendApdu,
+        key_params: Scp03KeyParams,
+        *,
         host_challenge: Optional[bytes] = None,
-        kvn: int = 0,
     ) -> Tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
 
-        resp = protocol.send_apdu(0x80, 0x50, kvn, 0, host_challenge)
-
-        """try:
-            resp = protocol.send_apdu(0x80, 0x50, kvn, 0, host_challenge)
+        try:
+            resp = send_apdu(0x80, 0x50, key_params.kvn, 0, host_challenge)
         except ApduError as e:
             if e.sw == SW.CLASS_NOT_SUPPORTED:
                 raise NotSupportedError(
                     "This YubiKey does not support secure messaging"
                 )
             raise
-        """
 
-        diversification_data = resp[:10]
-        key_info = resp[10:13]
+        diversification_data = resp[:10]  # noqa: unused
+        key_info = resp[10:13]  # noqa: unused
         card_challenge = resp[13:21]
         card_cryptogram = resp[21:29]
 
         context = host_challenge + card_challenge
 
-        if isinstance(keys, StaticKeys):
-            session_keys = keys.derive(context)
+        if isinstance(key_params.keys, StaticKeys):
+            session_keys = key_params.keys.derive(context)
         else:
-            session_keys = keys
+            session_keys = key_params.keys
 
         gen_card_crypto = _derive(
             session_keys.key_smac, _CARD_CRYPTOGRAM, context, 0x40
@@ -246,9 +234,8 @@ class ScpState:
     @classmethod
     def scp11_init(
         cls,
-        protocol,  #: SmartCardProtocol,
-        key: Key,
-        pk_sd_ecka: ec.EllipticCurvePublicKey,
+        send_apdu: SendApdu,
+        key_params: Scp11KeyParams,
     ) -> "ScpState":
         logger.debug("Initializing SCP11 handshake")
 
@@ -260,7 +247,7 @@ class ScpState:
         key_len = bytes([16])  # 128-bit
 
         # Host ephemeral key
-        esk_oce_ecka = ec.generate_private_key(pk_sd_ecka.curve)
+        esk_oce_ecka = ec.generate_private_key(key_params.pk_sd_ecka.curve)
         epk_oce_ecka = esk_oce_ecka.public_key()
         data = Tlv(
             0xA6,
@@ -279,22 +266,21 @@ class ScpState:
         # No static host key, same as ephemeral
         sk_oce_ecka = esk_oce_ecka
 
-        resp = protocol.send_apdu(0x80, 0x88, key.kvn, key.kid, data)
-        """try:
-            resp = protocol.send_apdu(0x80, 0x88, key.kvn, key.kid, data)
+        try:
+            resp = send_apdu(0x80, 0x88, key_params.kvn, 0x13, data)
         except ApduError as e:
             if e.sw == SW.CLASS_NOT_SUPPORTED:
                 raise NotSupportedError(
                     "This YubiKey does not support secure messaging"
                 )
-            raise"""
+            raise
 
-        epk_sd_ecka, receipt = Tlv.parse_list(resp)
-        assert epk_sd_ecka.tag == 0x5F49
-        assert receipt.tag == 0x86
+        epk_sd_ecka_tlv, resp = Tlv.parse_from(resp)
+        epk_sd_ecka = Tlv.unpack(0x5F49, epk_sd_ecka_tlv)
+        receipt = Tlv.unpack(0x86, resp)
 
         # Derive keys
-        key_agreement_data = data + epk_sd_ecka
+        key_agreement_data = data + epk_sd_ecka_tlv
         sharedinfo = key_usage + key_type + key_len
 
         # GPC v2.3 Amendment F (SCP11) v1.3 §3.1.2 Key Derivation
@@ -302,10 +288,10 @@ class ScpState:
             esk_oce_ecka.exchange(
                 ec.ECDH(),
                 ec.EllipticCurvePublicKey.from_encoded_point(
-                    sk_oce_ecka.curve, epk_sd_ecka.value
+                    sk_oce_ecka.curve, epk_sd_ecka
                 ),
             )
-            + sk_oce_ecka.exchange(ec.ECDH(), pk_sd_ecka)
+            + sk_oce_ecka.exchange(ec.ECDH(), key_params.pk_sd_ecka)
         )
 
         # 5 keys were derived, one for verification of receipt
@@ -313,8 +299,8 @@ class ScpState:
         keys = [keys[i : i + ln] for i in range(0, ln * 5, ln)]
         c = cmac.CMAC(algorithms.AES(keys.pop(0)))
         c.update(key_agreement_data)
-        c.verify(receipt.value)
+        c.verify(receipt)
         # The 4 remaining keys are session keys
         session_keys = SessionKeys(*keys)
 
-        return cls(session_keys, receipt.value)
+        return cls(session_keys, receipt)

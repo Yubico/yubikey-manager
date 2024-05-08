@@ -25,82 +25,31 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import (
+from .. import (
     Version,
     TRANSPORT,
     USB_INTERFACE,
     Connection,
-    CommandError,
     ApplicationNotAvailableError,
 )
-from .scp import ScpState, SessionKeys, StaticKeys, Key
-from cryptography.hazmat.primitives.asymmetric import ec
+from ._defs import ApduError, ApduFormat, SW, AID
+from .scp import (
+    ScpState,
+    ScpKeyParams,
+    Scp03KeyParams,
+    Scp11KeyParams,
+)
 from time import time
-from enum import Enum, IntEnum, unique
-from typing import Tuple, Union
+from typing import Tuple
 import abc
 import struct
 import logging
 import warnings
 
+
+__all__ = ["ApduError", "ApduFormat", "SW", "AID"]
+
 logger = logging.getLogger(__name__)
-
-
-class ApduError(CommandError):
-    """Thrown when an APDU response has the wrong SW code"""
-
-    def __init__(self, data: bytes, sw: int):
-        self.data = data
-        self.sw = sw
-
-    def __str__(self):
-        return f"APDU error: SW=0x{self.sw:04x}"
-
-
-@unique
-class ApduFormat(str, Enum):
-    """APDU encoding format"""
-
-    SHORT = "short"
-    EXTENDED = "extended"
-
-
-@unique
-class AID(bytes, Enum):
-    """YubiKey Application smart card AID values."""
-
-    OTP = bytes.fromhex("a0000005272001")
-    MANAGEMENT = bytes.fromhex("a000000527471117")
-    OPENPGP = bytes.fromhex("d27600012401")
-    OATH = bytes.fromhex("a0000005272101")
-    PIV = bytes.fromhex("a000000308")
-    FIDO = bytes.fromhex("a0000006472f0001")
-    HSMAUTH = bytes.fromhex("a000000527210701")
-    SCP = bytes.fromhex("a000000151000000")
-
-
-@unique
-class SW(IntEnum):
-    NO_INPUT_DATA = 0x6285
-    VERIFY_FAIL_NO_RETRY = 0x63C0
-    MEMORY_FAILURE = 0x6581
-    WRONG_LENGTH = 0x6700
-    SECURITY_CONDITION_NOT_SATISFIED = 0x6982
-    AUTH_METHOD_BLOCKED = 0x6983
-    DATA_INVALID = 0x6984
-    CONDITIONS_NOT_SATISFIED = 0x6985
-    COMMAND_NOT_ALLOWED = 0x6986
-    INCORRECT_PARAMETERS = 0x6A80
-    FUNCTION_NOT_SUPPORTED = 0x6A81
-    FILE_NOT_FOUND = 0x6A82
-    NO_SPACE = 0x6A84
-    REFERENCE_DATA_NOT_FOUND = 0x6A88
-    APPLET_SELECT_FAILED = 0x6999
-    WRONG_PARAMETERS_P1P2 = 0x6B00
-    INVALID_INSTRUCTION = 0x6D00
-    CLASS_NOT_SUPPORTED = 0x6E00
-    COMMAND_ABORTED = 0x6F00
-    OK = 0x9000
 
 
 class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
@@ -123,7 +72,7 @@ P2_SELECT = 0x00
 INS_SEND_REMAINING = 0xC0
 
 
-class ApduProcessor:
+class ApduProcessor(abc.ABC):
     @abc.abstractmethod
     def send_apdu(
         self,
@@ -370,9 +319,17 @@ class SmartCardProtocol:
                 raise ApplicationNotAvailableError()
             raise
 
-    def scp03_init(self, keys: Union[SessionKeys, StaticKeys]) -> None:
+    def init_scp(self, key_params: ScpKeyParams):
+        if isinstance(key_params, Scp03KeyParams):
+            self._scp03_init(key_params)
+        elif isinstance(key_params, Scp11KeyParams):
+            self._scp11_init(key_params)
+        else:
+            raise ValueError("Unsupported ScpKeyParams")
+
+    def _scp03_init(self, key_params: Scp03KeyParams) -> None:
         logger.debug("Initializing SCP03")
-        scp, host_cryptogram = ScpState.scp03_init(self, keys)
+        scp, host_cryptogram = ScpState.scp03_init(self.send_apdu, key_params)
         processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
 
         # Send EXTERNAL AUTHENTICATE
@@ -381,9 +338,9 @@ class SmartCardProtocol:
         self._apdu_format = ApduFormat.EXTENDED
         logger.info("SCP03 initialized")
 
-    def scp11_init(self, key: Key, pk_sd_ecka: ec.EllipticCurvePublicKey) -> None:
+    def _scp11_init(self, key_params: Scp11KeyParams) -> None:
         logger.debug("Initializing SCP11")
-        scp = ScpState.scp11_init(self, key, pk_sd_ecka)
+        scp = ScpState.scp11_init(self.send_apdu, key_params)
         self._processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
         self._apdu_format = ApduFormat.EXTENDED
         logger.info("SCP11 initialized")
