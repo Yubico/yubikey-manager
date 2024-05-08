@@ -25,14 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import ApplicationNotAvailableError
+from yubikit.core import ApplicationNotAvailableError, TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection, SmartCardProtocol
-from yubikit.core.scp03 import StaticKeys
+from yubikit.core.scp import StaticKeys
+from yubikit.scp import ScpSession
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
-from yubikit.scp import ScpSession
 from yubikit.management import CAPABILITY
 
 from .. import __version__
@@ -335,19 +335,24 @@ def cli(ctx, device, keys, log_level, log_file, reader):
             # FIDO-only command on Windows without Admin won't work.
             raise CliFail("FIDO access on Windows requires running as Administrator.")
 
+        orig_select = SmartCardProtocol.select
+
         def resolve():
             items = getattr(resolve, "items", None)
             if not items:
+                # We might be connecting over NFC, and thus may require SCP11
                 if reader is not None:
                     items = require_reader(connections, reader)
                     info = items[1]
-                    if info.fips_capable:
+                    # At least some FIPS functionality, and no manually passed keys
+                    if info.fips_capable and not keys:
                         pub_key = None
-                        device = items[0]
-                        if info.fips_capable:  # TODO: Check Capability from aid
-                            with device.open_connection(
-                                SmartCardConnection
-                            ) as connection:
+                        with items[0].open_connection(
+                            SmartCardConnection
+                        ) as connection:
+                            # We can now verify that we are connected over NFC
+                            if connection.transport == TRANSPORT.NFC:
+                                # Find a usable SCP11b key, don't care about the issuer
                                 scp = ScpSession(connection)
                                 for key_info in scp.get_key_information():
                                     if key_info.key.kid == 0x13:
@@ -355,16 +360,30 @@ def cli(ctx, device, keys, log_level, log_file, reader):
                                             -1
                                         ]
                                         pub_key = cert.public_key()
+                                        logger.info(
+                                            "SCP11b key found, "
+                                            "using for FIPS capable applications"
+                                        )
                                         break
+                                else:
+                                    logger.debug("No SCP11b key found, not using SCP")
 
                         if pub_key:
-                            select = SmartCardProtocol.select
+                            # We have a key, patch SELECT to also initialize SCP11b
 
                             def select_and_secure(self, aid, *args, **kwargs):
-                                resp = select(self, aid, *args, **kwargs)
-                                if CAPABILITY._from_aid(aid) in info.fips_capable:
-                                    logging.info("Requiring SCP11")
-                                    self.scp11_init(key_info.key, pub_key)
+                                resp = orig_select(self, aid, *args, **kwargs)
+                                # Verify that the seleted AID requires SCP
+                                try:
+                                    capability = CAPABILITY._from_aid(aid)
+                                    if capability in info.fips_capable:
+                                        logger.debug(
+                                            f"Selected FIPS capable {capability}, "
+                                            "use SCP"
+                                        )
+                                        self.scp11_init(key_info.key, pub_key)
+                                except ValueError:
+                                    pass  # Unrecognized AID, ignore it
                                 return resp
 
                             SmartCardProtocol.select = select_and_secure  # type: ignore
@@ -377,15 +396,19 @@ def cli(ctx, device, keys, log_level, log_file, reader):
         ctx.obj.add_resolver("pid", lambda: resolve()[0].pid)
         ctx.obj.add_resolver("info", lambda: resolve()[1])
 
+        def restore_select():
+            SmartCardProtocol.select = orig_select  # type: ignore
+
+        ctx.call_on_close(restore_select)
+
         if keys:
-            select = SmartCardProtocol.select
             if SmartCardConnection not in connections:
                 raise CliFail("--keys can only be used with CCID commands")
             connections = [SmartCardConnection]
 
             def select_and_secure(self, *args, **kwargs):
-                resp = select(self, *args, **kwargs)
-                self.init_scp03().authenticate(keys)
+                resp = orig_select(self, *args, **kwargs)
+                self.scp03_init(keys)
                 return resp
 
             SmartCardProtocol.select = select_and_secure  # type: ignore

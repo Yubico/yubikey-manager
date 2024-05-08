@@ -33,6 +33,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 from typing import NamedTuple, Tuple, Optional, Union
 
+import os
 import struct
 import logging
 
@@ -118,7 +119,7 @@ class SessionKeys(NamedTuple):
     key_senc: bytes
     key_smac: bytes
     key_srmac: bytes
-    key_dek: Optional[bytes]
+    key_dek: Optional[bytes] = None
 
 
 class StaticKeys(NamedTuple):
@@ -126,7 +127,7 @@ class StaticKeys(NamedTuple):
 
     key_enc: bytes
     key_mac: bytes
-    key_dek: Optional[bytes]
+    key_dek: Optional[bytes] = None
 
     @classmethod
     def default(cls) -> "StaticKeys":
@@ -152,14 +153,6 @@ class ScpState:
         self._mac_chain = mac_chain
         self._enc_counter = enc_counter
 
-    def generate_host_cryptogram(self, context: bytes, card_cryptogram: bytes) -> bytes:
-        gen_card_crypto = _derive(self._keys.key_smac, _CARD_CRYPTOGRAM, context, 0x40)
-        if not constant_time.bytes_eq(gen_card_crypto, card_cryptogram):
-            # This means wrong keys
-            raise BadResponseError("Wrong card cryptogram")
-
-        return _derive(self._keys.key_smac, _HOST_CRYPTOGRAM, context, 0x40)
-
     def encrypt(self, data: bytes) -> bytes:
         # Pad the data
         msg = data
@@ -174,10 +167,9 @@ class ScpState:
         self._enc_counter += 1
         return encrypted
 
-    def mac(self, data: bytes, update: bool = True) -> bytes:
+    def mac(self, data: bytes) -> bytes:
         next_mac_chain, mac = _calculate_mac(self._keys.key_smac, self._mac_chain, data)
-        if update:
-            self._mac_chain = next_mac_chain
+        self._mac_chain = next_mac_chain
         return mac
 
     def unmac(self, data: bytes, sw: int) -> bytes:
@@ -210,11 +202,13 @@ class ScpState:
         keys: Union[StaticKeys, SessionKeys],
         host_challenge: Optional[bytes] = None,
         kvn: int = 0,
-    ) -> None:
+    ) -> Tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
 
-        try:
+        resp = protocol.send_apdu(0x80, 0x50, kvn, 0, host_challenge)
+
+        """try:
             resp = protocol.send_apdu(0x80, 0x50, kvn, 0, host_challenge)
         except ApduError as e:
             if e.sw == SW.CLASS_NOT_SUPPORTED:
@@ -222,6 +216,7 @@ class ScpState:
                     "This YubiKey does not support secure messaging"
                 )
             raise
+        """
 
         diversification_data = resp[:10]
         key_info = resp[10:13]
@@ -235,12 +230,18 @@ class ScpState:
         else:
             session_keys = keys
 
-        state = cls(session_keys)
-        host_cryptogram = state.generate_host_cryptogram(context, card_cryptogram)
+        gen_card_crypto = _derive(
+            session_keys.key_smac, _CARD_CRYPTOGRAM, context, 0x40
+        )
+        if not constant_time.bytes_eq(gen_card_crypto, card_cryptogram):
+            # This means wrong keys
+            raise BadResponseError("Wrong card cryptogram")
 
-        protocol._set_scp_state(state)
-        protocol.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, encrypt=False)
-        logger.debug("SCP03 session established")
+        host_cryptogram = _derive(
+            session_keys.key_smac, _HOST_CRYPTOGRAM, context, 0x40
+        )
+
+        return cls(session_keys), host_cryptogram
 
     @classmethod
     def scp11_init(
@@ -248,7 +249,7 @@ class ScpState:
         protocol,  #: SmartCardProtocol,
         key: Key,
         pk_sd_ecka: ec.EllipticCurvePublicKey,
-    ) -> None:
+    ) -> "ScpState":
         logger.debug("Initializing SCP11 handshake")
 
         params = bytes([0x11, 0x00])  # SCP11b
@@ -307,7 +308,7 @@ class ScpState:
             + sk_oce_ecka.exchange(ec.ECDH(), pk_sd_ecka)
         )
 
-        # 5 keys were derived, one for verification
+        # 5 keys were derived, one for verification of receipt
         ln = key_len[0]
         keys = [keys[i : i + ln] for i in range(0, ln * 5, ln)]
         c = cmac.CMAC(algorithms.AES(keys.pop(0)))
@@ -316,7 +317,4 @@ class ScpState:
         # The 4 remaining keys are session keys
         session_keys = SessionKeys(*keys)
 
-        state = cls(session_keys, receipt.value)
-
-        protocol._set_scp_state(state)
-        logger.debug("SCP11 session established")
+        return cls(session_keys, receipt.value)

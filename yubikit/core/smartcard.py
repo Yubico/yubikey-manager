@@ -31,18 +31,17 @@ from . import (
     USB_INTERFACE,
     Connection,
     CommandError,
-    NotSupportedError,
     ApplicationNotAvailableError,
 )
-from .scp03 import ScpState, SessionKeys, StaticKeys, Key
+from .scp import ScpState, SessionKeys, StaticKeys, Key
 from cryptography.hazmat.primitives.asymmetric import ec
 from time import time
 from enum import Enum, IntEnum, unique
-from typing import Tuple, Union, Optional
-import os
+from typing import Tuple, Union
 import abc
 import struct
 import logging
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -122,23 +121,156 @@ P1_SELECT = 0x04
 P2_SELECT = 0x00
 
 INS_SEND_REMAINING = 0xC0
-SW1_HAS_MORE_DATA = 0x61
+
+
+class ApduProcessor:
+    @abc.abstractmethod
+    def send_apdu(
+        self,
+        cla: int,
+        ins: int,
+        p1: int,
+        p2: int,
+        data: bytes,
+        le: int,
+    ) -> Tuple[bytes, int]:
+        ...
+
+
+class ApduFormatProcessor(ApduProcessor):
+    def __init__(self, connection: SmartCardConnection):
+        self.connection = connection
+
+    def send_apdu(self, cla, ins, p1, p2, data, le):
+        apdu = self.format_apdu(cla, ins, p1, p2, data, le)
+        return self.connection.send_and_receive(apdu)
+
+    @abc.abstractmethod
+    def format_apdu(
+        self, cla: int, ins: int, p1: int, p2: int, data: bytes, le: int
+    ) -> bytes:
+        ...
+
 
 SHORT_APDU_MAX_CHUNK = 0xFF
 
 
-def _encode_short_apdu(cla, ins, p1, p2, data, le=0):
-    buf = struct.pack(">BBBBB", cla, ins, p1, p2, len(data)) + data
-    if le:
-        buf += struct.pack(">B", le)
-    return buf
+class ShortApduProcessor(ApduFormatProcessor):
+    def format_apdu(self, cla, ins, p1, p2, data, le):
+        buf = struct.pack(">BBBBB", cla, ins, p1, p2, len(data)) + data
+        if le:
+            buf += struct.pack(">B", le)
+        return buf
+
+    def send_apdu(self, cla, ins, p1, p2, data, le):
+        while len(data) > SHORT_APDU_MAX_CHUNK:
+            chunk, data = (
+                data[:SHORT_APDU_MAX_CHUNK],
+                data[SHORT_APDU_MAX_CHUNK:],
+            )
+            apdu = self.format_apdu(0x10 | cla, ins, p1, p2, chunk, le)
+            response, sw = self.connection.send_and_receive(apdu)
+            if sw != SW.OK:
+                return response, sw
+        return super().send_apdu(cla, ins, p1, p2, data, le)
 
 
-def _encode_extended_apdu(cla, ins, p1, p2, data, le=0):
-    buf = struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
-    if le:
-        buf += struct.pack(">H", le)
-    return buf
+class ExtendedApduProcessor(ApduFormatProcessor):
+    def format_apdu(self, cla, ins, p1, p2, data, le):
+        buf = struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
+        if le:
+            buf += struct.pack(">H", le)
+        return buf
+
+
+SW1_HAS_MORE_DATA = 0x61
+
+
+class ChainedResponseProcessor(ApduProcessor):
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        extended_apdus: bool = True,
+        ins_send_remaining: int = INS_SEND_REMAINING,
+    ):
+        self.connection = connection
+        self.processor = (
+            ExtendedApduProcessor(connection)
+            if extended_apdus
+            else ShortApduProcessor(connection)
+        )
+        self._get_data = self.processor.format_apdu(0, ins_send_remaining, 0, 0, b"", 0)
+
+    def send_apdu(self, cla, ins, p1, p2, data, le):
+        response, sw = self.processor.send_apdu(cla, ins, p1, p2, data, le)
+
+        # Read chained response
+        buf = b""
+        while sw >> 8 == SW1_HAS_MORE_DATA:
+            buf += response
+            response, sw = self.connection.send_and_receive(self._get_data)
+
+        buf += response
+        return buf, sw
+
+
+class TouchWorkaroundProcessor(ChainedResponseProcessor):
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        ins_send_remaining: int = INS_SEND_REMAINING,
+    ):
+        super().__init__(connection, ins_send_remaining=ins_send_remaining)
+        self._last_long_resp = 0.0
+
+    def send_apdu(self, cla, ins, p1, p2, data, le):
+        if self._last_long_resp > 0 and time() - self._last_long_resp < 2:
+            logger.debug("Sending dummy APDU as touch workaround")
+            # Dummy APDU, returns error
+            super().send_apdu(0, 0, 0, 0, b"", 0)
+            self._last_long_resp = 0
+
+        resp, sw = super().send_apdu(cla, ins, p1, p2, data, le)
+
+        if len(resp) > 54:
+            self._last_long_resp = time()
+        else:
+            self._last_long_resp = 0
+
+        return resp, sw
+
+
+class ScpProcessor(ChainedResponseProcessor):
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        scp_state: ScpState,
+        ins_send_remaining: int = INS_SEND_REMAINING,
+    ):
+        super().__init__(connection, ins_send_remaining=ins_send_remaining)
+        self._state = scp_state
+
+    def send_apdu(self, cla, ins, p1, p2, data, le, encrypt: bool = True):
+        if not cla & 0x80:
+            cla |= 0x04
+
+        if encrypt:
+            data = self._state.encrypt(data)
+
+        # Calculate and add MAC to data
+        apdu = self.processor.format_apdu(cla, ins, p1, p2, data + b"\0" * 8, le)
+        mac = self._state.mac(apdu[:-8])
+        data = data + mac
+
+        resp, sw = super().send_apdu(cla, ins, p1, p2, data, le)
+
+        # Un-MAC and decrypt, if needed
+        if resp:
+            resp = self._state.unmac(resp, sw)
+            if resp:
+                resp = self._state.decrypt(resp)
+
+        return resp, sw
 
 
 class SmartCardProtocol:
@@ -149,21 +281,44 @@ class SmartCardProtocol:
         smartcard_connection: SmartCardConnection,
         ins_send_remaining: int = INS_SEND_REMAINING,
     ):
-        self.apdu_format = ApduFormat.SHORT
         self.connection = smartcard_connection
+        self._apdu_format = ApduFormat.SHORT
         self._ins_send_remaining = ins_send_remaining
-        self._touch_workaround = False
-        self._last_long_resp = 0.0
-        self._scp: Optional[ScpState] = None
+        self._processor = ChainedResponseProcessor(
+            self.connection, False, ins_send_remaining
+        )
+
+    @property
+    def apdu_format(self) -> ApduFormat:
+        warnings.warn(
+            "Deprecated: do not read apdu_format.",
+            DeprecationWarning,
+        )
+
+        return self._apdu_format
+
+    @apdu_format.setter
+    def apdu_format(self, value) -> None:
+        if value == self._apdu_format:
+            return
+        if value != ApduFormat.EXTENDED:
+            raise ValueError(f"Cannot change to {value}")
+        self._processor = ChainedResponseProcessor(
+            self.connection, ins_send_remaining=self._ins_send_remaining
+        )
+        self._apdu_format = value
 
     def close(self) -> None:
         self.connection.close()
 
     def enable_touch_workaround(self, version: Version) -> None:
-        self._touch_workaround = self.connection.transport == TRANSPORT.USB and (
+        if self.connection.transport == TRANSPORT.USB and (
             (4, 2, 0) <= version <= (4, 2, 6)
-        )
-        logger.debug(f"Touch workaround enabled={self._touch_workaround}")
+        ):
+            self._processor = TouchWorkaroundProcessor(
+                self.connection, self._ins_send_remaining
+            )
+            logger.debug("Touch workaround enabled")
 
     def send_apdu(
         self,
@@ -173,7 +328,6 @@ class SmartCardProtocol:
         p2: int,
         data: bytes = b"",
         le: int = 0,
-        encrypt: bool = True,
     ) -> bytes:
         """Send APDU message.
 
@@ -185,85 +339,26 @@ class SmartCardProtocol:
         :param le: The maximum number of bytes in the data
             field of the response.
         """
-        if (
-            self._touch_workaround
-            and self._last_long_resp > 0
-            and time() - self._last_long_resp < 2
-        ):
-            logger.debug("Sending dummy APDU as touch workaround")
-            self.connection.send_and_receive(
-                _encode_short_apdu(0, 0, 0, 0, b"")
-            )  # Dummy APDU, returns error
-            self._last_long_resp = 0
-
-        if self._scp:
-            cla |= 0x04
-            if encrypt:
-                data = self._scp.encrypt(data)
-
-            # Calculate and add MAC to data
-            if (
-                self.apdu_format is ApduFormat.SHORT
-                and len(data) <= SHORT_APDU_MAX_CHUNK
-            ):
-                # No chunking, just send short
-                apdu = _encode_short_apdu(cla, ins, p1, p2, data + b"\0" * 8, le)
-                mac = self._scp.mac(apdu[:-8])
-                data = data + mac
-            else:
-                apdu = _encode_extended_apdu(cla, ins, p1, p2, data + b"\0" * 8, le)
-                mac = self._scp.mac(apdu[:-8])
-                data = data + mac
-
-        if self.apdu_format is ApduFormat.SHORT:
-            while len(data) > SHORT_APDU_MAX_CHUNK:
-                chunk, data = (
-                    data[:SHORT_APDU_MAX_CHUNK],
-                    data[SHORT_APDU_MAX_CHUNK:],
-                )
-                apdu = _encode_short_apdu(0x10 | cla, ins, p1, p2, chunk, le)
-                response, sw = self.connection.send_and_receive(apdu)
-                if sw != SW.OK:
-                    raise ApduError(response, sw)
-            apdu = _encode_short_apdu(cla, ins, p1, p2, data, le)
-            get_data = _encode_short_apdu(0, self._ins_send_remaining, 0, 0, b"")
-        elif self.apdu_format is ApduFormat.EXTENDED:
-            apdu = _encode_extended_apdu(cla, ins, p1, p2, data, le)
-            get_data = _encode_extended_apdu(0, self._ins_send_remaining, 0, 0, b"")
-        else:
-            raise TypeError("Invalid ApduFormat set")
-        response, sw = self.connection.send_and_receive(apdu)
-
-        # Read chained response
-        buf = b""
-        while sw >> 8 == SW1_HAS_MORE_DATA:
-            buf += response
-            response, sw = self.connection.send_and_receive(get_data)
-
-        buf += response
-
-        if self._scp and buf:
-            buf = self._scp.unmac(buf, sw)
-            if buf:
-                buf = self._scp.decrypt(buf)
+        resp, sw = self._processor.send_apdu(cla, ins, p1, p2, data, le)
 
         if sw != SW.OK:
-            raise ApduError(buf, sw)
+            raise ApduError(resp, sw)
 
-        if self._touch_workaround and len(buf) > 54:
-            self._last_long_resp = time()
-        else:
-            self._last_long_resp = 0
-
-        return buf
+        return resp
 
     def select(self, aid: bytes) -> bytes:
         """Perform a SELECT instruction.
 
         :param aid: The YubiKey application AID value.
         """
+        logger.debug(f"Selecting AID: {aid.hex()}")
+        self._processor = ChainedResponseProcessor(
+            self.connection,
+            self._apdu_format == ApduFormat.EXTENDED,
+            self._ins_send_remaining,
+        )
+
         try:
-            self._scp = None
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
         except ApduError as e:
             if e.sw in (
@@ -275,105 +370,20 @@ class SmartCardProtocol:
                 raise ApplicationNotAvailableError()
             raise
 
-    def _set_scp_state(self, state: ScpState) -> None:
-        self._scp = state
-
     def scp03_init(self, keys: Union[SessionKeys, StaticKeys]) -> None:
-        self._scp = None
-        ScpState.scp03_init(self, keys)
+        logger.debug("Initializing SCP03")
+        scp, host_cryptogram = ScpState.scp03_init(self, keys)
+        processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
+
+        # Send EXTERNAL AUTHENTICATE
+        processor.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, 0, encrypt=False)
+        self._processor = processor
+        self._apdu_format = ApduFormat.EXTENDED
+        logger.info("SCP03 initialized")
 
     def scp11_init(self, key: Key, pk_sd_ecka: ec.EllipticCurvePublicKey) -> None:
-        self._scp = None
-        ScpState.scp11_init(self, key, pk_sd_ecka)
-
-    def init_scp03(self, host_challenge: Optional[bytes] = None) -> "Scp03Handshake":
-        self._scp = None
-        return Scp03Handshake(self, host_challenge or os.urandom(8))
-
-
-class Scp03Handshake:
-    def __init__(self, protocol: SmartCardProtocol, host_challenge: bytes):
-        self._protocol = protocol
-        self._host_challenge = host_challenge
-
-        logger.debug("Initializing SCP handshake")
-        try:
-            resp = protocol.send_apdu(0x80, 0x50, 0, 0, self._host_challenge)
-        except ApduError as e:
-            if e.sw == SW.CLASS_NOT_SUPPORTED:
-                raise NotSupportedError(
-                    "This YubiKey does not support secure messaging"
-                )
-            raise
-
-        self._diversification_data = resp[:10]
-        self._key_info = resp[10:13]
-        self._card_challenge = resp[13:21]
-        self._card_cryptogram = resp[21:29]
-
-    @property
-    def diversification_data(self):
-        return self._diversification_data
-
-    @property
-    def key_info(self):
-        return self._key_info
-
-    def authenticate(self, keys: Union[StaticKeys, SessionKeys]) -> None:
-        context = self._host_challenge + self._card_challenge
-
-        if isinstance(keys, StaticKeys):
-            session_keys = keys.derive(context)
-        else:
-            session_keys = keys
-
-        state = ScpState(session_keys)
-        host_cryptogram = state.generate_host_cryptogram(context, self._card_cryptogram)
-
-        self._protocol._set_scp_state(state)
-        self._protocol.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, encrypt=False)
-        logger.debug("SCP03 session established")
-
-
-class Scp11bHandshake:
-    def __init__(self, protocol: SmartCardProtocol, host_challenge: bytes):
-        self._protocol = protocol
-        self._host_challenge = host_challenge
-
-        logger.debug("Initializing SCP handshake")
-        try:
-            resp = protocol.send_apdu(0x80, 0x50, 0, 0, self._host_challenge)
-        except ApduError as e:
-            if e.sw == SW.CLASS_NOT_SUPPORTED:
-                raise NotSupportedError(
-                    "This YubiKey does not support secure messaging"
-                )
-            raise
-
-        self._diversification_data = resp[:10]
-        self._key_info = resp[10:13]
-        self._card_challenge = resp[13:21]
-        self._card_cryptogram = resp[21:29]
-
-    @property
-    def diversification_data(self):
-        return self._diversification_data
-
-    @property
-    def key_info(self):
-        return self._key_info
-
-    def authenticate(self, keys: Union[StaticKeys, SessionKeys]) -> None:
-        context = self._host_challenge + self._card_challenge
-
-        if isinstance(keys, StaticKeys):
-            session_keys = keys.derive(context)
-        else:
-            session_keys = keys
-
-        state = ScpState(session_keys)
-        host_cryptogram = state.generate_host_cryptogram(context, self._card_cryptogram)
-
-        self._protocol._set_scp_state(state)
-        self._protocol.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, encrypt=False)
-        logger.debug("SCP11 session established")
+        logger.debug("Initializing SCP11")
+        scp = ScpState.scp11_init(self, key, pk_sd_ecka)
+        self._processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
+        self._apdu_format = ApduFormat.EXTENDED
+        logger.info("SCP11 initialized")

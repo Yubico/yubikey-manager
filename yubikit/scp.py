@@ -1,17 +1,14 @@
 from .core import Tlv
 from .core.smartcard import (
-    SW,
     AID,
-    ApduError,
-    ApduFormat,
     SmartCardConnection,
     SmartCardProtocol,
 )
-from .core.scp03 import Key
+from .core.scp import Key
 
 from cryptography import x509
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Optional, Union
+from typing import Mapping, Sequence
 
 
 import logging
@@ -55,7 +52,7 @@ class ScpSession:
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.SCP)
-        logger.debug(f"SCP session initialized")
+        logger.debug("SCP session initialized")
 
     def get_data(self, tag: int, data: bytes = b"") -> bytes:
         return self.protocol.send_apdu(0, INS_GET_DATA, tag >> 8, tag & 0xFF, data)

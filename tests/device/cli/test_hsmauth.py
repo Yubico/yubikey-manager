@@ -26,7 +26,7 @@ NON_DEFAULT_MANAGEMENT_KEY = "11111111111111111111111111111112"
 
 
 # Test both password and key
-@pytest.fixture(params=[DEFAULT_MANAGEMENT_KEY, "p4ssw0rd"])
+@pytest.fixture(params=[DEFAULT_MANAGEMENT_KEY, "p4ssw0rd123"])
 def management_key(request, ykman_cli, info):
     key = request.param
     if key == DEFAULT_MANAGEMENT_KEY and CAPABILITY.HSMAUTH in info.fips_capable:
@@ -127,7 +127,7 @@ class TestCredentials:
             "symmetric",
             "test-name-sym",
             "-c",
-            "123456",
+            "12345679",
             "-E",
             os.urandom(16).hex(),
             "-M",
@@ -146,7 +146,7 @@ class TestCredentials:
             "symmetric",
             "test-name-sym-gen",
             "-c",
-            "123456",
+            "12345679",
             "-g",
             "-m",
             management_key,
@@ -161,7 +161,7 @@ class TestCredentials:
             "derive",
             "test-name-sym-derived",
             "-c",
-            "123456",
+            "12345679",
             "-d",
             "password",
             "-m",
@@ -180,7 +180,7 @@ class TestCredentials:
             "import",
             "test-name-asym",
             "-c",
-            "123456",
+            "12345679",
             "-m",
             management_key,
             "-",
@@ -202,7 +202,7 @@ class TestCredentials:
             "generate",
             "test-name-asym-generated",
             "-c",
-            "123456",
+            "12345679",
             "-m",
             management_key,
         )
@@ -217,7 +217,7 @@ class TestCredentials:
             "derive",
             "test-name-touch",
             "-c",
-            "123456",
+            "12345679",
             "-d",
             "password",
             "-t",
@@ -240,7 +240,7 @@ class TestCredentials:
             "import",
             "test-name-asym",
             "-c",
-            "123456",
+            "12345679",
             "-m",
             management_key,
             private_key_file,
@@ -265,7 +265,7 @@ class TestCredentials:
             "derive",
             "test-name-sym",
             "-c",
-            "123456",
+            "12345679",
             "-d",
             "password",
             "-m",
@@ -282,7 +282,7 @@ class TestCredentials:
             "derive",
             "delete-me",
             "-c",
-            "123456",
+            "12345679",
             "-d",
             "password",
             "-m",
