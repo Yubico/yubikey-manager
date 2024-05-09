@@ -6,7 +6,7 @@ from .core import (
     Tlv,
     BadResponseError,
 )
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
 
 from urllib.parse import unquote, urlparse, parse_qs
 from functools import total_ordering
@@ -262,11 +262,19 @@ def _format_code(credential, timestamp, truncated):
 class OathSession:
     """A session with the OATH application."""
 
-    def __init__(self, connection: SmartCardConnection):
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: Optional[ScpKeyParams] = None,
+    ):
         self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
         self._version, self._salt, self._challenge = _parse_select(
             self.protocol.select(AID.OATH)
         )
+
+        if scp_key_params:
+            self.protocol.init_scp(scp_key_params)
+
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
         self.protocol.enable_touch_workaround(self._version)

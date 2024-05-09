@@ -33,7 +33,14 @@ from .core import (
     Tlv,
     InvalidPinError,
 )
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ApduError, SW
+from .core.smartcard import (
+    AID,
+    SmartCardConnection,
+    SmartCardProtocol,
+    ApduError,
+    SW,
+    ScpKeyParams,
+)
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -213,9 +220,16 @@ class SessionKeys(NamedTuple):
 class HsmAuthSession:
     """A session with the YubiHSM Auth application."""
 
-    def __init__(self, connection: SmartCardConnection) -> None:
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: Optional[ScpKeyParams] = None,
+    ) -> None:
         self.protocol = SmartCardProtocol(connection)
         self._version = _parse_select(self.protocol.select(AID.HSMAUTH))
+
+        if scp_key_params:
+            self.protocol.init_scp(scp_key_params)
 
     @property
     def version(self) -> Version:

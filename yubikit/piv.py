@@ -42,6 +42,7 @@ from .core.smartcard import (
     ApduFormat,
     SmartCardConnection,
     SmartCardProtocol,
+    ScpKeyParams,
 )
 
 from cryptography import x509
@@ -497,9 +498,17 @@ def _parse_device_public_key(key_type, encoded):
 class PivSession:
     """A session with the PIV application."""
 
-    def __init__(self, connection: SmartCardConnection):
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: Optional[ScpKeyParams] = None,
+    ):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.PIV)
+
+        if scp_key_params:
+            self.protocol.init_scp(scp_key_params)
+
         self._version = Version.from_bytes(
             self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0)
         )

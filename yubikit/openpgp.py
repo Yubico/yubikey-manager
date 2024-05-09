@@ -41,6 +41,7 @@ from .core.smartcard import (
     ApduError,
     AID,
     SW,
+    ScpKeyParams,
 )
 
 from cryptography import x509
@@ -992,7 +993,11 @@ def _pad_message(attributes, message, hash_algorithm):
 class OpenPgpSession:
     """A session with the OpenPGP application."""
 
-    def __init__(self, connection: SmartCardConnection):
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: Optional[ScpKeyParams] = None,
+    ):
         self.protocol = SmartCardProtocol(connection)
         try:
             self.protocol.select(AID.OPENPGP)
@@ -1004,6 +1009,10 @@ class OpenPgpSession:
                 self.protocol.select(AID.OPENPGP)
             else:
                 raise
+
+        if scp_key_params:
+            self.protocol.init_scp(scp_key_params)
+
         self._version = self._read_version()
 
         self.protocol.enable_touch_workaround(self.version)

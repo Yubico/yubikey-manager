@@ -73,6 +73,7 @@ from .util import (
     prompt_timeout,
     EnumChoice,
     pretty_print,
+    get_scp11_params,
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
@@ -196,10 +197,13 @@ def piv(ctx):
     dev = ctx.obj["device"]
     conn = dev.open_connection(SmartCardConnection)
     ctx.call_on_close(conn.close)
-    session = PivSession(conn)
+
+    info = ctx.obj["info"]
+    scp_params = get_scp11_params(info, CAPABILITY.PIV, conn)
+    session = PivSession(conn, scp_params)
+
     ctx.obj["session"] = session
     ctx.obj["pivman_data"] = get_pivman_data(session)
-    info = ctx.obj["info"]
     ctx.obj["fips_unready"] = (
         CAPABILITY.PIV in info.fips_capable and CAPABILITY.PIV not in info.fips_approved
     )

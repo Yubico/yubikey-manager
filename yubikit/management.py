@@ -45,7 +45,7 @@ from .core.otp import (
     CommandRejectedError,
 )
 from .core.fido import FidoConnection
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from enum import IntEnum, IntFlag, unique
@@ -445,10 +445,14 @@ P1_DEVICE_CONFIG = 0x11
 
 
 class _ManagementSmartCardBackend(_Backend):
-    def __init__(self, smartcard_connection):
+    def __init__(self, smartcard_connection, scp_key_params):
         self.protocol = SmartCardProtocol(smartcard_connection)
         try:
             select_bytes = self.protocol.select(AID.MANAGEMENT)
+
+            if scp_key_params:
+                self.protocol.init_scp(scp_key_params)
+
             if select_bytes[-2:] == b"\x90\x00":
                 # YubiKey Edge incorrectly appends SW twice.
                 select_bytes = select_bytes[:-2]
@@ -518,13 +522,19 @@ class _ManagementCtapBackend(_Backend):
 
 class ManagementSession:
     def __init__(
-        self, connection: Union[OtpConnection, SmartCardConnection, FidoConnection]
+        self,
+        connection: Union[OtpConnection, SmartCardConnection, FidoConnection],
+        scp_key_params: Optional[ScpKeyParams] = None,
     ):
         if isinstance(connection, OtpConnection):
+            if scp_key_params:
+                raise ValueError("SCP can only be used with SmartCardConnection")
             self.backend: _Backend = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
-            self.backend = _ManagementSmartCardBackend(connection)
+            self.backend = _ManagementSmartCardBackend(connection, scp_key_params)
         elif isinstance(connection, FidoConnection):
+            if scp_key_params:
+                raise ValueError("SCP can only be used with SmartCardConnection")
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")

@@ -39,6 +39,7 @@ from .util import (
     click_group,
     EnumChoice,
     pretty_print,
+    get_scp11_params,
 )
 from enum import IntEnum
 import logging
@@ -82,7 +83,11 @@ def openpgp(ctx):
     dev = ctx.obj["device"]
     conn = dev.open_connection(SmartCardConnection)
     ctx.call_on_close(conn.close)
-    ctx.obj["session"] = OpenPgpSession(conn)
+
+    info = ctx.obj["info"]
+    scp_params = get_scp11_params(info, CAPABILITY.OPENPGP, conn)
+
+    ctx.obj["session"] = OpenPgpSession(conn, scp_params)
 
 
 @openpgp.command()

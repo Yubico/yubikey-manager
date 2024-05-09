@@ -28,15 +28,18 @@
 import functools
 import click
 import sys
-from yubikit.management import DeviceInfo
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import SmartCardConnection, Scp11KeyParams
+from yubikit.management import DeviceInfo, CAPABILITY
 from yubikit.oath import parse_b32_key
+from yubikit.scp import ScpSession
 from collections import OrderedDict
 from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
 from contextlib import contextmanager
 from threading import Timer
 from enum import Enum
-from typing import List
+from typing import List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -308,3 +311,20 @@ def pretty_print(value, level: int = 0) -> List[str]:
 
 def is_yk4_fips(info: DeviceInfo) -> bool:
     return info.version[0] == 4 and info.is_fips
+
+
+def get_scp11_params(
+    info: DeviceInfo, capability: CAPABILITY, connection: SmartCardConnection
+) -> Optional[Scp11KeyParams]:
+    if connection.transport == TRANSPORT.NFC and capability in info.fips_capable:
+        logger.debug("Attempt to find SCP11b key")
+        scp = ScpSession(connection)
+        for key_info in scp.get_key_information():
+            if key_info.key.kid == 0x13:
+                cert = scp.get_certificate_bundle(key_info.key)[-1]
+                pub_key = cert.public_key()
+                logger.info("SCP11b key found, using for FIPS capable applications")
+                return Scp11KeyParams(key_info.key.kvn, pub_key)
+        else:
+            logger.debug("No SCP11b key found, not using SCP")
+    return None
