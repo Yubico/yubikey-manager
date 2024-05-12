@@ -33,6 +33,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 from dataclasses import dataclass
+from enum import IntEnum, unique
 from typing import NamedTuple, Tuple, Optional, Union, Callable
 
 import os
@@ -112,6 +113,14 @@ class StaticKeys(NamedTuple):
             _derive(self.key_mac, _KEY_RMAC, context),
             self.key_dek,
         )
+
+
+@unique
+class ScpKid(IntEnum):
+    SCP03 = 0x0
+    SCP11a = 0x11
+    SCP11b = 0x13
+    SCP11c = 0x15
 
 
 @dataclass

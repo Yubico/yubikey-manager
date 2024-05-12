@@ -51,7 +51,7 @@ from .util import (
     click_prompt,
     click_group,
     pretty_print,
-    get_scp11_params,
+    get_scp_params,
 )
 
 from cryptography.hazmat.primitives import serialization
@@ -232,8 +232,7 @@ def hsmauth(ctx):
     conn = dev.open_connection(SmartCardConnection)
     ctx.call_on_close(conn.close)
 
-    info = ctx.obj["info"]
-    scp_params = get_scp11_params(info, CAPABILITY.HSMAUTH, conn)
+    scp_params = get_scp_params(ctx, CAPABILITY.HSMAUTH, conn)
 
     ctx.obj["session"] = HsmAuthSession(conn, scp_params)
     info = ctx.obj["info"]

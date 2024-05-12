@@ -139,15 +139,26 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
             ctx.fail("No commands provided.")
 
     dev = ctx.obj["device"]
+    scp_resolve = ctx.obj.get("scp")
+
     with dev.open_connection(SmartCardConnection) as conn:
         protocol = SmartCardProtocol(conn)
         is_first = True
+
+        if scp_resolve:
+            params = scp_resolve(conn)
+        else:
+            params = None
 
         if app:
             is_first = False
             click.echo("SELECT AID: " + _hex(app))
             resp = protocol.select(app)
             _print_response(resp, SW.OK, no_pretty)
+
+        if params:
+            click.echo("INITIALIZE SCP")
+            protocol.init_scp(params)
 
         if send_apdu:  # Compatibility mode (full APDUs)
             for apdu in send_apdu:

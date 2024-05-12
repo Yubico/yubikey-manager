@@ -29,10 +29,15 @@ import functools
 import click
 import sys
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import SmartCardConnection, Scp11KeyParams
+from yubikit.core.smartcard import (
+    SmartCardConnection,
+    ScpKeyParams,
+    Scp11KeyParams,
+    ApduError,
+)
 from yubikit.management import DeviceInfo, CAPABILITY
 from yubikit.oath import parse_b32_key
-from yubikit.scp import ScpSession
+from yubikit.scp import ScpSession, ScpKey
 from collections import OrderedDict
 from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
@@ -313,18 +318,42 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
     return info.version[0] == 4 and info.is_fips
 
 
-def get_scp11_params(
-    info: DeviceInfo, capability: CAPABILITY, connection: SmartCardConnection
-) -> Optional[Scp11KeyParams]:
+def find_scp11_params(
+    connection: SmartCardConnection, kid: int, kvn: int
+) -> Scp11KeyParams:
+    scp = ScpSession(connection)
+    if not kvn:
+        for key_info in scp.get_key_information():
+            if key_info.key.kid == kid:
+                kvn = key_info.key.kvn
+                break
+        else:
+            raise ValueError(f"No SCP key found matching kid={kid}")
+    try:
+        cert = scp.get_certificate_bundle(ScpKey(kid, kvn))[-1]
+        pub_key = cert.public_key()
+        return Scp11KeyParams(kvn, pub_key)
+    except ApduError:
+        raise CliFail(f"Unable to get SCP key paramaters (kid={kid}, kvn={kvn})")
+
+
+def get_scp_params(
+    ctx: click.Context, capability: CAPABILITY, connection: SmartCardConnection
+) -> Optional[ScpKeyParams]:
+    # Explicit SCP
+    resolve = ctx.obj.get("scp")
+    if resolve:
+        return resolve(connection)
+
+    # Automatic SCP11b if needed
+    info = ctx.obj["info"]
     if connection.transport == TRANSPORT.NFC and capability in info.fips_capable:
         logger.debug("Attempt to find SCP11b key")
-        scp = ScpSession(connection)
-        for key_info in scp.get_key_information():
-            if key_info.key.kid == 0x13:
-                cert = scp.get_certificate_bundle(key_info.key)[-1]
-                pub_key = cert.public_key()
-                logger.info("SCP11b key found, using for FIPS capable applications")
-                return Scp11KeyParams(key_info.key.kvn, pub_key)
-        else:
+        try:
+            params = find_scp11_params(connection, 0x13, 0)
+            logger.info("SCP11b key found, using for FIPS capable applications")
+            return params
+        except ValueError:
             logger.debug("No SCP11b key found, not using SCP")
+
     return None

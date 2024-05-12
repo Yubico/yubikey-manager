@@ -118,7 +118,8 @@ class TestCredentials:
         apdu = calculate_session_keys_apdu(label, context, credential_password)
 
         # Try to calculate session keys using credential password
-        ykman_cli("apdu", "-a", "hsmauth", apdu)
+        # TODO: Use SCP if needed
+        ykman_cli("--scp", "scp11b", "apdu", "-a", "hsmauth", apdu)
 
     def test_import_credential_symmetric(self, ykman_cli, management_key):
         ykman_cli(
@@ -135,7 +136,7 @@ class TestCredentials:
             "-m",
             management_key,
         )
-        self.verify_credential_password(ykman_cli, "123456", "test-name-sym")
+        self.verify_credential_password(ykman_cli, "12345679", "test-name-sym")
         creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "test-name-sym" in creds
 
@@ -151,7 +152,7 @@ class TestCredentials:
             "-m",
             management_key,
         ).output
-        self.verify_credential_password(ykman_cli, "123456", "test-name-sym-gen")
+        self.verify_credential_password(ykman_cli, "12345679", "test-name-sym-gen")
         assert "Generated ENC and MAC keys" in output
 
     def test_import_credential_symmetric_derived(self, ykman_cli, management_key):
@@ -167,7 +168,7 @@ class TestCredentials:
             "-m",
             management_key,
         )
-        self.verify_credential_password(ykman_cli, "123456", "test-name-sym-derived")
+        self.verify_credential_password(ykman_cli, "12345679", "test-name-sym-derived")
         creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "test-name-sym-derived" in creds
 

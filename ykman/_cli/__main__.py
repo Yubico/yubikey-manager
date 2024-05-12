@@ -32,6 +32,7 @@ from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.smartcard.scp import (
     Scp03KeyParams,
     StaticKeys,
+    ScpKid,
 )
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
@@ -50,6 +51,7 @@ from .util import (
     CliFail,
     pretty_print,
     click_callback,
+    find_scp11_params,
 )
 from .info import info
 from .otp import otp
@@ -211,9 +213,11 @@ def parse_scp_keys(ctx, param, val):
             )
         if len(keys) == 1:
             return StaticKeys(keys[0], keys[0])
-        if len(keys) == 2:
-            return StaticKeys(keys[0], keys[1])
-        raise ValueError("Must provide 1 or 2 keys for K-ENC and K-MAC")
+        if 2 <= len(keys) <= 3:
+            return StaticKeys(*keys)
+        raise ValueError(
+            "Must provide 1-3 keys for K-ENC and K-MAC, and optionally K-DEK"
+        )
     except Exception:
         raise ValueError(val)
 
@@ -246,12 +250,28 @@ def parse_scp_keys(ctx, param, val):
     ],
 )
 @click.option(
+    "-s",
+    "--scp",
+    default=None,
+    type=EnumChoice(ScpKid),
+    metavar="KID",
+    help="SCP key identifier",
+)
+@click.option(
+    "-V",
+    "--scp-kvn",
+    default=None,
+    type=int,
+    metavar="KVN",
+    help="SCP key version",
+)
+@click.option(
     "-k",
-    "--keys",
+    "--scp-keys",
     default=None,
     callback=parse_scp_keys,
     metavar="KEYS",
-    help="specify keys for secure messaging, K-ENC:K-MAC",
+    help="specify keys for secure messaging, K-ENC:K-MAC[:K-DEK]",
 )
 @click.option(
     "-l",
@@ -291,7 +311,7 @@ def parse_scp_keys(ctx, param, val):
     help="show --help output, including hidden commands",
 )
 @click.pass_context
-def cli(ctx, device, keys, log_level, log_file, reader):
+def cli(ctx, device, scp, scp_kvn, scp_keys, log_level, log_file, reader):
     """
     Configure your YubiKey via the command line.
 
@@ -316,6 +336,8 @@ def cli(ctx, device, keys, log_level, log_file, reader):
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
 
+    use_scp = bool(scp is not None or scp_kvn or scp_keys)
+
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     # Commands that don't directly act on a key
     if subcmd in (list_keys,):
@@ -323,8 +345,8 @@ def cli(ctx, device, keys, log_level, log_file, reader):
             ctx.fail("--device can't be used with this command.")
         if reader:
             ctx.fail("--reader can't be used with this command.")
-        if keys:
-            ctx.fail("--keys can't be used with this command.")
+        if use_scp:
+            ctx.fail("SCP can't be used with this command.")
         return
 
     # Commands which need a YubiKey to act on
@@ -351,12 +373,35 @@ def cli(ctx, device, keys, log_level, log_file, reader):
         ctx.obj.add_resolver("pid", lambda: resolve()[0].pid)
         ctx.obj.add_resolver("info", lambda: resolve()[1])
 
-        if keys:
+        if use_scp:
             if SmartCardConnection not in connections:
-                raise CliFail("--keys can only be used with CCID commands")
+                raise CliFail("SCP can only be used with CCID commands")
+
+            if scp is None:
+                if scp_keys:
+                    scp = ScpKid.SCP03
+                else:
+                    scp = ScpKid.SCP11b
+
+            if scp_keys and scp != ScpKid.SCP03:
+                raise CliFail("--scp-keys can only be used with SCP03")
+
+            if scp == ScpKid.SCP03:
+                if not scp_keys:
+                    raise CliFail("SCP03 requires --scp-keys")
+
+                def params_f(_):
+                    return Scp03KeyParams(kvn=scp_kvn or 0, keys=scp_keys)
+
+            elif scp == ScpKid.SCP11b:
+
+                def params_f(conn):
+                    return find_scp11_params(conn, scp, scp_kvn or 0)
+
             connections = [SmartCardConnection]
+
             # TODO: Use these
-            ctx.obj.add_resolver("scp_params", lambda: Scp03KeyParams(keys=keys))
+            ctx.obj.add_resolver("scp", lambda: params_f)
 
 
 @cli.command("list")

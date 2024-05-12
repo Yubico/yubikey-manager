@@ -38,7 +38,7 @@ from .util import (
     EnumChoice,
     is_yk4_fips,
     pretty_print,
-    get_scp11_params,
+    get_scp_params,
 )
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.oath import (
@@ -87,8 +87,7 @@ def oath(ctx):
     conn = dev.open_connection(SmartCardConnection)
     ctx.call_on_close(conn.close)
 
-    info = ctx.obj["info"]
-    scp_params = get_scp11_params(info, CAPABILITY.OATH, conn)
+    scp_params = get_scp_params(ctx, CAPABILITY.OATH, conn)
 
     ctx.obj["session"] = OathSession(conn, scp_params)
     ctx.obj["oath_keys"] = AppData("oath_keys")

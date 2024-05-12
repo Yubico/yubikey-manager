@@ -53,7 +53,7 @@ class ScpKey(bytes):
 @dataclass
 class KeyInformation:
     key: ScpKey
-    componets: Mapping[int, int]
+    components: Mapping[int, int]
 
     @classmethod
     def parse(cls, data: bytes) -> "KeyInformation":
