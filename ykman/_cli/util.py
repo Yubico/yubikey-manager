@@ -29,12 +29,8 @@ import functools
 import click
 import sys
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import (
-    SmartCardConnection,
-    ScpKeyParams,
-    Scp11KeyParams,
-    ApduError,
-)
+from yubikit.core.smartcard import SmartCardConnection, ApduError
+from yubikit.core.smartcard.scp import ScpKid, ScpKeyParams, Scp11KeyParams
 from yubikit.management import DeviceInfo, CAPABILITY
 from yubikit.oath import parse_b32_key
 from yubikit.scp import ScpSession, ScpKey
@@ -319,7 +315,7 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
 
 
 def find_scp11_params(
-    connection: SmartCardConnection, kid: int, kvn: int
+    connection: SmartCardConnection, kid: ScpKid, kvn: int
 ) -> Scp11KeyParams:
     scp = ScpSession(connection)
     if not kvn:
@@ -332,7 +328,7 @@ def find_scp11_params(
     try:
         cert = scp.get_certificate_bundle(ScpKey(kid, kvn))[-1]
         pub_key = cert.public_key()
-        return Scp11KeyParams(kvn, pub_key)
+        return Scp11KeyParams(kid, kvn, pub_key)
     except ApduError:
         raise CliFail(f"Unable to get SCP key paramaters (kid={kid}, kvn={kvn})")
 
@@ -350,7 +346,7 @@ def get_scp_params(
     if connection.transport == TRANSPORT.NFC and capability in info.fips_capable:
         logger.debug("Attempt to find SCP11b key")
         try:
-            params = find_scp11_params(connection, 0x13, 0)
+            params = find_scp11_params(connection, ScpKid.SCP11b, 0)
             logger.info("SCP11b key found, using for FIPS capable applications")
             return params
         except ValueError:

@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 from dataclasses import dataclass
 from enum import IntEnum, unique
-from typing import NamedTuple, Tuple, Optional, Union, Callable
+from typing import NamedTuple, Tuple, Optional, Callable
 
 import os
 import abc
@@ -125,18 +125,32 @@ class ScpKid(IntEnum):
 
 @dataclass
 class ScpKeyParams(abc.ABC):
+    kid: ScpKid
     kvn: int
 
 
 @dataclass
 class Scp03KeyParams(ScpKeyParams):
+    kid: ScpKid = ScpKid.SCP03
     kvn: int = 0
-    keys: Union[StaticKeys, SessionKeys] = StaticKeys.default()
+    keys: StaticKeys = StaticKeys.default()
 
 
 @dataclass
 class Scp11KeyParams(ScpKeyParams):
     pk_sd_ecka: ec.EllipticCurvePublicKey
+    sk_oce_ecka: Optional[ec.EllipticCurvePrivateKey] = None
+    # TODO: Add trust chain
+
+    def __post_init__(self):
+        if self.kid == ScpKid.SCP11b:
+            if self.sk_oce_ecka:
+                raise ValueError("Secret key must be None")
+        elif self.kid in (ScpKid.SCP11a, ScpKid.SCP11c):
+            if not self.sk_oce_ecka:
+                raise ValueError("Secret key required")
+        else:
+            raise ValueError(f"Invalid SCP KID for SCP11: {self.kid}")
 
 
 SendApdu = Callable[[int, int, int, int, bytes], bytes]
@@ -221,11 +235,7 @@ class ScpState:
         card_cryptogram = resp[21:29]
 
         context = host_challenge + card_challenge
-
-        if isinstance(key_params.keys, StaticKeys):
-            session_keys = key_params.keys.derive(context)
-        else:
-            session_keys = key_params.keys
+        session_keys = key_params.keys.derive(context)
 
         gen_card_crypto = _derive(
             session_keys.key_smac, _CARD_CRYPTOGRAM, context, 0x40
