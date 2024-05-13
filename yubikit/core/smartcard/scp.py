@@ -25,16 +25,16 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .. import Tlv, NotSupportedError, BadResponseError
-from ._defs import ApduError, SW
+from .. import Tlv, BadResponseError
+from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import cmac, hashes, serialization, constant_time
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum, unique
-from typing import NamedTuple, Tuple, Optional, Callable
+from typing import NamedTuple, Tuple, Optional, Callable, Sequence
 
 import os
 import abc
@@ -123,32 +123,32 @@ class ScpKid(IntEnum):
     SCP11c = 0x15
 
 
-@dataclass
+@dataclass(frozen=True)
 class ScpKeyParams(abc.ABC):
     kid: ScpKid
     kvn: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Scp03KeyParams(ScpKeyParams):
     kid: ScpKid = ScpKid.SCP03
     kvn: int = 0
     keys: StaticKeys = StaticKeys.default()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Scp11KeyParams(ScpKeyParams):
     pk_sd_ecka: ec.EllipticCurvePublicKey
     sk_oce_ecka: Optional[ec.EllipticCurvePrivateKey] = None
-    # TODO: Add trust chain
+    certificates: Sequence[x509.Certificate] = field(default_factory=list)
 
     def __post_init__(self):
         if self.kid == ScpKid.SCP11b:
-            if self.sk_oce_ecka:
-                raise ValueError("Secret key must be None")
+            if self.sk_oce_ecka or self.certificates:
+                raise ValueError("sk_oce_ecka and certificates must be None")
         elif self.kid in (ScpKid.SCP11a, ScpKid.SCP11c):
-            if not self.sk_oce_ecka:
-                raise ValueError("Secret key required")
+            if not self.sk_oce_ecka or not self.certificates:
+                raise ValueError("sk_oce_ecka and certificates required")
         else:
             raise ValueError(f"Invalid SCP KID for SCP11: {self.kid}")
 
@@ -219,15 +219,7 @@ class ScpState:
     ) -> Tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
-
-        try:
-            resp = send_apdu(0x80, 0x50, key_params.kvn, 0, host_challenge)
-        except ApduError as e:
-            if e.sw == SW.CLASS_NOT_SUPPORTED:
-                raise NotSupportedError(
-                    "This YubiKey does not support secure messaging"
-                )
-            raise
+        resp = send_apdu(0x80, 0x50, key_params.kvn, 0, host_challenge)
 
         diversification_data = resp[:10]  # noqa: unused
         key_info = resp[10:13]  # noqa: unused
@@ -258,7 +250,24 @@ class ScpState:
     ) -> "ScpState":
         logger.debug("Initializing SCP11 handshake")
 
-        params = bytes([0x11, 0x00])  # SCP11b
+        # GPC v2.3 Amendment F (SCP11) v1.4 §7.5
+        logger.debug("Sending certificate chain")
+        n = len(key_params.certificates) - 1
+        for i, cert in enumerate(key_params.certificates):
+            p2 = key_params.kid | (0x80 if i < n else 0)
+            data = cert.public_bytes(serialization.Encording.DER)
+            send_apdu(0x80, 0x2A, key_params.kvn, p2, data)
+
+        # GPC v2.3 Amendment F (SCP11) v1.4 §7.1.1
+        if key_params.kid == ScpKid.SCP11a:
+            params = 0b01
+        elif key_params.kid == ScpKid.SCP11b:
+            params = 0b00
+        elif key_params.kid == ScpKid.SCP11c:
+            params = 0b11
+        else:
+            raise ValueError("Invalid SCP KID")
+
         key_usage = bytes(
             [0x3C]
         )  # AUTHENTICATED | C_MAC | C_DECRYPTION | R_MAC | R_ENCRYPTION
@@ -268,9 +277,11 @@ class ScpState:
         # Host ephemeral key
         esk_oce_ecka = ec.generate_private_key(key_params.pk_sd_ecka.curve)
         epk_oce_ecka = esk_oce_ecka.public_key()
+
+        # GPC v2.3 Amendment F (SCP11) v1.4 §7.6.2.3
         data = Tlv(
             0xA6,
-            Tlv(0x90, params)
+            Tlv(0x90, bytes([0x11, params]))
             + Tlv(0x95, key_usage)
             + Tlv(0x80, key_type)
             + Tlv(0x81, key_len),
@@ -282,27 +293,20 @@ class ScpState:
             ),
         )
 
-        # No static host key, same as ephemeral
-        sk_oce_ecka = esk_oce_ecka
+        # Static host key (SCP11a/c), or ephemeral key again (SCP11b)
+        sk_oce_ecka = key_params.sk_oce_ecka or esk_oce_ecka
 
-        try:
-            resp = send_apdu(0x80, 0x88, key_params.kvn, 0x13, data)
-        except ApduError as e:
-            if e.sw == SW.CLASS_NOT_SUPPORTED:
-                raise NotSupportedError(
-                    "This YubiKey does not support secure messaging"
-                )
-            raise
+        logger.debug("Performing key agreement")
+        ins = 0x88 if key_params.kid == ScpKid.SCP11b else 0x82
+        resp = send_apdu(0x80, ins, key_params.kvn, key_params.kid, data)
 
         epk_sd_ecka_tlv, resp = Tlv.parse_from(resp)
         epk_sd_ecka = Tlv.unpack(0x5F49, epk_sd_ecka_tlv)
         receipt = Tlv.unpack(0x86, resp)
 
-        # Derive keys
+        # GPC v2.3 Amendment F (SCP11) v1.3 §3.1.2 Key Derivation
         key_agreement_data = data + epk_sd_ecka_tlv
         sharedinfo = key_usage + key_type + key_len
-
-        # GPC v2.3 Amendment F (SCP11) v1.3 §3.1.2 Key Derivation
         keys = X963KDF(hashes.SHA256(), 5 * key_len[0], sharedinfo).derive(
             esk_oce_ecka.exchange(
                 ec.ECDH(),
