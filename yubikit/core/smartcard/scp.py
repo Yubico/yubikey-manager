@@ -44,6 +44,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+INS_INITIALIZE_UPDATE = 0x50
+INS_EXTERNAL_AUTHENTICATE = 0x82
+INS_INTERNAL_AUTHENTICATE = 0x88
+INS_PERFORM_SECURITY_OPERATION = 0x2A
+
 _DEFAULT_KEY = b"\x40\x41\x42\x43\x44\x45\x46\x47\x48\x49\x4a\x4b\x4c\x4d\x4e\x4f"
 
 _KEY_ENC = 0x04
@@ -117,7 +122,7 @@ class StaticKeys(NamedTuple):
 
 @unique
 class ScpKid(IntEnum):
-    SCP03 = 0x0
+    SCP03 = 0x1
     SCP11a = 0x11
     SCP11b = 0x13
     SCP11c = 0x15
@@ -219,7 +224,7 @@ class ScpState:
     ) -> Tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
-        resp = send_apdu(0x80, 0x50, key_params.kvn, 0, host_challenge)
+        resp = send_apdu(0x80, INS_INITIALIZE_UPDATE, key_params.kvn, 0, host_challenge)
 
         diversification_data = resp[:10]  # noqa: unused
         key_info = resp[10:13]  # noqa: unused
@@ -256,7 +261,7 @@ class ScpState:
         for i, cert in enumerate(key_params.certificates):
             p2 = key_params.kid | (0x80 if i < n else 0)
             data = cert.public_bytes(serialization.Encording.DER)
-            send_apdu(0x80, 0x2A, key_params.kvn, p2, data)
+            send_apdu(0x80, INS_PERFORM_SECURITY_OPERATION, key_params.kvn, p2, data)
 
         # GPC v2.3 Amendment F (SCP11) v1.4 §7.1.1
         if key_params.kid == ScpKid.SCP11a:
@@ -297,7 +302,11 @@ class ScpState:
         sk_oce_ecka = key_params.sk_oce_ecka or esk_oce_ecka
 
         logger.debug("Performing key agreement")
-        ins = 0x88 if key_params.kid == ScpKid.SCP11b else 0x82
+        ins = (
+            INS_INTERNAL_AUTHENTICATE
+            if key_params.kid == ScpKid.SCP11b
+            else INS_EXTERNAL_AUTHENTICATE
+        )
         resp = send_apdu(0x80, ins, key_params.kvn, key_params.kid, data)
 
         epk_sd_ecka_tlv, resp = Tlv.parse_from(resp)

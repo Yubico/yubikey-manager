@@ -33,7 +33,7 @@ from yubikit.core.smartcard import SmartCardConnection, ApduError
 from yubikit.core.smartcard.scp import ScpKid, ScpKeyParams, Scp11KeyParams
 from yubikit.management import DeviceInfo, CAPABILITY
 from yubikit.oath import parse_b32_key
-from yubikit.scp import ScpSession, ScpKey
+from yubikit.securedomain import SecureDomainSession, ScpKey
 from collections import OrderedDict
 from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
@@ -317,7 +317,7 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
 def find_scp11_params(
     connection: SmartCardConnection, kid: ScpKid, kvn: int
 ) -> Scp11KeyParams:
-    scp = ScpSession(connection)
+    scp = SecureDomainSession(connection)
     if not kvn:
         for key_info in scp.get_key_information():
             if key_info.key.kid == kid:

@@ -444,6 +444,8 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 name_parts.append("Bio")
                 if _fido_only(usb_supported):
                     name_parts.append("- FIDO Edition")
+                elif CAPABILITY.PIV in usb_supported:
+                    name_parts.append("- Multi-protocol Edition")
             if info.is_fips:
                 name_parts.append("FIPS")
             if info.is_sky and info.serial:

@@ -97,7 +97,7 @@ class AID(bytes, Enum):
     PIV = bytes.fromhex("a000000308")
     FIDO = bytes.fromhex("a0000006472f0001")
     HSMAUTH = bytes.fromhex("a000000527210701")
-    SCP = bytes.fromhex("a000000151000000")
+    SECURE_DOMAIN = bytes.fromhex("a000000151000000")
 
 
 @unique
@@ -259,8 +259,7 @@ class ScpProcessor(ChainedResponseProcessor):
         self._state = scp_state
 
     def send_apdu(self, cla, ins, p1, p2, data, le, encrypt: bool = True):
-        if not cla & 0x80:
-            cla |= 0x04
+        cla |= 0x04
 
         if encrypt:
             data = self._state.encrypt(data)
@@ -378,7 +377,7 @@ class SmartCardProtocol:
                 raise ApplicationNotAvailableError()
             raise
 
-    def init_scp(self, key_params: ScpKeyParams):
+    def init_scp(self, key_params: ScpKeyParams) -> None:
         try:
             if isinstance(key_params, Scp03KeyParams):
                 self._scp03_init(key_params)
