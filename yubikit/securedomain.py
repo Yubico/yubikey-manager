@@ -12,6 +12,7 @@ from .core.smartcard.scp import (
     INS_EXTERNAL_AUTHENTICATE,
     INS_INTERNAL_AUTHENTICATE,
     INS_PERFORM_SECURITY_OPERATION,
+    KeyRef,
     ScpKeyParams,
     StaticKeys,
 )
@@ -22,7 +23,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import ec
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Union, Optional
+from typing import Mapping, Sequence, Union
 from enum import IntEnum, unique
 
 
@@ -49,37 +50,6 @@ class KeyType(IntEnum):
 _DEFAULT_KCV_IV = b"\1" * 16
 
 
-class ScpKey(bytes):
-    @property
-    def kid(self) -> int:
-        return self[0]
-
-    @property
-    def kvn(self) -> int:
-        return self[1]
-
-    def __new__(cls, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
-        """This allows creation by passing either binary data, or kid and kvn."""
-        if isinstance(kid_or_data, int):  # kid and kvn
-            if kvn is None:
-                raise ValueError("Missing kvn")
-            data = bytes([kid_or_data, kvn])
-        else:  # Binary id and version
-            if kvn is not None:
-                raise ValueError("kvn can only be provided if kid_or_data is a kid")
-            data = kid_or_data
-
-        # mypy thinks this is wrong
-        return super(ScpKey, cls).__new__(cls, data)  # type: ignore
-
-    def __init__(self, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
-        if len(self) != 2:
-            raise ValueError("Incorrect length")
-
-    def __repr__(self):
-        return f"ScpKey(kid=0x{self.kid:02x}, kvn=0x{self.kvn:02x})"
-
-
 @unique
 class Curve(IntEnum):
     SECP256R1 = 0x00
@@ -104,13 +74,13 @@ class Curve(IntEnum):
 
 @dataclass
 class KeyInformation:
-    key: ScpKey
+    key: KeyRef
     components: Mapping[int, int]
 
     @classmethod
     def parse(cls, data: bytes) -> "KeyInformation":
         return cls(
-            ScpKey(data[:2]),
+            KeyRef(data[:2]),
             dict(zip(data[2::2], data[3::2])),
         )
 
@@ -118,13 +88,13 @@ class KeyInformation:
 @dataclass
 class CaIssuer:
     value: bytes
-    key: ScpKey
+    key: KeyRef
 
     @classmethod
     def parse_list(cls, data: bytes) -> Sequence["CaIssuer"]:
         tlvs = Tlv.parse_list(data)
         return [
-            cls(tlvs[i].value, ScpKey(tlvs[i + 1].value))
+            cls(tlvs[i].value, KeyRef(tlvs[i + 1].value))
             for i in range(0, len(tlvs), 2)
         ]
 
@@ -170,7 +140,7 @@ class SecureDomainSession:
         """20-byte key identifier, key type, key version"""
         return CaIssuer.parse_list(self.get_data(0xFF33 if kloc else 0xFF34))
 
-    def get_certificate_bundle(self, key: ScpKey) -> Sequence[x509.Certificate]:
+    def get_certificate_bundle(self, key: KeyRef) -> Sequence[x509.Certificate]:
         data = Tlv(0xA6, Tlv(0x83, key))
         return [
             x509.load_der_x509_certificate(cert)
@@ -183,7 +153,7 @@ class SecureDomainSession:
         for key_info in self.get_key_information():
             key = key_info.key
             if key.kid == 0x01:
-                key = ScpKey(0, 0)
+                key = KeyRef(0, 0)
                 ins = INS_INITIALIZE_UPDATE
             elif key.kid in (0x02, 0x03):
                 continue  # Skip these, will be deleted by 0x01
@@ -211,7 +181,7 @@ class SecureDomainSession:
         self.protocol.send_apdu(0, INS_STORE_DATA, 0x90, 0, data)
 
     def store_certificate_bundle(
-        self, key: ScpKey, certificates: Sequence[x509.Certificate]
+        self, key: KeyRef, certificates: Sequence[x509.Certificate]
     ) -> None:
         self.store_data(
             Tlv(0xA6, Tlv(0x83, key))
@@ -223,13 +193,13 @@ class SecureDomainSession:
             )
         )
 
-    def store_allow_list(self, key: ScpKey, serials: Sequence[int]) -> None:
+    def store_allow_list(self, key: KeyRef, serials: Sequence[int]) -> None:
         self.store_data(
             Tlv(0xA6, Tlv(0x83, key))
             + Tlv(0x70, b"".join(_int2asn1(s) for s in serials))
         )
 
-    def store_issuer(self, key: ScpKey, issuer: bytes, klcc: bool = False) -> None:
+    def store_issuer(self, key: KeyRef, issuer: bytes, klcc: bool = False) -> None:
         self.store_data(
             Tlv(
                 0xA6,
@@ -251,7 +221,7 @@ class SecureDomainSession:
         self.protocol.send_apdu(0x80, INS_DELETE, 0, int(delete_last), data)
 
     def generate_ec_key(
-        self, key: ScpKey, curve: Curve = Curve.SECP256R1, replace_kvn: int = 0
+        self, key: KeyRef, curve: Curve = Curve.SECP256R1, replace_kvn: int = 0
     ) -> ec.EllipticCurvePublicKey:
         data = bytes([key.kvn]) + Tlv(KeyType.ECC_KEY_PARAMS, bytes([curve]))
         resp = self.protocol.send_apdu(
@@ -262,7 +232,7 @@ class SecureDomainSession:
 
     def put_key(
         self,
-        key: ScpKey,
+        key: KeyRef,
         sk: Union[StaticKeys, ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey],
         replace_kvn: int = 0,
     ) -> None:

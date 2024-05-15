@@ -33,6 +33,7 @@ from yubikit.core.smartcard.scp import (
     Scp03KeyParams,
     StaticKeys,
     ScpKid,
+    KeyRef,
 )
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
@@ -260,7 +261,7 @@ def parse_scp_keys(ctx, param, val):
 @click.option(
     "-V",
     "--scp-kvn",
-    default=None,
+    default=0,
     type=int,
     metavar="KVN",
     help="SCP key version",
@@ -391,12 +392,14 @@ def cli(ctx, device, scp, scp_kvn, scp_keys, log_level, log_file, reader):
                     raise CliFail("SCP03 requires --scp-keys")
 
                 def params_f(_):
-                    return Scp03KeyParams(kvn=scp_kvn or 0, keys=scp_keys)
+                    return Scp03KeyParams(
+                        ref=KeyRef(ScpKid.SCP03, scp_kvn), keys=scp_keys
+                    )
 
             elif scp == ScpKid.SCP11b:
 
                 def params_f(conn):
-                    return find_scp11_params(conn, scp, scp_kvn or 0)
+                    return find_scp11_params(conn, scp, scp_kvn)
 
             connections = [SmartCardConnection]
 

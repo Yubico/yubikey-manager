@@ -30,10 +30,10 @@ import click
 import sys
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection, ApduError
-from yubikit.core.smartcard.scp import ScpKid, ScpKeyParams, Scp11KeyParams
+from yubikit.core.smartcard.scp import ScpKid, KeyRef, ScpKeyParams, Scp11KeyParams
 from yubikit.management import DeviceInfo, CAPABILITY
 from yubikit.oath import parse_b32_key
-from yubikit.securedomain import SecureDomainSession, ScpKey
+from yubikit.securedomain import SecureDomainSession
 from collections import OrderedDict
 from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
@@ -326,9 +326,9 @@ def find_scp11_params(
         else:
             raise ValueError(f"No SCP key found matching kid={kid}")
     try:
-        cert = scp.get_certificate_bundle(ScpKey(kid, kvn))[-1]
+        cert = scp.get_certificate_bundle(KeyRef(kid, kvn))[-1]
         pub_key = cert.public_key()
-        return Scp11KeyParams(kid, kvn, pub_key)
+        return Scp11KeyParams(KeyRef(kid, kvn), pub_key)
     except ApduError:
         raise CliFail(f"Unable to get SCP key paramaters (kid={kid}, kvn={kvn})")
 

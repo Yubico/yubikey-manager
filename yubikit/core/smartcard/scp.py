@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
-from typing import NamedTuple, Tuple, Optional, Callable, Sequence
+from typing import NamedTuple, Tuple, Optional, Callable, Sequence, Union
 
 import os
 import abc
@@ -128,34 +128,64 @@ class ScpKid(IntEnum):
     SCP11c = 0x15
 
 
+class KeyRef(bytes):
+    @property
+    def kid(self) -> int:
+        return self[0]
+
+    @property
+    def kvn(self) -> int:
+        return self[1]
+
+    def __new__(cls, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
+        """This allows creation by passing either binary data, or kid and kvn."""
+        if isinstance(kid_or_data, int):  # kid and kvn
+            if kvn is None:
+                raise ValueError("Missing kvn")
+            data = bytes([kid_or_data, kvn])
+        else:  # Binary id and version
+            if kvn is not None:
+                raise ValueError("kvn can only be provided if kid_or_data is a kid")
+            data = kid_or_data
+
+        # mypy thinks this is wrong
+        return super(KeyRef, cls).__new__(cls, data)  # type: ignore
+
+    def __init__(self, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
+        if len(self) != 2:
+            raise ValueError("Incorrect length")
+
+    def __repr__(self):
+        return f"KeyRef(kid=0x{self.kid:02x}, kvn=0x{self.kvn:02x})"
+
+
 @dataclass(frozen=True)
 class ScpKeyParams(abc.ABC):
-    kid: ScpKid
-    kvn: int
+    ref: KeyRef
 
 
 @dataclass(frozen=True)
 class Scp03KeyParams(ScpKeyParams):
-    kid: ScpKid = ScpKid.SCP03
-    kvn: int = 0
+    ref: KeyRef = KeyRef(ScpKid.SCP03, 0)
     keys: StaticKeys = StaticKeys.default()
 
 
 @dataclass(frozen=True)
 class Scp11KeyParams(ScpKeyParams):
     pk_sd_ecka: ec.EllipticCurvePublicKey
+    oce_ref: Optional[KeyRef] = None
     sk_oce_ecka: Optional[ec.EllipticCurvePrivateKey] = None
     certificates: Sequence[x509.Certificate] = field(default_factory=list)
 
     def __post_init__(self):
-        if self.kid == ScpKid.SCP11b:
+        if self.ref.kid == ScpKid.SCP11b:
             if self.sk_oce_ecka or self.certificates:
                 raise ValueError("sk_oce_ecka and certificates must be None")
-        elif self.kid in (ScpKid.SCP11a, ScpKid.SCP11c):
-            if not self.sk_oce_ecka or not self.certificates:
-                raise ValueError("sk_oce_ecka and certificates required")
+        elif self.ref.kid in (ScpKid.SCP11a, ScpKid.SCP11c):
+            if not all([self.oce_ref, self.sk_oce_ecka, self.certificates]):
+                raise ValueError("oce_ref, sk_oce_ecka and certificates required")
         else:
-            raise ValueError(f"Invalid SCP KID for SCP11: {self.kid}")
+            raise ValueError(f"Invalid SCP KID for SCP11: {self.ref.kid}")
 
 
 SendApdu = Callable[[int, int, int, int, bytes], bytes]
@@ -224,7 +254,9 @@ class ScpState:
     ) -> Tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
-        resp = send_apdu(0x80, INS_INITIALIZE_UPDATE, key_params.kvn, 0, host_challenge)
+        resp = send_apdu(
+            0x80, INS_INITIALIZE_UPDATE, key_params.ref.kvn, 0, host_challenge
+        )
 
         diversification_data = resp[:10]  # noqa: unused
         key_info = resp[10:13]  # noqa: unused
@@ -255,23 +287,26 @@ class ScpState:
     ) -> "ScpState":
         logger.debug("Initializing SCP11 handshake")
 
-        # GPC v2.3 Amendment F (SCP11) v1.4 §7.5
-        logger.debug("Sending certificate chain")
-        n = len(key_params.certificates) - 1
-        for i, cert in enumerate(key_params.certificates):
-            p2 = key_params.kid | (0x80 if i < n else 0)
-            data = cert.public_bytes(serialization.Encording.DER)
-            send_apdu(0x80, INS_PERFORM_SECURITY_OPERATION, key_params.kvn, p2, data)
-
         # GPC v2.3 Amendment F (SCP11) v1.4 §7.1.1
-        if key_params.kid == ScpKid.SCP11a:
+        if key_params.ref.kid == ScpKid.SCP11a:
             params = 0b01
-        elif key_params.kid == ScpKid.SCP11b:
+        elif key_params.ref.kid == ScpKid.SCP11b:
             params = 0b00
-        elif key_params.kid == ScpKid.SCP11c:
+        elif key_params.ref.kid == ScpKid.SCP11c:
             params = 0b11
         else:
             raise ValueError("Invalid SCP KID")
+
+        # GPC v2.3 Amendment F (SCP11) v1.4 §7.5
+        logger.debug("Sending certificate chain")
+        n = len(key_params.certificates) - 1
+        if n >= 0:
+            oce_ref = key_params.oce_ref
+            assert oce_ref  # nosec
+            for i, cert in enumerate(key_params.certificates):
+                p2 = oce_ref.kid | (0x80 if i < n else 0)
+                data = cert.public_bytes(serialization.Encoding.DER)
+                send_apdu(0x80, INS_PERFORM_SECURITY_OPERATION, oce_ref.kvn, p2, data)
 
         key_usage = bytes(
             [0x3C]
@@ -304,10 +339,10 @@ class ScpState:
         logger.debug("Performing key agreement")
         ins = (
             INS_INTERNAL_AUTHENTICATE
-            if key_params.kid == ScpKid.SCP11b
+            if key_params.ref.kid == ScpKid.SCP11b
             else INS_EXTERNAL_AUTHENTICATE
         )
-        resp = send_apdu(0x80, ins, key_params.kvn, key_params.kid, data)
+        resp = send_apdu(0x80, ins, key_params.ref.kvn, key_params.ref.kid, data)
 
         epk_sd_ecka_tlv, resp = Tlv.parse_from(resp)
         epk_sd_ecka = Tlv.unpack(0x5F49, epk_sd_ecka_tlv)
