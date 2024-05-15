@@ -173,19 +173,11 @@ class Scp03KeyParams(ScpKeyParams):
 @dataclass(frozen=True)
 class Scp11KeyParams(ScpKeyParams):
     pk_sd_ecka: ec.EllipticCurvePublicKey
+    # For SCP11 a/c we need an OCE key, with its trust chain
     oce_ref: Optional[KeyRef] = None
     sk_oce_ecka: Optional[ec.EllipticCurvePrivateKey] = None
+    # Certificate chain for sk_oce_ecka, leaf-first order
     certificates: Sequence[x509.Certificate] = field(default_factory=list)
-
-    def __post_init__(self):
-        if self.ref.kid == ScpKid.SCP11b:
-            if self.sk_oce_ecka or self.certificates:
-                raise ValueError("sk_oce_ecka and certificates must be None")
-        elif self.ref.kid in (ScpKid.SCP11a, ScpKid.SCP11c):
-            if not all([self.oce_ref, self.sk_oce_ecka, self.certificates]):
-                raise ValueError("oce_ref, sk_oce_ecka and certificates required")
-        else:
-            raise ValueError(f"Invalid SCP KID for SCP11: {self.ref.kid}")
 
 
 SendApdu = Callable[[int, int, int, int, bytes], bytes]
@@ -285,27 +277,30 @@ class ScpState:
         send_apdu: SendApdu,
         key_params: Scp11KeyParams,
     ) -> "ScpState":
-        logger.debug("Initializing SCP11 handshake")
+        kid = ScpKid(key_params.ref.kid)
+        logger.debug(f"Initializing {kid.name} handshake")
 
         # GPC v2.3 Amendment F (SCP11) v1.4 §7.1.1
-        if key_params.ref.kid == ScpKid.SCP11a:
+        if kid == ScpKid.SCP11a:
             params = 0b01
-        elif key_params.ref.kid == ScpKid.SCP11b:
+        elif kid == ScpKid.SCP11b:
             params = 0b00
-        elif key_params.ref.kid == ScpKid.SCP11c:
+        elif kid == ScpKid.SCP11c:
             params = 0b11
         else:
             raise ValueError("Invalid SCP KID")
 
-        # GPC v2.3 Amendment F (SCP11) v1.4 §7.5
-        logger.debug("Sending certificate chain")
-        n = len(key_params.certificates) - 1
-        if n >= 0:
-            oce_ref = key_params.oce_ref
-            assert oce_ref  # nosec
-            for i, cert in enumerate(key_params.certificates):
+        if kid in (ScpKid.SCP11a, ScpKid.SCP11c):
+            # GPC v2.3 Amendment F (SCP11) v1.4 §7.5
+            assert key_params.sk_oce_ecka  # nosec
+            n = len(key_params.certificates) - 1
+            assert n >= 0  # nosec
+            oce_ref = key_params.oce_ref or KeyRef(0, 0)
+            logger.debug("Sending certificate chain")
+            for i, cert in enumerate(reversed(key_params.certificates)):
                 p2 = oce_ref.kid | (0x80 if i < n else 0)
                 data = cert.public_bytes(serialization.Encoding.DER)
+                logger.debug(f"Sending cert: {cert.subject}")
                 send_apdu(0x80, INS_PERFORM_SECURITY_OPERATION, oce_ref.kvn, p2, data)
 
         key_usage = bytes(

@@ -41,7 +41,7 @@ from yubikit.logging import LOG_LEVEL
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
 from ..device import scan_devices, list_all_devices as _list_all_devices
-from ..util import get_windows_version
+from ..util import get_windows_version, parse_private_key, parse_certificates
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
 from ..settings import AppData
@@ -66,6 +66,7 @@ from .apdu import apdu
 from .script import run_script
 from .hsmauth import hsmauth
 
+from dataclasses import replace
 import click
 import click.shell_completion
 import ctypes
@@ -268,11 +269,33 @@ def parse_scp_keys(ctx, param, val):
 )
 @click.option(
     "-k",
-    "--scp-keys",
+    "--scp03-keys",
     default=None,
     callback=parse_scp_keys,
     metavar="KEYS",
     help="specify keys for secure messaging, K-ENC:K-MAC[:K-DEK]",
+)
+@click.option(
+    "-o",
+    "--scp11-oce-key",
+    metavar="KID KVN",
+    type=(int, int),
+    default=(0, 0),
+    help="specify private key and certificate chain for secure messaging",
+)
+@click.option(
+    "-c",
+    "--scp11-cred",
+    metavar="FILE",
+    type=click.File("rb"),
+    multiple=True,
+    help="specify private key and certificate chain for secure messaging",
+)
+@click.option(
+    "-p",
+    "--scp11-cred-password",
+    metavar="PASSWORD",
+    help="specify a password required to access the scp11-cred file",
 )
 @click.option(
     "-l",
@@ -312,7 +335,19 @@ def parse_scp_keys(ctx, param, val):
     help="show --help output, including hidden commands",
 )
 @click.pass_context
-def cli(ctx, device, scp, scp_kvn, scp_keys, log_level, log_file, reader):
+def cli(
+    ctx,
+    device,
+    scp,
+    scp_kvn,
+    scp03_keys,
+    scp11_oce_key,
+    scp11_cred,
+    scp11_cred_password,
+    log_level,
+    log_file,
+    reader,
+):
     """
     Configure your YubiKey via the command line.
 
@@ -337,7 +372,7 @@ def cli(ctx, device, scp, scp_kvn, scp_keys, log_level, log_file, reader):
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
 
-    use_scp = bool(scp is not None or scp_kvn or scp_keys)
+    use_scp = bool(scp is not None or scp_kvn or scp03_keys)
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     # Commands that don't directly act on a key
@@ -379,27 +414,52 @@ def cli(ctx, device, scp, scp_kvn, scp_keys, log_level, log_file, reader):
                 raise CliFail("SCP can only be used with CCID commands")
 
             if scp is None:
-                if scp_keys:
+                if scp03_keys:
                     scp = ScpKid.SCP03
                 else:
                     scp = ScpKid.SCP11b
 
-            if scp_keys and scp != ScpKid.SCP03:
-                raise CliFail("--scp-keys can only be used with SCP03")
+            if scp03_keys and scp != ScpKid.SCP03:
+                raise CliFail("--scp03-keys can only be used with SCP03")
 
             if scp == ScpKid.SCP03:
-                if not scp_keys:
-                    raise CliFail("SCP03 requires --scp-keys")
+                if not scp03_keys:
+                    raise CliFail("SCP03 requires --scp03-keys")
 
                 def params_f(_):
                     return Scp03KeyParams(
-                        ref=KeyRef(ScpKid.SCP03, scp_kvn), keys=scp_keys
+                        ref=KeyRef(ScpKid.SCP03, scp_kvn), keys=scp03_keys
                     )
 
             elif scp == ScpKid.SCP11b:
 
                 def params_f(conn):
                     return find_scp11_params(conn, scp, scp_kvn)
+
+            elif scp in (ScpKid.SCP11a, ScpKid.SCP11c):
+                if not scp11_cred:
+                    raise CliFail(f"{scp.name} requires --scp11-cred")
+
+                creds = [c.read() for c in scp11_cred]
+                first = creds.pop(0)
+                password = scp11_cred_password.encode() if scp11_cred_password else None
+                sk_oce_ecka = parse_private_key(first, password)
+                if creds:
+                    certificates = []
+                    for c in creds:
+                        certificates.extend(parse_certificates(c, None))
+                else:
+                    certificates = parse_certificates(first, password)
+
+                oce_ref = KeyRef(*scp11_oce_key)
+
+                def params_f(conn):
+                    return replace(
+                        find_scp11_params(conn, scp, scp_kvn),
+                        oce_ref=oce_ref,
+                        sk_oce_ecka=sk_oce_ecka,
+                        certificates=certificates,
+                    )
 
             connections = [SmartCardConnection]
 
