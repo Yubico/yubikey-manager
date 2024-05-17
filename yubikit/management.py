@@ -263,7 +263,7 @@ class DeviceInfo:
     is_locked: bool
     is_fips: bool = False
     is_sky: bool = False
-    part_number: bytes = b""
+    part_number: str = ""
     fips_capable: CAPABILITY = CAPABILITY(0)
     fips_approved: CAPABILITY = CAPABILITY(0)
     pin_complexity: bool = False
@@ -312,7 +312,10 @@ class DeviceInfo:
             supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
             enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
         nfc_restricted = data.get(TAG_NFC_RESTRICTED, b"\0") == b"\1"
-        part_number = data.get(TAG_PART_NUMBER, b"")
+        try:
+            part_number = data.get(TAG_PART_NUMBER, b"").decode()
+        except UnicodeDecodeError:
+            part_number = ""
         fips_capable = CAPABILITY._from_fips(
             bytes2int(data.get(TAG_FIPS_CAPABLE, b"\0"))
         )

@@ -158,6 +158,9 @@ class KeyRef(bytes):
     def __repr__(self):
         return f"KeyRef(kid=0x{self.kid:02x}, kvn=0x{self.kvn:02x})"
 
+    def __str__(self):
+        return repr(self)
+
 
 @dataclass(frozen=True)
 class ScpKeyParams(abc.ABC):
@@ -247,7 +250,7 @@ class ScpState:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
         resp = send_apdu(
-            0x80, INS_INITIALIZE_UPDATE, key_params.ref.kvn, 0, host_challenge
+            0x80, INS_INITIALIZE_UPDATE, key_params.ref.kvn, 0x00, host_challenge
         )
 
         diversification_data = resp[:10]  # noqa: unused
@@ -263,7 +266,7 @@ class ScpState:
         )
         if not constant_time.bytes_eq(gen_card_crypto, card_cryptogram):
             # This means wrong keys
-            raise BadResponseError("Wrong card cryptogram")
+            raise BadResponseError("Wrong SCP03 key set")
 
         host_cryptogram = _derive(
             session_keys.key_smac, _HOST_CRYPTOGRAM, context, 0x40

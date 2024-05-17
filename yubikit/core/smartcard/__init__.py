@@ -33,12 +33,14 @@ from .. import (
     NotSupportedError,
     ApplicationNotAvailableError,
     CommandError,
+    BadResponseError,
 )
 from .scp import (
     ScpState,
     ScpKeyParams,
     Scp03KeyParams,
     Scp11KeyParams,
+    INS_EXTERNAL_AUTHENTICATE,
 )
 from enum import Enum, IntEnum, unique
 from time import time
@@ -390,7 +392,11 @@ class SmartCardProtocol:
                 raise NotSupportedError(
                     "This YubiKey does not support secure messaging"
                 )
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                raise ValueError("Incorrect SCP parameters")
             raise
+        except BadResponseError:
+            raise ValueError("Incorrect SCP parameters")
 
     def _scp03_init(self, key_params: Scp03KeyParams) -> None:
         logger.debug("Initializing SCP03")
@@ -398,7 +404,10 @@ class SmartCardProtocol:
         processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
 
         # Send EXTERNAL AUTHENTICATE
-        processor.send_apdu(0x84, 0x82, 0x33, 0, host_cryptogram, 0, encrypt=False)
+        # P1 = C-DECRYPTION, R-ENCRYPTION, C-MAC, and R-MAC
+        processor.send_apdu(
+            0x84, INS_EXTERNAL_AUTHENTICATE, 0x33, 0, host_cryptogram, 0, encrypt=False
+        )
         self._processor = processor
         self._apdu_format = ApduFormat.EXTENDED
         logger.info("SCP03 initialized")

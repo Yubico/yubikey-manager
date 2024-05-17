@@ -25,9 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import functools
-import click
-import sys
+from ..util import parse_certificates
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection, ApduError
 from yubikit.core.smartcard.scp import ScpKid, KeyRef, ScpKeyParams, Scp11KeyParams
@@ -41,6 +39,9 @@ from contextlib import contextmanager
 from threading import Timer
 from enum import Enum
 from typing import List, Optional
+import functools
+import click
+import sys
 import logging
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,20 @@ class EnumChoice(click.Choice):
             self.choices = self.choices_names
 
         return self.choices_enum[name]
+
+
+class HexIntParamType(click.ParamType):
+    name = "integer"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, int):
+            return value
+        try:
+            if value.lower().startswith("0x"):
+                return int(value[2:], 16)
+            return int(value)
+        except ValueError:
+            self.fail(f"{value!r} is not a valid integer", param, ctx)
 
 
 def click_callback(invoke_on_missing=False):
@@ -315,7 +330,7 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
 
 
 def find_scp11_params(
-    connection: SmartCardConnection, kid: ScpKid, kvn: int
+    connection: SmartCardConnection, kid: ScpKid, kvn: int, ca: Optional[bytes] = None
 ) -> Scp11KeyParams:
     scp = SecureDomainSession(connection)
     if not kvn:
@@ -324,13 +339,26 @@ def find_scp11_params(
                 kvn = key_info.key.kvn
                 break
         else:
-            raise ValueError(f"No SCP key found matching kid={kid}")
+            raise ValueError(f"No SCP key found matching KID=0x{kid:x}")
     try:
-        cert = scp.get_certificate_bundle(KeyRef(kid, kvn))[-1]
-        pub_key = cert.public_key()
+        chain = scp.get_certificate_bundle(KeyRef(kid, kvn))
+        if ca:
+            logger.debug("Validating KLCC CA using supplied file")
+            parent = parse_certificates(ca, None)[0]
+            for cert in chain:
+                # Requires cryptography >= 40
+                cert.verify_directly_issued_by(parent)
+                parent = cert
+            logger.info("KLCC CA validated")
+        else:
+            logger.info("No CA supplied, skipping KLCC CA validation")
+
+        pub_key = chain[-1].public_key()
         return Scp11KeyParams(KeyRef(kid, kvn), pub_key)
     except ApduError:
-        raise CliFail(f"Unable to get SCP key paramaters (kid={kid}, kvn={kvn})")
+        raise ValueError(
+            f"Unable to get SCP key paramaters (KID=0x{kid:x}, KVN=ox{kvn:x})"
+        )
 
 
 def get_scp_params(
