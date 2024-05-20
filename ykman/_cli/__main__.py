@@ -41,7 +41,12 @@ from yubikit.logging import LOG_LEVEL
 from .. import __version__
 from ..pcsc import list_devices as list_ccid, list_readers
 from ..device import scan_devices, list_all_devices as _list_all_devices
-from ..util import get_windows_version, parse_private_key, parse_certificates
+from ..util import (
+    get_windows_version,
+    parse_private_key,
+    parse_certificates,
+    InvalidPasswordError,
+)
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
 from ..settings import AppData
@@ -53,6 +58,7 @@ from .util import (
     CliFail,
     pretty_print,
     click_callback,
+    click_prompt,
     find_scp11_params,
 )
 from .info import info
@@ -298,7 +304,9 @@ def parse_scp_keys(ctx, param, val):
     metavar="FILE",
     type=click.File("rb"),
     multiple=True,
-    help="specify private key and certificate chain for secure messaging",
+    help="specify private key and certificate chain for secure messaging, "
+    "can be used multiple times to provide key and certificates in multiple "
+    "files (private key, leaf, intermediates)",
 )
 @click.option(
     "-p",
@@ -457,7 +465,22 @@ def cli(
                 first = creds.pop(0)
                 password = scp11_cred_password.encode() if scp11_cred_password else None
                 # TODO: Prompt for password
-                sk_oce_ecka = parse_private_key(first, password)
+
+                while True:
+                    try:
+                        sk_oce_ecka = parse_private_key(first, password)
+                        break
+                    except InvalidPasswordError:
+                        if scp11_cred_password:
+                            raise CliFail("Wrong password to decrypt private key")
+                        logger.debug("Error parsing key", exc_info=True)
+                        password = click_prompt(
+                            "Enter password to decrypt SCP11 key",
+                            default="",
+                            hide_input=True,
+                            show_default=False,
+                        ).encode()
+
                 if creds:
                     certificates = []
                     for c in creds:
