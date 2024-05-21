@@ -13,6 +13,7 @@ from .core.smartcard.scp import (
     INS_INTERNAL_AUTHENTICATE,
     INS_PERFORM_SECURITY_OPERATION,
     KeyRef,
+    ScpKid,
     ScpKeyParams,
     StaticKeys,
 )
@@ -22,7 +23,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import ec
-from dataclasses import dataclass
 from typing import Mapping, Sequence, Union, cast
 from enum import IntEnum, unique
 
@@ -72,33 +72,6 @@ class Curve(IntEnum):
         return getattr(ec, self.name)()
 
 
-@dataclass
-class KeyInformation:
-    key: KeyRef
-    components: Mapping[int, int]
-
-    @classmethod
-    def parse(cls, data: bytes) -> "KeyInformation":
-        return cls(
-            KeyRef(data[:2]),
-            dict(zip(data[2::2], data[3::2])),
-        )
-
-
-@dataclass
-class CaIssuer:
-    identifier: bytes
-    key: KeyRef
-
-    @classmethod
-    def parse_list(cls, data: bytes) -> Sequence["CaIssuer"]:
-        tlvs = Tlv.parse_list(data)
-        return [
-            cls(tlvs[i].value, KeyRef(tlvs[i + 1].value))
-            for i in range(0, len(tlvs), 2)
-        ]
-
-
 def _int2asn1(value: int) -> bytes:
     bs = int2bytes(value)
     if bs[0] & 0x80:
@@ -136,39 +109,51 @@ class SecureDomainSession:
         """Read data from the secure domain."""
         return self.protocol.send_apdu(0, INS_GET_DATA, tag >> 8, tag & 0xFF, data)
 
-    def get_key_information(self) -> Sequence[KeyInformation]:
+    def get_key_information(self) -> Mapping[KeyRef, Mapping[int, int]]:
         """Get information about the currently loaded keys."""
-        return [
-            KeyInformation.parse(Tlv.unpack(0xC0, d))
-            for d in Tlv.parse_list(self.get_data(0xE0))
-        ]
+        keys = {}
+        for d in Tlv.parse_list(self.get_data(0xE0)):
+            data = Tlv.unpack(0xC0, d)
+            keys[KeyRef(data[:2])] = dict(zip(data[2::2], data[3::2]))
+        return keys
 
     def get_card_recognition_data(self) -> bytes:
         """Get information about the card."""
         return Tlv.unpack(0x73, self.get_data(0x66))
 
-    def get_supported_ca_identifiers(self, kloc: bool = False) -> Sequence[CaIssuer]:
-        """Get a list of the CA issuer Subject Key Identifiers for keys.
-
-        By default this will get the KLCC CA list.
-        Set kloc = True to instead get the KLOC list.
-        """
-        try:
-            return CaIssuer.parse_list(self.get_data(0xFF33 if kloc else 0xFF34))
-        except ApduError as e:
-            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-                return []
-            raise
+    def get_supported_ca_identifiers(self) -> Mapping[KeyRef, bytes]:
+        """Get a list of the CA issuer Subject Key Identifiers for keys."""
+        logger.debug("Getting CA identifiers")
+        data = b""
+        # Combine CA list for KLCC and KLOC
+        for tag in (0xFF33, 0xFF34):
+            try:
+                data += self.get_data(tag)
+            except ApduError as e:
+                if e.sw != SW.REFERENCE_DATA_NOT_FOUND:
+                    raise
+        tlvs = Tlv.parse_list(data)
+        return {
+            KeyRef(tlvs[i + 1].value): tlvs[i].value for i in range(0, len(tlvs), 2)
+        }
 
     def get_certificate_bundle(self, key: KeyRef) -> Sequence[x509.Certificate]:
         """Get the certificates associated with the given SCP11 private key.
 
         Certificates are returned leaf-last.
         """
-        return [
-            x509.load_der_x509_certificate(cert)
-            for cert in Tlv.parse_list(self.get_data(0xBF21, Tlv(0xA6, Tlv(0x83, key))))
-        ]
+        logger.debug(f"Getting certificate bundle for {key}")
+        try:
+            return [
+                x509.load_der_x509_certificate(cert)
+                for cert in Tlv.parse_list(
+                    self.get_data(0xBF21, Tlv(0xA6, Tlv(0x83, key)))
+                )
+            ]
+        except ApduError as e:
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                return []
+            raise
 
     def reset(self) -> None:
         """Perform a factory reset of the Secure Domain.
@@ -179,8 +164,7 @@ class SecureDomainSession:
         logger.debug("Resetting all SCP keys")
         # Reset is done by blocking all available keys
         data = b"\0" * 8
-        for key_info in self.get_key_information():
-            key = key_info.key
+        for key in self.get_key_information().keys():
             if key.kid == 0x01:
                 # SCP03 uses KID=0, we use KVN=0 to allow deleting the default keys
                 # which have an invalid KVN (0xff).
@@ -251,14 +235,13 @@ class SecureDomainSession:
         )
         logger.info("Serial allowlist stored")
 
-    def store_ca_issuer(self, key: KeyRef, ski: bytes, klcc: bool = False) -> None:
+    def store_ca_issuer(self, key: KeyRef, ski: bytes) -> None:
         """Store the SKI (Subject Key Identifier) for the CA of a given key.
 
         Requires OCE verification.
-
-        By default stores the CA for a KLOC. Set klcc = True to store for the KLCC.
         """
         logger.debug(f"Storing CA issuer SKI for {key}: {ski.hex()}")
+        klcc = key.kid in (ScpKid.SCP11a, ScpKid.SCP11b, ScpKid.SCP11c)
         self.store_data(
             Tlv(
                 0xA6,

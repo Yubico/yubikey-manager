@@ -179,7 +179,7 @@ class Scp11KeyParams(ScpKeyParams):
     # For SCP11 a/c we need an OCE key, with its trust chain
     oce_ref: Optional[KeyRef] = None
     sk_oce_ecka: Optional[ec.EllipticCurvePrivateKey] = None
-    # Certificate chain for sk_oce_ecka, leaf-first order
+    # Certificate chain for sk_oce_ecka, leaf-last order
     certificates: Sequence[x509.Certificate] = field(default_factory=list)
 
 
@@ -300,7 +300,7 @@ class ScpState:
             assert n >= 0  # nosec
             oce_ref = key_params.oce_ref or KeyRef(0, 0)
             logger.debug("Sending certificate chain")
-            for i, cert in enumerate(reversed(key_params.certificates)):
+            for i, cert in enumerate(key_params.certificates):
                 p2 = oce_ref.kid | (0x80 if i < n else 0)
                 data = cert.public_bytes(serialization.Encoding.DER)
                 logger.debug(f"Sending cert: {cert.subject}")
