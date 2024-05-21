@@ -145,16 +145,8 @@ def get_leaf_certificates(certs):
 
     :param certs: The list of cryptography x509 certificate objects.
     """
-    issuers = [
-        cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME) for cert in certs
-    ]
-    leafs = [
-        cert
-        for cert in certs
-        if (
-            cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME) not in issuers
-        )
-    ]
+    issuers = [cert.issuer for cert in certs]
+    leafs = [cert for cert in certs if cert.subject not in issuers]
     return leafs
 
 

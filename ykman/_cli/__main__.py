@@ -60,6 +60,7 @@ from .util import (
     click_callback,
     click_prompt,
     find_scp11_params,
+    organize_scp11_certificates,
 )
 from .info import info
 from .otp import otp
@@ -72,6 +73,7 @@ from .aliases import apply_aliases
 from .apdu import apdu
 from .script import run_script
 from .hsmauth import hsmauth
+from .securedomain import securedomain
 
 from cryptography.exceptions import InvalidSignature
 from dataclasses import replace
@@ -279,7 +281,7 @@ def parse_scp_keys(ctx, param, val):
     "-t",
     "--klcc-ca",
     type=click.File("rb"),
-    help="specify the CA to use to verify the SCP11 card key (KLCC)",
+    help="specify the CA to use to verify the SCP11 card key (CA-KLCC)",
 )
 @click.option(
     "-k",
@@ -296,6 +298,7 @@ def parse_scp_keys(ctx, param, val):
     type=HexIntParamType(),
     nargs=2,
     default=(0, 0),
+    hidden=True,
     help="specify which key the OCE is using to authenticate",
 )
 @click.option(
@@ -306,7 +309,7 @@ def parse_scp_keys(ctx, param, val):
     multiple=True,
     help="specify private key and certificate chain for secure messaging, "
     "can be used multiple times to provide key and certificates in multiple "
-    "files (private key, leaf, intermediates)",
+    "files (private key, certificates in leaf-last order)",
 )
 @click.option(
     "-p",
@@ -390,7 +393,7 @@ def cli(
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
 
-    use_scp = bool(scp is not None or scp_kvn or scp03_keys or klcc_ca)
+    use_scp = bool(scp is not None or scp_kvn or scp03_keys or scp11_cred or klcc_ca)
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     # Commands that don't directly act on a key
@@ -464,7 +467,6 @@ def cli(
                 creds = [c.read() for c in scp11_cred]
                 first = creds.pop(0)
                 password = scp11_cred_password.encode() if scp11_cred_password else None
-                # TODO: Prompt for password
 
                 while True:
                     try:
@@ -487,6 +489,10 @@ def cli(
                         certificates.extend(parse_certificates(c, None))
                 else:
                     certificates = parse_certificates(first, password)
+                    # If the bundle contains the CA we strip it out
+                    _, inter, leaf = organize_scp11_certificates(certificates)
+                    # Send the KA-KLOC and OCE certificates
+                    certificates = list(inter) + [leaf]
 
                 def params_f(conn):
                     if not scp:
@@ -593,6 +599,7 @@ COMMANDS = (
     apdu,
     run_script,
     hsmauth,
+    securedomain,
 )
 
 

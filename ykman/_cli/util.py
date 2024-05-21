@@ -35,10 +35,11 @@ from yubikit.securedomain import SecureDomainSession
 from collections import OrderedDict
 from collections.abc import MutableMapping
 from cryptography.hazmat.primitives import serialization
+from cryptography import x509
 from contextlib import contextmanager
 from threading import Timer
 from enum import Enum
-from typing import List, Optional
+from typing import Optional, Sequence, Tuple, List
 import functools
 import click
 import sys
@@ -287,13 +288,13 @@ class CliFail(Exception):
         self.status = status
 
 
-def pretty_print(value, level: int = 0) -> List[str]:
+def pretty_print(value, level: int = 0) -> Sequence[str]:
     """Pretty-prints structured data, as that returned by get_diagnostics.
 
     Returns a list of strings which can be printed as lines.
     """
     indent = "  " * level
-    lines = []
+    lines: List[str] = []
     if isinstance(value, list):
         for v in value:
             lines.extend(pretty_print(v, level))
@@ -334,9 +335,9 @@ def find_scp11_params(
 ) -> Scp11KeyParams:
     scp = SecureDomainSession(connection)
     if not kvn:
-        for key_info in scp.get_key_information():
-            if key_info.key.kid == kid:
-                kvn = key_info.key.kvn
+        for ref in scp.get_key_information().keys():
+            if ref.kid == kid:
+                kvn = ref.kvn
                 break
         else:
             raise ValueError(f"No SCP key found matching KID=0x{kid:x}")
@@ -381,3 +382,42 @@ def get_scp_params(
             logger.debug("No SCP11b key found, not using SCP")
 
     return None
+
+
+def organize_scp11_certificates(
+    certificates: Sequence[x509.Certificate],
+) -> Tuple[
+    Optional[x509.Certificate], Sequence[x509.Certificate], Optional[x509.Certificate]
+]:
+    if not certificates:
+        return None, [], None
+
+    # Order leaf-last
+    ordered, certificates = [certificates[0]], list(certificates[1:])
+    while certificates:
+        for c in certificates:
+            if c.subject == ordered[0].issuer:
+                certificates.remove(c)
+                ordered.insert(0, c)
+                break
+            if ordered[-1].subject == c.issuer:
+                certificates.remove(c)
+                ordered.append(c)
+                break
+        else:
+            raise ValueError("Incomplete chain of certificates")
+
+    ca, leaf = None, None
+
+    # Check if root is self-signed:
+    peek = ordered[0]
+    if peek.issuer == peek.subject:
+        ca = ordered.pop(0)
+
+    # Check if leaf has keyAgreement policy:
+    if ordered:
+        kue = ordered[-1].extensions.get_extension_for_oid(x509.ExtensionOID.KEY_USAGE)
+        if kue.value.key_agreement:
+            leaf = ordered.pop()
+
+    return ca, ordered, leaf
