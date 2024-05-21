@@ -244,8 +244,8 @@ class DeviceConfig:
             buf += Tlv(TAG_DEVICE_FLAGS, int2bytes(self.device_flags))
         if new_lock_code:
             buf += Tlv(TAG_CONFIG_LOCK, new_lock_code)
-        if self.nfc_restricted is not None:
-            buf += Tlv(TAG_NFC_RESTRICTED, b"\1" if self.nfc_restricted else b"\0")
+        if self.nfc_restricted:
+            buf += Tlv(TAG_NFC_RESTRICTED, b"\1")
         if len(buf) > 0xFF:
             raise NotSupportedError("DeviceConfiguration too large")
         return int2bytes(len(buf)) + buf
