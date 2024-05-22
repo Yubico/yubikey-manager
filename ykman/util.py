@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import Tlv
+from yubikit.core import Tlv, int2bytes
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
@@ -166,6 +166,13 @@ def is_pkcs12(data):
     except ValueError:
         logger.debug("Unable to parse TLV", exc_info=True)
     return False
+
+
+def display_serial(serial: int) -> str:
+    """Displays an x509 certificate serial number in a readable format."""
+    if serial >= 0x10000000000000000:
+        return ":".join(f"{b:02x}" for b in int2bytes(serial, 20))
+    return f"{serial} ({hex(serial)})"
 
 
 class OSVERSIONINFOW(ctypes.Structure):

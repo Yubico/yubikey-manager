@@ -38,6 +38,7 @@ from yubikit.piv import (
     TAG_LRC,
     SlotMetadata,
 )
+from .util import display_serial
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -598,18 +599,8 @@ def get_piv_info(session: PivSession):
         cert = certs.get(slot, None)
         if cert:
             try:
-                # Try to read out full DN, fallback to only CN.
-                # Support for DN was added in crytography 2.5
                 subject_dn = cert.subject.rfc4514_string()
                 issuer_dn = cert.issuer.rfc4514_string()
-                print_dn = True
-            except AttributeError:
-                print_dn = False
-                logger.debug("Failed to read DN, falling back to only CNs")
-                cn = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-                subject_cn = cn[0].value if cn else "None"
-                cn = cert.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-                issuer_cn = cn[0].value if cn else "None"
             except ValueError as e:
                 # Malformed certificates may throw ValueError
                 logger.debug("Failed parsing certificate", exc_info=True)
@@ -641,13 +632,9 @@ def get_piv_info(session: PivSession):
 
             # Print out everything
             cert_data["Public key type"] = key_algo
-            if print_dn:
-                cert_data["Subject DN"] = subject_dn
-                cert_data["Issuer DN"] = issuer_dn
-            else:
-                cert_data["Subject CN"] = subject_cn
-                cert_data["Issuer CN"] = issuer_cn
-            cert_data["Serial"] = serial
+            cert_data["Subject DN"] = subject_dn
+            cert_data["Issuer DN"] = issuer_dn
+            cert_data["Serial"] = display_serial(serial)
             cert_data["Fingerprint"] = fingerprint
             if not_before:
                 cert_data["Not before"] = not_before.isoformat()
