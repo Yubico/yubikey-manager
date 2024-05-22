@@ -176,7 +176,7 @@ class SecureDomainSession:
                 ins = INS_EXTERNAL_AUTHENTICATE
             elif key.kid == 0x13:
                 ins = INS_INTERNAL_AUTHENTICATE
-            else:  # 10, 20-2F
+            else:  # 0x10, 0x20-0x2F
                 ins = INS_PERFORM_SECURITY_OPERATION
 
             for _ in range(65):

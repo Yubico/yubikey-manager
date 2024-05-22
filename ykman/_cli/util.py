@@ -150,6 +150,8 @@ class HexIntParamType(click.ParamType):
         try:
             if value.lower().startswith("0x"):
                 return int(value[2:], 16)
+            if ":" in value:
+                return int(value.replace(":", ""), 16)
             return int(value)
         except ValueError:
             self.fail(f"{value!r} is not a valid integer", param, ctx)

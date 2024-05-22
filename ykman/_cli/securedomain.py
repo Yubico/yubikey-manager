@@ -55,7 +55,7 @@ from .util import (
 )
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from typing import List, Any
+from typing import Dict, List, Any
 
 import click
 import logging
@@ -107,9 +107,9 @@ def info(ctx):
         if ref.kid < 0x10:  # SCP03
             data.append(f"{ref}")
         else:  # SCP11
-            inner = {}
+            inner: Dict[str, Any] = {}
             if ref in cas:
-                inner["CA"] = cas[ref]
+                inner["CA"] = ":".join(f"{b:02X}" for b in cas[ref])
             try:
                 inner["Chain"] = [
                     c.subject.rfc4514_string() for c in sd.get_certificate_bundle(ref)
@@ -343,3 +343,14 @@ def delete_key(ctx, key):
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No key stored in {key}.")
         raise
+
+
+@keys.command("set-allowlist")
+@click.pass_context
+@click_key_argument
+@click.argument("serials", nargs=-1, type=HexIntParamType())
+def set_allowlist(ctx, key, serials):
+    _require_auth(ctx)
+    session = ctx.obj["session"]
+
+    session.set_allowlist(key, serials)
