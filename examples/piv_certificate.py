@@ -22,12 +22,10 @@ And instead use sign_csr_builder instead of sign_certificate_builder.
 Usage: piv_certificate.py
 """
 
-from yubikit.core import NotSupportedError
 from yubikit.piv import (
     PivSession,
     SLOT,
     KEY_TYPE,
-    MANAGEMENT_KEY_TYPE,
     DEFAULT_MANAGEMENT_KEY,
 )
 from ykman.piv import sign_certificate_builder
@@ -58,12 +56,8 @@ click.echo("")
 key = click.prompt(
     "Enter management key", default=DEFAULT_MANAGEMENT_KEY.hex(), hide_input=True
 )
-try:
-    mgmt_key_type = piv.get_management_key_metadata().key_type
-except NotSupportedError:
-    mgmt_key_type = MANAGEMENT_KEY_TYPE.TDES
 
-piv.authenticate(mgmt_key_type, bytes.fromhex(key))
+piv.authenticate(bytes.fromhex(key))
 
 # Generate a private key on the YubiKey
 print(f"Generating {key_type.name} key in slot {slot:X}...")

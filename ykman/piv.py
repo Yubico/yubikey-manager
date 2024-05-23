@@ -358,7 +358,6 @@ def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
     if pivman.has_derived_key:
         logger.debug("Has derived management key, update for new PIN")
         session.authenticate(
-            MANAGEMENT_KEY_TYPE.TDES,
             derive_management_key(old_pin, cast(bytes, pivman.salt)),
         )
         session.verify_pin(new_pin)

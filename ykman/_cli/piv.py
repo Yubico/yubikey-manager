@@ -1340,18 +1340,12 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
         session.verify_pin(pin)
         if pivman.has_derived_key:
             with prompt_timeout():
-                session.authenticate(
-                    MANAGEMENT_KEY_TYPE.TDES, derive_management_key(pin, pivman.salt)
-                )
+                session.authenticate(derive_management_key(pin, pivman.salt))
             session.verify_pin(pin)  # Ensure verify was the last thing we did
         elif pivman.has_stored_key:
             pivman_prot = get_pivman_protected_data(session)
-            try:
-                key_type = session.get_management_key_metadata().key_type
-            except NotSupportedError:
-                key_type = MANAGEMENT_KEY_TYPE.TDES
             with prompt_timeout():
-                session.authenticate(key_type, pivman_prot.key)
+                session.authenticate(pivman_prot.key)
             session.verify_pin(pin)  # Ensure verify was the last thing we did
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -1386,13 +1380,8 @@ def _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=False)
             else:
                 management_key = _prompt_management_key(mgm_key_prompt)
     try:
-        try:
-            key_type = session.get_management_key_metadata().key_type
-        except NotSupportedError:
-            key_type = MANAGEMENT_KEY_TYPE.TDES
-
         with prompt_timeout():
-            session.authenticate(key_type, management_key)
+            session.authenticate(management_key)
     except Exception:
         raise CliFail("Authentication with management key failed.")
 

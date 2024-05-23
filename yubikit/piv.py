@@ -62,7 +62,7 @@ from cryptography.hazmat.backends import default_backend
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum, unique
-from typing import Optional, Union, Type, cast
+from typing import Optional, Union, Type, cast, overload
 
 import warnings
 import logging
@@ -515,6 +515,11 @@ class PivSession:
         self.protocol.enable_touch_workaround(self.version)
         if self.version >= (4, 0, 0):
             self.protocol.apdu_format = ApduFormat.EXTENDED
+
+        try:
+            self._management_key_type = self.get_management_key_metadata().key_type
+        except NotSupportedError:
+            self._management_key_type = MANAGEMENT_KEY_TYPE.TDES
         self._current_pin_retries = 3
         self._max_pin_retries = 3
         logger.debug(f"PIV session initialized (version={self.version})")
@@ -522,6 +527,10 @@ class PivSession:
     @property
     def version(self) -> Version:
         return self._version
+
+    @property
+    def management_key_type(self) -> MANAGEMENT_KEY_TYPE:
+        return self._management_key_type
 
     def reset(self) -> None:
         logger.debug("Preparing PIV reset")
@@ -565,15 +574,41 @@ class PivSession:
 
         logger.info("PIV application data reset performed")
 
+    @overload
+    def authenticate(self, management_key: bytes) -> None:
+        ...
+
+    @overload
     def authenticate(
         self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
     ) -> None:
+        ...
+
+    def authenticate(self, *args, **kwargs) -> None:
         """Authenticate to PIV with management key.
 
-        :param key_type: The management key type.
-        :param management_key: The management key in raw bytes.
+        :param bytes management_key: The management key in raw bytes.
         """
-        key_type = MANAGEMENT_KEY_TYPE(key_type)
+        key_type = kwargs.get("key_type")
+        management_key = kwargs.get("management_key")
+        if len(args) == 2:
+            key_type, management_key = args
+        elif len(args) == 1:
+            management_key = args[0]
+        else:
+            key_type = kwargs.get("key_type")
+            management_key = kwargs.get("management_key")
+        if key_type:
+            warnings.warn(
+                "Deprecated: call authenticate() without passing management_key_type.",
+                DeprecationWarning,
+            )
+            if self.management_key_type != key_type:
+                raise ValueError("Incorrect management key type")
+        if not isinstance(management_key, bytes):
+            raise TypeError("management_key must be bytes")
+
+        key_type = self.management_key_type
         logger.debug(f"Authenticating with key type: {key_type}")
         response = self.protocol.send_apdu(
             0,
@@ -634,6 +669,7 @@ class PivSession:
             0xFE if require_touch else 0xFF,
             int2bytes(key_type) + Tlv(SLOT_CARD_MANAGEMENT, management_key),
         )
+        self._management_key_type = key_type
         logger.info("Management key set")
 
     def verify_pin(self, pin: str) -> None:

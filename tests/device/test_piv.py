@@ -94,20 +94,13 @@ def keys(session, info, default_keys):
         )
         session.change_pin(default_keys.pin, new_keys.pin)
         session.change_puk(default_keys.puk, new_keys.puk)
-        session.authenticate(mgm_key_type(session), default_keys.mgmt)
-        session.set_management_key(mgm_key_type(session), new_keys.mgmt)
+        session.authenticate(default_keys.mgmt)
+        session.set_management_key(session.management_key_type, new_keys.mgmt)
         reset_state(session)
 
         yield new_keys
     else:
         yield default_keys
-
-
-def mgm_key_type(session):
-    try:
-        return session.get_management_key_metadata().key_type
-    except NotSupportedError:
-        return MANAGEMENT_KEY_TYPE.TDES
 
 
 def not_roca(version):
@@ -121,12 +114,12 @@ def reset_state(session):
 
 
 def assert_mgm_key_is(session, key):
-    session.authenticate(mgm_key_type(session), key)
+    session.authenticate(key)
 
 
 def assert_mgm_key_is_not(session, key):
     with pytest.raises(ApduError):
-        session.authenticate(mgm_key_type(session), key)
+        session.authenticate(key)
 
 
 def generate_key(
@@ -136,7 +129,7 @@ def generate_key(
     key_type=KEY_TYPE.ECCP256,
     pin_policy=PIN_POLICY.DEFAULT,
 ):
-    session.authenticate(mgm_key_type(session), keys.mgmt)
+    session.authenticate(keys.mgmt)
     key = session.generate_key(slot, key_type, pin_policy=pin_policy)
     reset_state(session)
     return key
@@ -163,7 +156,7 @@ def import_key(
     pin_policy=PIN_POLICY.DEFAULT,
 ):
     private_key = generate_sw_key(key_type)
-    session.authenticate(mgm_key_type(session), keys.mgmt)
+    session.authenticate(keys.mgmt)
     session.put_key(slot, private_key, pin_policy)
     reset_state(session)
     return private_key.public_key()
@@ -209,7 +202,7 @@ class TestCertificateSignatures:
 
         slot = SLOT.SIGNATURE
         public_key = import_key(session, keys, slot, key_type)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.verify_pin(keys.pin)
         cert = generate_self_signed_certificate(
             session, slot, public_key, "CN=alice", NOW, NOW, hash_algorithm
@@ -280,7 +273,7 @@ class TestKeyManagement:
         with pytest.raises(ApduError):
             session.delete_certificate(SLOT.AUTHENTICATION)
 
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.delete_certificate(SLOT.AUTHENTICATION)
 
     def test_generate_csr_works(self, session, keys):
@@ -312,7 +305,7 @@ class TestKeyManagement:
     @pytest.mark.parametrize("slot", (SLOT.SIGNATURE, SLOT.AUTHENTICATION))
     def test_generate_self_signed_certificate(self, session, slot, keys):
         public_key = generate_key(session, keys, slot)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.verify_pin(keys.pin)
         cert = generate_self_signed_certificate(
             session, slot, public_key, "CN=alice", NOW, NOW
@@ -330,7 +323,7 @@ class TestKeyManagement:
                 SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, touch_policy=TOUCH_POLICY.DEFAULT
             )
 
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.generate_key(SLOT.AUTHENTICATION, KEY_TYPE.ECCP256)
 
     def test_put_certificate_requires_authentication(self, session, keys):
@@ -338,13 +331,13 @@ class TestKeyManagement:
         with pytest.raises(ApduError):
             session.put_certificate(SLOT.AUTHENTICATION, cert)
 
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.put_certificate(SLOT.AUTHENTICATION, cert)
 
     def _test_put_key_pairing(self, session, keys, alg1, alg2):
         # Set up a key in the slot and create a certificate for it
         public_key = generate_key(session, keys, SLOT.AUTHENTICATION, key_type=alg1)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.verify_pin(keys.pin)
         cert = generate_self_signed_certificate(
             session, SLOT.AUTHENTICATION, public_key, "CN=test", NOW, NOW
@@ -395,12 +388,12 @@ class TestKeyManagement:
         with pytest.raises(ApduError):
             session.put_key(SLOT.AUTHENTICATION, private_key)
 
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, private_key)
 
     def test_get_certificate_does_not_require_authentication(self, session, keys):
         cert = get_test_cert()
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.put_certificate(SLOT.AUTHENTICATION, cert)
         reset_state(session)
 
@@ -409,7 +402,7 @@ class TestKeyManagement:
 
 class TestCompressedCertificate:
     def test_put_and_read_compressed_certificate(self, session, keys):
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         cert = get_test_cert()
         session.put_certificate(SLOT.AUTHENTICATION, cert)
         session.put_certificate(SLOT.SIGNATURE, cert, compress=True)
@@ -430,19 +423,19 @@ class TestManagementKeyReadOnly:
     """
 
     def test_authenticate_twice_does_not_throw(self, session, keys):
-        session.authenticate(mgm_key_type(session), keys.mgmt)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
+        session.authenticate(keys.mgmt)
 
     def test_reset_resets_has_stored_key_flag(self, session, keys):
         pivman = get_pivman_data(session)
         assert not pivman.has_stored_key
 
         session.verify_pin(keys.pin)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         pivman_set_mgm_key(
             session,
             NON_DEFAULT_MANAGEMENT_KEY,
-            mgm_key_type(session),
+            session.management_key_type,
             store_on_device=True,
         )
 
@@ -465,7 +458,7 @@ class TestManagementKeyReadOnly:
     def test_set_mgm_key_does_not_change_key_if_not_authenticated(self, session, keys):
         with pytest.raises(ApduError):
             session.set_management_key(
-                mgm_key_type(session), NON_DEFAULT_MANAGEMENT_KEY
+                session.management_key_type, NON_DEFAULT_MANAGEMENT_KEY
             )
         assert_mgm_key_is(session, keys.mgmt)
 
@@ -473,12 +466,12 @@ class TestManagementKeyReadOnly:
     def test_set_stored_mgm_key_does_not_destroy_key_if_pin_not_verified(
         self, session, keys
     ):
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         with pytest.raises(ApduError):
             pivman_set_mgm_key(
                 session,
                 NON_DEFAULT_MANAGEMENT_KEY,
-                mgm_key_type(session),
+                session.management_key_type,
                 store_on_device=True,
             )
 
@@ -492,19 +485,21 @@ class TestManagementKeyReadWrite:
     """
 
     def test_set_mgm_key_changes_mgm_key(self, session, keys):
-        session.authenticate(mgm_key_type(session), keys.mgmt)
-        session.set_management_key(mgm_key_type(session), NON_DEFAULT_MANAGEMENT_KEY)
+        session.authenticate(keys.mgmt)
+        session.set_management_key(
+            session.management_key_type, NON_DEFAULT_MANAGEMENT_KEY
+        )
 
         assert_mgm_key_is_not(session, keys.mgmt)
         assert_mgm_key_is(session, NON_DEFAULT_MANAGEMENT_KEY)
 
     def test_set_stored_mgm_key_succeeds_if_pin_is_verified(self, session, keys):
         session.verify_pin(keys.pin)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         pivman_set_mgm_key(
             session,
             NON_DEFAULT_MANAGEMENT_KEY,
-            mgm_key_type(session),
+            session.management_key_type,
             store_on_device=True,
         )
 
@@ -637,7 +632,7 @@ class TestUnblockPin:
 
         reset_state(session)
 
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         # Fails with only management key (requirement added in 0.1.3)
         if version >= (0, 1, 3):
             with pytest.raises(ApduError):
@@ -653,7 +648,7 @@ class TestUnblockPin:
         puk_tries = 7
 
         session.verify_pin(keys.pin)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.set_pin_attempts(pin_tries, puk_tries)
 
         reset_state(session)
@@ -686,7 +681,7 @@ class TestMetadata:
         assert data.default_value is True
         assert data.touch_policy is TOUCH_POLICY.NEVER
 
-        session.authenticate(mgm_key_type(session), DEFAULT_MANAGEMENT_KEY)
+        session.authenticate(DEFAULT_MANAGEMENT_KEY)
         session.set_management_key(
             MANAGEMENT_KEY_TYPE.AES192, NON_DEFAULT_MANAGEMENT_KEY
         )
@@ -747,7 +742,7 @@ class TestMetadata:
     def test_slot_metadata_put(self, session, info, keys, key, slot, pin_policy):
         key_type = KEY_TYPE.from_public_key(key.public_key())
         skip_unsupported_key_type(key_type, info, pin_policy)
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.put_key(slot, key)
         data = session.get_slot_metadata(slot)
 
@@ -772,7 +767,7 @@ class TestMoveAndDelete:
 
     def test_move_key(self, session, keys):
         key = ec.generate_private_key(ec.SECP256R1(), default_backend())
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, key)
         data_a = session.get_slot_metadata(SLOT.AUTHENTICATION)
 
@@ -785,7 +780,7 @@ class TestMoveAndDelete:
 
     def test_delete_key(self, session, keys):
         key = ec.generate_private_key(ec.SECP256R1(), default_backend())
-        session.authenticate(mgm_key_type(session), keys.mgmt)
+        session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, key)
         session.get_slot_metadata(SLOT.AUTHENTICATION)
 
