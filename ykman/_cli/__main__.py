@@ -277,7 +277,7 @@ def require_device(connection_types, serial=None):
     help="specify private key and certificate chain for secure messaging, "
     "can be used multiple times to provide key and certificates in multiple "
     "files (private key, certificates in leaf-last order), OR SCP03 keys in hex "
-    "(K-ENC K-MAC [K-DEK])",
+    " separated by colon (:) K-ENC:K-MAC[:K-DEK]",
 )
 @click.option(
     "-p",
@@ -360,7 +360,7 @@ def cli(
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
 
-    use_scp = bool(scp_sd or scp_cred or scp_ca)
+    use_scp = bool(any(scp_sd) or scp_cred or scp_ca)
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     # Commands that don't directly act on a key
@@ -413,9 +413,12 @@ def cli(
             else:
                 ca = None
 
-            re_hex_keys = re.compile(r"^[0-9a-fA-F]{32}$")
-            if all(re_hex_keys.match(k) for k in scp_cred) and 2 <= len(scp_cred) <= 3:
-                scp03_keys = StaticKeys(*(bytes.fromhex(k) for k in scp_cred))
+            key_fmt = r"[0-9a-fA-F]{32}"
+            re_hex_keys = re.compile(rf"^{key_fmt}:{key_fmt}(:{key_fmt})?$")
+            if len(scp_cred) == 1 and re_hex_keys.match(scp_cred[0]):
+                scp03_keys = StaticKeys(
+                    *(bytes.fromhex(k) for k in scp_cred[0].split(":"))
+                )
                 scp11_creds = None
             else:
                 f = click.File("rb")
