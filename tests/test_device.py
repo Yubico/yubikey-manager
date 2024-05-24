@@ -16,7 +16,7 @@ def info(form_factor):
         serial=None,
         version=Version(5, 3, 0),
         form_factor=form_factor,
-        supported_capabilities={TRANSPORT.USB: 0xFF},  # type: ignore
+        supported_capabilities={TRANSPORT.USB: CAPABILITY(0xFF)},  # type: ignore
         is_locked=False,
         is_fips=False,
     )
@@ -24,7 +24,7 @@ def info(form_factor):
 
 def info_nfc(form_factor):
     with_nfc = info(form_factor)
-    with_nfc.supported_capabilities[TRANSPORT.NFC] = 0xFF
+    with_nfc.supported_capabilities[TRANSPORT.NFC] = CAPABILITY(0xFF)
     return with_nfc
 
 
@@ -37,8 +37,14 @@ def test_yk5_formfactors():
     assert get_name(info_nfc(FORM_FACTOR.USB_C_KEYCHAIN), kt) == "YubiKey 5C NFC"
     assert get_name(info(FORM_FACTOR.USB_C_NANO), kt) == "YubiKey 5C Nano"
     assert get_name(info(FORM_FACTOR.USB_C_LIGHTNING), kt) == "YubiKey 5Ci"
-    assert get_name(info(FORM_FACTOR.USB_A_BIO), kt) == "YubiKey Bio"
-    assert get_name(info(FORM_FACTOR.USB_C_BIO), kt) == "YubiKey C Bio"
+    assert (
+        get_name(info(FORM_FACTOR.USB_A_BIO), kt)
+        == "YubiKey Bio - Multi-protocol Edition"
+    )
+    assert (
+        get_name(info(FORM_FACTOR.USB_C_BIO), kt)
+        == "YubiKey C Bio - Multi-protocol Edition"
+    )
     assert get_name(info(FORM_FACTOR.UNKNOWN), kt) == "YubiKey 5"
     assert get_name(info_nfc(FORM_FACTOR.UNKNOWN), kt) == "YubiKey 5 NFC"
 
@@ -84,8 +90,14 @@ def test_yk5_fips_formfactors():
     )
     assert get_name(fips(info(FORM_FACTOR.USB_C_NANO)), kt) == "YubiKey 5C Nano FIPS"
     assert get_name(fips(info(FORM_FACTOR.USB_C_LIGHTNING)), kt) == "YubiKey 5Ci FIPS"
-    assert get_name(fips(info(FORM_FACTOR.USB_A_BIO)), kt) == "YubiKey Bio FIPS"
-    assert get_name(fips(info(FORM_FACTOR.USB_C_BIO)), kt) == "YubiKey C Bio FIPS"
+    assert (
+        get_name(fips(info(FORM_FACTOR.USB_A_BIO)), kt)
+        == "YubiKey Bio - Multi-protocol Edition FIPS"
+    )
+    assert (
+        get_name(fips(info(FORM_FACTOR.USB_C_BIO)), kt)
+        == "YubiKey C Bio - Multi-protocol Edition FIPS"
+    )
     assert get_name(fips(info(FORM_FACTOR.UNKNOWN)), kt) == "YubiKey 5 FIPS"
     assert get_name(fips(info_nfc(FORM_FACTOR.UNKNOWN)), kt) == "YubiKey 5 NFC FIPS"
 
