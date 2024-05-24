@@ -38,6 +38,12 @@ INS_STORE_DATA = 0xE2
 INS_DELETE = 0xE4
 INS_GENERATE_KEY = 0xF1
 
+TAG_KEY_INFORMATION = 0xE0
+TAG_CARD_RECOGNITION_DATA = 0x66
+TAG_CA_KLOC_IDENTIFIERS = 0xFF33
+TAG_CA_KLCC_IDENTIFIERS = 0xFF34
+TAG_CERTIFICATE_STORE = 0xBF21
+
 
 @unique
 class KeyType(IntEnum):
@@ -111,27 +117,44 @@ class SecureDomainSession:
 
     def get_key_information(self) -> Mapping[KeyRef, Mapping[int, int]]:
         """Get information about the currently loaded keys."""
+        # 11.3.3.1.1 Key Information Template ('E0')
         keys = {}
-        for d in Tlv.parse_list(self.get_data(0xE0)):
+        for d in Tlv.parse_list(self.get_data(TAG_KEY_INFORMATION)):
             data = Tlv.unpack(0xC0, d)
             keys[KeyRef(data[:2])] = dict(zip(data[2::2], data[3::2]))
         return keys
 
     def get_card_recognition_data(self) -> bytes:
         """Get information about the card."""
-        return Tlv.unpack(0x73, self.get_data(0x66))
+        # 7.4.1.3 Card Recognition Data
+        return Tlv.unpack(0x73, self.get_data(TAG_CARD_RECOGNITION_DATA))
 
-    def get_supported_ca_identifiers(self) -> Mapping[KeyRef, bytes]:
-        """Get a list of the CA issuer Subject Key Identifiers for keys."""
-        logger.debug("Getting CA identifiers")
+    def get_supported_ca_identifiers(
+        self, kloc: bool = False, klcc: bool = False
+    ) -> Mapping[KeyRef, bytes]:
+        """Get a list of the CA issuer Subject Key Identifiers for keys.
+
+        Setting one of kloc or klcc to True will cause only those CAs to be returned.
+        By default, this will get both KLOC and KLCC CAs.
+
+        :param kloc: Get KLOC CAs.
+        :param klcc: Get KLCC CAs.
+        """
+        if not kloc and not klcc:
+            kloc = klcc = True
+        logger.debug(f"Getting CA identifiers KLOC={kloc}, KLCC={klcc}")
         data = b""
         # Combine CA list for KLCC and KLOC
-        for tag in (0xFF33, 0xFF34):
-            try:
-                data += self.get_data(tag)
-            except ApduError as e:
-                if e.sw != SW.REFERENCE_DATA_NOT_FOUND:
-                    raise
+        for fetch, tag in (
+            (kloc, TAG_CA_KLOC_IDENTIFIERS),
+            (klcc, TAG_CA_KLCC_IDENTIFIERS),
+        ):
+            if fetch:
+                try:
+                    data += self.get_data(tag)
+                except ApduError as e:
+                    if e.sw != SW.REFERENCE_DATA_NOT_FOUND:
+                        raise
         tlvs = Tlv.parse_list(data)
         return {
             KeyRef(tlvs[i + 1].value): tlvs[i].value for i in range(0, len(tlvs), 2)
@@ -147,7 +170,7 @@ class SecureDomainSession:
             return [
                 x509.load_der_x509_certificate(cert)
                 for cert in Tlv.parse_list(
-                    self.get_data(0xBF21, Tlv(0xA6, Tlv(0x83, key)))
+                    self.get_data(TAG_CERTIFICATE_STORE, Tlv(0xA6, Tlv(0x83, key)))
                 )
             ]
         except ApduError as e:
@@ -213,7 +236,7 @@ class SecureDomainSession:
         self.store_data(
             Tlv(0xA6, Tlv(0x83, key))
             + Tlv(
-                0xBF21,
+                TAG_CERTIFICATE_STORE,
                 b"".join(
                     c.public_bytes(serialization.Encoding.DER) for c in certificates
                 ),

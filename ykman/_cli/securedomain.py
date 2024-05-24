@@ -98,7 +98,7 @@ def securedomain(ctx):
 @click.pass_context
 def info(ctx):
     """
-    Display general status of the PIV application.
+    List keys in the Secure Domain of the YubiKey.
     """
     sd = ctx.obj["session"]
     data: List[Any] = []
@@ -109,9 +109,9 @@ def info(ctx):
         else:  # SCP11
             inner: Dict[str, Any] = {}
             if ref in cas:
-                inner["CA"] = ":".join(f"{b:02X}" for b in cas[ref])
+                inner["CA Key Identifier"] = ":".join(f"{b:02X}" for b in cas[ref])
             try:
-                inner["Chain"] = [
+                inner["Certificate chain"] = [
                     c.subject.rfc4514_string() for c in sd.get_certificate_bundle(ref)
                 ]
             except ApduError:
@@ -163,19 +163,38 @@ def _fname(fobj):
 
 
 @click_callback()
-def click_parse_ref(ctx, param, val):
+def click_parse_scp_ref(ctx, param, val):
     try:
         return KeyRef(*val)
     except AttributeError:
         raise ValueError(val)
 
 
+class ScpKidParamType(HexIntParamType):
+    name = "kid"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, int):
+            return value
+        try:
+            name = value.upper()[:-1] + value[-1].lower()
+            return ScpKid[name]
+        except KeyError:
+            try:
+                if value.lower().startswith("0x"):
+                    return int(value[2:], 16)
+                if ":" in value:
+                    return int(value.replace(":", ""), 16)
+                return int(value)
+            except ValueError:
+                self.fail(f"{value!r} is not a valid integer", param, ctx)
+
+
 click_key_argument = click.argument(
     "key",
     metavar="KID KVN",
-    type=HexIntParamType(),
-    nargs=2,
-    callback=click_parse_ref,
+    type=(ScpKidParamType(), HexIntParamType()),
+    callback=click_parse_scp_ref,
 )
 
 
@@ -350,6 +369,16 @@ def delete_key(ctx, key):
 @click_key_argument
 @click.argument("serials", nargs=-1, type=HexIntParamType())
 def set_allowlist(ctx, key, serials):
+    """
+    Set an allowlist of certificate serial numbers for a key.
+
+    Each certificate in the chain used when authenticating an SCP11a/c session will be
+    checked and rejected if their serial number is not in this allowlist.
+
+    \b
+    KID KVN     key reference to set the allowlist for
+    SERIALS     serial numbers of certificates to allow (space separated)
+    """
     _require_auth(ctx)
     session = ctx.obj["session"]
 

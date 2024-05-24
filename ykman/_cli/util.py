@@ -333,10 +333,18 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
 
 
 def find_scp11_params(
-    connection: SmartCardConnection, kid: ScpKid, kvn: int, ca: Optional[bytes] = None
+    connection: SmartCardConnection, kid: int, kvn: int, ca: Optional[bytes] = None
 ) -> Scp11KeyParams:
     scp = SecureDomainSession(connection)
     if not kvn:
+        if ca:
+            # Find by CA
+            for ref, ca_check in scp.get_supported_ca_identifiers(klcc=True).items():
+                if ca_check == ca:
+                    if not kid or ref.kid == kid:
+                        kid, kvn = ref
+                        break
+        # Find any matching KID
         for ref in scp.get_key_information().keys():
             if ref.kid == kid:
                 kvn = ref.kvn

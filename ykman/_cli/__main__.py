@@ -57,7 +57,6 @@ from .util import (
     HexIntParamType,
     CliFail,
     pretty_print,
-    click_callback,
     click_prompt,
     find_scp11_params,
     organize_scp11_certificates,
@@ -73,7 +72,7 @@ from .aliases import apply_aliases
 from .apdu import apdu
 from .script import run_script
 from .hsmauth import hsmauth
-from .securedomain import securedomain
+from .securedomain import securedomain, click_parse_scp_ref, ScpKidParamType
 
 from cryptography.exceptions import InvalidSignature
 from dataclasses import replace
@@ -82,6 +81,7 @@ import click.shell_completion
 import ctypes
 import time
 import sys
+import re
 
 import logging
 
@@ -215,25 +215,6 @@ def require_device(connection_types, serial=None):
         )
 
 
-@click_callback()
-def parse_scp_keys(ctx, param, val):
-    try:
-        keys = [bytes.fromhex(v) for v in val.split(":")]
-        if not all(len(k) == 16 for k in keys):
-            raise ValueError(
-                "SCP keys must be exactly 16 bytes (32 hexadecimal digits) long."
-            )
-        if len(keys) == 1:
-            return StaticKeys(keys[0], keys[0])
-        if 2 <= len(keys) <= 3:
-            return StaticKeys(*keys)
-        raise ValueError(
-            "Must provide 1-3 keys for K-ENC and K-MAC, and optionally K-DEK"
-        )
-    except Exception:
-        raise ValueError(val)
-
-
 @click_group(context_settings=CLICK_CONTEXT_SETTINGS)
 @click.option(
     "-d",
@@ -262,60 +243,48 @@ def parse_scp_keys(ctx, param, val):
     ],
 )
 @click.option(
-    "-s",
-    "--scp",
-    default=None,
-    type=EnumChoice(ScpKid),
-    metavar="KID",
-    help="SCP key identifier",
-)
-@click.option(
-    "-V",
-    "--scp-kvn",
-    default=0,
-    type=HexIntParamType(),
-    metavar="KVN",
-    help="SCP key version",
-)
-@click.option(
     "-t",
-    "--klcc-ca",
+    "--scp-ca",
     type=click.File("rb"),
     help="specify the CA to use to verify the SCP11 card key (CA-KLCC)",
 )
 @click.option(
-    "-k",
-    "--scp03-keys",
-    default=None,
-    callback=parse_scp_keys,
-    metavar="KEYS",
-    help="specify keys for secure messaging, K-ENC:K-MAC[:K-DEK]",
+    "-c",
+    "--scp-sd",
+    metavar="KID KVN",
+    type=(ScpKidParamType(), HexIntParamType()),
+    default=(0, 0),
+    callback=click_parse_scp_ref,
+    hidden="--full-help" not in sys.argv,
+    help="specify which key the YubiKey is using to authenticate",
 )
 @click.option(
     "-o",
-    "--scp11-oce-key",
+    "--scp-oce",
     metavar="KID KVN",
     type=HexIntParamType(),
     nargs=2,
     default=(0, 0),
-    hidden=True,
+    hidden="--full-help" not in sys.argv,
     help="specify which key the OCE is using to authenticate",
 )
 @click.option(
-    "-c",
-    "--scp11-cred",
-    metavar="FILE",
-    type=click.File("rb"),
+    "-s",
+    "--scp",
+    "scp_cred",
+    metavar="CRED",
     multiple=True,
     help="specify private key and certificate chain for secure messaging, "
     "can be used multiple times to provide key and certificates in multiple "
-    "files (private key, certificates in leaf-last order)",
+    "files (private key, certificates in leaf-last order), OR SCP03 keys in hex "
+    "(K-ENC K-MAC [K-DEK])",
 )
 @click.option(
     "-p",
-    "--scp11-cred-password",
+    "--scp-password",
+    "scp_cred_password",
     metavar="PASSWORD",
-    help="specify a password required to access the scp11-cred file",
+    help="specify a password required to access the --scp file, if needed",
 )
 @click.option(
     "-l",
@@ -358,13 +327,11 @@ def parse_scp_keys(ctx, param, val):
 def cli(
     ctx,
     device,
-    scp,
-    scp_kvn,
-    klcc_ca,
-    scp03_keys,
-    scp11_oce_key,
-    scp11_cred,
-    scp11_cred_password,
+    scp_ca,
+    scp_sd,
+    scp_oce,
+    scp_cred,
+    scp_cred_password,
     log_level,
     log_file,
     reader,
@@ -393,7 +360,7 @@ def cli(
     if reader and device:
         ctx.fail("--reader and --device options can't be combined.")
 
-    use_scp = bool(scp is not None or scp_kvn or scp03_keys or scp11_cred or klcc_ca)
+    use_scp = bool(scp_sd or scp_cred or scp_ca)
 
     subcmd = next(c for c in COMMANDS if c.name == ctx.invoked_subcommand)
     # Commands that don't directly act on a key
@@ -434,46 +401,60 @@ def cli(
             if SmartCardConnection not in connections:
                 raise CliFail("SCP can only be used with CCID commands")
 
-            if klcc_ca:
-                ca = klcc_ca.read()
+            scp_kid, scp_kvn = scp_sd
+            if scp_kid:
+                try:
+                    scp_kid = ScpKid(scp_kid)
+                except ValueError:
+                    raise CliFail(f"Invalid KID for card certificate: {scp_kid}")
+
+            if scp_ca:
+                ca = scp_ca.read()
             else:
                 ca = None
 
-            if scp is None:
+            re_hex_keys = re.compile(r"^[0-9a-fA-F]{32}$")
+            if all(re_hex_keys.match(k) for k in scp_cred) and 2 <= len(scp_cred) <= 3:
+                scp03_keys = StaticKeys(*(bytes.fromhex(k) for k in scp_cred))
+                scp11_creds = None
+            else:
+                f = click.File("rb")
+                scp11_creds = [f.convert(fn, None, ctx).read() for fn in scp_cred]
+                scp03_keys = None
+
+            if not scp_kid:
                 if scp03_keys:
-                    scp = ScpKid.SCP03
-                elif not scp11_cred:
-                    scp = ScpKid.SCP11b
+                    scp_kid = ScpKid.SCP03
+                elif not scp11_creds:
+                    scp_kid = ScpKid.SCP11b
 
-            if scp03_keys and scp != ScpKid.SCP03:
-                raise CliFail("--scp03-keys can only be used with SCP03")
+            if scp03_keys and scp_kid != ScpKid.SCP03:
+                raise CliFail("--scp with SCP03 keys can only be used with SCP03")
 
-            if scp == ScpKid.SCP03:
-                if klcc_ca:
-                    raise CliFail("--klcc-ca can only be used with SCP11")
-                if not scp03_keys:
-                    scp03_keys = StaticKeys.default()
+            if scp_kid == ScpKid.SCP03:
+                if scp_ca:
+                    raise CliFail("--scp-ca can only be used with SCP11")
 
                 def params_f(_):
                     return Scp03KeyParams(
-                        ref=KeyRef(ScpKid.SCP03, scp_kvn), keys=scp03_keys
+                        ref=KeyRef(ScpKid.SCP03, scp_kvn),
+                        keys=scp03_keys or StaticKeys.default(),
                     )
 
-            elif scp11_cred:
+            elif scp11_creds:
                 # SCP11 a/c
-                if scp not in (ScpKid.SCP11a, ScpKid.SCP11c, None):
-                    raise CliFail("--scp11-cred can only be used with SCP11 a/c")
+                if scp_kid not in (ScpKid.SCP11a, ScpKid.SCP11c, None):
+                    raise CliFail("--scp with file(s) can only be used with SCP11 a/c")
 
-                creds = [c.read() for c in scp11_cred]
-                first = creds.pop(0)
-                password = scp11_cred_password.encode() if scp11_cred_password else None
+                first = scp11_creds.pop(0)
+                password = scp_cred_password.encode() if scp_cred_password else None
 
                 while True:
                     try:
                         sk_oce_ecka = parse_private_key(first, password)
                         break
                     except InvalidPasswordError:
-                        if scp11_cred_password:
+                        if scp_cred_password:
                             raise CliFail("Wrong password to decrypt private key")
                         logger.debug("Error parsing key", exc_info=True)
                         password = click_prompt(
@@ -483,9 +464,9 @@ def cli(
                             show_default=False,
                         ).encode()
 
-                if creds:
+                if scp11_creds:
                     certificates = []
-                    for c in creds:
+                    for c in scp11_creds:
                         certificates.extend(parse_certificates(c, None))
                 else:
                     certificates = parse_certificates(first, password)
@@ -495,7 +476,8 @@ def cli(
                     certificates = list(inter) + [leaf]
 
                 def params_f(conn):
-                    if not scp:
+                    if not scp_kid:
+                        # TODO: Find key based on CA
                         # Check for SCP11a key, then SCP11c
                         try:
                             params = find_scp11_params(conn, ScpKid.SCP11a, scp_kvn, ca)
@@ -507,27 +489,26 @@ def cli(
                             except (ValueError, InvalidSignature):
                                 raise e
                     else:
-                        params = find_scp11_params(conn, scp, scp_kvn, ca)
+                        params = find_scp11_params(conn, scp_kid, scp_kvn, ca)
                     return replace(
                         params,
-                        oce_ref=KeyRef(*scp11_oce_key),
+                        oce_ref=KeyRef(*scp_oce),
                         sk_oce_ecka=sk_oce_ecka,
                         certificates=certificates,
                     )
 
             else:
                 # SCP11b
-                if scp not in (ScpKid.SCP11b, None):
-                    raise CliFail(f"{scp.name} requires --scp11-cred")
-                if any(scp11_oce_key):
-                    raise CliFail("SCP11b cannot be used with --scp11-oce-key")
+                if scp_kid not in (ScpKid.SCP11b, None):
+                    raise CliFail(f"{scp_kid.name} requires --scp")
+                if any(scp_oce):
+                    raise CliFail("SCP11b cannot be used with --scp-oce")
 
                 def params_f(conn):
                     return find_scp11_params(conn, ScpKid.SCP11b, scp_kvn, ca)
 
             connections = [SmartCardConnection]
 
-            # TODO: Use these
             ctx.obj.add_resolver("scp", lambda: params_f)
 
 
