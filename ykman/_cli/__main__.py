@@ -446,7 +446,7 @@ def cli(
 
             elif scp11_creds:
                 # SCP11 a/c
-                if scp_kid not in (ScpKid.SCP11a, ScpKid.SCP11c, None):
+                if scp_kid and scp_kid not in (ScpKid.SCP11a, ScpKid.SCP11c):
                     raise CliFail("--scp with file(s) can only be used with SCP11 a/c")
 
                 first = scp11_creds.pop(0)

@@ -273,7 +273,7 @@ class SecureDomainSession:
         )
         logger.info("CA issuer SKI stored")
 
-    def delete_key(self, kid: int, kvn: int, delete_last: bool = False) -> None:
+    def delete_key(self, kid: int = 0, kvn: int = 0, delete_last: bool = False) -> None:
         """Delete one (or more) keys.
 
         Requires OCE verification.

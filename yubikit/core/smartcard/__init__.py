@@ -42,6 +42,7 @@ from .scp import (
     Scp11KeyParams,
     INS_EXTERNAL_AUTHENTICATE,
 )
+from yubikit.logging import LOG_LEVEL
 from enum import Enum, IntEnum, unique
 from time import time
 from typing import Tuple
@@ -264,6 +265,7 @@ class ScpProcessor(ChainedResponseProcessor):
         cla |= 0x04
 
         if encrypt:
+            logger.log(LOG_LEVEL.TRAFFIC, "Plaintext data: %s", data.hex())
             data = self._state.encrypt(data)
 
         # Calculate and add MAC to data
@@ -278,6 +280,7 @@ class ScpProcessor(ChainedResponseProcessor):
             resp = self._state.unmac(resp, sw)
             if resp:
                 resp = self._state.decrypt(resp)
+                logger.log(LOG_LEVEL.TRAFFIC, "Plaintext resp: %s", resp.hex())
 
         return resp, sw
 

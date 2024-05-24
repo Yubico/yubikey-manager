@@ -88,7 +88,7 @@ def securedomain(ctx):
     ctx.obj["authenticated"] = (
         isinstance(scp_params, Scp03KeyParams)
         or isinstance(scp_params, Scp11KeyParams)
-        and scp_params.ref.kid in (ScpKid.SCP11a, ScpKid.SCP11c)
+        and scp_params.ref.kid == ScpKid.SCP11a
     )
 
     ctx.obj["session"] = session
