@@ -244,7 +244,7 @@ class SecureDomainSession:
         )
         logger.info("Certificate bundle stored")
 
-    def store_allow_list(self, key: KeyRef, serials: Sequence[int]) -> None:
+    def store_allowlist(self, key: KeyRef, serials: Sequence[int]) -> None:
         """Store which certificate serial numbers that can be used for a given key.
 
         Requires OCE verification.

@@ -382,4 +382,4 @@ def set_allowlist(ctx, key, serials):
     _require_auth(ctx)
     session = ctx.obj["session"]
 
-    session.set_allowlist(key, serials)
+    session.store_allowlist(key, serials)
