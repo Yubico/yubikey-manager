@@ -1,5 +1,6 @@
 import pytest
 
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
 from yubikit.hsmauth import (
@@ -24,8 +25,11 @@ NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex("11111111111111111111111111111112")
 @pytest.fixture
 @condition.capability(CAPABILITY.HSMAUTH)
 @condition.min_version(5, 4, 3)
-def session(ccid_connection):
-    hsmauth = HsmAuthSession(ccid_connection)
+def session(ccid_connection, transport, info, scp_params):
+    if transport == TRANSPORT.NFC and CAPABILITY.HSMAUTH in info.fips_capable:
+        hsmauth = HsmAuthSession(ccid_connection, scp_params)
+    else:
+        hsmauth = HsmAuthSession(ccid_connection)
     hsmauth.reset()
     yield hsmauth
 

@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding, ed25519, x25519
 
-from yubikit.core import NotSupportedError
+from yubikit.core import NotSupportedError, TRANSPORT
 from yubikit.core.smartcard import AID, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.piv import (
@@ -65,12 +65,19 @@ def get_test_key():
 
 
 @pytest.fixture
+def scp(info, transport, scp_params):
+    if transport == TRANSPORT.NFC and CAPABILITY.PIV in info.fips_capable:
+        return scp_params
+    return None
+
+
+@pytest.fixture
 @condition.capability(CAPABILITY.PIV)
-def session(ccid_connection):
-    piv = PivSession(ccid_connection)
+def session(ccid_connection, scp):
+    piv = PivSession(ccid_connection, scp)
     piv.reset()
     yield piv
-    reset_state(piv)
+    reset_state(piv, scp)
 
 
 class Keys(NamedTuple):
@@ -85,7 +92,7 @@ def default_keys():
 
 
 @pytest.fixture
-def keys(session, info, default_keys):
+def keys(session, info, default_keys, scp):
     if info.pin_complexity:
         new_keys = Keys(
             "12345679" if CAPABILITY.PIV in info.fips_capable else "123458",
@@ -96,7 +103,7 @@ def keys(session, info, default_keys):
         session.change_puk(default_keys.puk, new_keys.puk)
         session.authenticate(default_keys.mgmt)
         session.set_management_key(session.management_key_type, new_keys.mgmt)
-        reset_state(session)
+        reset_state(session, scp)
 
         yield new_keys
     else:
@@ -107,10 +114,12 @@ def not_roca(version):
     return not ((4, 2, 0) <= version < (4, 3, 5))
 
 
-def reset_state(session):
+def reset_state(session, scp_params):
     session.protocol.connection.connection.disconnect()
     session.protocol.connection.connection.connect()
     session.protocol.select(AID.PIV)
+    if scp_params:
+        session.protocol.init_scp(scp_params)
 
 
 def assert_mgm_key_is(session, key):
@@ -124,6 +133,7 @@ def assert_mgm_key_is_not(session, key):
 
 def generate_key(
     session,
+    scp,
     keys,
     slot=SLOT.AUTHENTICATION,
     key_type=KEY_TYPE.ECCP256,
@@ -131,7 +141,7 @@ def generate_key(
 ):
     session.authenticate(keys.mgmt)
     key = session.generate_key(slot, key_type, pin_policy=pin_policy)
-    reset_state(session)
+    reset_state(session, scp)
     return key
 
 
@@ -150,6 +160,7 @@ def generate_sw_key(key_type):
 
 def import_key(
     session,
+    scp,
     keys,
     slot=SLOT.AUTHENTICATION,
     key_type=KEY_TYPE.ECCP256,
@@ -158,7 +169,7 @@ def import_key(
     private_key = generate_sw_key(key_type)
     session.authenticate(keys.mgmt)
     session.put_key(slot, private_key, pin_policy)
-    reset_state(session)
+    reset_state(session, scp)
     return private_key.public_key()
 
 
@@ -196,12 +207,12 @@ class TestCertificateSignatures:
         "hash_algorithm", (hashes.SHA256, hashes.SHA384, hashes.SHA512)
     )
     def test_generate_self_signed_certificate(
-        self, info, session, key_type, hash_algorithm, keys
+        self, info, session, key_type, hash_algorithm, keys, scp
     ):
         skip_unsupported_key_type(key_type, info)
 
         slot = SLOT.SIGNATURE
-        public_key = import_key(session, keys, slot, key_type)
+        public_key = import_key(session, scp, keys, slot, key_type)
         session.authenticate(keys.mgmt)
         session.verify_pin(keys.pin)
         cert = generate_self_signed_certificate(
@@ -220,10 +231,12 @@ class TestDecrypt:
         "key_type",
         [KEY_TYPE.RSA1024, KEY_TYPE.RSA2048, KEY_TYPE.RSA3072, KEY_TYPE.RSA4096],
     )
-    def test_import_decrypt(self, session, info, key_type, keys):
+    def test_import_decrypt(self, session, info, key_type, keys, scp):
         skip_unsupported_key_type(key_type, info)
 
-        public_key = import_key(session, keys, SLOT.KEY_MANAGEMENT, key_type=key_type)
+        public_key = import_key(
+            session, scp, keys, SLOT.KEY_MANAGEMENT, key_type=key_type
+        )
         pt = os.urandom(32)
         ct = public_key.encrypt(pt, padding.PKCS1v15())
 
@@ -234,11 +247,13 @@ class TestDecrypt:
 
 class TestKeyAgreement:
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
-    def test_generate_ecdh(self, session, info, key_type, keys):
+    def test_generate_ecdh(self, session, info, key_type, keys, scp):
         skip_unsupported_key_type(key_type, info)
 
         e_priv = generate_sw_key(key_type)
-        public_key = generate_key(session, keys, SLOT.KEY_MANAGEMENT, key_type=key_type)
+        public_key = generate_key(
+            session, scp, keys, SLOT.KEY_MANAGEMENT, key_type=key_type
+        )
         if key_type == KEY_TYPE.X25519:
             args = (public_key,)
         else:
@@ -250,11 +265,13 @@ class TestKeyAgreement:
         assert shared1 == shared2
 
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
-    def test_import_ecdh(self, session, info, key_type, keys):
+    def test_import_ecdh(self, session, info, key_type, keys, scp):
         skip_unsupported_key_type(key_type, info)
 
         e_priv = generate_sw_key(key_type)
-        public_key = import_key(session, keys, SLOT.KEY_MANAGEMENT, key_type=key_type)
+        public_key = import_key(
+            session, scp, keys, SLOT.KEY_MANAGEMENT, key_type=key_type
+        )
         if key_type == KEY_TYPE.X25519:
             args = (public_key,)
         else:
@@ -267,8 +284,8 @@ class TestKeyAgreement:
 
 
 class TestKeyManagement:
-    def test_delete_certificate_requires_authentication(self, session, keys):
-        generate_key(session, keys, SLOT.AUTHENTICATION)
+    def test_delete_certificate_requires_authentication(self, session, keys, scp):
+        generate_key(session, scp, keys, SLOT.AUTHENTICATION)
 
         with pytest.raises(ApduError):
             session.delete_certificate(SLOT.AUTHENTICATION)
@@ -276,8 +293,8 @@ class TestKeyManagement:
         session.authenticate(keys.mgmt)
         session.delete_certificate(SLOT.AUTHENTICATION)
 
-    def test_generate_csr_works(self, session, keys):
-        public_key = generate_key(session, keys, SLOT.AUTHENTICATION)
+    def test_generate_csr_works(self, session, keys, scp):
+        public_key = generate_key(session, scp, keys, SLOT.AUTHENTICATION)
 
         session.verify_pin(keys.pin)
         csr = generate_csr(session, SLOT.AUTHENTICATION, public_key, "CN=alice")
@@ -288,9 +305,9 @@ class TestKeyManagement:
             == "alice"
         )
 
-    def test_generate_self_signed_certificate_requires_pin(self, session, keys):
+    def test_generate_self_signed_certificate_requires_pin(self, session, keys, scp):
         session.verify_pin(keys.pin)
-        public_key = generate_key(session, keys, SLOT.AUTHENTICATION)
+        public_key = generate_key(session, scp, keys, SLOT.AUTHENTICATION)
 
         with pytest.raises(ApduError):
             generate_self_signed_certificate(
@@ -303,8 +320,8 @@ class TestKeyManagement:
         )
 
     @pytest.mark.parametrize("slot", (SLOT.SIGNATURE, SLOT.AUTHENTICATION))
-    def test_generate_self_signed_certificate(self, session, slot, keys):
-        public_key = generate_key(session, keys, slot)
+    def test_generate_self_signed_certificate(self, session, slot, keys, scp):
+        public_key = generate_key(session, scp, keys, slot)
         session.authenticate(keys.mgmt)
         session.verify_pin(keys.pin)
         cert = generate_self_signed_certificate(
@@ -334,9 +351,11 @@ class TestKeyManagement:
         session.authenticate(keys.mgmt)
         session.put_certificate(SLOT.AUTHENTICATION, cert)
 
-    def _test_put_key_pairing(self, session, keys, alg1, alg2):
+    def _test_put_key_pairing(self, session, scp, keys, alg1, alg2):
         # Set up a key in the slot and create a certificate for it
-        public_key = generate_key(session, keys, SLOT.AUTHENTICATION, key_type=alg1)
+        public_key = generate_key(
+            session, scp, keys, SLOT.AUTHENTICATION, key_type=alg1
+        )
         session.authenticate(keys.mgmt)
         session.verify_pin(keys.pin)
         cert = generate_self_signed_certificate(
@@ -351,37 +370,49 @@ class TestKeyManagement:
         session.delete_certificate(SLOT.AUTHENTICATION)
 
         # Overwrite the key with one of the same type
-        generate_key(session, keys, SLOT.AUTHENTICATION, key_type=alg1)
+        generate_key(session, scp, keys, SLOT.AUTHENTICATION, key_type=alg1)
         session.verify_pin(keys.pin)
         assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 
         # Overwrite the key with one of a different type
-        generate_key(session, keys, SLOT.AUTHENTICATION, key_type=alg2)
+        generate_key(session, scp, keys, SLOT.AUTHENTICATION, key_type=alg2)
         session.verify_pin(keys.pin)
         assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
 
     @condition.check(not_roca)
     @condition.yk4_fips(False)
-    def test_put_certificate_verifies_key_pairing_rsa1024(self, session, keys, info):
+    def test_put_certificate_verifies_key_pairing_rsa1024(
+        self, session, keys, info, scp
+    ):
         if CAPABILITY.PIV in info.fips_capable:
             pytest.skip("RSA1024 not available on YubiKey FIPS")
-        self._test_put_key_pairing(session, keys, KEY_TYPE.RSA1024, KEY_TYPE.ECCP256)
+        self._test_put_key_pairing(
+            session, scp, keys, KEY_TYPE.RSA1024, KEY_TYPE.ECCP256
+        )
 
     @condition.check(not_roca)
-    def test_put_certificate_verifies_key_pairing_rsa2048(self, session, keys):
-        self._test_put_key_pairing(session, keys, KEY_TYPE.RSA2048, KEY_TYPE.ECCP256)
+    def test_put_certificate_verifies_key_pairing_rsa2048(self, session, keys, scp):
+        self._test_put_key_pairing(
+            session, scp, keys, KEY_TYPE.RSA2048, KEY_TYPE.ECCP256
+        )
 
     @condition.check(not_roca)
-    def test_put_certificate_verifies_key_pairing_eccp256_a(self, session, keys):
-        self._test_put_key_pairing(session, keys, KEY_TYPE.ECCP256, KEY_TYPE.RSA2048)
+    def test_put_certificate_verifies_key_pairing_eccp256_a(self, session, keys, scp):
+        self._test_put_key_pairing(
+            session, scp, keys, KEY_TYPE.ECCP256, KEY_TYPE.RSA2048
+        )
 
     @condition.min_version(4)
-    def test_put_certificate_verifies_key_pairing_eccp256_b(self, session, keys):
-        self._test_put_key_pairing(session, keys, KEY_TYPE.ECCP256, KEY_TYPE.ECCP384)
+    def test_put_certificate_verifies_key_pairing_eccp256_b(self, session, keys, scp):
+        self._test_put_key_pairing(
+            session, scp, keys, KEY_TYPE.ECCP256, KEY_TYPE.ECCP384
+        )
 
     @condition.min_version(4)
-    def test_put_certificate_verifies_key_pairing_eccp384(self, session, keys):
-        self._test_put_key_pairing(session, keys, KEY_TYPE.ECCP384, KEY_TYPE.ECCP256)
+    def test_put_certificate_verifies_key_pairing_eccp384(self, session, keys, scp):
+        self._test_put_key_pairing(
+            session, scp, keys, KEY_TYPE.ECCP384, KEY_TYPE.ECCP256
+        )
 
     def test_put_key_requires_authentication(self, session, keys):
         private_key = get_test_key()
@@ -391,11 +422,11 @@ class TestKeyManagement:
         session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, private_key)
 
-    def test_get_certificate_does_not_require_authentication(self, session, keys):
+    def test_get_certificate_does_not_require_authentication(self, session, keys, scp):
         cert = get_test_cert()
         session.authenticate(keys.mgmt)
         session.put_certificate(SLOT.AUTHENTICATION, cert)
-        reset_state(session)
+        reset_state(session, scp)
 
         assert session.get_certificate(SLOT.AUTHENTICATION)
 
@@ -426,7 +457,7 @@ class TestManagementKeyReadOnly:
         session.authenticate(keys.mgmt)
         session.authenticate(keys.mgmt)
 
-    def test_reset_resets_has_stored_key_flag(self, session, keys):
+    def test_reset_resets_has_stored_key_flag(self, session, keys, scp):
         pivman = get_pivman_data(session)
         assert not pivman.has_stored_key
 
@@ -442,7 +473,7 @@ class TestManagementKeyReadOnly:
         pivman = get_pivman_data(session)
         assert pivman.has_stored_key
 
-        reset_state(session)
+        reset_state(session, scp)
         session.reset()
 
         pivman = get_pivman_data(session)
@@ -519,8 +550,10 @@ def sign(session, slot, key_type, message):
 
 class TestOperations:
     @condition.min_version(4)
-    def test_sign_with_pin_policy_always_requires_pin_every_time(self, session, keys):
-        generate_key(session, keys, pin_policy=PIN_POLICY.ALWAYS)
+    def test_sign_with_pin_policy_always_requires_pin_every_time(
+        self, session, keys, scp
+    ):
+        generate_key(session, scp, keys, pin_policy=PIN_POLICY.ALWAYS)
 
         with pytest.raises(ApduError):
             sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
@@ -539,21 +572,21 @@ class TestOperations:
     @condition.yk4_fips(False)
     @condition.check(lambda info: CAPABILITY.PIV not in info.fips_capable)
     @condition.min_version(4)
-    def test_sign_with_pin_policy_never_does_not_require_pin(self, session, keys):
-        generate_key(session, keys, pin_policy=PIN_POLICY.NEVER)
+    def test_sign_with_pin_policy_never_does_not_require_pin(self, session, keys, scp):
+        generate_key(session, scp, keys, pin_policy=PIN_POLICY.NEVER)
         sig = sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
         assert sig
 
     @condition.yk4_fips(True)
-    def test_pin_policy_never_blocked_on_fips(self, session, keys):
+    def test_pin_policy_never_blocked_on_fips(self, session, keys, scp):
         with pytest.raises(NotSupportedError):
-            generate_key(session, keys, pin_policy=PIN_POLICY.NEVER)
+            generate_key(session, scp, keys, pin_policy=PIN_POLICY.NEVER)
 
     @condition.min_version(4)
     def test_sign_with_pin_policy_once_requires_pin_once_per_session(
-        self, session, keys
+        self, session, keys, scp
     ):
-        generate_key(session, keys, pin_policy=PIN_POLICY.ONCE)
+        generate_key(session, scp, keys, pin_policy=PIN_POLICY.ONCE)
 
         with pytest.raises(ApduError):
             sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
@@ -565,7 +598,7 @@ class TestOperations:
         sig = sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
         assert sig
 
-        reset_state(session)
+        reset_state(session, scp)
 
         with pytest.raises(ApduError):
             sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
@@ -577,8 +610,8 @@ class TestOperations:
         sig = sign(session, SLOT.AUTHENTICATION, KEY_TYPE.ECCP256, b"foo")
         assert sig
 
-    def test_signature_can_be_verified_by_public_key(self, session, keys):
-        public_key = generate_key(session, keys)
+    def test_signature_can_be_verified_by_public_key(self, session, keys, scp):
+        public_key = generate_key(session, scp, keys)
 
         signed_data = bytes(random.randint(0, 255) for i in range(32))
 
@@ -617,7 +650,7 @@ class TestUnblockPin:
         session.verify_pin(NON_DEFAULT_PIN)
 
     def test_set_pin_retries_requires_pin_and_mgm_key(
-        self, session, version, default_keys
+        self, session, version, default_keys, scp
     ):
         keys = default_keys
 
@@ -630,7 +663,7 @@ class TestUnblockPin:
         with pytest.raises(ApduError):
             session.set_pin_attempts(4, 4)
 
-        reset_state(session)
+        reset_state(session, scp)
 
         session.authenticate(keys.mgmt)
         # Fails with only management key (requirement added in 0.1.3)
@@ -642,7 +675,7 @@ class TestUnblockPin:
         session.verify_pin(keys.pin)
         session.set_pin_attempts(4, 4)
 
-    def test_set_pin_retries_sets_pin_and_puk_tries(self, session, default_keys):
+    def test_set_pin_retries_sets_pin_and_puk_tries(self, session, default_keys, scp):
         keys = default_keys
         pin_tries = 9
         puk_tries = 7
@@ -651,7 +684,7 @@ class TestUnblockPin:
         session.authenticate(keys.mgmt)
         session.set_pin_attempts(pin_tries, puk_tries)
 
-        reset_state(session)
+        reset_state(session, scp)
 
         assert session.get_pin_attempts() == pin_tries
         with pytest.raises(InvalidPinError) as ctx:
@@ -702,11 +735,11 @@ class TestMetadata:
             assert data.default_value is False
 
     @pytest.mark.parametrize("key_type", list(KEY_TYPE))
-    def test_slot_metadata_generate(self, session, info, keys, key_type):
+    def test_slot_metadata_generate(self, session, info, keys, key_type, scp):
         skip_unsupported_key_type(key_type, info)
 
         slot = SLOT.SIGNATURE
-        key = generate_key(session, keys, slot, key_type)
+        key = generate_key(session, scp, keys, slot, key_type)
         data = session.get_slot_metadata(slot)
 
         assert data.key_type == key_type

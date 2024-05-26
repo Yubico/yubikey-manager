@@ -1,9 +1,11 @@
 from ykman.device import list_all_devices, read_info
 from ykman.pcsc import list_devices
+from ykman._cli.util import find_scp11_params
 from yubikit.core import TRANSPORT, Version
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.smartcard.scp import ScpKid
 from functools import partial
 from . import condition
 
@@ -100,3 +102,11 @@ def ccid_connection(device, info):
             yield c
     else:
         pytest.skip("CCID connection not available")
+
+
+@pytest.fixture(scope=connection_scope)
+def scp_params(ccid_connection):
+    try:
+        return find_scp11_params(ccid_connection, ScpKid.SCP11b, 0)
+    except ValueError:
+        return None

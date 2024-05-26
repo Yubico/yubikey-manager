@@ -10,6 +10,7 @@ from yubikit.openpgp import (
     KdfNone,
 )
 from yubikit.management import CAPABILITY
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError, AID
 from . import condition
 from typing import NamedTuple
@@ -27,8 +28,11 @@ NON_DEFAULT_ADMIN_PIN = "12345670"
 
 @pytest.fixture
 @condition.capability(CAPABILITY.OPENPGP)
-def session(ccid_connection):
-    pgp = OpenPgpSession(ccid_connection)
+def session(ccid_connection, info, scp_params):
+    if ccid_connection.transport == TRANSPORT.NFC and fips_capable(info):
+        pgp = OpenPgpSession(ccid_connection, scp_params)
+    else:
+        pgp = OpenPgpSession(ccid_connection)
     pgp.reset()
     return pgp
 
@@ -36,12 +40,6 @@ def session(ccid_connection):
 class Keys(NamedTuple):
     pin: str
     admin: str
-
-
-def reset_state(session):
-    session.protocol.connection.connection.disconnect()
-    session.protocol.connection.connection.connect()
-    session.protocol.select(AID.OPENPGP)
 
 
 def not_roca(version):
@@ -60,7 +58,7 @@ def not_fips_capable(info):
 
 
 @pytest.fixture
-def keys(session, info):
+def keys(session, info, transport, scp_params):
     if fips_capable(info):
         new_keys = Keys(
             "12345679",
@@ -68,7 +66,12 @@ def keys(session, info):
         )
         session.change_pin(DEFAULT_PIN, new_keys.pin)
         session.change_admin(DEFAULT_ADMIN_PIN, new_keys.admin)
-        reset_state(session)
+
+        session.protocol.connection.connection.disconnect()
+        session.protocol.connection.connection.connect()
+        session.protocol.select(AID.OPENPGP)
+        if transport == TRANSPORT.NFC and scp_params:
+            session.protocol.init_scp(scp_params)
 
         yield new_keys
     else:
