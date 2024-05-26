@@ -131,6 +131,9 @@ def reset(ctx, force):
     This action will wipe all keys and restore factory settings for
     the Secure Domain on the YubiKey.
     """
+    if "scp" in ctx.obj:
+        raise CliFail("Reset must be performed without an active SCP session")
+
     force or click.confirm(
         "WARNING! This will delete all stored Secure Domain data and restore factory "
         "settings. Proceed?",
@@ -152,10 +155,7 @@ def keys():
 
 def _require_auth(ctx):
     if not ctx.obj["authenticated"]:
-        raise CliFail(
-            "This command requires authentication, "
-            "invoke ykman with --scp03-keys or --scp11-cred."
-        )
+        raise CliFail("This command requires authentication, invoke ykman with --scp.")
 
 
 def _fname(fobj):

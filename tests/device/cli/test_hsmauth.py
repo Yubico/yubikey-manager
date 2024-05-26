@@ -3,6 +3,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from yubikit.core import TRANSPORT
 from yubikit.management import CAPABILITY
 from yubikit.hsmauth import (
     TAG_LABEL,
@@ -113,15 +114,24 @@ def calculate_session_keys_apdu(label, context, credential_password):
 
 
 class TestCredentials:
-    def verify_credential_password(self, ykman_cli, credential_password, label):
+    def verify_credential_password(
+        self, ykman_cli, transport, info, credential_password, label
+    ):
         context = b"g\xfc\xf1\xfe\xb5\xf1\xd8\x83\xedv=\xbfI0\x90\xbb"
         apdu = calculate_session_keys_apdu(label, context, credential_password)
 
         # Try to calculate session keys using credential password
         # TODO: Use SCP if needed
-        ykman_cli("--scp", "scp11b", "apdu", "-a", "hsmauth", apdu)
+        if transport == TRANSPORT.NFC and CAPABILITY.HSMAUTH in info.fips_capable:
+            args = ("--scp-sd", "scp11b", "0")
+        else:
+            args = tuple()
 
-    def test_import_credential_symmetric(self, ykman_cli, management_key):
+        ykman_cli(*args, "apdu", "-a", "hsmauth", apdu)
+
+    def test_import_credential_symmetric(
+        self, ykman_cli, transport, info, management_key
+    ):
         ykman_cli(
             "hsmauth",
             "credentials",
@@ -136,11 +146,15 @@ class TestCredentials:
             "-m",
             management_key,
         )
-        self.verify_credential_password(ykman_cli, "12345679", "test-name-sym")
+        self.verify_credential_password(
+            ykman_cli, transport, info, "12345679", "test-name-sym"
+        )
         creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "test-name-sym" in creds
 
-    def test_import_credential_symmetric_generate(self, ykman_cli, management_key):
+    def test_import_credential_symmetric_generate(
+        self, ykman_cli, transport, info, management_key
+    ):
         output = ykman_cli(
             "hsmauth",
             "credentials",
@@ -152,10 +166,14 @@ class TestCredentials:
             "-m",
             management_key,
         ).output
-        self.verify_credential_password(ykman_cli, "12345679", "test-name-sym-gen")
+        self.verify_credential_password(
+            ykman_cli, transport, info, "12345679", "test-name-sym-gen"
+        )
         assert "Generated ENC and MAC keys" in output
 
-    def test_import_credential_symmetric_derived(self, ykman_cli, management_key):
+    def test_import_credential_symmetric_derived(
+        self, ykman_cli, transport, info, management_key
+    ):
         ykman_cli(
             "hsmauth",
             "credentials",
@@ -168,7 +186,9 @@ class TestCredentials:
             "-m",
             management_key,
         )
-        self.verify_credential_password(ykman_cli, "12345679", "test-name-sym-derived")
+        self.verify_credential_password(
+            ykman_cli, transport, info, "12345679", "test-name-sym-derived"
+        )
         creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "test-name-sym-derived" in creds
 
