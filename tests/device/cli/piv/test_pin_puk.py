@@ -13,7 +13,10 @@ import re
 class TestPin:
     def test_change_pin(self, ykman_cli, keys):
         ykman_cli("piv", "access", "change-pin", "-P", keys.pin, "-n", NON_DEFAULT_PIN)
-        ykman_cli("piv", "access", "change-pin", "-P", NON_DEFAULT_PIN, "-n", keys.pin)
+        with pytest.raises(SystemExit):
+            ykman_cli(
+                "piv", "access", "change-pin", "-P", keys.pin, "-n", NON_DEFAULT_PIN
+            )
 
     def test_change_pin_prompt(self, ykman_cli, keys):
         ykman_cli(
@@ -22,12 +25,13 @@ class TestPin:
             "change-pin",
             input=old_new_new(keys.pin, NON_DEFAULT_PIN),
         )
-        ykman_cli(
-            "piv",
-            "access",
-            "change-pin",
-            input=old_new_new(NON_DEFAULT_PIN, keys.pin),
-        )
+        with pytest.raises(SystemExit):
+            ykman_cli(
+                "piv",
+                "access",
+                "change-pin",
+                input=old_new_new(keys.pin, NON_DEFAULT_PIN),
+            )
 
 
 class TestPuk:
@@ -37,15 +41,10 @@ class TestPuk:
         ).output
         assert "New PUK set." in o1
 
-        o2 = ykman_cli(
-            "piv", "access", "change-puk", "-p", NON_DEFAULT_PUK, "-n", keys.puk
-        ).output
-        assert "New PUK set." in o2
-
         with pytest.raises(SystemExit):
             ykman_cli(
-                "piv", "access", "change-puk", "-p", NON_DEFAULT_PUK, "-n", keys.puk
-            )
+                "piv", "access", "change-puk", "-p", keys.puk, "-n", NON_DEFAULT_PUK
+            ).output
 
     def test_change_puk_prompt(self, ykman_cli, keys):
         ykman_cli(
@@ -54,12 +53,13 @@ class TestPuk:
             "change-puk",
             input=old_new_new(keys.puk, NON_DEFAULT_PUK),
         )
-        ykman_cli(
-            "piv",
-            "access",
-            "change-puk",
-            input=old_new_new(NON_DEFAULT_PUK, keys.puk),
-        )
+        with pytest.raises(SystemExit):
+            ykman_cli(
+                "piv",
+                "access",
+                "change-puk",
+                input=old_new_new(keys.puk, NON_DEFAULT_PUK),
+            )
 
     def test_unblock_pin(self, ykman_cli, keys):
         for _ in range(3):
@@ -83,7 +83,7 @@ class TestPuk:
             )
 
         o = ykman_cli(
-            "piv", "access", "unblock-pin", "-p", keys.puk, "-n", keys.pin
+            "piv", "access", "unblock-pin", "-p", keys.puk, "-n", NON_DEFAULT_PIN
         ).output
         assert "PIN unblocked" in o
         o = ykman_cli("piv", "info").output

@@ -319,7 +319,7 @@ class TestCredentials:
 
 
 class TestManagementKey:
-    def test_change_management_key(self, ykman_cli, management_key):
+    def test_change_management_password(self, ykman_cli, management_key):
         ykman_cli(
             "hsmauth",
             "access",
@@ -353,6 +353,7 @@ class TestManagementKey:
             management_key,
         )
 
+    @condition.check(lambda info: not info.pin_complexity)
     def test_change_management_key_generate(self, ykman_cli, management_key):
         if len(management_key) != 32:
             pytest.skip("string management key")
@@ -366,6 +367,14 @@ class TestManagementKey:
             "-g",
         ).output
 
-        assert re.match(
-            r"^Generated management key: [a-f0-9]{16}", output, re.MULTILINE
+        gen_key = re.search(r"[a-f0-9]{32}", output).group(0)
+
+        ykman_cli(
+            "hsmauth",
+            "access",
+            "change-management-password",
+            "-m",
+            gen_key,
+            "-n",
+            management_key,
         )

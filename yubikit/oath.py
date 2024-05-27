@@ -274,11 +274,12 @@ class OathSession:
 
         if scp_key_params:
             self.protocol.init_scp(scp_key_params)
+        self._scp_params = scp_key_params
 
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
-        self.protocol.enable_touch_workaround(self._version)
-        self._neo_unlock_workaround = self.version < (3, 0, 0)
+        self.protocol.enable_touch_workaround(self.version)
+        self._neo_unlock_workaround = not scp_key_params and self.version < (3, 0, 0)
         logger.debug(
             f"OATH session initialized (version={self.version}, "
             f"has_key={self._has_key})"
@@ -308,6 +309,8 @@ class OathSession:
         """Perform a factory reset on the OATH application."""
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         _, self._salt, self._challenge = _parse_select(self.protocol.select(AID.OATH))
+        if self._scp_params:
+            self.protocol.init_scp(self._scp_params)
         logger.info("OATH application data reset performed")
         self._has_key = False
         self._device_id = _get_device_id(self._salt)

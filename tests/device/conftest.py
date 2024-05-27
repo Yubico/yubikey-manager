@@ -42,6 +42,13 @@ def _device(pytestconfig):
     if version:
         info.version = Version.from_string(version)
 
+        # Monkey patch all parsing of Version to use the supplied value
+        def get_version(cls, data):
+            return info.version
+
+        Version.from_bytes = classmethod(get_version)
+        Version.from_string = classmethod(get_version)
+
     return dev, info
 
 
