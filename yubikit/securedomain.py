@@ -88,8 +88,7 @@ def _int2asn1(value: int) -> bytes:
 def _encrypt_cbc(key: bytes, data: bytes, iv: bytes = b"\0" * 16) -> bytes:
     encryptor = Cipher(
         algorithms.AES(key),
-        # TODO: modes.CBC(iv),
-        modes.ECB(),  # nosec
+        modes.CBC(iv),
         backend=default_backend(),
     ).encryptor()
     return encryptor.update(data) + encryptor.finalize()
