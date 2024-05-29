@@ -29,6 +29,7 @@ from binascii import a2b_hex
 from yubikit.core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
+    ApduFormat,
     ApduError,
     SW,
     AID,
@@ -102,9 +103,10 @@ def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
     required=False,
     help="select application",
 )
+@click.option("--short", is_flag=True, help="use short APDUs instead of extended")
 @click.argument("apdu", nargs=-1)
 @click.option("-s", "--send-apdu", multiple=True, help="provide full APDUs")
-def apdu(ctx, no_pretty, app, apdu, send_apdu):
+def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
     """
     Execute arbitrary APDUs.
     Provide APDUs as a hex encoded, space-separated list using the following syntax:
@@ -149,6 +151,11 @@ def apdu(ctx, no_pretty, app, apdu, send_apdu):
             params = scp_resolve(conn)
         else:
             params = None
+
+        if not short:
+            protocol.apdu_format = ApduFormat.EXTENDED
+        elif params:
+            ctx.fail("--short cannot be used with SCP")
 
         if app:
             is_first = False
