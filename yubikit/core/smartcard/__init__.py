@@ -78,7 +78,11 @@ class ApduError(CommandError):
         self.sw = sw
 
     def __str__(self):
-        return f"APDU error: SW=0x{self.sw:04x}"
+        try:
+            name = SW(self.sw).name
+            return f"APDU error: SW=0x{self.sw:04x} ({name})"
+        except ValueError:
+            return f"APDU error: SW=0x{self.sw:04x}"
 
 
 @unique

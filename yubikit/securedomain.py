@@ -283,6 +283,12 @@ class SecureDomainSession:
         if not kid and not kvn:
             raise ValueError("Must specify at least one of kid, kvn.")
 
+        if kid in (1, 2, 3):
+            # SCP03 keys can only be deleted by KVN
+            if kvn:
+                kid = 0
+            else:
+                raise ValueError("SCP03 keys can only be deleted by KVN")
         logger.debug(f"Deleting keys with KID={kid or 'ANY'}, KVN={kvn or 'ANY'}")
         data = b""
         if kid:

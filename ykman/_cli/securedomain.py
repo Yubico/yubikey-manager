@@ -221,7 +221,12 @@ def generate_key(ctx, key, public_key_output):
 
     session = ctx.obj["session"]
 
-    public_key = session.generate_ec_key(key)
+    try:
+        public_key = session.generate_ec_key(key)
+    except ApduError as e:
+        if e.sw == SW.NO_SPACE:
+            raise CliFail("No space left for SCP keys")
+        raise
 
     key_encoding = serialization.Encoding.PEM
     public_key_output.write(
@@ -303,7 +308,12 @@ def import_key(ctx, key, input, password):
     else:
         raise CliFail(f"Invalid value for KID={key.kid:x}")
 
-    session.put_key(key, target)
+    try:
+        session.put_key(key, target)
+    except ApduError as e:
+        if e.sw == SW.NO_SPACE:
+            raise CliFail("No space left for SCP keys")
+        raise
 
     # If we have a bundle of intermediate certificates, store them
     if bundle:
@@ -344,7 +354,8 @@ def export(ctx, key, certificates_output):
 @keys.command("delete")
 @click.pass_context
 @click_key_argument
-def delete_key(ctx, key):
+@click_force_option
+def delete_key(ctx, key, force):
     """
     Delete a key or keyset.
 
@@ -356,11 +367,22 @@ def delete_key(ctx, key):
     """
     _require_auth(ctx)
     session = ctx.obj["session"]
+
+    force or click.confirm(
+        "WARNING! This will delete all matching SCP keys. Proceed?",
+        abort=True,
+        err=True,
+    )
+
     try:
         session.delete_key(key.kid, key.kvn)
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No key stored in {key}.")
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail(
+                "This would delete ALL SCP keys, use the reset command instead."
+            )
         raise
 
 
