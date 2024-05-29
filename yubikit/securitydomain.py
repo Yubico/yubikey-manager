@@ -94,13 +94,13 @@ def _encrypt_cbc(key: bytes, data: bytes, iv: bytes = b"\0" * 16) -> bytes:
     return encryptor.update(data) + encryptor.finalize()
 
 
-class SecureDomainSession:
+class SecurityDomainSession:
     """A session for managing SCP keys"""
 
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.SECURE_DOMAIN)
-        logger.debug("SecureDomain session initialized")
+        logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
         """Initialize SCP and authenticate the session.
@@ -111,7 +111,7 @@ class SecureDomainSession:
         self.protocol.init_scp(key_params)
 
     def get_data(self, tag: int, data: bytes = b"") -> bytes:
-        """Read data from the secure domain."""
+        """Read data from the security domain."""
         return self.protocol.send_apdu(0, INS_GET_DATA, tag >> 8, tag & 0xFF, data)
 
     def get_key_information(self) -> Mapping[KeyRef, Mapping[int, int]]:
@@ -178,7 +178,7 @@ class SecureDomainSession:
             raise
 
     def reset(self) -> None:
-        """Perform a factory reset of the Secure Domain.
+        """Perform a factory reset of the Security Domain.
 
         This will remove all keys and associated data, as well as restore the default
         SCP03 static keys, and generate a new (attestable) SCP11b key.
@@ -216,7 +216,7 @@ class SecureDomainSession:
         logger.info("SCP keys reset")
 
     def store_data(self, data: bytes) -> None:
-        """Stores data in the secure domain.
+        """Stores data in the security domain.
 
         Requires OCE verification.
         """

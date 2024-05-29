@@ -72,7 +72,7 @@ from .aliases import apply_aliases
 from .apdu import apdu
 from .script import run_script
 from .hsmauth import hsmauth
-from .securedomain import securedomain, click_parse_scp_ref, ScpKidParamType
+from .securitydomain import securitydomain, click_parse_scp_ref, ScpKidParamType
 
 from cryptography.exceptions import InvalidSignature
 from dataclasses import replace
@@ -583,7 +583,7 @@ COMMANDS = (
     apdu,
     run_script,
     hsmauth,
-    securedomain,
+    securitydomain,
 )
 
 

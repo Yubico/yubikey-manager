@@ -27,7 +27,7 @@ def test_scp11a(ykman_cli):
     ykman_cli("--scp-sd", "1", "0", "sd", "keys", "import", "scp03", "2", keys)
 
     # Delete SCP11b key, generate SCP11a key
-    ykman_cli("--scp", keys, "sd", "keys", "delete", "scp11b", "0")
+    ykman_cli("--scp", keys, "sd", "keys", "delete", "--force", "scp11b", "0")
     ykman_cli("--scp", keys, "sd", "keys", "generate", "scp11a", "3", "-")
 
     # Import OCE CA
@@ -92,6 +92,7 @@ def test_scp11a(ykman_cli):
             "sd",
             "keys",
             "delete",
+            "--force",
             "0x10",
             "3",
         )

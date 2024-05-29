@@ -34,7 +34,7 @@ from yubikit.core.smartcard.scp import (
     StaticKeys,
 )
 from yubikit.management import CAPABILITY
-from yubikit.securedomain import SecureDomainSession
+from yubikit.securitydomain import SecurityDomainSession
 
 from ..util import (
     parse_private_key,
@@ -70,16 +70,16 @@ logger = logging.getLogger(__name__)
 )
 @click.pass_context
 @click_postpone_execution
-def securedomain(ctx):
+def securitydomain(ctx):
     """
-    Manage the Secure Domain application, which holds keys for SCP.
+    Manage the Security Domain application, which holds keys for SCP.
     """
 
     dev = ctx.obj["device"]
     conn = dev.open_connection(SmartCardConnection)
     ctx.call_on_close(conn.close)
 
-    session = SecureDomainSession(conn)
+    session = SecurityDomainSession(conn)
     scp_params = get_scp_params(ctx, CAPABILITY(-1), conn)
 
     if scp_params:
@@ -94,11 +94,11 @@ def securedomain(ctx):
     ctx.obj["session"] = session
 
 
-@securedomain.command()
+@securitydomain.command()
 @click.pass_context
 def info(ctx):
     """
-    List keys in the Secure Domain of the YubiKey.
+    List keys in the Security Domain of the YubiKey.
     """
     sd = ctx.obj["session"]
     data: List[Any] = []
@@ -121,34 +121,34 @@ def info(ctx):
     click.echo("\n".join(pretty_print(data)))
 
 
-@securedomain.command()
+@securitydomain.command()
 @click.pass_context
 @click_force_option
 def reset(ctx, force):
     """
-    Reset all Secure Domain data.
+    Reset all Security Domain data.
 
     This action will wipe all keys and restore factory settings for
-    the Secure Domain on the YubiKey.
+    the Security Domain on the YubiKey.
     """
     if "scp" in ctx.obj:
         raise CliFail("Reset must be performed without an active SCP session")
 
     force or click.confirm(
-        "WARNING! This will delete all stored Secure Domain data and restore factory "
+        "WARNING! This will delete all stored Security Domain data and restore factory "
         "settings. Proceed?",
         abort=True,
         err=True,
     )
 
-    click.echo("Resetting Secure Domain data...")
+    click.echo("Resetting Security Domain data...")
     ctx.obj["session"].reset()
 
-    click.echo("Success! Secure Domain data has been cleared from the YubiKey.")
+    click.echo("Success! Security Domain data has been cleared from the YubiKey.")
     click.echo("Your YubiKey now has the default SCP key set")
 
 
-@securedomain.group()
+@securitydomain.group()
 def keys():
     """Manage SCP keys."""
 
