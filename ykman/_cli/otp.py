@@ -57,11 +57,8 @@ from .util import (
     EnumChoice,
     is_yk4_fips,
 )
-from .. import __version__
 from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
-    _PrepareUploadFailed,
-    _prepare_upload_key,
     is_in_fips_mode,
     generate_static_pw,
     parse_oath_key,
@@ -76,7 +73,6 @@ import logging
 import os
 import struct
 import click
-import webbrowser
 
 
 logger = logging.getLogger(__name__)
@@ -366,7 +362,7 @@ def delete(ctx, slot, force):
     "--upload",
     is_flag=True,
     required=False,
-    help="upload credential to YubiCloud (opens a browser, can't be used with --force)",
+    hidden=True,
 )
 @click.option(
     "-O",
@@ -395,18 +391,22 @@ def yubiotp(
     Program a Yubico OTP credential.
     """
 
-    info = ctx.obj["info"]
     session = _get_session(ctx)
     serial = None
+
+    if upload:
+        raise CliFail(
+            "Automated YubiCloud upload support has been ended. "
+            "You can manually upload a credential by saving it as a CSV file "
+            "(use -O/--config-output) and then submitting it to "
+            "https://upload.yubico.com"
+        )
 
     if public_id and serial_public_id:
         ctx.fail("Invalid options: --public-id conflicts with --serial-public-id.")
 
     if private_id and generate_private_id:
         ctx.fail("Invalid options: --private-id conflicts with --generate-public-id.")
-
-    if upload and force:
-        ctx.fail("Invalid options: --upload conflicts with --force.")
 
     if key and generate_key:
         ctx.fail("Invalid options: --key conflicts with --generate-key.")
@@ -461,23 +461,6 @@ def yubiotp(
             key = click_prompt("Enter secret key")
             key = bytes.fromhex(key)
 
-    if upload:
-        click.confirm("Upload credential to YubiCloud?", abort=True, err=True)
-
-        try:
-            upload_url = _prepare_upload_key(
-                key,
-                public_id,
-                private_id,
-                serial=info.serial,
-                user_agent="ykman/" + __version__,
-            )
-            click.echo("Upload to YubiCloud initiated successfully.")
-            logger.info("Initiated YubiCloud upload")
-        except _PrepareUploadFailed as e:
-            error_msg = "\n".join(e.messages())
-            raise CliFail("Upload to YubiCloud failed.\n" + error_msg)
-
     force or click.confirm(
         f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
     )
@@ -500,11 +483,6 @@ def yubiotp(
         csv = format_csv(serial, public_id, private_id, key, access_code)
         config_output.write(csv + "\n")
         logger.info(f"Configuration parameters written to {_fname(config_output)}")
-
-    if upload:
-        logger.info("Launching browser for YubiCloud upload")
-        click.echo("Opening upload form in browser: " + upload_url)
-        webbrowser.open_new_tab(upload_url)
 
 
 @otp.command()
