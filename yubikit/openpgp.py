@@ -37,7 +37,6 @@ from .core import (
 from .core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
-    ApduFormat,
     ApduError,
     AID,
     SW,
@@ -1015,9 +1014,7 @@ class OpenPgpSession:
 
         self._version = self._read_version()
 
-        self.protocol.enable_touch_workaround(self.version)
-        if not 0 < self.version[0] < 4:
-            self.protocol.apdu_format = ApduFormat.EXTENDED
+        self.protocol.configure(self.version)
 
         # Note: This value is cached!
         # Do not rely on contained information that can change!

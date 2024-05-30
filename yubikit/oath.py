@@ -281,7 +281,7 @@ class OathSession:
 
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
-        self.protocol.enable_touch_workaround(self.version)
+        self.protocol.configure(self.version)
         self._neo_unlock_workaround = not scp_key_params and self.version < (3, 0, 0)
         logger.debug(
             f"OATH session initialized (version={self.version}, "

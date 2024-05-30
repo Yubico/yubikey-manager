@@ -39,7 +39,6 @@ from .core.smartcard import (
     SW,
     AID,
     ApduError,
-    ApduFormat,
     SmartCardConnection,
     SmartCardProtocol,
     ScpKeyParams,
@@ -513,9 +512,7 @@ class PivSession:
         self._version = Version.from_bytes(
             self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0)
         )
-        self.protocol.enable_touch_workaround(self.version)
-        if self.version >= (4, 0, 0):
-            self.protocol.apdu_format = ApduFormat.EXTENDED
+        self.protocol.configure(self.version)
 
         try:
             self._management_key_type = self.get_management_key_metadata().key_type

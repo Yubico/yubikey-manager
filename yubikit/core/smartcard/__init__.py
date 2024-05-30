@@ -191,10 +191,16 @@ class ShortApduProcessor(ApduFormatProcessor):
 
 
 class ExtendedApduProcessor(ApduFormatProcessor):
+    def __init__(self, connection, max_apdu_size):
+        super().__init__(connection)
+        self._max_apdu_size = max_apdu_size
+
     def format_apdu(self, cla, ins, p1, p2, data, le):
         buf = struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
         if le:
             buf += struct.pack(">H", le)
+        if len(buf) > self._max_apdu_size:
+            raise NotSupportedError("APDU length exceeds YubiKey capability")
         return buf
 
 
@@ -205,12 +211,13 @@ class ChainedResponseProcessor(ApduProcessor):
     def __init__(
         self,
         connection: SmartCardConnection,
-        extended_apdus: bool = True,
+        extended_apdus: bool,
+        max_apdu_size: int,
         ins_send_remaining: int = INS_SEND_REMAINING,
     ):
         self.connection = connection
         self.processor = (
-            ExtendedApduProcessor(connection)
+            ExtendedApduProcessor(connection, max_apdu_size)
             if extended_apdus
             else ShortApduProcessor(connection)
         )
@@ -235,7 +242,9 @@ class TouchWorkaroundProcessor(ChainedResponseProcessor):
         connection: SmartCardConnection,
         ins_send_remaining: int = INS_SEND_REMAINING,
     ):
-        super().__init__(connection, ins_send_remaining=ins_send_remaining)
+        super().__init__(
+            connection, True, _MaxApduSize.YK4, ins_send_remaining=ins_send_remaining
+        )
         self._last_long_resp = 0.0
 
     def send_apdu(self, cla, ins, p1, p2, data, le):
@@ -260,9 +269,12 @@ class ScpProcessor(ChainedResponseProcessor):
         self,
         connection: SmartCardConnection,
         scp_state: ScpState,
+        max_apdu_size: int,
         ins_send_remaining: int = INS_SEND_REMAINING,
     ):
-        super().__init__(connection, ins_send_remaining=ins_send_remaining)
+        super().__init__(
+            connection, True, max_apdu_size, ins_send_remaining=ins_send_remaining
+        )
         self._state = scp_state
 
     def send_apdu(self, cla, ins, p1, p2, data, le, encrypt: bool = True):
@@ -289,6 +301,12 @@ class ScpProcessor(ChainedResponseProcessor):
         return resp, sw
 
 
+class _MaxApduSize(IntEnum):
+    NEO = 1390
+    YK4 = 2038
+    YK4_3 = 3062
+
+
 class SmartCardProtocol:
     """An implementation of the Smart Card protocol."""
 
@@ -298,10 +316,17 @@ class SmartCardProtocol:
         ins_send_remaining: int = INS_SEND_REMAINING,
     ):
         self.connection = smartcard_connection
+        self._max_apdu_size = _MaxApduSize.NEO
         self._apdu_format = ApduFormat.SHORT
         self._ins_send_remaining = ins_send_remaining
+        self._reset_processor()
+
+    def _reset_processor(self) -> None:
         self._processor = ChainedResponseProcessor(
-            self.connection, False, ins_send_remaining
+            self.connection,
+            self._apdu_format == ApduFormat.EXTENDED,
+            self._max_apdu_size,
+            self._ins_send_remaining,
         )
 
     @property
@@ -319,22 +344,44 @@ class SmartCardProtocol:
             return
         if value != ApduFormat.EXTENDED:
             raise ValueError(f"Cannot change to {value}")
-        self._processor = ChainedResponseProcessor(
-            self.connection, ins_send_remaining=self._ins_send_remaining
-        )
         self._apdu_format = value
+        self._reset_processor()
 
     def close(self) -> None:
         self.connection.close()
 
     def enable_touch_workaround(self, version: Version) -> None:
+        warnings.warn(
+            "Deprecated: use SmartCardProtocol.configure(version) instead.",
+            DeprecationWarning,
+        )
+        self._do_enable_touch_workaround(version)
+
+    def _do_enable_touch_workaround(self, version: Version) -> bool:
         if self.connection.transport == TRANSPORT.USB and (
             (4, 2, 0) <= version <= (4, 2, 6)
         ):
+            self._max_apdu_size = _MaxApduSize.YK4
             self._processor = TouchWorkaroundProcessor(
                 self.connection, self._ins_send_remaining
             )
             logger.debug("Touch workaround enabled")
+            return True
+        return False
+
+    def configure(self, version: Version) -> None:
+        """Configure the connection optimally for the given YubiKey version."""
+        if isinstance(self._processor, ScpProcessor):
+            return
+        if self._do_enable_touch_workaround(version):
+            return
+
+        if version[0] > 3:
+            self._apdu_format = ApduFormat.EXTENDED
+            self._max_apdu_size = (
+                _MaxApduSize.YK4_3 if version >= (4, 3) else _MaxApduSize.YK4
+            )
+            self._reset_processor()
 
     def send_apdu(
         self,
@@ -368,11 +415,7 @@ class SmartCardProtocol:
         :param aid: The YubiKey application AID value.
         """
         logger.debug(f"Selecting AID: {aid.hex()}")
-        self._processor = ChainedResponseProcessor(
-            self.connection,
-            self._apdu_format == ApduFormat.EXTENDED,
-            self._ins_send_remaining,
-        )
+        self._reset_processor()
 
         try:
             return self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid)
@@ -394,6 +437,9 @@ class SmartCardProtocol:
                 self._scp11_init(key_params)
             else:
                 raise ValueError("Unsupported ScpKeyParams")
+            self._apdu_format = ApduFormat.EXTENDED
+            self._max_apdu_size = _MaxApduSize.YK4_3
+            logger.info("SCP initialized")
         except ApduError as e:
             if e.sw == SW.CLASS_NOT_SUPPORTED:
                 raise NotSupportedError(
@@ -408,7 +454,9 @@ class SmartCardProtocol:
     def _scp03_init(self, key_params: Scp03KeyParams) -> None:
         logger.debug("Initializing SCP03")
         scp, host_cryptogram = ScpState.scp03_init(self.send_apdu, key_params)
-        processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
+        processor = ScpProcessor(
+            self.connection, scp, _MaxApduSize.YK4_3, self._ins_send_remaining
+        )
 
         # Send EXTERNAL AUTHENTICATE
         # P1 = C-DECRYPTION, R-ENCRYPTION, C-MAC, and R-MAC
@@ -416,12 +464,10 @@ class SmartCardProtocol:
             0x84, INS_EXTERNAL_AUTHENTICATE, 0x33, 0, host_cryptogram, 0, encrypt=False
         )
         self._processor = processor
-        self._apdu_format = ApduFormat.EXTENDED
-        logger.info("SCP03 initialized")
 
     def _scp11_init(self, key_params: Scp11KeyParams) -> None:
         logger.debug("Initializing SCP11")
         scp = ScpState.scp11_init(self.send_apdu, key_params)
-        self._processor = ScpProcessor(self.connection, scp, self._ins_send_remaining)
-        self._apdu_format = ApduFormat.EXTENDED
-        logger.info("SCP11 initialized")
+        self._processor = ScpProcessor(
+            self.connection, scp, _MaxApduSize.YK4_3, self._ins_send_remaining
+        )

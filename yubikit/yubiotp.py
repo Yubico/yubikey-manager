@@ -734,7 +734,7 @@ class YubiOtpSession:
                 self._version = max(mgmt_version, otp_version)
             else:
                 self._version = mgmt_version or otp_version
-            card_protocol.enable_touch_workaround(self._version)
+            card_protocol.configure(self._version)
             self.backend = _YubiOtpSmartCardBackend(
                 card_protocol, self._version, self._status[3]
             )

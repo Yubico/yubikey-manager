@@ -230,6 +230,7 @@ class HsmAuthSession:
 
         if scp_key_params:
             self.protocol.init_scp(scp_key_params)
+        self.protocol.configure(self._version)
 
     @property
     def version(self) -> Version:

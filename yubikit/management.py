@@ -455,16 +455,16 @@ class _ManagementSmartCardBackend(_Backend):
 
             if scp_key_params:
                 self.protocol.init_scp(scp_key_params)
-
-            if select_bytes[-2:] == b"\x90\x00":
+            elif select_bytes[-2:] == b"\x90\x00":
                 # YubiKey Edge incorrectly appends SW twice.
                 select_bytes = select_bytes[:-2]
+
             select_str = select_bytes.decode()
             self.version = Version.from_string(select_str)
             # For YubiKey NEO, we use the OTP application for further commands
             if self.version[0] == 3:
                 # Workaround to "de-select" on NEO, otherwise it gets stuck.
-                self.protocol.connection.send_and_receive(b"\xa4\x04\x00\x08")
+                smartcard_connection.send_and_receive(b"\xa4\x04\x00\x08")
                 self.protocol.select(AID.OTP)
         except ApplicationNotAvailableError:
             if smartcard_connection.transport == TRANSPORT.NFC:
@@ -473,6 +473,7 @@ class _ManagementSmartCardBackend(_Backend):
                 self.version = Version.from_bytes(status[:3])
             else:
                 raise
+        self.protocol.configure(self.version)
 
     def close(self):
         self.protocol.close()

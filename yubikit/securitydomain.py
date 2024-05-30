@@ -1,9 +1,8 @@
-from .core import Tlv, int2bytes, BadResponseError
+from .core import Tlv, int2bytes, BadResponseError, Version
 from .core.smartcard import (
     AID,
     SmartCardConnection,
     SmartCardProtocol,
-    ApduFormat,
     ApduError,
     SW,
     ScpProcessor,
@@ -101,7 +100,8 @@ class SecurityDomainSession:
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.SECURE_DOMAIN)
-        self.protocol.apdu_format = ApduFormat.EXTENDED
+        # We don't know the exact version, but this is the minimum that supports SCP
+        self.protocol.configure(Version(5, 3, 0))
         logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
