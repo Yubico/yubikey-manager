@@ -68,7 +68,6 @@ from .oath import oath
 from .piv import piv
 from .fido import fido
 from .config import config
-from .aliases import apply_aliases
 from .apdu import apdu
 from .script import run_script
 from .hsmauth import hsmauth
@@ -610,7 +609,6 @@ def main():
     handler.setFormatter(formatter)
     logging.getLogger().addHandler(handler)
 
-    sys.argv = apply_aliases(sys.argv)
     try:
         # --full-help triggers --help, hidden commands will already have read it by now.
         sys.argv[sys.argv.index("--full-help")] = "--help"
