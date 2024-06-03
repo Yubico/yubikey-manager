@@ -5,6 +5,7 @@ from .core import (
     Version,
     Tlv,
     BadResponseError,
+    NotSupportedError,
 )
 from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
 
@@ -273,6 +274,8 @@ class OathSession:
         )
 
         if scp_key_params:
+            if (5, 0, 0) <= self._version < (5, 6, 3):
+                raise NotSupportedError("SCP for OATH requires YubiKey 5.6.3 or later")
             self.protocol.init_scp(scp_key_params)
         self._scp_params = scp_key_params
 
@@ -424,6 +427,7 @@ class OathSession:
         :param name: The new name of the credential.
         :param issuer: The credential issuer.
         """
+        logger.debug(f"Renaming credential '{credential_id!r}' to '{issuer}:{name}'")
         require_version(self.version, (5, 3, 1))
         _, _, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
@@ -435,6 +439,7 @@ class OathSession:
 
     def list_credentials(self) -> List[Credential]:
         """List OATH credentials."""
+        logger.debug("Listing OATH credentials...")
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
             data = Tlv.unpack(TAG_NAME_LIST, tlv)
@@ -454,6 +459,7 @@ class OathSession:
         :param credential_id: The id of the credential.
         :param challenge: The challenge.
         """
+        logger.debug(f"Calculating response for credential: {credential_id!r}")
         resp = Tlv.unpack(
             TAG_RESPONSE,
             self.protocol.send_apdu(
@@ -471,6 +477,7 @@ class OathSession:
 
         :param credential_id: The id of the credential.
         """
+        logger.debug(f"Deleting crededential: {credential_id!r}")
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
         logger.info("Credential deleted")
 

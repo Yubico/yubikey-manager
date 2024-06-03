@@ -15,6 +15,31 @@ def preconditions(ykman_cli):
     ykman_cli("sd", "reset", "-f")
 
 
+def test_replace_kvn(ykman_cli):
+    key = "01" * 16
+    keys = f"{key}:{key}:{key}"
+
+    # Replace default SCP03 keyset
+    ykman_cli("--scp-sd", "1", "0", "sd", "keys", "import", "scp03", "2", keys)
+
+    # Generate new SCP11a key
+    ykman_cli("--scp", keys, "sd", "keys", "generate", "scp11a", "3", "-")
+
+    for i in range(3, 8):
+        ykman_cli(
+            "--scp",
+            keys,
+            "sd",
+            "keys",
+            "generate",
+            "scp11a",
+            str(i + 1),
+            "-r",
+            str(i),
+            "-",
+        )
+
+
 def test_scp11a(ykman_cli):
     with pytest.raises(ValueError):
         with open_file("scp/oce.pfx") as f:

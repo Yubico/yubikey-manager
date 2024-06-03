@@ -23,6 +23,20 @@ def _device(pytestconfig):
             serial = None
         else:
             pytest.skip("No serial specified for device tests")
+
+    version_str = pytestconfig.getoption("use_version")
+    if version_str:
+        version = Version.from_string(version_str)
+
+        # Monkey patch all parsing of Version to use the supplied value
+        # N.B. There are some instances where ideally we would replace the version,
+        # but we don't really care
+        def get_version(cls, data):
+            return version
+
+        Version.from_bytes = classmethod(get_version)
+        Version.from_string = classmethod(get_version)
+
     reader = pytestconfig.getoption("reader")
     if reader:
         readers = list_devices(reader)
@@ -38,16 +52,6 @@ def _device(pytestconfig):
         dev, info = devices[0]
     if info.serial != serial:
         pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
-    version = pytestconfig.getoption("use_version")
-    if version:
-        info.version = Version.from_string(version)
-
-        # Monkey patch all parsing of Version to use the supplied value
-        def get_version(cls, data):
-            return info.version
-
-        Version.from_bytes = classmethod(get_version)
-        Version.from_string = classmethod(get_version)
 
     return dev, info
 

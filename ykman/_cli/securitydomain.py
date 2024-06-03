@@ -104,8 +104,16 @@ def info(ctx):
     data: List[Any] = []
     cas = sd.get_supported_ca_identifiers()
     for ref in sd.get_key_information().keys():
-        if ref.kid < 0x10:  # SCP03
-            data.append(f"{ref}")
+        if ref.kid == 1:  # SCP03
+            data.append(
+                {
+                    f"SCP03 (KID=0x01-0x03, KVN=0x{ref.kvn:02X})": [
+                        "Default key set" if ref.kvn == 0xFF else "Imported key set"
+                    ]
+                }
+            )
+        elif ref.kid in (2, 3):  # SCP03 always in full key sets
+            continue
         else:  # SCP11
             inner: Dict[str, Any] = {}
             if ref in cas:
@@ -116,9 +124,13 @@ def info(ctx):
                 ]
             except ApduError:
                 pass
-            data.append({ref: inner})
+            try:
+                name = ScpKid(ref.kid).name
+            except ValueError:
+                name = "SCP11 OCE CA"
+            data.append({f"{name} (KID=0x{ref.kid:02X}, KVN=0x{ref.kvn:02X})": inner})
 
-    click.echo("\n".join(pretty_print(data)))
+    click.echo("\n".join(pretty_print({"SCP keys": data})))
 
 
 @securitydomain.command()
@@ -202,7 +214,14 @@ click_key_argument = click.argument(
 @click.pass_context
 @click_key_argument
 @click.argument("public-key-output", type=click.File("wb"), metavar="PUBLIC-KEY")
-def generate_key(ctx, key, public_key_output):
+@click.option(
+    "-r",
+    "--replace-kvn",
+    type=HexIntParamType(),
+    default=0,
+    help="replace an existing key of the same type (same KID)",
+)
+def generate_key(ctx, key, public_key_output, replace_kvn):
     """
     Generate an asymmetric key pair.
 
@@ -222,7 +241,7 @@ def generate_key(ctx, key, public_key_output):
     session = ctx.obj["session"]
 
     try:
-        public_key = session.generate_ec_key(key)
+        public_key = session.generate_ec_key(key, replace_kvn=replace_kvn)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
             raise CliFail("No space left for SCP keys")
@@ -246,7 +265,14 @@ def generate_key(ctx, key, public_key_output):
 @click_key_argument
 @click.argument("input", metavar="INPUT")
 @click.option("-p", "--password", help="password used to decrypt the file (if needed)")
-def import_key(ctx, key, input, password):
+@click.option(
+    "-r",
+    "--replace-kvn",
+    type=HexIntParamType(),
+    default=0,
+    help="replace an existing key of the same type (same KID)",
+)
+def import_key(ctx, key, input, password, replace_kvn):
     """
     Import a key or certificate.
 
@@ -309,7 +335,7 @@ def import_key(ctx, key, input, password):
         raise CliFail(f"Invalid value for KID={key.kid:x}")
 
     try:
-        session.put_key(key, target)
+        session.put_key(key, target, replace_kvn)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
             raise CliFail("No space left for SCP keys")

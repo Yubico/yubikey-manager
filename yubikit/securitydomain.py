@@ -3,6 +3,7 @@ from .core.smartcard import (
     AID,
     SmartCardConnection,
     SmartCardProtocol,
+    ApduFormat,
     ApduError,
     SW,
     ScpProcessor,
@@ -100,6 +101,7 @@ class SecurityDomainSession:
     def __init__(self, connection: SmartCardConnection):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.SECURE_DOMAIN)
+        self.protocol.apdu_format = ApduFormat.EXTENDED
         logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
