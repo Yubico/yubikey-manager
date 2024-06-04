@@ -1,6 +1,14 @@
 yubikit.core package
 ====================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   yubikit.core.smartcard
+
 Submodules
 ----------
 
@@ -16,14 +24,6 @@ yubikit.core.otp module
 -----------------------
 
 .. automodule:: yubikit.core.otp
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-yubikit.core.smartcard module
------------------------------
-
-.. automodule:: yubikit.core.smartcard
    :members:
    :undoc-members:
    :show-inheritance:

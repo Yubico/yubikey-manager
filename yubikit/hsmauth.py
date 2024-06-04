@@ -624,7 +624,7 @@ class HsmAuthSession:
 
         :param label: The label of the credential.
         :param credential_password: The password used to protect access to the
-        credential, needed for asymmetric credentials.
+            credential, needed for asymmetric credentials.
         """
         require_version(self.version, (5, 6, 0))
 

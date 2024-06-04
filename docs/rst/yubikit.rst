@@ -5,7 +5,7 @@ Subpackages
 -----------
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 4
 
    yubikit.core
 
@@ -56,6 +56,14 @@ yubikit.piv module
 ------------------
 
 .. automodule:: yubikit.piv
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+yubikit.securitydomain module
+-----------------------------
+
+.. automodule:: yubikit.securitydomain
    :members:
    :undoc-members:
    :show-inheritance:

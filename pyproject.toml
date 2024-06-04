@@ -39,9 +39,9 @@ pywin32 = {version = ">=223", platform = "win32"}
 pytest = "^8.0"
 makefun = "^1.9.5"
 pyinstaller = {version = "^6.0", python = "<3.13"}
-Sphinx = "^7.1"
+Sphinx = {version = "^7.2", python = ">=3.9, <3.13"}
 sphinx-rtd-theme = "^1.2.2"
-sphinx-autodoc-typehints = "^1.2.4"
+sphinx-autodoc-typehints = "^2"
 
 [tool.poetry.scripts]
 ykman = "ykman._cli.__main__:main"
