@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding, ed25519,
 
 from yubikit.core import NotSupportedError, TRANSPORT
 from yubikit.core.smartcard import AID, ApduError
-from yubikit.management import CAPABILITY
+from yubikit.management import CAPABILITY, ManagementSession
 from yubikit.piv import (
     PivSession,
     ALGORITHM,
@@ -73,9 +73,14 @@ def scp(info, transport, scp_params):
 
 @pytest.fixture
 @condition.capability(CAPABILITY.PIV)
-def session(ccid_connection, scp):
-    piv = PivSession(ccid_connection, scp)
-    piv.reset()
+def session(ccid_connection, scp, info):
+    if CAPABILITY.PIV in info.reset_blocked:
+        mgmt = ManagementSession(ccid_connection)
+        mgmt.device_reset()
+        piv = PivSession(ccid_connection, scp)
+    else:
+        piv = PivSession(ccid_connection, scp)
+        piv.reset()
     yield piv
     reset_state(piv, scp)
 
@@ -631,6 +636,11 @@ def block_pin(session):
 
 
 class TestUnblockPin:
+    @pytest.fixture(autouse=True)
+    def preconditions(self, bio_metadata):
+        if bio_metadata:
+            pytest.skip("PUK not supported on this YubiKey")
+
     def test_unblock_pin_requires_no_previous_authentication(self, session, keys):
         session.unblock_pin(keys.puk, NON_DEFAULT_PIN)
 
@@ -698,11 +708,11 @@ class TestMetadata:
     def preconditions(self):
         pass
 
-    def test_pin_metadata(self, session):
+    def test_pin_metadata(self, session, bio_metadata):
         data = session.get_pin_metadata()
         assert data.default_value is True
-        assert data.total_attempts == 3
-        assert data.attempts_remaining == 3
+        assert data.total_attempts == 8 if bio_metadata else 3
+        assert data.attempts_remaining == data.total_attempts
 
     def test_management_key_metadata(self, session, info):
         data = session.get_management_key_metadata()
@@ -837,3 +847,22 @@ class TestPinComplexity:
     def test_invalid_pins(self, session, keys, pin):
         with pytest.raises(ApduError):
             session.change_pin(keys.pin, pin)
+
+
+@pytest.fixture
+def bio_metadata(session):
+    try:
+        return session.get_bio_metadata()
+    except NotSupportedError:
+        return None
+
+
+class TestBioMpe:
+    @pytest.fixture(autouse=True)
+    def preconditions(self, bio_metadata):
+        if not bio_metadata:
+            pytest.skip("Requires YubiKey Bio with PIV")
+
+    def test_verify_uv_without_fingerprints(self, session, bio_metadata):
+        with pytest.raises(InvalidPinError):
+            session.verify_uv(check_only=True)

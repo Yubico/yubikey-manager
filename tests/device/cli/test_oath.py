@@ -133,7 +133,7 @@ class TestOATH:
 
     def test_oath_reset(self, ykman_cli):
         output = ykman_cli("oath", "reset", "-f").output
-        assert "Success! All OATH accounts have been deleted from the YubiKey" in output
+        assert "Reset complete" in output
 
     def test_oath_hotp_vectors_6(self, accounts_cli):
         accounts_cli(

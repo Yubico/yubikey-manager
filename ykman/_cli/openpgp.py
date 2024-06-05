@@ -40,6 +40,7 @@ from .util import (
     EnumChoice,
     pretty_print,
     get_scp_params,
+    log_or_echo,
 )
 from enum import IntEnum
 import logging
@@ -123,7 +124,9 @@ def reset(ctx, force):
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     ctx.obj["session"].reset()
     logger.info("OpenPGP application data reset")
-    click.echo("Success! All data has been cleared and default PINs are set.")
+    click.echo(
+        "Reset complete. OpenPGP data has been cleared and default PINs are set."
+    )
     echo_default_pins()
 
 
@@ -173,10 +176,10 @@ def set_pin_retries(
         session.set_pin_attempts(
             user_pin_retries, reset_code_retries, admin_pin_retries
         )
-        logger.info("Number of PIN/Reset Code/Admin PIN retries set")
+        click.echo("Number of PIN/Reset Code/Admin PIN retries set.")
 
         if resets_pins:
-            click.echo("Default PINs are set.")
+            click.echo("Default values have been restored:")
             echo_default_pins()
 
 
@@ -206,6 +209,7 @@ def change_pin(ctx, pin, new_pin):
 
     try:
         session.change_pin(pin, new_pin)
+        click.echo("User PIN has been changed.")
     except ApduError as e:
         if e.sw == SW.CONDITIONS_NOT_SATISFIED:
             raise CliFail("PIN does not meet complexity requirement.")
@@ -239,6 +243,7 @@ def change_reset_code(ctx, admin_pin, reset_code):
     session.verify_admin(admin_pin)
     try:
         session.set_reset_code(reset_code)
+        click.echo("Reset Code has been changed.")
     except ApduError as e:
         if e.sw == SW.CONDITIONS_NOT_SATISFIED:
             raise CliFail("Reset Code does not meet complexity requirement.")
@@ -271,6 +276,7 @@ def change_admin(ctx, admin_pin, new_admin_pin):
 
     try:
         session.change_admin(admin_pin, new_admin_pin)
+        click.echo("Admin PIN has been changed.")
     except ApduError as e:
         if e.sw == SW.CONDITIONS_NOT_SATISFIED:
             raise CliFail("Admin PIN does not meet complexity requirement.")
@@ -321,6 +327,7 @@ def unblock_pin(ctx, admin_pin, reset_code, new_pin):
 
     try:
         session.reset_pin(new_pin, reset_code)
+        click.echo("User PIN has been changed.")
     except ApduError as e:
         if e.sw == SW.CONDITIONS_NOT_SATISFIED:
             raise CliFail("New PIN does not meet complexity requirement.")
@@ -350,6 +357,7 @@ def set_signature_policy(ctx, policy, admin_pin):
     try:
         session.verify_admin(admin_pin)
         session.set_signature_pin_policy(policy)
+        click.echo("Signature PIN policy has been set.")
     except Exception:
         raise CliFail("Failed to set new Signature PIN policy")
 
@@ -405,7 +413,7 @@ def set_touch(ctx, key, policy, admin_pin, force):
         try:
             session.verify_admin(admin_pin)
             session.set_uif(key, policy)
-            logger.info(f"Touch policy for slot {key.name} set")
+            click.echo(f"Touch policy for slot {key.name} set.")
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 raise CliFail("Touch policy not allowed.")
@@ -440,7 +448,7 @@ def import_key(ctx, key, private_key, admin_pin):
     try:
         session.verify_admin(admin_pin)
         session.put_key(key, private_key)
-        logger.info(f"Private key imported for slot {key.name}")
+        click.echo(f"Private key imported for slot {key.name}.")
     except Exception:
         raise CliFail("Failed to import attestation key.")
 
@@ -484,9 +492,11 @@ def attest(ctx, key, certificate, pin, format):
             session.verify_pin(pin)
             cert = session.attest_key(key)
             certificate.write(cert.public_bytes(encoding=format))
-            logger.info(
+            log_or_echo(
                 f"Attestation certificate for slot {key.name} written to "
-                f"{_fname(certificate)}"
+                f"{_fname(certificate)}",
+                logger,
+                certificate,
             )
         except Exception:
             raise CliFail("Attestation failed")
@@ -519,7 +529,11 @@ def export_certificate(ctx, key, format, certificate):
     except ValueError:
         raise CliFail(f"Failed to read certificate from slot {key.name}")
     certificate.write(cert.public_bytes(encoding=format))
-    logger.info(f"Certificate for slot {key.name} exported to {_fname(certificate)}")
+    log_or_echo(
+        f"Certificate for slot {key.name} exported to {_fname(certificate)}",
+        logger,
+        certificate,
+    )
 
 
 @certificates.command("delete")
@@ -540,7 +554,7 @@ def delete_certificate(ctx, key, admin_pin):
     try:
         session.verify_admin(admin_pin)
         session.delete_certificate(key)
-        logger.info(f"Certificate for slot {key.name} deleted")
+        click.echo(f"Certificate for slot {key.name} deleted.")
     except Exception:
         raise CliFail("Failed to delete certificate.")
 
@@ -572,5 +586,6 @@ def import_certificate(ctx, key, cert, admin_pin):
     try:
         session.verify_admin(admin_pin)
         session.put_certificate(key, certs[0])
+        click.echo(f"Certificate imported into slot {key.name}")
     except Exception:
         raise CliFail("Failed to import certificate")

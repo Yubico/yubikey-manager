@@ -94,10 +94,7 @@ class TestHsmAuth:
 
     def test_hsmauth_reset(self, ykman_cli):
         output = ykman_cli("hsmauth", "reset", "-f").output
-        assert (
-            "Success! All YubiHSM Auth data have been cleared from the YubiKey."
-            in output
-        )
+        assert "Reset complete." in output
 
 
 def calculate_session_keys_apdu(label, context, credential_password):

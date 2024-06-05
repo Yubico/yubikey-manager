@@ -85,7 +85,7 @@ class TestPuk:
         o = ykman_cli(
             "piv", "access", "unblock-pin", "-p", keys.puk, "-n", NON_DEFAULT_PIN
         ).output
-        assert "PIN unblocked" in o
+        assert "New PIN set" in o
         o = ykman_cli("piv", "info").output
         assert re.search(r"PIN tries remaining:\s+3(/3)?", o)
 

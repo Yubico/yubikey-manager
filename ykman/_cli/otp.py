@@ -56,6 +56,7 @@ from .util import (
     prompt_for_touch,
     EnumChoice,
     is_yk4_fips,
+    log_or_echo,
 )
 from ..scancodes import encode, KEYBOARD_LAYOUT
 from ..otp import (
@@ -203,7 +204,7 @@ def _get_session(ctx, types=[OtpConnection, SmartCardConnection]):
             return YubiOtpSession(conn)
     raise CliFail(
         "The connection type required for this command is not supported/enabled on the "
-        "YubiKey"
+        "YubiKey."
     )
 
 
@@ -239,9 +240,9 @@ def swap(ctx, force):
         err=True,
     )
 
-    click.echo("Swapping slots...")
     try:
         session.swap_slots()
+        click.echo("Slots swapped.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
 
@@ -278,6 +279,7 @@ def ndef(ctx, slot, prefix, ndef_type):
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
+        click.echo("NDEF configuration updated.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
 
@@ -299,9 +301,9 @@ def delete(ctx, slot, force):
         abort=True,
         err=True,
     )
-    click.echo(f"Deleting the configuration in slot {slot}...")
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
+        click.echo(f"Configuration slot {slot} deleted.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
 
@@ -482,7 +484,11 @@ def yubiotp(
         serial = serial or session.get_serial()
         csv = format_csv(serial, public_id, private_id, key, access_code)
         config_output.write(csv + "\n")
-        logger.info(f"Configuration parameters written to {_fname(config_output)}")
+        log_or_echo(
+            f"Configuration parameters written to {_fname(config_output)}",
+            logger,
+            config_output,
+        )
 
 
 @otp.command()
@@ -547,6 +553,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
+        click.echo(f"Static password stored in slot {slot}.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
 
@@ -632,6 +639,7 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
+        click.echo(f"{cred_type} credential stored in slot {slot}.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
 
@@ -802,6 +810,7 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
+        click.echo(f"HOTP credential stored in slot {slot}.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
 
@@ -893,7 +902,6 @@ def settings(
         abort=True,
         err=True,
     )
-    click.echo(f"Updating settings for slot {slot}...")
 
     pacing_bits = int(pacing or "0") // 20
     pacing_10ms = bool(pacing_bits & 1)
@@ -909,5 +917,6 @@ def settings(
             new_access_code,
             ctx.obj["access_code"],
         )
+        click.echo(f"Settings for slot {slot} updated.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)

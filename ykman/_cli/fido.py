@@ -257,7 +257,7 @@ def reset(ctx, force):
                 fips_reset(conn)
             else:
                 Ctap2(conn).reset()
-        logger.info("FIDO application data reset")
+        click.echo("FIDO application data reset.")
     except CtapError as e:
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
             raise CliFail(
@@ -420,7 +420,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             change_pin(pin, new_pin)
         else:
             set_pin(new_pin)
-    logger.info("FIDO PIN updated")
+    click.echo("FIDO PIN updated.")
 
 
 def _require_pin(ctx, pin, feature="This feature"):
@@ -511,6 +511,7 @@ def force_pin_change(ctx, pin):
 
     config = _init_config(ctx, pin)
     config.set_min_pin_length(force_change_pin=True)
+    click.echo("Force PIN change set.")
 
 
 @access.command("set-min-length")
@@ -547,6 +548,7 @@ def set_min_pin_length(ctx, pin, rp_id, length):
             )
 
     config.set_min_pin_length(min_pin_length=length, rp_ids=rp_id)
+    click.echo("Minimum PIN length set.")
 
 
 def _prompt_current_pin(prompt="Enter your current PIN"):
@@ -699,7 +701,7 @@ def creds_delete(ctx, credential_id, pin, force):
         ):
             try:
                 credman.delete_cred(cred_id)
-                logger.info("Credential deleted")
+                click.echo("Credential deleted.")
             except CtapError:
                 raise CliFail("Failed to delete credential.")
     else:
@@ -832,7 +834,7 @@ def bio_rename(ctx, template_id, name, pin):
         raise CliFail(f"No fingerprint matching ID={template_id}.")
 
     bio.set_name(key, name)
-    logger.info("Fingerprint template renamed")
+    click.echo("Fingerprint template renamed.")
 
 
 @bio.command("delete")
@@ -871,7 +873,7 @@ def bio_delete(ctx, template_id, pin, force):
     if force or click.confirm(f"Delete fingerprint {_format_fp(key, name)}?"):
         try:
             bio.remove_enrollment(key)
-            logger.info("Fingerprint template deleted")
+            click.echo("Fingerprint template deleted.")
         except CtapError as e:
             raise CliFail(f"Failed to delete fingerprint: {e.code.name}")
 
@@ -898,8 +900,11 @@ def toggle_always_uv(ctx, pin):
     if CAPABILITY.FIDO2 in info.fips_capable:
         raise CliFail("Always Require UV can not be disabled on this YubiKey.")
 
+    always_uv = options["alwaysUv"]
+
     config = _init_config(ctx, pin)
     config.toggle_always_uv()
+    click.echo(f"Always Require UV is {'off' if always_uv else 'on'}.")
 
 
 @config.command("enable-ep-attestation")
@@ -920,3 +925,4 @@ def enable_ep_attestation(ctx, pin):
 
     config = _init_config(ctx, pin)
     config.enable_enterprise_attestation()
+    click.echo("Enterprise Attestation enabled.")

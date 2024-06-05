@@ -152,7 +152,7 @@ def reset(ctx, force):
         keys.write()
         logger.info("Deleted remembered access key")
 
-    click.echo("Success! All OATH accounts have been deleted from the YubiKey.")
+    click.echo("Reset complete. All OATH accounts have been deleted from the YubiKey.")
 
 
 click_password_option = click.option(
@@ -320,6 +320,7 @@ def remember(ctx, password):
         key = session.derive_key(password)
         try:
             _validate(ctx, key, True)
+            click.echo("Password remembered.")
         except Exception:
             raise CliFail("Authentication to the YubiKey failed. Wrong password?")
 
@@ -591,6 +592,7 @@ def _add_cred(ctx, data, touch, force):
 
     try:
         session.put_credential(data, touch)
+        click.echo("OATH account added.")
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
             raise CliFail("No space left on the YubiKey for OATH accounts.")

@@ -332,6 +332,21 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
     return info.version[0] == 4 and info.is_fips
 
 
+def _fileno(f) -> int:
+    try:
+        return f.fileno()
+    except Exception:
+        return -1
+
+
+def log_or_echo(message: str, log: logging.Logger, *files) -> None:
+    fno = _fileno(sys.stdout)
+    if any(_fileno(f) == fno for f in files):
+        log.info(message)
+    else:
+        click.echo(f"{message}.")
+
+
 def find_scp11_params(
     connection: SmartCardConnection, kid: int, kvn: int, ca: Optional[bytes] = None
 ) -> Scp11KeyParams:

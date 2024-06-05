@@ -98,7 +98,7 @@ class TestManagementKey:
             "-n",
             NON_DEFAULT_MANAGEMENT_KEY,
         ).output
-        assert "" == output
+        assert "New management key set" in output
         output = ykman_cli("piv", "info").output
         assert "Management key is stored on the YubiKey" not in output
 
@@ -122,7 +122,7 @@ class TestManagementKey:
             "-n",
             keys.mgmt,
         ).output
-        assert "" == output
+        assert "New management key set" in output
 
     def test_change_management_key_no_protect_arg_bad_length(self, ykman_cli, keys):
         with pytest.raises(SystemExit):

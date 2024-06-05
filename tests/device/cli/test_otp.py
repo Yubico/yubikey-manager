@@ -58,9 +58,9 @@ class TestSlotStatus:
         if "programmed" not in info:
             ykman_cli("otp", "static", "2", "incredible")
         output = ykman_cli("otp", "swap", "-f").output
-        assert "Swapping slots..." in output
+        assert "Slots swapped" in output
         output = ykman_cli("otp", "swap", "-f").output
-        assert "Swapping slots..." in output
+        assert "Slots swapped" in output
 
     @condition.yk4_fips(False)
     def test_ykman_otp_info_does_not_indicate_fips_mode_for_non_fips_key(
@@ -340,8 +340,8 @@ class TestSlotProgramming:
 
     def test_ykman_program_chalresp_slot_2_generated(self, ykman_cli):
         output = ykman_cli("otp", "chalresp", "2", "-f", "-g").output
-        assert re.match(
-            r"Using a randomly generated key \(hex\): [0-9a-f]{40}$", output
+        assert re.search(
+            r"Using a randomly generated key \(hex\): [0-9a-f]{40}", output
         )
         self._check_slot_2_programmed(ykman_cli)
 
@@ -366,12 +366,12 @@ class TestSlotProgramming:
     def test_update_settings_enter_slot_2(self, ykman_cli):
         ykman_cli("otp", "static", "2", "-f", "-g", "-l", "20")
         output = ykman_cli("otp", "settings", "2", "-f", "--no-enter").output
-        assert "Updating settings for slot" in output
+        assert "updated" in output
 
     def test_delete_slot_2(self, ykman_cli):
         ykman_cli("otp", "static", "2", "-f", "-g", "-l", "20")
         output = ykman_cli("otp", "delete", "2", "-f").output
-        assert "Deleting the configuration" in output
+        assert "deleted" in output
         status = ykman_cli("otp", "info").output
         assert "Slot 2: empty" in status
 

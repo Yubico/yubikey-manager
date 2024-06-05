@@ -143,7 +143,7 @@ def reset(ctx, force):
     click.echo("Resetting YubiKey data...")
     ctx.obj["session"].device_reset()
 
-    click.echo("Success! All data have been cleared from the YubiKey.")
+    click.echo("Reset complete. All data has been cleared from the YubiKey.")
 
 
 @config.command("set-lock-code")
@@ -217,7 +217,7 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
             use_code,
             set_code,
         )
-        logger.info("Lock code updated")
+        click.echo("Lock code updated.")
     except Exception:
         if info.is_locked:
             raise CliFail("Failed to change the lock code. Wrong current code?")
@@ -298,7 +298,7 @@ def _configure_applications(
             reboot,
             lock_code,
         )
-        logger.info(f"{transport} application configuration updated")
+        click.echo(f"{transport} application configuration updated.")
     except Exception:
         raise CliFail(f"Failed to configure {transport} applications.")
 

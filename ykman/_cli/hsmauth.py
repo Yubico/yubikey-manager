@@ -52,6 +52,7 @@ from .util import (
     click_group,
     pretty_print,
     get_scp_params,
+    log_or_echo,
 )
 
 from cryptography.hazmat.primitives import serialization
@@ -278,7 +279,9 @@ def reset(ctx, force):
     click.echo("Resetting YubiHSM Auth data...")
     ctx.obj["session"].reset()
 
-    click.echo("Success! All YubiHSM Auth data have been cleared from the YubiKey.")
+    click.echo(
+        "Reset complete. All YubiHSM Auth data has been cleared from the YubiKey."
+    )
     click.echo("Your YubiKey now has an empty Management password.")
 
 
@@ -371,6 +374,7 @@ def generate(ctx, label, credential_password, management_key, touch):
         session.generate_credential_asymmetric(
             management_key, label, credential_password, touch
         )
+        click.echo("Asymmetric credential generated.")
     except Exception as e:
         handle_credential_error(
             e, default_exception_msg="Failed to generate asymmetric credential."
@@ -441,6 +445,7 @@ def import_credential(
             credential_password,
             touch,
         )
+        click.echo("Asymmetric credential imported.")
     except Exception as e:
         handle_credential_error(
             e, default_exception_msg="Failed to import asymmetric credential."
@@ -475,7 +480,11 @@ def export(ctx, label, public_key_output, format):
 
         public_key_output.write(public_key_encoded)
 
-        logger.info(f"Public key for {label} written to {_fname(public_key_output)}")
+        log_or_echo(
+            f"Public key for {label} written to {_fname(public_key_output)}",
+            logger,
+            public_key_output,
+        )
     except ApduError as e:
         if e.sw == SW.AUTH_METHOD_BLOCKED:
             raise CliFail("The entry is not an asymmetric credential.")
@@ -545,6 +554,7 @@ def symmetric(
             credential_password,
             touch,
         )
+        click.echo("Symmetric credential stored.")
 
     except Exception as e:
         handle_credential_error(
@@ -595,6 +605,7 @@ def derive(ctx, label, derivation_password, credential_password, management_key,
         session.put_credential_derived(
             management_key, label, derivation_password, credential_password, touch
         )
+        click.echo("Derived symmetric credential stored.")
     except Exception as e:
         handle_credential_error(
             e, default_exception_msg="Failed to import symmetric credential."
@@ -629,6 +640,7 @@ def delete(ctx, label, management_key, force):
 
     try:
         session.delete_credential(management_key, label)
+        click.echo("Credential deleted.")
     except Exception as e:
         handle_credential_error(
             e,
@@ -706,6 +718,7 @@ def change_management_key(ctx, management_key, new_management_key, generate):
 
     try:
         session.put_management_key(management_key, new_management_key)
+        click.echo("Management key changed.")
     except Exception as e:
         handle_credential_error(
             e,
@@ -752,6 +765,7 @@ def change_management_password(ctx, management_key, new_management_key):
     session = ctx.obj["session"]
     try:
         session.put_management_key(management_key, new_management_key)
+        click.echo("Management password changed.")
     except Exception as e:
         handle_credential_error(
             e,

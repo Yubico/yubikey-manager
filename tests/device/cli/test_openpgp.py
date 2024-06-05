@@ -27,7 +27,7 @@ class TestOpenPGP:
 
     def test_openpgp_reset(self, ykman_cli):
         output = ykman_cli("openpgp", "reset", "-f").output
-        assert "Success! All data has been cleared and default PINs are set." in output
+        assert "Reset complete" in output
 
 
 class TestPin:

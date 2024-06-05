@@ -74,6 +74,7 @@ from .util import (
     EnumChoice,
     pretty_print,
     get_scp_params,
+    log_or_echo,
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
@@ -250,7 +251,7 @@ def reset(ctx, force):
     click.echo("Resetting PIV data...")
     ctx.obj["session"].reset()
 
-    click.echo("Success! All PIV data have been cleared from the YubiKey.")
+    click.echo("Reset complete. All PIV data has been cleared from the YubiKey.")
     click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
     click.echo("\tPIN:\t123456")
     click.echo("\tPUK:\t12345678")
@@ -298,7 +299,8 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
     )
     try:
         pivman_set_pin_attempts(session, pin_retries, puk_retries)
-        click.echo("Default PINs are set:")
+        click.echo("Number of PIN/PUK retries set.")
+        click.echo("Default PINs have been restored:")
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
     except Exception:
@@ -536,6 +538,7 @@ def change_management_key(
         pivman_set_mgm_key(
             session, new_management_key, algorithm, touch=touch, store_on_device=protect
         )
+        click.echo("New management key set.")
     except ApduError:
         raise CliFail("Changing the management key failed.")
 
@@ -561,7 +564,7 @@ def unblock_pin(ctx, puk, new_pin):
         )
     try:
         session.unblock_pin(puk, new_pin)
-        click.echo("PIN unblocked")
+        click.echo("New PIN set.")
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
@@ -637,9 +640,11 @@ def generate_key(
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
-    logger.info(
+    log_or_echo(
         f"Private key generated in slot {slot}, public key written to "
-        f"{_fname(public_key_output)}"
+        f"{_fname(public_key_output)}",
+        logger,
+        public_key_output,
     )
 
 
@@ -699,6 +704,7 @@ def import_key(
 
     _ensure_authenticated(ctx, pin, management_key)
     session.put_key(slot, private_key, pin_policy, touch_policy)
+    click.echo(f"Private key imported into slot {slot.name}.")
 
 
 @keys.command()
@@ -723,8 +729,10 @@ def attest(ctx, slot, certificate, format):
     except ApduError:
         raise CliFail("Attestation failed.")
     certificate.write(cert.public_bytes(encoding=format))
-    logger.info(
-        f"Attestation certificate for slot {slot} written to {_fname(certificate)}"
+    log_or_echo(
+        f"Attestation certificate for slot {slot} written to {_fname(certificate)}",
+        logger,
+        certificate,
     )
 
 
@@ -826,7 +834,11 @@ def export(ctx, slot, public_key_output, format, verify, pin):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
-    logger.info(f"Public key for slot {slot} written to {_fname(public_key_output)}")
+    log_or_echo(
+        f"Public key for slot {slot} written to {_fname(public_key_output)}",
+        logger,
+        public_key_output,
+    )
 
 
 @keys.command("move")
@@ -851,6 +863,7 @@ def move_key(ctx, management_key, pin, source, dest):
     _ensure_authenticated(ctx, pin, management_key)
     try:
         session.move_key(source, dest)
+        click.echo(f"Key moved from slot {source.name} to slot {dest.name}.")
     except ApduError as e:
         if e.sw == SW.INCORRECT_PARAMETERS:
             raise CliFail("DEST slot is not empty")
@@ -877,6 +890,7 @@ def delete_key(ctx, management_key, pin, slot):
     _ensure_authenticated(ctx, pin, management_key)
     try:
         session.delete_key(slot)
+        click.echo(f"Key in slot {slot.name} deleted.")
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No key stored in slot {slot}.")
@@ -985,6 +999,7 @@ def import_certificate(
 
     session.put_certificate(slot, cert_to_import, compress)
     session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    click.echo(f"Certificate imported into slot {slot.name}")
 
 
 @cert.command("export")
@@ -1006,7 +1021,11 @@ def export_certificate(ctx, format, slot, certificate):
     try:
         cert = session.get_certificate(slot)
         certificate.write(cert.public_bytes(encoding=format))
-        logger.info(f"Certificate from slot {slot} exported to {_fname(certificate)}")
+        log_or_echo(
+            f"Certificate from slot {slot} exported to {_fname(certificate)}",
+            logger,
+            certificate,
+        )
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
             raise CliFail("No certificate found.")
@@ -1083,6 +1102,7 @@ def generate_certificate(
             )
         session.put_certificate(slot, cert)
         session.put_object(OBJECT_ID.CHUID, generate_chuid())
+        click.echo(f"Certificate generated in slot {slot.name}.")
     except ApduError:
         raise CliFail("Certificate generation failed.")
 
@@ -1146,7 +1166,9 @@ def generate_certificate_signing_request(
         raise CliFail("Certificate Signing Request generation failed.")
 
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
-    logger.info(f"CSR for slot {slot} written to {_fname(csr_output)}")
+    log_or_echo(
+        f"CSR for slot {slot} written to {_fname(csr_output)}", logger, csr_output
+    )
 
 
 @cert.command("delete")
@@ -1167,6 +1189,7 @@ def delete_certificate(ctx, management_key, pin, slot):
     _ensure_authenticated(ctx, pin, management_key)
     session.delete_certificate(slot)
     session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    click.echo(f"Certificate in slot {slot.name} deleted.")
 
 
 @piv.group("objects")
@@ -1219,7 +1242,9 @@ def read_object(ctx, pin, object_id, output):
     def do_read_object(retry=True):
         try:
             output.write(session.get_object(object_id))
-            logger.info(f"Exported object {object_id} to {_fname(output)}")
+            log_or_echo(
+                f"Exported object {object_id} to {_fname(output)}", logger, output
+            )
         except ApduError as e:
             if e.sw == SW.FILE_NOT_FOUND:
                 raise CliFail("No data found.")
@@ -1256,6 +1281,7 @@ def write_object(ctx, pin, management_key, object_id, data):
 
     try:
         session.put_object(object_id, data.read())
+        click.echo("Object imported.")
     except ApduError as e:
         if e.sw == SW.INCORRECT_PARAMETERS:
             raise CliFail("Something went wrong, is the object id valid?")
@@ -1288,6 +1314,7 @@ def generate_object(ctx, pin, management_key, object_id):
         session.put_object(OBJECT_ID.CAPABILITY, generate_ccc())
     else:
         raise CliFail("Unsupported object ID for generate.")
+    click.echo("Object generated.")
 
 
 def _prompt_management_key(prompt="Enter a management key [blank to use default key]"):

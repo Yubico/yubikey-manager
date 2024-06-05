@@ -12,7 +12,7 @@ class TestMisc:
 
     def test_reset(self, ykman_cli):
         output = ykman_cli("piv", "reset", "-f").output
-        assert "Success!" in output
+        assert "Reset complete" in output
 
     def test_export_invalid_certificate_fails(self, ykman_cli, keys):
         ykman_cli(

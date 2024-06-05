@@ -52,6 +52,7 @@ from .util import (
     pretty_print,
     get_scp_params,
     organize_scp11_certificates,
+    log_or_echo,
 )
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -156,7 +157,9 @@ def reset(ctx, force):
     click.echo("Resetting Security Domain data...")
     ctx.obj["session"].reset()
 
-    click.echo("Success! Security Domain data has been cleared from the YubiKey.")
+    click.echo(
+        "Reset complete. Security Domain data has been cleared from the YubiKey."
+    )
     click.echo("Your YubiKey now has the default SCP key set")
 
 
@@ -254,9 +257,11 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
-    logger.info(
+    log_or_echo(
         f"Private key generated for {key}, public key written to "
-        f"{_fname(public_key_output)}"
+        f"{_fname(public_key_output)}",
+        logger,
+        public_key_output,
     )
 
 
@@ -327,28 +332,31 @@ def import_key(ctx, key, input, password, replace_kvn):
     elif key.kid in (0x10, *range(0x20, 0x30)):  # Public CA key
         ca, inter, leaf = organize_scp11_certificates(parse_certificates(data, None))
         if not ca:
-            raise CliFail("Input does not contain a valid CA-KLOC certificate")
+            raise CliFail("Input does not contain a valid CA-KLOC certificate.")
         target = ca.public_key()
         bundle = None
 
     else:
-        raise CliFail(f"Invalid value for KID={key.kid:x}")
+        raise CliFail(f"Invalid value for KID={key.kid:x}.")
 
     try:
         session.put_key(key, target, replace_kvn)
+        click.echo(f"Key stored for {target}.")
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            raise CliFail("No space left for SCP keys")
+            raise CliFail("No space left for SCP keys.")
         raise
 
     # If we have a bundle of intermediate certificates, store them
     if bundle:
         session.store_certificate_bundle(key, bundle)
+        click.echo("Certificate bundle stored.")
 
     # If the CA has a Subject Key Identifer we should store it
     if ca:
         ski = ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
         session.store_ca_issuer(key, ski.value.digest)
+        click.echo("CA key identifier stored.")
 
 
 @keys.command()
@@ -370,11 +378,13 @@ def export(ctx, key, certificates_output):
     ]
     if pems:
         certificates_output.write(b"".join(pems))
-        logger.info(
-            f"Certificate chain for {key} written to {_fname(certificates_output)}"
+        log_or_echo(
+            f"Certificate chain for {key} written to {_fname(certificates_output)}",
+            logger,
+            certificates_output,
         )
     else:
-        raise CliFail(f"No certificate chain stored for {key}")
+        raise CliFail(f"No certificate chain stored for {key}.")
 
 
 @keys.command("delete")
@@ -402,6 +412,7 @@ def delete_key(ctx, key, force):
 
     try:
         session.delete_key(key.kid, key.kvn)
+        click.echo("SCP key deleted.")
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No key stored in {key}.")
@@ -431,3 +442,4 @@ def set_allowlist(ctx, key, serials):
     session = ctx.obj["session"]
 
     session.store_allowlist(key, serials)
+    click.echo(f"SCP serial number allowlist set for {key}.")
