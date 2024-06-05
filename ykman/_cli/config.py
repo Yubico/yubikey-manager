@@ -264,10 +264,6 @@ def _configure_applications(
     else:
         reboot = False
 
-    if enable:
-        changes.append(f"Enable {enable.display_name}")
-    if disable:
-        changes.append(f"Disable {disable.display_name}")
     if reboot:
         changes.append("The YubiKey will reboot")
 
@@ -397,9 +393,14 @@ def usb(
 
     if enable_all:
         enable = info.supported_capabilities.get(TRANSPORT.USB)
+        changes.append("Enable all applications")
     else:
         enable = CAPABILITY(sum(enable))
+        if enable:
+            changes.append(f"Enable {enable.display_name}")
     disable = CAPABILITY(sum(disable))
+    if disable:
+        changes.append(f"Disable {disable.display_name}")
 
     if touch_eject:
         config.device_flags = info.config.device_flags | DEVICE_FLAG.EJECT
@@ -466,21 +467,29 @@ def nfc(ctx, enable, disable, enable_all, disable_all, list_enabled, lock_code, 
 
     config = DeviceConfig({}, None, None, None)
     info = ctx.obj["info"]
+    changes = []
 
     nfc_supported = info.supported_capabilities.get(TRANSPORT.NFC)
     if enable_all:
         enable = nfc_supported
+        changes.append("Enable all applications")
     else:
         enable = CAPABILITY(sum(enable))
+        if enable:
+            changes.append(f"Enable {enable.display_name}")
+
     if disable_all:
         disable = nfc_supported
+        changes.append("Disable all applications")
     else:
         disable = CAPABILITY(sum(disable))
+        if disable:
+            changes.append(f"Disable {disable.display_name}")
 
     _configure_applications(
         ctx,
         config,
-        [],
+        changes,
         TRANSPORT.NFC,
         enable,
         disable,

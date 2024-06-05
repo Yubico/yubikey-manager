@@ -102,6 +102,17 @@ class CAPABILITY(IntFlag):
 
     @property
     def display_name(self) -> str:
+        if self == 0:
+            return "None"
+        if f"{self:b}".count("1") > 1:
+            i = 1
+            names = []
+            while i < self:
+                if i & self:
+                    names.append(CAPABILITY(i).display_name)
+                i <<= 1
+            return ", ".join(names)
+
         if self == CAPABILITY.OTP:
             return "Yubico OTP"
         elif self == CAPABILITY.U2F:
@@ -110,10 +121,7 @@ class CAPABILITY(IntFlag):
             return "OpenPGP"
         elif self == CAPABILITY.HSMAUTH:
             return "YubiHSM Auth"
-        # mypy bug?
-        return self.name or ", ".join(
-            c.display_name for c in CAPABILITY if c in self  # type: ignore
-        )
+        return self.name or f"Unknown(0x{self:x})"
 
     @property
     def usb_interfaces(self) -> USB_INTERFACE:
