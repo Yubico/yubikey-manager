@@ -131,7 +131,7 @@ def require_reader(connection_types, reader):
                     info = read_info(conn, dev.pid)
                 return dev, info
             except Exception:
-                raise CliFail("Failed to connect to YubiKey")
+                raise CliFail("Failed to connect to YubiKey.")
         elif len(readers) > 1:
             raise CliFail("Multiple external readers match name.")
         else:
@@ -398,14 +398,14 @@ def cli(
 
         if use_scp:
             if SmartCardConnection not in connections:
-                raise CliFail("SCP can only be used with CCID commands")
+                raise CliFail("SCP can only be used with CCID commands.")
 
             scp_kid, scp_kvn = scp_sd
             if scp_kid:
                 try:
                     scp_kid = ScpKid(scp_kid)
                 except ValueError:
-                    raise CliFail(f"Invalid KID for card certificate: {scp_kid}")
+                    raise CliFail(f"Invalid KID for card certificate: {scp_kid}.")
 
             if scp_ca:
                 ca = scp_ca.read()
@@ -431,11 +431,11 @@ def cli(
                     scp_kid = ScpKid.SCP11b
 
             if scp03_keys and scp_kid != ScpKid.SCP03:
-                raise CliFail("--scp with SCP03 keys can only be used with SCP03")
+                raise CliFail("--scp with SCP03 keys can only be used with SCP03.")
 
             if scp_kid == ScpKid.SCP03:
                 if scp_ca:
-                    raise CliFail("--scp-ca can only be used with SCP11")
+                    raise CliFail("--scp-ca can only be used with SCP11.")
 
                 def params_f(_):
                     return Scp03KeyParams(
@@ -446,7 +446,7 @@ def cli(
             elif scp11_creds:
                 # SCP11 a/c
                 if scp_kid and scp_kid not in (ScpKid.SCP11a, ScpKid.SCP11c):
-                    raise CliFail("--scp with file(s) can only be used with SCP11 a/c")
+                    raise CliFail("--scp with file(s) can only be used with SCP11 a/c.")
 
                 first = scp11_creds.pop(0)
                 password = scp_cred_password.encode() if scp_cred_password else None
@@ -457,7 +457,7 @@ def cli(
                         break
                     except InvalidPasswordError:
                         if scp_cred_password:
-                            raise CliFail("Wrong password to decrypt private key")
+                            raise CliFail("Wrong password to decrypt private key.")
                         logger.debug("Error parsing key", exc_info=True)
                         password = click_prompt(
                             "Enter password to decrypt SCP11 key",
@@ -502,9 +502,9 @@ def cli(
             else:
                 # SCP11b
                 if scp_kid not in (ScpKid.SCP11b, None):
-                    raise CliFail(f"{scp_kid.name} requires --scp")
+                    raise CliFail(f"{scp_kid.name} requires --scp.")
                 if any(scp_oce):
-                    raise CliFail("SCP11b cannot be used with --scp-oce")
+                    raise CliFail("SCP11b cannot be used with --scp-oce.")
 
                 def params_f(conn):
                     return find_scp11_params(conn, ScpKid.SCP11b, scp_kvn, ca)

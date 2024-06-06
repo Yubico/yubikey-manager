@@ -359,7 +359,7 @@ def set_signature_policy(ctx, policy, admin_pin):
         session.set_signature_pin_policy(policy)
         click.echo("Signature PIN policy has been set.")
     except Exception:
-        raise CliFail("Failed to set new Signature PIN policy")
+        raise CliFail("Failed to set new Signature PIN policy.")
 
 
 @openpgp.group("keys")
@@ -499,7 +499,7 @@ def attest(ctx, key, certificate, pin, format):
                 certificate,
             )
         except Exception:
-            raise CliFail("Attestation failed")
+            raise CliFail("Attestation failed.")
 
 
 @openpgp.group("certificates")
@@ -527,7 +527,7 @@ def export_certificate(ctx, key, format, certificate):
     try:
         cert = session.get_certificate(key)
     except ValueError:
-        raise CliFail(f"Failed to read certificate from slot {key.name}")
+        raise CliFail(f"Failed to read certificate from slot {key.name}.")
     certificate.write(cert.public_bytes(encoding=format))
     log_or_echo(
         f"Certificate for slot {key.name} exported to {_fname(certificate)}",
@@ -588,4 +588,4 @@ def import_certificate(ctx, key, cert, admin_pin):
         session.put_certificate(key, certs[0])
         click.echo(f"Certificate imported into slot {key.name}")
     except Exception:
-        raise CliFail("Failed to import certificate")
+        raise CliFail("Failed to import certificate.")

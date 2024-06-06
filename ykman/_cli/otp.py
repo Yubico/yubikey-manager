@@ -401,7 +401,7 @@ def yubiotp(
             "Automated YubiCloud upload support has been ended. "
             "You can manually upload a credential by saving it as a CSV file "
             "(use -O/--config-output) and then submitting it to "
-            "https://upload.yubico.com"
+            "https://upload.yubico.com."
         )
 
     if public_id and serial_public_id:
@@ -418,7 +418,7 @@ def yubiotp(
             try:
                 serial = session.get_serial()
             except CommandError:
-                raise CliFail("Serial number not set, public ID must be provided")
+                raise CliFail("Serial number not set, public ID must be provided.")
 
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo(f"Using YubiKey serial as public ID: {public_id}")

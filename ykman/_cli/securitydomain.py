@@ -145,7 +145,7 @@ def reset(ctx, force):
     the Security Domain on the YubiKey.
     """
     if "scp" in ctx.obj:
-        raise CliFail("Reset must be performed without an active SCP session")
+        raise CliFail("Reset must be performed without an active SCP session.")
 
     force or click.confirm(
         "WARNING! This will delete all stored Security Domain data and restore factory "
@@ -239,7 +239,7 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
     valid = (ScpKid.SCP11a, ScpKid.SCP11b, ScpKid.SCP11c)
     if key.kid not in valid:
         values_str = ", ".join(f"0x{v:x} ({v.name})" for v in valid)
-        raise CliFail(f"KID must be one of {values_str}")
+        raise CliFail(f"KID must be one of {values_str}.")
 
     session = ctx.obj["session"]
 
@@ -247,7 +247,7 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
         public_key = session.generate_ec_key(key, replace_kvn=replace_kvn)
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
-            raise CliFail("No space left for SCP keys")
+            raise CliFail("No space left for SCP keys.")
         raise
 
     key_encoding = serialization.Encoding.PEM

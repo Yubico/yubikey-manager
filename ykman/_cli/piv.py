@@ -486,7 +486,9 @@ def change_management_key(
 
     # Can't combine new key with generate.
     if new_management_key and generate:
-        raise CliFail("Invalid options: --new-management-key conflicts with --generate")
+        raise CliFail(
+            "Invalid options: --new-management-key conflicts with --generate."
+        )
 
     # Touch not supported on NEO.
     if touch and session.version < (4, 0, 0):
@@ -530,7 +532,7 @@ def change_management_key(
 
     if len(new_management_key) != algorithm.key_len:
         raise CliFail(
-            "Management key has the wrong length (expected %d bytes)"
+            "Management key has the wrong length (expected %d bytes)."
             % algorithm.key_len
         )
 
@@ -624,7 +626,7 @@ def generate_key(
 
     if ctx.obj["fips_unready"]:
         raise CliFail(
-            "YubiKey FIPS must be in FIPS approved mode prior to key generation"
+            "YubiKey FIPS must be in FIPS approved mode prior to key generation."
         )
     _check_key_support_fips(ctx, algorithm, pin_policy)
 
@@ -671,7 +673,7 @@ def import_key(
     """
 
     if ctx.obj["fips_unready"]:
-        raise CliFail("YubiKey FIPS must be in FIPS approved mode prior to key import")
+        raise CliFail("YubiKey FIPS must be in FIPS approved mode prior to key import.")
 
     session = ctx.obj["session"]
 
@@ -858,7 +860,7 @@ def move_key(ctx, management_key, pin, source, dest):
     DEST              PIV slot to move the key into
     """
     if source == dest:
-        raise CliFail("SOURCE must be different from DEST")
+        raise CliFail("SOURCE must be different from DEST.")
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
     try:
@@ -866,9 +868,9 @@ def move_key(ctx, management_key, pin, source, dest):
         click.echo(f"Key moved from slot {source.name} to slot {dest.name}.")
     except ApduError as e:
         if e.sw == SW.INCORRECT_PARAMETERS:
-            raise CliFail("DEST slot is not empty")
+            raise CliFail("DEST slot is not empty.")
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-            raise CliFail("No key in SOURCE slot")
+            raise CliFail("No key in SOURCE slot.")
         raise
 
 
@@ -982,7 +984,7 @@ def import_certificate(
                 timeout = None
         except ApduError as e:
             if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-                raise CliFail(f"No private key in slot {slot}")
+                raise CliFail(f"No private key in slot {slot}.")
             raise
         except NotSupportedError:
             timeout = 1.0
@@ -992,7 +994,7 @@ def import_certificate(
                 if not check_key(session, slot, public_key):
                     raise CliFail(
                         "The public key of the certificate does not match the "
-                        f"private key in slot {slot}"
+                        f"private key in slot {slot}."
                     )
 
         _verify_pin_if_needed(ctx, session, do_verify, pin)
@@ -1417,6 +1419,8 @@ def _check_key_support_fips(ctx, key_type, pin_policy):
     info = ctx.obj["info"]
     if CAPABILITY.PIV in info.fips_capable:
         if key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519):
-            raise CliFail(f"Key type {key_type.name} not supported on YubiKey FIPS")
+            raise CliFail(f"Key type {key_type.name} not supported on YubiKey FIPS.")
         if pin_policy in (PIN_POLICY.NEVER,):
-            raise CliFail(f"PIN policy {pin_policy.name} not supported on YubiKey FIPS")
+            raise CliFail(
+                f"PIN policy {pin_policy.name} not supported on YubiKey FIPS."
+            )
