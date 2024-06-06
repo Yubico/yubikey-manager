@@ -269,7 +269,7 @@ def reset(ctx, force):
                 "YubiKey is inserted."
             )
         else:
-            raise CliFail(f"Reset failed: {e.code.name}")
+            raise CliFail(f"Reset failed: {e.code.name}.")
     except ApduError as e:  # From fips_reset
         if e.code == SW.COMMAND_NOT_ALLOWED:
             raise CliFail(
@@ -348,10 +348,13 @@ def change_pin(ctx, pin, new_pin, u2f):
             raise CliFail("PIN is not supported on this YubiKey.")
         client_pin = ClientPin(ctap2)
         min_len = ctap2.info.min_pin_length
+    max_len = 63
 
     def _fail_if_not_valid_pin(pin=None, name="PIN"):
         if not pin or len(pin) < min_len:
-            raise CliFail(f"{name} must be at least {min_len} characters long")
+            raise CliFail(f"{name} must be at least {min_len} characters long.")
+        if len(pin) > max_len:
+            raise CliFail(f"{name} must be at most {max_len} characters long.")
 
     def prompt_new_pin():
         return click_prompt(
@@ -381,7 +384,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 raise CliFail("New PIN doesn't meet complexity requirements.")
             else:
-                _fail_pin_error(ctx, e, "Failed to change PIN: %s")
+                _fail_pin_error(ctx, e, "Failed to change PIN: %s.")
 
         except ApduError as e:
             if e.code == SW.VERIFY_FAIL_NO_RETRY:
@@ -389,7 +392,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             elif e.code == SW.AUTH_METHOD_BLOCKED:
                 raise CliFail("PIN is blocked.")
             else:
-                raise CliFail(f"Failed to change PIN: SW={e.code:04x}")
+                raise CliFail(f"Failed to change PIN: SW={e.code:04x}.")
 
     def set_pin(new_pin):
         _fail_if_not_valid_pin(new_pin)
@@ -399,7 +402,7 @@ def change_pin(ctx, pin, new_pin, u2f):
             if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
                 raise CliFail("New PIN doesn't meet complexity requirements.")
             else:
-                raise CliFail(f"Failed to set PIN: {e.code}")
+                raise CliFail(f"Failed to set PIN: {e.code}.")
 
     if not is_fips:
         if ctap2.info.options.get("clientPin"):
@@ -457,7 +460,7 @@ def verify(ctx, pin):
                 pin, ClientPin.PERMISSION.GET_ASSERTION, "ykman.example.com"
             )
         except CtapError as e:
-            raise CliFail(f"PIN verification failed: {e}")
+            raise CliFail(f"PIN verification failed: {e}.")
     elif is_yk4_fips(ctx.obj["info"]):
         try:
             fips_verify_pin(ctx.obj["conn"], pin)
@@ -469,7 +472,7 @@ def verify(ctx, pin):
             elif e.code == SW.COMMAND_NOT_ALLOWED:
                 raise CliFail("PIN is not set.")
             else:
-                raise CliFail(f"PIN verification failed: {e.code.name}")
+                raise CliFail(f"PIN verification failed: {e.code.name}.")
     else:
         raise CliFail("This YubiKey does not support a FIDO PIN.")
     click.echo("PIN verified.")
@@ -491,7 +494,7 @@ def _init_config(ctx, pin):
                 pin, ClientPin.PERMISSION.AUTHENTICATOR_CFG
             )
         except CtapError as e:
-            _fail_pin_error(ctx, e, "PIN error: %s")
+            _fail_pin_error(ctx, e, "PIN error: %s.")
 
     return Config(ctap2, protocol, token)
 
@@ -518,7 +521,7 @@ def force_pin_change(ctx, pin):
 @click.pass_context
 @click.option("-P", "--pin", help="PIN code")
 @click.option("-R", "--rp-id", multiple=True, help="RP ID to allow")
-@click.argument("length", type=click.IntRange(4))
+@click.argument("length", type=click.IntRange(4, 63))
 def set_min_pin_length(ctx, pin, rp_id, length):
     """
     Set the minimum length allowed for PIN.
@@ -619,7 +622,7 @@ def _init_credman(ctx, pin):
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.CREDENTIAL_MGMT)
     except CtapError as e:
-        _fail_pin_error(ctx, e, "PIN error: %s")
+        _fail_pin_error(ctx, e, "PIN error: %s.")
 
     return CredentialManagement(ctap2, client_pin.protocol, token)
 
@@ -744,7 +747,7 @@ def _init_bio(ctx, pin):
     try:
         token = client_pin.get_pin_token(pin, ClientPin.PERMISSION.BIO_ENROLL)
     except CtapError as e:
-        _fail_pin_error(ctx, e, "PIN error: %s")
+        _fail_pin_error(ctx, e, "PIN error: %s.")
 
     return FPBioEnrollment(ctap2, client_pin.protocol, token)
 
@@ -803,7 +806,7 @@ def bio_enroll(ctx, name, pin):
                 )
             elif e.code == CtapError.ERR.USER_ACTION_TIMEOUT:
                 raise CliFail("Failed to add fingerprint due to user inactivity.")
-            raise CliFail(f"Failed to add fingerprint: {e.code.name}")
+            raise CliFail(f"Failed to add fingerprint: {e.code.name}.")
     logger.info("Fingerprint template registered")
     click.echo("Capture complete.")
     bio.set_name(template_id, name)
@@ -861,7 +864,7 @@ def bio_delete(ctx, template_id, pin, force):
         # Match using template_id as NAME
         matches = [k for k in enrollments if enrollments[k] == template_id]
         if len(matches) == 0:
-            raise CliFail(f"No fingerprint matching ID={template_id}")
+            raise CliFail(f"No fingerprint matching ID={template_id}.")
         elif len(matches) > 1:
             raise CliFail(
                 f"Multiple matches for NAME={template_id}. "
@@ -875,7 +878,7 @@ def bio_delete(ctx, template_id, pin, force):
             bio.remove_enrollment(key)
             click.echo("Fingerprint template deleted.")
         except CtapError as e:
-            raise CliFail(f"Failed to delete fingerprint: {e.code.name}")
+            raise CliFail(f"Failed to delete fingerprint: {e.code.name}.")
 
 
 @fido.group("config")
