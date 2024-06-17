@@ -570,6 +570,12 @@ class PivSession:
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 
+        # Update management key type
+        try:
+            self._management_key_type = self.get_management_key_metadata().key_type
+        except NotSupportedError:
+            self._management_key_type = MANAGEMENT_KEY_TYPE.TDES
+
         logger.info("PIV application data reset performed")
 
     @overload

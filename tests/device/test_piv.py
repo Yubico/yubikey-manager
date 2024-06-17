@@ -728,6 +728,8 @@ class TestMetadata:
         session.set_management_key(
             MANAGEMENT_KEY_TYPE.AES192, NON_DEFAULT_MANAGEMENT_KEY
         )
+        assert session.management_key_type == MANAGEMENT_KEY_TYPE.AES192
+
         data = session.get_management_key_metadata()
         assert data.key_type == MANAGEMENT_KEY_TYPE.AES192
         assert data.default_value is False
@@ -743,6 +745,9 @@ class TestMetadata:
             )
             data = session.get_management_key_metadata()
             assert data.default_value is False
+
+        session.reset()
+        assert session.management_key_type == default_type
 
     @pytest.mark.parametrize("key_type", list(KEY_TYPE))
     def test_slot_metadata_generate(self, session, info, keys, key_type, scp):
