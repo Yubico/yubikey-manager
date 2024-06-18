@@ -336,7 +336,7 @@ class TestManagementKey:
                 "-m",
                 management_key,
                 "-n",
-                management_key,
+                NON_DEFAULT_MANAGEMENT_KEY,
             )
 
         # Should succeed
@@ -347,10 +347,10 @@ class TestManagementKey:
             "-m",
             NON_DEFAULT_MANAGEMENT_KEY,
             "-n",
-            management_key,
+            NON_DEFAULT_MANAGEMENT_KEY,
         )
 
-    @condition.check(lambda info: not info.pin_complexity)
+    @condition.check(lambda info: not info.pin_complexity, "PIN complexity")
     def test_change_management_key_generate(self, ykman_cli, management_key):
         if len(management_key) != 32:
             pytest.skip("string management key")
@@ -373,5 +373,5 @@ class TestManagementKey:
             "-m",
             gen_key,
             "-n",
-            management_key,
+            NON_DEFAULT_MANAGEMENT_KEY,
         )

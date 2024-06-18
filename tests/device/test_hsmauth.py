@@ -232,10 +232,9 @@ class TestAccess:
         with pytest.raises(InvalidPinError):
             import_key_derived(session, management_key)
 
-        session.put_management_key(NON_DEFAULT_MANAGEMENT_KEY, management_key)
+        import_key_derived(session, NON_DEFAULT_MANAGEMENT_KEY)
 
     def test_management_key_retries(self, session, management_key):
-        session.put_management_key(management_key, management_key)
         initial_retries = session.get_management_key_retries()
         assert initial_retries == 8
 

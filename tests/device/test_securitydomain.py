@@ -46,9 +46,9 @@ def _verify_auth(sd):
 
 class TestScp03:
     @pytest.fixture(autouse=True)
-    @condition.transport(TRANSPORT.USB)
-    def preconditions(self):
-        pass
+    def preconditions(self, info, transport):
+        if info.is_fips and transport != TRANSPORT.USB:
+            pytest.skip("SCP management on YK FIPS over NFC")
 
     def test_ok(self, session):
         session.authenticate(Scp03KeyParams())
@@ -111,9 +111,9 @@ def _load_scp11_keys(session, kid, kvn):
 
 class TestScp11:
     @pytest.fixture(autouse=True)
-    @condition.transport(TRANSPORT.USB)
-    def preconditions(self):
-        pass
+    def preconditions(self, info, transport):
+        if info.is_fips and transport != TRANSPORT.USB:
+            pytest.skip("SCP management on YK FIPS over NFC")
 
     def test_scp11b_ok(self, session):
         ref = KeyRef(0x13, 0x1)
