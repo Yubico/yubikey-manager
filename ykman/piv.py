@@ -526,22 +526,8 @@ def get_piv_info(session: PivSession):
         tries = session.get_pin_attempts()
         tries_str = "15 or more" if tries == 15 else str(tries)
     info["PIN tries remaining"] = tries_str
-    try:
-        puk_data = session.get_puk_metadata()
-        if puk_data.attempts_remaining == 0:
-            lines.append("PUK is blocked")
-        elif puk_data.default_value:
-            lines.append("WARNING: Using default PUK!")
-        tries_str = "%d/%d" % (
-            puk_data.attempts_remaining,
-            puk_data.total_attempts,
-        )
-        info["PUK tries remaining"] = tries_str
-    except NotSupportedError:
-        if pivman.puk_blocked:
-            lines.append("PUK is blocked")
 
-    try:
+    try:  # Bio metadata
         bio = session.get_bio_metadata()
         if bio.configured:
             info[
@@ -550,7 +536,21 @@ def get_piv_info(session: PivSession):
         else:
             info["Biometrics"] = "Not configured"
     except NotSupportedError:
-        pass
+        try:  # PUK metadata (on non-bio)
+            puk_data = session.get_puk_metadata()
+            if puk_data.attempts_remaining == 0:
+                lines.append("PUK is blocked")
+            elif puk_data.default_value:
+                lines.append("WARNING: Using default PUK!")
+            tries_str = "%d/%d" % (
+                puk_data.attempts_remaining,
+                puk_data.total_attempts,
+            )
+            info["PUK tries remaining"] = tries_str
+        except NotSupportedError:
+            # YK < 5.3
+            if pivman.puk_blocked:
+                lines.append("PUK is blocked")
 
     try:
         metadata = session.get_management_key_metadata()

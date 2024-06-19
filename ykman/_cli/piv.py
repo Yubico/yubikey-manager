@@ -249,12 +249,22 @@ def reset(ctx, force):
     )
 
     click.echo("Resetting PIV data...")
-    ctx.obj["session"].reset()
+    session = ctx.obj["session"]
+    session.reset()
+
+    try:
+        has_puk = session.get_puk_metadata().attempts_remaining > 0
+    except NotSupportedError:
+        has_puk = True
 
     click.echo("Reset complete. All PIV data has been cleared from the YubiKey.")
-    click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
-    click.echo("\tPIN:\t123456")
-    click.echo("\tPUK:\t12345678")
+    if has_puk:
+        click.echo("Your YubiKey now has the default PIN, PUK and Management Key:")
+        click.echo("\tPIN:\t123456")
+        click.echo("\tPUK:\t12345678")
+    else:
+        click.echo("Your YubiKey now has the default PIN and Management Key:")
+        click.echo("\tPIN:\t123456")
     click.echo("\tManagement Key:\t010203040506070801020304050607080102030405060708")
 
 
@@ -287,6 +297,12 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
                 "Retry attempts must be set before PIN/PUK have been changed."
             )
 
+    try:  # Can't change retries on Bio MPE
+        session.get_bio_metadata()
+        raise CliFail("PIN/PUK retries cannot be changed on this YubiKey.")
+    except NotSupportedError:
+        pass
+
     _ensure_authenticated(
         ctx, pin, management_key, require_pin_and_key=True, no_prompt=force
     )
@@ -304,18 +320,24 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
     except Exception:
-        raise CliFail("Setting pin retries failed.")
+        raise CliFail("Setting PIN retries failed.")
 
 
-def _do_change_pin_puk(pin_complexity, name, current, new, fn):
-    def validate_pin_length(pin, prefix):
-        unit = "characters" if pin_complexity else "bytes"
-        pin_len = len(pin) if pin_complexity else len(pin.encode())
-        if not 6 <= pin_len <= 8:
-            raise CliFail(f"{prefix} {name} must be between 6 and 8 {unit} long.")
+def _validate_pin_length(pin, name, pin_complexity, min_len):
+    unit = "characters" if pin_complexity else "bytes"
+    pin_len = len(pin) if pin_complexity else len(pin.encode())
+    if not min_len <= pin_len <= 8:
+        if min_len == 8:
+            raise CliFail(f"{name} must be exactly 8 {unit} long.")
+        else:
+            raise CliFail(f"{name} must be between {min_len} and 8 {unit} long.")
 
-    validate_pin_length(current, "Current")
-    validate_pin_length(new, "New")
+
+def _do_change_pin_puk(info, name, current, new, fn):
+    pin_complexity = info.pin_complexity
+    min_len = 8 if CAPABILITY.PIV in info.fips_capable else 6
+    _validate_pin_length(current, f"Current {name}", pin_complexity, 6)
+    _validate_pin_length(new, f"New {name}", pin_complexity, min_len)
 
     try:
         fn()
@@ -347,6 +369,9 @@ def change_pin(ctx, pin, new_pin):
     info = ctx.obj["info"]
     session = ctx.obj["session"]
 
+    if not session.get_pin_attempts():
+        raise CliFail("PIN is blocked.")
+
     if not pin:
         pin = _prompt_pin("Enter the current PIN")
     if not new_pin:
@@ -359,7 +384,7 @@ def change_pin(ctx, pin, new_pin):
         )
 
     _do_change_pin_puk(
-        info.pin_complexity,
+        info,
         "PIN",
         pin,
         new_pin,
@@ -382,6 +407,12 @@ def change_puk(ctx, puk, new_puk):
     info = ctx.obj["info"]
     session = ctx.obj["session"]
 
+    try:
+        if not session.get_puk_metadata().attempts_remaining:
+            raise CliFail("PUK is blocked.")
+    except NotSupportedError:
+        pass
+
     if not puk:
         puk = _prompt_pin("Enter the current PUK")
     if not new_puk:
@@ -394,7 +425,7 @@ def change_puk(ctx, puk, new_puk):
         )
 
     _do_change_pin_puk(
-        info.pin_complexity,
+        info,
         "PUK",
         puk,
         new_puk,
@@ -564,6 +595,15 @@ def unblock_pin(ctx, puk, new_pin):
             hide_input=True,
             confirmation_prompt=True,
         )
+
+    info = ctx.obj["info"]
+    _validate_pin_length(
+        new_pin,
+        "New PIN",
+        info.pin_complexity,
+        8 if CAPABILITY.PIV in info.fips_capable else 6,
+    )
+
     try:
         session.unblock_pin(puk, new_pin)
         click.echo("New PIN set.")
