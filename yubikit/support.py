@@ -417,7 +417,7 @@ def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
                 FORM_FACTOR.USB_A_NANO,
                 FORM_FACTOR.USB_C_NANO,
             )
-            is_bio = info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO)
+            is_bio = info._is_bio
             is_c = info.form_factor in (  # Does NOT include Ci
                 FORM_FACTOR.USB_C_KEYCHAIN,
                 FORM_FACTOR.USB_C_NANO,

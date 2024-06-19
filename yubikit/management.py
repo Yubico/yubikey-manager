@@ -279,6 +279,10 @@ class DeviceInfo:
     fps_version: Optional[Version] = None
     stm_version: Optional[Version] = None
 
+    @property
+    def _is_bio(self) -> bool:
+        return self.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO)
+
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
 

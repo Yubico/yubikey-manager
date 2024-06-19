@@ -37,6 +37,7 @@ from fido2.ctap2 import (
 )
 from fido2.pcsc import CtapPcscDevice
 from yubikit.management import CAPABILITY
+from yubikit.core import TRANSPORT
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
 from time import sleep
@@ -325,7 +326,8 @@ def change_pin(ctx, pin, new_pin, u2f):
     6 characters long.
     """
 
-    is_fips = is_yk4_fips(ctx.obj["info"])
+    info = ctx.obj["info"]
+    is_fips = is_yk4_fips(info)
 
     if is_fips and not u2f:
         raise CliFail(
@@ -348,7 +350,13 @@ def change_pin(ctx, pin, new_pin, u2f):
             raise CliFail("PIN is not supported on this YubiKey.")
         client_pin = ClientPin(ctap2)
         min_len = ctap2.info.min_pin_length
-    max_len = 63
+    if (
+        info._is_bio
+        and CAPABILITY.PIV in info.config.enabled_capabilities[TRANSPORT.USB]
+    ):
+        max_len = 8
+    else:
+        max_len = 63
 
     def _fail_if_not_valid_pin(pin=None, name="PIN"):
         if not pin or len(pin) < min_len:
@@ -395,7 +403,6 @@ def change_pin(ctx, pin, new_pin, u2f):
                 raise CliFail(f"Failed to change PIN: SW={e.code:04x}.")
 
     def set_pin(new_pin):
-        _fail_if_not_valid_pin(new_pin)
         try:
             client_pin.set_pin(new_pin)
         except CtapError as e:
@@ -540,6 +547,14 @@ def set_min_pin_length(ctx, pin, rp_id, length):
     min_len = info.min_pin_length
     if length < min_len:
         raise CliFail(f"Cannot set a minimum length that is shorter than {min_len}.")
+
+    dev_info = ctx.obj["info"]
+    if (
+        dev_info._is_bio
+        and CAPABILITY.PIV in dev_info.config.enabled_capabilities[TRANSPORT.USB]
+        and length > 8
+    ):
+        raise CliFail("Cannot set a minimum length that is longer than 8.")
 
     config = _init_config(ctx, pin)
     if rp_id:
