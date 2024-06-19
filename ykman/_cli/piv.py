@@ -237,7 +237,7 @@ def reset(ctx, force):
     info = ctx.obj["info"]
     if CAPABILITY.PIV in info.reset_blocked:
         raise CliFail(
-            "Cannot perform PIV reset when biometrics are configured, "
+            "Cannot perform PIV reset when FIDO is configured, "
             "use 'ykman config reset' for full factory reset."
         )
 

@@ -191,8 +191,8 @@ def change_pin(ctx, pin, new_pin):
     """
     Change the User PIN.
 
-    The PIN has a minimum length of 6, and supports any type of
-    alphanumeric characters.
+    The PIN has a minimum length of 6 (or 8, for YubiKey 5.7+ FIPS when not using KDF),
+    and supports any type of alphanumeric characters.
     """
 
     session = ctx.obj["session"]

@@ -122,6 +122,10 @@ def reset(ctx, force):
     This action will wipe all data and restore factory settings for
     all applications on the YubiKey.
     """
+    dev = ctx.obj["device"]
+    if not dev.supports_connection(SmartCardConnection):
+        raise CliFail("Full device reset requires the CCID interface to be enabled.")
+
     info = ctx.obj["info"]
     # reset_blocked is a sure indicator of the command
     if not info.reset_blocked:
