@@ -35,7 +35,6 @@ from yubikit.management import (
     CAPABILITY,
     USB_INTERFACE,
     DEVICE_FLAG,
-    FORM_FACTOR,
     Mode,
 )
 from .util import (
@@ -123,15 +122,17 @@ def reset(ctx, force):
     This action will wipe all data and restore factory settings for
     all applications on the YubiKey.
     """
-    transport = ctx.obj["device"].transport
     info = ctx.obj["info"]
-    is_bio = info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO)
-    has_piv = CAPABILITY.PIV in info.supported_capabilities.get(transport)
-    if not (is_bio and has_piv):
-        raise CliFail(
-            "Full device reset is not supported on this YubiKey, "
-            "refer to reset commands for specific applications instead."
-        )
+    # reset_blocked is a sure indicator of the command
+    if not info.reset_blocked:
+        # No reset blocked, we can still check for Bio MPE
+        transport = ctx.obj["device"].transport
+        has_piv = CAPABILITY.PIV in info.supported_capabilities.get(transport)
+        if not (info._is_bio and has_piv):
+            raise CliFail(
+                "Full device reset is not supported on this YubiKey, "
+                "refer to reset commands for specific applications instead."
+            )
 
     force or click.confirm(
         "WARNING! This will delete all stored data and restore factory "
@@ -250,6 +251,14 @@ def _configure_applications(
     force,
 ):
     info = ctx.obj["info"]
+
+    # If any app reset is blocked, we will not be able to toggle applications
+    if info.reset_blocked:
+        raise CliFail(
+            "This YubiKey must be in a newly reset state before applications can be "
+            "toggled."
+        )
+
     supported = info.supported_capabilities.get(transport)
     enabled = info.config.enabled_capabilities.get(transport)
 

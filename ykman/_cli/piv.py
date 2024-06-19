@@ -287,6 +287,12 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
                 "Retry attempts must be set before PIN/PUK have been changed."
             )
 
+    try:  # Can't change retries on Bio MPE
+        session.get_bio_metadata()
+        raise CliFail("PIN/PUK retries cannot be changed on this YubiKey.")
+    except NotSupportedError:
+        pass
+
     _ensure_authenticated(
         ctx, pin, management_key, require_pin_and_key=True, no_prompt=force
     )
@@ -304,7 +310,7 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         click.echo("\tPIN:\t123456")
         click.echo("\tPUK:\t12345678")
     except Exception:
-        raise CliFail("Setting pin retries failed.")
+        raise CliFail("Setting PIN retries failed.")
 
 
 def _do_change_pin_puk(pin_complexity, name, current, new, fn):
@@ -347,6 +353,9 @@ def change_pin(ctx, pin, new_pin):
     info = ctx.obj["info"]
     session = ctx.obj["session"]
 
+    if not session.get_pin_attempts():
+        raise CliFail("PIN is blocked.")
+
     if not pin:
         pin = _prompt_pin("Enter the current PIN")
     if not new_pin:
@@ -381,6 +390,12 @@ def change_puk(ctx, puk, new_puk):
     """
     info = ctx.obj["info"]
     session = ctx.obj["session"]
+
+    try:
+        if not session.get_puk_metadata().attempts_remaining:
+            raise CliFail("PUK is blocked.")
+    except NotSupportedError:
+        pass
 
     if not puk:
         puk = _prompt_pin("Enter the current PUK")
