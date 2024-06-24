@@ -49,6 +49,12 @@ jobs:
           dist/ykman/ykman --version
           [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
 
+      - name: Simplify Python bundle
+        working-directory: ./dist/ykman/_internal
+        run: |
+          mv $(readlink Python) Python
+          rm -rf Python.framework
+
       - name: Copy scripts
         shell: bash
         run: cp -r resources/macos dist/scripts

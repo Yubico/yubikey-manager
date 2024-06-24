@@ -22,8 +22,13 @@ set -x
 
 cd $SCRIPT_DIR
 
+# Ensure executable, since we may have unpacked from zip
+chmod +x pkg_scripts/*
+
 mkdir -p pkg/root/usr/local/bin pkg/comp
-cp -r $SOURCE_DIR pkg/root/usr/local/
+cp -R $SOURCE_DIR pkg/root/usr/local/
+
+# Create a symlink to the main binary that is on the PATH
 (cd pkg/root/usr/local/bin && ln -s ../ykman/ykman)
 
 pkgbuild --root="pkg/root" --scripts="pkg_scripts" --identifier "com.yubico.yubikey-manager" --version "$RELEASE_VERSION" "pkg/comp/ykman.pkg"
