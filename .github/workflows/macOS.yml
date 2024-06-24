@@ -6,7 +6,7 @@ on: [push, pull_request]
 jobs:
   build:
 
-    runs-on: macos-11
+    runs-on: macos-latest
 
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
