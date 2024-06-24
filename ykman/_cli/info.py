@@ -180,11 +180,12 @@ def info(ctx, check_fips):
         )
         click.echo(f"Enabled USB interfaces: {f_interfaces}")
     if TRANSPORT.NFC in info.supported_capabilities:
-        f_nfc = (
-            "enabled"
-            if info.config.enabled_capabilities.get(TRANSPORT.NFC)
-            else "disabled"
-        )
+        if info.config.nfc_restricted:
+            f_nfc = "restricted"
+        elif info.config.enabled_capabilities.get(TRANSPORT.NFC):
+            f_nfc = "enabled"
+        else:
+            f_nfc = "disabled"
         click.echo(f"NFC transport is {f_nfc}")
     if info.pin_complexity:
         click.echo("PIN complexity is enforced")

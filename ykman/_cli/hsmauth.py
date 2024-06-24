@@ -25,7 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import SmartCardConnection, ApduError, SW
 from yubikit.hsmauth import (
     HsmAuthSession,
     InvalidPinError,
@@ -34,7 +35,6 @@ from yubikit.hsmauth import (
     CREDENTIAL_PASSWORD_LEN,
 )
 from yubikit.management import CAPABILITY
-from yubikit.core.smartcard import ApduError, SW
 
 from ..util import parse_private_key, InvalidPasswordError
 
@@ -234,8 +234,17 @@ def hsmauth(ctx):
     ctx.call_on_close(conn.close)
 
     scp_params = get_scp_params(ctx, CAPABILITY.HSMAUTH, conn)
-
     ctx.obj["session"] = HsmAuthSession(conn, scp_params)
+
+    try:
+        if not scp_params and dev.transport == TRANSPORT.NFC:
+            # Dummy command to test access
+            ctx.obj["session"].get_management_key_retries()
+    except ApduError as e:
+        if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+            raise CliFail("Unable to manage HSMAuth over NFC without SCP")
+        raise
+
     info = ctx.obj["info"]
     ctx.obj["fips_unready"] = (
         CAPABILITY.HSMAUTH in info.fips_capable

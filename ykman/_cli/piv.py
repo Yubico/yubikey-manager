@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import NotSupportedError
+from yubikit.core import NotSupportedError, TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import CAPABILITY
 from yubikit.piv import (
@@ -200,7 +200,16 @@ def piv(ctx):
     ctx.call_on_close(conn.close)
 
     scp_params = get_scp_params(ctx, CAPABILITY.PIV, conn)
-    session = PivSession(conn, scp_params)
+    try:
+        session = PivSession(conn, scp_params)
+    except ApduError as e:
+        if (
+            e.sw == SW.CONDITIONS_NOT_SATISFIED
+            and not scp_params
+            and dev.transport == TRANSPORT.NFC
+        ):
+            raise CliFail("Unable to manage PIV over NFC without SCP")
+        raise
 
     info = ctx.obj["info"]
     ctx.obj["session"] = session

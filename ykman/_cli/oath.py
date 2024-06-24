@@ -25,6 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
+from yubikit.oath import (
+    OathSession,
+    CredentialData,
+    OATH_TYPE,
+    HASH_ALGORITHM,
+    parse_b32_key,
+    _format_cred_id,
+)
+from yubikit.management import CAPABILITY
 from .util import (
     CliFail,
     click_force_option,
@@ -40,16 +51,6 @@ from .util import (
     pretty_print,
     get_scp_params,
 )
-from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
-from yubikit.oath import (
-    OathSession,
-    CredentialData,
-    OATH_TYPE,
-    HASH_ALGORITHM,
-    parse_b32_key,
-    _format_cred_id,
-)
-from yubikit.management import CAPABILITY
 from ..oath import is_steam, calculate_steam, is_hidden, delete_broken_credential
 from ..settings import AppData
 
@@ -92,10 +93,9 @@ def oath(ctx):
     ctx.obj["session"] = OathSession(conn, scp_params)
     ctx.obj["oath_keys"] = AppData("oath_keys")
     info = ctx.obj["info"]
-    ctx.obj["fips_unready"] = (
-        CAPABILITY.OATH in info.fips_capable
-        and CAPABILITY.OATH not in info.fips_approved
-    )
+    is_fips = CAPABILITY.OATH in info.fips_capable
+    ctx.obj["fips_unready"] = is_fips and CAPABILITY.OATH not in info.fips_approved
+    ctx.obj["no_scp"] = is_fips and dev.transport == TRANSPORT.NFC and not scp_params
 
 
 @oath.command()
@@ -221,6 +221,12 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
         raise CliFail("Password provided, but no password is set.")
 
 
+def _fail_scp(ctx, e):
+    if ctx.obj["no_scp"] and e.sw == SW.CONDITIONS_NOT_SATISFIED:
+        raise CliFail("Unable to manage OATH over NFC without SCP")
+    raise e
+
+
 @oath.group()
 def access():
     """Manage password protection for OATH."""
@@ -286,8 +292,11 @@ def change(ctx, password, clear, new_password, remember):
         elif device_id in keys:
             del keys[device_id]
             keys.write()
-        session.set_key(key)
-        click.echo("Password updated.")
+        try:
+            session.set_key(key)
+            click.echo("Password updated.")
+        except ApduError as e:
+            _fail_scp(ctx, e)
 
 
 @access.command()
@@ -599,8 +608,7 @@ def _add_cred(ctx, data, touch, force):
         elif e.sw == SW.COMMAND_ABORTED:
             # Some NEOs do not use the NO_SPACE error.
             raise CliFail("The command failed. Is there enough space on the YubiKey?")
-        else:
-            raise
+        _fail_scp(ctx, e)
 
 
 @accounts.command()

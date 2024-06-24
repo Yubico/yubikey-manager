@@ -25,6 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.openpgp import OpenPgpSession, UIF, PIN_POLICY, KEY_REF as _KEY_REF
 from yubikit.management import CAPABILITY
@@ -87,7 +88,16 @@ def openpgp(ctx):
 
     scp_params = get_scp_params(ctx, CAPABILITY.OPENPGP, conn)
 
-    ctx.obj["session"] = OpenPgpSession(conn, scp_params)
+    try:
+        ctx.obj["session"] = OpenPgpSession(conn, scp_params)
+    except ApduError as e:
+        if (
+            e.sw == SW.CONDITIONS_NOT_SATISFIED
+            and not scp_params
+            and dev.transport == TRANSPORT.NFC
+        ):
+            raise CliFail("Unable to manage OpenPGP over NFC without SCP")
+        raise
 
 
 @openpgp.command()
