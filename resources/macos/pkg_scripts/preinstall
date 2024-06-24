@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Delete existing installation
+rm -rf /usr/local/ykman

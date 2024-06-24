@@ -26,7 +26,7 @@ mkdir -p pkg/root/usr/local/bin pkg/comp
 cp -r $SOURCE_DIR pkg/root/usr/local/
 (cd pkg/root/usr/local/bin && ln -s ../ykman/ykman)
 
-pkgbuild --root="pkg/root" --identifier "com.yubico.yubikey-manager" --version "$RELEASE_VERSION" "pkg/comp/ykman.pkg"
+pkgbuild --root="pkg/root" --scripts="pkg_scripts" --identifier "com.yubico.yubikey-manager" --version "$RELEASE_VERSION" "pkg/comp/ykman.pkg"
 
 productbuild  --package-path "pkg/comp" --distribution "distribution.xml" "$PKG"
 
