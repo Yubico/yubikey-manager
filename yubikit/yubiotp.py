@@ -45,6 +45,7 @@ from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
 
 import abc
 import struct
+import warnings
 from hashlib import sha1
 from threading import Event
 from enum import unique, IntEnum, IntFlag
@@ -754,10 +755,20 @@ class YubiOtpSession:
         raise NotSupportedError("Requires smart card connection")
 
     def close(self) -> None:
+        """Close the underlying connection.
+
+        :deprecated: call .close() on the underlying connection instead.
+        """
+        warnings.warn(
+            "Deprecated: call .close() on the underlying connection instead.",
+            DeprecationWarning,
+        )
         self.backend.close()
 
     @property
     def version(self) -> Version:
+        """The version of the Yubico OTP application,
+        typically the same as the YubiKey firmware."""
         return self._version
 
     def get_serial(self) -> int:

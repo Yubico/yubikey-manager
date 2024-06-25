@@ -290,22 +290,25 @@ class OathSession:
 
     @property
     def version(self) -> Version:
-        """The OATH application version."""
+        """The version of the OATH application."""
         return self._version
 
     @property
     def device_id(self) -> str:
-        """The device ID."""
+        """The device ID.
+
+        A random static identifier that is re-generated on reset.
+        """
         return self._device_id
 
     @property
     def has_key(self) -> bool:
-        """If True, the YubiKey has an access key."""
+        """If True, the YubiKey has an access key set."""
         return self._has_key
 
     @property
     def locked(self) -> bool:
-        """If True, the OATH application is password protected."""
+        """If True, the OATH application is currently locked via an access key."""
         return self._challenge is not None
 
     def reset(self) -> None:
@@ -319,7 +322,7 @@ class OathSession:
         self._device_id = _get_device_id(self._salt)
 
     def derive_key(self, password: str) -> bytes:
-        """Derive a key from password.
+        """Derive an access key from a password.
 
         :param password: The derivation password.
         """
@@ -327,6 +330,8 @@ class OathSession:
 
     def validate(self, key: bytes) -> None:
         """Validate authentication with access key.
+
+        This unlocks the session for use.
 
         :param key: The access key.
         """
@@ -344,7 +349,7 @@ class OathSession:
         self._neo_unlock_workaround = False
 
     def set_key(self, key: bytes) -> None:
-        """Set access key for authentication.
+        """Set an access key for authentication.
 
         :param key: The access key.
         """
@@ -369,9 +374,9 @@ class OathSession:
             self.validate(key)
 
     def unset_key(self) -> None:
-        """Remove access code.
+        """Remove the access key.
 
-        WARNING: This removes authentication.
+        This removes the need to authentication a session before using it.
         """
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
         logger.info("Access code removed")
@@ -380,7 +385,7 @@ class OathSession:
     def put_credential(
         self, credential_data: CredentialData, touch_required: bool = False
     ) -> Credential:
-        """Add a OATH credential.
+        """Add an OATH credential.
 
         :param credential_data: The credential data.
         :param touch_required: The touch policy.
@@ -486,7 +491,9 @@ class OathSession:
     ) -> Mapping[Credential, Optional[Code]]:
         """Calculate codes for all OATH credentials on the YubiKey.
 
-        :param timestamp: A timestamp.
+        This excludes credentials which require touch as well as HOTP credentials.
+
+        :param timestamp: A timestamp used for the TOTP challenge.
         """
         timestamp = int(timestamp or time())
         challenge = _get_challenge(timestamp, DEFAULT_PERIOD)
