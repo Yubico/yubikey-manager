@@ -41,7 +41,7 @@ from .core.otp import (
     OtpProtocol,
     CommandRejectedError,
 )
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol
+from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
 
 import abc
 import struct
@@ -710,8 +710,14 @@ class _YubiOtpSmartCardBackend(_Backend):
 class YubiOtpSession:
     """A session with the YubiOTP application."""
 
-    def __init__(self, connection: Union[OtpConnection, SmartCardConnection]):
+    def __init__(
+        self,
+        connection: Union[OtpConnection, SmartCardConnection],
+        scp_key_params: Optional[ScpKeyParams] = None,
+    ):
         if isinstance(connection, OtpConnection):
+            if scp_key_params:
+                raise ValueError("SCP can only be used with SmartCardConnection")
             otp_protocol = OtpProtocol(connection)
             self._status = otp_protocol.read_status()
             self._version = otp_protocol.version
@@ -736,6 +742,8 @@ class YubiOtpSession:
             else:
                 self._version = mgmt_version or otp_version
             card_protocol.configure(self._version)
+            if scp_key_params:
+                card_protocol.init_scp(scp_key_params)
             self.backend = _YubiOtpSmartCardBackend(
                 card_protocol, self._version, self._status[3]
             )
@@ -746,13 +754,6 @@ class YubiOtpSession:
             f"connection={type(connection).__name__}, version={self.version}, "
             f"state={self.get_config_state()}"
         )
-
-    def init_scp03(self):
-        require_version(self.version, (5, 3, 0))
-        backend = self.backend
-        if isinstance(backend, _YubiOtpSmartCardBackend):
-            return backend.protocol.init_scp03()
-        raise NotSupportedError("Requires smart card connection")
 
     def close(self) -> None:
         """Close the underlying connection.
