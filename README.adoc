@@ -4,7 +4,7 @@ image:https://github.com/Yubico/yubikey-manager/actions/workflows/windows.yml/ba
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml/badge.svg["MacOS build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml"]
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml/badge.svg["Ubuntu build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml"]
 
-Python 3.7 (or later) library and command line tool for configuring a YubiKey.
+Python 3.8 (or later) library and command line tool for configuring a YubiKey.
 If you're looking for the graphical application, it's https://developers.yubico.com/yubikey-manager-qt/[here].
 
 === Usage
@@ -95,7 +95,7 @@ Additionally, packages are available from Homebrew and MacPorts.
 When running one of the `ykman otp` commands you may run into an error such as:
 `Failed to open device for communication: -536870174`. This indicates a problem
 with the permission to access the OTP (keyboard) USB interface.
-  
+
 To access a YubiKey over this interface the application needs the `Input
 Monitoring` permission. If you are not automatically prompted to grant this
 permission, you may have to do so manually. Note that it is the _terminal_ you
