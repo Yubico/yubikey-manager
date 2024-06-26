@@ -367,7 +367,10 @@ def find_scp11_params(
         else:
             raise ValueError(f"No SCP key found matching KID=0x{kid:x}")
     try:
-        chain = scp.get_certificate_bundle(KeyRef(kid, kvn))
+        ref = KeyRef(kid, kvn)
+        chain = scp.get_certificate_bundle(ref)
+        if not chain:
+            raise ValueError(f"No certificate chain stored for {ref}")
         if ca:
             logger.debug("Validating KLCC CA using supplied file")
             parent = parse_certificates(ca, None)[0]
@@ -380,11 +383,9 @@ def find_scp11_params(
             logger.info("No CA supplied, skipping KLCC CA validation")
 
         pub_key = chain[-1].public_key()
-        return Scp11KeyParams(KeyRef(kid, kvn), pub_key)
+        return Scp11KeyParams(ref, pub_key)
     except ApduError:
-        raise ValueError(
-            f"Unable to get SCP key paramaters (KID=0x{kid:x}, KVN=ox{kvn:x})"
-        )
+        raise ValueError(f"Unable to get SCP key paramaters ({ref})")
 
 
 def get_scp_params(

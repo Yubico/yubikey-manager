@@ -1,3 +1,18 @@
+* Version 5.5.0 (released 2024-06-26)
+ * Add Secure Channel support to smartcard sessions.
+ * Support extended APDUs in the "apdu" command (this is now the default).
+ * HSMAuth: Treat management key as a PIN/password instead of a key, adding new CLI
+   commands.
+ * PIV: Deprecate explicit passing of management key type when authenticating.
+ * CLI: Add "config nfc --restrict" command to set "NFC restricted mode".
+ * CLI: Display more information about PIN complexity and FIPS status for compatible
+   YubiKeys.
+ * CLI: Improved error messages for illegal values of PIV PIN and PUK.
+ * CLI: Drop error messages for old 3.x commands.
+ * CLI: Removal of --upload for YubiCloud credentials. Export to CSV and upload via web
+   instead.
+ * CLI: Add more detailed information to the CLI output for several commands.
+
 * Version 5.4.0 (released 2024-03-27)
  * Support for YubiKey Bio Multi-protocol Edition.
  * CLI: Improve error messages for several failures.

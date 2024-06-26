@@ -424,7 +424,7 @@ def check_key_support(
     This method will return None if the key (with PIN and touch policies) is supported,
     or it will raise a NotSupportedError if it is not.
 
-    THIS FUNCTION IS DEPRECATED! Use PivSession.check_key_support() instead.
+    :deprecated: Use PivSession.check_key_support() instead.
     """
     warnings.warn(
         "Deprecated: use PivSession.check_key_support() instead.",
@@ -524,13 +524,21 @@ class PivSession:
 
     @property
     def version(self) -> Version:
+        """The version of the PIV application,
+        typically the same as the YubiKey firmware."""
         return self._version
 
     @property
     def management_key_type(self) -> MANAGEMENT_KEY_TYPE:
+        """The algorithm of the management key currently in use."""
         return self._management_key_type
 
     def reset(self) -> None:
+        """Factory reset the PIV application data.
+
+        This deletes all user-data from the PIV application, and resets the default
+        values for PIN, PUK, and management key.
+        """
         logger.debug("Preparing PIV reset")
 
         try:
@@ -677,7 +685,7 @@ class PivSession:
         logger.info("Management key set")
 
     def verify_pin(self, pin: str) -> None:
-        """Verify the PIN.
+        """Verify the user by PIN.
 
         :param pin: The PIN.
         """
@@ -695,6 +703,17 @@ class PivSession:
     def verify_uv(
         self, temporary_pin: bool = False, check_only: bool = False
     ) -> Optional[bytes]:
+        """Verify the user by fingerprint (YubiKey Bio only).
+
+        Fingerprint verification will allow usage of private keys which have a PIN
+        policy allowing MATCH. For those using MATCH_ALWAYS, the fingerprint must be
+        verified just prior to using the key, or by first requesting a temporary PIN
+        and then later verifying the PIN just prior to key use.
+
+        :param temporary_pin: Request a temporary PIN for later use within the session.
+        :param check_only: Do not verify the user, instead immediately throw an
+            InvalidPinException containing the number of remaining attempts.
+        """
         logger.debug("Verifying UV")
         if temporary_pin and check_only:
             raise ValueError(
@@ -724,6 +743,10 @@ class PivSession:
         return response if temporary_pin else None
 
     def verify_temporary_pin(self, pin: bytes) -> None:
+        """Verify the user via temporary PIN.
+
+        :param pin: A temporary PIN previously requested via verify_uv.
+        """
         logger.debug("Verifying temporary PIN")
         if len(pin) != TEMPORARY_PIN_LEN:
             raise ValueError(f"Temporary PIN must be exactly {TEMPORARY_PIN_LEN} bytes")
@@ -856,6 +879,12 @@ class PivSession:
         )
 
     def get_bio_metadata(self) -> BioMetadata:
+        """Get YubiKey Bio metadata.
+
+        This tells you if fingerprints are enrolled or not, how many fingerprint
+        verification attempts remain, and whether or not a temporary PIN is currently
+        active.
+        """
         logger.debug("Getting bio metadata")
         try:
             data = Tlv.parse_dict(

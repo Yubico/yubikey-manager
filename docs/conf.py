@@ -189,3 +189,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/", None),
     "cryptography": ("https://cryptography.io/en/latest/", None),
 }
+
+
+# Custom config
+autodoc_member_order = "bysource"

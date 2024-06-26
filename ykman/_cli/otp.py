@@ -197,11 +197,24 @@ def otp(ctx, access_code):
 
 def _get_session(ctx, types=[OtpConnection, SmartCardConnection]):
     dev = ctx.obj["device"]
+
+    resolve_scp = ctx.obj.get("scp")
+    if resolve_scp:
+        if SmartCardConnection in types:
+            types = [SmartCardConnection]
+        else:
+            raise CliFail("SCP can only be used with SmartCardConnection")
+
     for conn_type in types:
         if dev.supports_connection(conn_type):
             conn = dev.open_connection(conn_type)
             ctx.call_on_close(conn.close)
-            return YubiOtpSession(conn)
+            if resolve_scp:
+                scp_params = resolve_scp(conn)
+            else:
+                scp_params = None
+            return YubiOtpSession(conn, scp_params)
+
     raise CliFail(
         "The connection type required for this command is not supported/enabled on the "
         "YubiKey."

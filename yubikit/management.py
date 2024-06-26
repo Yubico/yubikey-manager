@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union, Mapping
 import abc
 import struct
+import warnings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -560,10 +561,19 @@ class ManagementSession:
         )
 
     def close(self) -> None:
+        """Close the underlying connection.
+
+        :deprecated: call .close() on the underlying connection instead.
+        """
+        warnings.warn(
+            "Deprecated: call .close() on the underlying connection instead.",
+            DeprecationWarning,
+        )
         self.backend.close()
 
     @property
     def version(self) -> Version:
+        """The firmware version of the YubiKey"""
         return self.backend.version
 
     def read_device_info(self) -> DeviceInfo:
@@ -676,6 +686,12 @@ class ManagementSession:
             logger.info("Mode configuration written")
 
     def device_reset(self) -> None:
+        """Global factory reset.
+
+        This is only available for YubiKey Bio, which has a PIN that is shared between
+        applications. This will factory reset the global PIN as well as the associated
+        applications.
+        """
         if not isinstance(self.backend, _ManagementSmartCardBackend):
             raise NotSupportedError("Device reset can only be performed over CCID")
         logger.debug("Performing device reset")
