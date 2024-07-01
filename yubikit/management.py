@@ -105,7 +105,7 @@ class CAPABILITY(IntFlag):
     def display_name(self) -> str:
         if self == 0:
             return "None"
-        if f"{self:b}".count("1") > 1:
+        if bin(self).count("1") > 1:
             i = 1
             names = []
             while i < self:
