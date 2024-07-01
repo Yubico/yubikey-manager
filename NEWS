@@ -1,3 +1,7 @@
+* Version 5.5.1 (released 2024-07-01)
+ * Bugfix: CLI - Don't use formatting that doesn't work on older Python versions.
+   Note: As the 5.5.0 installers bundle Python 3.12, this will be a source-only release.
+
 * Version 5.5.0 (released 2024-06-26)
  * Add Secure Channel support to smartcard sessions.
  * Support extended APDUs in the "apdu" command (this is now the default).
