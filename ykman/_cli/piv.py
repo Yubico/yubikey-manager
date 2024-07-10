@@ -505,6 +505,11 @@ def change_management_key(
     """
     session = ctx.obj["session"]
 
+    if ctx.obj["fips_unready"] and protect:
+        raise CliFail(
+            "YubiKey FIPS must be in FIPS approved mode prior to using --protect."
+        )
+
     if not algorithm:
         try:
             algorithm = session.get_management_key_metadata().key_type
