@@ -285,7 +285,7 @@ class ScpProcessor(ChainedResponseProcessor):
             data = self._state.encrypt(data)
 
         # Calculate and add MAC to data
-        apdu = self.processor.format_apdu(cla, ins, p1, p2, data + b"\0" * 8, le)
+        apdu = self.processor.format_apdu(cla, ins, p1, p2, data + b"\0" * 8, 0)
         mac = self._state.mac(apdu[:-8])
         data = data + mac
 
@@ -362,6 +362,7 @@ class SmartCardProtocol:
             (4, 2, 0) <= version <= (4, 2, 6)
         ):
             self._max_apdu_size = _MaxApduSize.YK4
+            self._apdu_format = ApduFormat.EXTENDED
             self._processor = TouchWorkaroundProcessor(
                 self.connection, self._ins_send_remaining
             )
