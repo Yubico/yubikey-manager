@@ -200,7 +200,11 @@ def info(ctx, check_fips):
     if info.fips_capable:
         click.echo()
         click.echo("FIPS approved applications")
-        data = {c.display_name: c in info.fips_approved for c in info.fips_capable}
+        data = {
+            c.display_name: c in info.fips_approved
+            for c in CAPABILITY
+            if c in info.fips_capable
+        }
         click.echo("\n".join(pretty_print(data)))
 
     if check_fips:
