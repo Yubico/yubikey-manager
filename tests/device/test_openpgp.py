@@ -281,3 +281,12 @@ def test_attestation(session, keys):
     cert = session.attest_key(KEY_REF.SIG)
 
     assert cert.public_key() == pub
+
+
+@condition.min_version(5, 2)
+def test_get_challenge(session):
+    for ln in (1, 4, 8, 100):
+        x = session.get_challenge(ln)
+        assert len(x) == ln
+        if ln > 1:  # Avoid collision too often
+            assert x != session.get_challenge(ln)
