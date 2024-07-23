@@ -51,6 +51,7 @@ APDU_PATTERN = re.compile(
     r"^"
     r"(?P<cla>[0-9a-f]{2})?(?P<ins>[0-9a-f]{2})(?P<params>[0-9a-f]{4})?"
     r"(?::(?P<body>(?:[0-9a-f]{2})+))?"
+    r"(?:/(?P<le>[0-9a-f]{2}))?"
     r"(?P<check>=(?P<sw>[0-9a-f]{4})?)?"
     r"$",
     re.IGNORECASE,
@@ -61,7 +62,9 @@ def _hex(data: bytes) -> str:
     return " ".join(f"{d:02X}" for d in data)
 
 
-def _parse_apdu(data: str) -> Tuple[Tuple[int, int, int, int, bytes], Optional[int]]:
+def _parse_apdu(
+    data: str,
+) -> Tuple[Tuple[int, int, int, int, bytes, int], Optional[int]]:
     m = APDU_PATTERN.match(data)
     if not m:
         raise ValueError("Invalid APDU format: " + data)
@@ -69,12 +72,13 @@ def _parse_apdu(data: str) -> Tuple[Tuple[int, int, int, int, bytes], Optional[i
     ins = int(m.group("ins"), 16)
     params = int(m.group("params") or "0000", 16)
     body = a2b_hex(m.group("body") or "")
+    le = int(m.group("le") or "00", 16)
     if m.group("check"):
         sw: Optional[int] = int(m.group("sw") or "9000", 16)
     else:
         sw = None
     p1, p2 = params >> 8, params & 0xFF
-    return (cla, ins, p1, p2, body), sw
+    return (cla, ins, p1, p2, body, le), sw
 
 
 def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
@@ -110,7 +114,7 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
     """
     Execute arbitrary APDUs.
     Provide APDUs as a hex encoded, space-separated list using the following syntax:
-    [CLA]INS[P1P2][:DATA][=EXPECTED_SW]
+    [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]
 
     If not provided CLA, P1 and P2 are all set to zero.
     Setting EXPECTED_SW will cause the command to check the response SW an fail if it
@@ -132,6 +136,10 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
       $ ykman apdu a40400:a000000527210101 04dead
         or (using full-apdu mode)
       $ ykman apdu -s 00a4040008a000000527210101 -s 0004dead
+
+    \b
+      Get 8 random bytes from the OpenPGP application:
+      $ ykman apdu -a openpgp 84/08=
     """
     if apdu and send_apdu:
         ctx.fail("Cannot mix positional APDUs and -s/--send-apdu.")
@@ -183,10 +191,12 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
                     click.echo()
                 else:
                     is_first = False
-                header, body = apdu[:4], apdu[4]
+                header, body, le = apdu[:4], apdu[4], apdu[5]
                 req = _hex(struct.pack(">BBBB", *header))
                 if body:
                     req += " -- " + _hex(body)
+                if le:
+                    req += f" (LE={le:02X})"
                 click.echo("SEND: " + req)
                 try:
                     resp = protocol.send_apdu(*apdu)
