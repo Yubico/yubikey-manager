@@ -105,6 +105,11 @@ To add your terminal application to the `Input Monitoring` permission list, go
 to `System Preferences -> Security & Privacy -> Privacy -> Input Monitoring` to
 resolve this.
 
+===== Uninstallation of the MacOS .pkg
+To uninstall yubikey-manager when installed via the pgk installer, run:
+
+  $ sudo rm -rf /usr/local/bin/ykman /usr/local/ykman
+
 ==== Linux
 Packages are available for several Linux distributions by third party package
 maintainers.
