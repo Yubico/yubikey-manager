@@ -73,6 +73,20 @@ import re
 logger = logging.getLogger(__name__)
 
 
+PublicKey = Union[
+    rsa.RSAPublicKey,
+    ec.EllipticCurvePublicKey,
+    ed25519.Ed25519PublicKey,
+    x25519.X25519PublicKey,
+]
+PrivateKey = Union[
+    rsa.RSAPrivateKeyWithSerialization,
+    ec.EllipticCurvePrivateKeyWithSerialization,
+    ed25519.Ed25519PrivateKey,
+    x25519.X25519PrivateKey,
+]
+
+
 @unique
 class ALGORITHM(str, Enum):
     EC = "ec"
@@ -101,11 +115,11 @@ class KEY_TYPE(IntEnum):
         return self.name
 
     @property
-    def algorithm(self):
+    def algorithm(self) -> ALGORITHM:
         return ALGORITHM.RSA if self.name.startswith("RSA") else ALGORITHM.EC
 
     @property
-    def bit_len(self):
+    def bit_len(self) -> int:
         if self in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
             return 256
         match = re.search(r"\d+$", self.name)
@@ -114,7 +128,7 @@ class KEY_TYPE(IntEnum):
         raise ValueError("No bit_len")
 
     @classmethod
-    def from_public_key(cls, key):
+    def from_public_key(cls, key: PublicKey) -> "KEY_TYPE":
         if isinstance(key, rsa.RSAPublicKey):
             try:
                 return getattr(cls, "RSA%d" % key.key_size)
@@ -142,14 +156,14 @@ class MANAGEMENT_KEY_TYPE(IntEnum):
     AES256 = 0x0C
 
     @property
-    def key_len(self):
+    def key_len(self) -> int:
         if self.name == "TDES":
             return 24
         # AES
         return int(self.name[3:]) // 8
 
     @property
-    def challenge_len(self):
+    def challenge_len(self) -> int:
         if self.name == "TDES":
             return 8
         return 16
@@ -241,7 +255,7 @@ class OBJECT_ID(IntEnum):
     ATTESTATION = 0x5FFF01
 
     @classmethod
-    def from_slot(cls, slot):
+    def from_slot(cls, slot: SLOT) -> "OBJECT_ID":
         return getattr(cls, SLOT(slot).name)
 
 
@@ -1094,13 +1108,10 @@ class PivSession:
     def put_key(
         self,
         slot: SLOT,
-        private_key: Union[
-            rsa.RSAPrivateKeyWithSerialization,
-            ec.EllipticCurvePrivateKeyWithSerialization,
-        ],
+        private_key: PrivateKey,
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> None:
+    ) -> KEY_TYPE:
         """Import a private key to slot.
 
         Requires authentication with management key.
@@ -1156,7 +1167,7 @@ class PivSession:
         key_type: KEY_TYPE,
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
+    ) -> PublicKey:
         """Generate private key in slot.
 
         Requires authentication with management key.
