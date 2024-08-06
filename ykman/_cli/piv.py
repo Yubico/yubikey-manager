@@ -1120,7 +1120,9 @@ def export_certificate(ctx, format, slot, certificate):
 @click_management_key_option
 @click_pin_option
 @click_slot_argument
-@click.argument("public-key", type=click.File("rb"), metavar="PUBLIC-KEY")
+@click.argument(
+    "public-key", type=click.File("rb"), metavar="PUBLIC-KEY", required=False
+)
 @click.option(
     "-s",
     "--subject",
@@ -1164,8 +1166,13 @@ def generate_certificate(
     except NotSupportedError:
         timeout = 1.0
 
-    data = public_key.read()
-    public_key = serialization.load_pem_public_key(data, default_backend())
+    if public_key:
+        data = public_key.read()
+        public_key = serialization.load_pem_public_key(data, default_backend())
+    elif session.version < (5, 4, 0):
+        raise CliFail("PUBLIC-KEY required for YubiKey prior to 5.4.")
+    else:
+        public_key = session.get_slot_metadata(slot).public_key
 
     now = datetime.datetime.now(datetime.timezone.utc)
     valid_to = now + datetime.timedelta(days=valid_days)
