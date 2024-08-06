@@ -37,6 +37,8 @@ from yubikit.piv import (
     ALGORITHM,
     TAG_LRC,
     SlotMetadata,
+    FascN,
+    Chuid,
 )
 from .util import display_serial
 
@@ -48,7 +50,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
-from datetime import datetime
+from datetime import datetime, date
 import logging
 import struct
 import os
@@ -468,22 +470,17 @@ def check_key(
 
 def generate_chuid() -> bytes:
     """Generate a CHUID (Cardholder Unique Identifier)."""
-    # Non-Federal Issuer FASC-N
-    # [9999-9999-999999-0-1-0000000000300001]
-    FASC_N = (
-        b"\xd4\xe7\x39\xda\x73\x9c\xed\x39\xce\x73\x9d\x83\x68"
-        + b"\x58\x21\x08\x42\x10\x84\x21\xc8\x42\x10\xc3\xeb"
-    )
-    # Expires on: 2030-01-01
-    EXPIRY = b"\x32\x30\x33\x30\x30\x31\x30\x31"
 
-    return (
-        Tlv(0x30, FASC_N)
-        + Tlv(0x34, os.urandom(16))
-        + Tlv(0x35, EXPIRY)
-        + Tlv(0x3E)
-        + Tlv(TAG_LRC)
+    chuid = Chuid(
+        # Non-Federal Issuer FASC-N
+        fasc_n=FascN(9999, 9999, 999999, 0, 1, 0000000000, 3, 0000, 1),
+        guid=os.urandom(16),
+        # Expires on: 2030-01-01
+        expiration_date=date(2030, 1, 1),
+        asymmetric_signature=b"",
     )
+
+    return bytes(chuid)
 
 
 def generate_ccc() -> bytes:
