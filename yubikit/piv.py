@@ -520,6 +520,9 @@ class Chuid:
         data = Tlv.parse_dict(value)
         buffer_length = data.get(0xEE)
         lrc = data.get(TAG_LRC)
+        # From Python 3.11: date.fromisoformat(data[0x35])
+        d = data[0x35]
+        expiration_date = date(int(d[:4]), int(d[4:6]), int(d[6:8]))
         return cls(
             buffer_length=bytes2int(buffer_length) if buffer_length else None,
             fasc_n=FascN.from_bytes(data[0x30]),
@@ -527,7 +530,7 @@ class Chuid:
             organizational_identifier=data.get(0x32),
             duns=data.get(0x33),
             guid=data[0x34],
-            expiration_date=date.fromisoformat(data[0x35].decode()),
+            expiration_date=expiration_date,
             authentication_key_map=data.get(0x3D),
             asymmetric_signature=data[0x3E],
             lrc=lrc[0] if lrc else None,
