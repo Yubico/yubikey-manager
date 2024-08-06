@@ -38,6 +38,7 @@ from yubikit.piv import (
     PIN_POLICY,
     TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY,
+    Chuid,
 )
 from yubikit.core.smartcard import ApduError, SW
 
@@ -79,6 +80,7 @@ from .util import (
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
 
+import os
 import click
 import datetime
 import logging
@@ -960,6 +962,30 @@ def cert():
     """
 
 
+def _update_chuid(session):
+    try:
+        chuid_data = session.get_object(OBJECT_ID.CHUID)
+        try:
+            chuid = Chuid.from_bytes(chuid_data)
+        except ValueError:
+            logger.debug("Leaving unparsable CHUID as-is.")
+            return
+        if chuid.asymmetric_signature:
+            # Signed CHUID, leave it alone
+            logger.debug("Leaving signed CHUID as-is.")
+            return
+        chuid.guid = os.urandom(16)
+        chuid_data = bytes(chuid)
+        logger.debug("Updating CHUID GUID.")
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
+            logger.debug("Generating new CHUID.")
+            chuid_data = generate_chuid()
+        else:
+            raise
+    session.put_object(OBJECT_ID.CHUID, chuid_data)
+
+
 @cert.command("import")
 @click.pass_context
 @click_management_key_option
@@ -1054,7 +1080,7 @@ def import_certificate(
         _verify_pin_if_needed(ctx, session, do_verify, pin)
 
     session.put_certificate(slot, cert_to_import, compress)
-    session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    _update_chuid(session)
     click.echo(f"Certificate imported into slot {slot.name}")
 
 
@@ -1157,7 +1183,7 @@ def generate_certificate(
                 session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
         session.put_certificate(slot, cert)
-        session.put_object(OBJECT_ID.CHUID, generate_chuid())
+        _update_chuid(session)
         click.echo(f"Certificate generated in slot {slot.name}.")
     except ApduError:
         raise CliFail("Certificate generation failed.")
@@ -1244,7 +1270,7 @@ def delete_certificate(ctx, management_key, pin, slot):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
     session.delete_certificate(slot)
-    session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    _update_chuid(session)
     click.echo(f"Certificate in slot {slot.name} deleted.")
 
 
