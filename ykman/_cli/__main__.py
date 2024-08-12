@@ -46,6 +46,7 @@ from ..util import (
     parse_private_key,
     parse_certificates,
     InvalidPasswordError,
+    is_nfc_restricted,
 )
 from ..logging import init_logging
 from ..diagnostics import get_diagnostics, sys_info
@@ -126,11 +127,21 @@ def require_reader(connection_types, reader):
         readers = list_ccid(reader)
         if len(readers) == 1:
             dev = readers[0]
+            nfc_restricted = False
             try:
                 with dev.open_connection(SmartCardConnection) as conn:
-                    info = read_info(conn, dev.pid)
-                return dev, info
+                    try:
+                        info = read_info(conn, dev.pid)
+                        return dev, info
+                    except ValueError:
+                        nfc_restricted = is_nfc_restricted(conn)
+                        raise  # Re-raise to be handled in block below
             except Exception:
+                if nfc_restricted:
+                    raise CliFail(
+                        "YubiKey is in NFC restricted mode "
+                        "(see: https://www.yubico.com/getting-started/)."
+                    )
                 raise CliFail("Failed to connect to YubiKey.")
         elif len(readers) > 1:
             raise CliFail("Multiple external readers match name.")

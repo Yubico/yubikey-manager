@@ -26,6 +26,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from yubikit.core import Tlv, int2bytes
+from yubikit.core.smartcard import (
+    SmartCardConnection,
+    SmartCardProtocol,
+    ApduError,
+    ApplicationNotAvailableError,
+)
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
@@ -192,3 +198,19 @@ def get_windows_version() -> Tuple[int, int, int]:
     osvi.dwOSVersionInfoSize = ctypes.sizeof(osvi)
     ctypes.windll.Ntdll.RtlGetVersion(ctypes.byref(osvi))  # type: ignore
     return osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber
+
+
+_RESTRICTED_NDEF = bytes.fromhex("001FD1011B5504") + b"yubico.com/getting-started"
+
+
+def is_nfc_restricted(connection: SmartCardConnection) -> bool:
+    """Check if the given SmartCardConnection over NFC is in restricted NFC mode."""
+    try:
+        p = SmartCardProtocol(connection)
+        p.select(bytes.fromhex("D2760000850101"))
+        p.send_apdu(0x00, 0xA4, 0x00, 0x0C, bytes([0xE1, 0x04]))
+        ndef = p.send_apdu(0x00, 0xB0, 0x00, 0x00)
+    except (ApduError, ApplicationNotAvailableError):
+        ndef = None
+
+    return ndef == _RESTRICTED_NDEF
