@@ -968,18 +968,18 @@ def _update_chuid(session):
         try:
             chuid = Chuid.from_bytes(chuid_data)
         except ValueError:
-            logger.debug("Leaving unparsable CHUID as-is.")
+            logger.debug("Leaving unparsable CHUID as-is")
             return
         if chuid.asymmetric_signature:
             # Signed CHUID, leave it alone
-            logger.debug("Leaving signed CHUID as-is.")
+            logger.debug("Leaving signed CHUID as-is")
             return
         chuid.guid = uuid4().bytes
         chuid_data = bytes(chuid)
-        logger.debug("Updating CHUID GUID.")
+        logger.debug("Updating CHUID GUID")
     except ApduError as e:
         if e.sw == SW.FILE_NOT_FOUND:
-            logger.debug("Generating new CHUID.")
+            logger.debug("Generating new CHUID")
             chuid_data = generate_chuid()
         else:
             raise
