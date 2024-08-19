@@ -79,8 +79,8 @@ from .util import (
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
+from uuid import uuid4
 
-import os
 import click
 import datetime
 import logging
@@ -974,7 +974,7 @@ def _update_chuid(session):
             # Signed CHUID, leave it alone
             logger.debug("Leaving signed CHUID as-is.")
             return
-        chuid.guid = os.urandom(16)
+        chuid.guid = uuid4().bytes
         chuid_data = bytes(chuid)
         logger.debug("Updating CHUID GUID.")
     except ApduError as e:

@@ -51,6 +51,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import NameOID
 from datetime import datetime, date
+from uuid import uuid4
 import logging
 import struct
 import os
@@ -474,7 +475,7 @@ def generate_chuid() -> bytes:
     chuid = Chuid(
         # Non-Federal Issuer FASC-N
         fasc_n=FascN(9999, 9999, 999999, 0, 1, 0000000000, 3, 0000, 1),
-        guid=os.urandom(16),
+        guid=uuid4().bytes,
         # Expires on: 2030-01-01
         expiration_date=date(2030, 1, 1),
         asymmetric_signature=b"",
