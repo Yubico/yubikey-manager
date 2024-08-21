@@ -533,7 +533,7 @@ def set_min_pin_length(ctx, pin, rp_id, length):
     """
     Set the minimum length allowed for PIN.
 
-    Optionally use the --rp option to specify which RPs are allowed to request this
+    Optionally use the --rp-id option to specify which RPs are allowed to request this
     information.
     """
     info = ctx.obj["ctap2"].info if "ctap2" in ctx.obj else None
