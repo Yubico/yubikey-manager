@@ -38,6 +38,7 @@ from yubikit.piv import (
     PIN_POLICY,
     TOUCH_POLICY,
     DEFAULT_MANAGEMENT_KEY,
+    Chuid,
 )
 from yubikit.core.smartcard import ApduError, SW
 
@@ -78,6 +79,7 @@ from .util import (
 )
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
+from uuid import uuid4
 
 import click
 import datetime
@@ -960,6 +962,30 @@ def cert():
     """
 
 
+def _update_chuid(session):
+    try:
+        chuid_data = session.get_object(OBJECT_ID.CHUID)
+        try:
+            chuid = Chuid.from_bytes(chuid_data)
+        except ValueError:
+            logger.debug("Leaving unparsable CHUID as-is")
+            return
+        if chuid.asymmetric_signature:
+            # Signed CHUID, leave it alone
+            logger.debug("Leaving signed CHUID as-is")
+            return
+        chuid.guid = uuid4().bytes
+        chuid_data = bytes(chuid)
+        logger.debug("Updating CHUID GUID")
+    except ApduError as e:
+        if e.sw == SW.FILE_NOT_FOUND:
+            logger.debug("Generating new CHUID")
+            chuid_data = generate_chuid()
+        else:
+            raise
+    session.put_object(OBJECT_ID.CHUID, chuid_data)
+
+
 @cert.command("import")
 @click.pass_context
 @click_management_key_option
@@ -1054,7 +1080,7 @@ def import_certificate(
         _verify_pin_if_needed(ctx, session, do_verify, pin)
 
     session.put_certificate(slot, cert_to_import, compress)
-    session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    _update_chuid(session)
     click.echo(f"Certificate imported into slot {slot.name}")
 
 
@@ -1094,7 +1120,9 @@ def export_certificate(ctx, format, slot, certificate):
 @click_management_key_option
 @click_pin_option
 @click_slot_argument
-@click.argument("public-key", type=click.File("rb"), metavar="PUBLIC-KEY")
+@click.argument(
+    "public-key", type=click.File("rb"), metavar="PUBLIC-KEY", required=False
+)
 @click.option(
     "-s",
     "--subject",
@@ -1138,8 +1166,13 @@ def generate_certificate(
     except NotSupportedError:
         timeout = 1.0
 
-    data = public_key.read()
-    public_key = serialization.load_pem_public_key(data, default_backend())
+    if public_key:
+        data = public_key.read()
+        public_key = serialization.load_pem_public_key(data, default_backend())
+    elif session.version < (5, 4, 0):
+        raise CliFail("PUBLIC-KEY required for YubiKey prior to 5.4.")
+    else:
+        public_key = session.get_slot_metadata(slot).public_key
 
     now = datetime.datetime.now(datetime.timezone.utc)
     valid_to = now + datetime.timedelta(days=valid_days)
@@ -1157,7 +1190,7 @@ def generate_certificate(
                 session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
         session.put_certificate(slot, cert)
-        session.put_object(OBJECT_ID.CHUID, generate_chuid())
+        _update_chuid(session)
         click.echo(f"Certificate generated in slot {slot.name}.")
     except ApduError:
         raise CliFail("Certificate generation failed.")
@@ -1244,7 +1277,7 @@ def delete_certificate(ctx, management_key, pin, slot):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
     session.delete_certificate(slot)
-    session.put_object(OBJECT_ID.CHUID, generate_chuid())
+    _update_chuid(session)
     click.echo(f"Certificate in slot {slot.name} deleted.")
 
 

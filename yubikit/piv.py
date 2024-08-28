@@ -59,7 +59,8 @@ from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.backends import default_backend
 
-from dataclasses import dataclass
+from datetime import date
+from dataclasses import dataclass, astuple
 from enum import Enum, IntEnum, unique
 from typing import Optional, Union, Type, cast, overload
 
@@ -391,6 +392,149 @@ class BioMetadata:
     configured: bool
     attempts_remaining: int
     temporary_pin: bool
+
+
+def _bcd(val, ln=1):
+    bits = f"{val % 10:04b}"[::-1]
+    bits += str((bits.count("1") + 1) % 2)
+    return bits if ln == 1 else _bcd(val // 10, ln - 1) + bits
+
+
+BCD_SS = "11010"
+BCD_FS = "10110"
+BCD_ES = "11111"
+
+_FASCN_LENS = (4, 4, 6, 1, 1, 10, 1, 4, 1)
+
+
+@dataclass
+class FascN:
+    """FASC-N data structure
+
+    https://www.idmanagement.gov/docs/pacs-tig-scepacs.pdf
+    """
+
+    agency_code: int  # 4 digits
+    system_code: int  # 4 digits
+    credential_number: int  # 6 digits
+    credential_series: int  # 1 digit
+    individual_credential_issue: int  # 1 digit
+    person_identifier: int  # 10 digits
+    organizational_category: int  # 1 digit
+    organizational_identifier: int  # 4 digits
+    organization_association_category: int  # 1 digit
+
+    def __bytes__(self):
+        # Convert values to BCD
+        vs = iter(_bcd(v, ln) for v, ln in zip(astuple(self), _FASCN_LENS))
+
+        # Add separators
+        bs = (
+            BCD_SS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + next(vs)
+            + next(vs)
+            + next(vs)
+            + BCD_ES
+        )
+
+        # Calculate LRC
+        lrc = 0
+        for i in range(0, len(bs), 5):
+            lrc ^= int(bs[i : i + 5], 2)
+
+        return int2bytes(int(bs, 2) << 5 | lrc)
+
+    @classmethod
+    def from_bytes(cls, value: bytes) -> "FascN":
+        bs = f"{bytes2int(value):0200b}"
+        ds = [int(bs[i : i + 4][::-1], 2) for i in range(0, 200, 5)]
+        args = (
+            int("".join(str(d) for d in ds[offs : offs + ln]))
+            # offsets considering separators
+            for offs, ln in zip((1, 6, 11, 18, 20, 22, 32, 33, 37), _FASCN_LENS)
+        )
+        return cls(*args)
+
+    def __str__(self):
+        return "[%04d-%04d-%06d-%d-%d-%010d%d%04d%d]" % astuple(self)
+
+
+# From Python 3.10 we can use kw_only instead
+_chuid_no_value = object()
+
+
+@dataclass
+class Chuid:
+    buffer_length: Optional[int] = None
+    fasc_n: FascN = cast(FascN, _chuid_no_value)
+    agency_code: Optional[bytes] = None
+    organizational_identifier: Optional[bytes] = None
+    duns: Optional[bytes] = None
+    guid: bytes = cast(bytes, _chuid_no_value)
+    expiration_date: date = cast(date, _chuid_no_value)
+    authentication_key_map: Optional[bytes] = None
+    asymmetric_signature: bytes = cast(bytes, _chuid_no_value)
+    lrc: Optional[int] = None
+
+    def __post_init__(self):
+        if _chuid_no_value in (
+            self.fasc_n,
+            self.guid,
+            self.expiration_date,
+            self.asymmetric_signature,
+        ):
+            raise ValueError("Missing required field(s)")
+
+    def __bytes__(self):
+        bs = b""
+        if self.buffer_length is not None:
+            bs += Tlv(0xEE, int2bytes(self.buffer_length))
+        bs += Tlv(0x30, bytes(self.fasc_n))
+        if self.agency_code is not None:
+            bs += Tlv(0x31, self.agency_code)
+        if self.organizational_identifier is not None:
+            bs += Tlv(0x32, self.organizational_identifier)
+        if self.duns is not None:
+            bs += Tlv(0x33, self.duns)
+        bs += Tlv(0x34, self.guid)
+        bs += Tlv(0x35, self.expiration_date.isoformat().replace("-", "").encode())
+        if self.authentication_key_map is not None:
+            bs += Tlv(0x3D, self.authentication_key_map)
+        bs += Tlv(0x3E, self.asymmetric_signature)
+        bs += Tlv(TAG_LRC, bytes([self.lrc]) if self.lrc is not None else b"")
+        return bs
+
+    @classmethod
+    def from_bytes(cls, value: bytes) -> "Chuid":
+        data = Tlv.parse_dict(value)
+        buffer_length = data.get(0xEE)
+        lrc = data.get(TAG_LRC)
+        # From Python 3.11: date.fromisoformat(data[0x35])
+        d = data[0x35]
+        expiration_date = date(int(d[:4]), int(d[4:6]), int(d[6:8]))
+        return cls(
+            buffer_length=bytes2int(buffer_length) if buffer_length else None,
+            fasc_n=FascN.from_bytes(data[0x30]),
+            agency_code=data.get(0x31),
+            organizational_identifier=data.get(0x32),
+            duns=data.get(0x33),
+            guid=data[0x34],
+            expiration_date=expiration_date,
+            authentication_key_map=data.get(0x3D),
+            asymmetric_signature=data[0x3E],
+            lrc=lrc[0] if lrc else None,
+        )
 
 
 def _pad_message(key_type, message, hash_algorithm, padding):
