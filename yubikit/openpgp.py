@@ -1023,8 +1023,14 @@ class OpenPgpSession:
 
     def _read_version(self) -> Version:
         logger.debug("Getting version number")
-        bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
-        return Version(*(_bcd(x) for x in bcd))
+        try:
+            bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
+            return Version(*(_bcd(x) for x in bcd))
+        except ApduError as e:
+            # Pre 1.0.2 versions don't support reading the version
+            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
+                return Version(1, 0, 0)
+            raise
 
     @property
     def aid(self) -> OpenPgpAid:
