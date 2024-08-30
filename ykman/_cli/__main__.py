@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import ApplicationNotAvailableError
+from yubikit.core import ApplicationNotAvailableError, Version, _override_version
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -82,11 +82,16 @@ import ctypes
 import time
 import sys
 import re
+import os
 
 import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+# Development key builds are treated as having the following version
+_OVERRIDE_VERSION = Version.from_string(os.environ.get("_YK_OVERRIDE_VERSION", "5.7.2"))
 
 
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
@@ -400,6 +405,26 @@ def cli(
                     items = require_reader(connections, reader)
                 else:
                     items = require_device(connections, device)
+
+                if items[1].version.major == 0:
+                    logger.info(
+                        "Debug key detected, "
+                        f"overriding version with {_OVERRIDE_VERSION}"
+                    )
+                    # Preview build, override version and get new DeviceInfo
+                    _override_version(_OVERRIDE_VERSION)
+                    for c in connections:
+                        if items[0].supports_connection(c):
+                            try:
+                                with items[0].open_connection(c) as conn:
+                                    info = read_info(conn, items[0].pid)
+                                items = (items[0], info)
+                            except Exception:
+                                logger.debug("Failed", exc_info=True)
+                                continue
+                            break
+                    else:
+                        raise CliFail("Failed to connect to YubiKey.")
                 setattr(resolve, "items", items)
             return items
 

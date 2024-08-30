@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from ..util import parse_certificates
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, Version, require_version, NotSupportedError
 from yubikit.core.smartcard import SmartCardConnection, ApduError
 from yubikit.core.smartcard.scp import ScpKid, KeyRef, ScpKeyParams, Scp11KeyParams
 from yubikit.management import DeviceInfo, CAPABILITY
@@ -326,6 +326,14 @@ def pretty_print(value, level: int = 0) -> Sequence[str]:
     else:
         lines.append(f"{indent}{value}")
     return lines
+
+
+def check_version(version: Version, req: Tuple[int, int, int]) -> bool:
+    try:
+        require_version(version, req)
+        return True
+    except NotSupportedError:
+        return False
 
 
 def is_yk4_fips(info: DeviceInfo) -> bool:

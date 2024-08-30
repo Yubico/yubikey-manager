@@ -630,7 +630,9 @@ class HsmAuthSession:
 
         data: bytes = Tlv(TAG_LABEL, _parse_label(label))
 
-        if credential_password is not None and self.version >= (5, 7, 1):
+        if credential_password is not None and (
+            self.version >= (5, 7, 1) or self.version[0] == 0
+        ):
             data += Tlv(
                 TAG_CREDENTIAL_PASSWORD, _parse_credential_password(credential_password)
             )

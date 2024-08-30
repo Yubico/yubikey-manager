@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .core import (
-    require_version as _require_version,
+    require_version,
     int2bytes,
     bytes2int,
     Version,
@@ -92,13 +92,6 @@ PrivateKey = Union[
 class ALGORITHM(str, Enum):
     EC = "ec"
     RSA = "rsa"
-
-
-# Don't treat pre 1.0 versions as "developer builds".
-def require_version(my_version: Version, *args, **kwargs):
-    if my_version <= (0, 1, 4):  # Last pre 1.0 release of ykneo-piv
-        my_version = Version(1, 0, 0)
-    _require_version(my_version, *args, **kwargs)
 
 
 @unique
@@ -599,17 +592,16 @@ def _do_check_key_support(
     generate: bool = True,
     fips_restrictions: bool = False,
 ) -> None:
-    if version[0] == 0 and version > (0, 1, 3):
-        return  # Development build, skip version checks
-
-    if version < (4, 0, 0):
-        if key_type == KEY_TYPE.ECCP384:
-            raise NotSupportedError("ECCP384 requires YubiKey 4 or later")
-        if touch_policy != TOUCH_POLICY.DEFAULT or pin_policy != PIN_POLICY.DEFAULT:
-            raise NotSupportedError("PIN/Touch policy requires YubiKey 4 or later")
-
-    if version < (4, 3, 0) and touch_policy == TOUCH_POLICY.CACHED:
-        raise NotSupportedError("Cached touch policy requires YubiKey 4.3 or later")
+    if key_type == KEY_TYPE.ECCP384:
+        require_version(version, (4, 0, 0), "ECCP384 requires YubiKey 4 or later")
+    if touch_policy != TOUCH_POLICY.DEFAULT or pin_policy != PIN_POLICY.DEFAULT:
+        require_version(
+            version, (4, 0, 0), "PIN/Touch policy requires YubiKey 4 or later"
+        )
+    if touch_policy == TOUCH_POLICY.CACHED:
+        require_version(
+            version, (4, 3, 0), "Cached touch policy requires YubiKey 4.3 or later"
+        )
 
     # ROCA
     if (4, 2, 0) <= version < (4, 3, 5):
@@ -624,13 +616,13 @@ def _do_check_key_support(
             raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
 
     # New key types
-    if version < (5, 7, 0) and key_type in (
+    if key_type in (
         KEY_TYPE.RSA3072,
         KEY_TYPE.RSA4096,
         KEY_TYPE.ED25519,
         KEY_TYPE.X25519,
     ):
-        raise NotSupportedError(f"{key_type} requires YubiKey 5.7 or later")
+        require_version(version, (5, 7, 0), f"{key_type} requires YubiKey 5.7 or later")
 
 
 def _parse_device_public_key(key_type, encoded):

@@ -83,8 +83,10 @@ def _read_info_ccid(conn, key_type, interfaces):
         try:
             return mgmt.read_device_info()
         except NotSupportedError:
-            # Workaround to "de-select" the Management Applet needed for NEO
-            conn.send_and_receive(b"\xa4\x04\x00\x08")
+            if version.major == 3:
+                # Workaround to "de-select" the Management Applet needed for NEO
+                logger.debug("Send NEO de-select workaround...")
+                conn.send_and_receive(b"\xa4\x04\x00\x08")
     except ApplicationNotAvailableError:
         logger.debug("Couldn't select Management application, use fallback")
 

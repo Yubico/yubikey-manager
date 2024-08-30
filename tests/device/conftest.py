@@ -1,7 +1,7 @@
 from ykman.device import list_all_devices, read_info
 from ykman.pcsc import list_devices
 from ykman._cli.util import find_scp11_params
-from yubikit.core import TRANSPORT, Version
+from yubikit.core import TRANSPORT, Version, _override_version
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -24,18 +24,12 @@ def _device(pytestconfig):
         else:
             pytest.skip("No serial specified for device tests")
 
+    version = None
     version_str = pytestconfig.getoption("use_version")
     if version_str:
         version = Version.from_string(version_str)
-
-        # Monkey patch all parsing of Version to use the supplied value
-        # N.B. There are some instances where ideally we would replace the version,
-        # but we don't really care
-        def get_version(cls, data):
-            return version
-
-        Version.from_bytes = classmethod(get_version)
-        Version.from_string = classmethod(get_version)
+        _override_version(version)
+        os.environ["_YK_OVERRIDE_VERSION"] = version_str
 
     reader = pytestconfig.getoption("reader")
     if reader:
@@ -52,6 +46,8 @@ def _device(pytestconfig):
         dev, info = devices[0]
     if info.serial != serial:
         pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
+    if version:
+        info.version = version
 
     return dev, info
 
