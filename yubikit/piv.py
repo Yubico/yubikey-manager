@@ -165,7 +165,12 @@ class MANAGEMENT_KEY_TYPE(IntEnum):
 
 def _parse_management_key(key_type, management_key):
     if key_type == MANAGEMENT_KEY_TYPE.TDES:
-        return algorithms.TripleDES(management_key)
+        # TripleDES moved to decrepit in cryptography 43
+        try:
+            from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
+        except ImportError:
+            TripleDES = algorithms.TripleDES
+        return TripleDES(management_key)
     else:
         return algorithms.AES(management_key)
 
