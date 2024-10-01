@@ -5,7 +5,7 @@ image:https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml/badg
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml/badge.svg["Ubuntu build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml"]
 
 Python 3.8 (or later) library and command line tool for configuring a YubiKey.
-If you're looking for the graphical application, it's https://developers.yubico.com/yubikey-manager-qt/[here].
+If you're looking for a graphical application, check out  https://developers.yubico.com/yubioath-flutter/[Yubico Authenticator].
 
 === Usage
 For more usage information and examples, see the https://docs.yubico.com/software/yubikey/tools/ykman/Using_the_ykman_CLI.html[YubiKey Manager CLI User Manual].
