@@ -1,11 +1,13 @@
-[tool.poetry]
+[project]
 name = "yubikey-manager"
 version = "5.5.2-dev.0"
-description = "Tool for managing your YubiKey configuration."
-authors = ["Dain Nilsson <dain@yubico.com>"]
-license = "BSD"
-homepage = "https://github.com/Yubico/yubikey-manager"
-repository = "https://github.com/Yubico/yubikey-manager"
+description = "Library and CLI for managing your YubiKey configuration."
+authors = [
+  { name = "Dain Nilsson", email = "<dain@yubico.com>" }
+]
+readme = "README.adoc"
+requires-python = ">=3.8, <4"
+license = { file = "COPYING" }
 keywords = ["yubikey", "yubiotp", "piv", "fido"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
@@ -13,6 +15,23 @@ classifiers = [
   "Topic :: Security :: Cryptography",
   "Topic :: Utilities"
 ]
+dependencies = [
+  "cryptography (>=3.0, <45)",
+  "pyscard (>=2.0, <3)",
+  "fido2 (>=1.0, <2)",
+  "click (>=8.0, <9)",
+  "keyring (>=23.4, <26)",
+  "pywin32 (>=223) ; sys_platform == 'win32'",
+]
+
+[project.urls]
+Homepage = "https://github.com/Yubico/yubikey-manager"
+
+[project.scripts]
+ykman = "ykman._cli.__main__:main"
+
+[tool.poetry]
+requires-poetry = ">=2.0"
 include = [
   { path = "COPYING", format = "sdist"},
   { path = "NEWS", format = "sdist"},
@@ -25,29 +44,16 @@ packages = [
   { include = "ykman" },
 ]
 
-
-[tool.poetry.dependencies]
-python = "^3.8"
-cryptography = ">=3.0, <45"
-pyscard = "^2.0"
-fido2 = "^1.0"
-click = "^8.0"
-keyring = ">=23.4, <26"
-pywin32 = {version = ">=223", platform = "win32"}
-
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
 makefun = "^1.9.5"
-pyinstaller = {version = "^6.0", python = "<3.13"}
-Sphinx = {version = "^7.2", python = ">=3.9, <3.13"}
+pyinstaller = { version = "^6.0", python = "<3.13" }
+Sphinx = { version = "^7.2", python = ">=3.9, <3.13" }
 sphinx-rtd-theme = "^1.2.2"
 sphinx-autodoc-typehints = "^2"
 
-[tool.poetry.scripts]
-ykman = "ykman._cli.__main__:main"
-
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=2.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
