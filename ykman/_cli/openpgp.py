@@ -123,6 +123,8 @@ def reset(ctx, force):
 
     This action will wipe all OpenPGP data, and set all PINs to their default
     values.
+
+    The attestation key and certificate will NOT be reset.
     """
     force or click.confirm(
         "WARNING! This will delete all stored OpenPGP keys and data and restore "
@@ -391,19 +393,22 @@ def set_touch(ctx, key, policy, admin_pin, force):
     private key on the YubiKey. The touch policy is set individually for each key slot.
     To see the current touch policy, run the "openpgp info" subcommand.
 
+    WARNING: Setting the touch policy of the attestation key to "fixed" cannot be undone
+    without replacing the attestation private key.
+
     Touch policies:
 
     \b
-    Off (default)   no touch required
-    On              touch required
-    Fixed           touch required, can't be disabled without deleting the private key
-    Cached          touch required, cached for 15s after use
-    Cached-Fixed    touch required, cached for 15s after use, can't be disabled
-                    without deleting the private key
+    Off (default)  no touch required
+    On             touch required
+    Fixed          touch required, can't be disabled without deleting the private key
+    Cached         touch required, cached for 15s after use
+    Cached-Fixed   touch required, cached for 15s after use, can't be disabled
+                   without deleting the private key
 
     \b
-    KEY     key slot to set (sig, dec, aut or att)
-    POLICY  touch policy to set (on, off, fixed, cached or cached-fixed)
+    KEY            key slot to set (sig, dec, aut or att)
+    POLICY         touch policy to set (on, off, fixed, cached or cached-fixed)
     """
     session = ctx.obj["session"]
     policy_name = policy.name.lower().replace("_", "-")
@@ -437,11 +442,15 @@ def set_touch(ctx, key, policy, admin_pin, force):
 @click.argument("private-key", type=click.File("rb"), metavar="PRIVATE-KEY")
 def import_key(ctx, key, private_key, admin_pin):
     """
-    Import a private key (ONLY SUPPORTS ATTESTATION KEY).
-
     Import a private key for OpenPGP attestation.
 
+    The attestation key is by default pre-generated during production with a
+    Yubico-issued key and certificate.
+
+    WARNING: This private key cannot be recovered once overwritten!
+
     \b
+    KEY          key slot to import to (only 'att' supported)
     PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
     session = ctx.obj["session"]
@@ -555,7 +564,7 @@ def delete_certificate(ctx, key, admin_pin):
     Delete an OpenPGP certificate.
 
     \b
-    KEY         Key slot to delete certificate from (sig, dec, aut, or att).
+    KEY  key slot to delete certificate from (sig, dec, aut, or att)
     """
     session = ctx.obj["session"]
 
