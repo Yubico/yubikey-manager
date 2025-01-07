@@ -28,20 +28,24 @@ description = re.split(r"\s{2,}", parts[1])[1].strip()
 
 print(f".SH DESCRIPTION\n.PP\n{description}\n.SH OPTIONS")
 
-options = re.split(r"\s{2,}", parts[3].strip())
-buf = ""
 opt: List[str] = []
+options = parts[3].strip().split("\n  ")
 while options:
     o = options.pop(0)
     if o.startswith("-"):
         if opt:
-            print(".TP")
-            print((opt[0] + "\n" + " ".join(opt[1:])).replace("-", r"\-"))
-        opt = [re.sub(r"([-a-z]+)", r"\\fB\1\\fR", o)]
+            print(" ".join(opt))
+            opt = []
+        print(".TP")
+        oo = re.split(r"\s{2,}", o)
+        print(re.sub(r"([-a-z]+)", r"\\fB\1\\fR", oo.pop(0)).replace("-", r"\-"))
+        if oo:
+            options = oo + options
     else:
-        opt.append(o)
-print(".TP")
-print((opt[0] + "\n" + " ".join(opt[1:])).replace("-", r"\-"))
+        opt.append(o.strip())
+
+if opt:
+    print(" ".join(opt))
 
 print('.SS "Commands:"')
 commands = re.split(r"\s{2,}", parts[4].strip())
