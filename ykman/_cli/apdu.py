@@ -117,7 +117,7 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
     [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]
 
     If not provided CLA, P1 and P2 are all set to zero.
-    Setting EXPECTED_SW will cause the command to check the response SW an fail if it
+    Setting EXPECTED_SW will cause the command to check the response SW and fail if it
     differs. "=" can be used as shorthand for "=9000" (SW=OK).
 
     Examples:
