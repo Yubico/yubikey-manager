@@ -31,6 +31,7 @@ jobs:
       - name: Explicitly use universal versions
         run: |
           # Export exact versions
+          pipx inject poetry poetry-plugin-export
           poetry export --without-hashes > requirements.txt
           grep cryptography requirements.txt > cryptography.txt
           grep cffi requirements.txt > source-reqs.txt
