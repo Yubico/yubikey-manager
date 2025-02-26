@@ -149,6 +149,7 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
             ctx.fail("No commands provided.")
 
     dev = ctx.obj["device"]
+    info = ctx.obj["info"]
     scp_resolve = ctx.obj.get("scp")
 
     with dev.open_connection(SmartCardConnection) as conn:
@@ -160,7 +161,8 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
         else:
             params = None
 
-        if not short:
+        # Use extended APDUs on YK 4+, unless --short is specified
+        if not short and info.version[0] >= 4:
             protocol.apdu_format = ApduFormat.EXTENDED
         elif params:
             ctx.fail("--short cannot be used with SCP")
