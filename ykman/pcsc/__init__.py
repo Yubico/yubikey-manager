@@ -35,6 +35,7 @@ from smartcard import System
 from smartcard.Exceptions import CardConnectionException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
+from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnection
 
 from fido2.pcsc import CtapPcscDevice
 from time import sleep
@@ -88,7 +89,10 @@ class ScardYubiKeyDevice(YkmanDevice):
             return self._open_smartcard_connection()
         elif issubclass(CtapPcscDevice, connection_type):
             if self.transport == TRANSPORT.NFC:
-                return CtapPcscDevice(self.reader.createConnection(), self.reader.name)
+                return CtapPcscDevice(
+                    ExclusiveConnectCardConnection(self.reader.createConnection()),
+                    self.reader.name,
+                )
         return super(ScardYubiKeyDevice, self).open_connection(connection_type)
 
     def _open_smartcard_connection(self) -> SmartCardConnection:
@@ -102,9 +106,9 @@ class ScardYubiKeyDevice(YkmanDevice):
 
 class ScardSmartCardConnection(SmartCardConnection):
     def __init__(self, connection):
-        self.connection = connection
-        connection.connect()
-        atr = connection.getATR()
+        self.connection = ExclusiveConnectCardConnection(connection)
+        self.connection.connect()
+        atr = self.connection.getATR()
         self._transport = (
             TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
         )
