@@ -91,7 +91,7 @@ logger = logging.getLogger(__name__)
 
 
 # Development key builds are treated as having the following version
-_OVERRIDE_VERSION = Version.from_string(os.environ.get("_YK_OVERRIDE_VERSION", "5.7.2"))
+_OVERRIDE_VERSION = Version.from_string(os.environ.get("_YK_OVERRIDE_VERSION", "5.7.4"))
 
 
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
