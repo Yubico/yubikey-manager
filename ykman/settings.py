@@ -30,7 +30,9 @@ import json
 import keyring
 from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
+import logging
 
+logger = logging.getLogger(__name__)
 
 XDG_DATA_HOME = os.environ.get("XDG_DATA_HOME", "~/.local/share") + "/ykman"
 XDG_CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", "~/.config") + "/ykman"
@@ -45,8 +47,12 @@ class Settings(dict):
     def __init__(self, name):
         self.fname = Path(self._config_dir).expanduser().resolve() / (name + ".json")
         if self.fname.is_file():
-            with self.fname.open("r") as fd:
-                self.update(json.load(fd))
+            try:
+                with self.fname.open("r") as fd:
+                    self.update(json.load(fd))
+            except Exception:
+                # The file may be corrupted or unreadable, ignore it
+                logger.warning("Error reading settings file", exc_info=True)
 
     def __eq__(self, other):
         return other is not None and self.fname == other.fname
@@ -64,8 +70,8 @@ class Settings(dict):
     __hash__ = None
 
 
-class Configuration(Settings):
-    _config_dir = XDG_CONFIG_HOME
+# Deprecated, just use Settings. Remove in 6.0
+Configuration = Settings
 
 
 class KeystoreError(Exception):
