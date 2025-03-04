@@ -84,6 +84,8 @@ def handle_credential_error(
             raise CliFail("The device was not touched.")
         elif e.sw == SW.CONDITIONS_NOT_SATISFIED:
             raise CliFail(f"{target} does not meet complexity requirement.")
+    elif isinstance(e, ValueError):
+        raise  # Re-raise, ValueErrors are handled elsewhere
     raise CliFail(default_exception_msg)
 
 
