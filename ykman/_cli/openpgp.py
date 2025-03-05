@@ -30,7 +30,7 @@ from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.openpgp import OpenPgpSession, UIF, PIN_POLICY, KEY_REF as _KEY_REF
 from yubikit.management import CAPABILITY
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import get_openpgp_info
+from ..openpgp import get_openpgp_info, safe_reset
 from .util import (
     CliFail,
     click_force_option,
@@ -97,7 +97,16 @@ def openpgp(ctx):
             and dev.transport == TRANSPORT.NFC
         ):
             raise CliFail("Unable to manage OpenPGP over NFC without SCP")
-        raise
+        elif e.sw == SW.MEMORY_FAILURE:
+            if ctx.invoked_subcommand == "reset":
+                ctx.obj["conn"] = conn
+            else:
+                raise CliFail(
+                    "Memory corruption detected, OpenPGP needs to be reset using "
+                    "'ykman openpgp reset'"
+                )
+        else:
+            raise
 
 
 @openpgp.command()
@@ -134,7 +143,10 @@ def reset(ctx, force):
     )
 
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
-    ctx.obj["session"].reset()
+    if "session" in ctx.obj:
+        ctx.obj["session"].reset()
+    else:
+        safe_reset(ctx.obj["conn"])
     logger.info("OpenPGP application data reset")
     click.echo(
         "Reset complete. OpenPGP data has been cleared and default PINs are set."
