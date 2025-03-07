@@ -32,7 +32,18 @@ from yubikit.core.smartcard import (
     SW,
     AID,
 )
-from yubikit.openpgp import OpenPgpSession, KEY_REF, KdfNone, PW, INS, _INVALID_PIN
+from yubikit.openpgp import (
+    OpenPgpSession,
+    KEY_REF,
+    KdfNone,
+    PW,
+    INS,
+    _INVALID_PIN,
+    AlgorithmAttributes,
+    RsaAttributes,
+    EcAttributes,
+)
+from datetime import datetime, UTC
 import logging
 
 logger = logging.getLogger(__name__)
@@ -67,6 +78,48 @@ def safe_reset(connection: SmartCardConnection) -> None:
     logger.info("OpenPGP application data reset performed")
 
 
+def _format_ref(ref: KEY_REF) -> str:
+    if ref == KEY_REF.SIG:
+        return "Signature key"
+    if ref == KEY_REF.DEC:
+        return "Decryption key"
+    if ref == KEY_REF.AUT:
+        return "Authentication key"
+    if ref == KEY_REF.ATT:
+        return "Attestation key"
+    return ref.name
+
+
+def _format_fingerprint(fp: bytes) -> str:
+    return "  ".join(
+        " ".join(fp[h * 10 + s * 2 :][:2].hex() for s in range(5)) for h in range(2)
+    ).upper()
+
+
+def _format_date(timestamp: int) -> str:
+    return datetime.fromtimestamp(timestamp, UTC).isoformat()
+
+
+def _format_algorithm(alg: AlgorithmAttributes) -> str:
+    if isinstance(alg, RsaAttributes):
+        return f"RSA{alg.n_len}"
+    if isinstance(alg, EcAttributes):
+        return f"{alg.oid}"
+    return "Unknown key type"
+
+
+def get_key_info(discretionary, ref, status):
+    alg = discretionary.get_algorithm_attributes(ref)
+    return {
+        "Key slot": _format_ref(ref),
+        "Fingerprint": _format_fingerprint(discretionary.fingerprints[ref]),
+        "Algorithm": _format_algorithm(alg),
+        "Origin": status.name if status is not None else "UNKNOWN",
+        "Created": _format_date(discretionary.generation_times[ref]),
+        "Touch policy": discretionary.get_uif(ref),
+    }
+
+
 def get_openpgp_info(session: OpenPgpSession):
     """Get human readable information about the OpenPGP configuration.
 
@@ -85,15 +138,17 @@ def get_openpgp_info(session: OpenPgpSession):
         "KDF enabled": not isinstance(session.get_kdf(), KdfNone),
     }
 
-    # Touch only available on YK4 and later
-    if session.version >= (4, 2, 6):
-        touch = {
-            "Signature key": session.get_uif(KEY_REF.SIG),
-            "Encryption key": session.get_uif(KEY_REF.DEC),
-            "Authentication key": session.get_uif(KEY_REF.AUT),
+    for ref, fp in discretionary.fingerprints.items():
+        if session.version >= (5, 2, 0):
+            if not discretionary.key_information[ref] or ref == KEY_REF.ATT:
+                continue
+        else:
+            if not any(fp):
+                continue
+
+        info[_format_ref(ref)] = {
+            "Fingerprint": _format_fingerprint(fp),
+            "Touch policy": discretionary.get_uif(ref),
         }
-        if discretionary.attributes_att is not None:
-            touch["Attestation key"] = session.get_uif(KEY_REF.ATT)
-        info["Touch policies"] = touch
 
     return info

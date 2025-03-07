@@ -645,6 +645,9 @@ class DiscretionaryDataObjects:
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
         return getattr(self, f"attributes_{key_ref.name.lower()}")
 
+    def get_uif(self, key_ref: KEY_REF) -> Optional[UIF]:
+        return getattr(self, f"uif_{key_ref.name.lower()}")
+
 
 @dataclass
 class ApplicationRelatedData:
@@ -1092,7 +1095,13 @@ class OpenPgpSession:
 
     def get_application_related_data(self) -> ApplicationRelatedData:
         """Read the Application Related Data."""
-        return ApplicationRelatedData.parse(self.get_data(DO.APPLICATION_RELATED_DATA))
+        data = ApplicationRelatedData.parse(self.get_data(DO.APPLICATION_RELATED_DATA))
+        # Pre 3.0 the UIF is readable separately, but missing from discretionary
+        if data.aid.version < (3, 0):
+            data.discretionary.uif_sig = self.get_uif(KEY_REF.SIG)
+            data.discretionary.uif_dec = self.get_uif(KEY_REF.DEC)
+            data.discretionary.uif_aut = self.get_uif(KEY_REF.AUT)
+        return data
 
     def set_signature_pin_policy(self, pin_policy: PIN_POLICY) -> None:
         """Set signature PIN policy.
@@ -1427,13 +1436,11 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
-        try:
+        if self.version >= (4, 2, 0):
             return UIF.parse(self.get_data(key_ref.uif_do))
-        except ApduError as e:
-            if e.sw == SW.WRONG_PARAMETERS_P1P2:
-                # Not supported
-                return UIF.OFF
-            raise
+
+        # Not supported
+        return UIF.OFF
 
     def set_uif(self, key_ref: KEY_REF, uif: UIF) -> None:
         """Set the User Interaction Flag (touch requirement) for a key.

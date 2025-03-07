@@ -30,7 +30,7 @@ from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
 from yubikit.openpgp import OpenPgpSession, UIF, PIN_POLICY, KEY_REF as _KEY_REF
 from yubikit.management import CAPABILITY
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import get_openpgp_info, safe_reset
+from ..openpgp import get_openpgp_info, safe_reset, get_key_info
 from .util import (
     CliFail,
     click_force_option,
@@ -389,6 +389,30 @@ def set_signature_policy(ctx, policy, admin_pin):
 @openpgp.group("keys")
 def keys():
     """Manage private keys."""
+
+
+@keys.command("info")
+@click.pass_context
+@click.argument("key", metavar="KEY", type=EnumChoice(KEY_REF))
+def metadata(ctx, key):
+    """
+    Show metadata about a private key.
+
+    This will show what type of key is stored in a specific slot,
+    whether it was imported into the YubiKey, or generated on-chip,
+    and what the Touch policy is for using the key.
+
+    \b
+    KEY            key slot to set (sig, dec, aut or att)
+    """
+
+    session = ctx.obj["session"]
+    discretionary = session.get_application_related_data().discretionary
+    status = discretionary.key_information.get(key)
+    if session.version >= (5, 2, 0) and status is None:
+        raise CliFail(f"No key stored in slot {key.name}.")
+    info = get_key_info(discretionary, key, status)
+    click.echo("\n".join(pretty_print(info)))
 
 
 @keys.command("set-touch")
