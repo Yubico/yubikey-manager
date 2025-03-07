@@ -26,7 +26,13 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from ..util import parse_certificates
-from yubikit.core import TRANSPORT, Version, require_version, NotSupportedError
+from yubikit.core import (
+    TRANSPORT,
+    Version,
+    require_version,
+    NotSupportedError,
+    ApplicationNotAvailableError,
+)
 from yubikit.core.smartcard import SmartCardConnection, ApduError
 from yubikit.core.smartcard.scp import ScpKid, KeyRef, ScpKeyParams, Scp11KeyParams
 from yubikit.management import DeviceInfo, CAPABILITY
@@ -358,7 +364,11 @@ def log_or_echo(message: str, log: logging.Logger, *files) -> None:
 def find_scp11_params(
     connection: SmartCardConnection, kid: int, kvn: int, ca: Optional[bytes] = None
 ) -> Scp11KeyParams:
-    scp = SecurityDomainSession(connection)
+    try:
+        scp = SecurityDomainSession(connection)
+    except ApplicationNotAvailableError:
+        raise ValueError("Security Domain application not available")
+
     if not kvn:
         if ca:
             # Find by CA
