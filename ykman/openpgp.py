@@ -43,7 +43,7 @@ from yubikit.openpgp import (
     RsaAttributes,
     EcAttributes,
 )
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ def _format_fingerprint(fp: bytes) -> str:
 
 
 def _format_date(timestamp: int) -> str:
-    return datetime.fromtimestamp(timestamp, UTC).isoformat()
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
 
 
 def _format_algorithm(alg: AlgorithmAttributes) -> str:
