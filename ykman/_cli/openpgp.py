@@ -27,7 +27,13 @@
 
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
-from yubikit.openpgp import OpenPgpSession, UIF, PIN_POLICY, KEY_REF as _KEY_REF
+from yubikit.openpgp import (
+    OpenPgpSession,
+    UIF,
+    PIN_POLICY,
+    KEY_REF as _KEY_REF,
+    KEY_STATUS,
+)
 from yubikit.management import CAPABILITY
 from ..util import parse_certificates, parse_private_key
 from ..openpgp import get_openpgp_info, safe_reset, get_key_info
@@ -409,7 +415,7 @@ def metadata(ctx, key):
     session = ctx.obj["session"]
     discretionary = session.get_application_related_data().discretionary
     status = discretionary.key_information.get(key)
-    if session.version >= (5, 2, 0) and status is None:
+    if status == KEY_STATUS.NONE:
         raise CliFail(f"No key stored in slot {key.name}.")
     info = get_key_info(discretionary, key, status)
     click.echo("\n".join(pretty_print(info)))
