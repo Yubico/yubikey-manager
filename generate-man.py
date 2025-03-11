@@ -56,3 +56,16 @@ print(".SH EXAMPLES")
 examples = re.split(r"\s{2,}", parts[2].strip())
 while examples:
     print(f".PP\n{examples.pop(0)}\n.PP\n{examples.pop(0)}")
+
+print(
+    """.SH SHELL COMPLETION
+.PP
+Experimental shell completion for the command line tool is available.
+To enable it, run this command once (for Bash):
+.PP
+$ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
+.PP
+More information on shell completion (including instructions for other shells) is
+available at:
+https://click.palletsprojects.com/en/stable/shell-completion/"""
+)

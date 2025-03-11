@@ -1,4 +1,4 @@
-.TH YKMAN "1" "June 2024" "ykman 5.0.0" "User Commands"
+.TH YKMAN "1" "March 2025" "ykman 5.6.0" "User Commands"
 .SH NAME
 ykman \- YubiKey Manager (ykman)
 .SH SYNOPSIS
@@ -81,3 +81,13 @@ $ ykman list --serials
 Show information about YubiKey with serial number 123456:
 .PP
 $ ykman --device 123456 info
+.SH SHELL COMPLETION
+.PP
+Experimental shell completion for the command line tool is available.
+To enable it, run this command once (for Bash):
+.PP
+$ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
+.PP
+More information on shell completion (including instructions for other shells) is
+available at:
+https://click.palletsprojects.com/en/stable/shell-completion/

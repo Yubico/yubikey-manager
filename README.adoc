@@ -175,6 +175,6 @@ enable it, run this command once (for Bash):
 
   $ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
 
-More information on shell completion (including instructions for zch) is
-available here:
-https://click.palletsprojects.com/en/8.0.x/shell-completion
+More information on shell completion (including instructions for other shells) is
+available at:
+https://click.palletsprojects.com/en/stable/shell-completion/
