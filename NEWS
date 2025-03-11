@@ -1,3 +1,17 @@
+* Version 5.6.0 (released 2025-03-12)
+ * SCP: Add support for specifying Le (needed in OpenPGP get_challenge).
+ * PIV: When writing a new CHUID, prefer to keep data from the old one if possible.
+ * CLI: Specifying public-key is now optional when generating a PIV certificate,
+   if a public key can be read from the YubiKey itself.
+ * CLI: (YK FIPS) Disallow --protect for PIV when not in FIPS approved state.
+ * CLI: Support specifying Le in "apdu" command.
+ * CLI: Show OpenPGP key information in "openpgp info" and "openpgp keys info" commands.
+ * CLI: Detect OpenPGP memory corruption, and correctly factory reset OpenPGP if needed.
+ * CLI: Don't fail on corrupted configuration files, instead show a warning.
+ * Require Poetry >= 2.0 for building and packaging of the library.
+ * Bugfix: CLI - Don't use extended APDUs in the "apdu" command on old YubiKeys which
+   do not support it.
+
 * Version 5.5.1 (released 2024-07-01)
  * Bugfix: CLI - Don't use formatting that doesn't work on older Python versions.
    Note: As the 5.5.0 installers bundle Python 3.12, this will be a source-only release.
