@@ -171,9 +171,15 @@ SHORT_APDU_MAX_CHUNK = 0xFF
 
 class ShortApduProcessor(ApduFormatProcessor):
     def format_apdu(self, cla, ins, p1, p2, data, le):
-        buf = struct.pack(">BBBBB", cla, ins, p1, p2, len(data)) + data
+        buf = struct.pack(">BBBB", cla, ins, p1, p2)
+        if data:
+            buf += struct.pack(">B", len(data)) + data
         if le:
             buf += struct.pack(">B", le)
+        elif not data:
+            # No data nor Le, need explicit Lc
+            buf += b"\0"
+
         return buf
 
     def send_apdu(self, cla, ins, p1, p2, data, le):
@@ -195,9 +201,15 @@ class ExtendedApduProcessor(ApduFormatProcessor):
         self._max_apdu_size = max_apdu_size
 
     def format_apdu(self, cla, ins, p1, p2, data, le):
-        buf = struct.pack(">BBBBBH", cla, ins, p1, p2, 0, len(data)) + data
+        buf = struct.pack(">BBBB", cla, ins, p1, p2)
+        if data:
+            buf += struct.pack(">BH", 0, len(data)) + data
         if le:
+            if not data:
+                # Use 3-byte Le
+                buf += b"\0"
             buf += struct.pack(">H", le)
+
         if len(buf) > self._max_apdu_size:
             raise NotSupportedError("APDU length exceeds YubiKey capability")
         return buf
