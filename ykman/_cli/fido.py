@@ -111,6 +111,8 @@ def info(ctx):
         data["FIPS approved"] = is_in_fips_mode(ctx.obj["conn"])
 
     if ctap2:
+        if ctap2.info.aaguid:
+            data["AAGUID"] = str(ctap2.info.aaguid)
         client_pin = ClientPin(ctap2)  # N.B. All YubiKeys with CTAP2 support PIN.
         if ctap2.info.options["clientPin"]:
             if ctap2.info.force_pin_change:
