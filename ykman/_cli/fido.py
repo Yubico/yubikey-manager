@@ -188,7 +188,6 @@ def reset(ctx, force):
         if not readers or readers[0].reader.name != conn._name:
             raise CliFail("Unable to isolate NFC reader.")
         dev = readers[0]
-        logger.debug(f"use: {dev}")
         is_fips = False
 
         def prompt_re_insert():
