@@ -955,8 +955,13 @@ class PivSession:
         :param new_puk: The new PUK.
         """
         logger.debug("Changing PUK")
-        self._change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk)
-        logger.info("New PUK set")
+        try:
+            self._change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk)
+            logger.info("New PUK set")
+        except ApduError as e:
+            if e.sw == SW.INVALID_INSTRUCTION:
+                raise NotSupportedError("Setting PUK is not supported on this YubiKey")
+            raise
 
     def unblock_pin(self, puk: str, new_pin: str) -> None:
         """Reset PIN with PUK.
@@ -965,8 +970,15 @@ class PivSession:
         :param new_pin: The new PIN.
         """
         logger.debug("Using PUK to set new PIN")
-        self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
-        logger.info("New PIN set")
+        try:
+            self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
+            logger.info("New PIN set")
+        except ApduError as e:
+            if e.sw == SW.INVALID_INSTRUCTION:
+                raise NotSupportedError(
+                    "Unblocking PIN is not supported on this YubiKey"
+                )
+            raise
 
     def set_pin_attempts(self, pin_attempts: int, puk_attempts: int) -> None:
         """Set PIN retries for PIN and PUK.
