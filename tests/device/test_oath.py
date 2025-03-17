@@ -91,7 +91,7 @@ class TestLockPreventsAccess:
 
 
 HMAC_VECTORS = {
-    b"\x0B"
+    b"\x0b"
     * 20: {
         b"Hi There": {
             HASH_ALGORITHM.SHA256: bytes.fromhex(
@@ -114,9 +114,9 @@ HMAC_VECTORS = {
             ),
         }
     },
-    b"\xAA"
+    b"\xaa"
     * 20: {
-        b"\xDD"
+        b"\xdd"
         * 50: {
             HASH_ALGORITHM.SHA256: bytes.fromhex(
                 "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe"
@@ -128,7 +128,7 @@ HMAC_VECTORS = {
         }
     },
     bytes.fromhex("0102030405060708090a0b0c0d0e0f10111213141516171819"): {
-        b"\xCD"
+        b"\xcd"
         * 50: {
             HASH_ALGORITHM.SHA256: bytes.fromhex(
                 "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b"

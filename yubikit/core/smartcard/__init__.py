@@ -147,8 +147,7 @@ class ApduProcessor(abc.ABC):
         p2: int,
         data: bytes,
         le: int,
-    ) -> Tuple[bytes, int]:
-        ...
+    ) -> Tuple[bytes, int]: ...
 
 
 class ApduFormatProcessor(ApduProcessor):
@@ -162,8 +161,7 @@ class ApduFormatProcessor(ApduProcessor):
     @abc.abstractmethod
     def format_apdu(
         self, cla: int, ins: int, p1: int, p2: int, data: bytes, le: int
-    ) -> bytes:
-        ...
+    ) -> bytes: ...
 
 
 SHORT_APDU_MAX_CHUNK = 0xFF

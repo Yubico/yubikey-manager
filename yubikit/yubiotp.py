@@ -635,12 +635,10 @@ class ConfigState:
 
 class _Backend(abc.ABC):
     @abc.abstractmethod
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
     @abc.abstractmethod
-    def write_update(self, slot: CONFIG_SLOT, data: bytes) -> bytes:
-        ...
+    def write_update(self, slot: CONFIG_SLOT, data: bytes) -> bytes: ...
 
     @abc.abstractmethod
     def send_and_receive(
@@ -650,8 +648,7 @@ class _Backend(abc.ABC):
         expected_len: int,
         event: Optional[Event] = None,
         on_keepalive: Optional[Callable[[int], None]] = None,
-    ) -> bytes:
-        ...
+    ) -> bytes: ...
 
 
 class _YubiOtpOtpBackend(_Backend):

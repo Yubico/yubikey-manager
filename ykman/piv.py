@@ -528,9 +528,9 @@ def get_piv_info(session: PivSession):
     try:  # Bio metadata
         bio = session.get_bio_metadata()
         if bio.configured:
-            info[
-                "Biometrics"
-            ] = f"Configured, {bio.attempts_remaining} attempts remaining"
+            info["Biometrics"] = (
+                f"Configured, {bio.attempts_remaining} attempts remaining"
+            )
         else:
             info["Biometrics"] = "Not configured"
     except NotSupportedError:

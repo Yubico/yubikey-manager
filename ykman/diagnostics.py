@@ -201,9 +201,9 @@ def fido_info():
 
                             bio_enroll = ctap2.info.options.get("bioEnroll")
                             if bio_enroll:
-                                ctap_data[
-                                    "Fingerprint retries"
-                                ] = client_pin.get_uv_retries()
+                                ctap_data["Fingerprint retries"] = (
+                                    client_pin.get_uv_retries()
+                                )
                             elif bio_enroll is False:
                                 ctap_data["Fingerprints"] = "Not configured"
                         else:

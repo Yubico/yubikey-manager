@@ -28,7 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 """Scancode map for keyboard layout based on Modhex. Note that this
-    layouts allows both upper and lowercase characters."""
+layouts allows both upper and lowercase characters."""
 
 SHIFT = 0x80
 

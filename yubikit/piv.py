@@ -742,14 +742,12 @@ class PivSession:
         logger.info("PIV application data reset performed")
 
     @overload
-    def authenticate(self, management_key: bytes) -> None:
-        ...
+    def authenticate(self, management_key: bytes) -> None: ...
 
     @overload
     def authenticate(
         self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def authenticate(self, *args, **kwargs) -> None:
         """Authenticate to PIV with management key.
