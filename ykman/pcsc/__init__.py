@@ -40,12 +40,14 @@ from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnect
 from fido2.pcsc import CtapPcscDevice
 from time import sleep
 import subprocess  # nosec
+import os
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 YK_READER_NAME = "yubico yubikey"
+_YKMAN_NO_EXCLUSIVE = "YKMAN_NO_EXLUSIVE"
 
 
 # Figure out what the PID should be based on the reader name
@@ -89,10 +91,16 @@ class ScardYubiKeyDevice(YkmanDevice):
             return self._open_smartcard_connection()
         elif issubclass(CtapPcscDevice, connection_type):
             if self.transport == TRANSPORT.NFC:
-                return CtapPcscDevice(
-                    ExclusiveConnectCardConnection(self.reader.createConnection()),
-                    self.reader.name,
-                )
+                connection = self.reader.createConnection()
+                if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
+                    excl_connection = ExclusiveConnectCardConnection(connection)
+                    try:
+                        dev = CtapPcscDevice(excl_connection, self.reader.name)
+                        logger.debug("Using exclusive CCID connection")
+                        return dev
+                    except CardConnectionException:
+                        logger.info("Failed to get exclusive CCID access")
+                return CtapPcscDevice(connection, self.reader.name)
         return super(ScardYubiKeyDevice, self).open_connection(connection_type)
 
     def _open_smartcard_connection(self) -> SmartCardConnection:
@@ -106,8 +114,20 @@ class ScardYubiKeyDevice(YkmanDevice):
 
 class ScardSmartCardConnection(SmartCardConnection):
     def __init__(self, connection):
-        self.connection = ExclusiveConnectCardConnection(connection)
-        self.connection.connect()
+        if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
+            excl_connection = ExclusiveConnectCardConnection(connection)
+            try:
+                excl_connection.connect()
+                self.connection = excl_connection
+                logger.debug("Using exclusive CCID connection")
+            except CardConnectionException:
+                logger.info("Failed to get exclusive CCID access")
+                connection.connect()
+                self.connection = connection
+        else:
+            connection.connect()
+            self.connection = connection
+
         atr = self.connection.getATR()
         self._transport = (
             TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
