@@ -32,7 +32,7 @@ from yubikit.management import USB_INTERFACE
 from yubikit.logging import LOG_LEVEL
 
 from smartcard import System
-from smartcard.Exceptions import CardConnectionException
+from smartcard.Exceptions import CardConnectionException, NoCardException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.pcsc.PCSCContext import PCSCContext
 from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnection
@@ -67,6 +67,33 @@ def _pid_from_name(name):
     return PID.of(key_type, interfaces)
 
 
+class ScardSmartCardConnection(SmartCardConnection):
+    def __init__(self, connection):
+        connection.connect()
+        self.connection = connection
+
+        atr = self.connection.getATR()
+        self._transport = (
+            TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
+        )
+
+    @property
+    def transport(self):
+        return self._transport
+
+    def close(self):
+        self.connection.disconnect()
+
+    def send_and_receive(self, apdu):
+        """Sends a command APDU and returns the response data and sw"""
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", apdu.hex())
+        data, sw1, sw2 = self.connection.transmit(list(apdu))
+        logger.log(
+            LOG_LEVEL.TRAFFIC, "RECV: %s SW=%02x%02x", bytes(data).hex(), sw1, sw2
+        )
+        return bytes(data), sw1 << 8 | sw2
+
+
 class ScardYubiKeyDevice(YkmanDevice):
     """YubiKey Smart card device"""
 
@@ -91,63 +118,44 @@ class ScardYubiKeyDevice(YkmanDevice):
             return self._open_smartcard_connection()
         elif issubclass(CtapPcscDevice, connection_type):
             if self.transport == TRANSPORT.NFC:
-                connection = self.reader.createConnection()
-                if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
-                    excl_connection = ExclusiveConnectCardConnection(connection)
-                    try:
-                        dev = CtapPcscDevice(excl_connection, self.reader.name)
-                        logger.debug("Using exclusive CCID connection")
-                        return dev
-                    except CardConnectionException:
-                        logger.info("Failed to get exclusive CCID access")
-                return CtapPcscDevice(connection, self.reader.name)
+                return self._open_smartcard_connection(
+                    lambda c: CtapPcscDevice(c, self.reader.name)
+                )
         return super(ScardYubiKeyDevice, self).open_connection(connection_type)
 
-    def _open_smartcard_connection(self) -> SmartCardConnection:
+    def _open_smartcard_connection(
+        self, conn_factory=ScardSmartCardConnection, retry=True
+    ) -> SmartCardConnection:
+        connection = self.reader.createConnection()
         try:
-            return ScardSmartCardConnection(self.reader.createConnection())
-        except CardConnectionException as e:
-            if kill_scdaemon() or kill_yubikey_agent():
-                return ScardSmartCardConnection(self.reader.createConnection())
-            raise e
+            # Try an exclusive connection, unless disabled
+            if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
+                excl_connection = ExclusiveConnectCardConnection(connection)
+                try:
+                    scard_conn = conn_factory(excl_connection)
+                    logger.debug("Using exclusive CCID connection")
+                    return scard_conn
+                except CardConnectionException:
+                    logger.info("Failed to get exclusive CCID access")
 
-
-class ScardSmartCardConnection(SmartCardConnection):
-    def __init__(self, connection):
-        if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
-            excl_connection = ExclusiveConnectCardConnection(connection)
-            try:
-                excl_connection.connect()
-                self.connection = excl_connection
-                logger.debug("Using exclusive CCID connection")
-            except CardConnectionException:
-                logger.info("Failed to get exclusive CCID access")
-                connection.connect()
-                self.connection = connection
-        else:
-            connection.connect()
-            self.connection = connection
-
-        atr = self.connection.getATR()
-        self._transport = (
-            TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
-        )
-
-    @property
-    def transport(self):
-        return self._transport
-
-    def close(self):
-        self.connection.disconnect()
-
-    def send_and_receive(self, apdu):
-        """Sends a command APDU and returns the response data and sw"""
-        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", apdu.hex())
-        data, sw1, sw2 = self.connection.transmit(list(apdu))
-        logger.log(
-            LOG_LEVEL.TRAFFIC, "RECV: %s SW=%02x%02x", bytes(data).hex(), sw1, sw2
-        )
-        return bytes(data), sw1 << 8 | sw2
+            # Try a shared connection
+            return conn_factory(connection)
+        except CardConnectionException:
+            # Neither connection worked, maybe we need to kill stuff
+            if retry and (kill_scdaemon() or kill_yubikey_agent()):
+                return self._open_smartcard_connection(conn_factory, False)
+            raise
+        except (NoCardException, ValueError):
+            # Handle reclaim timeout
+            # TODO: Maybe only on NEO?
+            if retry and self.transport == TRANSPORT.USB:
+                for _ in range(6):
+                    try:
+                        sleep(0.5)
+                        return self._open_smartcard_connection(conn_factory, False)
+                    except (NoCardException, ValueError):
+                        continue
+            raise
 
 
 def kill_scdaemon():

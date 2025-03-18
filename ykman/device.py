@@ -41,7 +41,6 @@ from .hid import (
 )
 from .pcsc import list_devices as _list_ccid_devices
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
-from smartcard.Exceptions import NoCardException
 
 from time import sleep, time
 from collections import Counter
@@ -255,18 +254,6 @@ class _UsbCompositeDevice(YkmanDevice):
     def open_connection(self, connection_type):
         if not self.supports_connection(connection_type):
             raise ValueError("Unsupported Connection type")
-
-        # Allow for ~3s reclaim time on NEO for CCID
-        assert self.pid  # nosec
-        if self.pid.yubikey_type == YUBIKEY.NEO and issubclass(
-            connection_type, SmartCardConnection
-        ):
-            for _ in range(6):
-                try:
-                    return self._group.connect(self._key, connection_type)
-                except (NoCardException, ValueError):
-                    sleep(0.5)
-
         return self._group.connect(self._key, connection_type)
 
 

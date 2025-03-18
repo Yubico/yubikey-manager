@@ -25,8 +25,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, PID
+from yubikit.core import TRANSPORT, PID, USB_INTERFACE
+from yubikit.core.otp import OtpProtocol, CommandRejectedError
 from ..base import YkmanDevice
+
+from time import sleep
 
 YUBICO_VID = 0x1050
 
@@ -47,5 +50,19 @@ class OtpYubiKeyDevice(YkmanDevice):
 
     def open_connection(self, connection_type):
         if self.supports_connection(connection_type):
-            return self._connection_cls(self.path)
+            conn = self._connection_cls(self.path)
+            # If OTP-only, then it can't be reclaim
+            if self.pid and self.pid.usb_interfaces != USB_INTERFACE.OTP:
+                # Ensure we're not in reclaim
+                proto = OtpProtocol(conn)
+                for _ in range(6):
+                    try:
+                        # Read serial
+                        proto.send_and_receive(0x10, b"")
+                        break
+                    except CommandRejectedError:
+                        # In reclaim (maybe)
+                        sleep(0.5)
+                return conn
+
         return super(OtpYubiKeyDevice, self).open_connection(connection_type)
