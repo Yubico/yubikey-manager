@@ -2,11 +2,13 @@ from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.support import read_info
 from . import condition
 
 
 def try_connection(device, conn_type):
-    with device.open_connection(conn_type):
+    with device.open_connection(conn_type) as conn:
+        read_info(conn, device.pid)
         return True
 
 
