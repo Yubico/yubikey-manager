@@ -1,3 +1,11 @@
+* Version 5.6.1 (released 2025-03-18)
+ * Fix: Version 5.6.0 uses Exclusive smart card connections, which caused connections
+   to fail if another application was accessing the YubiKey. This version adds a
+   fallback to use non-exclusive connections in case of such a failure.
+ * Bugfix: APDU encoding was slightly incorrect for commands which specify Le, but no
+   data body. This caused issued on some platforms.
+ * CLI: The "fido info" command now shows the YubiKey AAGUID, when available.
+
 * Version 5.6.0 (released 2025-03-12)
  * SCP: Add support for specifying Le (needed in OpenPGP get_challenge).
  * PIV: When writing a new CHUID, prefer to keep data from the old one if possible.

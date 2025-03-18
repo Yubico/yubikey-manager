@@ -25,4 +25,4 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-__version__ = "5.6.1-dev.0"
+__version__ = "5.6.1"
