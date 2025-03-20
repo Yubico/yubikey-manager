@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from fido2.ctap import CtapError
+from fido2.ctap import CtapError, STATUS
 from fido2.ctap1 import ApduError
 from fido2.ctap2 import (
     Ctap2,
@@ -47,6 +47,7 @@ from .util import (
     click_force_option,
     click_group,
     prompt_timeout,
+    prompt_for_touch,
     is_yk4_fips,
     pretty_print,
 )
@@ -190,6 +191,8 @@ def reset(ctx, force):
         dev = readers[0]
         is_fips = False
 
+        conn.close()
+
         def prompt_re_insert():
             click.echo(
                 "Remove and re-place your YubiKey on the NFC reader to perform the "
@@ -254,11 +257,16 @@ def reset(ctx, force):
         conn = prompt_re_insert()
 
     try:
-        with prompt_timeout():
-            if is_fips:
+        if is_fips:
+            with prompt_timeout():
                 fips_reset(conn)
-            else:
-                Ctap2(conn).reset()
+        else:
+
+            def on_keepalive(status):
+                if status == STATUS.UPNEEDED:
+                    prompt_for_touch()
+
+            Ctap2(conn).reset(on_keepalive=on_keepalive)
         click.echo("FIDO application data reset.")
     except CtapError as e:
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
