@@ -292,7 +292,7 @@ def require_device(connection_types, serial=None):
     help="specify private key and certificate chain for secure messaging, "
     "can be used multiple times to provide key and certificates in multiple "
     "files (private key, certificates in leaf-last order), OR SCP03 keys in hex "
-    " separated by colon (:) K-ENC:K-MAC[:K-DEK]",
+    "separated by colon (:) K-ENC:K-MAC[:K-DEK]",
 )
 @click.option(
     "-p",
