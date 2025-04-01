@@ -1205,9 +1205,12 @@ class PivSession:
             raise BadResponseError("Malformed certificate data object")
 
         if cert_info == 1:
-            logger.debug("Certificate is compressed, decompressing...")
             # Compressed certificate
-            cert_data = gzip.decompress(cert_data)
+            logger.debug("Certificate is compressed, decompressing...")
+            try:
+                cert_data = gzip.decompress(cert_data)
+            except gzip.BadGzipFile:
+                raise BadResponseError("Unable to decompress certificate")
         elif cert_info != 0:
             raise NotSupportedError("Unsupported value in CertInfo")
 
