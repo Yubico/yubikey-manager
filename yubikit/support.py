@@ -45,6 +45,7 @@ from .management import (
     ManagementSession,
     DeviceInfo,
     DeviceConfig,
+    VersionQualifier,
     Mode,
     USB_INTERFACE,
     CAPABILITY,
@@ -150,6 +151,7 @@ def _read_info_ccid(conn, key_type, interfaces):
             TRANSPORT.NFC: capabilities,
         },
         is_locked=False,
+        version_qualifier=VersionQualifier(version),
     )
 
 
@@ -194,6 +196,7 @@ def _read_info_otp(conn, key_type, interfaces):
         form_factor=FORM_FACTOR.UNKNOWN,
         supported_capabilities=capabilities.copy(),
         is_locked=False,
+        version_qualifier=VersionQualifier(version),
     )
 
 
@@ -227,6 +230,7 @@ def _read_info_ctap(conn, key_type, interfaces):
             form_factor=FORM_FACTOR.USB_A_KEYCHAIN,
             supported_capabilities=supported_apps,
             is_locked=False,
+            version_qualifier=VersionQualifier(version),
         )
 
 

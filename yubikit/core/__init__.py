@@ -239,7 +239,7 @@ class _OverrideVersion:
         self._version: Optional[Version] = None
 
     def __call__(self, value):
-        logger.info("Overriding version check for development devices with {version}")
+        logger.info(f"Overriding version check for development devices with {value}")
         self._version = value
 
 
