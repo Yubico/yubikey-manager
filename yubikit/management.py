@@ -190,6 +190,18 @@ class DEVICE_FLAG(IntFlag):
     EJECT = 0x80
 
 
+@unique
+class RELEASE_TYPE(IntEnum):
+    """YubiKey release type."""
+
+    ALPHA = 0
+    BETA = 1
+    FINAL = 2
+
+    def __str__(self):
+        return self.name.lower()
+
+
 TAG_USB_SUPPORTED = 0x01
 TAG_SERIAL = 0x02
 TAG_USB_ENABLED = 0x03
@@ -214,6 +226,7 @@ TAG_FIPS_APPROVED = 0x15
 TAG_PIN_COMPLEXITY = 0x16
 TAG_NFC_RESTRICTED = 0x17
 TAG_RESET_BLOCKED = 0x18
+TAG_VERSION_QUALIFIER = 0x19
 TAG_FPS_VERSION = 0x20
 TAG_STM_VERSION = 0x21
 
@@ -260,6 +273,21 @@ class DeviceConfig:
         return int2bytes(len(buf)) + buf
 
 
+@dataclass(frozen=True)
+class VersionQualifier:
+    """Fully qualified YubiKey version"""
+
+    version: Version
+    type: RELEASE_TYPE = RELEASE_TYPE.FINAL
+    iteration: int = 0
+
+    def __str__(self):
+        return f"{self.version}.{self.type}.{self.iteration}"
+
+
+_DUMMY_VQ = VersionQualifier(Version(0, 0, 0))
+
+
 @dataclass
 class DeviceInfo:
     """Information about a YubiKey readable using the ManagementSession."""
@@ -279,6 +307,7 @@ class DeviceInfo:
     reset_blocked: CAPABILITY = CAPABILITY(0)
     fps_version: Optional[Version] = None
     stm_version: Optional[Version] = None
+    version_qualifier: VersionQualifier = _DUMMY_VQ
 
     @property
     def _is_bio(self) -> bool:
@@ -337,6 +366,21 @@ class DeviceInfo:
         )
         pin_complexity = data.get(TAG_PIN_COMPLEXITY, b"\0") == b"\1"
         reset_blocked = CAPABILITY(bytes2int(data.get(TAG_RESET_BLOCKED, b"\0")))
+        vq = data.get(TAG_VERSION_QUALIFIER)
+        if vq:
+            vq_data = Tlv.parse_dict(vq)
+            version_qualifier = VersionQualifier(
+                Version.from_bytes(vq_data[0x01]),
+                RELEASE_TYPE(bytes2int(vq_data[0x02])),
+                bytes2int(vq_data[0x03]),
+            )
+            if version_qualifier.type != RELEASE_TYPE.FINAL:
+                logger.info(
+                    f"Overriding behavioral version with {version_qualifier.version}"
+                )
+                version = version_qualifier.version
+        else:
+            version_qualifier = VersionQualifier(version, RELEASE_TYPE.FINAL, 0)
         fps_version = Version.from_bytes(data.get(TAG_FPS_VERSION, b"\0\0\0"))
         stm_version = Version.from_bytes(data.get(TAG_STM_VERSION, b"\0\0\0"))
 
@@ -356,6 +400,7 @@ class DeviceInfo:
             reset_blocked,
             fps_version or None,
             stm_version or None,
+            version_qualifier,
         )
 
 
