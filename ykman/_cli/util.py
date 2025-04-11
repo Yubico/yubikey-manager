@@ -369,14 +369,27 @@ def find_scp11_params(
     except ApplicationNotAvailableError:
         raise ValueError("Security Domain application not available")
 
+    if ca:
+        root_ca = parse_certificates(ca, None)[0]
+        try:
+            ski = root_ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+        except x509.ExtensionNotFound:
+            ski = None
+    else:
+        root_ca = None
+        ski = None
+
     if not kvn:
-        if ca:
+        if ski:
             # Find by CA
+            ca_ski = ski.value.digest
             for ref, ca_check in scp.get_supported_ca_identifiers(klcc=True).items():
-                if ca_check == ca:
+                if ca_check == ca_ski:
                     if not kid or ref.kid == kid:
                         kid, kvn = ref
                         break
+            else:
+                raise ValueError(f"No CA identifier found matching SKI: {ca_ski.hex()}")
         # Find any matching KID
         for ref in scp.get_key_information().keys():
             if ref.kid == kid:
@@ -389,9 +402,9 @@ def find_scp11_params(
         chain = scp.get_certificate_bundle(ref)
         if not chain:
             raise ValueError(f"No certificate chain stored for {ref}")
-        if ca:
+        if root_ca:
             logger.debug("Validating KLCC CA using supplied file")
-            parent = parse_certificates(ca, None)[0]
+            parent = root_ca
             for cert in chain:
                 # Requires cryptography >= 40
                 cert.verify_directly_issued_by(parent)
