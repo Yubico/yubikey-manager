@@ -316,6 +316,15 @@ class DeviceInfo:
     def has_transport(self, transport: TRANSPORT) -> bool:
         return transport in self.supported_capabilities
 
+    @property
+    def version_name(self) -> str:
+        """The version of the YubiKey as a string."""
+        return (
+            str(self.version_qualifier)
+            if self.version_qualifier.type != RELEASE_TYPE.FINAL
+            else str(self.version) if self.version else "unknown"
+        )
+
     @classmethod
     def parse(cls, encoded: bytes, default_version: Version) -> "DeviceInfo":
         if len(encoded) - 1 != encoded[0]:
