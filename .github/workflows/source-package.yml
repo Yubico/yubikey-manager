@@ -27,6 +27,8 @@ jobs:
 
       - name: Create source package
         run: |
+          # poetry will by default set all timestamps to 0, which Debian doesn't allow
+          export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
           poetry build
           mkdir artifacts
           export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
