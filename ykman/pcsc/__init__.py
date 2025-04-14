@@ -34,7 +34,6 @@ from yubikit.logging import LOG_LEVEL
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException, NoCardException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
-from smartcard.pcsc.PCSCContext import PCSCContext
 from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnection
 
 from fido2.pcsc import CtapPcscDevice
@@ -198,12 +197,18 @@ def kill_yubikey_agent():
 def list_readers():
     try:
         return System.readers()
-    except ListReadersException:
+    except ListReadersException as e:
         # If the PCSC system has restarted the context might be stale, try
         # forcing a new context (This happens on Windows if the last reader is
         # removed):
-        PCSCContext.instance = None
-        return System.readers()
+        try:
+            from smartcard.pcsc.PCSCContext import PCSCContext
+
+            PCSCContext.instance = None
+            return System.readers()
+        except ImportError:
+            # As of pyscard 2.2.2 the PCSCContext singleton has been removed
+            raise e
 
 
 def list_devices(name_filter=None):

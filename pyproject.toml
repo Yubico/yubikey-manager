@@ -17,7 +17,7 @@ classifiers = [
 ]
 dependencies = [
   "cryptography (>=3.0, <47)",
-  "pyscard (>=2.0, <3)",
+  "pyscard (>=2.0, <2.2.2)",
   "fido2 (>=1.0, <=2.0.0b1)",
   "click (>=8.0, <9)",
   "keyring (>=23.4, <26)",
