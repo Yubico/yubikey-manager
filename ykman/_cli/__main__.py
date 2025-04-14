@@ -601,8 +601,7 @@ def _describe_device(dev, dev_info, include_mode=True):
     if dev.pid is None:  # Devices from list_all_devices should always have PID.
         raise AssertionError("PID is None")
     name = get_name(dev_info, dev.pid.yubikey_type)
-    version = dev_info.version or "unknown"
-    description = f"{name} ({version})"
+    description = f"{name} ({dev_info.version_name})"
     if include_mode:
         mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
         description += f" [{mode}]"

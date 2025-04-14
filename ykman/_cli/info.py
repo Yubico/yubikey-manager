@@ -164,8 +164,7 @@ def info(ctx, check_fips):
     if info.serial:
         click.echo(f"Serial number: {info.serial}")
     if info.version:
-        f_version = ".".join(str(x) for x in info.version)
-        click.echo(f"Firmware version: {f_version}")
+        click.echo(f"Firmware version: {info.version_name}")
     else:
         click.echo(
             "Firmware version: Uncertain, re-run with only one YubiKey connected"
