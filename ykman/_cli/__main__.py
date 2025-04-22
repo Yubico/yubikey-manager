@@ -413,7 +413,10 @@ def cli(
                     )
                     # Preview build, override version and get new DeviceInfo
                     _override_version(_OVERRIDE_VERSION)
-                    for c in connections:
+                    info_connections = (
+                        connections if not reader else [SmartCardConnection]
+                    )
+                    for c in info_connections:
                         if items[0].supports_connection(c):
                             try:
                                 with items[0].open_connection(c) as conn:
