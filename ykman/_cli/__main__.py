@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import ApplicationNotAvailableError, Version, _override_version
+from yubikit.core import ApplicationNotAvailableError, _override_version
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -35,6 +35,7 @@ from yubikit.core.smartcard.scp import (
     ScpKid,
     KeyRef,
 )
+from yubikit.management import RELEASE_TYPE
 from yubikit.support import get_name, read_info
 from yubikit.logging import LOG_LEVEL
 
@@ -82,16 +83,11 @@ import ctypes
 import time
 import sys
 import re
-import os
 
 import logging
 
 
 logger = logging.getLogger(__name__)
-
-
-# Development key builds are treated as having the following version
-_OVERRIDE_VERSION = Version.from_string(os.environ.get("_YK_OVERRIDE_VERSION", "5.7.4"))
 
 
 CLICK_CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"], max_content_width=999)
@@ -406,28 +402,12 @@ def cli(
                 else:
                     items = require_device(connections, device)
 
-                if items[1].version.major == 0:
-                    logger.info(
-                        "Debug key detected, "
-                        f"overriding version with {_OVERRIDE_VERSION}"
-                    )
+                if items[1].version_qualifier.type != RELEASE_TYPE.FINAL:
                     # Preview build, override version and get new DeviceInfo
-                    _override_version(_OVERRIDE_VERSION)
-                    info_connections = (
-                        connections if not reader else [SmartCardConnection]
-                    )
-                    for c in info_connections:
-                        if items[0].supports_connection(c):
-                            try:
-                                with items[0].open_connection(c) as conn:
-                                    info = read_info(conn, items[0].pid)
-                                items = (items[0], info)
-                            except Exception:
-                                logger.debug("Failed", exc_info=True)
-                                continue
-                            break
-                    else:
-                        raise CliFail("Failed to connect to YubiKey.")
+                    version_q = items[1].version_qualifier
+                    _override_version(version_q.version)
+                    logger.info(f"Debug key detected: {version_q}")
+
                 setattr(resolve, "items", items)
             return items
 

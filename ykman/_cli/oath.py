@@ -48,7 +48,6 @@ from .util import (
     prompt_timeout,
     EnumChoice,
     is_yk4_fips,
-    check_version,
     pretty_print,
     get_scp_params,
 )
@@ -570,14 +569,14 @@ def _add_cred(ctx, data, touch, force):
     if len(data.secret) < 2:
         raise CliFail("Secret must be at least 2 bytes.")
 
-    if touch and not check_version(version, (4, 2, 6)):
+    if touch and not version >= (4, 2, 6):
         raise CliFail("Require touch is not supported on this YubiKey.")
 
     if data.counter and data.oath_type != OATH_TYPE.HOTP:
         raise CliFail("Counter only supported for HOTP accounts.")
 
     if data.hash_algorithm == HASH_ALGORITHM.SHA512 and (
-        not check_version(version, (4, 3, 1)) or is_yk4_fips(ctx.obj["info"])
+        not version >= (4, 3, 1) or is_yk4_fips(ctx.obj["info"])
     ):
         raise CliFail("Algorithm SHA512 not supported on this YubiKey.")
 

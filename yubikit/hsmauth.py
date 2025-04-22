@@ -32,6 +32,7 @@ from .core import (
     Version,
     Tlv,
     InvalidPinError,
+    _override_version,
 )
 from .core.smartcard import (
     AID,
@@ -227,7 +228,9 @@ class HsmAuthSession:
         scp_key_params: Optional[ScpKeyParams] = None,
     ) -> None:
         self.protocol = SmartCardProtocol(connection)
-        self._version = _parse_select(self.protocol.select(AID.HSMAUTH))
+        self._version = _override_version.patch(
+            _parse_select(self.protocol.select(AID.HSMAUTH))
+        )
 
         if scp_key_params:
             self.protocol.init_scp(scp_key_params)

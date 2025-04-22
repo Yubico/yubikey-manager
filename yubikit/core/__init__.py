@@ -238,12 +238,15 @@ class _OverrideVersion:
     def __init__(self):
         self._version: Optional[Version] = None
 
-    def __call__(self, value):
+    def __call__(self, value: Version) -> None:
         logger.info(f"Overriding version check for development devices with {value}")
         self._version = value
 
+    def patch(self, version: Version) -> Version:
+        return version == (0, 0, 1) and _override_version._version or version
 
-# Set this to override a version with major version == 0 in version checks
+
+# Set this to override development versions in version checks
 _override_version = _OverrideVersion()
 
 
@@ -251,13 +254,7 @@ def require_version(
     my_version: Version, min_version: tuple[int, int, int], message=None
 ):
     """Ensure a version is at least min_version."""
-    # Allow overriding version checks for development devices
-    v = my_version[0] == 0 and _override_version._version
-    if v:
-        logger.debug("Overriding version check with {v}")
-        my_version = v
-
-    if my_version < min_version:
+    if not my_version >= min_version:
         if not message:
             message = "This action requires YubiKey %d.%d.%d or later" % min_version
         raise NotSupportedError(message)

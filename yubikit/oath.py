@@ -6,6 +6,7 @@ from .core import (
     Tlv,
     BadResponseError,
     NotSupportedError,
+    _override_version,
 )
 from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
 
@@ -93,7 +94,7 @@ def parse_b32_key(key: str):
 def _parse_select(response):
     data = Tlv.parse_dict(response)
     return (
-        Version.from_bytes(data[TAG_VERSION]),
+        _override_version.patch(Version.from_bytes(data[TAG_VERSION])),
         data.get(TAG_NAME),
         data.get(TAG_CHALLENGE),
     )

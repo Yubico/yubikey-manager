@@ -33,6 +33,7 @@ from .core import (
     require_version,
     int2bytes,
     bytes2int,
+    _override_version,
 )
 from .core.smartcard import (
     SmartCardConnection,
@@ -1027,7 +1028,7 @@ class OpenPgpSession:
         logger.debug("Getting version number")
         try:
             bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
-            return Version(*(_bcd(x) for x in bcd))
+            return _override_version.patch(Version(*(_bcd(x) for x in bcd)))
         except ApduError as e:
             # Pre 1.0.2 versions don't support reading the version
             if e.sw == SW.CONDITIONS_NOT_SATISFIED:
