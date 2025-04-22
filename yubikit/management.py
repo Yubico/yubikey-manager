@@ -605,6 +605,11 @@ class ManagementSession:
             self.backend = _ManagementCtapBackend(connection)
         else:
             raise TypeError("Unsupported connection type")
+
+        if self.backend.version == (0, 0, 1):
+            logger.debug("Overriding development version...")
+            self.backend.version = self._do_read_device_info().version_qualifier.version
+
         logger.debug(
             "Management session initialized for "
             f"connection={type(connection).__name__}, version={self.version}"
@@ -629,6 +634,9 @@ class ManagementSession:
     def read_device_info(self) -> DeviceInfo:
         """Get detailed information about the YubiKey."""
         require_version(self.version, (4, 1, 0))
+        return self._do_read_device_info()
+
+    def _do_read_device_info(self) -> DeviceInfo:
         more_data = True
         tlvs = {}
         page = 0

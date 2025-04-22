@@ -1,11 +1,12 @@
 from ykman.device import list_all_devices, read_info
 from ykman.pcsc import list_devices
 from ykman._cli.util import find_scp11_params
-from yubikit.core import TRANSPORT, Version, _override_version
+from yubikit.core import TRANSPORT, _override_version
 from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.smartcard.scp import ScpKid
+from yubikit.management import RELEASE_TYPE
 from functools import partial
 from . import condition
 
@@ -24,13 +25,6 @@ def _device(pytestconfig):
         else:
             pytest.skip("No serial specified for device tests")
 
-    version = None
-    version_str = pytestconfig.getoption("use_version")
-    if version_str:
-        version = Version.from_string(version_str)
-        _override_version(version)
-        os.environ["_YK_OVERRIDE_VERSION"] = version_str
-
     reader = pytestconfig.getoption("reader")
     if reader:
         readers = list_devices(reader)
@@ -46,8 +40,9 @@ def _device(pytestconfig):
         dev, info = devices[0]
     if info.serial != serial:
         pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
-    if version:
-        info.version = version
+
+    if info.version_qualifier.type != RELEASE_TYPE.FINAL:
+        _override_version(info.version)
 
     return dev, info
 
