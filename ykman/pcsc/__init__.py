@@ -28,6 +28,7 @@
 from ..base import YkmanDevice
 from yubikit.core import TRANSPORT, YUBIKEY, PID
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.fido import SmartCardCtapDevice
 from yubikit.management import USB_INTERFACE
 from yubikit.logging import LOG_LEVEL
 
@@ -36,7 +37,6 @@ from smartcard.Exceptions import CardConnectionException, NoCardException
 from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnection
 
-from fido2.pcsc import CtapPcscDevice
 from time import sleep
 import subprocess  # nosec
 import os
@@ -108,41 +108,37 @@ class ScardYubiKeyDevice(YkmanDevice):
         self.reader = reader
 
     def supports_connection(self, connection_type):
-        if issubclass(CtapPcscDevice, connection_type):
+        if issubclass(SmartCardCtapDevice, connection_type):
             return self.transport == TRANSPORT.NFC
         return issubclass(ScardSmartCardConnection, connection_type)
 
     def open_connection(self, connection_type):
         if issubclass(ScardSmartCardConnection, connection_type):
             return self._open_smartcard_connection()
-        elif issubclass(CtapPcscDevice, connection_type):
+        elif issubclass(SmartCardCtapDevice, connection_type):
             if self.transport == TRANSPORT.NFC:
-                return self._open_smartcard_connection(
-                    lambda c: CtapPcscDevice(c, self.reader.name)
-                )
+                return SmartCardCtapDevice(self._open_smartcard_connection())
         return super(ScardYubiKeyDevice, self).open_connection(connection_type)
 
-    def _open_smartcard_connection(
-        self, conn_factory=ScardSmartCardConnection, retry=True
-    ) -> SmartCardConnection:
+    def _open_smartcard_connection(self, retry=True) -> SmartCardConnection:
         connection = self.reader.createConnection()
         try:
             # Try an exclusive connection, unless disabled
             if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
                 excl_connection = ExclusiveConnectCardConnection(connection)
                 try:
-                    scard_conn = conn_factory(excl_connection)
+                    scard_conn = ScardSmartCardConnection(excl_connection)
                     logger.debug("Using exclusive CCID connection")
                     return scard_conn
                 except CardConnectionException:
                     logger.info("Failed to get exclusive CCID access")
 
             # Try a shared connection
-            return conn_factory(connection)
+            return ScardSmartCardConnection(connection)
         except CardConnectionException:
             # Neither connection worked, maybe we need to kill stuff
             if retry and (kill_scdaemon() or kill_yubikey_agent()):
-                return self._open_smartcard_connection(conn_factory, False)
+                return self._open_smartcard_connection(False)
             raise
         except (NoCardException, ValueError):
             # Handle reclaim timeout
@@ -151,7 +147,7 @@ class ScardYubiKeyDevice(YkmanDevice):
                 for _ in range(6):
                     try:
                         sleep(0.5)
-                        return self._open_smartcard_connection(conn_factory, False)
+                        return self._open_smartcard_connection(False)
                     except (NoCardException, ValueError):
                         continue
             raise

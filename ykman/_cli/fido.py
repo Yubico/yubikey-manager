@@ -35,11 +35,10 @@ from fido2.ctap2 import (
     CaptureError,
     Config,
 )
-from fido2.pcsc import CtapPcscDevice
 from yubikit.management import CAPABILITY
 from yubikit.core import TRANSPORT
-from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SW
+from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
+from yubikit.core.smartcard import SW, SmartCardConnection
 from time import sleep
 from .util import (
     click_postpone_execution,
@@ -54,7 +53,7 @@ from .util import (
 from .util import CliFail
 from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
-from ..pcsc import list_devices as list_ccid
+from ..pcsc import ScardYubiKeyDevice
 from smartcard.Exceptions import NoCardException, CardConnectionException
 from typing import Optional, Sequence, List, Dict
 
@@ -66,7 +65,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-@click_group(connections=[FidoConnection])
+@click_group(connections=[FidoConnection, SmartCardConnection])
 @click.pass_context
 @click_postpone_execution
 def fido(ctx):
@@ -85,7 +84,14 @@ def fido(ctx):
 
     """
     dev = ctx.obj["device"]
-    conn = dev.open_connection(FidoConnection)
+    resolve_scp = ctx.obj.get("scp")
+    if resolve_scp:
+        s_conn = dev.open_connection(SmartCardConnection)
+        scp_params = resolve_scp(s_conn)
+        conn = SmartCardCtapDevice(s_conn, scp_params)
+    else:
+        conn = dev.open_connection(FidoConnection)
+
     ctx.call_on_close(conn.close)
     ctx.obj["conn"] = conn
     try:
@@ -183,12 +189,9 @@ def reset(ctx, force):
             "use 'ykman config reset' for full factory reset."
         )
 
+    dev = ctx.obj["device"]
     conn = ctx.obj["conn"]
-    if isinstance(conn, CtapPcscDevice):  # NFC
-        readers = list_ccid(conn._name)
-        if not readers or readers[0].reader.name != conn._name:
-            raise CliFail("Unable to isolate NFC reader.")
-        dev = readers[0]
+    if isinstance(dev, ScardYubiKeyDevice):  # NFC
         is_fips = False
 
         conn.close()
