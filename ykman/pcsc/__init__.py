@@ -66,6 +66,11 @@ def _pid_from_name(name):
     return PID.of(key_type, interfaces)
 
 
+def _release(connection):
+    if hasattr(connection, "release"):
+        connection.release()
+
+
 class ScardSmartCardConnection(SmartCardConnection):
     def __init__(self, connection):
         connection.connect()
@@ -82,6 +87,7 @@ class ScardSmartCardConnection(SmartCardConnection):
 
     def close(self):
         self.connection.disconnect()
+        _release(self.connection)
 
     def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
@@ -136,11 +142,13 @@ class ScardYubiKeyDevice(YkmanDevice):
             # Try a shared connection
             return ScardSmartCardConnection(connection)
         except CardConnectionException:
+            _release(connection)
             # Neither connection worked, maybe we need to kill stuff
             if retry and (kill_scdaemon() or kill_yubikey_agent()):
                 return self._open_smartcard_connection(False)
             raise
         except (NoCardException, ValueError):
+            _release(connection)
             # Handle reclaim timeout
             # TODO: Maybe only on NEO?
             if retry and self.transport == TRANSPORT.USB:

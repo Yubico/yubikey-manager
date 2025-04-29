@@ -121,6 +121,8 @@ def ccid_info():
                 c = reader.createConnection()
                 c.connect()
                 c.disconnect()
+                if hasattr(c, "release"):
+                    c.release()
                 result = "Success"
             except Exception as e:
                 result = f"<{e.__class__.__name__}>"
