@@ -47,12 +47,14 @@ version = ".".join(release.split(".")[:2])
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "sphinx.ext.autodoc",
-    "sphinx_autodoc_typehints",
+    "autoapi.extension",
+    "sphinx.ext.autodoc.typehints",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
 ]
+
+autodoc_typehints = "description"
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -192,4 +194,21 @@ intersphinx_mapping = {
 
 
 # Custom config
-autodoc_member_order = "bysource"
+autoapi_dirs = ["../yubikit", "../ykman"]
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "show-inheritance",
+    "show-module-summary",
+    "special-members",
+    "imported-members",
+]
+
+
+def skip_member(app, what, name, obj, skip, options):
+    if what == "data" and name.endswith(".logger"):
+        return True
+
+
+def setup(sphinx):
+    sphinx.connect("autoapi-skip-member", skip_member)

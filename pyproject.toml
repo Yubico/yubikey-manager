@@ -50,7 +50,7 @@ makefun = "^1.9.5"
 pyinstaller = { version = "^6.10", python = "<3.14" }
 sphinx = { version = "^7.4", python = ">=3.9" }
 sphinx-rtd-theme = { version = "^3", python = ">=3.9" }
-sphinx-autodoc-typehints = "^2"
+sphinx-autoapi = { version = "^3.3.3", python = ">=3.9" }
 fido2 = {version = "2.0.0b1", python = ">=3.10"}
 
 [build-system]

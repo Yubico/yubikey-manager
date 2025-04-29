@@ -10,7 +10,7 @@ Welcome to yubikey-manager's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   rst/packages
+   autoapi/index
 
 Indices and tables
 ==================
