@@ -1366,6 +1366,14 @@ def write_object(ctx, pin, management_key, object_id, data):
     """
 
     session = ctx.obj["session"]
+
+    if OBJECT_ID.PRINTED == object_id:
+        pivman = ctx.obj["pivman_data"]
+        if pivman.has_protected_key:
+            raise CliFail(
+                "Can't write to slot 0x5fc109 while management key is protected by PIN."
+            )
+
     _ensure_authenticated(ctx, pin, management_key)
 
     try:
@@ -1434,7 +1442,8 @@ def _ensure_authenticated(
     pivman = ctx.obj["pivman_data"]
 
     if pivman.has_protected_key and not management_key:
-        _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt)
+        if not _verify_pin(ctx, session, pivman, pin, no_prompt=no_prompt):
+            raise CliFail("Failed to authenticate with protected management key.")
         return True
 
     _authenticate(ctx, session, management_key, mgm_key_prompt, no_prompt=no_prompt)
@@ -1452,16 +1461,23 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
         else:
             pin = _prompt_pin()
 
+    authenticated = False
+
     try:
         session.verify_pin(pin)
         if pivman.has_derived_key:
             with prompt_timeout():
                 session.authenticate(derive_management_key(pin, pivman.salt))
+            authenticated = True
             session.verify_pin(pin)  # Ensure verify was the last thing we did
         elif pivman.has_stored_key:
-            pivman_prot = get_pivman_protected_data(session)
-            with prompt_timeout():
-                session.authenticate(pivman_prot.key)
+            try:
+                pivman_prot = get_pivman_protected_data(session)
+                with prompt_timeout():
+                    session.authenticate(pivman_prot.key)
+                authenticated = True
+            except Exception:
+                logger.warning("Failed to read stored management key", exc_info=True)
             session.verify_pin(pin)  # Ensure verify was the last thing we did
     except InvalidPinError as e:
         attempts = e.attempts_remaining
@@ -1471,6 +1487,8 @@ def _verify_pin(ctx, session, pivman, pin, no_prompt=False):
             raise CliFail("PIN is blocked.")
     except Exception:
         raise CliFail("PIN verification failed.")
+
+    return authenticated
 
 
 def _verify_pin_if_needed(ctx, session, func, pin=None, no_prompt=False):

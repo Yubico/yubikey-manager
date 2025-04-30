@@ -282,6 +282,10 @@ def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
             logger.debug("No data, initializing blank")
             return PivmanProtectedData()
         raise
+    except Exception:
+        raise ValueError(
+            f"Invalid data in protected slot ({hex(OBJECT_ID_PIVMAN_PROTECTED_DATA)})"
+        )
 
 
 def pivman_set_mgm_key(
