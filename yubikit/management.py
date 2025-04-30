@@ -222,7 +222,7 @@ TAG_STM_VERSION = 0x21
 class DeviceConfig:
     """Management settings for YubiKey which can be configured by the user."""
 
-    enabled_capabilities: Mapping[TRANSPORT, CAPABILITY] = field(default_factory=dict)
+    enabled_capabilities: dict[TRANSPORT, CAPABILITY] = field(default_factory=dict)
     auto_eject_timeout: Optional[int] = None
     challenge_response_timeout: Optional[int] = None
     device_flags: Optional[DEVICE_FLAG] = None

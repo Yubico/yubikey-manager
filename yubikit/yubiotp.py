@@ -573,7 +573,7 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
                 raise ValueError("Unsupported CFG flag for update")
         super(UpdateConfiguration, self)._update_flags(flag, value)
 
-    def protect_slot2(self: Cfg, value):
+    def protect_slot2(self, value):
         raise ValueError("protect_slot2 cannot be applied to UpdateConfiguration")
 
     def tabs(

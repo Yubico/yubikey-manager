@@ -753,8 +753,8 @@ class KdfIterSaltedS2k(Kdf):
     hash_algorithm: HASH_ALGORITHM
     iteration_count: int
     salt_user: bytes
-    salt_reset: bytes
-    salt_admin: bytes
+    salt_reset: Optional[bytes]
+    salt_admin: Optional[bytes]
     initial_hash_user: Optional[bytes]
     initial_hash_admin: Optional[bytes]
 
@@ -830,7 +830,7 @@ class KdfIterSaltedS2k(Kdf):
 class PrivateKeyTemplate(abc.ABC):
     crt: CRT
 
-    def _get_template(self) -> Sequence[Tlv]:
+    def _get_template(self) -> list[Tlv]:
         raise NotImplementedError()
 
     def __bytes__(self) -> bytes:
@@ -850,11 +850,11 @@ class RsaKeyTemplate(PrivateKeyTemplate):
     q: bytes
 
     def _get_template(self):
-        return (
+        return [
             Tlv(0x91, self.e),
             Tlv(0x92, self.p),
             Tlv(0x93, self.q),
-        )
+        ]
 
 
 @dataclass
@@ -865,13 +865,13 @@ class RsaCrtKeyTemplate(RsaKeyTemplate):
     n: bytes
 
     def _get_template(self):
-        return (
+        return [
             *super()._get_template(),
             Tlv(0x94, self.iqmp),
             Tlv(0x95, self.dmp1),
             Tlv(0x96, self.dmq1),
             Tlv(0x97, self.n),
-        )
+        ]
 
 
 @dataclass
@@ -880,9 +880,9 @@ class EcKeyTemplate(PrivateKeyTemplate):
     public_key: Optional[bytes]
 
     def _get_template(self):
-        tlvs: tuple[Tlv, ...] = (Tlv(0x92, self.private_key),)
+        tlvs = [Tlv(0x92, self.private_key)]
         if self.public_key:
-            tlvs = (*tlvs, Tlv(0x99, self.public_key))
+            tlvs.append(Tlv(0x99, self.public_key))
 
         return tlvs
 
@@ -982,11 +982,13 @@ def _pad_message(attributes, message, hash_algorithm):
 
     if isinstance(attributes, EcAttributes):
         return hashed
-    if isinstance(attributes, RsaAttributes):
+    elif isinstance(attributes, RsaAttributes):
         try:
             return _pkcs1v15_headers[type(hash_algorithm)] + hashed
         except KeyError:
             raise ValueError(f"Unsupported hash algorithm for RSA: {hash_algorithm}")
+    else:
+        raise ValueError(f"Unsupported algorithm attributes: {attributes}")
 
 
 class OpenPgpSession:
@@ -1752,11 +1754,15 @@ class OpenPgpSession:
             data = value.public_bytes(Encoding.Raw, PublicFormat.Raw)
         elif isinstance(value, bytes):
             data = value
+        else:
+            raise ValueError("Value must be a bytes or public key")
 
         if isinstance(attributes, RsaAttributes):
             data = b"\0" + data
         elif isinstance(attributes, EcAttributes):
             data = Tlv(0xA6, Tlv(0x7F49, Tlv(0x86, data)))
+        else:
+            raise ValueError("Unsupported algorithm attributes")
 
         response = self.protocol.send_apdu(0, INS.PSO, 0x80, 0x86, data)
         logger.info("Value decrypted")

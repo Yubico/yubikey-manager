@@ -53,6 +53,7 @@ from .management import (
 )
 from .yubiotp import YubiOtpSession
 
+from dataclasses import replace
 from typing import Optional
 import logging
 
@@ -327,7 +328,9 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
             info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version < (5, 2, 4)
         ):
             # Known not to have NFC
-            info.supported_capabilities.pop(TRANSPORT.NFC, None)
+            supported = dict(info.supported_capabilities)
+            supported.pop(TRANSPORT.NFC)
+            replace(info, supported_capabilities=supported)
             info.config.enabled_capabilities.pop(TRANSPORT.NFC, None)
 
     logger.debug("Device info, after tweaks: %s", info)

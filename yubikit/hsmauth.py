@@ -107,11 +107,12 @@ class ALGORITHM(IntEnum):
     EC_P256_YUBICO_AUTHENTICATION = 39
 
     @property
-    def key_len(self):
+    def key_len(self) -> int:
         if self.name.startswith("AES128"):
             return 16
         elif self.name.startswith("EC_P256"):
             return 32
+        raise ValueError("Unknown algorithm")
 
     @property
     def pubkey_len(self):

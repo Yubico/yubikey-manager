@@ -1121,7 +1121,7 @@ class PivSession:
         self,
         slot: SLOT,
         peer_public_key: Union[
-            ec.EllipticCurvePrivateKeyWithSerialization, x25519.X25519PublicKey
+            ec.EllipticCurvePublicKeyWithSerialization, x25519.X25519PublicKey
         ],
     ) -> bytes:
         """Calculate shared secret using ECDH.
@@ -1280,6 +1280,7 @@ class PivSession:
         self.check_key_support(key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
+            assert isinstance(private_key, rsa.RSAPrivateKey)  # nosec
             numbers = private_key.private_numbers()
             numbers = cast(rsa.RSAPrivateNumbers, numbers)
             if numbers.public_numbers.e != 65537:
@@ -1300,6 +1301,7 @@ class PivSession:
                 ),
             )
         else:
+            assert isinstance(private_key, ec.EllipticCurvePrivateKey)  # nosec
             numbers = private_key.private_numbers()
             numbers = cast(ec.EllipticCurvePrivateNumbers, numbers)
             data = Tlv(0x06, int2bytes(numbers.private_value, ln))

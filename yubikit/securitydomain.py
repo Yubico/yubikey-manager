@@ -66,8 +66,10 @@ class Curve(IntEnum):
     BrainpoolP512R1 = 0x07
 
     @classmethod
-    def _from_key(cls, private_key: ec.EllipticCurvePrivateKey) -> "Curve":
-        name = private_key.curve.name.lower()
+    def _from_key(
+        cls, key: ec.EllipticCurvePrivateKey | ec.EllipticCurvePublicKey
+    ) -> "Curve":
+        name = key.curve.name.lower()
         for curve in cls:
             if curve.name.lower() == name:
                 return curve
