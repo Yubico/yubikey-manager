@@ -28,7 +28,7 @@
 from ..base import YkmanDevice, PID
 from .base import OtpYubiKeyDevice
 from yubikit.core import TRANSPORT
-from typing import List, Callable
+from typing import Callable
 import sys
 import logging
 
@@ -53,7 +53,7 @@ else:
             )
 
 
-list_otp_devices: Callable[[], List[OtpYubiKeyDevice]] = backend.list_devices
+list_otp_devices: Callable[[], list[OtpYubiKeyDevice]] = backend.list_devices
 
 
 try:
@@ -76,7 +76,7 @@ try:
                 return CtapHidDevice(self.descriptor, open_connection(self.descriptor))
             return super(CtapYubiKeyDevice, self).open_connection(connection_type)
 
-    def list_ctap_devices() -> List[CtapYubiKeyDevice]:
+    def list_ctap_devices() -> list[CtapYubiKeyDevice]:
         devs = []
         for desc in list_descriptors():
             if desc.vid == 0x1050:
@@ -95,7 +95,7 @@ except Exception:
                 "CTAP HID support is not implemented on this platform"
             )
 
-    def list_ctap_devices() -> List[CtapYubiKeyDevice]:
+    def list_ctap_devices() -> list[CtapYubiKeyDevice]:
         raise NotImplementedError(
             "CTAP HID support is not implemented on this platform"
         )

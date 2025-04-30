@@ -36,7 +36,6 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
-from typing import Tuple
 import ctypes
 
 import logging
@@ -192,7 +191,7 @@ class OSVERSIONINFOW(ctypes.Structure):
     ]
 
 
-def get_windows_version() -> Tuple[int, int, int]:
+def get_windows_version() -> tuple[int, int, int]:
     """Get the true Windows version, since sys.getwindowsversion lies."""
     osvi = OSVERSIONINFOW()
     osvi.dwOSVersionInfoSize = ctypes.sizeof(osvi)

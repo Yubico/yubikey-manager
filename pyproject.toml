@@ -6,7 +6,7 @@ authors = [
   { name = "Dain Nilsson", email = "<dain@yubico.com>" }
 ]
 readme = "README.adoc"
-requires-python = ">=3.8, <4"
+requires-python = ">=3.9, <4"
 license = { file = "COPYING" }
 keywords = ["yubikey", "yubiotp", "piv", "fido"]
 classifiers = [
@@ -48,9 +48,9 @@ packages = [
 pytest = "^8.0"
 makefun = "^1.9.5"
 pyinstaller = { version = "^6.10", python = "<3.14" }
-sphinx = { version = "^7.4", python = ">=3.9" }
-sphinx-rtd-theme = { version = "^3", python = ">=3.9" }
-sphinx-autoapi = { version = "^3.3.3", python = ">=3.9" }
+sphinx = "^7.4"
+sphinx-rtd-theme = "^3"
+sphinx-autoapi = "^3.3.3"
 fido2 = {version = "2.0.0b1", python = ">=3.10"}
 
 [build-system]

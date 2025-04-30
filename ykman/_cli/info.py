@@ -38,7 +38,6 @@ from .util import CliFail, is_yk4_fips, click_command, pretty_print
 from ..otp import is_in_fips_mode as otp_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
-from typing import List
 
 import click
 import logging
@@ -73,7 +72,7 @@ def print_app_status_table(supported_apps, enabled_apps):
         else:
             rows.append([app.display_name, usb_status])
 
-    column_l: List[int] = []
+    column_l: list[int] = []
     for row in rows:
         for idx, c in enumerate(row):
             if len(column_l) > idx:

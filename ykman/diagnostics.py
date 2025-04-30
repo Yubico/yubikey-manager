@@ -22,7 +22,7 @@ from fido2.ctap2 import Ctap2, ClientPin
 
 from dataclasses import asdict
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any
 import platform
 import ctypes
 import sys
@@ -30,7 +30,7 @@ import os
 
 
 def sys_info():
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "ykman": ykman_version,
         "Python": sys.version,
         "Platform": sys.platform,
@@ -50,7 +50,7 @@ def sys_info():
 
 
 def mgmt_info(pid, conn):
-    data: List[Any] = []
+    data: list[Any] = []
     try:
         m = ManagementSession(conn)
         raw_info = m.backend.read_config()
@@ -128,7 +128,7 @@ def ccid_info():
                 result = f"<{e.__class__.__name__}>"
             readers[reader.name] = result
 
-        yubikeys: Dict[str, Any] = {}
+        yubikeys: dict[str, Any] = {}
         for dev in list_ccid_devices():
             try:
                 with dev.open_connection(SmartCardConnection) as conn:
@@ -152,7 +152,7 @@ def ccid_info():
 
 def otp_info():
     try:
-        yubikeys: Dict[str, Any] = {}
+        yubikeys: dict[str, Any] = {}
         for dev in list_otp_devices():
             try:
                 dev_info = []
@@ -181,10 +181,10 @@ def otp_info():
 
 def fido_info():
     try:
-        yubikeys: Dict[str, Any] = {}
+        yubikeys: dict[str, Any] = {}
         for dev in list_ctap_devices():
             try:
-                dev_info: List[Any] = []
+                dev_info: list[Any] = []
                 with dev.open_connection(FidoConnection) as conn:
                     dev_info.append(
                         {
@@ -196,7 +196,7 @@ def fido_info():
                     )
                     try:
                         ctap2 = Ctap2(conn)
-                        ctap_data: Dict[str, Any] = {"Ctap2Info": asdict(ctap2.info)}
+                        ctap_data: dict[str, Any] = {"Ctap2Info": asdict(ctap2.info)}
                         if ctap2.info.options.get("clientPin"):
                             client_pin = ClientPin(ctap2)
                             ctap_data["PIN retries"] = client_pin.get_pin_retries()

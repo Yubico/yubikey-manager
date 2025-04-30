@@ -64,14 +64,11 @@ from enum import Enum, IntEnum, IntFlag, unique
 from dataclasses import dataclass
 from typing import (
     Optional,
-    Tuple,
     ClassVar,
     Mapping,
     Sequence,
     SupportsBytes,
     Union,
-    Dict,
-    List,
 )
 import struct
 import logging
@@ -220,7 +217,7 @@ class OpenPgpAid(bytes):
     """
 
     @property
-    def version(self) -> Tuple[int, int]:
+    def version(self) -> tuple[int, int]:
         """OpenPGP version (tuple of 2 integers: main version, secondary version)."""
         return (_bcd(self[6]), _bcd(self[7]))
 
@@ -883,7 +880,7 @@ class EcKeyTemplate(PrivateKeyTemplate):
     public_key: Optional[bytes]
 
     def _get_template(self):
-        tlvs: Tuple[Tlv, ...] = (Tlv(0x92, self.private_key),)
+        tlvs: tuple[Tlv, ...] = (Tlv(0x92, self.private_key),)
         if self.public_key:
             tlvs = (*tlvs, Tlv(0x99, self.public_key))
 
@@ -1384,7 +1381,7 @@ class OpenPgpSession:
             buf = Tlv.unpack(DO.ALGORITHM_INFORMATION, buf + b"\0\0")[:-2]
 
         slots = {slot.algorithm_attributes_do: slot for slot in KEY_REF}
-        data: Dict[KEY_REF, List[AlgorithmAttributes]] = {}
+        data: dict[KEY_REF, list[AlgorithmAttributes]] = {}
         for tlv in Tlv.parse_list(buf):
             data.setdefault(slots[DO(tlv.tag)], []).append(
                 AlgorithmAttributes.parse(tlv.value)

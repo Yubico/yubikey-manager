@@ -27,10 +27,6 @@
 
 from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
-    Type,
-    List,
-    Dict,
-    Tuple,
     TypeVar,
     Union,
     Optional,
@@ -158,7 +154,7 @@ class PID(IntEnum):
         suffix = "_".join(t.name or str(t) for t in USB_INTERFACE if t in interfaces)
         return cls[key_type.name + "_" + suffix]
 
-    def supports_connection(self, connection_type: Type[Connection]) -> bool:
+    def supports_connection(self, connection_type: type[Connection]) -> bool:
         return connection_type.usb_interface in self.usb_interfaces
 
 
@@ -177,13 +173,13 @@ class YubiKeyDevice(abc.ABC):
         """Get the transport used to communicate with this YubiKey"""
         return self._transport
 
-    def supports_connection(self, connection_type: Type[Connection]) -> bool:
+    def supports_connection(self, connection_type: type[Connection]) -> bool:
         """Check if a YubiKeyDevice supports a specific Connection type"""
         return False
 
-    # mypy will not accept abstract types in Type[T_Connection]
+    # mypy will not accept abstract types in type[T_Connection]
     def open_connection(
-        self, connection_type: Union[Type[T_Connection], Callable[..., T_Connection]]
+        self, connection_type: Union[type[T_Connection], Callable[..., T_Connection]]
     ) -> T_Connection:
         """Opens a connection to the YubiKey"""
         raise ValueError("Unsupported Connection type")
@@ -252,7 +248,7 @@ _override_version = _OverrideVersion()
 
 
 def require_version(
-    my_version: Version, min_version: Tuple[int, int, int], message=None
+    my_version: Version, min_version: tuple[int, int, int], message=None
 ):
     """Ensure a version is at least min_version."""
     # Allow overriding version checks for development devices
@@ -362,12 +358,12 @@ class Tlv(bytes):
         return f"Tlv(tag=0x{self.tag:02x}, value={self.value.hex()})"
 
     @classmethod
-    def parse_from(cls: Type[T_Tlv], data: bytes) -> Tuple[T_Tlv, bytes]:
+    def parse_from(cls: type[T_Tlv], data: bytes) -> tuple[T_Tlv, bytes]:
         tag, offs, ln, end = _tlv_parse(data)
         return cls(data[:end]), data[end:]
 
     @classmethod
-    def parse_list(cls: Type[T_Tlv], data: bytes) -> List[T_Tlv]:
+    def parse_list(cls: type[T_Tlv], data: bytes) -> list[T_Tlv]:
         res = []
         while data:
             tlv, data = cls.parse_from(data)
@@ -375,11 +371,11 @@ class Tlv(bytes):
         return res
 
     @classmethod
-    def parse_dict(cls: Type[T_Tlv], data: bytes) -> Dict[int, bytes]:
+    def parse_dict(cls: type[T_Tlv], data: bytes) -> dict[int, bytes]:
         return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
 
     @classmethod
-    def unpack(cls: Type[T_Tlv], tag: int, data: bytes) -> bytes:
+    def unpack(cls: type[T_Tlv], tag: int, data: bytes) -> bytes:
         tlv = cls(data)
         if tlv.tag != tag:
             raise ValueError(f"Wrong tag, got 0x{tlv.tag:02x} expected 0x{tag:02x}")

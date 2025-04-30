@@ -45,7 +45,6 @@ from .scp import (
 from yubikit.logging import LOG_LEVEL
 from enum import Enum, IntEnum, unique
 from time import time
-from typing import Tuple
 import abc
 import struct
 import logging
@@ -64,7 +63,7 @@ class SmartCardConnection(Connection, metaclass=abc.ABCMeta):
         """Get the transport type of the connection (USB or NFC)"""
 
     @abc.abstractmethod
-    def send_and_receive(self, apdu: bytes) -> Tuple[bytes, int]:
+    def send_and_receive(self, apdu: bytes) -> tuple[bytes, int]:
         """Sends a command APDU and returns the response"""
 
 
@@ -147,7 +146,7 @@ class ApduProcessor(abc.ABC):
         p2: int,
         data: bytes,
         le: int,
-    ) -> Tuple[bytes, int]: ...
+    ) -> tuple[bytes, int]: ...
 
 
 class ApduFormatProcessor(ApduProcessor):

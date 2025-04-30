@@ -20,7 +20,7 @@ from yubikit.core.otp import OtpConnection
 from yubikit.logging import LOG_LEVEL
 
 from ctypes import wintypes, LibraryLoader
-from typing import Dict, cast
+from typing import cast
 import ctypes
 import platform
 import logging
@@ -323,7 +323,7 @@ def list_paths():
 
 
 _SKIP = cast(OtpYubiKeyDevice, object())
-_device_cache: Dict[bytes, OtpYubiKeyDevice] = {}
+_device_cache: dict[bytes, OtpYubiKeyDevice] = {}
 
 
 def list_devices():

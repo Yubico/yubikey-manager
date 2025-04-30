@@ -62,7 +62,7 @@ from cryptography.hazmat.backends import default_backend
 from datetime import date
 from dataclasses import dataclass, astuple
 from enum import Enum, IntEnum, unique
-from typing import Optional, Union, Type, cast, overload
+from typing import Optional, Union, cast, overload
 
 import warnings
 import logging
@@ -642,7 +642,7 @@ def _parse_device_public_key(key_type, encoded):
         return x25519.X25519PublicKey.from_public_bytes(data[0x86])
     else:
         if key_type == KEY_TYPE.ECCP256:
-            curve: Type[ec.EllipticCurve] = ec.SECP256R1
+            curve: type[ec.EllipticCurve] = ec.SECP256R1
         else:
             curve = ec.SECP384R1
 

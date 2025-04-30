@@ -15,7 +15,7 @@ from enum import IntEnum, unique
 from dataclasses import dataclass
 from base64 import b64encode, b32decode
 from time import time
-from typing import Optional, List, Mapping
+from typing import Optional, Mapping
 
 import hmac
 import hashlib
@@ -442,7 +442,7 @@ class OathSession:
         logger.info("Credential renamed")
         return new_id
 
-    def list_credentials(self) -> List[Credential]:
+    def list_credentials(self) -> list[Credential]:
         """List OATH credentials."""
         logger.debug("Listing OATH credentials...")
         creds = []

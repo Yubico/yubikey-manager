@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
-from typing import NamedTuple, Tuple, Optional, Callable, Sequence, Union
+from typing import NamedTuple, Optional, Callable, Sequence, Union
 
 import os
 import abc
@@ -70,7 +70,7 @@ def _derive(key: bytes, t: int, context: bytes, L: int = 0x80) -> bytes:
     return c.finalize()[: L // 8]
 
 
-def _calculate_mac(key: bytes, chain: bytes, message: bytes) -> Tuple[bytes, bytes]:
+def _calculate_mac(key: bytes, chain: bytes, message: bytes) -> tuple[bytes, bytes]:
     c = cmac.CMAC(algorithms.AES(key), backend=default_backend())
     c.update(chain)
     c.update(message)
@@ -246,7 +246,7 @@ class ScpState:
         key_params: Scp03KeyParams,
         *,
         host_challenge: Optional[bytes] = None,
-    ) -> Tuple["ScpState", bytes]:
+    ) -> tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
         resp = send_apdu(

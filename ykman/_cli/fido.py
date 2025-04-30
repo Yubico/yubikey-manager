@@ -55,7 +55,7 @@ from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
 from ..hid import list_ctap_devices
 from ..pcsc import ScardYubiKeyDevice
 from smartcard.Exceptions import NoCardException, CardConnectionException
-from typing import Optional, Sequence, List, Dict
+from typing import Optional, Sequence
 
 import io
 import csv as _csv
@@ -109,8 +109,8 @@ def info(ctx):
     info = ctx.obj["info"]
     ctap2 = ctx.obj.get("ctap2")
 
-    data: Dict = {}
-    lines: List = [data]
+    data: dict = {}
+    lines: list = [data]
 
     if CAPABILITY.FIDO2 in info.fips_capable:
         data["FIPS approved"] = CAPABILITY.FIDO2 in info.fips_approved
@@ -600,7 +600,7 @@ def _gen_creds(credman):
             )
 
 
-def _format_table(headings: Sequence[str], rows: List[Sequence[str]]) -> str:
+def _format_table(headings: Sequence[str], rows: list[Sequence[str]]) -> str:
     all_rows = [headings] + rows
     padded_rows = [["" for cell in row] for row in all_rows]
 

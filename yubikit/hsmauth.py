@@ -51,7 +51,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from functools import total_ordering
 from enum import IntEnum, unique
 from dataclasses import dataclass
-from typing import Optional, List, Union, Tuple, NamedTuple
+from typing import Optional, Union, NamedTuple
 import struct
 
 import logging
@@ -151,7 +151,7 @@ def _parse_select(response):
     return Version.from_bytes(data)
 
 
-def _password_to_key(password: str) -> Tuple[bytes, bytes]:
+def _password_to_key(password: str) -> tuple[bytes, bytes]:
     """Derive encryption and MAC key from a password.
 
     :return: A tuple containing the encryption key, and MAC key.
@@ -242,7 +242,7 @@ class HsmAuthSession:
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         logger.info("YubiHSM Auth application data reset performed")
 
-    def list_credentials(self) -> List[Credential]:
+    def list_credentials(self) -> list[Credential]:
         """List YubiHSM Auth credentials on YubiKey"""
 
         creds = []

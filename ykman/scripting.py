@@ -39,7 +39,7 @@ from yubikit.support import get_name, read_info
 from smartcard.Exceptions import NoCardException, CardConnectionException
 
 from time import sleep
-from typing import Generator, Optional, Set
+from typing import Generator, Optional
 
 
 """
@@ -138,7 +138,7 @@ def multi(
         insert a YubiKey.
     """
     state = None
-    handled_serials: Set[Optional[int]] = set()
+    handled_serials: set[Optional[int]] = set()
     pids, _ = scan_devices()
     n_devs = sum(pids.values())
     if n_devs == 0:
@@ -223,7 +223,7 @@ def multi_nfc(
             prompted = True
         sleep(1.0)
 
-    handled_serials: Set[Optional[int]] = set()
+    handled_serials: set[Optional[int]] = set()
     current: Optional[int] = -1
     while True:  # Run this until we stop the script with Ctrl+C
         try:

@@ -57,7 +57,7 @@ import struct
 import os
 import re
 
-from typing import Union, Mapping, Optional, List, Dict, Type, Any, cast
+from typing import Union, Mapping, Optional, Any, cast
 
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ _NAME_ATTRIBUTES = {
 _ESCAPED = "\\\"+,'<> #="
 
 
-def _parse(value: str) -> List[List[str]]:
+def _parse(value: str) -> list[list[str]]:
     remaining = list(value)
     name = []
     entry = []
@@ -129,7 +129,7 @@ def parse_rfc4514_string(value: str) -> x509.Name:
     :param value: An RFC 4514 string.
     """
     name = _parse(value)
-    attributes: List[x509.RelativeDistinguishedName] = []
+    attributes: list[x509.RelativeDistinguishedName] = []
     for entry in name:
         parts = []
         for part in entry:
@@ -509,10 +509,10 @@ def get_piv_info(session: PivSession):
     :param session: The PIV session.
     """
     pivman = get_pivman_data(session)
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "PIV version": session.version,
     }
-    lines: List[Any] = [info]
+    lines: list[Any] = [info]
 
     try:
         pin_data = session.get_pin_metadata()
@@ -564,7 +564,7 @@ def get_piv_info(session: PivSession):
     if pivman.has_stored_key:
         lines.append("Management key is stored on the YubiKey, protected by PIN.")
 
-    objects: Dict[str, Any] = {}
+    objects: dict[str, Any] = {}
     lines.append(objects)
     try:
         objects["CHUID"] = session.get_object(OBJECT_ID.CHUID)
@@ -587,7 +587,7 @@ def get_piv_info(session: PivSession):
         if slot not in keys and slot not in certs:
             continue
 
-        cert_data: Dict[str, Any] = {}
+        cert_data: dict[str, Any] = {}
         objects[f"Slot {slot}"] = cert_data
         if slot in keys:
             cert_data["Private key type"] = keys[slot].key_type
@@ -666,7 +666,7 @@ def sign_certificate_builder(
     slot: SLOT,
     key_type: KEY_TYPE,
     builder: x509.CertificateBuilder,
-    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.Certificate:
     """Sign a Certificate.
 
@@ -702,7 +702,7 @@ def sign_csr_builder(
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
     builder: x509.CertificateSigningRequestBuilder,
-    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Sign a CSR.
 
@@ -753,7 +753,7 @@ def generate_self_signed_certificate(
     subject_str: str,
     valid_from: datetime,
     valid_to: datetime,
-    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.Certificate:
     """Generate a self-signed certificate using a private key in a slot.
 
@@ -787,7 +787,7 @@ def generate_csr(
     slot: SLOT,
     public_key: Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey],
     subject_str: str,
-    hash_algorithm: Type[_AllowedHashTypes] = hashes.SHA256,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot.
 

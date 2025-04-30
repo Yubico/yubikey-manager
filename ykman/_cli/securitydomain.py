@@ -56,7 +56,7 @@ from .util import (
 )
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from typing import Dict, List, Any
+from typing import Any
 
 import click
 import logging
@@ -102,7 +102,7 @@ def info(ctx):
     List keys in the Security Domain of the YubiKey.
     """
     sd = ctx.obj["session"]
-    data: List[Any] = []
+    data: list[Any] = []
     cas = sd.get_supported_ca_identifiers()
     for ref in sd.get_key_information().keys():
         if ref.kid == 1:  # SCP03
@@ -116,7 +116,7 @@ def info(ctx):
         elif ref.kid in (2, 3):  # SCP03 always in full key sets
             continue
         else:  # SCP11
-            inner: Dict[str, Any] = {}
+            inner: dict[str, Any] = {}
             if ref in cas:
                 inner["CA Key Identifier"] = ":".join(f"{b:02X}" for b in cas[ref])
             try:

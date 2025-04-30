@@ -55,7 +55,7 @@ from .util import (
 from ..oath import is_steam, calculate_steam, is_hidden, delete_broken_credential
 from ..settings import AppData
 
-from typing import Dict, List, Any
+from typing import Any
 import click
 import logging
 
@@ -107,8 +107,8 @@ def info(ctx):
     """
     session = ctx.obj["session"]
     info = ctx.obj["info"]
-    data: Dict[str, Any] = {"OATH version": "%d.%d.%d" % session.version}
-    lines: List[Any] = [data]
+    data: dict[str, Any] = {"OATH version": "%d.%d.%d" % session.version}
+    lines: list[Any] = [data]
 
     if CAPABILITY.OATH in info.fips_capable:
         # This is a bit ugly as it makes assumptions about the structure of data
@@ -612,14 +612,14 @@ def _add_cred(ctx, data, touch, force):
         _fail_scp(ctx, e)
 
 
-@accounts.command()
+@accounts.command("list")
 @click_show_hidden_option
 @click.pass_context
 @click.option("-o", "--oath-type", is_flag=True, help="display the OATH type")
 @click.option("-P", "--period", is_flag=True, help="display the period")
 @click_password_option
 @click_remember_option
-def list(ctx, show_hidden, oath_type, period, password, remember):
+def list_creds(ctx, show_hidden, oath_type, period, password, remember):
     """
     List all accounts.
 

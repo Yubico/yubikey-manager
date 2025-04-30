@@ -35,7 +35,7 @@ from yubikit.core.smartcard import (
     AID,
 )
 from .util import EnumChoice, CliFail, click_command
-from typing import Tuple, Optional
+from typing import Optional
 
 import re
 import sys
@@ -64,7 +64,7 @@ def _hex(data: bytes) -> str:
 
 def _parse_apdu(
     data: str,
-) -> Tuple[Tuple[int, int, int, int, bytes, int], Optional[int]]:
+) -> tuple[tuple[int, int, int, int, bytes, int], Optional[int]]:
     m = APDU_PATTERN.match(data)
     if not m:
         raise ValueError("Invalid APDU format: " + data)

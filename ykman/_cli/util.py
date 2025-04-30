@@ -45,7 +45,7 @@ from cryptography import x509
 from contextlib import contextmanager
 from threading import Timer
 from enum import Enum
-from typing import Optional, Sequence, Tuple, List
+from typing import Optional, Sequence
 import functools
 import click
 import sys
@@ -302,7 +302,7 @@ def pretty_print(value, level: int = 0) -> Sequence[str]:
     Returns a list of strings which can be printed as lines.
     """
     indent = "  " * level
-    lines: List[str] = []
+    lines: list[str] = []
     if isinstance(value, list):
         for v in value:
             lines.extend(pretty_print(v, level))
@@ -334,7 +334,7 @@ def pretty_print(value, level: int = 0) -> Sequence[str]:
     return lines
 
 
-def check_version(version: Version, req: Tuple[int, int, int]) -> bool:
+def check_version(version: Version, req: tuple[int, int, int]) -> bool:
     try:
         require_version(version, req)
         return True
@@ -443,7 +443,7 @@ def get_scp_params(
 
 def organize_scp11_certificates(
     certificates: Sequence[x509.Certificate],
-) -> Tuple[
+) -> tuple[
     Optional[x509.Certificate], Sequence[x509.Certificate], Optional[x509.Certificate]
 ]:
     if not certificates:
