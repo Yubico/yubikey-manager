@@ -51,6 +51,7 @@ pyinstaller = { version = "^6.10", python = "<3.14" }
 sphinx = "^7.4"
 sphinx-rtd-theme = "^3"
 sphinx-autoapi = "^3.3.3"
+pyright = "^1.1"
 fido2 = {version = "2.0.0b1", python = ">=3.10"}
 
 [build-system]
