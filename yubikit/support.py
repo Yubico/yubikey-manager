@@ -313,17 +313,14 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
     if (4, 4, 0) <= info.version < (4, 5, 0):
         info.is_fips = True
 
-    # Set nfc_enabled if missing (pre YubiKey 5)
-    if (
-        info.has_transport(TRANSPORT.NFC)
-        and TRANSPORT.NFC not in info.config.enabled_capabilities
-    ):
-        info.config.enabled_capabilities[TRANSPORT.NFC] = info.supported_capabilities[
-            TRANSPORT.NFC
-        ]
-
-    # Workaround for invalid configurations.
-    if info.version >= (4, 0, 0):
+    # Fix NFC if needed
+    if info.has_transport(TRANSPORT.NFC):
+        # Set nfc_enabled if missing (pre YubiKey 5)
+        if TRANSPORT.NFC not in info.config.enabled_capabilities:
+            info.config.enabled_capabilities[TRANSPORT.NFC] = (
+                info.supported_capabilities[TRANSPORT.NFC]
+            )
+        # Workaround for invalid configurations
         if info.form_factor in (
             FORM_FACTOR.USB_A_NANO,
             FORM_FACTOR.USB_C_NANO,
@@ -331,11 +328,11 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
         ) or (
             info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version < (5, 2, 4)
         ):
-            # Known not to have NFC
+            # Known to not have NFC, remove capabilities
             supported = dict(info.supported_capabilities)
-            supported.pop(TRANSPORT.NFC)
+            del supported[TRANSPORT.NFC]
             replace(info, supported_capabilities=supported)
-            info.config.enabled_capabilities.pop(TRANSPORT.NFC, None)
+            del info.config.enabled_capabilities[TRANSPORT.NFC]
 
     logger.debug("Device info, after tweaks: %s", info)
     return info
