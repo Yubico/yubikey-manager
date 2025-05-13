@@ -25,33 +25,38 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+from enum import IntEnum
+
+import click
+
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
-from yubikit.openpgp import (
-    OpenPgpSession,
-    UIF,
-    PIN_POLICY,
-    KEY_REF as _KEY_REF,
-    KEY_STATUS,
-)
+from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
+from yubikit.openpgp import (
+    KEY_REF as _KEY_REF,
+)
+from yubikit.openpgp import (
+    KEY_STATUS,
+    PIN_POLICY,
+    UIF,
+    OpenPgpSession,
+)
+
+from ..openpgp import get_key_info, get_openpgp_info, safe_reset
 from ..util import parse_certificates, parse_private_key
-from ..openpgp import get_openpgp_info, safe_reset, get_key_info
 from .util import (
     CliFail,
+    EnumChoice,
     click_force_option,
     click_format_option,
+    click_group,
     click_postpone_execution,
     click_prompt,
-    click_group,
-    EnumChoice,
-    pretty_print,
     get_scp_params,
     log_or_echo,
+    pretty_print,
 )
-from enum import IntEnum
-import logging
-import click
 
 logger = logging.getLogger(__name__)
 

@@ -1,23 +1,25 @@
-from yubikit.core import Tlv, TRANSPORT
-from yubikit.core.smartcard import ApduError
-from yubikit.core.smartcard.scp import (
-    ScpKid,
-    KeyRef,
-    StaticKeys,
-    Scp03KeyParams,
-    Scp11KeyParams,
-)
-from yubikit.securitydomain import SecurityDomainSession
-from . import condition
-from ..util import open_file
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.backends import default_backend
-from cryptography.exceptions import InvalidSignature
 import os
 
 import pytest
+from cryptography import x509
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+
+from yubikit.core import TRANSPORT, Tlv
+from yubikit.core.smartcard import ApduError
+from yubikit.core.smartcard.scp import (
+    KeyRef,
+    Scp03KeyParams,
+    Scp11KeyParams,
+    ScpKid,
+    StaticKeys,
+)
+from yubikit.securitydomain import SecurityDomainSession
+
+from ..util import open_file
+from . import condition
 
 
 @pytest.fixture

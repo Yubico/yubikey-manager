@@ -1,5 +1,6 @@
-from yubikit.core.smartcard import SmartCardProtocol, ApplicationNotAvailableError
 import pytest
+
+from yubikit.core.smartcard import ApplicationNotAvailableError, SmartCardProtocol
 
 
 def test_select_wrong_app(ccid_connection):

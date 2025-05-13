@@ -25,9 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.hsmauth import HsmAuthSession, INITIAL_RETRY_COUNTER
-
 import os
+
+from yubikit.hsmauth import INITIAL_RETRY_COUNTER, HsmAuthSession
 
 
 def get_hsmauth_info(session: HsmAuthSession):

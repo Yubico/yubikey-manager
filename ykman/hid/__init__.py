@@ -25,12 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ..base import YkmanDevice, PID
-from .base import OtpYubiKeyDevice
-from yubikit.core import TRANSPORT
-from typing import Callable
-import sys
 import logging
+import sys
+from typing import Callable
+
+from yubikit.core import TRANSPORT
+
+from ..base import PID, YkmanDevice
+from .base import OtpYubiKeyDevice
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,7 @@ list_otp_devices: Callable[[], list[OtpYubiKeyDevice]] = backend.list_devices
 
 
 try:
-    from fido2.hid import list_descriptors, open_connection, CtapHidDevice
+    from fido2.hid import CtapHidDevice, list_descriptors, open_connection
 
     class CtapYubiKeyDevice(YkmanDevice):
         """YubiKey FIDO USB HID device"""

@@ -25,11 +25,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, PID, USB_INTERFACE
-from yubikit.core.otp import OtpProtocol, CommandRejectedError
-from ..base import YkmanDevice
-
 from time import sleep
+
+from yubikit.core import PID, TRANSPORT, USB_INTERFACE
+from yubikit.core.otp import CommandRejectedError, OtpProtocol
+
+from ..base import YkmanDevice
 
 YUBICO_VID = 0x1050
 

@@ -1,15 +1,15 @@
-from ykman.hsmauth import generate_random_management_key
-
-from yubikit.hsmauth import (
-    _parse_credential_password,
-    _parse_label,
-    _password_to_key,
-    CREDENTIAL_PASSWORD_LEN,
-    MAX_LABEL_LEN,
-)
 from binascii import a2b_hex
 
 import pytest
+
+from ykman.hsmauth import generate_random_management_key
+from yubikit.hsmauth import (
+    CREDENTIAL_PASSWORD_LEN,
+    MAX_LABEL_LEN,
+    _parse_credential_password,
+    _parse_label,
+    _password_to_key,
+)
 
 
 class TestHsmAuthFunctions:

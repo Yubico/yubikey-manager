@@ -25,21 +25,22 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .. import Tlv, BadResponseError
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import cmac, hashes, serialization, constant_time
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
+import abc
+import logging
+import os
+import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
-from typing import NamedTuple, Optional, Callable, Sequence, Union
+from typing import Callable, NamedTuple, Optional, Sequence, Union
 
-import os
-import abc
-import struct
-import logging
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import cmac, constant_time, hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
+
+from .. import BadResponseError, Tlv
 
 logger = logging.getLogger(__name__)
 

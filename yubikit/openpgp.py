@@ -25,54 +25,54 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .core import (
-    Tlv,
-    Version,
-    NotSupportedError,
-    InvalidPinError,
-    require_version,
-    int2bytes,
-    bytes2int,
-    _override_version,
-)
-from .core.smartcard import (
-    SmartCardConnection,
-    SmartCardProtocol,
-    ApduError,
-    AID,
-    SW,
-    ScpKeyParams,
+import abc
+import logging
+import os
+import struct
+from dataclasses import dataclass
+from enum import Enum, IntEnum, IntFlag, unique
+from typing import (
+    ClassVar,
+    Mapping,
+    Optional,
+    Sequence,
+    SupportsBytes,
+    Union,
 )
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    PrivateFormat,
-    PublicFormat,
-    NoEncryption,
-)
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, ed25519, x25519
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, x25519
 from cryptography.hazmat.primitives.asymmetric.utils import (
     Prehashed,
     encode_dss_signature,
 )
-
-import os
-import abc
-from enum import Enum, IntEnum, IntFlag, unique
-from dataclasses import dataclass
-from typing import (
-    Optional,
-    ClassVar,
-    Mapping,
-    Sequence,
-    SupportsBytes,
-    Union,
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
 )
-import struct
-import logging
+
+from .core import (
+    InvalidPinError,
+    NotSupportedError,
+    Tlv,
+    Version,
+    _override_version,
+    bytes2int,
+    int2bytes,
+    require_version,
+)
+from .core.smartcard import (
+    AID,
+    SW,
+    ApduError,
+    ScpKeyParams,
+    SmartCardConnection,
+    SmartCardProtocol,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -25,15 +25,16 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Connection, CommandError, TimeoutError, Version, USB_INTERFACE
+import abc
+import logging
+import struct
+from threading import Event
+from time import sleep
+from typing import Callable, Optional
+
 from yubikit.logging import LOG_LEVEL
 
-from time import sleep
-from threading import Event
-from typing import Optional, Callable
-import abc
-import struct
-import logging
+from . import USB_INTERFACE, CommandError, Connection, TimeoutError, Version
 
 logger = logging.getLogger(__name__)
 

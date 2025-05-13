@@ -25,38 +25,38 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+from dataclasses import replace
+from typing import Optional
+
 from .core import (
+    PID,
     TRANSPORT,
     YUBIKEY,
-    PID,
-    Version,
+    ApplicationNotAvailableError,
     Connection,
     NotSupportedError,
-    ApplicationNotAvailableError,
+    Version,
 )
-from .core.otp import OtpConnection
 from .core.fido import FidoConnection
+from .core.otp import OtpConnection
 from .core.smartcard import (
     AID,
     SmartCardConnection,
     SmartCardProtocol,
 )
 from .management import (
-    ManagementSession,
-    DeviceInfo,
-    DeviceConfig,
-    VersionQualifier,
-    Mode,
-    USB_INTERFACE,
     CAPABILITY,
-    FORM_FACTOR,
     DEVICE_FLAG,
+    FORM_FACTOR,
+    USB_INTERFACE,
+    DeviceConfig,
+    DeviceInfo,
+    ManagementSession,
+    Mode,
+    VersionQualifier,
 )
 from .yubiotp import YubiOtpSession
-
-from dataclasses import replace
-from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 

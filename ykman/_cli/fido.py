@@ -25,42 +25,44 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from fido2.ctap import CtapError, STATUS
+import csv as _csv
+import io
+import logging
+from time import sleep
+from typing import Optional, Sequence
+
+import click
+from fido2.ctap import STATUS, CtapError
 from fido2.ctap1 import ApduError
 from fido2.ctap2 import (
-    Ctap2,
-    ClientPin,
-    CredentialManagement,
-    FPBioEnrollment,
     CaptureError,
+    ClientPin,
     Config,
+    CredentialManagement,
+    Ctap2,
+    FPBioEnrollment,
 )
-from yubikit.management import CAPABILITY
+from smartcard.Exceptions import CardConnectionException, NoCardException
+
 from yubikit.core import TRANSPORT
 from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
 from yubikit.core.smartcard import SW, SmartCardConnection
-from time import sleep
-from .util import (
-    click_postpone_execution,
-    click_prompt,
-    click_force_option,
-    click_group,
-    prompt_timeout,
-    prompt_for_touch,
-    is_yk4_fips,
-    pretty_print,
-)
-from .util import CliFail
-from ..fido import is_in_fips_mode, fips_reset, fips_change_pin, fips_verify_pin
+from yubikit.management import CAPABILITY
+
+from ..fido import fips_change_pin, fips_reset, fips_verify_pin, is_in_fips_mode
 from ..hid import list_ctap_devices
 from ..pcsc import ScardYubiKeyDevice
-from smartcard.Exceptions import NoCardException, CardConnectionException
-from typing import Optional, Sequence
-
-import io
-import csv as _csv
-import click
-import logging
+from .util import (
+    CliFail,
+    click_force_option,
+    click_group,
+    click_postpone_execution,
+    click_prompt,
+    is_yk4_fips,
+    pretty_print,
+    prompt_for_touch,
+    prompt_timeout,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,9 @@
+import pytest
+
 from yubikit.core import NotSupportedError
+
 from ....util import open_file
 from ... import condition
-import pytest
 
 
 class TestFIPS:

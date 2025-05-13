@@ -25,56 +25,57 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from base64 import b32encode
-from yubikit.yubiotp import (
-    SLOT,
-    NDEF_TYPE,
-    YubiOtpSession,
-    YubiOtpSlotConfiguration,
-    HmacSha1SlotConfiguration,
-    StaticPasswordSlotConfiguration,
-    HotpSlotConfiguration,
-    UpdateConfiguration,
-)
-from yubikit.core import TRANSPORT, CommandError
-from yubikit.core.otp import (
-    MODHEX_ALPHABET,
-    modhex_encode,
-    modhex_decode,
-    OtpConnection,
-)
-from yubikit.core.smartcard import SmartCardConnection
-
-from .util import (
-    CliFail,
-    click_group,
-    click_force_option,
-    click_callback,
-    click_parse_b32_key,
-    click_postpone_execution,
-    click_prompt,
-    prompt_for_touch,
-    EnumChoice,
-    is_yk4_fips,
-    log_or_echo,
-)
-from ..scancodes import encode, KEYBOARD_LAYOUT
-from ..otp import (
-    is_in_fips_mode,
-    generate_static_pw,
-    parse_oath_key,
-    parse_b32_key,
-    time_challenge,
-    format_oath_code,
-    format_csv,
-)
-from threading import Event
-from time import time
 import logging
 import os
 import struct
+from base64 import b32encode
+from threading import Event
+from time import time
+
 import click
 
+from yubikit.core import TRANSPORT, CommandError
+from yubikit.core.otp import (
+    MODHEX_ALPHABET,
+    OtpConnection,
+    modhex_decode,
+    modhex_encode,
+)
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.yubiotp import (
+    NDEF_TYPE,
+    SLOT,
+    HmacSha1SlotConfiguration,
+    HotpSlotConfiguration,
+    StaticPasswordSlotConfiguration,
+    UpdateConfiguration,
+    YubiOtpSession,
+    YubiOtpSlotConfiguration,
+)
+
+from ..otp import (
+    format_csv,
+    format_oath_code,
+    generate_static_pw,
+    is_in_fips_mode,
+    parse_b32_key,
+    parse_oath_key,
+    time_challenge,
+)
+from ..scancodes import KEYBOARD_LAYOUT, encode
+from .util import (
+    CliFail,
+    EnumChoice,
+    click_callback,
+    click_force_option,
+    click_group,
+    click_parse_b32_key,
+    click_postpone_execution,
+    click_prompt,
+    is_yk4_fips,
+    log_or_echo,
+    prompt_for_touch,
+)
 
 logger = logging.getLogger(__name__)
 

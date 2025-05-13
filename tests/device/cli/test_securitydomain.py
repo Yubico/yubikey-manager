@@ -1,11 +1,12 @@
-from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import ApduError
-from ykman.util import parse_certificates
-from .. import condition
-from ...util import open_file
+import pytest
 from cryptography import x509
 
-import pytest
+from ykman.util import parse_certificates
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import ApduError
+
+from ...util import open_file
+from .. import condition
 
 
 @pytest.fixture(autouse=True)

@@ -25,22 +25,23 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from . import Connection, USB_INTERFACE
-from fido2.ctap import CtapDevice, CtapError, STATUS
-from fido2.hid import CAPABILITY, CTAPHID
-from yubikit.core.smartcard import (
-    SmartCardConnection,
-    SmartCardProtocol,
-    AID,
-    ApduError,
-)
-from yubikit.core.smartcard.scp import ScpKeyParams
-
+import logging
+import struct
 from threading import Event
 from typing import Callable, Iterator, Optional
 
-import struct
-import logging
+from fido2.ctap import STATUS, CtapDevice, CtapError
+from fido2.hid import CAPABILITY, CTAPHID
+
+from yubikit.core.smartcard import (
+    AID,
+    ApduError,
+    SmartCardConnection,
+    SmartCardProtocol,
+)
+from yubikit.core.smartcard.scp import ScpKeyParams
+
+from . import USB_INTERFACE, Connection
 
 logger = logging.getLogger(__name__)
 

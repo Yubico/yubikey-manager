@@ -1,22 +1,22 @@
+from datetime import date
+
+import pytest
+
 from ykman.piv import (
+    generate_chuid,
     generate_random_management_key,
     parse_rfc4514_string,
-    generate_chuid,
 )
-
 from yubikit.core import NotSupportedError, Version
 from yubikit.piv import (
     KEY_TYPE,
     MANAGEMENT_KEY_TYPE,
     PIN_POLICY,
     TOUCH_POLICY,
-    _do_check_key_support,
-    FascN,
     Chuid,
+    FascN,
+    _do_check_key_support,
 )
-from datetime import date
-
-import pytest
 
 
 @pytest.mark.parametrize(

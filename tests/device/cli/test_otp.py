@@ -27,12 +27,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.management import CAPABILITY
-from .. import condition
+import re
 from time import sleep
 
-import re
 import pytest
+
+from yubikit.management import CAPABILITY
+
+from .. import condition
 
 
 def no_pin_complexity(info):

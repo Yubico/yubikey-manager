@@ -1,22 +1,21 @@
+import os
+
 import pytest
-
-from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import ApduError
-from yubikit.management import CAPABILITY
-from yubikit.hsmauth import (
-    HsmAuthSession,
-    Credential,
-    INITIAL_RETRY_COUNTER,
-    InvalidPinError,
-)
-
-from . import condition
-
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-import os
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import ApduError
+from yubikit.hsmauth import (
+    INITIAL_RETRY_COUNTER,
+    Credential,
+    HsmAuthSession,
+    InvalidPinError,
+)
+from yubikit.management import CAPABILITY
+
+from . import condition
 
 DEFAULT_MANAGEMENT_KEY = bytes.fromhex("00000000000000000000000000000000")
 NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex("11111111111111111111111111111112")

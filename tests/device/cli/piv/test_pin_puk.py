@@ -1,13 +1,15 @@
-from .util import (
-    old_new_new,
-    NON_DEFAULT_PIN,
-    NON_DEFAULT_PUK,
-)
+import re
+
+import pytest
+
 from ykman.piv import OBJECT_ID_PIVMAN_DATA, PivmanData
 from yubikit.management import CAPABILITY
 
-import pytest
-import re
+from .util import (
+    NON_DEFAULT_PIN,
+    NON_DEFAULT_PUK,
+    old_new_new,
+)
 
 
 class TestPin:

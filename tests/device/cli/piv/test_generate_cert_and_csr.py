@@ -1,11 +1,13 @@
 from binascii import b2a_hex
+
+import pytest
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding
-from .util import NON_DEFAULT_MANAGEMENT_KEY
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+
 from ... import condition
-import pytest
+from .util import NON_DEFAULT_MANAGEMENT_KEY
 
 
 def _verify_cert(cert, pubkey):

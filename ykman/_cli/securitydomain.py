@@ -25,43 +25,43 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core.smartcard import SmartCardConnection, ApduError, SW
+import logging
+import sys
+from typing import Any
+
+import click
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+
+from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.core.smartcard.scp import (
-    ScpKid,
     KeyRef,
     Scp03KeyParams,
     Scp11KeyParams,
+    ScpKid,
     StaticKeys,
 )
 from yubikit.management import CAPABILITY
 from yubikit.securitydomain import SecurityDomainSession
 
 from ..util import (
-    parse_private_key,
-    parse_certificates,
     InvalidPasswordError,
+    parse_certificates,
+    parse_private_key,
 )
 from .util import (
     CliFail,
-    click_group,
-    click_force_option,
-    click_postpone_execution,
-    click_callback,
-    click_prompt,
     HexIntParamType,
-    pretty_print,
+    click_callback,
+    click_force_option,
+    click_group,
+    click_postpone_execution,
+    click_prompt,
     get_scp_params,
-    organize_scp11_certificates,
     log_or_echo,
+    organize_scp11_certificates,
+    pretty_print,
 )
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-from typing import Any
-
-import click
-import logging
-import sys
-
 
 logger = logging.getLogger(__name__)
 

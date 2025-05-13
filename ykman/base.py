@@ -25,8 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, PID, YubiKeyDevice
-from typing import Optional, Hashable
+from typing import Hashable, Optional
+
+from yubikit.core import PID, TRANSPORT, YubiKeyDevice
 
 
 class YkmanDevice(YubiKeyDevice):

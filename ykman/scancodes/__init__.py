@@ -26,7 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from enum import Enum
-from . import us, uk, de, fr, it, modhex, norman, bepo
+
+from . import bepo, de, fr, it, modhex, norman, uk, us
 
 
 class KEYBOARD_LAYOUT(Enum):

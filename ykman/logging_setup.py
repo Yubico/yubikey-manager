@@ -25,18 +25,18 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ykman import __version__ as ykman_version
-from ykman.util import get_windows_version
-from ykman.logging import init_logging
-from yubikit.logging import LOG_LEVEL
-from datetime import datetime
-import platform
-import logging
-import warnings
 import ctypes
-import sys
+import logging
 import os
+import platform
+import sys
+import warnings
+from datetime import datetime
 
+from ykman import __version__ as ykman_version
+from ykman.logging import init_logging
+from ykman.util import get_windows_version
+from yubikit.logging import LOG_LEVEL
 
 logger = logging.getLogger(__name__)
 

@@ -25,13 +25,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .util import click_force_option, click_command
-from .. import scripting  # noqa - make sure this file gets included by PyInstaller.
-
-import sys
-import click
 import logging
+import sys
 
+import click
+
+from .. import scripting  # noqa - make sure this file gets included by PyInstaller.
+from .util import click_command, click_force_option
 
 logger = logging.getLogger(__name__)
 

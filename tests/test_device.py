@@ -1,13 +1,14 @@
+from typing import cast
+
 from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import (
     CAPABILITY,
     FORM_FACTOR,
-    DeviceInfo,
     DeviceConfig,
+    DeviceInfo,
     Version,
 )
 from yubikit.support import get_name
-from typing import cast
 
 
 def info(form_factor):

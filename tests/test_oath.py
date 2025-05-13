@@ -1,14 +1,15 @@
 #  vim: set fileencoding=utf-8 :
 
-from yubikit.oath import (
-    CredentialData,
-    OATH_TYPE,
-    HASH_ALGORITHM,
-    _derive_key,
-    _parse_cred_id,
-    _format_cred_id,
-)
 import unittest
+
+from yubikit.oath import (
+    HASH_ALGORITHM,
+    OATH_TYPE,
+    CredentialData,
+    _derive_key,
+    _format_cred_id,
+    _parse_cred_id,
+)
 
 
 class TestOathFunctions(unittest.TestCase):

@@ -25,22 +25,23 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ..base import YkmanDevice
-from yubikit.core import TRANSPORT, YUBIKEY, PID
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.core.fido import SmartCardCtapDevice
-from yubikit.management import USB_INTERFACE
-from yubikit.logging import LOG_LEVEL
+import logging
+import os
+import subprocess  # nosec
+from time import sleep
 
 from smartcard import System
 from smartcard.Exceptions import CardConnectionException, NoCardException
-from smartcard.pcsc.PCSCExceptions import ListReadersException
 from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnection
+from smartcard.pcsc.PCSCExceptions import ListReadersException
 
-from time import sleep
-import subprocess  # nosec
-import os
-import logging
+from yubikit.core import PID, TRANSPORT, YUBIKEY
+from yubikit.core.fido import SmartCardCtapDevice
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.logging import LOG_LEVEL
+from yubikit.management import USB_INTERFACE
+
+from ..base import YkmanDevice
 
 logger = logging.getLogger(__name__)
 
@@ -165,8 +166,8 @@ def kill_scdaemon():
     killed = False
     try:
         # Works for Windows.
+        from win32api import CloseHandle, OpenProcess, TerminateProcess
         from win32com.client import GetObject
-        from win32api import OpenProcess, CloseHandle, TerminateProcess
 
         wmi = GetObject("winmgmts:")
         ps = wmi.InstancesOf("Win32_Process")

@@ -25,31 +25,33 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT, YUBIKEY
-from yubikit.core.otp import OtpConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.core.fido import FidoConnection
-from yubikit.management import (
-    ManagementSession,
-    DeviceConfig,
-    CAPABILITY,
-    USB_INTERFACE,
-    DEVICE_FLAG,
-    Mode,
-)
-from .util import (
-    click_group,
-    click_postpone_execution,
-    click_force_option,
-    click_prompt,
-    EnumChoice,
-    CliFail,
-)
+import logging
 import os
 import re
-import click
-import logging
 
+import click
+
+from yubikit.core import TRANSPORT, YUBIKEY
+from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import (
+    CAPABILITY,
+    DEVICE_FLAG,
+    USB_INTERFACE,
+    DeviceConfig,
+    ManagementSession,
+    Mode,
+)
+
+from .util import (
+    CliFail,
+    EnumChoice,
+    click_force_option,
+    click_group,
+    click_postpone_execution,
+    click_prompt,
+)
 
 logger = logging.getLogger(__name__)
 

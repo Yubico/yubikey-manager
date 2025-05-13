@@ -25,12 +25,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import os
 import json
-import keyring
-from pathlib import Path
-from cryptography.fernet import Fernet, InvalidToken
 import logging
+import os
+from pathlib import Path
+
+import keyring
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
 

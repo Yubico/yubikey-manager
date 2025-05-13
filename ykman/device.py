@@ -25,29 +25,33 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import Connection, PID, TRANSPORT, YUBIKEY
-from yubikit.core.otp import OtpConnection
-from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import (
-    DeviceInfo,
-    USB_INTERFACE,
-)
-from yubikit.support import read_info
-from .base import YkmanDevice
-from .hid import (
-    list_otp_devices as _list_otp_devices,
-    list_ctap_devices as _list_ctap_devices,
-)
-from .pcsc import list_devices as _list_ccid_devices
-from smartcard.pcsc.PCSCExceptions import EstablishContextException
-
-from time import sleep, time
-from collections import Counter
-from typing import Mapping, Iterable, Hashable
-import sys
 import ctypes
 import logging
+import sys
+from collections import Counter
+from time import sleep, time
+from typing import Hashable, Iterable, Mapping
+
+from smartcard.pcsc.PCSCExceptions import EstablishContextException
+
+from yubikit.core import PID, TRANSPORT, YUBIKEY, Connection
+from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import (
+    USB_INTERFACE,
+    DeviceInfo,
+)
+from yubikit.support import read_info
+
+from .base import YkmanDevice
+from .hid import (
+    list_ctap_devices as _list_ctap_devices,
+)
+from .hid import (
+    list_otp_devices as _list_otp_devices,
+)
+from .pcsc import list_devices as _list_ccid_devices
 
 logger = logging.getLogger(__name__)
 

@@ -1,32 +1,34 @@
-from . import __version__ as ykman_version
-from .util import get_windows_version
-from .pcsc import list_readers, list_devices as list_ccid_devices
-from .hid import list_otp_devices, list_ctap_devices
-from .piv import get_piv_info
-from .openpgp import get_openpgp_info
-from .hsmauth import get_hsmauth_info
-
-from yubikit.core import Tlv
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.core.fido import FidoConnection
-from yubikit.core.otp import OtpConnection
-from yubikit.management import ManagementSession
-from yubikit.yubiotp import YubiOtpSession
-from yubikit.piv import PivSession
-from yubikit.oath import OathSession
-from yubikit.openpgp import OpenPgpSession
-from yubikit.hsmauth import HsmAuthSession
-from yubikit.support import read_info, get_name
-from fido2.ctap import CtapError
-from fido2.ctap2 import Ctap2, ClientPin
-
+import ctypes
+import os
+import platform
+import sys
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any
-import platform
-import ctypes
-import sys
-import os
+
+from fido2.ctap import CtapError
+from fido2.ctap2 import ClientPin, Ctap2
+
+from yubikit.core import Tlv
+from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.hsmauth import HsmAuthSession
+from yubikit.management import ManagementSession
+from yubikit.oath import OathSession
+from yubikit.openpgp import OpenPgpSession
+from yubikit.piv import PivSession
+from yubikit.support import get_name, read_info
+from yubikit.yubiotp import YubiOtpSession
+
+from . import __version__ as ykman_version
+from .hid import list_ctap_devices, list_otp_devices
+from .hsmauth import get_hsmauth_info
+from .openpgp import get_openpgp_info
+from .pcsc import list_devices as list_ccid_devices
+from .pcsc import list_readers
+from .piv import get_piv_info
+from .util import get_windows_version
 
 
 def sys_info():

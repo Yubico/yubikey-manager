@@ -15,17 +15,18 @@
 # Modified work Copyright 2020 Yubico AB. All Rights Reserved.
 # This file, with modifications, is licensed under the above Apache License.
 
-from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
+import ctypes
+import logging
+import platform
+import re
+import sys
+from ctypes import LibraryLoader, wintypes
+from typing import cast
+
 from yubikit.core.otp import OtpConnection
 from yubikit.logging import LOG_LEVEL
 
-from ctypes import wintypes, LibraryLoader
-from typing import cast
-import ctypes
-import platform
-import logging
-import re
-import sys
+from .base import USAGE_OTP, YUBICO_VID, OtpYubiKeyDevice
 
 # Only typecheck this file on Windows
 assert sys.platform == "win32"  # nosec

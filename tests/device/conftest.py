@@ -1,18 +1,20 @@
+import os
+import time
+from functools import partial
+
+import pytest
+
+from ykman._cli.util import find_scp11_params
 from ykman.device import list_all_devices, read_info
 from ykman.pcsc import list_devices
-from ykman._cli.util import find_scp11_params
 from yubikit.core import TRANSPORT, _override_version
-from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.smartcard.scp import ScpKid
 from yubikit.management import RELEASE_TYPE
-from functools import partial
-from . import condition
 
-import pytest
-import time
-import os
+from . import condition
 
 
 @pytest.fixture(scope="session")

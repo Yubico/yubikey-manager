@@ -9,14 +9,13 @@ session it will be ignored.
 Usage: yubiotp_batch.py <output_file>
 """
 
+import os
+import struct
+import sys
+
 from ykman import scripting as s
 from ykman.otp import format_csv
-from yubikit.yubiotp import YubiOtpSession, YubiOtpSlotConfiguration, SLOT
-
-import os
-import sys
-import struct
-
+from yubikit.yubiotp import SLOT, YubiOtpSession, YubiOtpSlotConfiguration
 
 # csv file out output to, given as an argument
 try:

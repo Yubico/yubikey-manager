@@ -1,15 +1,21 @@
 #  vim: set fileencoding=utf-8 :
 
-from ykman import __version__ as version
-from yubikit.core import Tlv, bytes2int, InvalidPinError
-from yubikit.core.otp import modhex_encode, modhex_decode
-from yubikit.management import FORM_FACTOR
-from ykman.util import is_pkcs12, is_pem, parse_private_key, parse_certificates
-from ykman.util import _parse_pkcs12
-from ykman.otp import format_oath_code, generate_static_pw, time_challenge
-from .util import open_file
-
 import unittest
+
+from ykman import __version__ as version
+from ykman.otp import format_oath_code, generate_static_pw, time_challenge
+from ykman.util import (
+    _parse_pkcs12,
+    is_pem,
+    is_pkcs12,
+    parse_certificates,
+    parse_private_key,
+)
+from yubikit.core import InvalidPinError, Tlv, bytes2int
+from yubikit.core.otp import modhex_decode, modhex_encode
+from yubikit.management import FORM_FACTOR
+
+from .util import open_file
 
 
 def test_invalid_pin_exception_value_error():

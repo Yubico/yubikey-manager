@@ -1,41 +1,41 @@
 import datetime
-import random
-import pytest
 import os
+import random
+from typing import NamedTuple
 
+import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding, ed25519, x25519
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 
-from yubikit.core import NotSupportedError, TRANSPORT
-from yubikit.core.smartcard import AID, ApduError
-from yubikit.management import CAPABILITY, ManagementSession
-from yubikit.piv import (
-    PivSession,
-    ALGORITHM,
-    KEY_TYPE,
-    PIN_POLICY,
-    TOUCH_POLICY,
-    SLOT,
-    OBJECT_ID,
-    MANAGEMENT_KEY_TYPE,
-    InvalidPinError,
-    _do_check_key_support,
-)
 from ykman.piv import (
     check_key,
+    generate_csr,
+    generate_self_signed_certificate,
     get_pivman_data,
     get_pivman_protected_data,
-    generate_self_signed_certificate,
-    generate_csr,
     pivman_set_mgm_key,
 )
 from ykman.util import parse_certificates, parse_private_key
+from yubikit.core import TRANSPORT, NotSupportedError
+from yubikit.core.smartcard import AID, ApduError
+from yubikit.management import CAPABILITY, ManagementSession
+from yubikit.piv import (
+    ALGORITHM,
+    KEY_TYPE,
+    MANAGEMENT_KEY_TYPE,
+    OBJECT_ID,
+    PIN_POLICY,
+    SLOT,
+    TOUCH_POLICY,
+    InvalidPinError,
+    PivSession,
+    _do_check_key_support,
+)
+
 from ..util import open_file
 from . import condition
-from typing import NamedTuple
-
 
 DEFAULT_PIN = "123456"
 NON_DEFAULT_PIN = "12341235"

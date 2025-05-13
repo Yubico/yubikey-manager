@@ -25,66 +25,65 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import NotSupportedError, TRANSPORT
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import CAPABILITY
-from yubikit.piv import (
-    PivSession,
-    InvalidPinError,
-    KEY_TYPE,
-    MANAGEMENT_KEY_TYPE,
-    OBJECT_ID,
-    SLOT,
-    PIN_POLICY,
-    TOUCH_POLICY,
-    DEFAULT_MANAGEMENT_KEY,
-    Chuid,
-)
-from yubikit.core.smartcard import ApduError, SW
-
-from ..util import (
-    get_leaf_certificates,
-    parse_private_key,
-    parse_certificates,
-    InvalidPasswordError,
-)
-from ..piv import (
-    get_piv_info,
-    get_pivman_data,
-    get_pivman_protected_data,
-    pivman_set_mgm_key,
-    pivman_change_pin,
-    pivman_set_pin_attempts,
-    derive_management_key,
-    generate_random_management_key,
-    generate_chuid,
-    generate_ccc,
-    check_key,
-    generate_self_signed_certificate,
-    generate_csr,
-)
-from .util import (
-    CliFail,
-    click_group,
-    click_force_option,
-    click_format_option,
-    click_postpone_execution,
-    click_callback,
-    click_prompt,
-    prompt_timeout,
-    EnumChoice,
-    pretty_print,
-    get_scp_params,
-    log_or_echo,
-)
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.backends import default_backend
+import datetime
+import logging
 from uuid import uuid4
 
 import click
-import datetime
-import logging
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
 
+from yubikit.core import TRANSPORT, NotSupportedError
+from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
+from yubikit.management import CAPABILITY
+from yubikit.piv import (
+    DEFAULT_MANAGEMENT_KEY,
+    KEY_TYPE,
+    MANAGEMENT_KEY_TYPE,
+    OBJECT_ID,
+    PIN_POLICY,
+    SLOT,
+    TOUCH_POLICY,
+    Chuid,
+    InvalidPinError,
+    PivSession,
+)
+
+from ..piv import (
+    check_key,
+    derive_management_key,
+    generate_ccc,
+    generate_chuid,
+    generate_csr,
+    generate_random_management_key,
+    generate_self_signed_certificate,
+    get_piv_info,
+    get_pivman_data,
+    get_pivman_protected_data,
+    pivman_change_pin,
+    pivman_set_mgm_key,
+    pivman_set_pin_attempts,
+)
+from ..util import (
+    InvalidPasswordError,
+    get_leaf_certificates,
+    parse_certificates,
+    parse_private_key,
+)
+from .util import (
+    CliFail,
+    EnumChoice,
+    click_callback,
+    click_force_option,
+    click_format_option,
+    click_group,
+    click_postpone_execution,
+    click_prompt,
+    get_scp_params,
+    log_or_echo,
+    pretty_print,
+    prompt_timeout,
+)
 
 logger = logging.getLogger(__name__)
 

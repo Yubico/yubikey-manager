@@ -25,26 +25,27 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+from datetime import datetime, timezone
+
 from yubikit.core.smartcard import (
+    AID,
+    SW,
+    ApduError,
     SmartCardConnection,
     SmartCardProtocol,
-    ApduError,
-    SW,
-    AID,
 )
 from yubikit.openpgp import (
-    OpenPgpSession,
-    KEY_REF,
-    KdfNone,
-    PW,
-    INS,
     _INVALID_PIN,
+    INS,
+    KEY_REF,
+    PW,
     AlgorithmAttributes,
-    RsaAttributes,
     EcAttributes,
+    KdfNone,
+    OpenPgpSession,
+    RsaAttributes,
 )
-from datetime import datetime, timezone
-import logging
 
 logger = logging.getLogger(__name__)
 

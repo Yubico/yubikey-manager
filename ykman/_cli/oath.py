@@ -25,38 +25,40 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+from typing import Any
+
+import click
+
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import ApduError, SW, SmartCardConnection
-from yubikit.oath import (
-    OathSession,
-    CredentialData,
-    OATH_TYPE,
-    HASH_ALGORITHM,
-    parse_b32_key,
-    _format_cred_id,
-)
+from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
+from yubikit.oath import (
+    HASH_ALGORITHM,
+    OATH_TYPE,
+    CredentialData,
+    OathSession,
+    _format_cred_id,
+    parse_b32_key,
+)
+
+from ..oath import calculate_steam, delete_broken_credential, is_hidden, is_steam
+from ..settings import AppData
 from .util import (
     CliFail,
-    click_force_option,
-    click_postpone_execution,
-    click_callback,
-    click_parse_b32_key,
-    click_prompt,
-    click_group,
-    prompt_for_touch,
-    prompt_timeout,
     EnumChoice,
+    click_callback,
+    click_force_option,
+    click_group,
+    click_parse_b32_key,
+    click_postpone_execution,
+    click_prompt,
+    get_scp_params,
     is_yk4_fips,
     pretty_print,
-    get_scp_params,
+    prompt_for_touch,
+    prompt_timeout,
 )
-from ..oath import is_steam, calculate_steam, is_hidden, delete_broken_credential
-from ..settings import AppData
-
-from typing import Any
-import click
-import logging
 
 logger = logging.getLogger(__name__)
 

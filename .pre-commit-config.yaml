@@ -2,10 +2,10 @@ repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.11.9
   hooks:
-    # Run the linter.
+    # Run the linter, organize imports
     - id: ruff
       args: [ --fix ]
-    # Run the formatter.
+    # Run the formatter
     - id: ruff-format
 - repo: https://github.com/PyCQA/bandit
   rev: 1.8.3

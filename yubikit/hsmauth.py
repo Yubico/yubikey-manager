@@ -25,37 +25,35 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .core import (
-    int2bytes,
-    bytes2int,
-    require_version,
-    Version,
-    Tlv,
-    InvalidPinError,
-    _override_version,
-)
-from .core.smartcard import (
-    AID,
-    SmartCardConnection,
-    SmartCardProtocol,
-    ApduError,
-    SW,
-    ScpKeyParams,
-)
+import logging
+import struct
+from dataclasses import dataclass
+from enum import IntEnum, unique
+from functools import total_ordering
+from typing import NamedTuple, Optional, Union
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-
-from functools import total_ordering
-from enum import IntEnum, unique
-from dataclasses import dataclass
-from typing import Optional, Union, NamedTuple
-import struct
-
-import logging
+from .core import (
+    InvalidPinError,
+    Tlv,
+    Version,
+    _override_version,
+    bytes2int,
+    int2bytes,
+    require_version,
+)
+from .core.smartcard import (
+    AID,
+    SW,
+    ApduError,
+    ScpKeyParams,
+    SmartCardConnection,
+    SmartCardProtocol,
+)
 
 logger = logging.getLogger(__name__)
 

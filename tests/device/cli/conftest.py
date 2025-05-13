@@ -1,10 +1,12 @@
-from yubikit.core import TRANSPORT
+import logging
+from functools import partial
+
+import pytest
+from click.testing import CliRunner
+
 from ykman._cli.__main__ import cli
 from ykman._cli.util import CliFail
-from click.testing import CliRunner
-from functools import partial
-import pytest
-import logging
+from yubikit.core import TRANSPORT
 
 logger = logging.getLogger(__name__)
 

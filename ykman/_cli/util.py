@@ -25,25 +25,28 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from ..util import parse_certificates
-from yubikit.core import TRANSPORT, ApplicationNotAvailableError
-from yubikit.core.smartcard import SmartCardConnection, ApduError
-from yubikit.core.smartcard.scp import ScpKid, KeyRef, ScpKeyParams, Scp11KeyParams
-from yubikit.management import DeviceInfo, CAPABILITY
-from yubikit.oath import parse_b32_key
-from yubikit.securitydomain import SecurityDomainSession
+import functools
+import logging
+import sys
 from collections import OrderedDict
 from collections.abc import MutableMapping
-from cryptography.hazmat.primitives import serialization
-from cryptography import x509
 from contextlib import contextmanager
-from threading import Timer
 from enum import Enum
+from threading import Timer
 from typing import Optional, Sequence
-import functools
+
 import click
-import sys
-import logging
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+
+from yubikit.core import TRANSPORT, ApplicationNotAvailableError
+from yubikit.core.smartcard import ApduError, SmartCardConnection
+from yubikit.core.smartcard.scp import KeyRef, Scp11KeyParams, ScpKeyParams, ScpKid
+from yubikit.management import CAPABILITY, DeviceInfo
+from yubikit.oath import parse_b32_key
+from yubikit.securitydomain import SecurityDomainSession
+
+from ..util import parse_certificates
 
 logger = logging.getLogger(__name__)
 

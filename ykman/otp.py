@@ -25,16 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .scancodes import KEYBOARD_LAYOUT
-from yubikit.core.otp import modhex_encode
-from yubikit.yubiotp import YubiOtpSession
-from yubikit.oath import parse_b32_key
+import logging
+import random
+import struct
 from datetime import datetime
 from typing import Iterable, Optional
 
-import struct
-import random
-import logging
+from yubikit.core.otp import modhex_encode
+from yubikit.oath import parse_b32_key
+from yubikit.yubiotp import YubiOtpSession
+
+from .scancodes import KEYBOARD_LAYOUT
 
 logger = logging.getLogger(__name__)
 

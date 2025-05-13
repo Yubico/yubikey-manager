@@ -25,24 +25,25 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+import re
+import struct
+import sys
 from binascii import a2b_hex
-from yubikit.core.smartcard import (
-    SmartCardConnection,
-    SmartCardProtocol,
-    ApduFormat,
-    ApduError,
-    SW,
-    AID,
-)
-from .util import EnumChoice, CliFail, click_command
 from typing import Optional
 
-import re
-import sys
 import click
-import struct
-import logging
 
+from yubikit.core.smartcard import (
+    AID,
+    SW,
+    ApduError,
+    ApduFormat,
+    SmartCardConnection,
+    SmartCardProtocol,
+)
+
+from .util import CliFail, EnumChoice, click_command
 
 logger = logging.getLogger(__name__)
 

@@ -1,13 +1,16 @@
+import os
+import tempfile
+
+import pytest
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+
 from yubikit.core import NotSupportedError
 from yubikit.management import CAPABILITY
+
 from ... import condition
-import tempfile
-import os
-import pytest
 
 
 def generate_pem_eccp256_keypair():

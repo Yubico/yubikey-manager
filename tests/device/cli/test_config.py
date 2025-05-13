@@ -1,9 +1,9 @@
-from yubikit.core import TRANSPORT, YUBIKEY
-from yubikit.management import CAPABILITY
-from .. import condition
-
 import pytest
 
+from yubikit.core import TRANSPORT, YUBIKEY
+from yubikit.management import CAPABILITY
+
+from .. import condition
 
 VALID_LOCK_CODE = "a" * 32
 INVALID_LOCK_CODE_NON_HEX = "z" * 32

@@ -1,16 +1,18 @@
+import pytest
+
+from ykman.device import list_all_devices
 from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import CAPABILITY, ManagementSession
 from yubikit.yubiotp import (
-    YubiOtpSession,
     SLOT,
     HmacSha1SlotConfiguration,
     StaticPasswordSlotConfiguration,
+    YubiOtpSession,
 )
-from yubikit.management import CAPABILITY, ManagementSession
-from ykman.device import list_all_devices
+
 from . import condition
-import pytest
 
 
 @pytest.fixture(params=[OtpConnection, SmartCardConnection])

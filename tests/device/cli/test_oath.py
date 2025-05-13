@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 
-from ykman.oath import STEAM_CHAR_TABLE
-from yubikit.management import CAPABILITY
-from .. import condition
 from base64 import b32encode
+
 import pytest
 
+from ykman.oath import STEAM_CHAR_TABLE
+from yubikit.management import CAPABILITY
+
+from .. import condition
 
 URI_HOTP_EXAMPLE = (
     "otpauth://hotp/Example:demo@example.com?"

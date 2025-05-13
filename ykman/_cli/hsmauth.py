@@ -25,41 +25,40 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
+import os
+
+import click
+from cryptography.hazmat.primitives import serialization
+
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import SmartCardConnection, ApduError, SW
+from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.hsmauth import (
+    ALGORITHM,
+    CREDENTIAL_PASSWORD_LEN,
+    MANAGEMENT_KEY_LEN,
     HsmAuthSession,
     InvalidPinError,
-    ALGORITHM,
-    MANAGEMENT_KEY_LEN,
-    CREDENTIAL_PASSWORD_LEN,
 )
 from yubikit.management import CAPABILITY
 
-from ..util import parse_private_key, InvalidPasswordError
-
 from ..hsmauth import (
-    get_hsmauth_info,
     generate_random_management_key,
+    get_hsmauth_info,
 )
+from ..util import InvalidPasswordError, parse_private_key
 from .util import (
     CliFail,
-    click_force_option,
-    click_postpone_execution,
     click_callback,
+    click_force_option,
     click_format_option,
-    click_prompt,
     click_group,
-    pretty_print,
+    click_postpone_execution,
+    click_prompt,
     get_scp_params,
     log_or_echo,
+    pretty_print,
 )
-
-from cryptography.hazmat.primitives import serialization
-
-import click
-import os
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,9 @@
 from yubikit.core import TRANSPORT
-from yubikit.core.otp import OtpConnection
 from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.support import read_info
+
 from . import condition
 
 

@@ -25,16 +25,17 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core.otp import OtpConnection
-from yubikit.logging import LOG_LEVEL
-from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
+import fcntl
+import glob
+import logging
+import struct
+import sys
 from typing import Set
 
-import glob
-import fcntl
-import struct
-import logging
-import sys
+from yubikit.core.otp import OtpConnection
+from yubikit.logging import LOG_LEVEL
+
+from .base import USAGE_OTP, YUBICO_VID, OtpYubiKeyDevice
 
 # Don't typecheck this file on Windows
 assert sys.platform != "win32"  # nosec

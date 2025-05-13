@@ -1,6 +1,8 @@
-from .util import old_new_new, NON_DEFAULT_MANAGEMENT_KEY
 import re
+
 import pytest
+
+from .util import NON_DEFAULT_MANAGEMENT_KEY, old_new_new
 
 
 class TestManagementKey:

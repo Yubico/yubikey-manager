@@ -1,6 +1,8 @@
-from yubikit.management import CAPABILITY
-from .. import condition
 import pytest
+
+from yubikit.management import CAPABILITY
+
+from .. import condition
 
 DEFAULT_PIN = "123456"
 NON_DEFAULT_PIN = "12345679"

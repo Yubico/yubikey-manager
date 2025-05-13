@@ -25,21 +25,21 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import Tlv, int2bytes
-from yubikit.core.smartcard import (
-    SmartCardConnection,
-    SmartCardProtocol,
-    ApduError,
-    ApplicationNotAvailableError,
-)
-from cryptography.hazmat.primitives.serialization import pkcs12
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-from cryptography import x509
 import ctypes
-
 import logging
 
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import pkcs12
+
+from yubikit.core import Tlv, int2bytes
+from yubikit.core.smartcard import (
+    ApduError,
+    ApplicationNotAvailableError,
+    SmartCardConnection,
+    SmartCardProtocol,
+)
 
 logger = logging.getLogger(__name__)
 

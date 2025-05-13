@@ -25,31 +25,32 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .. import (
-    Version,
-    TRANSPORT,
-    USB_INTERFACE,
-    Connection,
-    NotSupportedError,
-    ApplicationNotAvailableError,
-    CommandError,
-    BadResponseError,
-)
-from .scp import (
-    ScpState,
-    ScpKeyParams,
-    Scp03KeyParams,
-    Scp11KeyParams,
-    INS_EXTERNAL_AUTHENTICATE,
-)
-from yubikit.logging import LOG_LEVEL
+import abc
+import logging
+import struct
+import warnings
 from enum import Enum, IntEnum, unique
 from time import time
-import abc
-import struct
-import logging
-import warnings
 
+from yubikit.logging import LOG_LEVEL
+
+from .. import (
+    TRANSPORT,
+    USB_INTERFACE,
+    ApplicationNotAvailableError,
+    BadResponseError,
+    CommandError,
+    Connection,
+    NotSupportedError,
+    Version,
+)
+from .scp import (
+    INS_EXTERNAL_AUTHENTICATE,
+    Scp03KeyParams,
+    Scp11KeyParams,
+    ScpKeyParams,
+    ScpState,
+)
 
 logger = logging.getLogger(__name__)
 

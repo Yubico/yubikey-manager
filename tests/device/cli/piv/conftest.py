@@ -1,8 +1,11 @@
-from yubikit.management import CAPABILITY
-from ... import condition
-from .util import DEFAULT_PIN, DEFAULT_PUK, DEFAULT_MANAGEMENT_KEY
 from typing import NamedTuple
+
 import pytest
+
+from yubikit.management import CAPABILITY
+
+from ... import condition
+from .util import DEFAULT_MANAGEMENT_KEY, DEFAULT_PIN, DEFAULT_PUK
 
 
 @pytest.fixture(autouse=True)

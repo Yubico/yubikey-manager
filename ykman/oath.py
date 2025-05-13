@@ -25,14 +25,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core.smartcard import ApduError, SW
-from yubikit.oath import OathSession, Credential, OATH_TYPE
+import logging
+import struct
 from time import time
 from typing import Optional
 
-import struct
-import logging
-
+from yubikit.core.smartcard import SW, ApduError
+from yubikit.oath import OATH_TYPE, Credential, OathSession
 
 logger = logging.getLogger(__name__)
 

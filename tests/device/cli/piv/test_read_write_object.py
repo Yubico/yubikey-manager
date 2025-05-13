@@ -1,10 +1,12 @@
 import os
 
+import pytest
 from cryptography.hazmat.primitives import serialization
-from ....util import generate_self_signed_certificate
+
 from yubikit.core import Tlv
 from yubikit.piv import OBJECT_ID, SLOT
-import pytest
+
+from ....util import generate_self_signed_certificate
 
 
 class TestReadWriteObject:

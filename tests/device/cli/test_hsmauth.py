@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
+import os
+import re
+import struct
+import tempfile
+
+import pytest
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from yubikit.core import TRANSPORT
-from yubikit.management import CAPABILITY
+from yubikit.core import TRANSPORT, Tlv
 from yubikit.hsmauth import (
-    TAG_LABEL,
+    INS_CALCULATE,
     TAG_CONTEXT,
     TAG_CREDENTIAL_PASSWORD,
-    INS_CALCULATE,
-    _parse_label,
+    TAG_LABEL,
     _parse_credential_password,
+    _parse_label,
 )
-from yubikit.core import Tlv
-from .. import condition
+from yubikit.management import CAPABILITY
 
-import pytest
-import re
-import os
-import tempfile
-import struct
+from .. import condition
 
 DEFAULT_MANAGEMENT_KEY = "00000000000000000000000000000000"
 NON_DEFAULT_MANAGEMENT_KEY = "11111111111111111111111111111112"

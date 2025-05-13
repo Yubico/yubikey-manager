@@ -1,29 +1,28 @@
-from .core import (
-    int2bytes,
-    bytes2int,
-    require_version,
-    Version,
-    Tlv,
-    BadResponseError,
-    NotSupportedError,
-    _override_version,
-)
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
-
-from urllib.parse import unquote, urlparse, parse_qs
-from functools import total_ordering
-from enum import IntEnum, unique
-from dataclasses import dataclass
-from base64 import b64encode, b32decode
-from time import time
-from typing import Optional, Mapping
-
-import hmac
 import hashlib
-import struct
+import hmac
+import logging
 import os
 import re
-import logging
+import struct
+from base64 import b32decode, b64encode
+from dataclasses import dataclass
+from enum import IntEnum, unique
+from functools import total_ordering
+from time import time
+from typing import Mapping, Optional
+from urllib.parse import parse_qs, unquote, urlparse
+
+from .core import (
+    BadResponseError,
+    NotSupportedError,
+    Tlv,
+    Version,
+    _override_version,
+    bytes2int,
+    int2bytes,
+    require_version,
+)
+from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
 
 logger = logging.getLogger(__name__)
 

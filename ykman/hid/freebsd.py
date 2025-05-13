@@ -53,19 +53,19 @@
 #     EOF
 #     reboot
 #
-from yubikit.core.otp import OtpConnection
-from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
-
-from ctypes.util import find_library
 import ctypes
-
-import glob
 import fcntl
+import glob
+import logging
 import os
 import re
-import sys
 import struct
-import logging
+import sys
+from ctypes.util import find_library
+
+from yubikit.core.otp import OtpConnection
+
+from .base import USAGE_OTP, YUBICO_VID, OtpYubiKeyDevice
 
 # Don't typecheck this file on Windows
 assert sys.platform != "win32"  # nosec

@@ -15,13 +15,14 @@
 # Modified work Copyright 2020 Yubico AB. All Rights Reserved.
 # This file, with modifications, is licensed under the above Apache License.
 
-from .base import OtpYubiKeyDevice, YUBICO_VID, USAGE_OTP
-from yubikit.core.otp import OtpConnection
-from yubikit.logging import LOG_LEVEL
-
 import ctypes
 import ctypes.util
 import logging
+
+from yubikit.core.otp import OtpConnection
+from yubikit.logging import LOG_LEVEL
+
+from .base import USAGE_OTP, YUBICO_VID, OtpYubiKeyDevice
 
 logger = logging.getLogger(__name__)
 

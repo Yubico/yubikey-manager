@@ -25,23 +25,23 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.core import TRANSPORT
-from yubikit.core.otp import OtpConnection
-from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import CAPABILITY, USB_INTERFACE
-from yubikit.yubiotp import YubiOtpSession
-from yubikit.oath import OathSession
-from yubikit.support import get_name
-
-from .util import CliFail, is_yk4_fips, click_command, pretty_print
-from ..otp import is_in_fips_mode as otp_in_fips_mode
-from ..oath import is_in_fips_mode as oath_in_fips_mode
-from ..fido import is_in_fips_mode as ctap_in_fips_mode
-
-import click
 import logging
 
+import click
+
+from yubikit.core import TRANSPORT
+from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import CAPABILITY, USB_INTERFACE
+from yubikit.oath import OathSession
+from yubikit.support import get_name
+from yubikit.yubiotp import YubiOtpSession
+
+from ..fido import is_in_fips_mode as ctap_in_fips_mode
+from ..oath import is_in_fips_mode as oath_in_fips_mode
+from ..otp import is_in_fips_mode as otp_in_fips_mode
+from .util import CliFail, click_command, is_yk4_fips, pretty_print
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,6 @@
-from .. import condition
 import pytest
+
+from .. import condition
 
 
 class TestYkmanInfo:

@@ -1,5 +1,6 @@
-from yubikit.piv import OBJECT_ID
 import pytest
+
+from yubikit.piv import OBJECT_ID
 
 
 class TestMisc:

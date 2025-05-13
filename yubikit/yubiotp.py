@@ -25,33 +25,33 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .core import (
-    TRANSPORT,
-    Version,
-    bytes2int,
-    require_version,
-    NotSupportedError,
-    BadResponseError,
-    _override_version,
-)
-from .core import ApplicationNotAvailableError
-from .core.otp import (
-    check_crc,
-    calculate_crc,
-    OtpConnection,
-    OtpProtocol,
-    CommandRejectedError,
-)
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
-
 import abc
+import logging
 import struct
 import warnings
+from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
-from enum import unique, IntEnum, IntFlag
-from typing import TypeVar, Optional, Union, Callable
-import logging
+from typing import Callable, Optional, TypeVar, Union
+
+from .core import (
+    TRANSPORT,
+    ApplicationNotAvailableError,
+    BadResponseError,
+    NotSupportedError,
+    Version,
+    _override_version,
+    bytes2int,
+    require_version,
+)
+from .core.otp import (
+    CommandRejectedError,
+    OtpConnection,
+    OtpProtocol,
+    calculate_crc,
+    check_crc,
+)
+from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
 
 logger = logging.getLogger(__name__)
 

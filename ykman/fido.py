@@ -25,14 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import time
 import struct
-from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SW
-from fido2.ctap1 import Ctap1, ApduError
-
+import time
 from typing import Optional
 
+from fido2.ctap1 import ApduError, Ctap1
+
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SW
 
 U2F_VENDOR_FIRST = 0x40
 

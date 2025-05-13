@@ -25,36 +25,37 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import abc
+import logging
+import struct
+import warnings
+from dataclasses import dataclass, field
+from enum import IntEnum, IntFlag, unique
+from typing import Mapping, Optional, Union
+
+from fido2.hid import CAPABILITY as CTAP_CAPABILITY
+
 from .core import (
+    TRANSPORT,
+    USB_INTERFACE,
+    ApplicationNotAvailableError,
+    BadResponseError,
+    NotSupportedError,
+    Tlv,
+    Version,
     bytes2int,
     int2bytes,
     require_version,
-    Version,
-    Tlv,
-    TRANSPORT,
-    USB_INTERFACE,
-    NotSupportedError,
-    BadResponseError,
-    ApplicationNotAvailableError,
-)
-from .core.otp import (
-    check_crc,
-    OtpConnection,
-    OtpProtocol,
-    STATUS_OFFSET_PROG_SEQ,
-    CommandRejectedError,
 )
 from .core.fido import FidoConnection
-from .core.smartcard import AID, SmartCardConnection, SmartCardProtocol, ScpKeyParams
-from fido2.hid import CAPABILITY as CTAP_CAPABILITY
-
-from enum import IntEnum, IntFlag, unique
-from dataclasses import dataclass, field
-from typing import Optional, Union, Mapping
-import abc
-import struct
-import warnings
-import logging
+from .core.otp import (
+    STATUS_OFFSET_PROG_SEQ,
+    CommandRejectedError,
+    OtpConnection,
+    OtpProtocol,
+    check_crc,
+)
+from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
 
 logger = logging.getLogger(__name__)
 

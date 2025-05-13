@@ -25,9 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from yubikit.logging import LOG_LEVEL
 import logging
 
+from yubikit.logging import LOG_LEVEL
 
 logging.addLevelName(LOG_LEVEL.TRAFFIC, LOG_LEVEL.TRAFFIC.name)
 logger = logging.getLogger(__name__)

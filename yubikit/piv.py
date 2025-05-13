@@ -25,52 +25,50 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .core import (
-    require_version,
-    int2bytes,
-    bytes2int,
-    Version,
-    Tlv,
-    NotSupportedError,
-    BadResponseError,
-    InvalidPinError,
-    _override_version,
-)
-from .core.smartcard import (
-    SW,
-    AID,
-    ApduError,
-    SmartCardConnection,
-    SmartCardProtocol,
-    ScpKeyParams,
-)
+import gzip
+import logging
+import os
+import re
+import warnings
+from dataclasses import astuple, dataclass
+from datetime import date
+from enum import Enum, IntEnum, unique
+from typing import Optional, Union, cast, overload
 
 from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, x25519
+from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.constant_time import bytes_eq
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
-    PublicFormat,
-    PrivateFormat,
     NoEncryption,
+    PrivateFormat,
+    PublicFormat,
 )
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, ed25519, x25519
-from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
-from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
-from cryptography.hazmat.backends import default_backend
 
-from datetime import date
-from dataclasses import dataclass, astuple
-from enum import Enum, IntEnum, unique
-from typing import Optional, Union, cast, overload
-
-import warnings
-import logging
-import gzip
-import os
-import re
-
+from .core import (
+    BadResponseError,
+    InvalidPinError,
+    NotSupportedError,
+    Tlv,
+    Version,
+    _override_version,
+    bytes2int,
+    int2bytes,
+    require_version,
+)
+from .core.smartcard import (
+    AID,
+    SW,
+    ApduError,
+    ScpKeyParams,
+    SmartCardConnection,
+    SmartCardProtocol,
+)
 
 logger = logging.getLogger(__name__)
 

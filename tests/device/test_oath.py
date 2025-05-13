@@ -1,16 +1,16 @@
 import pytest
 
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import ApduError, AID, SW
+from yubikit.core.smartcard import AID, SW, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.oath import (
-    OathSession,
-    CredentialData,
     HASH_ALGORITHM,
     OATH_TYPE,
+    CredentialData,
+    OathSession,
 )
-from . import condition
 
+from . import condition
 
 KEY = bytes.fromhex("01020304050607080102030405060708")
 

@@ -25,23 +25,21 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-
 from __future__ import annotations
 
-from enum import Enum, IntEnum, IntFlag, unique
-from typing import (
-    TypeVar,
-    Union,
-    Optional,
-    Hashable,
-    NamedTuple,
-    Callable,
-    ClassVar,
-)
-import re
 import abc
 import logging
-
+import re
+from enum import Enum, IntEnum, IntFlag, unique
+from typing import (
+    Callable,
+    ClassVar,
+    Hashable,
+    NamedTuple,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 logger = logging.getLogger(__name__)
 

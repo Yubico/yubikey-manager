@@ -8,7 +8,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-
 logger = logging.getLogger(__name__)
 
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -1,7 +1,7 @@
-from inspect import signature, Parameter, isgeneratorfunction
-from makefun import wraps
+from inspect import Parameter, isgeneratorfunction, signature
 
 import pytest
+from makefun import wraps
 
 
 def check(check, message="Condition not satisfied"):

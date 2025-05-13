@@ -26,21 +26,21 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .base import YkmanDevice
-from .device import list_all_devices, scan_devices
-from .pcsc import list_devices as list_ccid
-
-from yubikit.core import TRANSPORT
-from yubikit.core.otp import OtpConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.core.fido import FidoConnection
-from yubikit.management import DeviceInfo
-from yubikit.support import get_name, read_info
-from smartcard.Exceptions import NoCardException, CardConnectionException
-
 from time import sleep
 from typing import Generator, Optional
 
+from smartcard.Exceptions import CardConnectionException, NoCardException
+
+from yubikit.core import TRANSPORT
+from yubikit.core.fido import FidoConnection
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import DeviceInfo
+from yubikit.support import get_name, read_info
+
+from .base import YkmanDevice
+from .device import list_all_devices, scan_devices
+from .pcsc import list_devices as list_ccid
 
 """
 Various helpers intended to simplify scripting.

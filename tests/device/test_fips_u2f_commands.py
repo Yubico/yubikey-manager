@@ -1,11 +1,12 @@
-from fido2.ctap1 import ApduError
-from yubikit.core import TRANSPORT
-from yubikit.management import CAPABILITY
-from yubikit.core.smartcard import SW
-from ykman.fido import fips_change_pin, fips_verify_pin, fips_reset, is_in_fips_mode
-from . import condition
-
 import pytest
+from fido2.ctap1 import ApduError
+
+from ykman.fido import fips_change_pin, fips_reset, fips_verify_pin, is_in_fips_mode
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import SW
+from yubikit.management import CAPABILITY
+
+from . import condition
 
 
 @pytest.fixture(autouse=True)

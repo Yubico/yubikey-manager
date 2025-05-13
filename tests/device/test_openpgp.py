@@ -1,23 +1,24 @@
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import ec, rsa, ed25519, x25519, padding
-from cryptography.hazmat.primitives import hashes
-from yubikit.openpgp import (
-    OpenPgpSession,
-    KEY_REF,
-    RSA_SIZE,
-    OID,
-    KdfIterSaltedS2k,
-    KdfNone,
-)
-from yubikit.management import CAPABILITY
-from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import ApduError, AID
-from . import condition
+import time
 from typing import NamedTuple
 
 import pytest
-import time
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 
+from yubikit.core import TRANSPORT
+from yubikit.core.smartcard import AID, ApduError
+from yubikit.management import CAPABILITY
+from yubikit.openpgp import (
+    KEY_REF,
+    OID,
+    RSA_SIZE,
+    KdfIterSaltedS2k,
+    KdfNone,
+    OpenPgpSession,
+)
+
+from . import condition
 
 E = 65537
 DEFAULT_PIN = "123456"
