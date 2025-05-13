@@ -25,6 +25,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+
+from __future__ import annotations
+
 from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
     TypeVar,
@@ -60,11 +63,11 @@ class Version(NamedTuple):
         return any(self)
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "Version":
+    def from_bytes(cls, data: bytes) -> Version:
         return cls(*data)
 
     @classmethod
-    def from_string(cls, data: str) -> "Version":
+    def from_string(cls, data: str) -> Version:
         m = _VERSION_STRING_PATTERN.search(data)
         if m:
             return cls(
@@ -304,9 +307,6 @@ def _tlv_parse(data, offset=0):
         raise ValueError("Invalid encoding of tag/length")
 
 
-T_Tlv = TypeVar("T_Tlv", bound="Tlv")
-
-
 class Tlv(bytes):
     @property
     def tag(self) -> int:
@@ -343,8 +343,7 @@ class Tlv(bytes):
                 raise ValueError("value can only be provided if tag_or_data is a tag")
             data = tag_or_data
 
-        # mypy thinks this is wrong
-        return super(Tlv, cls).__new__(cls, data)  # type: ignore
+        return super(Tlv, cls).__new__(cls, data)
 
     def __init__(self, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
         self._tag, self._value_offset, self._value_ln, end = _tlv_parse(self)
@@ -355,12 +354,12 @@ class Tlv(bytes):
         return f"Tlv(tag=0x{self.tag:02x}, value={self.value.hex()})"
 
     @classmethod
-    def parse_from(cls: type[T_Tlv], data: bytes) -> tuple[T_Tlv, bytes]:
+    def parse_from(cls: type[Tlv], data: bytes) -> tuple[Tlv, bytes]:
         tag, offs, ln, end = _tlv_parse(data)
         return cls(data[:end]), data[end:]
 
     @classmethod
-    def parse_list(cls: type[T_Tlv], data: bytes) -> list[T_Tlv]:
+    def parse_list(cls: type[Tlv], data: bytes) -> list[Tlv]:
         res = []
         while data:
             tlv, data = cls.parse_from(data)
@@ -368,11 +367,11 @@ class Tlv(bytes):
         return res
 
     @classmethod
-    def parse_dict(cls: type[T_Tlv], data: bytes) -> dict[int, bytes]:
+    def parse_dict(cls: type[Tlv], data: bytes) -> dict[int, bytes]:
         return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
 
     @classmethod
-    def unpack(cls: type[T_Tlv], tag: int, data: bytes) -> bytes:
+    def unpack(cls: type[Tlv], tag: int, data: bytes) -> bytes:
         tlv = cls(data)
         if tlv.tag != tag:
             raise ValueError(f"Wrong tag, got 0x{tlv.tag:02x} expected 0x{tag:02x}")
