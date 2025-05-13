@@ -176,17 +176,17 @@ class TestOATH:
         cred = accounts_cli("code", "steam-cred").output.strip()
         code = cred.split()[-1]
         assert 5 == len(code), f"cred wrong length: {code!r}"
-        assert all(
-            c in STEAM_CHAR_TABLE for c in code
-        ), f"{code!r} contains non-steam characters"
+        assert all(c in STEAM_CHAR_TABLE for c in code), (
+            f"{code!r} contains non-steam characters"
+        )
 
     def test_oath_totp_steam_code_single(self, accounts_cli):
         accounts_cli("add", "Steam:steam-cred", "abba")
         code = accounts_cli("code", "-s", "steam-cred").output.strip()
         assert 5 == len(code), f"cred wrong length: {code!r}"
-        assert all(
-            c in STEAM_CHAR_TABLE for c in code
-        ), f"{code!r} contains non-steam characters"
+        assert all(c in STEAM_CHAR_TABLE for c in code), (
+            f"{code!r} contains non-steam characters"
+        )
 
     def test_oath_code_output_no_touch(self, accounts_cli):
         accounts_cli("add", "TOTP:normal", "aaaa")
@@ -199,9 +199,9 @@ class TestOATH:
 
         code = entries["Steam:normal"].split()[-1]
         assert 5 == len(code), f"cred wrong length: {code!r}"
-        assert all(
-            c in STEAM_CHAR_TABLE for c in code
-        ), f"{code!r} contains non-steam characters"
+        assert all(c in STEAM_CHAR_TABLE for c in code), (
+            f"{code!r} contains non-steam characters"
+        )
 
         code = entries["TOTP:normal"].split()[-1]
         assert 6 == len(code)
@@ -223,9 +223,9 @@ class TestOATH:
 
         code = entries["Steam:normal"].split()[-1]
         assert 5 == len(code), f"cred wrong length: {code!r}"
-        assert all(
-            c in STEAM_CHAR_TABLE for c in code
-        ), f"{code!r} contains non-steam characters"
+        assert all(c in STEAM_CHAR_TABLE for c in code), (
+            f"{code!r} contains non-steam characters"
+        )
 
         code = entries["TOTP:normal"].split()[-1]
         assert 6 == len(code)

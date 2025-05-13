@@ -300,8 +300,7 @@ def _fail_pin_error(ctx, e, other="%s"):
         raise CliFail("Wrong PIN.")
     elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
         raise CliFail(
-            "PIN authentication is currently blocked. "
-            "Remove and re-insert the YubiKey."
+            "PIN authentication is currently blocked. Remove and re-insert the YubiKey."
         )
     elif e.code == CtapError.ERR.PIN_BLOCKED:
         raise CliFail("PIN is blocked.")

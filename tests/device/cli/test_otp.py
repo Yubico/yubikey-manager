@@ -185,10 +185,7 @@ class TestSlotProgramming:
             "otp",
             "yubiotp",
             "2",
-            input="vvccccfiluij\n"
-            "267e0a88949b\n"
-            "b8e31ab90bb8830e3c1fe1b483a8e0d4\n"
-            "y\n",
+            input="vvccccfiluij\n267e0a88949b\nb8e31ab90bb8830e3c1fe1b483a8e0d4\ny\n",
         )
         self._check_slot_2_programmed(ykman_cli)
 
@@ -293,9 +290,7 @@ class TestSlotProgramming:
             )
         self._check_slot_2_not_programmed(ykman_cli)
 
-    def test_ykman_program_otp_slot_2_generate_id_conflicts_private_id(
-        self, ykman_cli
-    ):  # noqa: E501
+    def test_ykman_program_otp_slot_2_generate_id_conflicts_private_id(self, ykman_cli):  # noqa: E501
         with pytest.raises(SystemExit):
             ykman_cli(
                 "otp",

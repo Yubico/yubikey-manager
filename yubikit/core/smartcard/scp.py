@@ -80,7 +80,9 @@ def _calculate_mac(key: bytes, chain: bytes, message: bytes) -> tuple[bytes, byt
 
 def _init_cipher(key: bytes, counter: int, response=False) -> Cipher:
     encryptor = Cipher(
-        algorithms.AES(key), modes.ECB(), backend=default_backend()  # nosec ECB
+        algorithms.AES(key),
+        modes.ECB(),  # nosec ECB
+        backend=default_backend(),
     ).encryptor()
     iv_data = (b"\x80" if response else b"\x00") + int.to_bytes(counter, 15, "big")
     iv = encryptor.update(iv_data) + encryptor.finalize()
@@ -253,8 +255,8 @@ class ScpState:
             0x80, INS_INITIALIZE_UPDATE, key_params.ref.kvn, 0x00, host_challenge
         )
 
-        diversification_data = resp[:10]  # noqa: unused
-        key_info = resp[10:13]  # noqa: unused
+        diversification_data = resp[:10]  # noqa: F841
+        key_info = resp[10:13]  # noqa: F841
         card_challenge = resp[13:21]
         card_cryptogram = resp[21:29]
 

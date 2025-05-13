@@ -322,7 +322,9 @@ class DeviceInfo:
         return (
             str(self.version_qualifier)
             if self.version_qualifier.type != RELEASE_TYPE.FINAL
-            else str(self.version) if self.version else "unknown"
+            else str(self.version)
+            if self.version
+            else "unknown"
         )
 
     @classmethod

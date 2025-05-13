@@ -52,7 +52,7 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(
             "hknhfjbrjnlnldnhcujvddbikngjrtgh",
             modhex_encode(
-                b"\x69\xb6\x48\x1c\x8b\xab\xa2\xb6" b"\x0e\x8f\x22\x17\x9b\x58\xcd\x56"
+                b"\x69\xb6\x48\x1c\x8b\xab\xa2\xb6\x0e\x8f\x22\x17\x9b\x58\xcd\x56"
             ),
         )
 

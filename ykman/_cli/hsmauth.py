@@ -683,8 +683,7 @@ def access():
     "-g",
     "--generate",
     is_flag=True,
-    help="generate a random management key "
-    "(can't be used with --new-management-key)",
+    help="generate a random management key (can't be used with --new-management-key)",
 )
 def change_management_key(ctx, management_key, new_management_key, generate):
     """
