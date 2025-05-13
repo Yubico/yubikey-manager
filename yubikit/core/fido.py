@@ -37,7 +37,7 @@ from yubikit.core.smartcard import (
 from yubikit.core.smartcard.scp import ScpKeyParams
 
 from threading import Event
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Optional
 
 import struct
 import logging
@@ -56,7 +56,7 @@ class SmartCardCtapDevice(CtapDevice):
     def __init__(
         self,
         connection: SmartCardConnection,
-        scp_key_params: ScpKeyParams | None = None,
+        scp_key_params: Optional[ScpKeyParams] = None,
     ):
         self._capabilities = CAPABILITY(0)
 
@@ -88,8 +88,8 @@ class SmartCardCtapDevice(CtapDevice):
         self,
         cmd: int,
         data: bytes = b"",
-        event: Event | None = None,
-        on_keepalive: Callable[[STATUS], None] | None = None,
+        event: Optional[Event] = None,
+        on_keepalive: Optional[Callable[[STATUS], None]] = None,
     ) -> bytes:
         if cmd == CTAPHID.MSG:
             cla, ins, p1, p2 = data[:4]

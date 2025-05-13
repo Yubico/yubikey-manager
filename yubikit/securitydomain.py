@@ -67,7 +67,7 @@ class Curve(IntEnum):
 
     @classmethod
     def _from_key(
-        cls, key: ec.EllipticCurvePrivateKey | ec.EllipticCurvePublicKey
+        cls, key: Union[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]
     ) -> "Curve":
         name = key.curve.name.lower()
         for curve in cls:
