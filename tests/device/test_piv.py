@@ -677,7 +677,7 @@ class TestUnblockPin:
 
         session.authenticate(keys.mgmt)
         # Fails with only management key (requirement added in 0.1.3)
-        if version >= (0, 1, 3):
+        if session.version >= (0, 1, 3):
             with pytest.raises(ApduError):
                 session.set_pin_attempts(4, 4)
 

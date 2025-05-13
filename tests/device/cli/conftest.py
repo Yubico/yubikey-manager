@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture()
 def ykman_cli(capsys, device, info):
     def _ykman_cli(*argv, **kwargs):
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         with capsys.disabled():
             logger.debug("CLI: ykman %r", argv)
             result = runner.invoke(cli, argv, obj={}, **kwargs)
