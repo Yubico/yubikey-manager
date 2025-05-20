@@ -1,3 +1,11 @@
+* Version 5.7.0 (unreleased)
+ ** Python 3.9 or later is now required.
+ ** PIV: Improve error handling for the Printed data slot.
+ ** PIV: Improve error handling when decompressing malformed certificates.
+ ** Fix incompatibility with pyscard 2.2.2.
+ ** Building the project now requires Poetry version 2.0 or later.
+ ** Windows and MacOS installers built with Python 3.13.3
+
 * Version 5.6.1 (released 2025-03-18)
  ** Fix: Version 5.6.0 uses Exclusive smart card connections, which caused connections
     to fail if another application was accessing the YubiKey. This version adds a
