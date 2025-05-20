@@ -1,53 +1,53 @@
 * Version 5.6.1 (released 2025-03-18)
- * Fix: Version 5.6.0 uses Exclusive smart card connections, which caused connections
-   to fail if another application was accessing the YubiKey. This version adds a
-   fallback to use non-exclusive connections in case of such a failure.
- * Bugfix: APDU encoding was slightly incorrect for commands which specify Le, but no
-   data body. This caused issued on some platforms.
- * CLI: The "fido info" command now shows the YubiKey AAGUID, when available.
+ ** Fix: Version 5.6.0 uses Exclusive smart card connections, which caused connections
+    to fail if another application was accessing the YubiKey. This version adds a
+    fallback to use non-exclusive connections in case of such a failure.
+ ** Bugfix: APDU encoding was slightly incorrect for commands which specify Le, but no
+    data body. This caused issued on some platforms.
+ ** CLI: The "fido info" command now shows the YubiKey AAGUID, when available.
 
 * Version 5.6.0 (released 2025-03-12)
- * SCP: Add support for specifying Le (needed in OpenPGP get_challenge).
- * PIV: When writing a new CHUID, prefer to keep data from the old one if possible.
- * CLI: Specifying public-key is now optional when generating a PIV certificate,
-   if a public key can be read from the YubiKey itself.
- * CLI: (YK FIPS) Disallow --protect for PIV when not in FIPS approved state.
- * CLI: Support specifying Le in "apdu" command.
- * CLI: Show OpenPGP key information in "openpgp info" and "openpgp keys info" commands.
- * CLI: Detect OpenPGP memory corruption, and correctly factory reset OpenPGP if needed.
- * CLI: Don't fail on corrupted configuration files, instead show a warning.
- * Require Poetry >= 2.0 for building and packaging of the library.
- * Bugfix: CLI - Don't use extended APDUs in the "apdu" command on old YubiKeys which
-   do not support it.
+ ** SCP: Add support for specifying Le (needed in OpenPGP get_challenge).
+ ** PIV: When writing a new CHUID, prefer to keep data from the old one if possible.
+ ** CLI: Specifying public-key is now optional when generating a PIV certificate,
+    if a public key can be read from the YubiKey itself.
+ ** CLI: (YK FIPS) Disallow --protect for PIV when not in FIPS approved state.
+ ** CLI: Support specifying Le in "apdu" command.
+ ** CLI: Show OpenPGP key information in "openpgp info" and "openpgp keys info" commands.
+ ** CLI: Detect OpenPGP memory corruption, and correctly factory reset OpenPGP if needed.
+ ** CLI: Don't fail on corrupted configuration files, instead show a warning.
+ ** Require Poetry >= 2.0 for building and packaging of the library.
+ ** Bugfix: CLI - Don't use extended APDUs in the "apdu" command on old YubiKeys which
+    do not support it.
 
 * Version 5.5.1 (released 2024-07-01)
- * Bugfix: CLI - Don't use formatting that doesn't work on older Python versions.
-   Note: As the 5.5.0 installers bundle Python 3.12, this will be a source-only release.
+ ** Bugfix: CLI - Don't use formatting that doesn't work on older Python versions.
+    Note: As the 5.5.0 installers bundle Python 3.12, this will be a source-only release.
 
 * Version 5.5.0 (released 2024-06-26)
- * Add Secure Channel support to smartcard sessions.
- * Support extended APDUs in the "apdu" command (this is now the default).
- * HSMAuth: Treat management key as a PIN/password instead of a key, adding new CLI
-   commands.
- * PIV: Deprecate explicit passing of management key type when authenticating.
- * CLI: Add "config nfc --restrict" command to set "NFC restricted mode".
- * CLI: Display more information about PIN complexity and FIPS status for compatible
-   YubiKeys.
- * CLI: Improved error messages for illegal values of PIV PIN and PUK.
- * CLI: Drop error messages for old 3.x commands.
- * CLI: Removal of --upload for YubiCloud credentials. Export to CSV and upload via web
-   instead.
- * CLI: Add more detailed information to the CLI output for several commands.
+ ** Add Secure Channel support to smartcard sessions.
+ ** Support extended APDUs in the "apdu" command (this is now the default).
+ ** HSMAuth: Treat management key as a PIN/password instead of a key, adding new CLI
+    commands.
+ ** PIV: Deprecate explicit passing of management key type when authenticating.
+ ** CLI: Add "config nfc --restrict" command to set "NFC restricted mode".
+ ** CLI: Display more information about PIN complexity and FIPS status for compatible
+    YubiKeys.
+ ** CLI: Improved error messages for illegal values of PIV PIN and PUK.
+ ** CLI: Drop error messages for old 3.x commands.
+ ** CLI: Removal of --upload for YubiCloud credentials. Export to CSV and upload via web
+    instead.
+ ** CLI: Add more detailed information to the CLI output for several commands.
 
 * Version 5.4.0 (released 2024-03-27)
- * Support for YubiKey Bio Multi-protocol Edition.
- * CLI: Improve error messages for several failures.
- * Attempt to send SIGHUP to yubikey-agent if it is blocking the connection.
- * Bugfix: Allow "fido config" to work when no PIN is set on the YubiKey.
- * Bugfix: MacOS - Fix race condition resulting in unneeded delay in fido commands over
-   USB.
- * Bugfix: Linux - Fix error when listing OTP devices when no YubiKeys are attached.
- * Bugfix: OpenPGP - Fix RSA key generation on YubiKey NEO.
+ ** Support for YubiKey Bio Multi-protocol Edition.
+ ** CLI: Improve error messages for several failures.
+ ** Attempt to send SIGHUP to yubikey-agent if it is blocking the connection.
+ ** Bugfix: Allow "fido config" to work when no PIN is set on the YubiKey.
+ ** Bugfix: MacOS - Fix race condition resulting in unneeded delay in fido commands over
+    USB.
+ ** Bugfix: Linux - Fix error when listing OTP devices when no YubiKeys are attached.
+ ** Bugfix: OpenPGP - Fix RSA key generation on YubiKey NEO.
 
 * Version 5.3.0 (released 2024-01-31)
  ** FIDO: Add new CLI commands for PIN management and authenticator config
@@ -108,7 +108,7 @@
 
 * Version 4.0.9 (released 2022-06-17)
  ** Dependency: Add support for python-fido2 1.x
-  ** Fix: Drop stated support for Click 6 as features from 7 are being used.
+ ** Fix: Drop stated support for Click 6 as features from 7 are being used.
 
 * Version 4.0.8 (released 2022-01-31)
  ** Bugfix: Fix error message for invalid modhex when programing a YubiOTP credential.
