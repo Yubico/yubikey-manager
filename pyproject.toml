@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
   "cryptography (>=3.0, <47)",
   "pyscard (>=2.0, <3)",
-  "fido2 (>=1.0, <=2.0.0b1)",
+  "fido2 (>=1.0, <3)",
   "click (>=8.0, <9)",
   "keyring (>=23.4, <26)",
   "pywin32 (>=223) ; sys_platform == 'win32'",
@@ -52,7 +52,6 @@ sphinx = "^7.4"
 sphinx-rtd-theme = "^3"
 sphinx-autoapi = "^3.3.3"
 pyright = "^1.1"
-fido2 = {version = "2.0.0b1", python = ">=3.10"}
 
 [build-system]
 requires = ["poetry-core>=2.0"]
