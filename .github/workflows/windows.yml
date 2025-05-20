@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   build:
 
-    runs-on: windows-latest
+    runs-on: windows-11-arm
 
     steps:
       - uses: actions/checkout@v4
