@@ -280,11 +280,22 @@ class ScpProcessor(ChainedResponseProcessor):
         scp_state: ScpState,
         max_apdu_size: int,
         ins_send_remaining: int = INS_SEND_REMAINING,
+        extended_apdus: bool = True,
     ):
         super().__init__(
-            connection, True, max_apdu_size, ins_send_remaining=ins_send_remaining
+            connection,
+            extended_apdus,
+            max_apdu_size,
+            ins_send_remaining=ins_send_remaining,
         )
         self._state = scp_state
+        self.is_short = not extended_apdus
+        # For short APDUs, we need to use the extended processor for MAC calculation
+        self.extended_processor = (
+            ExtendedApduProcessor(connection, max_apdu_size)
+            if self.is_short
+            else self.processor
+        )
 
     def send_apdu(self, cla, ins, p1, p2, data, le, encrypt: bool = True):
         cla |= 0x04
@@ -294,7 +305,13 @@ class ScpProcessor(ChainedResponseProcessor):
             data = self._state.encrypt(data)
 
         # Calculate and add MAC to data
-        apdu = self.processor.format_apdu(cla, ins, p1, p2, data + b"\0" * 8, 0)
+        if self.is_short and len(data) + 8 > SHORT_APDU_MAX_CHUNK:
+            # Will chain command, but MAC should be calculated on whole data
+            apdu = self.extended_processor.format_apdu(
+                cla, ins, p1, p2, data + b"\0" * 8, 0
+            )
+        else:
+            apdu = self.processor.format_apdu(cla, ins, p1, p2, data + b"\0" * 8, 0)
         mac = self._state.mac(apdu[:-8])
         data = data + mac
 
@@ -387,7 +404,8 @@ class SmartCardProtocol:
             return
 
         if version[0] > 3:
-            self._apdu_format = ApduFormat.EXTENDED
+            if self.connection.transport == TRANSPORT.USB:
+                self._apdu_format = ApduFormat.EXTENDED
             self._max_apdu_size = (
                 _MaxApduSize.YK4_3 if version >= (4, 3) else _MaxApduSize.YK4
             )
@@ -439,7 +457,9 @@ class SmartCardProtocol:
                 raise ApplicationNotAvailableError()
             raise
 
-    def init_scp(self, key_params: ScpKeyParams) -> None:
+    def init_scp(self, key_params: ScpKeyParams, short_apdus: bool = False) -> None:
+        if self.connection.transport == TRANSPORT.USB and not short_apdus:
+            self._apdu_format = ApduFormat.EXTENDED
         try:
             if isinstance(key_params, Scp03KeyParams):
                 self._scp03_init(key_params)
@@ -447,8 +467,8 @@ class SmartCardProtocol:
                 self._scp11_init(key_params)
             else:
                 raise ValueError("Unsupported ScpKeyParams")
-            self._apdu_format = ApduFormat.EXTENDED
-            self._max_apdu_size = _MaxApduSize.YK4_3
+
+            self._max_apdu_size = max(_MaxApduSize.YK4_3, self._max_apdu_size)
             logger.info("SCP initialized")
         except ApduError as e:
             if e.sw == SW.CLASS_NOT_SUPPORTED:
@@ -465,7 +485,11 @@ class SmartCardProtocol:
         logger.debug("Initializing SCP03")
         scp, host_cryptogram = ScpState.scp03_init(self.send_apdu, key_params)
         processor = ScpProcessor(
-            self.connection, scp, _MaxApduSize.YK4_3, self._ins_send_remaining
+            self.connection,
+            scp,
+            _MaxApduSize.YK4_3,
+            self._ins_send_remaining,
+            extended_apdus=self._apdu_format == ApduFormat.EXTENDED,
         )
 
         # Send EXTERNAL AUTHENTICATE
@@ -479,5 +503,9 @@ class SmartCardProtocol:
         logger.debug("Initializing SCP11")
         scp = ScpState.scp11_init(self.send_apdu, key_params)
         self._processor = ScpProcessor(
-            self.connection, scp, _MaxApduSize.YK4_3, self._ins_send_remaining
+            self.connection,
+            scp,
+            _MaxApduSize.YK4_3,
+            self._ins_send_remaining,
+            extended_apdus=self._apdu_format == ApduFormat.EXTENDED,
         )

@@ -34,6 +34,7 @@ from typing import Optional
 
 import click
 
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import (
     AID,
     SW,
@@ -108,7 +109,7 @@ def _print_response(resp: bytes, sw: int, no_pretty: bool) -> None:
     required=False,
     help="select application",
 )
-@click.option("--short", is_flag=True, help="use short APDUs instead of extended")
+@click.option("--short", is_flag=True, help="force usage of short APDUs")
 @click.argument("apdu", nargs=-1)
 @click.option("-s", "--send-apdu", multiple=True, help="provide full APDUs")
 def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
@@ -162,11 +163,9 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
         else:
             params = None
 
-        # Use extended APDUs on YK 4+, unless --short is specified
-        if not short and info.version[0] >= 4:
+        # Use extended APDUs on YK 4+ over USB, unless --short is specified
+        if not short and info.version[0] >= 4 and conn.transport == TRANSPORT.USB:
             protocol.apdu_format = ApduFormat.EXTENDED
-        elif params:
-            ctx.fail("--short cannot be used with SCP")
 
         if app:
             is_first = False
@@ -176,7 +175,7 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
 
         if params:
             click.echo("INITIALIZE SCP")
-            protocol.init_scp(params)
+            protocol.init_scp(params, short)
 
         if send_apdu:  # Compatibility mode (full APDUs)
             for apdu in send_apdu:
