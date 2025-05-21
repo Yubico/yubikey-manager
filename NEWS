@@ -3,6 +3,7 @@
  ** PIV: Improve error handling for the Printed data slot.
  ** PIV: Improve error handling when decompressing malformed certificates.
  ** Fix incompatibility with pyscard 2.2.2.
+ ** Improve compatibility with NFC readers that don't support extended APDUs.
  ** Building the project now requires Poetry version 2.0 or later.
  ** Windows and MacOS installers built with Python 3.13.3
 
