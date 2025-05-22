@@ -39,7 +39,6 @@ from yubikit.core.smartcard import (
     AID,
     SW,
     ApduError,
-    ApduFormat,
     SmartCardConnection,
     SmartCardProtocol,
 )
@@ -151,31 +150,9 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
             ctx.fail("No commands provided.")
 
     dev = ctx.obj["device"]
-    info = ctx.obj["info"]
-    scp_resolve = ctx.obj.get("scp")
 
     with dev.open_connection(SmartCardConnection) as conn:
-        protocol = SmartCardProtocol(conn)
         is_first = True
-
-        if scp_resolve:
-            params = scp_resolve(conn)
-        else:
-            params = None
-
-        # Use extended APDUs on YK 4+ over USB, unless --short is specified
-        if not short and info.version[0] >= 4 and conn.transport == TRANSPORT.USB:
-            protocol.apdu_format = ApduFormat.EXTENDED
-
-        if app:
-            is_first = False
-            click.echo("SELECT AID: " + _hex(app))
-            resp = protocol.select(app)
-            _print_response(resp, SW.OK, no_pretty)
-
-        if params:
-            click.echo("INITIALIZE SCP")
-            protocol.init_scp(params, short)
 
         if send_apdu:  # Compatibility mode (full APDUs)
             for apdu in send_apdu:
@@ -185,9 +162,31 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
                     is_first = False
                 apdu = a2b_hex(apdu)
                 click.echo("SEND: " + _hex(apdu))
-                resp, sw = protocol.connection.send_and_receive(apdu)
+                resp, sw = conn.send_and_receive(apdu)
                 _print_response(resp, sw, no_pretty)
         else:  # Standard mode
+            info = ctx.obj["info"]
+            protocol = SmartCardProtocol(conn)
+
+            scp_resolve = ctx.obj.get("scp")
+            if scp_resolve:
+                params = scp_resolve(conn)
+            else:
+                params = None
+
+            # Configure basic protocol settings
+            protocol.configure(info.version, force_short=short)
+
+            if app:
+                is_first = False
+                click.echo("SELECT AID: " + _hex(app))
+                resp = protocol.select(app)
+                _print_response(resp, SW.OK, no_pretty)
+
+            if params:
+                click.echo("INITIALIZE SCP")
+                protocol.init_scp(params)
+
             for apdu, check in apdus:
                 if not is_first:
                     click.echo()
