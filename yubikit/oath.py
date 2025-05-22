@@ -272,6 +272,7 @@ class OathSession:
         self._version, self._salt, self._challenge = _parse_select(
             self.protocol.select(AID.OATH)
         )
+        self.protocol.configure(self.version)
 
         if scp_key_params:
             if (5, 0, 0) <= self._version < (5, 6, 3):
@@ -281,7 +282,6 @@ class OathSession:
 
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
-        self.protocol.configure(self.version)
         self._neo_unlock_workaround = not scp_key_params and self.version < (3, 0, 0)
         logger.debug(
             f"OATH session initialized (version={self.version}, "

@@ -342,7 +342,7 @@ class SecurityDomainSession:
 
         data = bytes([key.kvn])
         expected = data
-        dek = processor._state._keys.key_dek
+        dek = processor.state._keys.key_dek
         p2 = key.kid
         if isinstance(sk, StaticKeys):
             if not dek:

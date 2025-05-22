@@ -151,7 +151,7 @@ def test_import_ecdh_x25519(session, keys):
 def test_import_sign_rsa(session, keys, key_size, info):
     if key_size != 2048:
         if info.version[0] < 4:
-            pytest.skip(f"RSA {key_size} requires YuibKey 4 or later")
+            pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
     priv = rsa.generate_private_key(E, key_size, default_backend())
@@ -172,7 +172,7 @@ def test_import_sign_rsa(session, keys, key_size, info):
 def test_import_decrypt_rsa(session, keys, key_size, info):
     if key_size != 2048:
         if info.version[0] < 4:
-            pytest.skip(f"RSA {key_size} requires YuibKey 4 or later")
+            pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
     priv = rsa.generate_private_key(E, key_size, default_backend())
@@ -195,7 +195,7 @@ def test_import_decrypt_rsa(session, keys, key_size, info):
 def test_generate_rsa(session, keys, key_size, info):
     if key_size != 2048:
         if info.version[0] < 4:
-            pytest.skip(f"RSA {key_size} requires YuibKey 4 or later")
+            pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
     session.verify_admin(keys.admin)

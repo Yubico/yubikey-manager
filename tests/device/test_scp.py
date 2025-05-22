@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 
 import pytest
 
@@ -21,16 +22,30 @@ def scp_params(ccid_connection):
     return Scp11KeyParams(ref, chain[-1].public_key())
 
 
-@pytest.mark.parametrize("size", (10, 255, 256, 512, 2048))
-@pytest.mark.parametrize("format", ApduFormat)
-def test_scp_apdus(format, size, ccid_connection, scp_params):
-    if format == ApduFormat.EXTENDED and ccid_connection.transport != TRANSPORT.USB:
-        pytest.skip("Extended APDU format not used over NFC")
+class Configuration(Enum):
+    default = 0
+    force_short = 1
+    no_config = 2
 
-    session = SmartCardProtocol(ccid_connection)
-    session.select(AID.MANAGEMENT)
-    session.init_scp(scp_params, format == ApduFormat.SHORT)
+    def __str__(self):
+        return self.name
+
+
+@pytest.mark.parametrize("size", (10, 255, 256, 512, 2048))
+@pytest.mark.parametrize("config", Configuration)
+def test_scp_apdus(config, size, ccid_connection, scp_params, version):
+    protocol = SmartCardProtocol(ccid_connection)
+    if config == Configuration.default:
+        protocol.configure(version)
+    elif config == Configuration.force_short:
+        protocol.configure(version, True)
+    else:
+        pass  # no configuration
+
+    protocol.select(AID.MANAGEMENT)
+    protocol.init_scp(scp_params)
 
     payload = os.urandom(size)
-    resp = session.send_apdu(0, 1, 0, 0, payload)
+    # ECHO command
+    resp = protocol.send_apdu(0, 1, 0, 0, payload)
     assert resp == payload

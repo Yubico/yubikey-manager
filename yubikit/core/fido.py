@@ -33,6 +33,7 @@ from typing import Callable, Iterator, Optional
 from fido2.ctap import STATUS, CtapDevice, CtapError
 from fido2.hid import CAPABILITY, CTAPHID
 
+from yubikit.core import Version
 from yubikit.core.smartcard import (
     AID,
     ApduError,
@@ -67,6 +68,8 @@ class SmartCardCtapDevice(CtapDevice):
             self._capabilities |= CAPABILITY.NMSG
 
         if scp_key_params:
+            # We can at least raise the configuration level to 5.3.0, since SCP is not available before then
+            self.protocol.configure(Version(5, 3, 0))
             self.protocol.init_scp(scp_key_params)
 
         try:  # Probe for CTAP2 by calling GET_INFO
