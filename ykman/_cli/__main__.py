@@ -191,7 +191,7 @@ def require_device(connection_types, serial=None):
         pid = next(iter(devices.keys()))
         supported = [c for c in connection_types if pid.supports_connection(c)]
         if WIN_CTAP_RESTRICTED and supported == [FidoConnection]:
-            # FIDO-only command on Windows without Admin won't work.
+            # FIDO-only command on Windows without Admin won't work
             raise CliFail("FIDO access on Windows requires running as Administrator.")
         if not supported:
             interfaces = [c.usb_interface for c in connection_types]
@@ -385,14 +385,15 @@ def cli(
             ctx.fail("SCP can't be used with this command.")
         return
 
+    # FIDO command on Windows without Admin won't work
+    if subcmd == fido and WIN_CTAP_RESTRICTED:
+        raise CliFail("FIDO access on Windows requires running as Administrator.")
+
     # Commands which need a YubiKey to act on
     connections = getattr(
         subcmd, "connections", [SmartCardConnection, FidoConnection, OtpConnection]
     )
     if connections:
-        if connections == [FidoConnection] and WIN_CTAP_RESTRICTED:
-            # FIDO-only command on Windows without Admin won't work.
-            raise CliFail("FIDO access on Windows requires running as Administrator.")
 
         def resolve():
             items = getattr(resolve, "items", None)
