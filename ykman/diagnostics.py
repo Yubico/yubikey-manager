@@ -9,12 +9,12 @@ from typing import Any
 from fido2.ctap import CtapError
 from fido2.ctap2 import ClientPin, Ctap2
 
-from yubikit.core import Tlv
+from yubikit.core import Tlv, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.hsmauth import HsmAuthSession
-from yubikit.management import ManagementSession
+from yubikit.management import RELEASE_TYPE, ManagementSession
 from yubikit.oath import OathSession
 from yubikit.openpgp import OpenPgpSession
 from yubikit.piv import PivSession
@@ -51,6 +51,9 @@ def sys_info():
     return info
 
 
+# This method calls _override_version, needed for the other foo_info() functions
+# to return accurate information in case of a development key. Thus, it must run
+# prior to calling any other info function in this file.
 def mgmt_info(pid, conn):
     data: list[Any] = []
     try:
@@ -68,6 +71,10 @@ def mgmt_info(pid, conn):
 
     try:
         info = read_info(conn, pid)
+        if info.version_qualifier.type != RELEASE_TYPE.FINAL:
+            # Preview build, override version
+            _override_version(info.version_qualifier.version)
+
         data.append(
             {
                 "DeviceInfo": asdict(info),
