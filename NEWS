@@ -1,3 +1,7 @@
+* Version 5.7.1 (released 2025-06-05)
+ ** Bugfix: Fix OTP connections for YubiKeys with all other USB interfaces deactivated.
+ ** Windows and MacOS installers built with Python 3.13.4
+
 * Version 5.7.0 (released 2025-05-28)
  ** Python 3.9 or later is now required.
  ** PIV: Improve error handling for the Printed data slot.
