@@ -31,9 +31,8 @@ jobs:
           export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
           poetry build
           mkdir artifacts
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/yubikey_manager-*.tar.gz artifacts/yubikey_manager-$REF.tar.gz
-          mv dist/yubikey_manager-*.whl artifacts/yubikey_manager-$REF.whl
+          mv dist/yubikey_manager-*.tar.gz artifacts/
+          mv dist/yubikey_manager-*.whl artifacts/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
