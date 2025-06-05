@@ -20,7 +20,7 @@ from ykman.piv import (
 from ykman.util import parse_certificates, parse_private_key
 from yubikit.core import TRANSPORT, NotSupportedError
 from yubikit.core.smartcard import AID, ApduError
-from yubikit.management import CAPABILITY, ManagementSession
+from yubikit.management import CAPABILITY, RELEASE_TYPE, ManagementSession
 from yubikit.piv import (
     ALGORITHM,
     KEY_TYPE,
@@ -848,8 +848,15 @@ class TestPinComplexity:
         with pytest.raises(ApduError):
             session.change_pin(keys.pin, pin)
 
+    @condition.check(lambda info: info.version_qualifier.type == RELEASE_TYPE.FINAL)
     @pytest.mark.parametrize("pin", ("abc123", "password", "123123"))
-    def test_invalid_pins(self, session, keys, pin):
+    def test_invalid_pins_standard(self, session, keys, pin):
+        with pytest.raises(ApduError):
+            session.change_pin(keys.pin, pin)
+
+    @condition.check(lambda info: info.version_qualifier.type != RELEASE_TYPE.FINAL)
+    @pytest.mark.parametrize("pin", ("1234", "567890", "11223344"))
+    def test_invalid_pins_prerelease(self, session, keys, pin):
         with pytest.raises(ApduError):
             session.change_pin(keys.pin, pin)
 

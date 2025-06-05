@@ -136,7 +136,7 @@ class TestResetPin:
         self.ensure_pin_changed(ykman_cli)
 
     def test_set_and_use_reset_code_prompt(self, ykman_cli):
-        reset_code = "11223344"
+        reset_code = "44332211"
 
         ykman_cli(
             "openpgp",
