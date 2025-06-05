@@ -64,6 +64,6 @@ class OtpYubiKeyDevice(YkmanDevice):
                     except CommandRejectedError:
                         # In reclaim (maybe)
                         sleep(0.5)
-                return conn
+            return conn
 
         return super(OtpYubiKeyDevice, self).open_connection(connection_type)
