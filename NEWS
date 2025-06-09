@@ -1,4 +1,9 @@
-* Version 5.7.1 (released 2025-06-05)
+* Version 5.7.2 (released 2025-06-09)
+  This is a Windows-only patch release.
+ ** FIDO reset over NFC on Windows fixed
+ ** Windows installer built with Python 3.13.4
+
+* Version 5.7.1 (released 2025-06-09)
  ** Bugfix: Fix OTP connections for YubiKeys with all other USB interfaces deactivated.
  ** Windows and MacOS installers built with Python 3.13.4
 
