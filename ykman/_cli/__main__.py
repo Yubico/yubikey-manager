@@ -405,7 +405,7 @@ def cli(
                     items = require_device(connections, device)
 
                 if items[1].version_qualifier.type != RELEASE_TYPE.FINAL:
-                    # Preview build, override version and get new DeviceInfo
+                    # Preview build, override version
                     version_q = items[1].version_qualifier
                     _override_version(version_q.version)
                     logger.info(f"Debug key detected: {version_q}")

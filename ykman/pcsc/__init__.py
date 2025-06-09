@@ -28,6 +28,7 @@
 import logging
 import os
 import subprocess  # nosec
+import sys
 from time import sleep
 
 from smartcard import System
@@ -190,9 +191,10 @@ def kill_scdaemon():
 
 def kill_yubikey_agent():
     killed = False
-    return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # nosec
-    if return_code == 0:
-        killed = True
+    if sys.platform != "win32":
+        return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # nosec
+        if return_code == 0:
+            killed = True
     if killed:
         sleep(0.1)
 

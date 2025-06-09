@@ -1,6 +1,6 @@
 [project]
 name = "yubikey-manager"
-version = "5.7.1-dev.0"
+version = "5.7.3-dev.0"
 description = "Library and CLI for managing your YubiKey configuration."
 authors = [
   { name = "Dain Nilsson", email = "<dain@yubico.com>" }
@@ -16,7 +16,7 @@ classifiers = [
   "Topic :: Utilities"
 ]
 dependencies = [
-  "cryptography (>=3.0, <47)",
+  "cryptography (>=3.0, <48)",
   "pyscard (>=2.0, <3)",
   "fido2 (>=1.0, <3)",
   "click (>=8.0, <9)",
