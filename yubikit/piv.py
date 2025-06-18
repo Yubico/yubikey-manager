@@ -788,7 +788,7 @@ class PivSession:
 
         backend = default_backend()
         cipher_key = _parse_management_key(key_type, management_key)
-        cipher = Cipher(cipher_key, modes.ECB(), backend)  # nosec
+        cipher = Cipher(cipher_key, modes.ECB(), backend)  # noqa: S305
         decryptor = cipher.decryptor()
         decrypted = decryptor.update(witness) + decryptor.finalize()
 
@@ -1281,7 +1281,7 @@ class PivSession:
         self.check_key_support(key_type, pin_policy, touch_policy, False)
         ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
-            assert isinstance(private_key, rsa.RSAPrivateKey)  # nosec
+            assert isinstance(private_key, rsa.RSAPrivateKey)  # noqa: S101
             numbers = private_key.private_numbers()
             numbers = cast(rsa.RSAPrivateNumbers, numbers)
             if numbers.public_numbers.e != 65537:
@@ -1302,7 +1302,7 @@ class PivSession:
                 ),
             )
         else:
-            assert isinstance(private_key, ec.EllipticCurvePrivateKey)  # nosec
+            assert isinstance(private_key, ec.EllipticCurvePrivateKey)  # noqa: S101
             numbers = private_key.private_numbers()
             numbers = cast(ec.EllipticCurvePrivateNumbers, numbers)
             data = Tlv(0x06, int2bytes(numbers.private_value, ln))

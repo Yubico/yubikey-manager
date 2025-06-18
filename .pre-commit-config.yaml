@@ -7,11 +7,6 @@ repos:
       args: [ --fix ]
     # Run the formatter
     - id: ruff-format
-- repo: https://github.com/PyCQA/bandit
-  rev: 1.8.3
-  hooks:
-    - id: bandit
-      exclude: ^(test(s)?/|docs/)  # keep in sync with .bandit file
 - repo: https://github.com/pre-commit/mirrors-mypy
   rev: v1.15.0
   hooks:

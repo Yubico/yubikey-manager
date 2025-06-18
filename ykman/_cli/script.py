@@ -102,4 +102,4 @@ def run_script(ctx, site_dir, script, arguments, force):
     script_body = script.read()
 
     sys.argv = [script.name, *arguments]
-    exec(script_body, {})  # nosec
+    exec(script_body, {})  # noqa: S102

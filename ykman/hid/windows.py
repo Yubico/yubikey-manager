@@ -29,7 +29,7 @@ from yubikit.logging import LOG_LEVEL
 from .base import USAGE_OTP, YUBICO_VID, OtpYubiKeyDevice
 
 # Only typecheck this file on Windows
-assert sys.platform == "win32"  # nosec
+assert sys.platform == "win32"  # noqa: S101
 from ctypes import WinDLL, WinError  # noqa: E402
 
 logger = logging.getLogger(__name__)

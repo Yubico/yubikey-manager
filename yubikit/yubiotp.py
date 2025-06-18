@@ -304,7 +304,7 @@ class CFGSTATE(IntFlag):
 
 def _shorten_hmac_key(key: bytes) -> bytes:
     if len(key) > SHA1_BLOCK_SIZE:
-        key = sha1(key).digest()  # nosec
+        key = sha1(key).digest()  # noqa: S324
     elif len(key) > HMAC_KEY_SIZE:
         raise NotSupportedError(f"Key lengths > {HMAC_KEY_SIZE} bytes not supported")
     return key

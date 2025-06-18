@@ -38,7 +38,7 @@ from yubikit.logging import LOG_LEVEL
 from .base import USAGE_OTP, YUBICO_VID, OtpYubiKeyDevice
 
 # Don't typecheck this file on Windows
-assert sys.platform != "win32"  # nosec
+assert sys.platform != "win32"  # noqa: S101
 
 logger = logging.getLogger(__name__)
 

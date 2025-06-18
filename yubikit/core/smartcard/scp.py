@@ -84,7 +84,7 @@ def _calculate_mac(key: bytes, chain: bytes, message: bytes) -> tuple[bytes, byt
 def _init_cipher(key: bytes, counter: int, response=False) -> Cipher:
     encryptor = Cipher(
         algorithms.AES(key),
-        modes.ECB(),  # nosec ECB
+        modes.ECB(),  # noqa: S305
         backend=default_backend(),
     ).encryptor()
     iv_data = (b"\x80" if response else b"\x00") + int.to_bytes(counter, 15, "big")
@@ -300,9 +300,9 @@ class ScpState:
 
         if kid in (ScpKid.SCP11a, ScpKid.SCP11c):
             # GPC v2.3 Amendment F (SCP11) v1.4 §7.5
-            assert key_params.sk_oce_ecka  # nosec
+            assert key_params.sk_oce_ecka  # noqa: S101
             n = len(key_params.certificates) - 1
-            assert n >= 0  # nosec
+            assert n >= 0  # noqa: S101
             oce_ref = key_params.oce_ref or KeyRef(0, 0)
             logger.debug("Sending certificate chain")
             for i, cert in enumerate(key_params.certificates):

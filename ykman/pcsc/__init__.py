@@ -167,6 +167,7 @@ def kill_scdaemon():
     killed = False
     try:
         # Works for Windows.
+        assert sys.platform == "win32"  # noqa: S101
         from win32api import CloseHandle, OpenProcess, TerminateProcess
         from win32com.client import GetObject
 
@@ -181,7 +182,7 @@ def kill_scdaemon():
                 killed = True
     except ImportError:
         # Works for Linux and OS X.
-        return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # nosec
+        return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # noqa: S603, S607
         if return_code == 0:
             killed = True
     if killed:
@@ -192,7 +193,7 @@ def kill_scdaemon():
 def kill_yubikey_agent():
     killed = False
     if sys.platform != "win32":
-        return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # nosec
+        return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # noqa: S603, S607
         if return_code == 0:
             killed = True
     if killed:

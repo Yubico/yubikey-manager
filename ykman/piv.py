@@ -171,7 +171,7 @@ def derive_management_key(pin: str, salt: bytes) -> bytes:
     :param pin: The PIN.
     :param salt: The salt.
     """
-    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())  # nosec
+    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())  # noqa: S303
     return kdf.derive(pin.encode("utf-8"))
 
 
