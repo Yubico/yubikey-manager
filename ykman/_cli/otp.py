@@ -42,6 +42,7 @@ from yubikit.core.otp import (
     modhex_encode,
 )
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.management import CAPABILITY
 from yubikit.yubiotp import (
     NDEF_TYPE,
     SLOT,
@@ -293,6 +294,11 @@ def ndef(ctx, slot, prefix, ndef_type):
 
     try:
         session.set_ndef_configuration(slot, prefix, ctx.obj["access_code"], ndef_type)
+
+        if CAPABILITY.OTP not in info.config.enabled_capabilities[TRANSPORT.NFC]:
+            logger.warning(
+                "NDEF is currently disabled. Enable using 'ykman config nfc -e otp'"
+            )
         click.echo("NDEF configuration updated.")
     except CommandError:
         raise CliFail(_WRITE_FAIL_MSG)
