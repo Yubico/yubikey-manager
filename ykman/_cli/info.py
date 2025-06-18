@@ -85,17 +85,16 @@ def print_app_status_table(supported_apps, enabled_apps):
     if nfc_supported:
         f_USB = "USB".ljust(column_l[1])
         f_NFC = "NFC".ljust(column_l[2])
-    f_table = ""
+        click.echo(f"{f_apps}\t{f_USB}\t{f_NFC}")
+    else:
+        click.echo(f"{f_apps}")
 
+    f_table = ""
     for row in rows:
         for idx, c in enumerate(row):
             f_table += f"{c.ljust(column_l[idx])}\t"
         f_table = f_table.strip() + "\n"
 
-    if nfc_supported:
-        click.echo(f"{f_apps}\t{f_USB}\t{f_NFC}")
-    else:
-        click.echo(f"{f_apps}")
     click.echo(f_table, nl=False)
 
 

@@ -1060,7 +1060,7 @@ def import_certificate(
             if metadata.touch_policy in (TOUCH_POLICY.ALWAYS, TOUCH_POLICY.CACHED):
                 timeout = 0.0
             else:
-                timeout = None
+                timeout = 30.0  # Don't prompt
         except ApduError as e:
             if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
                 raise CliFail(f"No private key in slot {slot}.")
@@ -1157,7 +1157,7 @@ def generate_certificate(
         if metadata.touch_policy in (TOUCH_POLICY.ALWAYS, TOUCH_POLICY.CACHED):
             timeout = 0.0
         else:
-            timeout = None
+            timeout = 30.0  # Don't prompt
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No private key in slot {slot}.")
@@ -1236,7 +1236,7 @@ def generate_certificate_signing_request(
         if metadata.touch_policy in (TOUCH_POLICY.ALWAYS, TOUCH_POLICY.CACHED):
             timeout = 0.0
         else:
-            timeout = None
+            timeout = 30.0  # Don't prompt
     except ApduError as e:
         if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
             raise CliFail(f"No private key in slot {slot}.")

@@ -594,9 +594,10 @@ def _parse_interface_string(interface):
 def _parse_mode_string(ctx, param, mode):
     try:
         mode_int = int(mode)
-        return Mode.from_code(mode_int)
-    except IndexError:
-        raise CliFail(f"Invalid mode: {mode_int}")
+        try:
+            return Mode.from_code(mode_int)
+        except IndexError:
+            raise CliFail(f"Invalid mode: {mode_int}")
     except ValueError:
         pass  # Not a numeric mode, parse string
 

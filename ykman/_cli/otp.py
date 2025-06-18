@@ -231,8 +231,8 @@ def info(ctx):
     """
     session = _get_session(ctx)
     state = session.get_config_state()
-    slot1 = state.is_configured(1)
-    slot2 = state.is_configured(2)
+    slot1 = state.is_configured(SLOT.ONE)
+    slot2 = state.is_configured(SLOT.TWO)
 
     click.echo(f"Slot 1: {slot1 and 'programmed' or 'empty'}")
     click.echo(f"Slot 2: {slot2 and 'programmed' or 'empty'}")
