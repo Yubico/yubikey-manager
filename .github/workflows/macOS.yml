@@ -16,37 +16,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Poetry
-        run: pipx install poetry
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13.4'
-          cache: poetry
+          python-version-file: ".python-version"
 
-      - name: Install dependencies
-        run: poetry install
+      - name: Install the project
+        run: uv sync --locked --dev
 
       - name: Explicitly use universal versions
         run: |
           # Export exact versions
-          pipx inject poetry poetry-plugin-export
-          poetry export --without-hashes > requirements.txt
+          uv pip freeze  > requirements.txt
           grep cryptography requirements.txt > cryptography.txt
           grep cffi requirements.txt > source-reqs.txt
           grep pyscard requirements.txt >> source-reqs.txt
           # Remove non-universal packages
-          poetry run pip uninstall -y cryptography cffi pyscard
+          uv pip uninstall cryptography cffi pyscard
           # Build cffi from source to get universal build
-          poetry run pip install --upgrade -r source-reqs.txt --no-binary :all:
+          uv pip install --upgrade -r source-reqs.txt --no-binary :all:
           # Explicitly install pre-build universal build of cryptography
-          poetry run pip download -r cryptography.txt --platform macosx_10_12_universal2 --only-binary :all: --no-deps --dest .
-          poetry run pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
+          pip download -r cryptography.txt --platform macosx_10_12_universal2 --only-binary :all: --no-deps --dest .
+          uv pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
 
       - name: PyInstaller
         run: |
-          poetry run pyinstaller ykman.spec
+          uv run pyinstaller ykman.spec
           dist/ykman/ykman --version
           [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
 

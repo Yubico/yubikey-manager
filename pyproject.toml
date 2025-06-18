@@ -24,11 +24,26 @@ dependencies = [
   "pywin32 (>=223) ; sys_platform == 'win32'",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9",
+    "makefun>=1.9.5,<2",
+    "pyinstaller>=6.10,<7",
+    "sphinx>=7.4,<8",
+    "sphinx-rtd-theme>=3,<4",
+    "sphinx-autoapi>=3.3.3,<4",
+    "pyright>=1.1,<2",
+]
+
 [project.urls]
 Homepage = "https://github.com/Yubico/yubikey-manager"
 
 [project.scripts]
 ykman = "ykman._cli.__main__:main"
+
+[build-system]
+requires = ["poetry-core>=2.0"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 requires-poetry = ">=2.0"
@@ -43,19 +58,6 @@ packages = [
   { include = "yubikit" },
   { include = "ykman" },
 ]
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-makefun = "^1.9.5"
-pyinstaller = { version = "^6.10", python = "<3.14" }
-sphinx = "^7.4"
-sphinx-rtd-theme = "^3"
-sphinx-autoapi = "^3.3.3"
-pyright = "^1.1"
-
-[build-system]
-requires = ["poetry-core>=2.0"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

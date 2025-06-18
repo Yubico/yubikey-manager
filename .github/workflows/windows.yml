@@ -10,23 +10,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Poetry
-        run: pipx install poetry
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13.4'
-          cache: poetry
+          python-version-file: ".python-version"
 
-      - name: Install dependencies
-        run: poetry install
+      - name: Install the project
+        run: uv sync --locked --dev
 
       - name: Run unit tests
-        run: poetry run pytest -v
+        run: uv run pytest -v
 
       - name: Build
-        run: poetry build
+        run: uv build
 
       - name: Install from tar.gz
         shell: bash
@@ -48,7 +49,7 @@ jobs:
       - name: PyInstaller
         shell: bash
         run: |
-          poetry run pyinstaller ykman.spec
+          uv run pyinstaller ykman.spec
           dist/ykman/ykman.exe --version
           [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
 

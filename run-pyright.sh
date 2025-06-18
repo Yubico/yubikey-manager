@@ -1,11 +1,6 @@
 #!/bin/sh
 
-# Runs pyright from poetry
+# Runs pyright from uv
 set -e
 
-if [ "$(poetry env list)" = "" ]; then
-	echo "Initializing poetry env..."
-	poetry install
-fi
-
-poetry run pyright yubikit
+uv run pyright yubikit
