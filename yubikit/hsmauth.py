@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import logging
 import struct
 from dataclasses import dataclass
@@ -205,7 +207,7 @@ class SessionKeys(NamedTuple):
     key_srmac: bytes
 
     @classmethod
-    def parse(cls, response: bytes) -> "SessionKeys":
+    def parse(cls, response: bytes) -> SessionKeys:
         key_senc = response[:16]
         key_smac = response[16:32]
         key_srmac = response[32:48]

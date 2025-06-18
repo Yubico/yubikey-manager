@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import abc
 import logging
 import os
@@ -111,7 +113,7 @@ class StaticKeys(NamedTuple):
     key_dek: bytes | None = None
 
     @classmethod
-    def default(cls) -> "StaticKeys":
+    def default(cls) -> StaticKeys:
         return cls(_DEFAULT_KEY, _DEFAULT_KEY, _DEFAULT_KEY)
 
     def derive(self, context: bytes) -> SessionKeys:
@@ -249,7 +251,7 @@ class ScpState:
         key_params: Scp03KeyParams,
         *,
         host_challenge: bytes | None = None,
-    ) -> tuple["ScpState", bytes]:
+    ) -> tuple[ScpState, bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)
         resp = send_apdu(
@@ -282,7 +284,7 @@ class ScpState:
         cls,
         send_apdu: SendApdu,
         key_params: Scp11KeyParams,
-    ) -> "ScpState":
+    ) -> ScpState:
         kid = ScpKid(key_params.ref.kid)
         logger.debug(f"Initializing {kid.name} handshake")
 

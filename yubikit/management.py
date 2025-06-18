@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import abc
 import logging
 import struct
@@ -77,7 +79,7 @@ class CAPABILITY(IntFlag):
         return f"{name}: {hex(self)}"
 
     @classmethod
-    def _from_fips(cls, fips: int) -> "CAPABILITY":
+    def _from_fips(cls, fips: int) -> CAPABILITY:
         c = CAPABILITY(0)
         if fips & (1 << 0):
             c |= CAPABILITY.FIDO2
@@ -92,7 +94,7 @@ class CAPABILITY(IntFlag):
         return c
 
     @classmethod
-    def _from_aid(cls, aid: AID) -> "CAPABILITY":
+    def _from_aid(cls, aid: AID) -> CAPABILITY:
         # TODO: match on prefix?
         try:
             return getattr(CAPABILITY, aid.name)
@@ -176,7 +178,7 @@ class FORM_FACTOR(IntEnum):
             return "Unknown"
 
     @classmethod
-    def from_code(cls, code: int) -> "FORM_FACTOR":
+    def from_code(cls, code: int) -> FORM_FACTOR:
         if code and not isinstance(code, int):
             raise ValueError(f"Invalid form factor code: {code}")
         code &= 0xF
@@ -329,7 +331,7 @@ class DeviceInfo:
         )
 
     @classmethod
-    def parse(cls, encoded: bytes, default_version: Version) -> "DeviceInfo":
+    def parse(cls, encoded: bytes, default_version: Version) -> DeviceInfo:
         if len(encoded) - 1 != encoded[0]:
             raise BadResponseError("Invalid length")
         return cls.parse_tlvs(Tlv.parse_dict(encoded[1:]), default_version)
@@ -337,7 +339,7 @@ class DeviceInfo:
     @classmethod
     def parse_tlvs(
         cls, data: Mapping[int, bytes], default_version: Version
-    ) -> "DeviceInfo":
+    ) -> DeviceInfo:
         locked = data.get(TAG_CONFIG_LOCK) == b"\1"
         serial = bytes2int(data.get(TAG_SERIAL, b"\0")) or None
         ff_value = bytes2int(data.get(TAG_FORM_FACTOR, b"\0"))
@@ -445,7 +447,7 @@ class Mode:
         return "+".join(t.name or str(t) for t in USB_INTERFACE if t in self.interfaces)
 
     @classmethod
-    def from_code(cls, code: int) -> "Mode":
+    def from_code(cls, code: int) -> Mode:
         # Mode is determined from the lowest 3 bits
         try:
             return cls(_MODES[code & 0b00000111])

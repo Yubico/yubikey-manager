@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import gzip
 import logging
 import os
@@ -121,7 +123,7 @@ class KEY_TYPE(IntEnum):
         raise ValueError("No bit_len")
 
     @classmethod
-    def from_public_key(cls, key: PublicKey) -> "KEY_TYPE":
+    def from_public_key(cls, key: PublicKey) -> KEY_TYPE:
         if isinstance(key, rsa.RSAPublicKey):
             try:
                 return getattr(cls, "RSA%d" % key.key_size)
@@ -253,7 +255,7 @@ class OBJECT_ID(IntEnum):
     ATTESTATION = 0x5FFF01
 
     @classmethod
-    def from_slot(cls, slot: SLOT) -> "OBJECT_ID":
+    def from_slot(cls, slot: SLOT) -> OBJECT_ID:
         return getattr(cls, SLOT(slot).name)
 
 
@@ -453,7 +455,7 @@ class FascN:
         return int2bytes(int(bs, 2) << 5 | lrc)
 
     @classmethod
-    def from_bytes(cls, value: bytes) -> "FascN":
+    def from_bytes(cls, value: bytes) -> FascN:
         bs = f"{bytes2int(value):0200b}"
         ds = [int(bs[i : i + 4][::-1], 2) for i in range(0, 200, 5)]
         args = (
@@ -513,7 +515,7 @@ class Chuid:
         return bs
 
     @classmethod
-    def from_bytes(cls, value: bytes) -> "Chuid":
+    def from_bytes(cls, value: bytes) -> Chuid:
         data = Tlv.parse_dict(value)
         buffer_length = data.get(0xEE)
         lrc = data.get(TAG_LRC)

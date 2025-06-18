@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
 import logging
@@ -113,7 +115,7 @@ class CredentialData:
     issuer: str | None = None
 
     @classmethod
-    def parse_uri(cls, uri: str) -> "CredentialData":
+    def parse_uri(cls, uri: str) -> CredentialData:
         """Parse OATH credential data from URI.
 
         :param uri: The URI to parse from.

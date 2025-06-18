@@ -25,6 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import abc
 import logging
 import os
@@ -263,7 +265,7 @@ class CardholderRelatedData:
     sex: int
 
     @classmethod
-    def parse(cls, encoded) -> "CardholderRelatedData":
+    def parse(cls, encoded) -> CardholderRelatedData:
         data = Tlv.parse_dict(Tlv.unpack(DO.CARDHOLDER_RELATED_DATA, encoded))
         return cls(
             data[DO.NAME],
@@ -278,7 +280,7 @@ class ExtendedLengthInfo:
     response_max_bytes: int
 
     @classmethod
-    def parse(cls, encoded) -> "ExtendedLengthInfo":
+    def parse(cls, encoded) -> ExtendedLengthInfo:
         data = Tlv.parse_list(encoded)
         return cls(
             bytes2int(Tlv.unpack(0x02, data[0])),
@@ -309,7 +311,7 @@ class ExtendedCapabilities:
     mse_command: bool
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "ExtendedCapabilities":
+    def parse(cls, encoded: bytes) -> ExtendedCapabilities:
         return cls(
             EXTENDED_CAPABILITY_FLAGS(encoded[0]),
             encoded[1],
@@ -338,7 +340,7 @@ class PwStatus:
         return getattr(self, f"attempts_{pw.name.lower()}")
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "PwStatus":
+    def parse(cls, encoded: bytes) -> PwStatus:
         try:
             policy = PIN_POLICY(encoded[0])
         except ValueError:
@@ -423,7 +425,7 @@ class AlgorithmAttributes(abc.ABC):
     algorithm_id: int
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "AlgorithmAttributes":
+    def parse(cls, encoded: bytes) -> AlgorithmAttributes:
         algorithm_id = encoded[0]
         for sub_cls in cls.__subclasses__():
             if algorithm_id in sub_cls._supported_ids:
@@ -436,7 +438,7 @@ class AlgorithmAttributes(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def _parse_data(cls, alg: int, encoded: bytes) -> "AlgorithmAttributes":
+    def _parse_data(cls, alg: int, encoded: bytes) -> AlgorithmAttributes:
         raise NotImplementedError()
 
 
@@ -468,11 +470,11 @@ class RsaAttributes(AlgorithmAttributes):
         cls,
         n_len: RSA_SIZE,
         import_format: RSA_IMPORT_FORMAT = RSA_IMPORT_FORMAT.STANDARD,
-    ) -> "RsaAttributes":
+    ) -> RsaAttributes:
         return cls(0x01, n_len, 17, import_format)
 
     @classmethod
-    def _parse_data(cls, alg, encoded) -> "RsaAttributes":
+    def _parse_data(cls, alg, encoded) -> RsaAttributes:
         n, e, f = struct.unpack(">HHB", encoded)
         return cls(alg, n, e, RSA_IMPORT_FORMAT(f))
 
@@ -544,7 +546,7 @@ class EcAttributes(AlgorithmAttributes):
     import_format: EC_IMPORT_FORMAT
 
     @classmethod
-    def create(cls, key_ref: KEY_REF, oid: CurveOid) -> "EcAttributes":
+    def create(cls, key_ref: KEY_REF, oid: CurveOid) -> EcAttributes:
         if oid == OID.Ed25519:
             alg = 0x16  # EdDSA
         elif key_ref == KEY_REF.DEC:
@@ -554,7 +556,7 @@ class EcAttributes(AlgorithmAttributes):
         return cls(alg, oid, EC_IMPORT_FORMAT.STANDARD)
 
     @classmethod
-    def _parse_data(cls, alg, encoded) -> "EcAttributes":
+    def _parse_data(cls, alg, encoded) -> EcAttributes:
         if encoded[-1] == 0xFF:
             f = EC_IMPORT_FORMAT.STANDARD_W_PUBKEY
             oid = encoded[:-1]
@@ -611,7 +613,7 @@ class DiscretionaryDataObjects:
     uif_att: UIF | None
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "DiscretionaryDataObjects":
+    def parse(cls, encoded: bytes) -> DiscretionaryDataObjects:
         data = Tlv.parse_dict(encoded)
         return cls(
             ExtendedCapabilities.parse(data[TAG_EXTENDED_CAPABILITIES]),
@@ -652,7 +654,7 @@ class ApplicationRelatedData:
     discretionary: DiscretionaryDataObjects
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "ApplicationRelatedData":
+    def parse(cls, encoded: bytes) -> ApplicationRelatedData:
         outer = Tlv.unpack(DO.APPLICATION_RELATED_DATA, encoded)
         data = Tlv.parse_dict(outer)
         return cls(
@@ -680,7 +682,7 @@ class SecuritySupportTemplate:
     signature_counter: int
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "SecuritySupportTemplate":
+    def parse(cls, encoded: bytes) -> SecuritySupportTemplate:
         data = Tlv.parse_dict(Tlv.unpack(DO.SECURITY_SUPPORT_TEMPLATE, encoded))
         return cls(bytes2int(data[TAG_SIGNATURE_COUNTER]))
 
@@ -696,11 +698,11 @@ class Kdf(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def _parse_data(cls, data: Mapping[int, bytes]) -> "Kdf":
+    def _parse_data(cls, data: Mapping[int, bytes]) -> Kdf:
         raise NotImplementedError()
 
     @classmethod
-    def parse(cls, encoded: bytes) -> "Kdf":
+    def parse(cls, encoded: bytes) -> Kdf:
         data = Tlv.parse_dict(encoded)
         try:
             algorithm = bytes2int(data[0x81])
@@ -721,7 +723,7 @@ class KdfNone(Kdf):
     algorithm = 0
 
     @classmethod
-    def _parse_data(cls, data) -> "KdfNone":
+    def _parse_data(cls, data) -> KdfNone:
         return cls()
 
     def process(self, pw, pin):
@@ -770,7 +772,7 @@ class KdfIterSaltedS2k(Kdf):
         cls,
         hash_algorithm: HASH_ALGORITHM = HASH_ALGORITHM.SHA256,
         iteration_count: int = 0x780000,
-    ) -> "KdfIterSaltedS2k":
+    ) -> KdfIterSaltedS2k:
         salt_user = os.urandom(8)
         salt_admin = os.urandom(8)
         return cls(
@@ -788,7 +790,7 @@ class KdfIterSaltedS2k(Kdf):
         )
 
     @classmethod
-    def _parse_data(cls, data) -> "KdfIterSaltedS2k":
+    def _parse_data(cls, data) -> KdfIterSaltedS2k:
         return cls(
             HASH_ALGORITHM(bytes2int(data[0x82])),
             bytes2int(data[0x83]),

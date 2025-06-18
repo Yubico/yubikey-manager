@@ -149,7 +149,7 @@ class PID(IntEnum):
         return USB_INTERFACE(sum(USB_INTERFACE[x] for x in self.name.split("_")[1:]))
 
     @classmethod
-    def of(cls, key_type: YUBIKEY, interfaces: USB_INTERFACE) -> "PID":
+    def of(cls, key_type: YUBIKEY, interfaces: USB_INTERFACE) -> PID:
         suffix = "_".join(t.name or str(t) for t in USB_INTERFACE if t in interfaces)
         return cls[key_type.name + "_" + suffix]
 
