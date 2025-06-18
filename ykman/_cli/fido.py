@@ -29,7 +29,7 @@ import csv as _csv
 import io
 import logging
 from time import sleep
-from typing import Never, Sequence
+from typing import NoReturn, Sequence
 
 import click
 from fido2.ctap import STATUS, CtapError
@@ -328,7 +328,7 @@ def reset(ctx, force):
         raise CliFail("Reset failed.")
 
 
-def _fail_pin_error(ctx, e, other="%s") -> Never:
+def _fail_pin_error(ctx, e, other="%s") -> NoReturn:
     if e.code == CtapError.ERR.PIN_INVALID:
         raise CliFail("Wrong PIN.")
     elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:

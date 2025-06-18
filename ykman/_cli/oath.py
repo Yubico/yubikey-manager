@@ -531,7 +531,7 @@ def click_parse_uri(ctx, param, val):
 @click_password_option
 @click_remember_option
 @click.pass_context
-def uri(ctx, data: CredentialData | None, touch, force, password, remember):
+def uri(ctx, data, touch, force, password, remember):
     """
     Add a new account from an otpauth:// URI.
 

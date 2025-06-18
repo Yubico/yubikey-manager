@@ -110,9 +110,7 @@ class ScardYubiKeyDevice(YkmanDevice):
             transport = TRANSPORT.USB
         else:
             transport = TRANSPORT.NFC
-        super(ScardYubiKeyDevice, self).__init__(
-            transport, reader.name, _pid_from_name(reader.name)
-        )
+        super().__init__(transport, reader.name, _pid_from_name(reader.name))
         self.reader = reader
 
     def supports_connection(self, connection_type):
@@ -126,7 +124,7 @@ class ScardYubiKeyDevice(YkmanDevice):
         elif issubclass(SmartCardCtapDevice, connection_type):
             if self.transport == TRANSPORT.NFC:
                 return SmartCardCtapDevice(self._open_smartcard_connection())
-        return super(ScardYubiKeyDevice, self).open_connection(connection_type)
+        return super().open_connection(connection_type)
 
     def _open_smartcard_connection(self, retry=True) -> SmartCardConnection:
         connection = self.reader.createConnection()
@@ -165,9 +163,8 @@ class ScardYubiKeyDevice(YkmanDevice):
 
 def kill_scdaemon():
     killed = False
-    try:
+    if sys.platform == "win32":
         # Works for Windows.
-        assert sys.platform == "win32"  # noqa: S101
         from win32api import CloseHandle, OpenProcess, TerminateProcess
         from win32com.client import GetObject
 
@@ -180,7 +177,7 @@ def kill_scdaemon():
                 TerminateProcess(handle, -1)
                 CloseHandle(handle)
                 killed = True
-    except ImportError:
+    else:
         # Works for Linux and OS X.
         return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # noqa: S603, S607
         if return_code == 0:
@@ -210,7 +207,7 @@ def list_readers():
         # forcing a new context (This happens on Windows if the last reader is
         # removed):
         try:
-            from smartcard.pcsc.PCSCContext import PCSCContext
+            from smartcard.pcsc.PCSCContext import PCSCContext  # type: ignore
 
             PCSCContext.instance = None
             return System.readers()
