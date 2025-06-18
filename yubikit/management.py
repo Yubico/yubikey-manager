@@ -572,7 +572,8 @@ class _ManagementCtapBackend(_Backend):
     def __init__(self, fido_connection):
         self.ctap = fido_connection
         version = fido_connection.device_version
-        if version[0] < 4:  # Prior to YK4 this was not firmware version
+        # Prior to YK4 this was not firmware version
+        if version[0] < 4 and version != (0, 0, 1):
             if not (
                 version[0] == 0 and fido_connection.capabilities & CTAP_CAPABILITY.CBOR
             ):
