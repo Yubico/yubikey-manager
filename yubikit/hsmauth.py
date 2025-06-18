@@ -30,7 +30,7 @@ import struct
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -119,7 +119,7 @@ class ALGORITHM(IntEnum):
             return 64
 
 
-def _parse_credential_password(credential_password: Union[bytes, str]) -> bytes:
+def _parse_credential_password(credential_password: bytes | str) -> bytes:
     if isinstance(credential_password, str):
         pw = credential_password.encode().ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
     else:
@@ -183,7 +183,7 @@ class Credential:
     label: str
     algorithm: ALGORITHM
     counter: int
-    touch_required: Optional[bool]
+    touch_required: bool | None
 
     def __lt__(self, other):
         a = self.label.lower()
@@ -223,7 +223,7 @@ class HsmAuthSession:
     def __init__(
         self,
         connection: SmartCardConnection,
-        scp_key_params: Optional[ScpKeyParams] = None,
+        scp_key_params: ScpKeyParams | None = None,
     ) -> None:
         self.protocol = SmartCardProtocol(connection)
         self._version = _override_version.patch(
@@ -265,7 +265,7 @@ class HsmAuthSession:
         label: str,
         key: bytes,
         algorithm: ALGORITHM,
-        credential_password: Union[bytes, str],
+        credential_password: bytes | str,
         touch_required: bool = False,
     ) -> Credential:
         if len(management_key) != MANAGEMENT_KEY_LEN:
@@ -317,7 +317,7 @@ class HsmAuthSession:
         label: str,
         key_enc: bytes,
         key_mac: bytes,
-        credential_password: Union[bytes, str],
+        credential_password: bytes | str,
         touch_required: bool = False,
     ) -> Credential:
         """Import a symmetric YubiHSM Auth credential.
@@ -351,7 +351,7 @@ class HsmAuthSession:
         management_key: bytes,
         label: str,
         derivation_password: str,
-        credential_password: Union[bytes, str],
+        credential_password: bytes | str,
         touch_required: bool = False,
     ) -> Credential:
         """Import a symmetric YubiHSM Auth credential derived from password.
@@ -375,7 +375,7 @@ class HsmAuthSession:
         management_key: bytes,
         label: str,
         private_key: ec.EllipticCurvePrivateKeyWithSerialization,
-        credential_password: Union[bytes, str],
+        credential_password: bytes | str,
         touch_required: bool = False,
     ) -> Credential:
         """Import an asymmetric YubiHSM Auth credential.
@@ -409,7 +409,7 @@ class HsmAuthSession:
         self,
         management_key: bytes,
         label: str,
-        credential_password: Union[bytes, str],
+        credential_password: bytes | str,
         touch_required: bool = False,
     ) -> Credential:
         """Generate an asymmetric YubiHSM Auth credential.
@@ -521,9 +521,9 @@ class HsmAuthSession:
         self,
         label: str,
         context: bytes,
-        credential_password: Union[bytes, str],
-        card_crypto: Optional[bytes] = None,
-        public_key: Optional[bytes] = None,
+        credential_password: bytes | str,
+        card_crypto: bytes | None = None,
+        public_key: bytes | None = None,
     ) -> bytes:
         data = Tlv(TAG_LABEL, _parse_label(label)) + Tlv(TAG_CONTEXT, context)
 
@@ -555,8 +555,8 @@ class HsmAuthSession:
         self,
         label: str,
         context: bytes,
-        credential_password: Union[bytes, str],
-        card_crypto: Optional[bytes] = None,
+        credential_password: bytes | str,
+        card_crypto: bytes | None = None,
     ) -> SessionKeys:
         """Calculate session keys from a symmetric YubiHSM Auth credential.
 
@@ -581,7 +581,7 @@ class HsmAuthSession:
         label: str,
         context: bytes,
         public_key: ec.EllipticCurvePublicKey,
-        credential_password: Union[bytes, str],
+        credential_password: bytes | str,
         card_crypto: bytes,
     ) -> SessionKeys:
         """Calculate session keys from an asymmetric YubiHSM Auth credential.
@@ -617,7 +617,7 @@ class HsmAuthSession:
         )
 
     def get_challenge(
-        self, label: str, credential_password: Union[bytes, str, None] = None
+        self, label: str, credential_password: bytes | str | None = None
     ) -> bytes:
         """Get the Host Challenge.
 

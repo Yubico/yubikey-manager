@@ -31,7 +31,6 @@ import struct
 import warnings
 from enum import Enum, IntEnum, unique
 from time import time
-from typing import Optional
 
 from yubikit.logging import LOG_LEVEL
 

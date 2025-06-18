@@ -27,7 +27,6 @@
 
 import logging
 from dataclasses import replace
-from typing import Optional
 
 from .core import (
     PID,
@@ -77,7 +76,7 @@ _BASE_NEO_APPS = CAPABILITY.OTP | CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.
 
 
 def _read_info_ccid(conn, key_type, interfaces):
-    version: Optional[Version] = None
+    version: Version | None = None
     try:
         mgmt = ManagementSession(conn)
         version = mgmt.version
@@ -234,7 +233,7 @@ def _read_info_ctap(conn, key_type, interfaces):
         )
 
 
-def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
+def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
     """Reads out DeviceInfo from a YubiKey, or attempts to synthesize the data.
 
     Reading DeviceInfo from a ManagementSession is only supported for newer YubiKeys.
@@ -250,7 +249,7 @@ def read_info(conn: Connection, pid: Optional[PID] = None) -> DeviceInfo:
 
     logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
     if pid:
-        key_type: Optional[YUBIKEY] = pid.yubikey_type
+        key_type: YUBIKEY | None = pid.yubikey_type
         interfaces = pid.usb_interfaces
     elif isinstance(conn, SmartCardConnection) and conn.transport == TRANSPORT.NFC:
         # No PID for NFC connections
@@ -354,7 +353,7 @@ def _is_preview(version):
     return False
 
 
-def get_name(info: DeviceInfo, key_type: Optional[YUBIKEY]) -> str:
+def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
     """Determine the product name of a YubiKey
 
     :param info: The device info.

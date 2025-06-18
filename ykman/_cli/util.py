@@ -33,7 +33,7 @@ from collections.abc import MutableMapping
 from contextlib import contextmanager
 from enum import Enum
 from threading import Timer
-from typing import Optional, Sequence
+from typing import Sequence
 
 import click
 from cryptography import x509
@@ -351,7 +351,7 @@ def log_or_echo(message: str, log: logging.Logger, *files) -> None:
 
 
 def find_scp11_params(
-    connection: SmartCardConnection, kid: int, kvn: int, ca: Optional[bytes] = None
+    connection: SmartCardConnection, kid: int, kvn: int, ca: bytes | None = None
 ) -> Scp11KeyParams:
     try:
         scp = SecurityDomainSession(connection)
@@ -410,7 +410,7 @@ def find_scp11_params(
 
 def get_scp_params(
     ctx: click.Context, capability: CAPABILITY, connection: SmartCardConnection
-) -> Optional[ScpKeyParams]:
+) -> ScpKeyParams | None:
     # Explicit SCP
     resolve = ctx.obj.get("scp")
     if resolve:
@@ -433,7 +433,7 @@ def get_scp_params(
 def organize_scp11_certificates(
     certificates: Sequence[x509.Certificate],
 ) -> tuple[
-    Optional[x509.Certificate], Sequence[x509.Certificate], Optional[x509.Certificate]
+    x509.Certificate | None, Sequence[x509.Certificate], x509.Certificate | None
 ]:
     if not certificates:
         return None, [], None

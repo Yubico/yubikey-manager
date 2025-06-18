@@ -1,6 +1,6 @@
 import logging
 from enum import IntEnum, unique
-from typing import Mapping, Sequence, Union, cast
+from typing import Mapping, Sequence, cast
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -66,7 +66,7 @@ class Curve(IntEnum):
 
     @classmethod
     def _from_key(
-        cls, key: Union[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]
+        cls, key: ec.EllipticCurvePrivateKey | ec.EllipticCurvePublicKey
     ) -> "Curve":
         name = key.curve.name.lower()
         for curve in cls:
@@ -325,7 +325,7 @@ class SecurityDomainSession:
     def put_key(
         self,
         key: KeyRef,
-        sk: Union[StaticKeys, ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey],
+        sk: StaticKeys | ec.EllipticCurvePrivateKey | ec.EllipticCurvePublicKey,
         replace_kvn: int = 0,
     ) -> None:
         """Import an SCP key.

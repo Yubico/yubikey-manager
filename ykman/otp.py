@@ -29,7 +29,7 @@ import logging
 import random
 import struct
 from datetime import datetime
-from typing import Iterable, Optional
+from typing import Iterable
 
 from yubikit.core.otp import modhex_encode
 from yubikit.oath import parse_b32_key
@@ -103,8 +103,8 @@ def format_csv(
     public_id: bytes,
     private_id: bytes,
     key: bytes,
-    access_code: Optional[bytes] = None,
-    timestamp: Optional[datetime] = None,
+    access_code: bytes | None = None,
+    timestamp: datetime | None = None,
 ) -> str:
     """Produce a CSV line in the "Yubico" format.
 

@@ -36,9 +36,7 @@ from typing import (
     ClassVar,
     Hashable,
     NamedTuple,
-    Optional,
     TypeVar,
-    Union,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,7 +178,7 @@ class YubiKeyDevice(abc.ABC):
 
     # mypy will not accept abstract types in type[T_Connection]
     def open_connection(
-        self, connection_type: Union[type[T_Connection], Callable[..., T_Connection]]
+        self, connection_type: type[T_Connection] | Callable[..., T_Connection]
     ) -> T_Connection:
         """Opens a connection to the YubiKey"""
         raise ValueError("Unsupported Connection type")
@@ -230,14 +228,14 @@ class InvalidPinError(CommandError, ValueError):
     version of the library.
     """
 
-    def __init__(self, attempts_remaining: int, message: Optional[str] = None):
+    def __init__(self, attempts_remaining: int, message: str | None = None):
         super().__init__(message or f"Invalid PIN/PUK, {attempts_remaining} remaining")
         self.attempts_remaining = attempts_remaining
 
 
 class _OverrideVersion:
     def __init__(self):
-        self._version: Optional[Version] = None
+        self._version: Version | None = None
 
     def __call__(self, value: Version) -> None:
         logger.info(f"Overriding version check for development devices with {value}")
@@ -318,7 +316,7 @@ class Tlv(bytes):
     def value(self) -> bytes:
         return self[self._value_offset : self._value_offset + self._value_ln]
 
-    def __new__(cls, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
+    def __new__(cls, tag_or_data: int | bytes, value: bytes | None = None):
         """This allows creation by passing either binary data, or tag and value."""
         if isinstance(tag_or_data, int):  # Tag and (optional) value
             tag = tag_or_data
@@ -343,7 +341,7 @@ class Tlv(bytes):
 
         return super(Tlv, cls).__new__(cls, data)
 
-    def __init__(self, tag_or_data: Union[int, bytes], value: Optional[bytes] = None):
+    def __init__(self, tag_or_data: int | bytes, value: bytes | None = None):
         self._tag, self._value_offset, self._value_ln, end = _tlv_parse(self)
         if len(self) != end:
             raise ValueError("Incorrect TLV length")

@@ -30,7 +30,6 @@ import re
 import struct
 import sys
 from binascii import a2b_hex
-from typing import Optional
 
 import click
 
@@ -65,7 +64,7 @@ def _hex(data: bytes) -> str:
 
 def _parse_apdu(
     data: str,
-) -> tuple[tuple[int, int, int, int, bytes, int], Optional[int]]:
+) -> tuple[tuple[int, int, int, int, bytes, int], int | None]:
     m = APDU_PATTERN.match(data)
     if not m:
         raise ValueError("Invalid APDU format: " + data)
@@ -75,7 +74,7 @@ def _parse_apdu(
     body = a2b_hex(m.group("body") or "")
     le = int(m.group("le") or "00", 16)
     if m.group("check"):
-        sw: Optional[int] = int(m.group("sw") or "9000", 16)
+        sw: int | None = int(m.group("sw") or "9000", 16)
     else:
         sw = None
     p1, p2 = params >> 8, params & 0xFF

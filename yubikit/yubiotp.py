@@ -32,7 +32,7 @@ import warnings
 from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
-from typing import Callable, Optional, TypeVar, Union
+from typing import Callable, TypeVar
 
 from .core import (
     TRANSPORT,
@@ -331,7 +331,7 @@ class SlotConfiguration:
     def is_supported_by(self, version: Version) -> bool:
         return True
 
-    def get_config(self, acc_code: Optional[bytes] = None) -> bytes:
+    def get_config(self, acc_code: bytes | None = None) -> bytes:
         return _build_config(
             self._fixed,
             self._uid,
@@ -647,8 +647,8 @@ class _Backend(abc.ABC):
         slot: CONFIG_SLOT,
         data: bytes,
         expected_len: int,
-        event: Optional[Event] = None,
-        on_keepalive: Optional[Callable[[int], None]] = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
 
 
@@ -710,8 +710,8 @@ class YubiOtpSession:
 
     def __init__(
         self,
-        connection: Union[OtpConnection, SmartCardConnection],
-        scp_key_params: Optional[ScpKeyParams] = None,
+        connection: OtpConnection | SmartCardConnection,
+        scp_key_params: ScpKeyParams | None = None,
     ):
         if isinstance(connection, OtpConnection):
             if scp_key_params:
@@ -792,8 +792,8 @@ class YubiOtpSession:
         self,
         slot: SLOT,
         configuration: SlotConfiguration,
-        acc_code: Optional[bytes] = None,
-        cur_acc_code: Optional[bytes] = None,
+        acc_code: bytes | None = None,
+        cur_acc_code: bytes | None = None,
     ) -> None:
         """Write configuration to slot.
 
@@ -821,8 +821,8 @@ class YubiOtpSession:
         self,
         slot: SLOT,
         configuration: SlotConfiguration,
-        acc_code: Optional[bytes] = None,
-        cur_acc_code: Optional[bytes] = None,
+        acc_code: bytes | None = None,
+        cur_acc_code: bytes | None = None,
     ) -> None:
         """Update configuration in slot.
 
@@ -853,7 +853,7 @@ class YubiOtpSession:
         logger.debug("Swapping touch slots")
         self._write_config(CONFIG_SLOT.SWAP, b"", None)
 
-    def delete_slot(self, slot: SLOT, cur_acc_code: Optional[bytes] = None) -> None:
+    def delete_slot(self, slot: SLOT, cur_acc_code: bytes | None = None) -> None:
         """Delete configuration stored in slot.
 
         :param slot: The slot to delete the configuration in.
@@ -867,9 +867,7 @@ class YubiOtpSession:
             cur_acc_code,
         )
 
-    def set_scan_map(
-        self, scan_map: bytes, cur_acc_code: Optional[bytes] = None
-    ) -> None:
+    def set_scan_map(self, scan_map: bytes, cur_acc_code: bytes | None = None) -> None:
         """Update scan-codes on YubiKey.
 
         This updates the scan-codes (or keyboard presses) that the YubiKey
@@ -881,8 +879,8 @@ class YubiOtpSession:
     def set_ndef_configuration(
         self,
         slot: SLOT,
-        uri: Optional[str] = None,
-        cur_acc_code: Optional[bytes] = None,
+        uri: str | None = None,
+        cur_acc_code: bytes | None = None,
         ndef_type: NDEF_TYPE = NDEF_TYPE.URI,
     ) -> None:
         """Configure a slot to be used over NDEF (NFC).
@@ -904,8 +902,8 @@ class YubiOtpSession:
         self,
         slot: SLOT,
         challenge: bytes,
-        event: Optional[Event] = None,
-        on_keepalive: Optional[Callable[[int], None]] = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes:
         """Perform a challenge-response operation using HMAC-SHA1.
 

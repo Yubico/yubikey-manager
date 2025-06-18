@@ -28,7 +28,7 @@
 import logging
 import struct
 from threading import Event
-from typing import Callable, Iterator, Optional
+from typing import Callable, Iterator
 
 from fido2.ctap import STATUS, CtapDevice, CtapError
 from fido2.hid import CAPABILITY, CTAPHID
@@ -58,7 +58,7 @@ class SmartCardCtapDevice(CtapDevice):
     def __init__(
         self,
         connection: SmartCardConnection,
-        scp_key_params: Optional[ScpKeyParams] = None,
+        scp_key_params: ScpKeyParams | None = None,
     ):
         self._capabilities = CAPABILITY(0)
 
@@ -92,8 +92,8 @@ class SmartCardCtapDevice(CtapDevice):
         self,
         cmd: int,
         data: bytes = b"",
-        event: Optional[Event] = None,
-        on_keepalive: Optional[Callable[[STATUS], None]] = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[STATUS], None] | None = None,
     ) -> bytes:
         if cmd == CTAPHID.MSG:
             cla, ins, p1, p2 = data[:4]

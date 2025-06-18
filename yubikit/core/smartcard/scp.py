@@ -31,7 +31,7 @@ import os
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
-from typing import Callable, NamedTuple, Optional, Sequence, Union
+from typing import Callable, NamedTuple, Sequence
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -100,7 +100,7 @@ class SessionKeys(NamedTuple):
     key_senc: bytes
     key_smac: bytes
     key_srmac: bytes
-    key_dek: Optional[bytes] = None
+    key_dek: bytes | None = None
 
 
 class StaticKeys(NamedTuple):
@@ -108,7 +108,7 @@ class StaticKeys(NamedTuple):
 
     key_enc: bytes
     key_mac: bytes
-    key_dek: Optional[bytes] = None
+    key_dek: bytes | None = None
 
     @classmethod
     def default(cls) -> "StaticKeys":
@@ -140,7 +140,7 @@ class KeyRef(bytes):
     def kvn(self) -> int:
         return self[1]
 
-    def __new__(cls, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
+    def __new__(cls, kid_or_data: int | bytes, kvn: int | None = None):
         """This allows creation by passing either binary data, or kid and kvn."""
         if isinstance(kid_or_data, int):  # kid and kvn
             if kvn is None:
@@ -154,7 +154,7 @@ class KeyRef(bytes):
         # mypy thinks this is wrong
         return super(KeyRef, cls).__new__(cls, data)  # type: ignore
 
-    def __init__(self, kid_or_data: Union[int, bytes], kvn: Optional[int] = None):
+    def __init__(self, kid_or_data: int | bytes, kvn: int | None = None):
         if len(self) != 2:
             raise ValueError("Incorrect length")
 
@@ -180,8 +180,8 @@ class Scp03KeyParams(ScpKeyParams):
 class Scp11KeyParams(ScpKeyParams):
     pk_sd_ecka: ec.EllipticCurvePublicKey
     # For SCP11 a/c we need an OCE key, with its trust chain
-    oce_ref: Optional[KeyRef] = None
-    sk_oce_ecka: Optional[ec.EllipticCurvePrivateKey] = None
+    oce_ref: KeyRef | None = None
+    sk_oce_ecka: ec.EllipticCurvePrivateKey | None = None
     # Certificate chain for sk_oce_ecka, leaf-last order
     certificates: Sequence[x509.Certificate] = field(default_factory=list)
 
@@ -248,7 +248,7 @@ class ScpState:
         send_apdu: SendApdu,
         key_params: Scp03KeyParams,
         *,
-        host_challenge: Optional[bytes] = None,
+        host_challenge: bytes | None = None,
     ) -> tuple["ScpState", bytes]:
         logger.debug("Initializing SCP03 handshake")
         host_challenge = host_challenge or os.urandom(8)

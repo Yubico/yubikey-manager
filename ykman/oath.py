@@ -28,7 +28,6 @@
 import logging
 import struct
 from time import time
-from typing import Optional
 
 from yubikit.core.smartcard import SW, ApduError
 from yubikit.oath import OATH_TYPE, Credential, OathSession
@@ -50,7 +49,7 @@ def is_steam(credential: Credential) -> bool:
 
 
 def calculate_steam(
-    app: OathSession, credential: Credential, timestamp: Optional[int] = None
+    app: OathSession, credential: Credential, timestamp: int | None = None
 ) -> str:
     """Calculate steam codes."""
     timestamp = int(timestamp or time())

@@ -33,7 +33,7 @@ import warnings
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from typing import Optional, Union, cast, overload
+from typing import TypeAlias, cast, overload
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -73,18 +73,18 @@ from .core.smartcard import (
 logger = logging.getLogger(__name__)
 
 
-PublicKey = Union[
-    rsa.RSAPublicKey,
-    ec.EllipticCurvePublicKey,
-    ed25519.Ed25519PublicKey,
-    x25519.X25519PublicKey,
-]
-PrivateKey = Union[
-    rsa.RSAPrivateKeyWithSerialization,
-    ec.EllipticCurvePrivateKeyWithSerialization,
-    ed25519.Ed25519PrivateKey,
-    x25519.X25519PrivateKey,
-]
+PublicKey: TypeAlias = (
+    rsa.RSAPublicKey
+    | ec.EllipticCurvePublicKey
+    | ed25519.Ed25519PublicKey
+    | x25519.X25519PublicKey
+)
+PrivateKey: TypeAlias = (
+    rsa.RSAPrivateKeyWithSerialization
+    | ec.EllipticCurvePrivateKeyWithSerialization
+    | ed25519.Ed25519PrivateKey
+    | x25519.X25519PrivateKey
+)
 
 
 @unique
@@ -473,16 +473,16 @@ _chuid_no_value = object()
 
 @dataclass
 class Chuid:
-    buffer_length: Optional[int] = None
+    buffer_length: int | None = None
     fasc_n: FascN = cast(FascN, _chuid_no_value)
-    agency_code: Optional[bytes] = None
-    organizational_identifier: Optional[bytes] = None
-    duns: Optional[bytes] = None
+    agency_code: bytes | None = None
+    organizational_identifier: bytes | None = None
+    duns: bytes | None = None
     guid: bytes = cast(bytes, _chuid_no_value)
     expiration_date: date = cast(date, _chuid_no_value)
-    authentication_key_map: Optional[bytes] = None
+    authentication_key_map: bytes | None = None
     asymmetric_signature: bytes = cast(bytes, _chuid_no_value)
-    lrc: Optional[int] = None
+    lrc: int | None = None
 
     def __post_init__(self):
         if _chuid_no_value in (
@@ -654,7 +654,7 @@ class PivSession:
     def __init__(
         self,
         connection: SmartCardConnection,
-        scp_key_params: Optional[ScpKeyParams] = None,
+        scp_key_params: ScpKeyParams | None = None,
     ):
         self.protocol = SmartCardProtocol(connection)
         self.protocol.select(AID.PIV)
@@ -854,7 +854,7 @@ class PivSession:
 
     def verify_uv(
         self, temporary_pin: bool = False, check_only: bool = False
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         """Verify the user by fingerprint (YubiKey Bio only).
 
         Fingerprint verification will allow usage of private keys which have a PIN
@@ -1072,7 +1072,7 @@ class PivSession:
         key_type: KEY_TYPE,
         message: bytes,
         hash_algorithm: hashes.HashAlgorithm,
-        padding: Optional[AsymmetricPadding] = None,
+        padding: AsymmetricPadding | None = None,
     ) -> bytes:
         """Sign message with key.
 
@@ -1119,9 +1119,9 @@ class PivSession:
     def calculate_secret(
         self,
         slot: SLOT,
-        peer_public_key: Union[
-            ec.EllipticCurvePublicKeyWithSerialization, x25519.X25519PublicKey
-        ],
+        peer_public_key: (
+            ec.EllipticCurvePublicKeyWithSerialization | x25519.X25519PublicKey
+        ),
     ) -> bytes:
         """Calculate shared secret using ECDH.
 
@@ -1172,7 +1172,7 @@ class PivSession:
         except ValueError as e:
             raise BadResponseError("Malformed object data", e)
 
-    def put_object(self, object_id: int, data: Optional[bytes] = None) -> None:
+    def put_object(self, object_id: int, data: bytes | None = None) -> None:
         """Write data to PIV object.
 
         Requires authentication with management key.

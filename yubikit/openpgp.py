@@ -34,10 +34,9 @@ from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
     ClassVar,
     Mapping,
-    Optional,
     Sequence,
     SupportsBytes,
-    Union,
+    TypeAlias,
 )
 
 from cryptography import x509
@@ -403,21 +402,16 @@ class KEY_STATUS(IntEnum):
 KeyInformation = Mapping[KEY_REF, KEY_STATUS]
 Fingerprints = Mapping[KEY_REF, bytes]
 GenerationTimes = Mapping[KEY_REF, int]
-EcPublicKey = Union[
-    ec.EllipticCurvePublicKey,
-    ed25519.Ed25519PublicKey,
-    x25519.X25519PublicKey,
-]
-PublicKey = Union[EcPublicKey, rsa.RSAPublicKey]
-EcPrivateKey = Union[
-    ec.EllipticCurvePrivateKeyWithSerialization,
-    ed25519.Ed25519PrivateKey,
-    x25519.X25519PrivateKey,
-]
-PrivateKey = Union[
-    rsa.RSAPrivateKeyWithSerialization,
-    EcPrivateKey,
-]
+EcPublicKey: TypeAlias = (
+    ec.EllipticCurvePublicKey | ed25519.Ed25519PublicKey | x25519.X25519PublicKey
+)
+PublicKey: TypeAlias = EcPublicKey | rsa.RSAPublicKey
+EcPrivateKey: TypeAlias = (
+    ec.EllipticCurvePrivateKeyWithSerialization
+    | ed25519.Ed25519PrivateKey
+    | x25519.X25519PrivateKey
+)
+PrivateKey: TypeAlias = rsa.RSAPrivateKeyWithSerialization | EcPrivateKey
 
 
 # mypy doesn't handle abstract dataclasses well
@@ -605,16 +599,16 @@ class DiscretionaryDataObjects:
     attributes_sig: AlgorithmAttributes
     attributes_dec: AlgorithmAttributes
     attributes_aut: AlgorithmAttributes
-    attributes_att: Optional[AlgorithmAttributes]
+    attributes_att: AlgorithmAttributes | None
     pw_status: PwStatus
     fingerprints: Fingerprints
     ca_fingerprints: Fingerprints
     generation_times: GenerationTimes
     key_information: KeyInformation
-    uif_sig: Optional[UIF]
-    uif_dec: Optional[UIF]
-    uif_aut: Optional[UIF]
-    uif_att: Optional[UIF]
+    uif_sig: UIF | None
+    uif_dec: UIF | None
+    uif_aut: UIF | None
+    uif_att: UIF | None
 
     @classmethod
     def parse(cls, encoded: bytes) -> "DiscretionaryDataObjects":
@@ -643,7 +637,7 @@ class DiscretionaryDataObjects:
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
         return getattr(self, f"attributes_{key_ref.name.lower()}")
 
-    def get_uif(self, key_ref: KEY_REF) -> Optional[UIF]:
+    def get_uif(self, key_ref: KEY_REF) -> UIF | None:
         return getattr(self, f"uif_{key_ref.name.lower()}")
 
 
@@ -653,8 +647,8 @@ class ApplicationRelatedData:
 
     aid: OpenPgpAid
     historical: bytes
-    extended_length_info: Optional[ExtendedLengthInfo]
-    general_feature_management: Optional[GENERAL_FEATURE_MANAGEMENT]
+    extended_length_info: ExtendedLengthInfo | None
+    general_feature_management: GENERAL_FEATURE_MANAGEMENT | None
     discretionary: DiscretionaryDataObjects
 
     @classmethod
@@ -754,10 +748,10 @@ class KdfIterSaltedS2k(Kdf):
     hash_algorithm: HASH_ALGORITHM
     iteration_count: int
     salt_user: bytes
-    salt_reset: Optional[bytes]
-    salt_admin: Optional[bytes]
-    initial_hash_user: Optional[bytes]
-    initial_hash_admin: Optional[bytes]
+    salt_reset: bytes | None
+    salt_admin: bytes | None
+    initial_hash_user: bytes | None
+    initial_hash_admin: bytes | None
 
     @staticmethod
     def _do_process(hash_algorithm, iteration_count, data):
@@ -878,7 +872,7 @@ class RsaCrtKeyTemplate(RsaKeyTemplate):
 @dataclass
 class EcKeyTemplate(PrivateKeyTemplate):
     private_key: bytes
-    public_key: Optional[bytes]
+    public_key: bytes | None
 
     def _get_template(self):
         tlvs = [Tlv(0x92, self.private_key)]
@@ -998,7 +992,7 @@ class OpenPgpSession:
     def __init__(
         self,
         connection: SmartCardConnection,
-        scp_key_params: Optional[ScpKeyParams] = None,
+        scp_key_params: ScpKeyParams | None = None,
     ):
         self.protocol = SmartCardProtocol(connection)
         try:
@@ -1075,7 +1069,7 @@ class OpenPgpSession:
         logger.debug(f"Reading Data Object {do.name} ({do:X})")
         return self.protocol.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
 
-    def put_data(self, do: DO, data: Union[bytes, SupportsBytes]) -> None:
+    def put_data(self, do: DO, data: bytes | SupportsBytes) -> None:
         """Write a Data Object to the YubiKey.
 
         :param do: The Data Object to write to.
@@ -1307,7 +1301,7 @@ class OpenPgpSession:
         self.put_data(DO.RESETTING_CODE, data)
         logger.info("New Reset Code has been set")
 
-    def reset_pin(self, new_pin: str, reset_code: Optional[str] = None) -> None:
+    def reset_pin(self, new_pin: str, reset_code: str | None = None) -> None:
         """Reset the User PIN to a new value.
 
         This command requires Admin PIN verification, or the Reset Code.
@@ -1735,7 +1729,7 @@ class OpenPgpSession:
             )
         return response
 
-    def decrypt(self, value: Union[bytes, EcPublicKey]) -> bytes:
+    def decrypt(self, value: bytes | EcPublicKey) -> bytes:
         """Decrypt a value using the DEC key.
 
         For RSA the `value` should be an encrypted block.

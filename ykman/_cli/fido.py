@@ -29,7 +29,7 @@ import csv as _csv
 import io
 import logging
 from time import sleep
-from typing import Optional, Sequence
+from typing import Never, Sequence
 
 import click
 from fido2.ctap import STATUS, CtapError
@@ -51,7 +51,6 @@ from yubikit.management import CAPABILITY
 
 from ..fido import fips_change_pin, fips_reset, fips_verify_pin, is_in_fips_mode
 from ..hid import list_ctap_devices
-from ..pcsc import ScardYubiKeyDevice
 from .util import (
     CliFail,
     click_force_option,
@@ -329,7 +328,7 @@ def reset(ctx, force):
         raise CliFail("Reset failed.")
 
 
-def _fail_pin_error(ctx, e, other="%s"):
+def _fail_pin_error(ctx, e, other="%s") -> Never:
     if e.code == CtapError.ERR.PIN_INVALID:
         raise CliFail("Wrong PIN.")
     elif e.code == CtapError.ERR.PIN_AUTH_BLOCKED:
@@ -524,7 +523,7 @@ def verify(ctx, pin):
             elif e.code == SW.COMMAND_NOT_ALLOWED:
                 raise CliFail("PIN is not set.")
             else:
-                raise CliFail(f"PIN verification failed: {e.code.name}.")
+                raise CliFail(f"PIN verification failed: {e.code:04x}.")
     else:
         raise CliFail("This YubiKey does not support a FIDO PIN.")
     click.echo("PIN verified.")
@@ -916,7 +915,7 @@ def bio_delete(ctx, template_id, pin, force):
     enrollments = bio.enumerate_enrollments()
 
     try:
-        key: Optional[bytes] = bytes.fromhex(template_id)
+        key: bytes | None = bytes.fromhex(template_id)
     except ValueError:
         key = None
 

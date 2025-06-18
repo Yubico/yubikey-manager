@@ -27,7 +27,6 @@
 
 import struct
 import time
-from typing import Optional
 
 from fido2.ctap1 import ApduError, Ctap1
 
@@ -59,9 +58,7 @@ def is_in_fips_mode(fido_connection: FidoConnection) -> bool:
         raise
 
 
-def fips_change_pin(
-    fido_connection: FidoConnection, old_pin: Optional[str], new_pin: str
-):
+def fips_change_pin(fido_connection: FidoConnection, old_pin: str | None, new_pin: str):
     """Change the PIN on a YubiKey 4 FIPS.
 
     If no PIN is set, pass None or an empty string as old_pin.

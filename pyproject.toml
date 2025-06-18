@@ -6,7 +6,7 @@ authors = [
   { name = "Dain Nilsson", email = "<dain@yubico.com>" }
 ]
 readme = "README.adoc"
-requires-python = ">=3.9, <4"
+requires-python = ">=3.10, <4"
 license = { file = "COPYING" }
 keywords = ["yubikey", "yubiotp", "piv", "fido"]
 classifiers = [
@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
   "cryptography (>=3.0, <48)",
   "pyscard (>=2.0, <3)",
-  "fido2 (>=1.0, <3)",
+  "fido2 (>=2.0, <3)",
   "click (>=8.0, <9)",
   "keyring (>=23.4, <26)",
   "pywin32 (>=223) ; sys_platform == 'win32'",

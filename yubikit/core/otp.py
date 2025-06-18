@@ -30,7 +30,7 @@ import logging
 import struct
 from threading import Event
 from time import sleep
-from typing import Callable, Optional
+from typing import Callable
 
 from yubikit.logging import LOG_LEVEL
 
@@ -143,9 +143,9 @@ class OtpProtocol:
     def send_and_receive(
         self,
         slot: int,
-        data: Optional[bytes] = None,
-        event: Optional[Event] = None,
-        on_keepalive: Optional[Callable[[int], None]] = None,
+        data: bytes | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes:
         """Sends a command to the YubiKey, and reads the response.
 

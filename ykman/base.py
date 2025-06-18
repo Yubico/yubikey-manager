@@ -25,7 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Hashable, Optional
+from typing import Hashable
 
 from yubikit.core import PID, TRANSPORT, YubiKeyDevice
 
@@ -33,12 +33,12 @@ from yubikit.core import PID, TRANSPORT, YubiKeyDevice
 class YkmanDevice(YubiKeyDevice):
     """YubiKey device reference, with optional PID"""
 
-    def __init__(self, transport: TRANSPORT, fingerprint: Hashable, pid: Optional[PID]):
+    def __init__(self, transport: TRANSPORT, fingerprint: Hashable, pid: PID | None):
         super(YkmanDevice, self).__init__(transport, fingerprint)
         self._pid = pid
 
     @property
-    def pid(self) -> Optional[PID]:
+    def pid(self) -> PID | None:
         """Return the PID of the YubiKey, if available."""
         return self._pid
 

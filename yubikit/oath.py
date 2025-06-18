@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
 from time import time
-from typing import Mapping, Optional
+from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .core import (
@@ -110,7 +110,7 @@ class CredentialData:
     digits: int = DEFAULT_DIGITS
     period: int = DEFAULT_PERIOD
     counter: int = DEFAULT_IMF
-    issuer: Optional[str] = None
+    issuer: str | None = None
 
     @classmethod
     def parse_uri(cls, uri: str) -> "CredentialData":
@@ -163,11 +163,11 @@ class Credential:
 
     device_id: str
     id: bytes
-    issuer: Optional[str]
+    issuer: str | None
     name: str
     oath_type: OATH_TYPE
     period: int
-    touch_required: Optional[bool]
+    touch_required: bool | None
 
     def __lt__(self, other):
         a = ((self.issuer or self.name).lower(), self.name.lower())
@@ -266,7 +266,7 @@ class OathSession:
     def __init__(
         self,
         connection: SmartCardConnection,
-        scp_key_params: Optional[ScpKeyParams] = None,
+        scp_key_params: ScpKeyParams | None = None,
     ):
         self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
         self._version, self._salt, self._challenge = _parse_select(
@@ -424,7 +424,7 @@ class OathSession:
         )
 
     def rename_credential(
-        self, credential_id: bytes, name: str, issuer: Optional[str] = None
+        self, credential_id: bytes, name: str, issuer: str | None = None
     ) -> bytes:
         """Rename a OATH credential.
 
@@ -487,8 +487,8 @@ class OathSession:
         logger.info("Credential deleted")
 
     def calculate_all(
-        self, timestamp: Optional[int] = None
-    ) -> Mapping[Credential, Optional[Code]]:
+        self, timestamp: int | None = None
+    ) -> Mapping[Credential, Code | None]:
         """Calculate codes for all OATH credentials on the YubiKey.
 
         This excludes credentials which require touch as well as HOTP credentials.
@@ -530,7 +530,7 @@ class OathSession:
         return entries
 
     def calculate_code(
-        self, credential: Credential, timestamp: Optional[int] = None
+        self, credential: Credential, timestamp: int | None = None
     ) -> Code:
         """Calculate code for an OATH credential.
 
