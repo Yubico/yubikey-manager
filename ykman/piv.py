@@ -399,7 +399,8 @@ def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certif
     :param session: The PIV session.
     """
     certs = {}
-    for slot in set(SLOT) - {SLOT.ATTESTATION}:
+    slots: list[SLOT] = [s for s in SLOT if s != SLOT.ATTESTATION]
+    for slot in slots:
         try:
             certs[slot] = session.get_certificate(slot)
         except ApduError:
@@ -412,7 +413,8 @@ def list_certificates(session: PivSession) -> Mapping[SLOT, Optional[x509.Certif
 
 def _list_keys(session: PivSession) -> Mapping[SLOT, SlotMetadata]:
     keys = {}
-    for slot in set(SLOT) - {SLOT.ATTESTATION}:
+    slots: list[SLOT] = [s for s in SLOT if s != SLOT.ATTESTATION]
+    for slot in slots:
         try:
             keys[slot] = session.get_slot_metadata(slot)
         except ApduError as e:
@@ -587,10 +589,9 @@ def get_piv_info(session: PivSession):
         keys = _list_keys(session)
     except NotSupportedError:
         keys = {}
-    for slot in set(SLOT) - {SLOT.ATTESTATION}:
-        if slot not in keys and slot not in certs:
-            continue
 
+    slots = [s for s in SLOT if s in keys or s in certs]
+    for slot in slots:
         cert_data: dict[str, Any] = {}
         objects[f"Slot {slot}"] = cert_data
         if slot in keys:
