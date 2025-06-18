@@ -96,10 +96,24 @@ def fido(ctx):
 
     ctx.call_on_close(conn.close)
     ctx.obj["conn"] = conn
-    try:
+    info = ctx.obj["info"]
+
+    if CAPABILITY.FIDO2 in info.config.enabled_capabilities[dev.transport]:
         ctx.obj["ctap2"] = Ctap2(conn)
-    except (ValueError, CtapError):
-        logger.info("FIDO device does not support CTAP2", exc_info=True)
+    else:
+        supported = CAPABILITY.FIDO2 in info.supported_capabilities[dev.transport]
+        if ctx.invoked_subcommand != "info":
+            if supported:
+                raise CliFail(
+                    "FIDO2 has been disabled on this YubiKey. "
+                    "Use 'ykman config' to enable it."
+                )
+            else:
+                raise CliFail("This YubiKey does not support FIDO2.")
+        if supported:
+            logger.debug("CTAP2 supported, but not enabled")
+        else:
+            logger.debug("CTAP2 not supported on this device")
 
 
 @fido.command()
@@ -165,7 +179,10 @@ def info(ctx):
         if ep is not None:
             data["Enterprise Attestation"] = "Enabled" if ep else "Disabled"
     else:
-        data["PIN"] = "Not supported"
+        dev = ctx.obj["device"]
+        supported = CAPABILITY.FIDO2 in info.supported_capabilities[dev.transport]
+        data["CTAP2"] = "Disabled" if supported else "Not supported"
+        data["PIN"] = "Disabled" if supported else "Not supported"
 
     click.echo("\n".join(pretty_print(lines)))
 
