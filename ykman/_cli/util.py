@@ -269,12 +269,12 @@ def click_prompt(prompt, err=True, **kwargs):
     return click.prompt(prompt, err=err, **kwargs)
 
 
-def prompt_for_touch():
+def prompt_for_touch(prompt: str = "Touch your YubiKey...") -> None:
     logger.debug("Prompting user to touch YubiKey...")
     try:
-        click.echo("Touch your YubiKey...", err=True)
+        click.echo(prompt, err=True)
     except Exception:
-        sys.stderr.write("Touch your YubiKey...\n")
+        sys.stderr.write(f"{prompt}\n")
 
 
 @contextmanager

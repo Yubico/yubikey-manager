@@ -102,18 +102,22 @@ def fido(ctx):
         ctx.obj["ctap2"] = Ctap2(conn)
     else:
         supported = CAPABILITY.FIDO2 in info.supported_capabilities[dev.transport]
-        if ctx.invoked_subcommand != "info":
-            if supported:
-                raise CliFail(
-                    "FIDO2 has been disabled on this YubiKey. "
-                    "Use 'ykman config' to enable it."
-                )
-            else:
-                raise CliFail("This YubiKey does not support FIDO2.")
+        logger.debug(f"CTAP2 not enabled, supported: {supported}")
+
+        if ctx.invoked_subcommand == "info":
+            return  # Don't fail on info command
+        if ctx.invoked_subcommand == "reset" and is_yk4_fips(info):
+            # Reset is supported on YK4 FIPS only
+            return
+
+        # Fail other commands if CTAP2 is not enabled
         if supported:
-            logger.debug("CTAP2 supported, but not enabled")
+            raise CliFail(
+                "FIDO2 has been disabled on this YubiKey. "
+                "Use 'ykman config' to enable it."
+            )
         else:
-            logger.debug("CTAP2 not supported on this device")
+            raise CliFail("This YubiKey does not support FIDO2.")
 
 
 @fido.command()
@@ -209,10 +213,17 @@ def reset(ctx, force):
         )
 
     dev = ctx.obj["device"]
-    conn = ctx.obj["conn"]
-    if isinstance(dev, ScardYubiKeyDevice):  # NFC
-        is_fips = False
+    if CAPABILITY.FIDO2 in info.config.enabled_capabilities[dev.transport]:
+        transports = ctx.obj["ctap2"].info.transports_for_reset
+        if transports and dev.transport not in transports:
+            raise CliFail(
+                "Cannot perform FIDO reset on this YubiKey over the current transport. "
+                f"Allowed transports: {', '.join(transports)}"
+            )
 
+    conn = ctx.obj["conn"]
+    if dev.transport == TRANSPORT.NFC:
+        is_fips = False
         conn.close()
 
         def prompt_re_insert():
@@ -239,11 +250,7 @@ def reset(ctx, force):
         n_keys = len(list_ctap_devices())
         if n_keys > 1:
             raise CliFail("Only one YubiKey can be connected to perform a reset.")
-        is_fips = is_yk4_fips(ctx.obj["info"])
-
-        ctap2 = ctx.obj.get("ctap2")
-        if not is_fips and not ctap2:
-            raise CliFail("This YubiKey does not support FIDO reset.")
+        is_fips = is_yk4_fips(info)
 
         def prompt_re_insert():
             click.echo("Remove and re-insert your YubiKey to perform the reset...")
@@ -283,12 +290,20 @@ def reset(ctx, force):
             with prompt_timeout():
                 fips_reset(conn)
         else:
+            ctap2 = Ctap2(conn)
+            msg = (
+                "Press and hold the YubiKey button for 10 seconds to confirm."
+                if ctap2.info.long_touch_for_reset
+                else "Touch the YubiKey to confirm."
+            )
 
             def on_keepalive(status):
                 if status == STATUS.UPNEEDED:
-                    prompt_for_touch()
+                    prompt_for_touch(msg)
+                elif status == STATUS.PROCESSING:
+                    click.echo("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!")
 
-            Ctap2(conn).reset(on_keepalive=on_keepalive)
+            ctap2.reset(on_keepalive=on_keepalive)
         click.echo("FIDO application data reset.")
     except CtapError as e:
         if e.code == CtapError.ERR.ACTION_TIMEOUT:
