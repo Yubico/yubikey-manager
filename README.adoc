@@ -4,7 +4,7 @@ image:https://github.com/Yubico/yubikey-manager/actions/workflows/windows.yml/ba
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml/badge.svg["MacOS build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml"]
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml/badge.svg["Ubuntu build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml"]
 
-Python 3.8 (or later) library and command line tool for configuring a YubiKey.
+Python 3.10 (or later) library and command line tool for configuring a YubiKey.
 If you're looking for a graphical application, check out  https://developers.yubico.com/yubioath-flutter/[Yubico Authenticator].
 
 === Usage
@@ -113,11 +113,9 @@ To uninstall yubikey-manager when installed via the pgk installer, run:
 ==== Linux
 Packages are available for several Linux distributions by third party package
 maintainers.
-Yubico also provides packages for Ubuntu in the yubico/stable PPA:
 
-  $ sudo apt-add-repository ppa:yubico/stable
-  $ sudo apt update
-  $ sudo apt install yubikey-manager
+Python-specific tools such as pip, pipx, or uv can be used directly to install and
+manage yubikey-manager, and is generally the recommended approach.
 
 ==== FreeBSD
 Although not being officially supported on this platform, YubiKey Manager can be

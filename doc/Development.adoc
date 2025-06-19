@@ -2,9 +2,8 @@
 
 === Install dependencies
 
-It's assumed a Python 3 environment with pip is installed.
-Additionally, the project uses https://python-poetry.org/[poetry]
-as its build tool; install that as well.
+This project uses https://docs.astral.sh/uv/[uv] for development.
+Follow the uv Getting Started guide to install and configure it.
 
 ==== Windows
 
@@ -30,40 +29,42 @@ Clone the repository:
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
 
-Install via poetry:
+=== Running from source
 
-    $ poetry install
+To run ykman from source, use the `uv run` command:
+
+    $ uv run ykman
 
 Show available commands:
 
-    $ poetry run ykman --help
+    $ uv run ykman --help
 
 Show information about inserted YubiKey:
 
-    $ poetry run ykman info
+    $ uv run ykman info
 
 Run ykman in DEBUG mode:
 
-    $ poetry run ykman --log-level DEBUG info
+    $ uv run ykman --log-level DEBUG info
 
 === Code Style & Security
 
-This project uses https://black.readthedocs.io/en/latest/[Black] and
-https://flake8.pycqa.org/[Flake8] for code style,
-https://mypy-lang.org[mypy] for static type checking, and
-https://github.com/PyCQA[Bandit] for security linting. These are invoked with a
-http://pre-commit.com/[pre-commit] hook.
+This project uses https://docs.astral.sh/ruff/[ruff] for code style, and security
+linting.
+https://mypy-lang.org[mypy] and https://github.com/microsoft/pyright[pyright] are
+used for static type checking.
+These are invoked with a http://pre-commit.com/[pre-commit] hook.
 
 To use these:
 
-    $ pip install pre-commit
+    $ uv tool install pre-commit
     $ pre-commit install
 
 === Unit tests
 
 To run unit tests:
 
-    $ poetry run pytest
+    $ uv run pytest
 
 
 === Integration tests
@@ -75,12 +76,12 @@ To run integration tests, indicate the serial number (given by `ykman list`) of
 the YubiKey to test with.  Make sure no other YubiKey is connected when running
 the test!
 
-   $ poetry run pytest --device 123456
+   $ uv run pytest --device 123456
 
 To run the tests over NFC, place the YubiKey to test on an NFC reader, and
 indicate both the reader and the serial number of the YubiKey:
 
-   $ poetry run pytest --reader HID --device 123456
+   $ uv run pytest --reader HID --device 123456
 
 The integration test suite will automatically identify which test cases can be
 run with the attached YubiKey.
@@ -90,3 +91,4 @@ run with the attached YubiKey.
 
 For third-party packaging, use the source releases and signatures available
 https://developers.yubico.com/yubikey-manager/Releases/[here].
+These artifacts are also published on Github on the Releases page.
