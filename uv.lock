@@ -485,15 +485,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nodeenv"
-version = "1.9.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/43/16/fc88b08840de0e0a72a2f9d8c6bae36be573e475a6326ae854bcc549fc45/nodeenv-1.9.1.tar.gz", hash = "sha256:6ec12890a2dab7946721edbfbcd91f3319c6ccc9aec47be7c7e6b7011ee6645f", size = 47437, upload-time = "2024-06-04T18:44:11.171Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/1d/1b658dbd2b9fa9c4c9f32accbfc0205d532c8c6194dc0f2a4c0428e7128a/nodeenv-1.9.1-py2.py3-none-any.whl", hash = "sha256:ba11c9782d29c27c70ffbdda2d7415098754709be8a7056d79a737cd901155c9", size = 22314, upload-time = "2024-06-04T18:44:08.352Z" },
-]
-
-[[package]]
 name = "packaging"
 version = "25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -577,19 +568,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5f/ff/e3376595935d5f8135964d2177cd3e3e0c1b5a6237497d9775237c247a5d/pyinstaller_hooks_contrib-2025.5.tar.gz", hash = "sha256:707386770b8fe066c04aad18a71bc483c7b25e18b4750a756999f7da2ab31982", size = 163124, upload-time = "2025-06-08T18:47:53.26Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/2c/b4d317534e17dd1df95c394d4b37febb15ead006a1c07c2bb006481fb5e7/pyinstaller_hooks_contrib-2025.5-py3-none-any.whl", hash = "sha256:ebfae1ba341cb0002fb2770fad0edf2b3e913c2728d92df7ad562260988ca373", size = 437246, upload-time = "2025-06-08T18:47:51.516Z" },
-]
-
-[[package]]
-name = "pyright"
-version = "1.1.402"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nodeenv" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/04/ce0c132d00e20f2d2fb3b3e7c125264ca8b909e693841210534b1ea1752f/pyright-1.1.402.tar.gz", hash = "sha256:85a33c2d40cd4439c66aa946fd4ce71ab2f3f5b8c22ce36a623f59ac22937683", size = 3888207, upload-time = "2025-06-11T08:48:35.759Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/37/1a1c62d955e82adae588be8e374c7f77b165b6cb4203f7d581269959abbc/pyright-1.1.402-py3-none-any.whl", hash = "sha256:2c721f11869baac1884e846232800fe021c33f1b4acb3929cff321f7ea4e2982", size = 5624004, upload-time = "2025-06-11T08:48:33.998Z" },
 ]
 
 [[package]]
@@ -947,7 +925,6 @@ dependencies = [
 dev = [
     { name = "makefun" },
     { name = "pyinstaller" },
-    { name = "pyright" },
     { name = "pytest" },
     { name = "sphinx" },
     { name = "sphinx-autoapi" },
@@ -968,7 +945,6 @@ requires-dist = [
 dev = [
     { name = "makefun", specifier = ">=1.9.5,<2" },
     { name = "pyinstaller", specifier = ">=6.10,<7" },
-    { name = "pyright", specifier = ">=1.1,<2" },
     { name = "pytest", specifier = ">=8.0,<9" },
     { name = "sphinx", specifier = ">=7.4,<8" },
     { name = "sphinx-autoapi", specifier = ">=3.3.3,<4" },

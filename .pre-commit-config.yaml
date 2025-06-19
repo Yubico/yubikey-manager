@@ -1,22 +1,19 @@
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.11.9
+  rev: v0.12.0
   hooks:
     # Run the linter, organize imports
-    - id: ruff
+    - id: ruff-check
       args: [ --fix ]
     # Run the formatter
     - id: ruff-format
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.15.0
+  rev: v1.16.1
   hooks:
     - id: mypy
       exclude: ^(tests/|docs/)  # keep in sync with mypy.ini
       additional_dependencies: []
-- repo: local
+- repo: https://github.com/RobertCraigie/pyright-python
+  rev: v1.1.402
   hooks:
     - id: pyright
-      name: pyright
-      language: script
-      entry: run-pyright.sh
-      require_serial: true

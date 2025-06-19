@@ -27,7 +27,13 @@ jobs:
           python-version-file: ".python-version"
 
       - name: Install the project
-        run: uv sync --locked --dev
+        run: uv sync --locked
+
+      - name: Run pre-commit hooks
+        run: |
+          uv tool install pre-commit
+          pre-commit install
+          pre-commit run --all-files --verbose
 
       - name: Explicitly use universal versions
         run: |

@@ -32,7 +32,6 @@ dev = [
     "sphinx>=7.4,<8",
     "sphinx-rtd-theme>=3,<4",
     "sphinx-autoapi>=3.3.3,<4",
-    "pyright>=1.1,<2",
 ]
 
 [project.urls]
@@ -65,3 +64,8 @@ testpaths = ["tests"]
 [tool.ruff.lint]
 select = ["I", "S"]
 exclude = ["tests/*"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+exclude = ["ykman/", "tests/", "docs/"]

@@ -25,7 +25,13 @@ jobs:
           sudo apt-get install -qq swig libpcsclite-dev
 
       - name: Install the project
-        run: uv sync --locked --dev
+        run: uv sync --locked
+
+      - name: Run pre-commit hooks
+        run: |
+          uv tool install pre-commit
+          pre-commit install
+          pre-commit run --all-files --verbose
 
       - name: Run unit tests
         run: uv run pytest
@@ -64,10 +70,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -qq swig libpcsclite-dev
-          python -m pip install --upgrade pip
 
       - name: Install the project
-        run: uv sync --locked --dev
+        run: uv sync --locked
 
       - name: Build sphinx documentation
         run: uv run make -C docs/ html
