@@ -33,7 +33,6 @@ jobs:
       - name: Run pre-commit hooks
         run: |
           uv tool install pre-commit
-          pre-commit install
           pre-commit run --all-files --verbose
 
       # Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
