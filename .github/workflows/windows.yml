@@ -2,6 +2,8 @@ name: Windows
 
 on: [push, pull_request]
 
+permissions: read-all
+
 jobs:
   build:
 

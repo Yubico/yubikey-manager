@@ -2,7 +2,8 @@ name: macOS
 
 on: [push, pull_request]
 
-# Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
+permissions: read-all
+
 jobs:
   build:
 
@@ -35,6 +36,7 @@ jobs:
           pre-commit install
           pre-commit run --all-files --verbose
 
+      # Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
       - name: Explicitly use universal versions
         run: |
           # Export exact versions
