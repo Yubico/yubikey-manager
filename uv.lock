@@ -910,7 +910,7 @@ wheels = [
 
 [[package]]
 name = "yubikey-manager"
-version = "5.7.3.dev0"
+version = "5.8.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
