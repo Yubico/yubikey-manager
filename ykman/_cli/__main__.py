@@ -636,7 +636,7 @@ def main():
         pass  # No --full-help
 
     try:
-        cli(obj={})
+        cli(obj={}, windows_expand_args=False)
     except Exception as e:
         status = 1
         if isinstance(e, CliFail):
