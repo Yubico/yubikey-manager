@@ -1112,8 +1112,8 @@ class PivSession:
         except AttributeError:
             raise ValueError("Invalid length of ciphertext")
         logger.debug(
-            f"Decrypting data with key in slot {slot} of type {key_type} using ",
-            f"padding={padding}",
+            f"Decrypting data with key in slot {slot} of type {key_type} using "
+            f"padding={padding}"
         )
         padded = self._use_private_key(slot, key_type, cipher_text, False)
         return _unpad_message(padded, padding)
