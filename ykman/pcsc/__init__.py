@@ -120,6 +120,7 @@ class ScardYubiKeyDevice(YkmanDevice):
         return issubclass(ScardSmartCardConnection, connection_type)
 
     def open_connection(self, connection_type):
+        assert isinstance(connection_type, type)  # noqa: S101
         if issubclass(ScardSmartCardConnection, connection_type):
             return self._open_smartcard_connection()
         elif issubclass(SmartCardCtapDevice, connection_type):

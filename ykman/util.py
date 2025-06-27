@@ -89,7 +89,10 @@ def parse_private_key(data, password):
 
     # PKCS12
     if is_pkcs12(data):
-        return _parse_pkcs12(data, password)[0]
+        key = _parse_pkcs12(data, password)[0]
+        if not key:
+            raise ValueError("PKCS12 file does not contain a private key.")
+        return key
 
     # DER
     try:

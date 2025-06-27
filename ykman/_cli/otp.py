@@ -192,7 +192,7 @@ def otp(ctx, access_code):
         try:
             access_code = parse_access_code_hex(access_code)
         except Exception as e:
-            ctx.fail(f"Failed to parse access code: {e}")
+            raise CliFail(f"Failed to parse access code: {e}")
 
     ctx.obj["access_code"] = access_code
 
@@ -249,11 +249,12 @@ def swap(ctx, force):
     Swaps the two slot configurations.
     """
     session = _get_session(ctx)
-    force or click.confirm(
-        "Swap the two slots of the YubiKey?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "Swap the two slots of the YubiKey?",
+            abort=True,
+            err=True,
+        )
 
     try:
         session.swap_slots()
@@ -316,11 +317,12 @@ def delete(ctx, slot, force):
     state = session.get_config_state()
     if not force and not state.is_configured(slot):
         raise CliFail("Not possible to delete an empty slot.")
-    force or click.confirm(
-        f"Do you really want to delete the configuration of slot {slot}?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            f"Do you really want to delete the configuration of slot {slot}?",
+            abort=True,
+            err=True,
+        )
     try:
         session.delete_slot(slot, ctx.obj["access_code"])
         click.echo(f"Configuration slot {slot} deleted.")
@@ -425,13 +427,15 @@ def yubiotp(
         )
 
     if public_id and serial_public_id:
-        ctx.fail("Invalid options: --public-id conflicts with --serial-public-id.")
+        raise CliFail("Invalid options: --public-id conflicts with --serial-public-id.")
 
     if private_id and generate_private_id:
-        ctx.fail("Invalid options: --private-id conflicts with --generate-public-id.")
+        raise CliFail(
+            "Invalid options: --private-id conflicts with --generate-public-id."
+        )
 
     if key and generate_key:
-        ctx.fail("Invalid options: --key conflicts with --generate-key.")
+        raise CliFail("Invalid options: --key conflicts with --generate-key.")
 
     if not public_id:
         if serial_public_id:
@@ -443,7 +447,7 @@ def yubiotp(
             public_id = modhex_encode(b"\xff\x00" + struct.pack(b">I", serial))
             click.echo(f"Using YubiKey serial as public ID: {public_id}")
         elif force:
-            ctx.fail(
+            raise CliFail(
                 "Public ID not given. Remove the --force flag, or "
                 "add the --serial-public-id flag or --public-id option."
             )
@@ -451,18 +455,18 @@ def yubiotp(
             public_id = click_prompt("Enter public ID")
 
     if len(public_id) % 2:
-        ctx.fail("Invalid public ID, length must be a multiple of 2.")
+        raise CliFail("Invalid public ID, length must be a multiple of 2.")
     try:
-        public_id = modhex_decode(public_id)
+        public_id_bytes = modhex_decode(public_id)
     except ValueError:
-        ctx.fail(f"Invalid public ID, must be modhex ({MODHEX_ALPHABET}).")
+        raise CliFail(f"Invalid public ID, must be modhex ({MODHEX_ALPHABET}).")
 
     if not private_id:
         if generate_private_id:
             private_id = os.urandom(6)
             click.echo(f"Using a randomly generated private ID: {private_id.hex()}")
         elif force:
-            ctx.fail(
+            raise CliFail(
                 "Private ID not given. Remove the --force flag, or "
                 "add the --generate-private-id flag or --private-id option."
             )
@@ -475,7 +479,7 @@ def yubiotp(
             key = os.urandom(16)
             click.echo(f"Using a randomly generated secret key: {key.hex()}")
         elif force:
-            ctx.fail(
+            raise CliFail(
                 "Secret key not given. Remove the --force flag, or "
                 "add the --generate-key flag or --key option."
             )
@@ -483,15 +487,16 @@ def yubiotp(
             key = click_prompt("Enter secret key")
             key = bytes.fromhex(key)
 
-    force or click.confirm(
-        f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
-    )
+    if not force:
+        click.confirm(
+            f"Program a YubiOTP credential in slot {slot}?", abort=True, err=True
+        )
 
     access_code = ctx.obj["access_code"]
     try:
         session.put_configuration(
             slot,
-            YubiOtpSlotConfiguration(public_id, private_id, key).append_cr(
+            YubiOtpSlotConfiguration(public_id_bytes, private_id, key).append_cr(
                 not no_enter
             ),
             access_code,
@@ -502,7 +507,7 @@ def yubiotp(
 
     if config_output:
         serial = serial or session.get_serial()
-        csv = format_csv(serial, public_id, private_id, key, access_code)
+        csv = format_csv(serial, public_id_bytes, private_id, key, access_code)
         config_output.write(csv + "\n")
         log_or_echo(
             f"Configuration parameters written to {_fname(config_output)}",
@@ -553,9 +558,9 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     session = _get_session(ctx)
 
     if password and len(password) > 38:
-        ctx.fail("Password too long (maximum length is 38 characters).")
+        raise CliFail("Password too long (maximum length is 38 characters).")
     if generate and not length:
-        ctx.fail("Provide a length for the generated password.")
+        raise CliFail("Provide a length for the generated password.")
 
     if not password and not generate:
         password = click_prompt("Enter a static password")
@@ -616,14 +621,14 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
 
     if key:
         if generate:
-            ctx.fail("Invalid options: --generate conflicts with KEY argument.")
+            raise CliFail("Invalid options: --generate conflicts with KEY argument.")
         elif totp:
             key = parse_b32_key(key)
         else:
             key = parse_oath_key(key)
     else:
         if force and not generate:
-            ctx.fail(
+            raise CliFail(
                 "No secret key given. Remove the --force flag, "
                 "set the KEY argument or set the --generate flag."
             )
@@ -647,11 +652,12 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
             key = parse_oath_key(key)
 
     cred_type = "TOTP" if totp else "challenge-response"
-    force or click.confirm(
-        f"Program a {cred_type} credential in slot {slot}?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            f"Program a {cred_type} credential in slot {slot}?",
+            abort=True,
+            err=True,
+        )
     try:
         session.put_configuration(
             slot,
@@ -711,7 +717,7 @@ def calculate(ctx, slot, challenge, totp, digits):
                 challenge = time_challenge(int(challenge))
             except Exception:
                 logger.exception("Error parsing challenge")
-                ctx.fail("Timestamp challenge for TOTP must be an integer.")
+                raise CliFail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
         challenge = bytes.fromhex(challenge)
 
@@ -816,9 +822,10 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             except Exception as e:
                 click.echo(e)
 
-    force or click.confirm(
-        f"Program a HOTP credential in slot {slot}?", abort=True, err=True
-    )
+    if not force:
+        click.confirm(
+            f"Program a HOTP credential in slot {slot}?", abort=True, err=True
+        )
     try:
         session.put_configuration(
             slot,
@@ -889,7 +896,7 @@ def settings(
     session = _get_session(ctx)
 
     if new_access_code and delete_access_code:
-        ctx.fail("--new-access-code conflicts with --delete-access-code.")
+        raise CliFail("--new-access-code conflicts with --delete-access-code.")
 
     if delete_access_code and not ctx.obj["access_code"]:
         raise CliFail(
@@ -912,16 +919,17 @@ def settings(
         try:
             new_access_code = parse_access_code_hex(new_access_code)
         except Exception as e:
-            ctx.fail("Failed to parse access code: " + str(e))
+            raise CliFail("Failed to parse access code: " + str(e))
         if ctx.obj["info"].pin_complexity and len(set(new_access_code)) < 2:
             raise CliFail("Access code does not meet complexity requirement.")
 
-    force or click.confirm(
-        f"Update the settings for slot {slot}? "
-        "All existing settings will be overwritten.",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            f"Update the settings for slot {slot}? "
+            "All existing settings will be overwritten.",
+            abort=True,
+            err=True,
+        )
 
     pacing_bits = int(pacing or "0") // 20
     pacing_10ms = bool(pacing_bits & 1)

@@ -64,12 +64,12 @@ class YkmanDevice(YubiKeyDevice):
         This may be required to perform certain operations, such as FIDO reset.
 
         This method will attempt to verify that the same YubiKey is reinserted,
-        but it will only fail when this is definitely not the case (eg. if the serial number
-        does not match).
+        but it will only fail when this is definitely not the case (eg. if the serial
+        number does not match).
 
         :param reinsert_cb: Callback to indicate the the YubiKey has been removed,
         and should be reinserted.
-        :param event: Optional event to cancel the operation (throws CancelledException).
+        :param event: Optional event to cancel (throws CancelledException).
         """
         self._do_reinsert(reinsert_cb or (lambda _: None), event or Event())
 

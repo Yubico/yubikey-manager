@@ -35,7 +35,7 @@ import warnings
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from typing import TypeAlias, cast, overload
+from typing import TYPE_CHECKING, TypeAlias, cast, overload
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -71,6 +71,11 @@ from .core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
 )
+
+if TYPE_CHECKING:
+    # This type isn't available on cryptography <40.
+    from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
+
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +128,7 @@ class KEY_TYPE(IntEnum):
         raise ValueError("No bit_len")
 
     @classmethod
-    def from_public_key(cls, key: PublicKey) -> KEY_TYPE:
+    def from_public_key(cls, key: PublicKeyTypes) -> KEY_TYPE:
         if isinstance(key, rsa.RSAPublicKey):
             try:
                 return getattr(cls, "RSA%d" % key.key_size)
@@ -1073,7 +1078,7 @@ class PivSession:
         slot: SLOT,
         key_type: KEY_TYPE,
         message: bytes,
-        hash_algorithm: hashes.HashAlgorithm,
+        hash_algorithm: hashes.HashAlgorithm | None,
         padding: AsymmetricPadding | None = None,
     ) -> bytes:
         """Sign message with key.

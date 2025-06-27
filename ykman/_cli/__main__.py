@@ -458,11 +458,13 @@ def cli(
                 if scp_ca:
                     raise CliFail("--scp-ca can only be used with SCP11.")
 
-                def params_f(_):
+                def params_f_scp03(_):
                     return Scp03KeyParams(
                         ref=KeyRef(ScpKid.SCP03, scp_kvn),
                         keys=scp03_keys or StaticKeys.default(),
                     )
+
+                params_f = params_f_scp03
 
             elif scp11_creds:
                 # SCP11 a/c
@@ -498,7 +500,7 @@ def cli(
                     # Send the KA-KLOC and OCE certificates
                     certificates = list(inter) + [leaf]
 
-                def params_f(conn):
+                def params_f_scp11ab(conn):
                     if not scp_kid:
                         # TODO: Find key based on CA
                         # Check for SCP11a key, then SCP11c
@@ -520,6 +522,7 @@ def cli(
                         certificates=certificates,
                     )
 
+                params_f = params_f_scp11ab
             else:
                 # SCP11b
                 if scp_kid not in (ScpKid.SCP11b, None):
@@ -527,8 +530,10 @@ def cli(
                 if any(scp_oce):
                     raise CliFail("SCP11b cannot be used with --scp-oce.")
 
-                def params_f(conn):
+                def params_f_scp11b(conn):
                     return find_scp11_params(conn, ScpKid.SCP11b, scp_kvn, ca)
+
+                params_f = params_f_scp11b
 
             connections = [SmartCardConnection]
 

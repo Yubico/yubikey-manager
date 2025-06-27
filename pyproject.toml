@@ -62,10 +62,11 @@ packages = [
 testpaths = ["tests"]
 
 [tool.ruff.lint]
-select = ["I", "S"]
+extend-select = ["E", "I", "S"]
 exclude = ["tests/*"]
 
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-exclude = ["ykman/", "tests/", "docs/"]
+exclude = ["tests/", "docs/"]
+reportPrivateImportUsage = false

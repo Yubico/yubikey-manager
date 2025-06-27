@@ -50,6 +50,7 @@ class OtpYubiKeyDevice(YkmanDevice):
         return issubclass(self._connection_cls, connection_type)
 
     def open_connection(self, connection_type):
+        assert isinstance(connection_type, type)  # noqa: S101
         if self.supports_connection(connection_type):
             conn = self._connection_cls(self.path)
             # If OTP-only, then it can't be reclaim

@@ -68,7 +68,8 @@ class SmartCardCtapDevice(CtapDevice, Connection):
             self._capabilities |= CAPABILITY.NMSG
 
         if scp_key_params:
-            # We can at least raise the configuration level to 5.3.0, since SCP is not available before then
+            # We can at least raise the configuration level to 5.3.0,
+            # since SCP is not available before then
             self.protocol.configure(Version(5, 3, 0))
             self.protocol.init_scp(scp_key_params)
 

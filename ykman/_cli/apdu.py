@@ -33,7 +33,6 @@ from binascii import a2b_hex
 
 import click
 
-from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import (
     AID,
     SW,
@@ -141,12 +140,11 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
       Get 8 random bytes from the OpenPGP application:
       $ ykman apdu -a openpgp 84/08=
     """
+    if not send_apdu and not apdu and not app:
+        ctx.fail("No commands provided.")
     if apdu and send_apdu:
         ctx.fail("Cannot mix positional APDUs and -s/--send-apdu.")
-    elif not send_apdu:
-        apdus = [_parse_apdu(data) for data in apdu]
-        if not apdus and not app:
-            ctx.fail("No commands provided.")
+    apdus = [_parse_apdu(data) for data in apdu]
 
     dev = ctx.obj["device"]
 

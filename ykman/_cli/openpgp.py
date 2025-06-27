@@ -146,12 +146,13 @@ def reset(ctx, force):
 
     The attestation key and certificate will NOT be reset.
     """
-    force or click.confirm(
-        "WARNING! This will delete all stored OpenPGP keys and data and restore "
-        "factory settings. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all stored OpenPGP keys and data and restore "
+            "factory settings. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     click.echo("Resetting OpenPGP data, don't remove the YubiKey...")
     if "session" in ctx.obj:

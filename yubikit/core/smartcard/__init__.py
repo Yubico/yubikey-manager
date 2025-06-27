@@ -151,7 +151,8 @@ class ShortApduFormatter(ApduFormatter):
     def format_apdu(self, cla, ins, p1, p2, data, le):
         if len(data) > SHORT_APDU_MAX_CHUNK:
             raise ValueError(
-                f"Data length {len(data)} exceeds maximum APDU size {SHORT_APDU_MAX_CHUNK}"
+                f"Data length {len(data)} exceeds maximum APDU size "
+                f"{SHORT_APDU_MAX_CHUNK}"
             )
 
         buf = struct.pack(">BBBB", cla, ins, p1, p2)
@@ -405,7 +406,7 @@ class SmartCardProtocol:
     def configure(self, version: Version, force_short: bool = False) -> None:
         """Configure the connection optimally for the given YubiKey version."""
         if self._do_enable_touch_workaround(version, force_short):
-            # Devices that require the touch workaround do not support additional options
+            # Devices that require the touch workaround don't support additional options
             return
 
         if version[0] <= 3:

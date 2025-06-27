@@ -147,12 +147,13 @@ def reset(ctx, force):
     if "scp" in ctx.obj:
         raise CliFail("Reset must be performed without an active SCP session.")
 
-    force or click.confirm(
-        "WARNING! This will delete all stored Security Domain data and restore factory "
-        "settings. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all stored Security Domain data and restore "
+            "factory settings. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     click.echo("Resetting Security Domain data...")
     ctx.obj["session"].reset()
@@ -404,11 +405,12 @@ def delete_key(ctx, key, force):
     _require_auth(ctx)
     session = ctx.obj["session"]
 
-    force or click.confirm(
-        "WARNING! This will delete all matching SCP keys. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all matching SCP keys. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     try:
         session.delete_key(key.kid, key.kvn)

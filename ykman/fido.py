@@ -27,21 +27,12 @@
 
 import logging
 import struct
-from dataclasses import asdict, replace
-from threading import Event
 from time import sleep
-from typing import Callable, Hashable
 
 from fido2.ctap1 import ApduError, Ctap1
-from fido2.ctap2 import Ctap2, Info
-from smartcard.Exceptions import CardConnectionException, NoCardException
 
-from yubikit.core import TRANSPORT, YubiKeyDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
-
-from .device import _UsbCompositeDevice
-from .hid import list_ctap_devices
 
 logger = logging.getLogger(__name__)
 

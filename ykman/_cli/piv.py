@@ -251,12 +251,13 @@ def reset(ctx, force):
             "use 'ykman config reset' for full factory reset."
         )
 
-    force or click.confirm(
-        "WARNING! This will delete all stored PIV data and restore factory "
-        "settings. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all stored PIV data and restore factory "
+            "settings. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     click.echo("Resetting PIV data...")
     session = ctx.obj["session"]
@@ -317,12 +318,13 @@ def set_pin_retries(ctx, management_key, pin, pin_retries, puk_retries, force):
         ctx, pin, management_key, require_pin_and_key=True, no_prompt=force
     )
     click.echo("WARNING: This will reset the PIN and PUK to the factory defaults!")
-    force or click.confirm(
-        f"Set the number of PIN and PUK retry attempts to: {pin_retries} "
-        f"{puk_retries}?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            f"Set the number of PIN and PUK retry attempts to: {pin_retries} "
+            f"{puk_retries}?",
+            abort=True,
+            err=True,
+        )
     try:
         pivman_set_pin_attempts(session, pin_retries, puk_retries)
         click.echo("Number of PIN/PUK retries set.")

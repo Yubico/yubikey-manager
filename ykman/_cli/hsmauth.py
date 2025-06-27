@@ -279,12 +279,13 @@ def reset(ctx, force):
     the YubiHSM Auth application on the YubiKey.
     """
 
-    force or click.confirm(
-        "WARNING! This will delete all stored YubiHSM Auth data and restore factory "
-        "setting. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all stored YubiHSM Auth data and restore "
+            "factory setting. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     click.echo("Resetting YubiHSM Auth data...")
     ctx.obj["session"].reset()
@@ -640,11 +641,12 @@ def delete(ctx, label, management_key, force):
     if management_key is None:
         management_key = _prompt_management_key()
 
-    force or click.confirm(
-        f"Delete credential: {label} ?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            f"Delete credential: {label} ?",
+            abort=True,
+            err=True,
+        )
 
     session = ctx.obj["session"]
 

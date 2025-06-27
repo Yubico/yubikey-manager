@@ -32,6 +32,7 @@ from pathlib import Path
 
 import keyring
 from cryptography.fernet import Fernet, InvalidToken
+from keyring.errors import KeyringError
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ class AppData(Settings):
         if not self.keyring_unlocked:
             try:
                 wrap_key = keyring.get_password(self._service, self._username)
-            except keyring.errors.KeyringError:
+            except KeyringError:
                 raise KeystoreError("Keyring locked or unavailable")
 
             if wrap_key is None:

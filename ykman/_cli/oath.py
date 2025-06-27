@@ -136,12 +136,13 @@ def reset(ctx, force):
     the OATH application on the YubiKey.
     """
 
-    force or click.confirm(
-        "WARNING! This will delete all stored OATH accounts and restore factory "
-        "settings. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all stored OATH accounts and restore factory "
+            "settings. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     session = ctx.obj["session"]
     click.echo("Resetting OATH data...")
@@ -685,49 +686,51 @@ def code(ctx, show_hidden, query, single, password, remember):
 
     if len(creds) == 1:
         cred = creds[0]
-        code = entries[cred]
+        # If we don't have a code, we need to calculate it.
         if cred.touch_required:
             prompt_for_touch()
         try:
-            if cred.oath_type == OATH_TYPE.HOTP:
-                with prompt_timeout():
-                    # HOTP might require touch, we don't know.
-                    # Assume yes after 500ms.
-                    code = session.calculate_code(cred)
-            elif code is None:
-                code = session.calculate_code(cred)
+            if is_steam(cred):
+                value = calculate_steam(session, cred)
+            elif entries[cred]:
+                value = entries[cred].value
+            else:
+                if cred.oath_type == OATH_TYPE.HOTP:
+                    with prompt_timeout():
+                        # HOTP might require touch, we don't know.
+                        # Assume yes after 500ms.
+                        value = session.calculate_code(cred).value
+                else:
+                    value = session.calculate_code(cred).value
         except ApduError as e:
             if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
                 raise CliFail("Touch account timed out!")
-        entries[cred] = code
-
-    elif single and len(creds) > 1:
-        _error_multiple_hits(ctx, creds)
-
-    elif single and len(creds) == 0:
-        raise CliFail("No matching account found.")
-
-    if single and creds:
-        if is_steam(cred):
-            click.echo(calculate_steam(session, cred))
+            raise
+        if single:
+            click.echo(value)
         else:
-            click.echo(code.value)
+            click.echo(f"{_string_id(cred)}  {value}")
+    elif single:
+        if creds:
+            _error_multiple_hits(ctx, creds)
+        else:
+            raise CliFail("No matching account found.")
     else:
         outputs = []
         for cred in sorted(creds):
             code = entries[cred]
             if code:
                 if is_steam(cred):
-                    code = calculate_steam(session, cred)
+                    codestr = calculate_steam(session, cred)
                 else:
-                    code = code.value
+                    codestr = code.value
             elif cred.touch_required:
-                code = "[Requires Touch]"
+                codestr = "[Requires Touch]"
             elif cred.oath_type == OATH_TYPE.HOTP:
-                code = "[HOTP Account]"
+                codestr = "[HOTP Account]"
             else:
-                code = ""
-            outputs.append((_string_id(cred), code))
+                codestr = ""
+            outputs.append((_string_id(cred), codestr))
 
         longest_name = max(len(n) for (n, c) in outputs) if outputs else 0
         longest_code = max(len(c) for (n, c) in outputs) if outputs else 0

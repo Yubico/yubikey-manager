@@ -25,13 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
 
 import logging
 import os
 import re
 import struct
 from datetime import date, datetime
-from typing import Any, Mapping, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, Mapping, TypeAlias, cast
 from uuid import uuid4
 
 from cryptography import x509
@@ -59,6 +60,14 @@ from yubikit.piv import (
 )
 
 from .util import display_serial
+
+if TYPE_CHECKING:
+    # These types arent't available on cryptography <40.
+    from cryptography.hazmat.primitives.asymmetric.types import (
+        CertificateIssuerPrivateKeyTypes,
+        CertificatePublicKeyTypes,
+        PublicKeyTypes,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +435,7 @@ def _list_keys(session: PivSession) -> Mapping[SLOT, SlotMetadata]:
 def check_key(
     session: PivSession,
     slot: SLOT,
-    public_key: rsa.RSAPublicKey | ec.EllipticCurvePublicKey,
+    public_key: PublicKeyTypes,
 ) -> bool:
     """Check that a given public key corresponds to the private key in a slot.
 
@@ -461,7 +470,7 @@ def check_key(
         elif isinstance(public_key, ec.EllipticCurvePublicKey):
             public_key.verify(test_sig, test_data, ec.ECDSA(hashes.SHA256()))
         else:
-            raise ValueError("Unknown key type: " + type(public_key))
+            raise ValueError(f"Unknown key type: {type(public_key)}")
         return True
 
     except ApduError as e:
@@ -682,7 +691,7 @@ def sign_certificate_builder(
     :param hash_algorithm: The hash algorithm, ignored for Curve 25519.
     """
     logger.debug("Signing a certificate")
-    dummy_key = _dummy_key(key_type)
+    dummy_key = cast(CertificateIssuerPrivateKeyTypes, _dummy_key(key_type))
     cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
 
     sig = session.sign(
@@ -705,7 +714,7 @@ def sign_certificate_builder(
 def sign_csr_builder(
     session: PivSession,
     slot: SLOT,
-    public_key: rsa.RSAPublicKey | ec.EllipticCurvePublicKey,
+    public_key: PublicKeyTypes,
     builder: x509.CertificateSigningRequestBuilder,
     hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
@@ -720,7 +729,7 @@ def sign_csr_builder(
     """
     logger.debug("Signing a CSR")
     key_type = KEY_TYPE.from_public_key(public_key)
-    dummy_key = _dummy_key(key_type)
+    dummy_key = cast(CertificateIssuerPrivateKeyTypes, _dummy_key(key_type))
 
     csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
     seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
@@ -754,7 +763,7 @@ def sign_csr_builder(
 def generate_self_signed_certificate(
     session: PivSession,
     slot: SLOT,
-    public_key: rsa.RSAPublicKey | ec.EllipticCurvePublicKey,
+    public_key: PublicKeyTypes,
     subject_str: str,
     valid_from: datetime,
     valid_to: datetime,
@@ -772,6 +781,7 @@ def generate_self_signed_certificate(
     """
     logger.debug("Generating a self-signed certificate")
     key_type = KEY_TYPE.from_public_key(public_key)
+    public_key = cast(CertificatePublicKeyTypes, public_key)
 
     subject = parse_rfc4514_string(subject_str)
     builder = (
@@ -790,7 +800,7 @@ def generate_self_signed_certificate(
 def generate_csr(
     session: PivSession,
     slot: SLOT,
-    public_key: rsa.RSAPublicKey | ec.EllipticCurvePublicKey,
+    public_key: PublicKeyTypes,
     subject_str: str,
     hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:

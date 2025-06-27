@@ -249,6 +249,7 @@ class _UsbCompositeDevice(YkmanDevice):
         return self._group.supports_connection(connection_type)
 
     def open_connection(self, connection_type):
+        assert isinstance(connection_type, type)  # noqa: S101
         if not self.supports_connection(connection_type):
             raise ValueError("Unsupported Connection type")
         return self._group.connect(self._key, connection_type)

@@ -33,11 +33,12 @@ from collections.abc import MutableMapping
 from contextlib import contextmanager
 from enum import Enum
 from threading import Timer
-from typing import Sequence
+from typing import Sequence, cast
 
 import click
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 
 from yubikit.core import TRANSPORT, ApplicationNotAvailableError
 from yubikit.core.smartcard import ApduError, SmartCardConnection
@@ -66,6 +67,7 @@ class _YkmanCommand(click.Command):
 
     def get_help_option(self, ctx):
         option = super().get_help_option(ctx)
+        assert option is not None  # noqa: S101
         option.help = "show this message and exit"
         return option
 
@@ -386,8 +388,9 @@ def find_scp11_params(
                 break
         else:
             raise ValueError(f"No SCP key found matching KID=0x{kid:x}")
+
+    ref = KeyRef(kid, kvn)
     try:
-        ref = KeyRef(kid, kvn)
         chain = scp.get_certificate_bundle(ref)
         if not chain:
             raise ValueError(f"No certificate chain stored for {ref}")
@@ -402,7 +405,7 @@ def find_scp11_params(
         else:
             logger.info("No CA supplied, skipping KLCC CA validation")
 
-        pub_key = chain[-1].public_key()
+        pub_key = cast(EllipticCurvePublicKey, chain[-1].public_key())
         return Scp11KeyParams(ref, pub_key)
     except ApduError:
         raise ValueError(f"Unable to get SCP key paramaters ({ref})")
@@ -462,7 +465,7 @@ def organize_scp11_certificates(
 
     # Check if leaf has keyAgreement policy:
     if ordered:
-        kue = ordered[-1].extensions.get_extension_for_oid(x509.ExtensionOID.KEY_USAGE)
+        kue = ordered[-1].extensions.get_extension_for_class(x509.KeyUsage)
         if kue.value.key_agreement:
             leaf = ordered.pop()
 

@@ -140,12 +140,13 @@ def reset(ctx, force):
                 "refer to reset commands for specific applications instead."
             )
 
-    force or click.confirm(
-        "WARNING! This will delete all stored data and restore factory "
-        "settings. Proceed?",
-        abort=True,
-        err=True,
-    )
+    if not force:
+        click.confirm(
+            "WARNING! This will delete all stored data and restore factory "
+            "settings. Proceed?",
+            abort=True,
+            err=True,
+        )
 
     click.echo("Resetting YubiKey data...")
     ctx.obj["session"].device_reset()
@@ -194,9 +195,10 @@ def set_lock_code(ctx, lock_code, new_lock_code, clear, generate, force):
     elif generate:
         set_code = os.urandom(16)
         click.echo(f"Using a randomly generated lock code: {set_code.hex()}")
-        force or click.confirm(
-            "Lock configuration with this lock code?", abort=True, err=True
-        )
+        if not force:
+            click.confirm(
+                "Lock configuration with this lock code?", abort=True, err=True
+            )
     else:
         if not new_lock_code:
             new_lock_code = click_prompt(
@@ -301,7 +303,8 @@ def _configure_applications(
     click.echo(f"{transport} configuration changes:")
     for change in changes:
         click.echo(f"  {change}")
-    force or click.confirm("Proceed?", abort=True, err=True)
+    if not force:
+        click.confirm("Proceed?", abort=True, err=True)
 
     config.enabled_capabilities = {transport: new_enabled}
 
@@ -708,7 +711,8 @@ def mode(ctx, mode, touch_eject, autoeject_timeout, chalresp_timeout, force):
             )
         elif info.is_sky and USB_INTERFACE.FIDO not in mode.interfaces:
             raise CliFail("Security Key requires FIDO to be enabled.")
-        force or click.confirm(f"Set mode of YubiKey to {mode}?", abort=True, err=True)
+        if not force:
+            click.confirm(f"Set mode of YubiKey to {mode}?", abort=True, err=True)
 
     try:
         mgmt.set_mode(mode, chalresp_timeout, autoeject)

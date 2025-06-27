@@ -62,7 +62,7 @@ class HidrawConnection(OtpConnection):
     def receive(self):
         buf = bytearray(1 + 8)
         fcntl.ioctl(self.handle, USB_GET_REPORT, buf, True)
-        data = buf[1:]
+        data = bytes(buf[1:])
         logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
         return data
 

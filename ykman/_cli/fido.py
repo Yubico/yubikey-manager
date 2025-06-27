@@ -380,19 +380,48 @@ def change_pin(ctx, pin, new_pin, u2f):
     if is_fips:
         conn = ctx.obj["conn"]
         min_len = 6
+        max_len = 32
+
+        def _fips_change_pin(new_pin):
+            fips_pin = pin or ""
+            try:
+                # Failing this with empty current PIN does not cost a retry
+                fips_change_pin(conn, fips_pin, new_pin)
+            except ApduError as e:
+                if e.code == SW.WRONG_LENGTH:
+                    fips_pin = _prompt_current_pin()
+                    _fail_if_not_valid_pin(fips_pin)
+                    fips_change_pin(conn, fips_pin, new_pin)
+                else:
+                    raise
+
+        do_change = _fips_change_pin
+
     else:
         ctap2 = ctx.obj.get("ctap2")
         if not ctap2:
             raise CliFail("PIN is not supported on this YubiKey.")
         client_pin = ClientPin(ctap2)
         min_len = ctap2.info.min_pin_length
-    if (
-        info._is_bio
-        and CAPABILITY.PIV in info.config.enabled_capabilities[TRANSPORT.USB]
-    ):
-        max_len = 8
-    else:
-        max_len = 63
+        max_len = ctap2.info.max_pin_length
+        if (
+            info._is_bio
+            and CAPABILITY.PIV in info.config.enabled_capabilities[TRANSPORT.USB]
+        ):
+            max_len = 8
+        if ctap2.info.options.get("clientPin"):
+            if not pin:
+                pin = _prompt_current_pin()
+
+            def _ctap2_change_pin(new_pin):
+                client_pin.change_pin(pin, new_pin)
+
+            do_change = _ctap2_change_pin
+        else:
+            if pin:
+                raise CliFail("There is no current PIN set. Use --new-pin to set one.")
+
+            do_change = client_pin.set_pin
 
     def _fail_if_not_valid_pin(pin=None, name="PIN"):
         if not pin or len(pin) < min_len:
@@ -400,72 +429,29 @@ def change_pin(ctx, pin, new_pin, u2f):
         if len(pin) > max_len:
             raise CliFail(f"{name} must be at most {max_len} characters long.")
 
-    def prompt_new_pin():
-        return click_prompt(
+    if not new_pin:
+        new_pin = click_prompt(
             "Enter your new PIN",
             hide_input=True,
             confirmation_prompt=True,
         )
-
-    def change_pin(pin, new_pin):
-        try:
-            if is_fips:
-                try:
-                    # Failing this with empty current PIN does not cost a retry
-                    fips_change_pin(conn, pin or "", new_pin)
-                except ApduError as e:
-                    if e.code == SW.WRONG_LENGTH:
-                        pin = _prompt_current_pin()
-                        _fail_if_not_valid_pin(pin)
-                        fips_change_pin(conn, pin, new_pin)
-                    else:
-                        raise
-
-            else:
-                client_pin.change_pin(pin, new_pin)
-
-        except CtapError as e:
-            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                raise CliFail("New PIN doesn't meet complexity requirements.")
-            else:
-                _fail_pin_error(ctx, e, "Failed to change PIN: %s.")
-
-        except ApduError as e:
-            if e.code == SW.VERIFY_FAIL_NO_RETRY:
-                raise CliFail("Wrong PIN.")
-            elif e.code == SW.AUTH_METHOD_BLOCKED:
-                raise CliFail("PIN is blocked.")
-            else:
-                raise CliFail(f"Failed to change PIN: SW={e.code:04x}.")
-
-    def set_pin(new_pin):
-        try:
-            client_pin.set_pin(new_pin)
-        except CtapError as e:
-            if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
-                raise CliFail("New PIN doesn't meet complexity requirements.")
-            else:
-                raise CliFail(f"Failed to set PIN: {e.code}.")
-
-    if not is_fips:
-        if ctap2.info.options.get("clientPin"):
-            if not pin:
-                pin = _prompt_current_pin()
-        else:
-            if pin:
-                raise CliFail("There is no current PIN set. Use --new-pin to set one.")
-
-    if not new_pin:
-        new_pin = prompt_new_pin()
     _fail_if_not_valid_pin(new_pin, "New PIN")
 
-    if is_fips:
-        change_pin(pin, new_pin)
-    else:
-        if ctap2.info.options.get("clientPin"):
-            change_pin(pin, new_pin)
+    try:
+        do_change(new_pin)
+    except CtapError as e:
+        if e.code == CtapError.ERR.PIN_POLICY_VIOLATION:
+            raise CliFail("New PIN doesn't meet complexity requirements.")
         else:
-            set_pin(new_pin)
+            _fail_pin_error(ctx, e, "Failed to change PIN: %s.")
+    except ApduError as e:
+        if e.code == SW.VERIFY_FAIL_NO_RETRY:
+            raise CliFail("Wrong PIN.")
+        elif e.code == SW.AUTH_METHOD_BLOCKED:
+            raise CliFail("PIN is blocked.")
+        else:
+            raise CliFail(f"Failed to change PIN: SW={e.code:04x}.")
+
     click.echo("FIDO PIN updated.")
 
 
@@ -911,7 +897,7 @@ def bio_delete(ctx, template_id, pin, force):
     except ValueError:
         key = None
 
-    if key not in enrollments:
+    if not key or key not in enrollments:
         # Match using template_id as NAME
         matches = [k for k in enrollments if enrollments[k] == template_id]
         if len(matches) == 0:
