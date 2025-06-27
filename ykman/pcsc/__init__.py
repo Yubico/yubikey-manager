@@ -41,8 +41,9 @@ from yubikit.core.fido import SmartCardCtapDevice
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.logging import LOG_LEVEL
 from yubikit.management import USB_INTERFACE
+from yubikit.support import read_info
 
-from ..base import YkmanDevice
+from ..base import REINSERT_STATUS, CancelledException, YkmanDevice
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,59 @@ class ScardYubiKeyDevice(YkmanDevice):
                     except (NoCardException, ValueError):
                         continue
             raise
+
+    def _do_reinsert(self, reinsert_cb, event):
+        removed = False
+        with self.open_connection(SmartCardConnection) as conn:
+            info = read_info(conn, self.pid)
+        reinsert_cb(REINSERT_STATUS.REMOVE)
+
+        if self.transport == TRANSPORT.NFC:
+            while not event.wait(0.5):
+                try:
+                    conn = self.open_connection(SmartCardConnection)
+                    if removed:
+                        info2 = read_info(conn, self.pid)
+                        conn.close()
+                        if info.serial != info2.serial or info.version != info2.version:
+                            raise ValueError(
+                                "Reinserted YubiKey does not match the original"
+                            )
+                        sleep(1.0)  # Wait for the device to settle
+                        return
+                    conn.close()
+                except CardConnectionException:
+                    pass  # Expected, ignore
+                except NoCardException:
+                    if not removed:
+                        reinsert_cb(REINSERT_STATUS.REINSERT)
+                        removed = True
+
+            raise CancelledException()
+        else:
+            while not event.wait(0.5):
+                if not removed:
+                    # Wait for the reader to be removed
+                    if self.reader not in list_readers():
+                        reinsert_cb(REINSERT_STATUS.REINSERT)
+                        removed = True
+                else:
+                    # Wait for the reader to be reinserted
+                    for reader in list_readers():
+                        if reader.name == self.reader.name:
+                            self.reader = reader
+                            with self.open_connection(SmartCardConnection) as conn:
+                                info2 = read_info(conn, self.pid)
+                            if (
+                                info.serial != info2.serial
+                                or info.version != info2.version
+                            ):
+                                raise ValueError(
+                                    "Reinserted YubiKey does not match the original"
+                                )
+                            sleep(1.0)  # Wait for the device to settle
+                            return
+            raise CancelledException()
 
 
 def kill_scdaemon():

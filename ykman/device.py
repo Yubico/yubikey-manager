@@ -44,7 +44,7 @@ from yubikit.management import (
 )
 from yubikit.support import read_info
 
-from .base import YkmanDevice
+from .base import REINSERT_STATUS, CancelledException, YkmanDevice
 from .hid import (
     list_ctap_devices as _list_ctap_devices,
 )
@@ -155,7 +155,7 @@ class _PidGroup:
             info.is_sky,
         )
 
-    def add(self, conn_type, dev, force_resolve=False):
+    def add(self, conn_type, dev, force_resolve=False, silent=False):
         logger.debug(f"Add device for {conn_type}: {dev}")
         iface = conn_type.usb_interface
         self._fingerprints.add(dev.fingerprint)
@@ -170,7 +170,8 @@ class _PidGroup:
                 logger.debug(f"Resolved device {info.serial}")
                 return
             except Exception:
-                logger.warning("Failed opening device", exc_info=True)
+                if not silent:
+                    logger.warning("Failed opening device", exc_info=True)
         self._unresolved.setdefault(iface, []).append(dev)
 
     def supports_connection(self, conn_type):
@@ -232,16 +233,17 @@ class _PidGroup:
         for key, info in self._infos.items():
             dev = next(iter(self._resolved[key].values()))
             results.append(
-                (_UsbCompositeDevice(self, key, dev.fingerprint, dev.pid), info)
+                (_UsbCompositeDevice(self, key, dev.fingerprint, dev.pid, info), info)
             )
         return results
 
 
 class _UsbCompositeDevice(YkmanDevice):
-    def __init__(self, group, key, fingerprint, pid):
+    def __init__(self, group, key, fingerprint, pid, info):
         super().__init__(TRANSPORT.USB, fingerprint, pid)
         self._group = group
         self._key = key
+        self._info = info
 
     def supports_connection(self, connection_type):
         return self._group.supports_connection(connection_type)
@@ -251,17 +253,48 @@ class _UsbCompositeDevice(YkmanDevice):
             raise ValueError("Unsupported Connection type")
         return self._group.connect(self._key, connection_type)
 
+    def _do_reinsert(self, reinsert_cb, event):
+        state = scan_devices()[1]
+        removed = False
 
-def list_all_devices(
+        def is_match(info):
+            return (
+                self._info.serial == info.serial and self._info.version == info.version
+            )
+
+        logger.debug(f"Waiting for removal of device serial={self._info.serial}")
+        reinsert_cb(REINSERT_STATUS.REMOVE)
+        while not event.wait(0.5):
+            new_state = scan_devices()[1]
+            if new_state == state:
+                # No change in devices, continue waiting
+                continue
+            state = new_state
+            devs = _list_all_devices(silent=True)
+
+            if not removed:
+                if any(is_match(info) for _, info in devs):
+                    # Device is still present, but something else has changed
+                    raise ValueError("A different YubiKey was inserted/removed")
+                removed = True
+                reinsert_cb(REINSERT_STATUS.REINSERT)
+            else:
+                for dev, info in devs:
+                    if is_match(info):
+                        # Device is reinserted, update properties
+                        self._group = dev._group  # type: ignore
+                        self._key = dev._key  # type: ignore
+                        self._info = info
+                        return
+
+        raise CancelledException()
+
+
+def _list_all_devices(
     connection_types: Iterable[type[Connection]] = _CONNECTION_LIST_MAPPING.keys(),
+    silent: bool = False,
 ) -> list[tuple[YkmanDevice, DeviceInfo]]:
-    """Connect to all attached YubiKeys and read device info from them.
-
-    :param connection_types: An iterable of YubiKey connection types.
-    :return: A list of (device, info) tuples for each connected device.
-    """
     groups: dict[PID, _PidGroup] = {}
-
     for connection_type in connection_types:
         for base_type in _CONNECTION_LIST_MAPPING:
             if issubclass(connection_type, base_type):
@@ -272,10 +305,26 @@ def list_all_devices(
         try:
             for dev in _CONNECTION_LIST_MAPPING[connection_type]():
                 group = groups.setdefault(dev.pid, _PidGroup(dev.pid))
-                group.add(connection_type, dev)
+                group.add(
+                    connection_type,
+                    dev,
+                    silent=silent,
+                )
         except Exception:
-            logger.exception("Unable to list devices for connection")
+            if not silent:
+                logger.exception("Unable to list devices for connection")
     devices = []
     for group in groups.values():
         devices.extend(group.get_devices())
     return devices
+
+
+def list_all_devices(
+    connection_types: Iterable[type[Connection]] = _CONNECTION_LIST_MAPPING.keys(),
+) -> list[tuple[YkmanDevice, DeviceInfo]]:
+    """Connect to all attached YubiKeys and read device info from them.
+
+    :param connection_types: An iterable of YubiKey connection types.
+    :return: A list of (device, info) tuples for each connected device.
+    """
+    return _list_all_devices(connection_types)

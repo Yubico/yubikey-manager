@@ -89,6 +89,9 @@ class ScriptingDevice:
     def name(self) -> str:
         return self._name
 
+    def reinsert(self, reinsert_cb=None, event=None):
+        self._wrapped.reinsert(reinsert_cb=reinsert_cb, event=event)
+
     def otp(self) -> OtpConnection:
         """Establish a OTP connection."""
         return self.open_connection(OtpConnection)

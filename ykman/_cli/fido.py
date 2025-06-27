@@ -28,7 +28,7 @@
 import csv as _csv
 import io
 import logging
-from time import sleep
+from dataclasses import asdict, replace
 from typing import NoReturn, Sequence
 
 import click
@@ -42,15 +42,19 @@ from fido2.ctap2 import (
     Ctap2,
     FPBioEnrollment,
 )
-from smartcard.Exceptions import CardConnectionException, NoCardException
 
 from yubikit.core import TRANSPORT
 from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
 from yubikit.core.smartcard import SW, SmartCardConnection
 from yubikit.management import CAPABILITY
 
-from ..fido import fips_change_pin, fips_reset, fips_verify_pin, is_in_fips_mode
-from ..hid import list_ctap_devices
+from ..base import REINSERT_STATUS
+from ..fido import (
+    fips_change_pin,
+    fips_reset,
+    fips_verify_pin,
+    is_in_fips_mode,
+)
 from .util import (
     CliFail,
     click_force_option,
@@ -190,6 +194,10 @@ def info(ctx):
     click.echo("\n".join(pretty_print(lines)))
 
 
+def _ctap2_fingerprint(info):
+    return asdict(replace(info, enc_identifier=None))
+
+
 @fido.command("reset")
 @click_force_option
 @click.pass_context
@@ -223,45 +231,13 @@ def reset(ctx, force):
     conn = ctx.obj["conn"]
     if dev.transport == TRANSPORT.NFC:
         is_fips = False
-        conn.close()
-
-        def prompt_re_insert():
-            click.echo(
-                "Remove and re-place your YubiKey on the NFC reader to perform the "
-                "reset..."
-            )
-
-            removed = False
-            while True:
-                sleep(0.5)
-                try:
-                    with dev.open_connection(FidoConnection):
-                        if removed:
-                            sleep(1.0)  # Wait for the device to settle
-                            break
-                except CardConnectionException:
-                    pass  # Expected, ignore
-                except NoCardException:
-                    removed = True
-            return dev.open_connection(FidoConnection)
+        remove_msg = "Remove your YubiKey from the NFC reader."
+        insert_msg = "Place your YubiKey back on the NFC reader now..."
 
     else:  # USB
-        n_keys = len(list_ctap_devices())
-        if n_keys > 1:
-            raise CliFail("Only one YubiKey can be connected to perform a reset.")
         is_fips = is_yk4_fips(info)
-
-        def prompt_re_insert():
-            click.echo("Remove and re-insert your YubiKey to perform the reset...")
-
-            removed = False
-            while True:
-                sleep(0.5)
-                keys = list_ctap_devices()
-                if not keys:
-                    removed = True
-                if removed and len(keys) == 1:
-                    return keys[0].open_connection(FidoConnection)
+        remove_msg = "Remove your YubiKey from the USB port."
+        insert_msg = "Re-insert your YubiKey now..."
 
     if not force:
         click.confirm(
@@ -282,7 +258,17 @@ def reset(ctx, force):
             if destroy_input != "OVERWRITE":
                 raise CliFail("Reset aborted by user.")
 
-        conn = prompt_re_insert()
+        conn.close()
+
+        def prompt_reinsert(status):
+            match status:
+                case REINSERT_STATUS.REMOVE:
+                    click.echo(remove_msg)
+                case REINSERT_STATUS.REINSERT:
+                    click.echo(insert_msg)
+
+        dev.reinsert(reinsert_cb=prompt_reinsert)
+        conn = dev.open_connection(type(conn))
 
     try:
         if is_fips:
@@ -290,7 +276,13 @@ def reset(ctx, force):
                 fips_reset(conn)
         else:
             ctap2 = Ctap2(conn)
-            msg = (
+            if info.serial is None:
+                # Compare CTAP2 info to ensure we are resetting the same device.
+                if _ctap2_fingerprint(ctx.obj["ctap2"].info) != _ctap2_fingerprint(
+                    ctap2.info
+                ):
+                    raise CliFail("Inserted YubiKey does not match the one removed.")
+            touch_msg = (
                 "Press and hold the YubiKey button for 10 seconds to confirm."
                 if ctap2.info.long_touch_for_reset
                 else "Touch the YubiKey to confirm."
@@ -298,7 +290,7 @@ def reset(ctx, force):
 
             def on_keepalive(status):
                 if status == STATUS.UPNEEDED:
-                    prompt_for_touch(msg)
+                    prompt_for_touch(touch_msg)
                 elif status == STATUS.PROCESSING:
                     click.echo("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!")
 

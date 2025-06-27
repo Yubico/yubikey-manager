@@ -25,13 +25,26 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import logging
 import struct
-import time
+from dataclasses import asdict, replace
+from threading import Event
+from time import sleep
+from typing import Callable, Hashable
 
 from fido2.ctap1 import ApduError, Ctap1
+from fido2.ctap2 import Ctap2, Info
+from smartcard.Exceptions import CardConnectionException, NoCardException
 
+from yubikit.core import TRANSPORT, YubiKeyDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SW
+
+from .device import _UsbCompositeDevice
+from .hid import list_ctap_devices
+
+logger = logging.getLogger(__name__)
+
 
 U2F_VENDOR_FIRST = 0x40
 
@@ -104,6 +117,6 @@ def fips_reset(fido_connection: FidoConnection):
             return
         except ApduError as e:
             if e.code == SW.CONDITIONS_NOT_SATISFIED:
-                time.sleep(0.5)
+                sleep(0.5)
             else:
                 raise e

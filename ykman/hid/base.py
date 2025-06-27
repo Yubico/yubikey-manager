@@ -42,7 +42,7 @@ class OtpYubiKeyDevice(YkmanDevice):
     """YubiKey USB HID OTP device"""
 
     def __init__(self, path, pid, connection_cls):
-        super(OtpYubiKeyDevice, self).__init__(TRANSPORT.USB, path, PID(pid))
+        super().__init__(TRANSPORT.USB, path, PID(pid))
         self.path = path
         self._connection_cls = connection_cls
 
@@ -66,4 +66,7 @@ class OtpYubiKeyDevice(YkmanDevice):
                         sleep(0.5)
             return conn
 
-        return super(OtpYubiKeyDevice, self).open_connection(connection_type)
+        return super().open_connection(connection_type)
+
+    def _do_reinsert(self, reinsert_cb, event) -> None:
+        raise NotImplementedError("Reinsert is not implemented on this platform")
