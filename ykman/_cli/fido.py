@@ -740,6 +740,7 @@ def creds_delete(ctx, credential_id, pin, force):
             f"Delete {rp_id} {user_name} {display_name} ({cred_id['id'].hex()})?"
         ):
             try:
+                click.echo("Deleting credential, DO NOT REMOVE YOUR YUBIKEY!")
                 credman.delete_cred(cred_id)
                 click.echo("Credential deleted.")
             except CtapError:
