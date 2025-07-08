@@ -64,7 +64,6 @@ from .util import display_serial
 if TYPE_CHECKING:
     # These types arent't available on cryptography <40.
     from cryptography.hazmat.primitives.asymmetric.types import (
-        CertificateIssuerPrivateKeyTypes,
         CertificatePublicKeyTypes,
         PublicKeyTypes,
     )
@@ -691,7 +690,8 @@ def sign_certificate_builder(
     :param hash_algorithm: The hash algorithm, ignored for Curve 25519.
     """
     logger.debug("Signing a certificate")
-    dummy_key = cast(CertificateIssuerPrivateKeyTypes, _dummy_key(key_type))
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
     cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
 
     sig = session.sign(
@@ -729,7 +729,8 @@ def sign_csr_builder(
     """
     logger.debug("Signing a CSR")
     key_type = KEY_TYPE.from_public_key(public_key)
-    dummy_key = cast(CertificateIssuerPrivateKeyTypes, _dummy_key(key_type))
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
 
     csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
     seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
@@ -781,7 +782,8 @@ def generate_self_signed_certificate(
     """
     logger.debug("Generating a self-signed certificate")
     key_type = KEY_TYPE.from_public_key(public_key)
-    public_key = cast(CertificatePublicKeyTypes, public_key)
+    if TYPE_CHECKING:
+        public_key = cast(CertificatePublicKeyTypes, public_key)
 
     subject = parse_rfc4514_string(subject_str)
     builder = (
