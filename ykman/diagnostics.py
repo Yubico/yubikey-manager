@@ -58,9 +58,9 @@ def mgmt_info(pid, conn):
     data: list[Any] = []
     try:
         m = ManagementSession(conn)
-        raw_info = m.backend.read_config()
-        if Tlv.parse_dict(raw_info[1:]).get(0x10) == b"\1":
-            raw_info += m.backend.read_config(1)
+        raw_info = m.backend.read_config()[1:]
+        if Tlv.parse_dict(raw_info).get(0x10) == b"\1":
+            raw_info += m.backend.read_config(1)[1:]
         data.append(
             {
                 "Raw Info": raw_info,
