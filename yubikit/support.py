@@ -409,32 +409,43 @@ def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
                 FORM_FACTOR.USB_C_BIO,
             )
 
+            # Base name
             if info.is_sky:
                 name_parts = ["Security Key"]
             else:
                 name_parts = ["YubiKey"]
                 if not is_bio:
                     name_parts.append("5")
+
+            # Form factor additions
             if is_c:
                 name_parts.append("C")
             elif info.form_factor == FORM_FACTOR.USB_C_LIGHTNING:
                 name_parts.append("Ci")
+
             if is_nano:
                 name_parts.append("Nano")
-            if info.has_transport(TRANSPORT.NFC):
+            elif info.has_transport(TRANSPORT.NFC):
                 name_parts.append("NFC")
             elif info.form_factor == FORM_FACTOR.USB_A_KEYCHAIN:
                 name_parts.append("A")  # Only for non-NFC A Keychain.
-            if is_bio:
+            elif is_bio:
                 name_parts.append("Bio")
+
+            # Extra suffixes
+            if info.is_fips:
+                name_parts.append("FIPS")
+            elif is_bio:
                 if _fido_only(usb_supported):
                     name_parts.append("- FIDO Edition")
                 elif CAPABILITY.PIV in usb_supported:
                     name_parts.append("- Multi-protocol Edition")
-            if info.is_fips:
-                name_parts.append("FIPS")
-            if info.is_sky and info.serial:
+            elif info.is_sky and info.serial:
                 name_parts.append("- Enterprise Edition")
+            elif info.pin_complexity and not info.is_sky and not info.is_fips:
+                name_parts.append("- Enhanced PIN")
+
+            # Combine parts into a name and make final adjustments
             device_name = " ".join(name_parts).replace("5 C", "5C").replace("5 A", "5A")
 
     return device_name
