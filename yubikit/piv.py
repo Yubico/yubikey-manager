@@ -404,6 +404,12 @@ def _bcd(val, ln=1):
     return bits if ln == 1 else _bcd(val // 10, ln - 1) + bits
 
 
+def _dump_tlv_dict(values: dict[int, bytes | None]) -> bytes:
+    return b"".join(
+        Tlv(tag, value) for tag, value in values.items() if value is not None
+    )
+
+
 BCD_SS = "11010"
 BCD_FS = "10110"
 BCD_ES = "11111"
@@ -474,50 +480,43 @@ class FascN:
         return "[%04d-%04d-%06d-%d-%d-%010d%d%04d%d]" % astuple(self)
 
 
-# From Python 3.10 we can use kw_only instead
-_chuid_no_value = object()
-
-
-@dataclass
+@dataclass(kw_only=True)
 class Chuid:
     buffer_length: int | None = None
-    fasc_n: FascN = cast(FascN, _chuid_no_value)
+    fasc_n: FascN
     agency_code: bytes | None = None
     organizational_identifier: bytes | None = None
     duns: bytes | None = None
-    guid: bytes = cast(bytes, _chuid_no_value)
-    expiration_date: date = cast(date, _chuid_no_value)
+    guid: bytes
+    expiration_date: date
     authentication_key_map: bytes | None = None
-    asymmetric_signature: bytes = cast(bytes, _chuid_no_value)
+    asymmetric_signature: bytes
     lrc: int | None = None
 
-    def __post_init__(self):
-        if _chuid_no_value in (
-            self.fasc_n,
-            self.guid,
-            self.expiration_date,
-            self.asymmetric_signature,
-        ):
-            raise ValueError("Missing required field(s)")
+    def _get_bytes(self, include_signature: bool = True) -> bytes:
+        return _dump_tlv_dict(
+            {
+                0xEE: int2bytes(self.buffer_length)
+                if self.buffer_length is not None
+                else None,
+                0x30: bytes(self.fasc_n),
+                0x31: self.agency_code,
+                0x32: self.organizational_identifier,
+                0x33: self.duns,
+                0x34: self.guid,
+                0x35: self.expiration_date.isoformat().replace("-", "").encode(),
+                0x3D: self.authentication_key_map,
+                0x3E: self.asymmetric_signature if include_signature else None,
+                TAG_LRC: bytes([self.lrc]) if self.lrc is not None else b"",
+            }
+        )
+
+    @property
+    def tbs_bytes(self) -> bytes:
+        return self._get_bytes(include_signature=False)
 
     def __bytes__(self):
-        bs = b""
-        if self.buffer_length is not None:
-            bs += Tlv(0xEE, int2bytes(self.buffer_length))
-        bs += Tlv(0x30, bytes(self.fasc_n))
-        if self.agency_code is not None:
-            bs += Tlv(0x31, self.agency_code)
-        if self.organizational_identifier is not None:
-            bs += Tlv(0x32, self.organizational_identifier)
-        if self.duns is not None:
-            bs += Tlv(0x33, self.duns)
-        bs += Tlv(0x34, self.guid)
-        bs += Tlv(0x35, self.expiration_date.isoformat().replace("-", "").encode())
-        if self.authentication_key_map is not None:
-            bs += Tlv(0x3D, self.authentication_key_map)
-        bs += Tlv(0x3E, self.asymmetric_signature)
-        bs += Tlv(TAG_LRC, bytes([self.lrc]) if self.lrc is not None else b"")
-        return bs
+        return self._get_bytes()
 
     @classmethod
     def from_bytes(cls, value: bytes) -> Chuid:
