@@ -59,6 +59,7 @@ from cryptography.hazmat.primitives.serialization import (
 from .core import (
     InvalidPinError,
     NotSupportedError,
+    Oid,
     Tlv,
     Version,
     _override_version,
@@ -484,7 +485,7 @@ class RsaAttributes(AlgorithmAttributes):
         )
 
 
-class CurveOid(bytes):
+class CurveOid(Oid):
     def _get_name(self) -> str:
         for oid in OID:
             if self.startswith(oid):
@@ -495,24 +496,22 @@ class CurveOid(bytes):
         return self._get_name()
 
     def __repr__(self) -> str:
-        name = self._get_name()
-        return f"{name}({self.hex()})"
+        return f"{self._get_name()}({self.dotted_string})"
 
 
 class OID(CurveOid, Enum):
-    SECP256R1 = CurveOid(b"\x2a\x86\x48\xce\x3d\x03\x01\x07")
-    SECP256K1 = CurveOid(b"\x2b\x81\x04\x00\x0a")
-    SECP384R1 = CurveOid(b"\x2b\x81\x04\x00\x22")
-    SECP521R1 = CurveOid(b"\x2b\x81\x04\x00\x23")
-    BrainpoolP256R1 = CurveOid(b"\x2b\x24\x03\x03\x02\x08\x01\x01\x07")
-    BrainpoolP384R1 = CurveOid(b"\x2b\x24\x03\x03\x02\x08\x01\x01\x0b")
-    BrainpoolP512R1 = CurveOid(b"\x2b\x24\x03\x03\x02\x08\x01\x01\x0d")
-    X25519 = CurveOid(b"\x2b\x06\x01\x04\x01\x97\x55\x01\x05\x01")
-    Ed25519 = CurveOid(b"\x2b\x06\x01\x04\x01\xda\x47\x0f\x01")
+    SECP256R1 = CurveOid.from_string("1.2.840.10045.3.1.7")
+    SECP256K1 = CurveOid.from_string("1.3.132.0.10")
+    SECP384R1 = CurveOid.from_string("1.3.132.0.34")
+    SECP521R1 = CurveOid.from_string("1.3.132.0.35")
+    BrainpoolP256R1 = CurveOid.from_string("1.3.36.3.3.2.8.1.1.7")
+    BrainpoolP384R1 = CurveOid.from_string("1.3.36.3.3.2.8.1.1.11")
+    BrainpoolP512R1 = CurveOid.from_string("1.3.36.3.3.2.8.1.1.13")
+    X25519 = CurveOid.from_string("1.3.6.1.4.1.3029.1.5.1")
+    Ed25519 = CurveOid.from_string("1.3.6.1.4.1.11591.15.1")
 
     @classmethod
     def _from_key(cls, private_key: EcPrivateKey) -> CurveOid:
-        name = ""
         if isinstance(private_key, ec.EllipticCurvePrivateKey):
             name = private_key.curve.name.lower()
         else:

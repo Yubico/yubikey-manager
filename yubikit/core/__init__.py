@@ -372,3 +372,44 @@ class Tlv(bytes):
         if tlv.tag != tag:
             raise ValueError(f"Wrong tag, got 0x{tlv.tag:02x} expected 0x{tag:02x}")
         return tlv.value
+
+
+class Oid(bytes):
+    @property
+    def dotted_string(self) -> str:
+        parts = [self[0] // 40, self[0] % 40]
+        num = 0
+        for x in self[1:]:
+            num = (num << 7) | (x & 0x7F)
+            if not 0x80 & x:
+                parts.append(num)
+                num = 0
+
+        return ".".join(str(x) for x in parts)
+
+    @classmethod
+    def from_string(cls, data: str) -> Oid:
+        parts = [int(x) for x in data.split(".")]
+        if len(parts) < 2:
+            raise ValueError("OID must have at least two arcs")
+
+        buf = bytearray([(parts[0] * 40) + parts[1]])
+
+        for part in parts[2:]:
+            if part < 0:
+                raise ValueError("OID parts must be non-negative")
+            partbuf = bytearray()
+            while part > 0x7F:
+                partbuf.insert(0, part & 0x7F)
+                part >>= 7
+            partbuf.insert(0, part)
+            buf.extend(0x80 | b for b in partbuf)
+            buf[-1] ^= 0x80
+
+        return cls(buf)
+
+    def __repr__(self) -> str:
+        return f"Oid({self.dotted_string})"
+
+    def __str__(self) -> str:
+        return self.dotted_string
