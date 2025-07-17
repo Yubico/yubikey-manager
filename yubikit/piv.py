@@ -56,6 +56,7 @@ from .core import (
     BadResponseError,
     InvalidPinError,
     NotSupportedError,
+    Oid,
     Tlv,
     Version,
     _override_version,
@@ -480,6 +481,99 @@ class FascN:
         return "[%04d-%04d-%06d-%d-%d-%010d%d%04d%d]" % astuple(self)
 
 
+_HASH_OIDS = {
+    hashes.SHA1: Oid.from_string("1.3.14.3.2.26"),
+    hashes.SHA224: Oid.from_string("2.16.840.1.101.3.4.2.4"),
+    hashes.SHA256: Oid.from_string("2.16.840.1.101.3.4.2.1"),
+    hashes.SHA384: Oid.from_string("2.16.840.1.101.3.4.2.2"),
+    hashes.SHA512: Oid.from_string("2.16.840.1.101.3.4.2.3"),
+    hashes.SHA3_224: Oid.from_string("1.3.6.1.4.1.37476.3.2.1.99.7.224"),
+    hashes.SHA3_256: Oid.from_string("1.3.6.1.4.1.37476.3.2.1.99.7.256"),
+    hashes.SHA3_384: Oid.from_string("1.3.6.1.4.1.37476.3.2.1.99.7.384"),
+    hashes.SHA3_512: Oid.from_string("1.3.6.1.4.1.37476.3.2.1.99.7.512"),
+}
+
+
+def _get_tbs_bytes(chuid_tbs: bytes, cert: x509.Certificate) -> bytes:
+    assert cert.signature_hash_algorithm  # noqa: S101
+    h = hashes.Hash(cert.signature_hash_algorithm)
+    h.update(chuid_tbs)
+    digest = h.finalize()
+    subject = cert.subject.public_bytes()
+
+    # signedAttrs
+    return Tlv(
+        0x31,
+        Tlv(  # contentType
+            0x30,
+            Tlv(0x06, Oid.from_string("1.2.840.113549.1.9.3"))
+            + Tlv(0x31, Tlv(0x06, Oid.from_string("2.16.840.1.101.3.6.1"))),
+        )
+        + Tlv(  # messageDigest
+            0x30,
+            Tlv(0x06, Oid.from_string("1.2.840.113549.1.9.4"))
+            + Tlv(0x31, Tlv(0x04, digest)),
+        )
+        + Tlv(  # pivSigner-DN
+            0x30,
+            Tlv(0x06, Oid.from_string("2.16.840.1.101.3.6.5")) + Tlv(0x31, subject),
+        ),
+    )
+
+
+class ChuidSigner:
+    def __init__(self, chuid_tbs: bytes, certificate: x509.Certificate):
+        self.tbs_bytes = _get_tbs_bytes(chuid_tbs, certificate)
+        self._certificate = certificate
+
+    def sign(self, signature: bytes) -> bytes:
+        """Create the asymmetric signature for the CHUID.
+
+        :param signature: The signature over the tbs_bytes using the private key
+        """
+        cert = self._certificate
+        assert cert.signature_hash_algorithm  # noqa: S101
+        hash_oid = _HASH_OIDS[type(cert.signature_hash_algorithm)]
+        signed_attrs = self.tbs_bytes
+
+        # Serial number is signed, so we may need to prepend a zero byte
+        serial = int2bytes(cert.serial_number)
+        if 0x80 & serial[0]:
+            serial = b"\0" + serial
+
+        signer_info = Tlv(
+            0x30,
+            Tlv(0x02, b"\1")  # version
+            + Tlv(0x30, cert.issuer.public_bytes() + Tlv(0x02, serial))
+            + Tlv(0x30, Tlv(0x06, hash_oid) + Tlv(0x05))  # signature hash
+            + Tlv(0xA0, Tlv.unpack(0x31, signed_attrs))
+            + Tlv(
+                0x30,
+                Tlv(0x06, Oid.from_string(cert.signature_algorithm_oid.dotted_string))
+                + Tlv(0x05),
+            )
+            + Tlv(0x04, signature),
+        )
+
+        signed_data = Tlv(
+            0x30,
+            Tlv(0x06, Oid.from_string("1.2.840.113549.1.7.2"))  # signedData
+            + Tlv(
+                0xA0,
+                Tlv(
+                    0x30,
+                    Tlv(0x02, b"\3")  # version
+                    + Tlv(0x31, Tlv(0x30, Tlv(0x06, hash_oid) + Tlv(0x05)))  # digestAlg
+                    + Tlv(0x30, Tlv(0x06, Oid.from_string("2.16.840.1.101.3.6.1")))
+                    + Tlv(0xA0, cert.public_bytes(Encoding.DER))
+                    + Tlv(0x31, signer_info),
+                ),
+            ),
+        )
+
+        return bytes(signed_data)
+
+
 @dataclass(kw_only=True)
 class Chuid:
     buffer_length: int | None = None
@@ -490,7 +584,7 @@ class Chuid:
     guid: bytes
     expiration_date: date
     authentication_key_map: bytes | None = None
-    asymmetric_signature: bytes
+    asymmetric_signature: bytes = b""
     lrc: int | None = None
 
     def _get_bytes(self, include_signature: bool = True) -> bytes:
@@ -538,6 +632,10 @@ class Chuid:
             asymmetric_signature=data[0x3E],
             lrc=lrc[0] if lrc else None,
         )
+
+    def get_signer(self, certificate: x509.Certificate) -> ChuidSigner:
+        """Get a signer for this CHUID."""
+        return ChuidSigner(self.tbs_bytes, certificate)
 
 
 def _pad_message(key_type, message, hash_algorithm, padding):
