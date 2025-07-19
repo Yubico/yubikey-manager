@@ -877,6 +877,12 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
     help="use scancodes for numeric keypad when sending digits "
     "(helps for some keyboard layouts)",
 )
+@click.option(
+    "--serial-usb-visible",
+    is_flag=True,
+    show_default=True,
+    help="enable serial number in the USB iSerial field",
+)
 def settings(
     ctx,
     slot,
@@ -885,6 +891,7 @@ def settings(
     enter,
     pacing,
     use_numeric_keypad,
+    serial_usb_visible,
     force,
 ):
     """
@@ -941,6 +948,7 @@ def settings(
             UpdateConfiguration()
             .append_cr(enter)
             .use_numeric(use_numeric_keypad)
+            .serial_usb_visible(serial_usb_visible)
             .pacing(pacing_10ms, pacing_20ms),
             new_access_code,
             ctx.obj["access_code"],
