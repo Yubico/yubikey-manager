@@ -105,14 +105,33 @@ class SmartCardCtapDevice(CtapDevice, Connection):
                 data = data[5 : 5 + data[4]]
         elif cmd == CTAPHID.CBOR:
             # NFCCTAP_MSG
-            cla, ins, p1, p2 = 0x80, 0x10, 0x00, 0x00
+            cla, ins, p1, p2 = 0x80, 0x10, 0x80, 0x00
         else:
             raise CtapError(CtapError.ERR.INVALID_COMMAND)
 
+        event = event or Event()
+        last_ka = None
+
         try:
-            return self.protocol.send_apdu(cla, ins, p1, p2, data)
-        except ApduError:
-            raise CtapError(CtapError.ERR.OTHER)  # TODO: Map from SW error
+            while True:
+                try:
+                    return self.protocol.send_apdu(cla, ins, p1, p2, data)
+                except ApduError as e:
+                    if e.sw == 0x9100:
+                        ins, p1 = 0x11, 0x00  # NFCCTAP_GETRESPONSE
+                        ka_status = STATUS(e.data[0])
+                        if on_keepalive and last_ka != ka_status:
+                            last_ka = ka_status
+                            on_keepalive(ka_status)
+                        if event.wait(0.1):
+                            p1 = 0x11  # cancel
+                        continue
+                    raise CtapError(CtapError.ERR.OTHER)  # TODO: Map from SW error
+        except KeyboardInterrupt:
+            if ins == 0x11:
+                logger.debug("Keyboard interrupt, cancelling...")
+                self.protocol.send_apdu(cla, ins, 0x11, p2)
+            raise
 
     @classmethod
     def list_devices(cls) -> Iterator[CtapDevice]:

@@ -262,8 +262,7 @@ class OtpProtocol:
                     else:
                         on_keepalive(STATUS_PROCESSING)
                         timeout = 0.02
-                    sleep(timeout)
-                    if event.wait(timeout):
+                    if event.is_set(timeout):
                         self._reset_state()
                         raise TimeoutError("Command cancelled by Event")
         except KeyboardInterrupt:

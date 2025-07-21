@@ -93,6 +93,7 @@ def fido(ctx):
     if resolve_scp:
         s_conn = dev.open_connection(SmartCardConnection)
         scp_params = resolve_scp(s_conn)
+        ctx.obj["scp_params"] = scp_params
         conn = SmartCardCtapDevice(s_conn, scp_params)
     else:
         conn = dev.open_connection(FidoConnection)
@@ -268,7 +269,14 @@ def reset(ctx, force):
                     click.echo(insert_msg)
 
         dev.reinsert(reinsert_cb=prompt_reinsert)
-        conn = dev.open_connection(type(conn))
+
+        # Make sure to re-establish SCP, if used
+        if isinstance(conn, SmartCardCtapDevice):
+            conn = SmartCardCtapDevice(
+                dev.open_connection(SmartCardConnection), ctx.obj["scp_params"]
+            )
+        else:
+            conn = dev.open_connection(FidoConnection)
 
     try:
         if is_fips:
