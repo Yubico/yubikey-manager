@@ -302,6 +302,7 @@ INS_GET_DATA = 0xCB
 INS_PUT_DATA = 0xDB
 INS_MOVE_KEY = 0xF6
 INS_GET_METADATA = 0xF7
+INS_GET_SERIAL = 0xF8
 INS_ATTEST = 0xF9
 INS_SET_PIN_RETRIES = 0xFA
 INS_RESET = 0xFB
@@ -746,10 +747,18 @@ class PivSession:
 
         logger.info("PIV application data reset performed")
 
+    def get_serial(self) -> int:
+        """Get the serial number of the YubiKey."""
+        logger.debug("Getting serial number")
+        require_version(self.version, (5, 0, 3))
+        response = self.protocol.send_apdu(0, INS_GET_SERIAL, 0, 0)
+        return bytes2int(response)
+
     @overload
     def authenticate(self, management_key: bytes) -> None: ...
 
     @overload
+    # TODO: remove in 6.0
     def authenticate(
         self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
     ) -> None: ...
