@@ -684,8 +684,8 @@ def chalresp(ctx, slot, key, totp, touch, force, generate):
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="number of digits in generated TOTP code (default: 6), "
-    "ignored unless --totp is set",
+    show_default=True,
+    help="number of digits in generated TOTP code, ignored unless --totp is set",
 )
 @click.pass_context
 def calculate(ctx, slot, challenge, totp, digits):
@@ -759,7 +759,8 @@ def parse_modhex_or_bcd(value):
     "--digits",
     type=click.Choice(["6", "8"]),
     default="6",
-    help="number of digits in generated code (default is 6)",
+    show_default=True,
+    help="number of digits in generated code",
 )
 @click.option("-c", "--counter", type=int, default=0, help="initial counter value")
 @click.option("-i", "--identifier", help="token identifier")
@@ -873,9 +874,13 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
 @click.option(
     "--use-numeric-keypad",
     is_flag=True,
-    show_default=True,
     help="use scancodes for numeric keypad when sending digits "
     "(helps for some keyboard layouts)",
+)
+@click.option(
+    "--serial-usb-visible",
+    is_flag=True,
+    help="make the serial number visible in the USB descriptor",
 )
 def settings(
     ctx,
@@ -885,6 +890,7 @@ def settings(
     enter,
     pacing,
     use_numeric_keypad,
+    serial_usb_visible,
     force,
 ):
     """
@@ -941,7 +947,8 @@ def settings(
             UpdateConfiguration()
             .append_cr(enter)
             .use_numeric(use_numeric_keypad)
-            .pacing(pacing_10ms, pacing_20ms),
+            .pacing(pacing_10ms, pacing_20ms)
+            .serial_usb_visible(serial_usb_visible),
             new_access_code,
             ctx.obj["access_code"],
         )
