@@ -255,8 +255,9 @@ class _UsbCompositeDevice(YkmanDevice):
         return self._group.connect(self._key, connection_type)
 
     def _do_reinsert(self, reinsert_cb, event):
-        state = scan_devices()[1]
+        pids, state = scan_devices()
         removed = False
+        n_devs = sum(pids.values())
 
         def is_match(info):
             return (
@@ -266,7 +267,7 @@ class _UsbCompositeDevice(YkmanDevice):
         logger.debug(f"Waiting for removal of device serial={self._info.serial}")
         reinsert_cb(REINSERT_STATUS.REMOVE)
         while not event.wait(0.5):
-            new_state = scan_devices()[1]
+            new_pids, new_state = scan_devices()
             if new_state == state:
                 # No change in devices, continue waiting
                 continue
@@ -274,12 +275,16 @@ class _UsbCompositeDevice(YkmanDevice):
             devs = _list_all_devices(silent=True)
 
             if not removed:
-                if any(is_match(info) for _, info in devs):
-                    # Device is still present, but something else has changed
+                if n_devs != sum(new_pids.values()) + 1 or any(
+                    is_match(info) for _, info in devs
+                ):
                     raise ValueError("A different YubiKey was inserted/removed")
                 removed = True
                 reinsert_cb(REINSERT_STATUS.REINSERT)
             else:
+                # Expect number of devices to be back to starting value
+                if n_devs != sum(new_pids.values()):
+                    raise ValueError("A different YubiKey was inserted/removed")
                 for dev, info in devs:
                     if is_match(info):
                         # Device is reinserted, update properties
