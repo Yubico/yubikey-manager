@@ -89,19 +89,24 @@ def fido(ctx):
 
     """
     dev = ctx.obj["device"]
+    info = ctx.obj["info"]
+
     resolve_scp = ctx.obj.get("scp")
     if resolve_scp:
         s_conn = dev.open_connection(SmartCardConnection)
         scp_params = resolve_scp(s_conn)
         ctx.obj["scp_params"] = scp_params
         conn = SmartCardCtapDevice(s_conn, scp_params)
-    else:
+    elif dev.supports_connection(FidoConnection):
         conn = dev.open_connection(FidoConnection)
+    elif dev.supports_connection(SmartCardConnection) and info.version >= (5, 8, 0):
+        conn = dev.open_connection(SmartCardCtapDevice)
+    else:
+        raise CliFail("Unsupported connection type")
 
     ctx.obj["conn"] = conn
     # ctx.obj["conn"] might change its target later
     ctx.call_on_close(lambda: ctx.obj["conn"].close())
-    info = ctx.obj["info"]
 
     if CAPABILITY.FIDO2 in info.config.enabled_capabilities[dev.transport]:
         ctx.obj["ctap2"] = Ctap2(conn)

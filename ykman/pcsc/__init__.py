@@ -124,8 +124,7 @@ class ScardYubiKeyDevice(YkmanDevice):
         if issubclass(ScardSmartCardConnection, connection_type):
             return self._open_smartcard_connection()
         elif issubclass(SmartCardCtapDevice, connection_type):
-            if self.transport == TRANSPORT.NFC:
-                return SmartCardCtapDevice(self._open_smartcard_connection())
+            return SmartCardCtapDevice(self._open_smartcard_connection())
         return super().open_connection(connection_type)
 
     def _open_smartcard_connection(self, retry=True) -> SmartCardConnection:
