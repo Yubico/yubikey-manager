@@ -98,8 +98,9 @@ def fido(ctx):
     else:
         conn = dev.open_connection(FidoConnection)
 
-    ctx.call_on_close(conn.close)
     ctx.obj["conn"] = conn
+    # ctx.obj["conn"] might change its target later
+    ctx.call_on_close(lambda: ctx.obj["conn"].close())
     info = ctx.obj["info"]
 
     if CAPABILITY.FIDO2 in info.config.enabled_capabilities[dev.transport]:
@@ -277,6 +278,7 @@ def reset(ctx, force):
             )
         else:
             conn = dev.open_connection(FidoConnection)
+        ctx.obj["conn"] = conn
 
     try:
         if is_fips:

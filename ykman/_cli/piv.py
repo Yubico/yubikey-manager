@@ -166,6 +166,13 @@ click_hash_option = click.option(
     help="hash algorithm",
     callback=click_parse_hash,
 )
+click_update_chuid_option = click.option(
+    "--update-chuid/--no-update-chuid",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="update the CHUID GUID to a new random value",
+)
 
 
 def _fname(fobj):
@@ -960,6 +967,10 @@ def delete_key(ctx, management_key, pin, slot):
 def cert():
     """
     Manage certificates.
+
+    By default, modifying the certificate in a slot will also update the
+    CHUID with a new random GUID. To prevent this, use the --no-update-chuid
+    option.
     """
 
 
@@ -1001,10 +1012,11 @@ def _update_chuid(session):
 @click.option(
     "-c", "--compress", is_flag=True, help="compresses the certificate before storing"
 )
+@click_update_chuid_option
 @click_slot_argument
 @click.argument("cert", type=click.File("rb"), metavar="CERTIFICATE")
 def import_certificate(
-    ctx, management_key, pin, slot, cert, password, verify, compress
+    ctx, management_key, pin, slot, cert, password, verify, compress, update_chuid
 ):
     """
     Import an X.509 certificate.
@@ -1081,7 +1093,8 @@ def import_certificate(
         _verify_pin_if_needed(ctx, session, do_verify, pin)
 
     session.put_certificate(slot, cert_to_import, compress)
-    _update_chuid(session)
+    if update_chuid:
+        _update_chuid(session)
     click.echo(f"Certificate imported into slot {slot.name}")
 
 
@@ -1139,8 +1152,17 @@ def export_certificate(ctx, format, slot, certificate):
     show_default=True,
 )
 @click_hash_option
+@click_update_chuid_option
 def generate_certificate(
-    ctx, management_key, pin, slot, public_key, subject, valid_days, hash_algorithm
+    ctx,
+    management_key,
+    pin,
+    slot,
+    public_key,
+    subject,
+    valid_days,
+    hash_algorithm,
+    update_chuid,
 ):
     """
     Generate a self-signed X.509 certificate.
@@ -1191,7 +1213,8 @@ def generate_certificate(
                 session, slot, public_key, subject, now, valid_to, hash_algorithm
             )
         session.put_certificate(slot, cert)
-        _update_chuid(session)
+        if update_chuid:
+            _update_chuid(session)
         click.echo(f"Certificate generated in slot {slot.name}.")
     except ApduError:
         raise CliFail("Certificate generation failed.")
@@ -1266,7 +1289,8 @@ def generate_certificate_signing_request(
 @click_management_key_option
 @click_pin_option
 @click_slot_argument
-def delete_certificate(ctx, management_key, pin, slot):
+@click_update_chuid_option
+def delete_certificate(ctx, management_key, pin, slot, update_chuid):
     """
     Delete a certificate.
 
@@ -1278,7 +1302,8 @@ def delete_certificate(ctx, management_key, pin, slot):
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
     session.delete_certificate(slot)
-    _update_chuid(session)
+    if update_chuid:
+        _update_chuid(session)
     click.echo(f"Certificate in slot {slot.name} deleted.")
 
 

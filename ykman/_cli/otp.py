@@ -107,6 +107,13 @@ click_slot_argument = click.argument(
     "slot", type=click.Choice(["1", "2"]), callback=lambda c, p, v: SLOT(int(v))
 )
 
+click_enter_option = click.option(
+    "--enter/--no-enter",
+    default=True,
+    show_default=True,
+    help="send an Enter keystroke after slot output",
+)
+
 
 _WRITE_FAIL_MSG = (
     "Failed to write to the YubiKey. Make sure the device does not "
@@ -355,11 +362,7 @@ def delete(ctx, slot, force):
     callback=parse_hex(16),
     help="16 byte secret key",
 )
-@click.option(
-    "--no-enter",
-    is_flag=True,
-    help="don't send an Enter keystroke after emitting the OTP",
-)
+@click_enter_option
 @click.option(
     "-S",
     "--serial-public-id",
@@ -403,7 +406,7 @@ def yubiotp(
     public_id,
     private_id,
     key,
-    no_enter,
+    enter,
     force,
     serial_public_id,
     generate_private_id,
@@ -496,9 +499,7 @@ def yubiotp(
     try:
         session.put_configuration(
             slot,
-            YubiOtpSlotConfiguration(public_id_bytes, private_id, key).append_cr(
-                not no_enter
-            ),
+            YubiOtpSlotConfiguration(public_id_bytes, private_id, key).append_cr(enter),
             access_code,
             access_code,
         )
@@ -537,14 +538,10 @@ def yubiotp(
     show_default=True,
     help="keyboard layout to use for the static password",
 )
-@click.option(
-    "--no-enter",
-    is_flag=True,
-    help="don't send an Enter keystroke after outputting the password",
-)
+@click_enter_option
 @click_force_option
 @click.pass_context
-def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, force):
+def static(ctx, slot, password, generate, length, keyboard_layout, enter, force):
     """
     Configure a static password.
 
@@ -574,7 +571,7 @@ def static(ctx, slot, password, generate, length, keyboard_layout, no_enter, for
     try:
         session.put_configuration(
             slot,
-            StaticPasswordSlotConfiguration(scan_codes).append_cr(not no_enter),
+            StaticPasswordSlotConfiguration(scan_codes).append_cr(enter),
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
@@ -764,14 +761,10 @@ def parse_modhex_or_bcd(value):
 )
 @click.option("-c", "--counter", type=int, default=0, help="initial counter value")
 @click.option("-i", "--identifier", help="token identifier")
-@click.option(
-    "--no-enter",
-    is_flag=True,
-    help="don't send an Enter keystroke after outputting the code",
-)
+@click_enter_option
 @click_force_option
 @click.pass_context
-def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
+def hotp(ctx, slot, key, digits, counter, identifier, enter, force):
     """
     Program an HMAC-SHA1 OATH-HOTP credential.
 
@@ -834,7 +827,7 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
             .imf(counter)
             .token_id(token_id, mh1, mh2)
             .digits8(int(digits) == 8)
-            .append_cr(not no_enter),
+            .append_cr(enter),
             ctx.obj["access_code"],
             ctx.obj["access_code"],
         )
@@ -857,12 +850,7 @@ def hotp(ctx, slot, key, digits, counter, identifier, no_enter, force):
 @click.option(
     "--delete-access-code", is_flag=True, help="remove access code from the slot"
 )
-@click.option(
-    "--enter/--no-enter",
-    default=True,
-    show_default=True,
-    help="send an Enter keystroke after slot output",
-)
+@click_enter_option
 @click.option(
     "-p",
     "--pacing",
