@@ -271,10 +271,15 @@ class _UsbCompositeDevice(YkmanDevice):
             if new_state == state:
                 # No change in devices, continue waiting
                 continue
+
             state = new_state
             devs = _list_all_devices(silent=True)
 
             if not removed:
+                if new_pids == pids:
+                    # No change in PIDs, continue waiting
+                    continue
+
                 if n_devs != sum(new_pids.values()) + 1 or any(
                     is_match(info) for _, info in devs
                 ):

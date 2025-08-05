@@ -277,12 +277,13 @@ def reset(ctx, force):
         dev.reinsert(reinsert_cb=prompt_reinsert)
 
         # Make sure to re-establish SCP, if used
-        if isinstance(conn, SmartCardCtapDevice):
+        scp_params = ctx.obj.get("scp_params")
+        if scp_params:
             conn = SmartCardCtapDevice(
-                dev.open_connection(SmartCardConnection), ctx.obj["scp_params"]
+                dev.open_connection(SmartCardConnection), scp_params
             )
         else:
-            conn = dev.open_connection(FidoConnection)
+            conn = dev.open_connection(type(conn))
         ctx.obj["conn"] = conn
 
     try:

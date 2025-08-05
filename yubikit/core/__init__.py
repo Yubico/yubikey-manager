@@ -30,7 +30,9 @@ from __future__ import annotations
 import abc
 import logging
 import re
+from contextlib import contextmanager
 from enum import Enum, IntEnum, IntFlag, unique
+from threading import Timer
 from typing import (
     Callable,
     ClassVar,
@@ -413,3 +415,13 @@ class Oid(bytes):
 
     def __str__(self) -> str:
         return self.dotted_string
+
+
+@contextmanager
+def _timeout(f, timeout):
+    timer = Timer(timeout, f)
+    try:
+        timer.start()
+        yield None
+    finally:
+        timer.cancel()

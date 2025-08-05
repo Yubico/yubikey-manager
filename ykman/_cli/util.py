@@ -30,9 +30,7 @@ import logging
 import sys
 from collections import OrderedDict
 from collections.abc import MutableMapping
-from contextlib import contextmanager
 from enum import Enum
-from threading import Timer
 from typing import Sequence, cast
 
 import click
@@ -40,7 +38,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 
-from yubikit.core import TRANSPORT, ApplicationNotAvailableError
+from yubikit.core import TRANSPORT, ApplicationNotAvailableError, _timeout
 from yubikit.core.smartcard import ApduError, SmartCardConnection
 from yubikit.core.smartcard.scp import KeyRef, Scp11KeyParams, ScpKeyParams, ScpKid
 from yubikit.management import CAPABILITY, DeviceInfo
@@ -279,14 +277,8 @@ def prompt_for_touch(prompt: str = "Touch your YubiKey...") -> None:
         sys.stderr.write(f"{prompt}\n")
 
 
-@contextmanager
 def prompt_timeout(timeout=0.5):
-    timer = Timer(timeout, prompt_for_touch)
-    try:
-        timer.start()
-        yield None
-    finally:
-        timer.cancel()
+    return _timeout(prompt_for_touch, timeout)
 
 
 class CliFail(Exception):
