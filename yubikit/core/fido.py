@@ -55,6 +55,8 @@ Connection.register(FidoConnection)
 
 # Use SmartCardConnection for FIDO access, allowing usage of SCP
 class SmartCardCtapDevice(CtapDevice, Connection):
+    usb_interface = USB_INTERFACE.CCID
+
     def __init__(
         self,
         connection: SmartCardConnection,
