@@ -96,18 +96,19 @@ class SmartCardCtapDevice(CtapDevice, Connection):
         event: Event | None = None,
         on_keepalive: Callable[[STATUS], None] | None = None,
     ) -> bytes:
-        if cmd == CTAPHID.MSG:
-            cla, ins, p1, p2 = data[:4]
-            if data[4] == 0:
-                ln = struct.unpack(">H", data[5:7])[0]
-                data = data[7 : 7 + ln]
-            else:
-                data = data[5 : 5 + data[4]]
-        elif cmd == CTAPHID.CBOR:
-            # NFCCTAP_MSG
-            cla, ins, p1, p2 = 0x80, 0x10, 0x80, 0x00
-        else:
-            raise CtapError(CtapError.ERR.INVALID_COMMAND)
+        match cmd:
+            case CTAPHID.MSG:
+                cla, ins, p1, p2 = data[:4]
+                if data[4] == 0:
+                    ln = struct.unpack(">H", data[5:7])[0]
+                    data = data[7 : 7 + ln]
+                else:
+                    data = data[5 : 5 + data[4]]
+            case CTAPHID.CBOR:
+                # NFCCTAP_MSG
+                cla, ins, p1, p2 = 0x80, 0x10, 0x80, 0x00
+            case _:
+                raise CtapError(CtapError.ERR.INVALID_COMMAND)
 
         event = event or Event()
         last_ka = None
