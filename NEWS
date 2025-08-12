@@ -1,7 +1,19 @@
+* Version 5.8.0 (unreleased)
+ ** Python 3.10 or later is now required.
+ ** CLI: The "otp settings" command now supports --serial-usb-visible.
+ ** CLI: List PIV "retired" key slots after normal slots.
+ ** CLI: Add --no-update-chuid to "piv certificate" commands.
+ ** CLI: Improve "fido" command error handing when FIDO2 is disabled/missing.
+ ** CLI: Support "fido reset" when multiple keys are connected.
+ ** Windows CLI: Fix issue with command line arguments starting with "~".
+ ** Add "YkmanDevice.reinsert" method to simplify reconnecting a YubiKey.
+ ** PIV: Add "PivSession.get_serial" method.
+ ** Building the project now uses uv.
+
 * Version 5.7.2 (released 2025-06-09)
   This is a Windows-only patch release.
- ** FIDO reset over NFC on Windows fixed
- ** Windows installer built with Python 3.13.4
+ ** FIDO reset over NFC on Windows fixed.
+ ** Windows installer built with Python 3.13.4.
 
 * Version 5.7.1 (released 2025-06-09)
  ** Bugfix: Fix OTP connections for YubiKeys with all other USB interfaces deactivated.
