@@ -1,4 +1,4 @@
-* Version 5.8.0 (unreleased)
+* Version 5.8.0 (released 2025-09-03)
  ** Python 3.10 or later is now required.
  ** CLI: The "otp settings" command now supports --serial-usb-visible.
  ** CLI: List PIV "retired" key slots after normal slots.
