@@ -99,7 +99,11 @@ def fido(ctx):
         conn = SmartCardCtapDevice(s_conn, scp_params)
     elif dev.supports_connection(FidoConnection):
         conn = dev.open_connection(FidoConnection)
-    elif dev.supports_connection(SmartCardConnection) and info.version >= (5, 8, 0):
+    elif (
+        dev.supports_connection(SmartCardConnection)
+        and dev.transport == TRANSPORT.USB
+        and info.config.enabled_capabilities[dev.transport] & 0x1000  # CCID_FIDO
+    ):
         conn = dev.open_connection(SmartCardCtapDevice)
     else:
         raise CliFail("Unsupported connection type")

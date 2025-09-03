@@ -442,7 +442,7 @@ def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
                     name_parts.append("- Multi-protocol Edition")
             elif info.is_sky and info.serial:
                 name_parts.append("- Enterprise Edition")
-            elif info.pin_complexity and not info.is_sky and not info.is_fips:
+            elif info.pin_complexity and not info.is_sky:
                 name_parts.append("- Enhanced PIN")
 
             # Combine parts into a name and make final adjustments
