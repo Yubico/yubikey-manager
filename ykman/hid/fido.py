@@ -5,8 +5,7 @@ from fido2.hid import CtapHidDevice, list_descriptors, open_connection
 from yubikit.core import PID, TRANSPORT, Connection
 from yubikit.support import read_info
 
-from ..base import REINSERT_STATUS, CancelledException
-from ..device import YkmanDevice
+from ..base import REINSERT_STATUS, CancelledException, YkmanDevice
 from ..fido import FidoConnection
 
 logger = logging.getLogger(__name__)
