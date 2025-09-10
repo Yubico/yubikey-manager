@@ -119,6 +119,9 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
     Setting EXPECTED_SW will cause the command to check the response SW and fail if it
     differs. "=" can be used as shorthand for "=9000" (SW=OK).
 
+    As an alternative, you can provide full APDUs using the -s/--send-apdu option. You
+    cannot mix -a and positional APDUs with --send-apdu.
+
     Examples:
 
     \b
@@ -142,7 +145,7 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
     """
     if not send_apdu and not apdu and not app:
         ctx.fail("No commands provided.")
-    if apdu and send_apdu:
+    if (app or apdu) and send_apdu:
         ctx.fail("Cannot mix positional APDUs and -s/--send-apdu.")
     apdus = [_parse_apdu(data) for data in apdu]
 
