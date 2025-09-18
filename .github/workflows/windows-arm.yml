@@ -1,0 +1,69 @@
+name: Windows ARM64
+
+on: [push, pull_request]
+
+permissions: read-all
+
+jobs:
+  build:
+
+    runs-on: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install the project
+        run: uv sync --locked
+
+      - name: Run pre-commit hooks
+        run: |
+          uv tool install pre-commit
+          pre-commit run --all-files --verbose
+
+      - name: Run unit tests
+        run: uv run pytest -v
+
+      - name: Build
+        run: uv build
+
+      - name: Install from tar.gz
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install dist/*.tar.gz
+          ykman --version
+          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+          pip uninstall -y yubikey-manager
+
+      - name: Install from wheel
+        shell: bash
+        run: |
+          pip install dist/*.whl
+          ykman --version
+          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+          pip uninstall -y yubikey-manager
+
+      - name: PyInstaller
+        shell: bash
+        run: |
+          uv run pyinstaller ykman.spec
+          dist/ykman/ykman.exe --version
+          [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
+
+      # TODO: Add Installer and packaging scripts
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ykman-builds-windows
+          path: dist
