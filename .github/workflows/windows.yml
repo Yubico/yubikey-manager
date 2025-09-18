@@ -60,14 +60,6 @@ jobs:
           dist/ykman/ykman.exe --version
           [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
 
-      - name: Copy scripts
-        shell: bash
-        run: cp -r resources/win dist/scripts
-
-      - name: Build installer
-        working-directory: ./dist
-        run: .\scripts\make_msi.ps1
-
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
