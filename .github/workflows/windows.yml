@@ -6,7 +6,6 @@ permissions: read-all
 
 jobs:
   build:
-
     runs-on: windows-latest
 
     steps:
@@ -33,7 +32,7 @@ jobs:
       - name: Run unit tests
         run: uv run pytest -v
 
-      - name: Build
+      - name: Build (sdist & wheel)
         run: uv build
 
       - name: Install from tar.gz
@@ -42,7 +41,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install dist/*.tar.gz
           ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+          [[ -z "$(ykman --version | grep -E 'not found|missing')" ]]
           pip uninstall -y yubikey-manager
 
       - name: Install from wheel
@@ -50,7 +49,7 @@ jobs:
         run: |
           pip install dist/*.whl
           ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
+          [[ -z "$(ykman --version | grep -E 'not found|missing')" ]]
           pip uninstall -y yubikey-manager
 
       - name: PyInstaller
@@ -58,17 +57,31 @@ jobs:
         run: |
           uv run pyinstaller ykman.spec
           dist/ykman/ykman.exe --version
-          [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
+          [[ -z "$(dist/ykman/ykman.exe --version | grep -E 'not found|missing')" ]]
 
-      - name: Copy scripts
+      - name: Copy installer resources
         shell: bash
         run: cp -r resources/win dist/scripts
 
-      - name: Build installer
-        working-directory: ./dist
-        run: .\scripts\make_msi.ps1
+      - name: Install WiX 5 CLI
+        shell: powershell
+        run: |
+          dotnet tool install --global wix
 
-      - name: Upload build
+      - name: Add .NET Global Tools to PATH
+        shell: powershell
+        run: |
+          $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
+          if (-not ($env:PATH -split ";" | Where-Object { $_ -eq $toolPath })) {
+            echo "PATH=$env:PATH;$toolPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Build MSI (x64)
+        working-directory: ./dist
+        shell: powershell
+        run: .\scripts\make_msi.ps1 -Arch x64
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ykman-builds-windows

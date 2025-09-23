@@ -5,8 +5,7 @@ on: [push, pull_request]
 permissions: read-all
 
 jobs:
-  build:
-
+  build-arm64:
     runs-on: windows-11-arm
 
     steps:
@@ -17,7 +16,7 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python
+      - name: Set up Python (arm64)
         uses: actions/setup-python@v5
         with:
           python-version-file: ".python-version"
@@ -33,37 +32,57 @@ jobs:
       - name: Run unit tests
         run: uv run pytest -v
 
-      - name: Build
+      - name: Build (sdist & wheel)
         run: uv build
 
       - name: Install from tar.gz
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install dist/*.tar.gz
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
+            python -m pip install --upgrade pip
+            pip install dist/*.tar.gz
+            ykman --version
+            [[ -z "$(ykman --version | grep -E 'not found|missing')" ]]
+            pip uninstall -y yubikey-manager
 
       - name: Install from wheel
         shell: bash
         run: |
-          pip install dist/*.whl
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
+            pip install dist/*.whl
+            ykman --version
+            [[ -z "$(ykman --version | grep -E 'not found|missing')" ]]
+            pip uninstall -y yubikey-manager
 
-      - name: PyInstaller
+      - name: PyInstaller (ARM64)
         shell: bash
         run: |
           uv run pyinstaller ykman.spec
           dist/ykman/ykman.exe --version
-          [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
+          [[ -z "$(dist/ykman/ykman.exe --version | grep -E 'not found|missing')" ]]
 
-      # TODO: Add Installer and packaging scripts
+      - name: Copy installer resources
+        shell: bash
+        run: cp -r resources/win dist/scripts
 
-      - name: Upload build
+      - name: Install WiX 5 CLI
+        shell: powershell
+        run: |
+          dotnet tool install --global wix
+
+      - name: Add .NET Global Tools to PATH
+        shell: powershell
+        run: |
+          $toolPath = Join-Path $env:USERPROFILE ".dotnet\tools"
+          if (-not ($env:PATH -split ";" | Where-Object { $_ -eq $toolPath })) {
+            echo "PATH=$env:PATH;$toolPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Build ARM64 MSI
+        working-directory: ./dist
+        shell: powershell
+        run: .\scripts\make_msi.ps1 -Arch arm64
+
+      - name: Upload ARM64 build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ykman-builds-windows
+          name: ykman-builds-windows-arm64
           path: dist
