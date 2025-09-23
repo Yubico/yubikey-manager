@@ -3,70 +3,91 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <?define ProductName="YubiKey Manager CLI" ?>
-  <!-- PackagePlatform provided via -d PackagePlatform=... (x64 or arm64) -->
-  <?ifndef PackagePlatform?>
-    <?define PackagePlatform="x64" ?>
-  <?endif?>
 
+  <!-- Package: core metadata. Architecture is chosen via build command (e.g., -arch x64 / arm64). -->
   <Package
       Name="$(var.ProductName)"
       Version="$(var.ProductVersion)"
       Manufacturer="Yubico AB"
       UpgradeCode="fba0ab59-48d1-4050-82eb-acad31cf2239"
-      Language="1033"
-      InstallerVersion="500"
-      Compressed="yes"
-      Platform="$(var.PackagePlatform)"
       Scope="perMachine"
-      Description="$(var.ProductName) $(var.ProductVersion)" />
+      Compressed="yes"
+      Language="1033">
 
-  <MediaTemplate />
+    <!-- Summary information (replaces an attempted Description attribute) -->
+    <SummaryInformation
+        Description="$(var.ProductName) $(var.ProductVersion)"
+        Keywords="YubiKey,Manager,CLI" />
 
-  <WixVariable Id="WixUIDialogBmp" Value="yubico-msi-background.png" />
-  <WixVariable Id="WixUIBannerBmp" Value="yubico-msi-y-banner.png" />
+    <!-- Media authoring -->
+    <MediaTemplate />
 
-  <MajorUpgrade
-      AllowDowngrades="no"
-      DowngradeErrorMessage="A newer version of $(var.ProductName) is already installed." />
+    <!-- Handle upgrades -->
+    <MajorUpgrade
+        AllowDowngrades="no"
+        DowngradeErrorMessage="A newer version of $(var.ProductName) is already installed." />
 
-  <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+    <!-- UI -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+    <UI>
+      <UIRef Id="WixUI_InstallDir" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
+    </UI>
 
-  <UI>
-    <UIRef Id="WixUI_InstallDir" />
-    <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
-    <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
-  </UI>
+    <!-- Bitmap variables (must be inside Package in WiX 4) -->
+    <WixVariable Id="WixUIDialogBmp" Value="yubico-msi-background.png" />
+    <WixVariable Id="WixUIBannerBmp" Value="yubico-msi-y-banner.png" />
 
-  <Directory Id="TARGETDIR" Name="SourceDir">
-    <Directory Id="ProgramFiles64Folder">
-      <Directory Id="YubicoDir" Name="Yubico">
-        <Directory Id="INSTALLDIR" Name="YubiKey Manager CLI">
+    <!-- Feature tree (references components/groups defined in fragments below & in fragment.wxs) -->
+    <Feature Id="MainFeature" Title="$(var.ProductName)" Level="1">
+      <ComponentRef Id="EnvVars" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentGroupRef Id="ApplicationFiles" />
+    </Feature>
+
+  </Package>
+
+  <!-- Fragment: Directory layout -->
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="YubicoDir" Name="Yubico">
+          <Directory Id="INSTALLDIR" Name="YubiKey Manager CLI" />
         </Directory>
       </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="YubiKey Manager CLI" />
+      </Directory>
     </Directory>
-    <Directory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="YubiKey Manager CLI" />
-    </Directory>
-  </Directory>
+  </Fragment>
 
-  <Component Id="EnvVars" Guid="7e30efe4-dc8b-40ba-a182-76e490de4f37" Directory="INSTALLDIR">
-    <RegistryValue Root="HKMU" Key="Software\Yubico\YubiKey Manager CLI\Env" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
-    <Environment Id="PathEnvVar" Action="set" System="yes" Name="PATH" Part="last" Value="[INSTALLDIR]" />
-  </Component>
+  <!-- Fragment: Environment variable & PATH component -->
+  <Fragment>
+    <Component Id="EnvVars" Guid="7e30efe4-dc8b-40ba-a182-76e490de4f37" Directory="INSTALLDIR">
+      <RegistryValue Root="HKMU" Key="Software\Yubico\YubiKey Manager CLI\Env" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+      <Environment Id="PathEnvVar" Action="set" System="yes" Name="PATH" Part="last" Value="[INSTALLDIR]" />
+    </Component>
+  </Fragment>
 
-  <Component Id="ApplicationShortcut" Guid="fba0ab59-48d1-4050-82eb-acad31cf2239" Directory="ApplicationProgramsFolder">
-    <RegistryValue Root="HKCU" Key="Software\Yubico\YubiKey Manager CLI" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
-    <util:RemoveFolderEx Id="RemoveOnInstall" On="install" Property="INSTALLDIR" />
-    <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
-    <!-- Optional shortcut:
-    <Shortcut Id="YkmanShortcut" Name="YubiKey Manager CLI" Target="[INSTALLDIR]ykman.exe" WorkingDirectory="INSTALLDIR" />
-    -->
-  </Component>
+  <!-- Fragment: Start Menu / cleanup component -->
+  <Fragment>
+    <Component Id="ApplicationShortcut" Guid="fba0ab59-48d1-4050-82eb-acad31cf2239" Directory="ApplicationProgramsFolder">
+      <RegistryValue Root="HKCU" Key="Software\Yubico\YubiKey Manager CLI" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      <util:RemoveFolderEx Id="RemoveOnInstall" On="install" Property="INSTALLDIR" />
+      <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall" />
+      <!-- Optional shortcut:
+      <Shortcut Id="YkmanShortcut" Name="YubiKey Manager CLI" Target="[INSTALLDIR]ykman.exe" WorkingDirectory="INSTALLDIR" />
+      -->
+    </Component>
+  </Fragment>
 
-  <Feature Id="MainFeature" Title="$(var.ProductName)" Level="1">
-    <ComponentRef Id="EnvVars" />
-    <ComponentRef Id="ApplicationShortcut" />
-    <ComponentGroupRef Id="ApplicationFiles" />
-  </Feature>
+  <!-- NOTE: The harvested / manually generated fragment.wxs (from your script) supplies:
+       <Fragment>
+         <DirectoryRef ...> (Component/AppFiles)
+         <ComponentGroup Id="ApplicationFiles">...</ComponentGroup>
+       </Fragment>
+       That file is passed alongside this one to wix build.
+  -->
 
 </Wix>
