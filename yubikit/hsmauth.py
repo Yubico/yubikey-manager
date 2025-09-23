@@ -86,6 +86,7 @@ INS_GET_VERSION = 0x07
 INS_PUT_MANAGEMENT_KEY = 0x08
 INS_GET_MANAGEMENT_KEY_RETRIES = 0x09
 INS_GET_PUBLIC_KEY = 0x0A
+INS_CHANGE_CREDENTIAL_PASSWORD = 0x0B
 
 # Lengths for parameters
 MANAGEMENT_KEY_LEN = 16
@@ -477,6 +478,79 @@ class HsmAuthSession:
                 attempts_remaining=retries,
                 message=f"Invalid management key, {retries} attempts remaining",
             )
+
+    def _change_credential_password(
+        self, data: bytes, use_management_key: bool
+    ) -> None:
+        require_version(self.version, (5, 8, 0))
+        try:
+            self.protocol.send_apdu(
+                0,
+                INS_CHANGE_CREDENTIAL_PASSWORD,
+                1 if use_management_key else 0,
+                0,
+                data,
+            )
+            logger.info("Credential password changed")
+        except ApduError as e:
+            retries = _retries_from_sw(e.sw)
+            if retries is None:
+                raise
+            raise InvalidPinError(
+                attempts_remaining=retries,
+                message=f"Invalid auth, {retries} attempts remaining",
+            )
+
+    def change_credential_password(
+        self,
+        label: str,
+        credential_password: bytes | str,
+        new_credential_password: bytes | str,
+    ) -> None:
+        """Change the password of a YubiHSM Auth credential.
+
+        :param label: The label of the credential.
+        :param credential_password: The current credential password.
+        :param new_credential_password: The new credential password.
+        """
+        data = (
+            Tlv(TAG_LABEL, _parse_label(label))
+            + Tlv(
+                TAG_CREDENTIAL_PASSWORD, _parse_credential_password(credential_password)
+            )
+            + Tlv(
+                TAG_CREDENTIAL_PASSWORD,
+                _parse_credential_password(new_credential_password),
+            )
+        )
+        self._change_credential_password(data, False)
+
+    def change_credential_password_admin(
+        self,
+        label: str,
+        management_key: bytes,
+        new_credential_password: bytes | str,
+    ) -> None:
+        """Change the password of a YubiHSM Auth credential with management key.
+
+        :param label: The label of the credential.
+        :param management_key: The management key.
+        :param new_credential_password: The new credential password.
+        """
+        if len(management_key) != MANAGEMENT_KEY_LEN:
+            raise ValueError(
+                "Management key must be %d bytes long" % MANAGEMENT_KEY_LEN
+            )
+
+        data = (
+            Tlv(TAG_LABEL, _parse_label(label))
+            + Tlv(TAG_MANAGEMENT_KEY, management_key)
+            + Tlv(
+                TAG_CREDENTIAL_PASSWORD,
+                _parse_credential_password(new_credential_password),
+            )
+        )
+        self._change_credential_password(data, True)
 
     def put_management_key(
         self,

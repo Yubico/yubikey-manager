@@ -63,15 +63,13 @@ from .util import (
 logger = logging.getLogger(__name__)
 
 
-def handle_credential_error(
-    e: Exception, default_exception_msg, target="Credential password"
-):
+def handle_error(e: Exception, default_exception_msg, target="Credential password"):
     if isinstance(e, InvalidPinError):
         attempts = e.attempts_remaining
         if attempts:
-            raise CliFail(f"Wrong management key, {attempts} attempts remaining.")
+            raise CliFail(f"Wrong {target}, {attempts} attempts remaining.")
         else:
-            raise CliFail("Management key is blocked.")
+            raise CliFail(f"{target} is blocked.")
     elif isinstance(e, ApduError):
         if e.sw == SW.AUTH_METHOD_BLOCKED:
             raise CliFail("A credential with the provided label already exists.")
@@ -177,11 +175,11 @@ def _prompt_management_key(prompt="Enter management password", confirm=False):
     )
 
 
-def _prompt_credential_password(prompt="Enter credential password"):
+def _prompt_credential_password(prompt="Enter credential password", confirm=False):
     credential_password = click_prompt(
         prompt,
         hide_input=True,
-        confirmation_prompt=True,
+        confirmation_prompt=confirm,
     )
 
     return _parse_password(
@@ -387,7 +385,7 @@ def generate(ctx, label, credential_password, management_key, touch):
         )
         click.echo("Asymmetric credential generated.")
     except Exception as e:
-        handle_credential_error(
+        handle_error(
             e, default_exception_msg="Failed to generate asymmetric credential."
         )
 
@@ -458,9 +456,7 @@ def import_credential(
         )
         click.echo("Asymmetric credential imported.")
     except Exception as e:
-        handle_credential_error(
-            e, default_exception_msg="Failed to import asymmetric credential."
-        )
+        handle_error(e, default_exception_msg="Failed to import asymmetric credential.")
 
 
 @credentials.command()
@@ -568,9 +564,7 @@ def symmetric(
         click.echo("Symmetric credential stored.")
 
     except Exception as e:
-        handle_credential_error(
-            e, default_exception_msg="Failed to import symmetric credential."
-        )
+        handle_error(e, default_exception_msg="Failed to import symmetric credential.")
 
 
 @credentials.command()
@@ -618,9 +612,7 @@ def derive(ctx, label, derivation_password, credential_password, management_key,
         )
         click.echo("Derived symmetric credential stored.")
     except Exception as e:
-        handle_credential_error(
-            e, default_exception_msg="Failed to import symmetric credential."
-        )
+        handle_error(e, default_exception_msg="Failed to import symmetric credential.")
 
 
 @credentials.command()
@@ -654,9 +646,82 @@ def delete(ctx, label, management_key, force):
         session.delete_credential(management_key, label)
         click.echo("Credential deleted.")
     except Exception as e:
-        handle_credential_error(
+        handle_error(
             e,
             default_exception_msg="Failed to delete credential.",
+        )
+
+
+@credentials.command()
+@click.pass_context
+@click.argument("label")
+@click.option(
+    "-c",
+    "--credential-password",
+    help="current credential password",
+    callback=click_parse_credential_password,
+)
+@click_management_key_option
+@click.option(
+    "-n",
+    "--new-credential-password",
+    help="a new credential password to set",
+    callback=click_parse_credential_password,
+)
+def change_password(
+    ctx, label, credential_password, management_key, new_credential_password
+):
+    """
+    Change the password of a credential.
+
+    This will change the password of a YubiHSM Auth credential stored on the YubiKey.
+
+    NOTE: Both the management password and the current credential password can be used
+    to change credential password, but cannot be combined.
+
+    \b
+    LABEL a label to match a single credential (as shown in "list")
+    """
+
+    session = ctx.obj["session"]
+    if credential_password and management_key:
+        ctx.fail("--credential-password and --management-password can't be combined")
+
+    if management_key is None and credential_password is None:
+        if click.confirm(
+            "Use management password to change credential password?",
+            default=True,
+            show_default=True,
+        ):
+            management_key = _prompt_management_key()
+        else:
+            credential_password = _prompt_credential_password(
+                "Enter current credential password"
+            )
+
+    use_management_key = management_key is not None
+    if new_credential_password is None:
+        new_credential_password = _prompt_credential_password(
+            "Enter the new credential password", confirm=True
+        )
+
+    try:
+        if use_management_key:
+            session.change_credential_password_admin(
+                label, management_key, new_credential_password
+            )
+        else:
+            session.change_credential_password(
+                label, credential_password, new_credential_password
+            )
+        click.echo("Credential password changed.")
+    except Exception as e:
+        handle_error(
+            e,
+            default_exception_msg="Failed to change credential password.",
+            target="Management password"
+            if use_management_key
+            else "Credential password",
         )
 
 
@@ -731,7 +796,7 @@ def change_management_key(ctx, management_key, new_management_key, generate):
         session.put_management_key(management_key, new_management_key)
         click.echo("Management key changed.")
     except Exception as e:
-        handle_credential_error(
+        handle_error(
             e,
             default_exception_msg="Failed to change management key.",
             target="Management key",
@@ -778,7 +843,7 @@ def change_management_password(ctx, management_key, new_management_key):
         session.put_management_key(management_key, new_management_key)
         click.echo("Management password changed.")
     except Exception as e:
-        handle_credential_error(
+        handle_error(
             e,
             default_exception_msg="Failed to change management password.",
             target="Management password",
