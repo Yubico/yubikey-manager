@@ -222,6 +222,53 @@ class TestCredentialManagement:
         credentials = session.list_credentials()
         assert len(credentials) == 0
 
+    @condition.min_version(5, 8)
+    def test_change_credential_password(self, session, management_key):
+        credential_password = "987654321"
+        new_credential_password = "123456789"
+        credential = import_key_derived(session, management_key, credential_password)
+
+        # Try to change credential password using wrong old password
+        with pytest.raises(InvalidPinError):
+            session.change_credential_password(
+                credential.label,
+                "wrongvalue",
+                new_credential_password,
+            )
+
+        session.change_credential_password(
+            credential.label,
+            credential_password,
+            new_credential_password,
+        )
+
+        self.verify_credential_password(session, new_credential_password, credential)
+
+        session.delete_credential(management_key, credential.label)
+
+    @condition.min_version(5, 8)
+    def test_change_credential_password_admin(self, session, management_key):
+        new_credential_password = "123456789"
+        credential = import_key_derived(session, management_key)
+
+        # Try to change credential password using wrong management key
+        with pytest.raises(InvalidPinError):
+            session.change_credential_password_admin(
+                credential.label,
+                NON_DEFAULT_MANAGEMENT_KEY,
+                new_credential_password,
+            )
+
+        session.change_credential_password_admin(
+            credential.label,
+            management_key,
+            new_credential_password,
+        )
+
+        self.verify_credential_password(session, new_credential_password, credential)
+
+        session.delete_credential(management_key, credential.label)
+
 
 class TestAccess:
     def test_change_management_key(self, session, management_key):

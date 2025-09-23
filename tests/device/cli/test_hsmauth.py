@@ -126,6 +126,31 @@ class TestCredentials:
 
         ykman_cli(*args, "apdu", "-a", "hsmauth", apdu)
 
+    def import_key_derived(
+        self,
+        ykman_cli,
+        management_key,
+        label,
+        credential_password="12345679",
+        derivation_password="p4ssw0rd",
+        touch_required=False,
+    ):
+        args = (
+            "hsmauth",
+            "credentials",
+            "derive",
+            label,
+            "-c",
+            credential_password,
+            "-d",
+            derivation_password,
+            "-m",
+            management_key,
+        )
+        if touch_required:
+            args += ("-t",)
+        ykman_cli(*args)
+
     def test_import_credential_symmetric(
         self, ykman_cli, transport, info, management_key
     ):
@@ -171,17 +196,11 @@ class TestCredentials:
     def test_import_credential_symmetric_derived(
         self, ykman_cli, transport, info, management_key
     ):
-        ykman_cli(
-            "hsmauth",
-            "credentials",
-            "derive",
-            "test-name-sym-derived",
-            "-c",
-            "12345679",
-            "-d",
-            "password",
-            "-m",
+        self.import_key_derived(
+            ykman_cli,
             management_key,
+            "test-name-sym-derived",
+            "12345679",
         )
         self.verify_credential_password(
             ykman_cli, transport, info, "12345679", "test-name-sym-derived"
@@ -229,18 +248,11 @@ class TestCredentials:
         assert "test-name-asym-generated" in creds
 
     def test_import_credential_touch_required(self, ykman_cli, management_key):
-        ykman_cli(
-            "hsmauth",
-            "credentials",
-            "derive",
-            "test-name-touch",
-            "-c",
-            "12345679",
-            "-d",
-            "password",
-            "-t",
-            "-m",
+        self.import_key_derived(
+            ykman_cli,
             management_key,
+            "test-name-touch",
+            touch_required=True,
         )
 
         creds = ykman_cli("hsmauth", "credentials", "list").output
@@ -277,35 +289,17 @@ class TestCredentials:
 
     @condition.min_version(5, 6)
     def test_export_public_key_symmetric_credential(self, ykman_cli, management_key):
-        ykman_cli(
-            "hsmauth",
-            "credentials",
-            "derive",
-            "test-name-sym",
-            "-c",
-            "12345679",
-            "-d",
-            "password",
-            "-m",
+        self.import_key_derived(
+            ykman_cli,
             management_key,
+            "test-name-sym",
         )
 
         with pytest.raises(SystemExit):
             ykman_cli("hsmauth", "credentials", "export", "test-name-sym")
 
     def test_delete_credential(self, ykman_cli, management_key):
-        ykman_cli(
-            "hsmauth",
-            "credentials",
-            "derive",
-            "delete-me",
-            "-c",
-            "12345679",
-            "-d",
-            "password",
-            "-m",
-            management_key,
-        )
+        self.import_key_derived(ykman_cli, management_key, "delete-me")
         old_creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "delete-me" in old_creds
         ykman_cli(
@@ -313,6 +307,77 @@ class TestCredentials:
         )
         new_creds = ykman_cli("hsmauth", "credentials", "list").output
         assert "delete-me" not in new_creds
+
+    @condition.min_version(5, 8)
+    def test_change_credential_password(self, ykman_cli, management_key):
+        credential_password = "123456789"
+        new_credential_password = "987654321"
+        label = "test-change-password"
+        self.import_key_derived(
+            ykman_cli, management_key, label, credential_password=credential_password
+        )
+
+        with pytest.raises(SystemExit):
+            # Should fail - wrong current password
+            ykman_cli(
+                "hsmauth",
+                "credentials",
+                "change-password",
+                label,
+                "-c",
+                "wrongvalue",
+                "-n",
+                new_credential_password,
+            )
+
+        # Should succeed
+        ykman_cli(
+            "hsmauth",
+            "credentials",
+            "change-password",
+            label,
+            "-c",
+            credential_password,
+            "-n",
+            new_credential_password,
+        )
+
+    @condition.min_version(5, 8)
+    def test_change_credential_password_admin(self, ykman_cli, management_key):
+        credential_password = "123456789"
+        new_credential_password = "987654321"
+        label = "test-change-password"
+        self.import_key_derived(
+            ykman_cli,
+            management_key,
+            label,
+            credential_password=credential_password,
+        )
+
+        with pytest.raises(SystemExit):
+            # Should fail - wrong management key
+            ykman_cli(
+                "hsmauth",
+                "credentials",
+                "change-password",
+                label,
+                "-m",
+                NON_DEFAULT_MANAGEMENT_KEY,
+                "-n",
+                new_credential_password,
+            )
+
+        # Should succeed
+        ykman_cli(
+            "hsmauth",
+            "credentials",
+            "change-password",
+            label,
+            "-m",
+            management_key,
+            "-n",
+            new_credential_password,
+        )
 
 
 class TestManagementKey:
