@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import struct
+import warnings
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Mapping, TypeAlias, cast
 from uuid import uuid4
@@ -129,13 +130,27 @@ def _parse(value: str) -> list[list[str]]:
 _DOTTED_STRING_RE = re.compile(r"\d(\.\d+)+")
 
 
+# TODO: Require cryptography >= 37 and remove this function
 def parse_rfc4514_string(value: str) -> x509.Name:
     """Parse an RFC 4514 string into a x509.Name.
 
     See: https://tools.ietf.org/html/rfc4514.html
 
     :param value: An RFC 4514 string.
+    :deprecated: Use x509.Name.from_rfc4514_string() instead.
     """
+    warnings.warn(
+        "Deprecated: use x509.Name.from_rfc4514_string() instead.",
+        DeprecationWarning,
+    )
+    try:
+        return x509.Name.from_rfc4514_string(value)
+    except AttributeError:
+        # cryptography < 37, use fallback implementation
+        return _parse_rfc4514_string(value)
+
+
+def _parse_rfc4514_string(value: str) -> x509.Name:
     name = _parse(value)
     attributes: list[x509.RelativeDistinguishedName] = []
     for entry in name:

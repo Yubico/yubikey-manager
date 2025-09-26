@@ -5,7 +5,7 @@ import pytest
 from ykman.piv import (
     generate_chuid,
     generate_random_management_key,
-    parse_rfc4514_string,
+    _parse_rfc4514_string,
 )
 from yubikit.core import NotSupportedError, Version
 from yubikit.piv import (
@@ -32,8 +32,8 @@ from yubikit.piv import (
     ],
 )
 def test_parse_rfc4514_string(value):
-    name = parse_rfc4514_string(value)
-    name2 = parse_rfc4514_string(name.rfc4514_string())
+    name = _parse_rfc4514_string(value)
+    name2 = _parse_rfc4514_string(name.rfc4514_string())
     assert name == name2
 
 
