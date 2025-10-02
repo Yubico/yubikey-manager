@@ -676,7 +676,7 @@ def change_password(
 
     This will change the password of a YubiHSM Auth credential stored on the YubiKey.
 
-    NOTE: Both the management password and the current credential password can be used
+    Both the management password and the current credential password can be used
     to change credential password, but cannot be combined.
 
     \b
@@ -688,16 +688,21 @@ def change_password(
         ctx.fail("--credential-password and --management-password can't be combined")
 
     if management_key is None and credential_password is None:
-        if click.confirm(
-            "Use management password to change credential password?",
-            default=True,
-            show_default=True,
-        ):
-            management_key = _prompt_management_key()
-        else:
+        click.echo("Choose authentication method:")
+        click.echo(" [1] Current credential password")
+        click.echo(" [2] Management password")
+        method = click_prompt(
+            "Enter selection",
+            type=click.Choice([1, 2]),
+            default=1,
+            show_choices=False,
+        )
+        if method == 1:
             credential_password = _prompt_credential_password(
                 "Enter current credential password"
             )
+        else:
+            management_key = _prompt_management_key()
 
     use_management_key = management_key is not None
     if new_credential_password is None:
