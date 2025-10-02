@@ -676,8 +676,8 @@ def change_password(
 
     This will change the password of a YubiHSM Auth credential stored on the YubiKey.
 
-    Both the management password and the current credential password can be used
-    to change credential password, but cannot be combined.
+    Changing a password requires either the current password for the credential,
+    or the management password (not both).
 
     \b
     LABEL a label to match a single credential (as shown in "list")
