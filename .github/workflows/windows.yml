@@ -73,3 +73,66 @@ jobs:
         with:
           name: ykman-builds-windows
           path: dist
+
+  sign-exe:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: ykman-builds-windows
+
+      - name: ls
+        run: ls
+
+      - name: ls
+        run: ls ykman-builds-windows
+
+      - name: docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ci@yubico.com
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: write service account credentials
+        env:
+          GAC: ${{ secrets.SCRIBE_SA }}
+        run: |
+          echo "${GAC}" > scribe_sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
+
+      - name: run scribe exe
+        run: >
+          docker run
+          --user $(id -u):$(id -g)
+          --volume $(pwd):/scribe
+          --env-file <(env)
+          ghcr.io/yubico/scribe-ci:v1
+          --project-id scribe-prod-987134
+          --bucket scribe-u-pub-ykman-fqj0hy
+          --config /scribe/.github/scribe-sign-exe.yml
+          submit .
+          --synchronous
+          --download-artifacts
+
+      - name: unpack signed exe
+        run: |
+          mkdir -p signed
+          mv scribe-download/*/sign-source/1.zip signed/
+          rm -rf scribe-download
+          cd signed
+          unzip -j 1.zip || true
+          rm 1.zip
+          cd ..
+          cp signed/ykman.exe ykman-builds-windows/ykman/ykman.exe
+
+      - name: upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-files
+          path: ykman-builds-windows
