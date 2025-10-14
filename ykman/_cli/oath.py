@@ -26,6 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
+import os
+from base64 import b32encode
 from typing import Any
 
 import click
@@ -381,7 +383,6 @@ click_touch_option = click.option(
     "-t", "--touch", is_flag=True, help="require touch on YubiKey to generate code"
 )
 
-
 click_show_hidden_option = click.option(
     "-H", "--show-hidden", is_flag=True, help="include hidden accounts"
 )
@@ -410,6 +411,10 @@ def _search(creds, query, show_hidden):
         if query.lower() in cred_id.lower():
             hits.append(c)
     return hits
+
+
+def _b32_encode(key):
+    return b32encode(key).decode().replace("=", "")
 
 
 @oath.group()
@@ -459,6 +464,12 @@ def accounts():
     default=30,
     show_default=True,
 )
+@click.option(
+    "-g",
+    "--generate",
+    is_flag=True,
+    help="generate a random credential key (cannot be used with SECRET)",
+)
 @click_touch_option
 @click_force_option
 @click_password_option
@@ -470,6 +481,7 @@ def add(
     name,
     issuer,
     period,
+    generate,
     oath_type,
     digits,
     touch,
@@ -496,7 +508,12 @@ def add(
 
     digits = int(digits)
 
-    if not secret:
+    if generate:
+        if secret:
+            raise CliFail("Cannot use --generate together with a provided SECRET.")
+        secret = os.urandom(20)
+
+    elif not secret:
         while True:
             secret = click_prompt("Enter a secret key (base32)")
             try:
@@ -515,6 +532,9 @@ def add(
         touch,
         force,
     )
+
+    if generate:
+        click.echo(f"Generated credential secret (base32): {_b32_encode(secret)}")
 
 
 @click_callback()
