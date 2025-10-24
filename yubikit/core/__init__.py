@@ -262,12 +262,8 @@ def require_version(
 
 
 def int2bytes(value: int, min_len: int = 0) -> bytes:
-    buf = []
-    while value > 0xFF:
-        buf.append(value & 0xFF)
-        value >>= 8
-    buf.append(value)
-    return bytes(reversed(buf)).rjust(min_len, b"\0")
+    min_len = max(min_len, (value.bit_length() + 7) // 8)
+    return value.to_bytes(min_len, "big")
 
 
 def bytes2int(data: bytes) -> int:
