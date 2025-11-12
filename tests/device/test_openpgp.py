@@ -6,7 +6,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, InvalidPinError
 from yubikit.core.smartcard import AID, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.openpgp import (
@@ -77,6 +77,64 @@ def keys(session, info, transport, scp_params):
         yield new_keys
     else:
         yield Keys(DEFAULT_PIN, DEFAULT_ADMIN_PIN)
+
+
+def test_change_pin(session, keys):
+    session.verify_pin(keys.pin)
+    session.change_pin(keys.pin, NON_DEFAULT_PIN)
+
+    with pytest.raises(InvalidPinError) as e:
+        session.verify_pin(keys.pin)
+        assert e.value.attempts_remaining == 2
+
+    session.verify_pin(NON_DEFAULT_PIN)
+    session.change_pin(NON_DEFAULT_PIN, keys.pin)
+
+    with pytest.raises(InvalidPinError) as e:
+        session.verify_pin(NON_DEFAULT_PIN)
+        assert e.value.attempts_remaining == 2
+
+    session.verify_pin(keys.pin)
+
+
+def test_change_admin(session, keys):
+    session.verify_admin(keys.admin)
+    session.change_admin(keys.admin, NON_DEFAULT_ADMIN_PIN)
+
+    with pytest.raises(InvalidPinError) as e:
+        session.verify_admin(keys.admin)
+        assert e.value.attempts_remaining == 2
+
+    session.verify_admin(NON_DEFAULT_ADMIN_PIN)
+    session.change_admin(NON_DEFAULT_ADMIN_PIN, keys.admin)
+
+    with pytest.raises(InvalidPinError) as e:
+        session.verify_admin(NON_DEFAULT_ADMIN_PIN)
+        assert e.value.attempts_remaining == 2
+
+    session.verify_admin(keys.admin)
+
+
+def test_change_pin_retries(session, keys, version):
+    with pytest.raises(ApduError):
+        session.set_pin_attempts(5, 0, 25)
+
+    session.verify_admin(keys.admin)
+    session.set_pin_attempts(5, 0, 25)
+
+    assert session.get_pin_status().attempts_user == 5
+    if version >= (4, 0, 0):
+        # NEO returns 3 if no reset code is set
+        assert session.get_pin_status().attempts_reset == 0
+    assert session.get_pin_status().attempts_admin == 25
+
+    with pytest.raises(InvalidPinError) as e:
+        session.verify_pin(NON_DEFAULT_PIN)
+        assert e.value.attempts_remaining == 4
+
+    with pytest.raises(InvalidPinError) as e:
+        session.verify_admin(NON_DEFAULT_ADMIN_PIN)
+        assert e.value.attempts_remaining == 24
 
 
 def test_import_requires_admin(session):

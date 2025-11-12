@@ -1210,7 +1210,10 @@ class OpenPgpSession:
         try:
             self.protocol.send_apdu(0, INS.VERIFY, 0, pw + mode, pin_enc)
         except ApduError as e:
-            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED or (
+                # Pre 4.0 firmware returns this on incorrect PIN/PUK
+                (e.sw >> 8) == 0x63 and self._version < (4, 0, 0)
+            ):
                 attempts = self.get_pin_status().get_attempts(pw)
                 raise InvalidPinError(attempts)
             if e.sw == SW.AUTH_METHOD_BLOCKED:
@@ -1262,7 +1265,10 @@ class OpenPgpSession:
                 self._process_pin(kdf, pw, pin) + self._process_pin(kdf, pw, new_pin),
             )
         except ApduError as e:
-            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
+            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED or (
+                # Pre 4.0 firmware returns this on incorrect PIN/PUK
+                e.sw == SW.CONDITIONS_NOT_SATISFIED and self._version < (4, 0, 0)
+            ):
                 attempts = self.get_pin_status().get_attempts(pw)
                 raise InvalidPinError(attempts)
             if e.sw == SW.AUTH_METHOD_BLOCKED:
