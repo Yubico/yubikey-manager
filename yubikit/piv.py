@@ -854,6 +854,9 @@ class PivSession:
     def verify_pin(self, pin: str) -> None:
         """Verify the user by PIN.
 
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
+
         :param pin: The PIN.
         """
         logger.debug("Verifying PIN")
@@ -953,6 +956,9 @@ class PivSession:
     def change_pin(self, old_pin: str, new_pin: str) -> None:
         """Change the PIN.
 
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
+
         :param old_pin: The current PIN.
         :param new_pin: The new PIN.
         """
@@ -962,6 +968,9 @@ class PivSession:
 
     def change_puk(self, old_puk: str, new_puk: str) -> None:
         """Change the PUK.
+
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
 
         :param old_puk: The current PUK.
         :param new_puk: The new PUK.
@@ -977,6 +986,9 @@ class PivSession:
 
     def unblock_pin(self, puk: str, new_pin: str) -> None:
         """Reset PIN with PUK.
+
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
 
         :param puk: The PUK.
         :param new_pin: The new PIN.
