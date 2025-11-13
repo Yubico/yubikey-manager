@@ -364,7 +364,8 @@ def _do_change_pin_puk(info, name, current, new, fn):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            raise CliFail(f"{name} change failed - %d tries left." % attempts)
+            f_attempts = str(attempts) if attempts != 15 else "15 or more"
+            raise CliFail(f"{name} change failed - {f_attempts} tries left.")
         else:
             raise CliFail(f"{name} is blocked.")
     except ApduError as e:
@@ -634,7 +635,8 @@ def unblock_pin(ctx, puk, new_pin):
     except InvalidPinError as e:
         attempts = e.attempts_remaining
         if attempts:
-            raise CliFail("PIN unblock failed - %d tries left." % attempts)
+            f_attempts = str(attempts) if attempts != 15 else "15 or more"
+            raise CliFail(f"PIN unblock failed - {f_attempts} tries left.")
         else:
             raise CliFail("PUK is blocked.")
     except ApduError as e:

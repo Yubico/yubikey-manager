@@ -697,6 +697,11 @@ class TestUnblockPin:
         reset_state(session, scp)
 
         assert session.get_pin_attempts() == pin_tries
+
+        with pytest.raises(InvalidPinError) as ctx:
+            session.verify_pin(NON_DEFAULT_PIN)
+        assert ctx.value.attempts_remaining == pin_tries - 1
+
         with pytest.raises(InvalidPinError) as ctx:
             session.change_puk(NON_DEFAULT_PUK, keys.puk)
         assert ctx.value.attempts_remaining == puk_tries - 1
