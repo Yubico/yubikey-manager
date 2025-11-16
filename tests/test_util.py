@@ -123,21 +123,28 @@ def test_tlv():
     assert tlv1 + tlv2 + tlv3 == b"\0\5hello\xfe\0\x12\x82\x01\x90" + b"hi" * 200
 
 
-def test_is_pkcs12():
+def test_is_pkcs12_type_check():
     with pytest.raises(TypeError):
         is_pkcs12(None)
 
-    with open_file("rsa_2048_key.pem") as rsa_2048_key_pem:
-        assert not is_pkcs12(rsa_2048_key_pem.read())
 
-    with open_file("rsa_2048_key_encrypted.pem") as f:
-        assert not is_pkcs12(f.read())
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "rsa_2048_key.pem",
+        "rsa_2048_key_encrypted.pem",
+        "rsa_2048_cert.pem",
+    ],
+)
+def test_is_pkcs12_rejects_pem_material(filename):
+    with open_file(filename) as fh:
+        assert not is_pkcs12(fh.read())
 
-    with open_file("rsa_2048_cert.pem") as rsa_2048_cert_pem:
-        assert not is_pkcs12(rsa_2048_cert_pem.read())
 
+def test_is_pkcs12_accepts_pkcs12_blobs():
     with open_file("rsa_2048_key_cert.pfx") as rsa_2048_key_cert_pfx:
         data = rsa_2048_key_cert_pfx.read()
+
     assert is_pkcs12(data)
     parse_private_key(data, None)
     parse_certificates(data, None)
@@ -155,37 +162,44 @@ def test_parse_pkcs12():
     assert len(certs) == 1
 
 
-def test_is_pem():
-    assert not is_pem(b"just a byte string")
-    assert not is_pem(None)
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (b"just a byte string", False),
+        (None, False),
+        ("rsa_2048_key.pem", True),
+        ("rsa_2048_key_encrypted.pem", True),
+        ("rsa_2048_cert.pem", True),
+        ("rsa_2048_key_cert.pfx", False),
+        ("rsa_2048_cert_metadata.pem", True),
+        ("rsa_2048_key_cert_encrypted.pfx", False),
+    ],
+)
+def test_is_pem(value, expected):
+    if isinstance(value, str):
+        with open_file(value) as fh:
+            contents = fh.read()
+    else:
+        contents = value
+    assert bool(is_pem(contents)) is expected
 
-    with open_file("rsa_2048_key.pem") as rsa_2048_key_pem:
-        assert is_pem(rsa_2048_key_pem.read())
 
-    with open_file("rsa_2048_key_encrypted.pem") as f:
-        assert is_pem(f.read())
-
-    with open_file("rsa_2048_cert.pem") as rsa_2048_cert_pem:
-        assert is_pem(rsa_2048_cert_pem.read())
-
-    with open_file("rsa_2048_key_cert.pfx") as rsa_2048_key_cert_pfx:
-        assert not is_pem(rsa_2048_key_cert_pfx.read())
-
-    with open_file("rsa_2048_cert_metadata.pem") as f:
-        assert is_pem(f.read())
-
-    with open_file("rsa_2048_key_cert_encrypted.pfx") as encrypted_pfx:
-        assert not is_pem(encrypted_pfx.read())
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (0x00, FORM_FACTOR.UNKNOWN),
+        (0x01, FORM_FACTOR.USB_A_KEYCHAIN),
+        (0x02, FORM_FACTOR.USB_A_NANO),
+        (0x03, FORM_FACTOR.USB_C_KEYCHAIN),
+        (0x04, FORM_FACTOR.USB_C_NANO),
+        (0x05, FORM_FACTOR.USB_C_LIGHTNING),
+        (0x99, FORM_FACTOR.UNKNOWN),
+    ],
+)
+def test_form_factor_from_code(code, expected):
+    assert FORM_FACTOR.from_code(code) == expected
 
 
-def test_form_factor_from_code():
+def test_form_factor_from_code_rejects_invalid_type():
     with pytest.raises(ValueError):
         FORM_FACTOR.from_code("im a string")  # type: ignore[arg-type]
-
-    assert FORM_FACTOR.from_code(0x00) == FORM_FACTOR.UNKNOWN
-    assert FORM_FACTOR.from_code(0x01) == FORM_FACTOR.USB_A_KEYCHAIN
-    assert FORM_FACTOR.from_code(0x02) == FORM_FACTOR.USB_A_NANO
-    assert FORM_FACTOR.from_code(0x03) == FORM_FACTOR.USB_C_KEYCHAIN
-    assert FORM_FACTOR.from_code(0x04) == FORM_FACTOR.USB_C_NANO
-    assert FORM_FACTOR.from_code(0x05) == FORM_FACTOR.USB_C_LIGHTNING
-    assert FORM_FACTOR.from_code(0x99) == FORM_FACTOR.UNKNOWN
