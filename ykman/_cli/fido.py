@@ -303,7 +303,7 @@ def reset(ctx, force):
                 ):
                     raise CliFail("Inserted YubiKey does not match the one removed.")
             touch_msg = (
-                "Press and hold the YubiKey button for 10 seconds to confirm."
+                "Press and hold the YubiKey button for 5 seconds to confirm."
                 if ctap2.info.long_touch_for_reset
                 else "Touch the YubiKey to confirm."
             )
