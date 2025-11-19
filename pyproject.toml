@@ -16,7 +16,7 @@ classifiers = [
   "Topic :: Utilities"
 ]
 dependencies = [
-  "cryptography (>=3.0, <48)",
+  "cryptography (>=3.0, <49)",
   "pyscard (>=2.0, <3)",
   "fido2 (>=2.0, <3)",
   "click (>=8.0, <9)",
