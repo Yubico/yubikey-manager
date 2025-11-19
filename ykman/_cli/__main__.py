@@ -181,11 +181,16 @@ def require_device(connection_types, serial=None):
             except TimeoutError:
                 raise CliFail("No YubiKey detected!")
         if n_devs > 1:
-            list_all_devices()  # Update device cache
-            raise CliFail(
-                "Multiple YubiKeys detected. Use --device SERIAL to specify "
-                "which one to use."
-            )
+            devices_list = list_all_devices()  # Update device cache
+            click.echo("Multiple YubiKeys detected:", err=True)
+            for dev, dev_info in devices_list:
+                click.echo(
+                    "- "
+                    + _describe_device(dev, dev_info)
+                    + (f" Serial: {dev_info.serial}" if dev_info.serial else ""),
+                    err=True,
+                )
+            raise CliFail("Use --device SERIAL to specify which one to use.")
 
         # Only one connected device, check if any needed interfaces are available
         pid = next(iter(devices.keys()))
@@ -639,6 +644,18 @@ def main():
         sys.argv[sys.argv.index("--full-help")] = "--help"
     except ValueError:
         pass  # No --full-help
+
+    try:
+        # Allow --device SERIAL to be specified anywhere in the argument list
+        index = sys.argv.index("--device")
+        if index > 1:
+            # Move --device to be the first argument after the command name
+            arg = sys.argv.pop(index)
+            val = sys.argv.pop(index)
+            sys.argv.insert(1, val)
+            sys.argv.insert(1, arg)
+    except ValueError:
+        pass  # No --device
 
     try:
         cli(obj={}, windows_expand_args=False)
