@@ -26,10 +26,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
+import os
+from base64 import b32encode
 from typing import Any
 
 import click
+from cryptography.x509 import NameOID
+from pskc import PSKC
 
+from ykman.piv import parse_rfc4514_string
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
@@ -55,6 +60,7 @@ from .util import (
     click_prompt,
     get_scp_params,
     is_yk4_fips,
+    log_or_echo,
     pretty_print,
     prompt_for_touch,
     prompt_timeout,
@@ -226,7 +232,7 @@ def _init_session(ctx, password, remember, prompt="Enter the password"):
 
 def _fail_scp(ctx, e):
     if ctx.obj["no_scp"] and e.sw == SW.CONDITIONS_NOT_SATISFIED:
-        raise CliFail("Unable to manage OATH over NFC without SCP")
+        raise CliFail("Unable to manage OATH over NFC without SCP.")
     raise e
 
 
@@ -381,7 +387,6 @@ click_touch_option = click.option(
     "-t", "--touch", is_flag=True, help="require touch on YubiKey to generate code"
 )
 
-
 click_show_hidden_option = click.option(
     "-H", "--show-hidden", is_flag=True, help="include hidden accounts"
 )
@@ -410,6 +415,17 @@ def _search(creds, query, show_hidden):
         if query.lower() in cred_id.lower():
             hits.append(c)
     return hits
+
+
+def _b32_encode(key):
+    return b32encode(key).decode().replace("=", "")
+
+
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
+
+
+_PSKC_ALG_PREFIX = "urn:ietf:params:xml:ns:keyprov:pskc:"
 
 
 @oath.group()
@@ -459,6 +475,26 @@ def accounts():
     default=30,
     show_default=True,
 )
+@click.option(
+    "-g",
+    "--generate",
+    is_flag=True,
+    help="generate a random credential key (cannot be used with SECRET)",
+)
+@click.option(
+    "-O",
+    "--output",
+    type=click.File("wb"),
+    help="write the credential to a PSKC file in addition to adding it to the YubiKey",
+)
+@click.option(
+    "--pskc-key",
+    help="encrypt the PSKC file with a pre-shared key (hex)",
+)
+@click.option(
+    "--pskc-passphrase",
+    help="encrypt the PSKC file with a passphrase",
+)
 @click_touch_option
 @click_force_option
 @click_password_option
@@ -470,6 +506,8 @@ def add(
     name,
     issuer,
     period,
+    generate,
+    output,
     oath_type,
     digits,
     touch,
@@ -478,6 +516,8 @@ def add(
     force,
     password,
     remember,
+    pskc_key,
+    pskc_passphrase,
 ):
     """
     Add a new account.
@@ -491,10 +531,45 @@ def add(
 
     if ctx.obj["fips_unready"]:
         raise CliFail(
-            "YubiKey FIPS must be in FIPS approved mode prior to adding accounts"
+            "YubiKey FIPS must be in FIPS approved mode prior to adding accounts."
         )
 
     digits = int(digits)
+
+    serial = ctx.obj["info"].serial
+    if output and serial is None:
+        raise CliFail("YubiKey has readable serial number, cannot write to PSKC file.")
+
+    if generate:
+        if secret:
+            raise CliFail("Cannot use --generate together with a provided SECRET.")
+        secret = os.urandom(20)
+
+    if pskc_key and pskc_passphrase:
+        raise CliFail("Cannot use both --pskc-key and --pskc-passphrase.")
+    if (pskc_key or pskc_passphrase) and not output:
+        raise CliFail(
+            "Must specify --output when using --pskc-key or --pskc-passphrase."
+        )
+    if pskc_passphrase:
+        if pskc_passphrase == "-":  # noqa: S105
+            pskc_passphrase = click_prompt(
+                "Enter passphrase to encrypt PSKC file",
+                hide_input=True,
+                confirmation_prompt=True,
+            )
+        if len(pskc_passphrase) < 8:
+            raise CliFail("Passphrase must be at least 8 characters.")
+    elif pskc_key:
+        if pskc_key == "-":
+            pskc_key = click_prompt(
+                "Enter pre-shared key (hex) to encrypt PSKC file",
+                hide_input=True,
+                confirmation_prompt=True,
+            )
+        pskc_key = bytes.fromhex(pskc_key)
+        if len(pskc_key) != 16:
+            raise CliFail("Pre-shared key must be 16 bytes (32 hex characters).")
 
     if not secret:
         while True:
@@ -507,14 +582,54 @@ def add(
 
     _init_session(ctx, password, remember)
 
+    cred = CredentialData(
+        name, oath_type, algorithm, secret, digits, period, counter, issuer
+    )
     _add_cred(
         ctx,
-        CredentialData(
-            name, oath_type, algorithm, secret, digits, period, counter, issuer
-        ),
+        cred,
         touch,
         force,
     )
+    log_or_echo("OATH account added", logger, output)
+
+    if output:
+        pskc = PSKC()
+        if pskc_passphrase:
+            pskc.encryption.setup_pbkdf2(pskc_passphrase)
+            logger.debug("PSKC file will be encrypted with passphrase")
+        elif pskc_key:
+            pskc.encryption.setup_preshared_key(key=pskc_key)
+            logger.debug("PSKC file will be encrypted with pre-shared key")
+
+        friendly_name = cred.name
+        if cred.issuer:
+            friendly_name = cred.issuer + ":" + friendly_name
+        fields = dict(
+            secret=cred.secret,
+            algorithm=f"{_PSKC_ALG_PREFIX}{cred.oath_type.name.lower()}",
+            id=serial,
+            serial=serial,
+            manufacturer="Yubico",
+            issuer=cred.issuer,
+            key_userid=f"CN={cred.name}",
+            friendly_name=friendly_name,
+            response_length=str(cred.digits),
+            response_encoding="DECIMAL",
+            algorithm_suite=cred.hash_algorithm.name,
+        )
+        if cred.oath_type == OATH_TYPE.TOTP:
+            fields["time_interval"] = str(cred.period)
+        else:
+            fields["counter"] = str(cred.counter)
+
+        pskc.add_key(**fields)
+        pskc.write(output)
+        log_or_echo(
+            f"Credential written to PSKC file: {_fname(output)}", logger, output
+        )
+    elif generate:
+        click.echo(f"Generated credential secret (base32): {_b32_encode(secret)}")
 
 
 @click_callback()
@@ -560,6 +675,95 @@ def uri(ctx, data, touch, force, password, remember):
 
     _init_session(ctx, password, remember)
     _add_cred(ctx, data, touch, force)
+    click.echo("OATH account added.")
+
+
+@accounts.command("import")
+@click.argument("import_file", type=click.File("rb"), metavar="FILE")
+@click_touch_option
+@click_force_option
+@click_password_option
+@click_remember_option
+@click.pass_context
+def import_pskc(ctx, import_file, touch, force, password, remember):
+    """
+    Add new account(s) from a PSKC file.
+
+    Reads credentials from a PSKC file, adding them to the YubiKey.
+    The file can contain multiple credentials, and you will be prompted
+    to confirm each one before it is added, unless --force is used, in
+    which case all valid credentials will be added without prompting, overwriting
+    any existing accounts with the same name.
+    """
+    pskc = PSKC(import_file)
+    if pskc.encryption.is_encrypted:
+        if pskc.encryption.derivation.algorithm:
+            passphrase = click_prompt(
+                "Enter passphrase to decrypt PSKC file",
+                hide_input=True,
+            )
+            pskc.encryption.derive_key(passphrase)
+        else:
+            key = click_prompt(
+                "Enter passphrase to decrypt PSKC file",
+                hide_input=True,
+            )
+            pskc.encryption.key = bytes.fromhex(key)
+
+    _init_session(ctx, password, remember)
+
+    n_keys = 0
+    valid = False
+    for key in pskc.keys:
+        if key and key.algorithm.startswith(_PSKC_ALG_PREFIX):
+            oath_type = OATH_TYPE[key.algorithm[len(_PSKC_ALG_PREFIX) :].upper()]
+        else:
+            logger.debug(f"Skipping key with unknown algorithm: {key.algorithm}")
+            continue
+
+        hash_algorithm = (
+            HASH_ALGORITHM[key.algorithm_suite.upper()]
+            if key.algorithm_suite
+            else HASH_ALGORITHM.SHA1
+        )
+
+        issuer, name = None, key.id
+        # If nothing more specific is available, use the friendly name if it contains :
+        if key.friendly_name and ":" in key.friendly_name:
+            issuer, name = key.friendly_name.split(":", 1)
+        # If label or userid are available, use them
+        if key.issuer:
+            issuer = key.issuer
+        if key.key_userid:
+            try:
+                # Use the CN field if the userid is a DN
+                dn = parse_rfc4514_string(key.key_userid)
+                name = dn.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+                assert isinstance(name, str)  # noqa: S101
+            except (ValueError, IndexError):
+                name = key.key_userid
+
+        cred = CredentialData(
+            secret=key.secret,
+            issuer=issuer,
+            name=name,
+            oath_type=oath_type,
+            hash_algorithm=hash_algorithm,
+            digits=key.response_length or 6,
+            period=key.time_interval or 30,
+            counter=key.counter or 0,
+        )
+        account_name = f"{issuer + ':' if issuer else ''}{name}"
+        if force or (click.confirm(f"Import account: {account_name} ?", default=True)):
+            _add_cred(ctx, cred, touch, force)
+            click.echo(f"Added account: {account_name}")
+            n_keys += 1
+        valid = True
+
+    if valid:
+        click.echo(f"{n_keys} OATH account(s) added.")
+    else:
+        raise CliFail("No valid OATH accounts found in the file.")
 
 
 def _add_cred(ctx, data, touch, force):
@@ -604,7 +808,6 @@ def _add_cred(ctx, data, touch, force):
 
     try:
         session.put_credential(data, touch)
-        click.echo("OATH account added.")
     except ApduError as e:
         if e.sw == SW.NO_SPACE:
             raise CliFail("No space left on the YubiKey for OATH accounts.")
