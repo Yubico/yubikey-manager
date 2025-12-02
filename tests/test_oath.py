@@ -47,9 +47,21 @@ def test_format_cred_id(issuer, name, period, expected):
 @pytest.mark.parametrize(
     ("salt", "password", "expected"),
     [
-        (b"\0" * 8, "foobar", b"\xb0}\xa1\xe7\xde\x87\xf8\x9a\x87\xa2\xb5\x98\xea\xa2\x18\x8c"),
-        (b"12345678", "Hallå världen!", b"\xda\x81\x8ek,\xf0\xa2\xd0\xbf\x19\xb3\xdd\xd3K\x83\xf5"),
-        (b"saltsalt", "Ťᶒśƫ ᵽĥřӓşḛ", b"\xf3\xdf\xa7\x81T\xc8\x102\x99E\xfb\xc4\xb55\xe57"),
+        (
+            b"\0" * 8,
+            "foobar",
+            b"\xb0}\xa1\xe7\xde\x87\xf8\x9a\x87\xa2\xb5\x98\xea\xa2\x18\x8c",
+        ),
+        (
+            b"12345678",
+            "Hallå världen!",
+            b"\xda\x81\x8ek,\xf0\xa2\xd0\xbf\x19\xb3\xdd\xd3K\x83\xf5",
+        ),
+        (
+            b"saltsalt",
+            "Ťᶒśƫ ᵽĥřӓşḛ",
+            b"\xf3\xdf\xa7\x81T\xc8\x102\x99E\xfb\xc4\xb55\xe57",
+        ),
     ],
 )
 def test_derive_key(salt, password, expected):
