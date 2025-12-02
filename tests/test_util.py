@@ -52,9 +52,9 @@ def test_generate_static_pw():
     template = r"^[cbdefghijklnrtuvCBDEFGHIJKLNRTUV]{%d}$"
     for length in range(0, 38):
         pattern = re.compile(template % length)
-        assert pattern.fullmatch(
-            generate_static_pw(length)
-        ), f"Length {length} failed regex check"
+        assert pattern.fullmatch(generate_static_pw(length)), (
+            f"Length {length} failed regex check"
+        )
 
 
 @pytest.mark.parametrize(
@@ -62,7 +62,10 @@ def test_generate_static_pw():
     [
         ("", b""),
         ("dteffuje", b"\x2d\x34\x4e\x83"),
-        ("hknhfjbrjnlnldnhcujvddbikngjrtgh", b"\x69\xb6\x48\x1c\x8b\xab\xa2\xb6\x0e\x8f\x22\x17\x9b\x58\xcd\x56"),
+        (
+            "hknhfjbrjnlnldnhcujvddbikngjrtgh",
+            b"\x69\xb6\x48\x1c\x8b\xab\xa2\xb6\x0e\x8f\x22\x17\x9b\x58\xcd\x56",
+        ),
     ],
 )
 def test_modhex_decode(value, expected):
@@ -74,7 +77,10 @@ def test_modhex_decode(value, expected):
     [
         (b"", ""),
         (b"\x2d\x34\x4e\x83", "dteffuje"),
-        (b"\x69\xb6\x48\x1c\x8b\xab\xa2\xb6\x0e\x8f\x22\x17\x9b\x58\xcd\x56", "hknhfjbrjnlnldnhcujvddbikngjrtgh"),
+        (
+            b"\x69\xb6\x48\x1c\x8b\xab\xa2\xb6\x0e\x8f\x22\x17\x9b\x58\xcd\x56",
+            "hknhfjbrjnlnldnhcujvddbikngjrtgh",
+        ),
     ],
 )
 def test_modhex_encode(value, expected):
