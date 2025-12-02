@@ -2,7 +2,7 @@
 <installer-gui-script minSpecVersion="1">
     <title>yubikey-manager</title>
     <pkg-ref id="com.yubico.yubikey-manager"/>
-    <options customize="never" require-scripts="false"/>
+    <options hostArchitectures="x86_64,arm64" customize="never" require-scripts="false"/>
     <choices-outline>
         <line choice="default">
             <line choice="com.yubico.yubikey-manager"/>
