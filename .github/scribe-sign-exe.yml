@@ -1,4 +1,4 @@
-stub: yubikey-manager
+stub: ykman
 releaseType: public
 jobs:
   - name: sign-source
