@@ -136,3 +136,30 @@ jobs:
         with:
           name: signed-files
           path: ykman-builds-windows
+
+  build-msi:
+    needs: [sign-exe]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: ykman-builds-windows
+
+      - name: ls
+        run: ls
+
+      - name: ls
+        run: ls ykman-builds-windows
+
+      - name: Build installer
+        working-directory: .\ykman-builds-windows\signed-files\
+        run: .\scripts\make_msi.ps1
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ykman-installer-windows
+          path: .\ykman-builds-windows\signed-files\
