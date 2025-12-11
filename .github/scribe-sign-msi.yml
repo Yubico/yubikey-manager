@@ -1,0 +1,11 @@
+stub: ykman
+releaseType: public
+jobs:
+  - name: sign-source
+    platform: linux
+    steps:
+      - id: 1
+        action: windows
+        description: YubiKey Manager
+        files:
+          - ykman-builds-windows/ykman-installer-windows/ykman.msi
