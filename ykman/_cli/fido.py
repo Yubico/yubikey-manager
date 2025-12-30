@@ -41,6 +41,7 @@ from fido2.ctap2 import (
     CredentialManagement,
     Ctap2,
     FPBioEnrollment,
+    LargeBlobs,
 )
 
 from yubikit.core import TRANSPORT
@@ -62,12 +63,17 @@ from .util import (
     click_postpone_execution,
     click_prompt,
     is_yk4_fips,
+    log_or_echo,
     pretty_print,
     prompt_for_touch,
     prompt_timeout,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _fname(fobj):
+    return getattr(fobj, "name", fobj)
 
 
 @click_group(connections=[FidoConnection, SmartCardConnection])
@@ -937,6 +943,179 @@ def bio_delete(ctx, template_id, pin, force):
             click.echo("Fingerprint template deleted.")
         except CtapError as e:
             raise CliFail(f"Failed to delete fingerprint: {e.code.name}.")
+
+
+@fido.group("blobs")
+def blobs():
+    """
+    Manage largeBlob data for credentials.
+
+    This command lets you manage largeBlob data associated with individual
+    credentials stored on your YubiKey.
+    LargeBlob management requires a FIDO PIN to be set on the YubiKey.
+
+    \b
+    Examples:
+
+    \b
+      Export largeBlob data for a credential to a file:
+      $ ykman fido blobs export da7fdc myblob.bin --pin 123456
+
+    \b
+      Import largeBlob data for a credential from a file:
+      $ ykman fido blobs import da7fdc myblob.bin --pin 123456
+
+    \b
+      Delete largeBlob data for a credential:
+      $ ykman fido blobs delete da7fdc --pin 123456
+    """
+
+
+def _get_large_blob_key(ctx, credential_id, pin):
+    """Get the largeBlobKey for a credential by making an assertion."""
+    pin = _require_pin(ctx, pin, "LargeBlob Management")
+
+    ctap2 = ctx.obj.get("ctap2")
+    if not LargeBlobs.is_supported(ctap2.info):
+        raise CliFail("LargeBlobs is not supported on this YubiKey.")
+
+    # Find the full credential ID from credentials
+    credman = _init_credman(ctx, pin)
+    creds = list(_gen_creds(credman))
+    credential_id = credential_id.rstrip(".").lower()
+
+    hits = [
+        (rp_id, cred_id)
+        for (rp_id, cred_id, _, _, _) in creds
+        if cred_id["id"].hex().startswith(credential_id)
+    ]
+
+    if len(hits) == 0:
+        raise CliFail("No matching credential found.")
+    elif len(hits) > 1:
+        raise CliFail("Multiple matches, make the credential ID more specific.")
+
+    rp_id, cred_id = hits[0]
+
+    # Make an assertion to get the largeBlobKey
+    client_pin = ClientPin(ctap2)
+    try:
+        token = client_pin.get_pin_token(
+            pin,
+            ClientPin.PERMISSION.GET_ASSERTION | ClientPin.PERMISSION.LARGE_BLOB_WRITE,
+            rp_id,
+        )
+    except CtapError as e:
+        _fail_pin_error(ctx, e, "PIN error: %s.")
+
+    # Perform get_assertion with largeBlobKey extension
+    try:
+        allow_list = [{"id": cred_id["id"], "type": "public-key"}]
+        result = ctap2.get_assertion(
+            rp_id,
+            b"0" * 32,  # Client data hash (dummy value for this purpose)
+            allow_list,
+            options={"up": False},
+            extensions={"largeBlobKey": True},
+            pin_uv_param=client_pin.protocol.authenticate(token, b"0" * 32),
+            pin_uv_protocol=client_pin.protocol.VERSION,
+        )
+
+        if not result.large_blob_key:
+            raise CliFail(
+                "Credential does not support largeBlobKey. "
+                "The credential must be created with the largeBlob extension."
+            )
+
+        return result.large_blob_key, token, client_pin.protocol
+    except CtapError as e:
+        raise CliFail(f"Failed to get largeBlobKey: {e.code.name}.")
+
+
+@blobs.command("export")
+@click.pass_context
+@click.argument("credential_id")
+@click.argument("output", type=click.File("wb"), metavar="OUTPUT")
+@click.option("-P", "--pin", help="PIN code")
+def blobs_export(ctx, credential_id, output, pin):
+    """
+    Export largeBlob data for a credential.
+
+    \b
+    CREDENTIAL_ID   a unique substring match of a Credential ID
+                    (from 'ykman fido credentials list')
+    OUTPUT          file to write blob data to (use '-' to use stdout)
+    """
+    large_blob_key, token, pin_protocol = _get_large_blob_key(ctx, credential_id, pin)
+
+    ctap2 = ctx.obj.get("ctap2")
+    large_blobs = LargeBlobs(ctap2, pin_protocol, token)
+
+    try:
+        blob_data = large_blobs.get_blob(large_blob_key)
+        if blob_data is None:
+            raise CliFail("No largeBlob data found for this credential.")
+        output.write(blob_data)
+        log_or_echo(f"Exported blob to {_fname(output)}", logger, output)
+    except CtapError as e:
+        raise CliFail(f"Failed to read largeBlob data: {e.code.name}.")
+
+
+@blobs.command("import")
+@click.pass_context
+@click.argument("credential_id")
+@click.argument("data", type=click.File("rb"), metavar="DATA")
+@click.option("-P", "--pin", help="PIN code")
+def blobs_import(ctx, credential_id, data, pin):
+    """
+    Import largeBlob data for a credential.
+
+    \b
+    CREDENTIAL_ID   a unique substring match of a Credential ID
+                    (from 'ykman fido credentials list')
+    DATA            file containing the blob data to be written (use '-' to use stdin)
+    """
+    large_blob_key, token, pin_protocol = _get_large_blob_key(ctx, credential_id, pin)
+
+    ctap2 = ctx.obj.get("ctap2")
+    large_blobs = LargeBlobs(ctap2, pin_protocol, token)
+    blob_data = data.read()
+
+    try:
+        large_blobs.put_blob(large_blob_key, blob_data)
+        click.echo("LargeBlob data imported.")
+    except CtapError as e:
+        raise CliFail(f"Failed to write largeBlob data: {e.code.name}.")
+
+
+@blobs.command("delete")
+@click.pass_context
+@click.argument("credential_id")
+@click.option("-P", "--pin", help="PIN code")
+@click.option("-f", "--force", is_flag=True, help="confirm deletion without prompting")
+def blobs_delete(ctx, credential_id, pin, force):
+    """
+    Delete largeBlob data for a credential.
+
+    \b
+    CREDENTIAL_ID   a unique substring match of a Credential ID
+                    (from 'ykman fido credentials list')
+    """
+    if not force and not click.confirm(
+        f"Delete largeBlob data for credential {credential_id}?"
+    ):
+        return
+
+    large_blob_key, token, pin_protocol = _get_large_blob_key(ctx, credential_id, pin)
+
+    ctap2 = ctx.obj.get("ctap2")
+    large_blobs = LargeBlobs(ctap2, pin_protocol, token)
+
+    try:
+        large_blobs.delete_blob(large_blob_key)
+        click.echo("LargeBlob data deleted.")
+    except CtapError as e:
+        raise CliFail(f"Failed to delete largeBlob data: {e.code.name}.")
 
 
 @fido.group("config")
