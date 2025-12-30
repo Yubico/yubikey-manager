@@ -38,7 +38,11 @@ while options:
             opt = []
         print(".TP")
         oo = re.split(r"\s{2,}", o)
-        print(re.sub(r"([-a-z]+)", r"\\fB\1\\fR", oo.pop(0)).replace("-", r"\-"))
+        print(
+            re.sub(
+                r"(?<![\|\-a-z])([-a-z]+)(?![\-a-z\|])", r"\\fB\1\\fR", oo.pop(0)
+            ).replace("-", r"\-")
+        )
         if oo:
             options = oo + options
     else:
@@ -63,9 +67,12 @@ print(
 Experimental shell completion for the command line tool is available.
 To enable it, run this command once (for Bash):
 .PP
+.nf
 $ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
+.fi
 .PP
 More information on shell completion (including instructions for other shells) is
 available at:
+.br
 https://click.palletsprojects.com/en/stable/shell-completion/"""
 )
