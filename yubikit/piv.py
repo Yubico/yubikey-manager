@@ -35,7 +35,7 @@ import warnings
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from typing import TYPE_CHECKING, TypeAlias, cast, overload
+from typing import TYPE_CHECKING, TypeAlias, overload
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -1308,7 +1308,7 @@ class PivSession:
         if key_type.algorithm == ALGORITHM.RSA:
             assert isinstance(private_key, rsa.RSAPrivateKey)  # noqa: S101
             numbers = private_key.private_numbers()
-            numbers = cast(rsa.RSAPrivateNumbers, numbers)
+            numbers = numbers
             if numbers.public_numbers.e != 65537:
                 raise NotSupportedError("RSA exponent must be 65537")
             ln //= 2
@@ -1329,7 +1329,7 @@ class PivSession:
         else:
             assert isinstance(private_key, ec.EllipticCurvePrivateKey)  # noqa: S101
             numbers = private_key.private_numbers()
-            numbers = cast(ec.EllipticCurvePrivateNumbers, numbers)
+            numbers = numbers
             data = Tlv(0x06, int2bytes(numbers.private_value, ln))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
