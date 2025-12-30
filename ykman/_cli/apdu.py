@@ -147,7 +147,7 @@ def apdu(ctx, no_pretty, app, short, apdu, send_apdu):
         ctx.fail("No commands provided.")
     if (app or apdu) and send_apdu:
         ctx.fail("Cannot mix positional APDUs and -s/--send-apdu.")
-    apdus = [_parse_apdu(data) for data in apdu]
+    apdus = (_parse_apdu(data) for data in apdu)
 
     dev = ctx.obj["device"]
 

@@ -30,7 +30,7 @@ import logging
 import sys
 from collections import Counter
 from time import sleep, time
-from typing import Hashable, Iterable, Mapping
+from typing import Callable, Hashable, Iterable, Mapping, TypeAlias
 
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
@@ -95,7 +95,10 @@ def list_otp_devices():
     return _list_otp_devices()
 
 
-_CONNECTION_LIST_MAPPING = {
+_T_CONNECTION: TypeAlias = type[Connection] | type[FidoConnection]
+
+
+_CONNECTION_LIST_MAPPING: dict[_T_CONNECTION, Callable[[], Iterable[YkmanDevice]]] = {
     SmartCardConnection: list_ccid_devices,
     OtpConnection: list_otp_devices,
     FidoConnection: list_ctap_devices,
@@ -302,7 +305,7 @@ class _UsbCompositeDevice(YkmanDevice):
 
 
 def _list_all_devices(
-    connection_types: Iterable[type[Connection]] = _CONNECTION_LIST_MAPPING.keys(),
+    connection_types: Iterable[_T_CONNECTION] = _CONNECTION_LIST_MAPPING.keys(),
     silent: bool = False,
 ) -> list[tuple[YkmanDevice, DeviceInfo]]:
     groups: dict[PID, _PidGroup] = {}
@@ -315,6 +318,7 @@ def _list_all_devices(
             raise ValueError("Invalid connection type")
         try:
             for dev in _CONNECTION_LIST_MAPPING[connection_type]():
+                assert dev.pid is not None  # noqa: S101
                 group = groups.setdefault(dev.pid, _PidGroup(dev.pid))
                 group.add(
                     connection_type,
@@ -331,7 +335,7 @@ def _list_all_devices(
 
 
 def list_all_devices(
-    connection_types: Iterable[type[Connection]] = _CONNECTION_LIST_MAPPING.keys(),
+    connection_types: Iterable[_T_CONNECTION] = _CONNECTION_LIST_MAPPING.keys(),
 ) -> list[tuple[YkmanDevice, DeviceInfo]]:
     """Connect to all attached YubiKeys and read device info from them.
 
