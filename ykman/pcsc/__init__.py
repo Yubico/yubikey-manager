@@ -219,18 +219,23 @@ def kill_scdaemon():
     killed = False
     if sys.platform == "win32":
         # Works for Windows.
-        from win32api import CloseHandle, OpenProcess, TerminateProcess
-        from win32com.client import GetObject
 
-        wmi = GetObject("winmgmts:")
-        ps = wmi.InstancesOf("Win32_Process")
-        for p in ps:
-            if p.Properties_("Name").Value == "scdaemon.exe":
-                pid = p.Properties_("ProcessID").Value
-                handle = OpenProcess(1, False, pid)
-                TerminateProcess(handle, -1)
-                CloseHandle(handle)
-                killed = True
+        # TODO: Type checking is currently failing on Github Actions
+        from typing import TYPE_CHECKING
+
+        if not TYPE_CHECKING:
+            from win32api import CloseHandle, OpenProcess, TerminateProcess
+            from win32com.client import GetObject
+
+            wmi = GetObject("winmgmts:")
+            ps = wmi.InstancesOf("Win32_Process")
+            for p in ps:
+                if p.Properties_("Name").Value == "scdaemon.exe":
+                    pid = p.Properties_("ProcessID").Value
+                    handle = OpenProcess(1, False, pid)
+                    TerminateProcess(handle, -1)
+                    CloseHandle(handle)
+                    killed = True
     else:
         # Works for Linux and OS X.
         return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # noqa: S603, S607
