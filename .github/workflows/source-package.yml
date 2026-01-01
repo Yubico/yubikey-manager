@@ -47,7 +47,7 @@ jobs:
           mv dist/yubikey_manager-*.whl artifacts/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: yubikey-manager-source-package
           path: artifacts
@@ -81,7 +81,7 @@ jobs:
         run: uv run make -C docs/ html
 
       - name: Upload documentation
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: yubikey-manager-docs
           path: docs/_build/html
