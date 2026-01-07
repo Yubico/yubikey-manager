@@ -17,7 +17,7 @@ NOTE: This same approach can be used to generate a CSR, see:
 
 https://cryptography.io/en/latest/x509/reference/#x-509-csr-certificate-signing-request-builder-object
 
-And instead use sign_csr_builder instead of sign_certificate_builder.
+And use sign_csr_builder instead of sign_certificate_builder.
 
 Usage: piv_certificate.py
 """
