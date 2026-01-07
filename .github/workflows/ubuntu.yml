@@ -46,7 +46,7 @@ jobs:
           mv dist/ykman dist/ykman-$REF
 
       - name: Upload build
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ykman-builds-ubuntu
           path: dist

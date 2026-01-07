@@ -715,10 +715,15 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
     n_keys = 0
     valid = False
     for key in pskc.keys:
-        if key and key.algorithm.startswith(_PSKC_ALG_PREFIX):
+        if key.algorithm and key.algorithm.startswith(_PSKC_ALG_PREFIX):
             oath_type = OATH_TYPE[key.algorithm[len(_PSKC_ALG_PREFIX) :].upper()]
         else:
             logger.debug(f"Skipping key with unknown algorithm: {key.algorithm}")
+            continue
+
+        # Required fields
+        if key.secret is None or key.id is None:
+            logger.debug("Skipping key with no secret or no id")
             continue
 
         hash_algorithm = (
@@ -731,7 +736,7 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
         # If nothing more specific is available, use the friendly name if it contains :
         if key.friendly_name and ":" in key.friendly_name:
             issuer, name = key.friendly_name.split(":", 1)
-        # If label or userid are available, use them
+        # If issuer or userid are available, use them
         if key.issuer:
             issuer = key.issuer
         if key.key_userid:
