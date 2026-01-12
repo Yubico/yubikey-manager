@@ -261,7 +261,7 @@ def require_version(
         raise NotSupportedError(message)
 
 
-def int2bytes(value: int, min_len: int = 0) -> bytes:
+def int2bytes(value: int, min_len: int = 1) -> bytes:
     min_len = max(min_len, (value.bit_length() + 7) // 8)
     return value.to_bytes(min_len, "big")
 

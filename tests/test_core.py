@@ -95,3 +95,7 @@ def test_tlv_multibyte_tag():
 @pytest.mark.parametrize("n", (0, 1, 0xFF, 0x100, 0xFFFF, 0x10000))
 def test_int2bytes(n):
     assert bytes2int(int2bytes(n)) == n
+
+
+def test_int2bytes_zero():
+    assert int2bytes(0) == b"\x00"
