@@ -416,7 +416,8 @@ class TestManagementKey:
         )
 
     @condition.check(lambda info: not info.pin_complexity, "PIN complexity")
-    def test_change_management_key_generate(self, ykman_cli, management_key):
+    @condition.max_version(5, 7, 99)
+    def test_change_management_key_generate(self, version, ykman_cli, management_key):
         if len(management_key) != 32:
             pytest.skip("string management key")
 
