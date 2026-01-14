@@ -1,6 +1,6 @@
 [project]
 name = "yubikey-manager"
-version = "5.8.1-dev.0"
+version = "5.9.0"
 description = "Library and CLI for managing your YubiKey configuration."
 authors = [
   { name = "Dain Nilsson", email = "<dain@yubico.com>" }
