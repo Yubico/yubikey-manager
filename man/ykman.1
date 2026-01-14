@@ -1,4 +1,4 @@
-.TH YKMAN "1" "June 2025" "ykman 5.7.2" "User Commands"
+.TH YKMAN "1" "January 2026" "ykman 5.9.0" "User Commands"
 .SH NAME
 ykman \- YubiKey Manager (ykman)
 .SH SYNOPSIS
@@ -24,7 +24,7 @@ specify private key and certificate chain for secure messaging, can be used mult
 \fB\-p\fR, \fB\-\-scp\-password\fR PASSWORD
 specify a password required to access the --scp file, if needed
 .TP
-\fB\-l\fR, \fB\-\-log\-level\fR [ERROR|WARNING|INFO|DEBUG|TRAFFIC]
+\fB\-l\fR, \fB\-\-log\-level\fR [error|warning|info|debug|traffic]
 enable logging at given verbosity level
 .TP
 \fB\-\-log\-file\fR FILE
@@ -86,8 +86,11 @@ $ ykman --device 123456 info
 Experimental shell completion for the command line tool is available.
 To enable it, run this command once (for Bash):
 .PP
+.nf
 $ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
+.fi
 .PP
 More information on shell completion (including instructions for other shells) is
 available at:
+.br
 https://click.palletsprojects.com/en/stable/shell-completion/
