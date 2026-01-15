@@ -567,7 +567,10 @@ def add(
                 hide_input=True,
                 confirmation_prompt=True,
             )
-        pskc_key = bytes.fromhex(pskc_key)
+        try:
+            pskc_key = bytes.fromhex(pskc_key)
+        except ValueError:
+            pskc_key = b""
         if len(pskc_key) != 16:
             raise CliFail("Pre-shared key must be 16 bytes (32 hex characters).")
 
@@ -705,10 +708,13 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
             pskc.encryption.derive_key(passphrase)
         else:
             key = click_prompt(
-                "Enter passphrase to decrypt PSKC file",
+                "Enter pre-shared key (32 char hex) to decrypt PSKC file",
                 hide_input=True,
             )
-            pskc.encryption.key = bytes.fromhex(key)
+            try:
+                pskc.encryption.key = bytes.fromhex(key)
+            except ValueError:
+                raise CliFail("Invalid pre-shared key: must be valid hexadecimal.")
 
     _init_session(ctx, password, remember)
 
@@ -722,7 +728,13 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
             continue
 
         # Required fields
-        if key.secret is None or key.id is None:
+        try:
+            secret = key.secret
+        except Exception as e:
+            raise CliFail(
+                "Failed to decrypt PSKC file. Wrong passphrase or pre-shared key?"
+            ) from e
+        if secret is None or key.id is None:
             logger.debug("Skipping key with no secret or no id")
             continue
 
@@ -749,7 +761,7 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
                 name = key.key_userid
 
         cred = CredentialData(
-            secret=key.secret,
+            secret=secret,
             issuer=issuer,
             name=name,
             oath_type=oath_type,
