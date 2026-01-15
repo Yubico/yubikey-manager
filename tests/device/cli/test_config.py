@@ -1,7 +1,8 @@
+from astroid.nodes import If
 import pytest
 
 from yubikit.core import TRANSPORT, YUBIKEY
-from yubikit.management import CAPABILITY
+from yubikit.management import CAPABILITY, FORM_FACTOR
 
 from .. import condition
 
@@ -25,9 +26,17 @@ def not_sky(device, info):
         return device.pid.yubikey_type != YUBIKEY.SKY
 
 
+def not_mpe(info):
+    if info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO):
+        if info.supported_capabilities[TRANSPORT.USB] & CAPABILITY.PIV:
+            return False
+    return True
+
+
 class TestConfigUSB:
     @pytest.fixture(autouse=True)
-    @condition.check(not_sky)
+    @condition.check(not_sky, "SKY")
+    @condition.check(not_mpe, "Bio MPE")
     @condition.min_version(5)
     def enable_all(self, ykman_cli, await_reboot):
         ykman_cli("config", "usb", "--enable-all", "-f")

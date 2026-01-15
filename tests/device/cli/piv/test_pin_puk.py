@@ -3,7 +3,8 @@ import re
 import pytest
 
 from ykman.piv import OBJECT_ID_PIVMAN_DATA, PivmanData
-from yubikit.management import CAPABILITY
+from yubikit.core import TRANSPORT
+from yubikit.management import CAPABILITY, FORM_FACTOR
 
 from .util import (
     NON_DEFAULT_PIN,
@@ -37,6 +38,12 @@ class TestPin:
 
 
 class TestPuk:
+    @pytest.fixture(autouse=True)
+    def preconditions(self, info):
+        if info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO):
+            if info.supported_capabilities[TRANSPORT.USB] & CAPABILITY.PIV:
+                pytest.skip("Bio MPE does not support PUK")
+
     def test_change_puk(self, ykman_cli, keys):
         o1 = ykman_cli(
             "piv", "access", "change-puk", "-p", keys.puk, "-n", NON_DEFAULT_PUK
@@ -93,6 +100,12 @@ class TestPuk:
 
 
 class TestSetRetries:
+    @pytest.fixture(autouse=True)
+    def preconditions(self, info):
+        if info.form_factor in (FORM_FACTOR.USB_A_BIO, FORM_FACTOR.USB_C_BIO):
+            if info.supported_capabilities[TRANSPORT.USB] & CAPABILITY.PIV:
+                pytest.skip("Bio MPE does not support PUK")
+
     def test_set_retries(self, ykman_cli, default_keys, version):
         ykman_cli(
             "piv",
