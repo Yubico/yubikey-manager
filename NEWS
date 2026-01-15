@@ -1,3 +1,15 @@
+* Version 5.9.0
+ ** OATH: Add support for importing credentials from PSKC files.
+ ** OATH: Add --generate flag to "oath accounts add" command to generate random secrets.
+ ** CLI: Include attached devices in error output when device selection fails.
+ ** PIV: Correct display of PIN attempts remaining when >= 15.
+ ** PIV: Deprecate ykman.piv.parse_rfc4514_string. Use from_rfc4514_string from cryptography instead.
+ ** OpenPGP: Improve error handling for YubiKey NEO.
+ ** HSM Auth: Add "hsmauth credentials change-password" command.
+ ** Bugfix: Fix error handling in "apdu" command.
+ ** Dependency: Add python-pskc library for PSKC support.
+ ** Windows and MacOS installers built with Python 3.14.2
+
 * Version 5.8.0 (released 2025-09-03)
  ** Python 3.10 or later is now required.
  ** CLI: The "otp settings" command now supports --serial-usb-visible.
