@@ -420,7 +420,7 @@ _FASCN_LENS = (4, 4, 6, 1, 1, 10, 1, 4, 1)
 
 
 _cxf_dictionary = bytes([
-    # This data embed pre-computed structures used by the zlib deflate algorithm
+    # This data embeds pre-computed structures used by the zlib deflate algorithm
     # It's purpose is to avoid to store the full dictionary in the compressed
     # stream, thus reducing the size of the certificate
     # Source: https://datatracker.ietf.org/doc/html/draft-pritikin-comp-x509-00#appendix-A
