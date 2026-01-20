@@ -702,7 +702,7 @@ def decompress_certificate(cert_data: bytes) -> bytes:
         cert_data = gzip.decompress(cert_data)
         logger.debug("Decompressed certificate with basic gzip format")
         return cert_data
-    except gzip.BadGzipFile:
+    except (zlib.error, gzip.BadGzipFile):
         logger.warning("Failed to decompressed with basic gzip format")
 
     raise BadResponseError("Failed to decompress certificate")
