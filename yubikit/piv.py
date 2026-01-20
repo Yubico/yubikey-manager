@@ -33,6 +33,7 @@ import os
 import re
 import warnings
 import zlib
+from base64 import b64decode
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
@@ -419,54 +420,6 @@ BCD_ES = "11111"
 _FASCN_LENS = (4, 4, 6, 1, 1, 10, 1, 4, 1)
 
 
-_cxf_dictionary = bytes([
-    # This data embeds pre-computed structures used by the zlib deflate algorithm
-    # It's purpose is to avoid to store the full dictionary in the compressed
-    # stream, thus reducing the size of the certificate
-    # Source: https://datatracker.ietf.org/doc/html/draft-pritikin-comp-x509-00#appendix-A
-    0x30, 0x82, 0x01, 0x39, 0x30, 0x82, 0x01, 0x23,
-    0xa0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x01, 0x01,
-    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
-    0xf7, 0x0d, 0x01, 0x01, 0x05, 0x05, 0x00, 0x30,
-    0x19, 0x31, 0x17, 0x30, 0x15, 0x06, 0x03, 0x55,
-    0x04, 0x03, 0x13, 0x0e, 0x68, 0x74, 0x74, 0x70,
-    0x3a, 0x2f, 0x2f, 0x77, 0x77, 0x77, 0x2e, 0x63,
-    0x6f, 0x6d, 0x30, 0x1e, 0x17, 0x0d, 0x31, 0x30,
-    0x30, 0x35, 0x31, 0x31, 0x31, 0x39, 0x31, 0x33,
-    0x30, 0x33, 0x5a, 0x17, 0x0d, 0x31, 0x31, 0x30,
-    0x35, 0x31, 0x31, 0x31, 0x39, 0x31, 0x33, 0x30,
-    0x33, 0x5a, 0x30, 0x5f, 0x31, 0x10, 0x30, 0x0e,
-    0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d,
-    0x01, 0x09, 0x01, 0x16, 0x01, 0x40, 0x31, 0x0a,
-    0x30, 0x08, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13,
-    0x01, 0x20, 0x31, 0x0b, 0x30, 0x09, 0x06, 0x03,
-    0x55, 0x04, 0x06, 0x13, 0x02, 0x55, 0x53, 0x31,
-    0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x08,
-    0x13, 0x02, 0x57, 0x49, 0x31, 0x0b, 0x30, 0x09,
-    0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x02, 0x6f,
-    0x6e, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55,
-    0x04, 0x0b, 0x13, 0x03, 0x6f, 0x75, 0x6e, 0x31,
-    0x0a, 0x30, 0x08, 0x06, 0x03, 0x55, 0x04, 0x05,
-    0x13, 0x01, 0x20, 0x30, 0x1f, 0x30, 0x0d, 0x06,
-    0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01,
-    0x01, 0x01, 0x05, 0x00, 0x03, 0x0e, 0x00, 0x30,
-    0x0b, 0x02, 0x04, 0x6e, 0x86, 0xe5, 0x95, 0x02,
-    0x03, 0x01, 0x00, 0x01, 0xa3, 0x4d, 0x30, 0x4b,
-    0x30, 0x09, 0x06, 0x03, 0x55, 0x1d, 0x13, 0x04,
-    0x02, 0x30, 0x00, 0x30, 0x1d, 0x06, 0x03, 0x55,
-    0x1d, 0x0e, 0x04, 0x16, 0x04, 0x14, 0x1d, 0x29,
-    0x0a, 0xe9, 0xbb, 0xac, 0x0b, 0x1c, 0x4a, 0xe8,
-    0xf2, 0xa9, 0x06, 0x52, 0xfd, 0xab, 0xc2, 0xb5,
-    0x99, 0xc4, 0x30, 0x1f, 0x06, 0x03, 0x55, 0x1d,
-    0x23, 0x04, 0x18, 0x30, 0x16, 0x80, 0x14, 0x9f,
-    0xba, 0xff, 0x0d, 0x53, 0x2e, 0x12, 0x92, 0xbd,
-    0x47, 0x1a, 0xb7, 0x9f, 0x28, 0x8b, 0x9a, 0x5d,
-    0x74, 0xfa, 0x74, 0x30, 0x0d, 0x06, 0x09, 0x2a,
-    0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05,
-    0x05, 0x00, 0x03, 0x01, 0x00
-])
-
-
 @dataclass
 class FascN:
     """FASC-N data structure
@@ -702,6 +655,57 @@ def _parse_device_public_key(key_type, encoded):
             curve = ec.SECP384R1
 
         return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
+
+
+# This data embeds pre-computed structures used by the zlib deflate algorithm
+# It's purpose is to avoid to store the full dictionary in the compressed
+# stream, thus reducing the size of the certificate
+# Source: https://datatracker.ietf.org/doc/html/draft-pritikin-comp-x509-00#appendix-A
+_cxf_dictionary = b64decode("""
+MIIBOTCCASOgAwIBAgIBATANBgkqhkiG9w0BAQUFADAZMRcwFQYDVQQDEw5odHRw
+Oi8vd3d3LmNvbTAeFw0xMDA1MTExOTEzMDNaFw0xMTA1MTExOTEzMDNaMF8xEDAO
+BgkqhkiG9w0BCQEWAUAxCjAIBgNVBAMTASAxCzAJBgNVBAYTAlVTMQswCQYDVQQI
+EwJXSTELMAkGA1UEChMCb24xDDAKBgNVBAsTA291bjEKMAgGA1UEBRMBIDAfMA0G
+CSqGSIb3DQEBAQUAAw4AMAsCBG6G5ZUCAwEAAaNNMEswCQYDVR0TBAIwADAdBgNV
+HQ4EFgQUHSkK6busCxxK6PKpBlL9q8K1mcQwHwYDVR0jBBgwFoAUn7r/DVMuEpK9
+Rxq3nyiLml10+nQwDQYJKoZIhvcNAQEFBQADAQA=
+""")
+
+
+def decompress_certificate(cert_data: bytes) -> bytes:
+    """
+    Decompress a compressed certificate using various methods.
+    """
+    logger.debug("Certificate is compressed, decompressing...")
+
+    # CXF Deflate Method (as used by Pointsharp Net iD)
+    if cert_data[:2] == b"\01\00":
+        expected_length = int.from_bytes(cert_data[2:4], "little")
+        decompressor = zlib.decompressobj(wbits=zlib.MAX_WBITS, zdict=_cxf_dictionary)
+        try:
+            cert_data = decompressor.decompress(cert_data[4:])
+            if len(cert_data) != expected_length:
+                logger.error(
+                    "Unexpected decompressed length, expected %d, got %d",
+                    expected_length,
+                    len(cert_data),
+                )
+                raise ValueError("Decompressed length does not match expected length")
+
+            logger.debug("Decompressed certificate with CXF deflate format")
+            return cert_data
+        except (zlib.error, ValueError):
+            logger.warning("Failed to decompress with CXF format")
+
+    # Gzip Method (default)
+    try:
+        cert_data = gzip.decompress(cert_data)
+        logger.debug("Decompressed certificate with basic gzip format")
+        return cert_data
+    except gzip.BadGzipFile:
+        logger.warning("Failed to decompressed with basic gzip format")
+
+    raise BadResponseError("Failed to decompress certificate")
 
 
 class PivSession:
@@ -1265,52 +1269,6 @@ class PivSession:
         )
         logger.info(f"Data written to object slot {hex(object_id)}")
 
-    @staticmethod
-    def decompress_certificate(cert_data: bytes) -> bytes:
-        """
-            Decompress a compressed certificate using various methods.
-        """
-        logger.debug("Certificate is compressed, decompressing...")
-
-        # Gzip Method
-        try:
-            cert_data = gzip.decompress(cert_data)
-            logger.debug("Decompressed certificate with basic gzip format")
-            return cert_data
-        except gzip.BadGzipFile:
-            logger.debug("Certificate is not compressed with basic gzip format")
-
-        # CXF Deflate Method (raw deflate with dictionary)
-        # Method explained here: https://datatracker.ietf.org/doc/html/draft-pritikin-comp-x509-00
-        try:
-            decompressor = zlib.decompressobj(wbits=-zlib.MAX_WBITS, zdict=_cxf_dictionary)
-            cert_data = decompressor.decompress(cert_data)
-            logger.debug("Decompressed certificate with CXF deflate format (raw)")
-            return cert_data
-        except (ValueError, zlib.error):
-            logger.debug("Certificate is not compressed with CXF deflate format (raw)")
-
-
-        # CXF Deflate Method (with unknow header and final value checking)
-        # 2 first bytes may be 0x01 0x00 (unknow)
-        # Next 2 bytes are the uncompressed length (little-endian)
-        # Next 2 bytes may be 0x78 0xDA (unknow)
-        try:
-            expected_length = int.from_bytes(cert_data[2:4], "little")
-
-            decompressor = zlib.decompressobj(wbits=-zlib.MAX_WBITS, zdict=_cxf_dictionary)
-            cert_data = decompressor.decompress(cert_data[6:])
-            if len(cert_data) != expected_length:
-                logger.error("Unexpected decompressed length, expected %d, got %d", expected_length, len(cert_data))
-                raise ValueError("Decompressed length does not match expected length")
-
-            logger.debug("Decompressed certificate with CXF deflate format (with headers)")
-            return cert_data
-        except (ValueError, zlib.error):
-            logger.debug("Certificate is not compressed with CXF deflate format (with headers)")
-
-        raise BadResponseError("Failed to decompress certificate")
-
     def get_certificate(self, slot: SLOT) -> x509.Certificate:
         """Get certificate from slot.
 
@@ -1327,7 +1285,7 @@ class PivSession:
 
         if cert_info == 1:
             # Compressed certificate
-            cert_data = self.decompress_certificate(cert_data)
+            cert_data = decompress_certificate(cert_data)
         elif cert_info != 0:
             raise NotSupportedError("Unsupported value in CertInfo")
 
