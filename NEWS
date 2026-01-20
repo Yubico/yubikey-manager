@@ -2,6 +2,7 @@
  ** OATH: Add support for importing credentials from PSKC files.
  ** OATH: Add --generate flag to "oath accounts add" command to generate random secrets.
  ** CLI: Include attached devices in error output when device selection fails.
+ ** PIV: Add support for decompressing certificates using CXF.
  ** PIV: Correct display of PIN attempts remaining when >= 15.
  ** PIV: Deprecate ykman.piv.parse_rfc4514_string. Use from_rfc4514_string from cryptography instead.
  ** OpenPGP: Improve error handling for YubiKey NEO.
