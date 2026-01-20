@@ -32,6 +32,8 @@ import logging
 import os
 import re
 import warnings
+import zlib
+from base64 import b64decode
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
@@ -655,6 +657,57 @@ def _parse_device_public_key(key_type, encoded):
         return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
+# This data embeds pre-computed structures used by the zlib deflate algorithm
+# It's purpose is to avoid to store the full dictionary in the compressed
+# stream, thus reducing the size of the certificate
+# Source: https://datatracker.ietf.org/doc/html/draft-pritikin-comp-x509-00#appendix-A
+_cxf_dictionary = b64decode("""
+MIIBOTCCASOgAwIBAgIBATANBgkqhkiG9w0BAQUFADAZMRcwFQYDVQQDEw5odHRw
+Oi8vd3d3LmNvbTAeFw0xMDA1MTExOTEzMDNaFw0xMTA1MTExOTEzMDNaMF8xEDAO
+BgkqhkiG9w0BCQEWAUAxCjAIBgNVBAMTASAxCzAJBgNVBAYTAlVTMQswCQYDVQQI
+EwJXSTELMAkGA1UEChMCb24xDDAKBgNVBAsTA291bjEKMAgGA1UEBRMBIDAfMA0G
+CSqGSIb3DQEBAQUAAw4AMAsCBG6G5ZUCAwEAAaNNMEswCQYDVR0TBAIwADAdBgNV
+HQ4EFgQUHSkK6busCxxK6PKpBlL9q8K1mcQwHwYDVR0jBBgwFoAUn7r/DVMuEpK9
+Rxq3nyiLml10+nQwDQYJKoZIhvcNAQEFBQADAQA=
+""")
+
+
+def decompress_certificate(cert_data: bytes) -> bytes:
+    """
+    Decompress a compressed certificate using various methods.
+    """
+    logger.debug("Certificate is compressed, decompressing...")
+
+    # CXF Deflate Method (as used by Pointsharp Net iD)
+    if cert_data[:2] == b"\01\00":
+        expected_length = int.from_bytes(cert_data[2:4], "little")
+        decompressor = zlib.decompressobj(wbits=zlib.MAX_WBITS, zdict=_cxf_dictionary)
+        try:
+            cert_data = decompressor.decompress(cert_data[4:])
+            if len(cert_data) != expected_length:
+                logger.error(
+                    "Unexpected decompressed length, expected %d, got %d",
+                    expected_length,
+                    len(cert_data),
+                )
+                raise ValueError("Decompressed length does not match expected length")
+
+            logger.debug("Decompressed certificate with CXF deflate format")
+            return cert_data
+        except (zlib.error, ValueError):
+            logger.warning("Failed to decompress with CXF format")
+
+    # Gzip Method (default)
+    try:
+        cert_data = gzip.decompress(cert_data)
+        logger.debug("Decompressed certificate with basic gzip format")
+        return cert_data
+    except (zlib.error, gzip.BadGzipFile):
+        logger.warning("Failed to decompressed with basic gzip format")
+
+    raise BadResponseError("Failed to decompress certificate")
+
+
 class PivSession:
     """A session with the PIV application."""
 
@@ -1232,11 +1285,7 @@ class PivSession:
 
         if cert_info == 1:
             # Compressed certificate
-            logger.debug("Certificate is compressed, decompressing...")
-            try:
-                cert_data = gzip.decompress(cert_data)
-            except gzip.BadGzipFile:
-                raise BadResponseError("Unable to decompress certificate")
+            cert_data = decompress_certificate(cert_data)
         elif cert_info != 0:
             raise NotSupportedError("Unsupported value in CertInfo")
 
