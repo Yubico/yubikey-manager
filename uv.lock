@@ -358,14 +358,14 @@ wheels = [
 
 [[package]]
 name = "fido2"
-version = "2.1.0"
+version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/43/f0/4f99ff79569a8f59e629bd4c042d5f160781dae58a818bb98c1127e4a6b4/fido2-2.1.0.tar.gz", hash = "sha256:b84da93f9bf608a675feb8445cc1d0cec2b8a02d46d165a1ba2fc8a1ab3bdce1", size = 4455878, upload-time = "2026-01-14T14:04:04.424Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/3c/c65377e48c144afca6b02c69f10c0fe936db556096a4e2c9798e2aa72db6/fido2-2.1.1.tar.gz", hash = "sha256:f1379f845870cc7fc64c7f07323c3ce41e8c96c37054e79e0acd5630b3fec5ac", size = 4455940, upload-time = "2026-01-19T11:08:34.683Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/af/fa786b701282592747c4c52080e319e77a77be2cf2f2c685d4ebbfd6140a/fido2-2.1.0-py3-none-any.whl", hash = "sha256:1bcc68f5664c31a184eb7c54de4dbad3bdf3ed19705e565a778ec8fd1376658a", size = 226913, upload-time = "2026-01-14T14:03:59.086Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/ab/d0fa89cc4b982800dd88daa799612f11642bf9393851715d9eaeba3cfcac/fido2-2.1.1-py3-none-any.whl", hash = "sha256:f85c16c8084abf6530b6c6ec3a0cf8575943321842e06916686943a8b784182c", size = 226945, upload-time = "2026-01-19T11:08:29.675Z" },
 ]
 
 [[package]]
@@ -599,11 +599,11 @@ wheels = [
 
 [[package]]
 name = "packaging"
-version = "25.0"
+version = "26.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a1/d4/1fc4078c65507b51b96ca8f8c3ba19e6a61c8253c72794544580a7b6c24d/packaging-25.0.tar.gz", hash = "sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f", size = 165727, upload-time = "2025-04-19T11:48:59.673Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/65/ee/299d360cdc32edc7d2cf530f3accf79c4fca01e96ffc950d8a52213bd8e4/packaging-26.0.tar.gz", hash = "sha256:00243ae351a257117b6a241061796684b084ed1c516a08c48a3f7e147a9d80b4", size = 143416, upload-time = "2026-01-21T20:50:39.064Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484", size = 66469, upload-time = "2025-04-19T11:48:57.875Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl", hash = "sha256:b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529", size = 74366, upload-time = "2026-01-21T20:50:37.788Z" },
 ]
 
 [[package]]
@@ -626,11 +626,11 @@ wheels = [
 
 [[package]]
 name = "pycparser"
-version = "2.23"
+version = "3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/fe/cf/d2d3b9f5699fb1e4615c8e32ff220203e43b248e1dfcc6736ad9057731ca/pycparser-2.23.tar.gz", hash = "sha256:78816d4f24add8f10a06d6f05b4d424ad9e96cfebf68a4ddc99c65c0720d00c2", size = 173734, upload-time = "2025-09-09T13:23:47.91Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/7d/92392ff7815c21062bea51aa7b87d45576f649f16458d78b7cf94b9ab2e6/pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29", size = 103492, upload-time = "2026-01-21T14:26:51.89Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/e3/59cd50310fc9b59512193629e1984c1f95e5c8ae6e5d8c69532ccc65a7fe/pycparser-2.23-py3-none-any.whl", hash = "sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934", size = 118140, upload-time = "2025-09-09T13:23:46.651Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992", size = 48172, upload-time = "2026-01-21T14:26:50.693Z" },
 ]
 
 [[package]]
@@ -672,15 +672,15 @@ wheels = [
 
 [[package]]
 name = "pyinstaller-hooks-contrib"
-version = "2025.11"
+version = "2026.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
     { name = "setuptools" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/2f/2c68b6722d233dae3e5243751aafc932940b836919cfaca22dd0c60d417c/pyinstaller_hooks_contrib-2025.11.tar.gz", hash = "sha256:dfe18632e06655fa88d218e0d768fd753e1886465c12a6d4bce04f1aaeec917d", size = 169183, upload-time = "2025-12-23T12:59:37.361Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/8f/8052ff65067697ee80fde45b9731842e160751c41ac5690ba232c22030e8/pyinstaller_hooks_contrib-2026.0.tar.gz", hash = "sha256:0120893de491a000845470ca9c0b39284731ac6bace26f6849dea9627aaed48e", size = 170311, upload-time = "2026-01-20T00:15:23.922Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/c4/3a096c6e701832443b957b9dac18a163103360d0c7f5842ca41695371148/pyinstaller_hooks_contrib-2025.11-py3-none-any.whl", hash = "sha256:777e163e2942474aa41a8e6d31ac1635292d63422c3646c176d584d04d971c34", size = 449478, upload-time = "2025-12-23T12:59:35.987Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/b1/9da6ec3e88696018ee7bb9dc4a7310c2cfaebf32923a19598cd342767c10/pyinstaller_hooks_contrib-2026.0-py3-none-any.whl", hash = "sha256:0590db8edeba3e6c30c8474937021f5cd39c0602b4d10f74a064c73911efaca5", size = 452318, upload-time = "2026-01-20T00:15:21.88Z" },
 ]
 
 [[package]]
@@ -876,11 +876,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "80.9.0"
+version = "80.10.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/18/5d/3bf57dcd21979b887f014ea83c24ae194cfcd12b9e0fda66b957c69d1fca/setuptools-80.9.0.tar.gz", hash = "sha256:f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c", size = 1319958, upload-time = "2025-05-27T00:56:51.443Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/ff/f75651350db3cf2ef767371307eb163f3cc1ac03e16fdf3ac347607f7edb/setuptools-80.10.1.tar.gz", hash = "sha256:bf2e513eb8144c3298a3bd28ab1a5edb739131ec5c22e045ff93cd7f5319703a", size = 1229650, upload-time = "2026-01-21T09:42:03.061Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl", hash = "sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922", size = 1201486, upload-time = "2025-05-27T00:56:49.664Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/76/f963c61683a39084aa575f98089253e1e852a4417cb8a3a8a422923a5246/setuptools-80.10.1-py3-none-any.whl", hash = "sha256:fc30c51cbcb8199a219c12cc9c281b5925a4978d212f84229c909636d9f6984e", size = 1099859, upload-time = "2026-01-21T09:42:00.688Z" },
 ]
 
 [[package]]
@@ -1099,7 +1099,7 @@ wheels = [
 
 [[package]]
 name = "yubikey-manager"
-version = "5.9.0"
+version = "5.9.1.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
