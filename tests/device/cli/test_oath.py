@@ -300,3 +300,305 @@ class TestOathFips:
             ykman_cli(
                 "oath", "accounts", "add", "abba", "abba", "--algorithm", "SHA512"
             )
+
+
+class TestPskc:
+    def test_add_with_generate(self, accounts_cli):
+        """Test adding a credential with --generate flag."""
+        result = accounts_cli("add", "generated-cred", "--generate", "-f")
+        assert "Generated credential secret (base32):" in result.output
+
+        creds = accounts_cli("list").output
+        assert "generated-cred" in creds
+
+    def test_add_with_generate_and_secret_fails(self, accounts_cli):
+        """Test that --generate cannot be used with a provided secret."""
+        with pytest.raises(SystemExit):
+            accounts_cli("add", "fail-cred", "abba", "--generate", "-f")
+
+    def test_export_to_pskc_file(self, accounts_cli, tmp_path):
+        """Test exporting a credential to a PSKC file."""
+        pskc_file = tmp_path / "export.pskc"
+        accounts_cli(
+            "add", "export-test", "GEZDGNBVGY3TQOJQ", "-O", str(pskc_file), "-f"
+        )
+        assert pskc_file.exists()
+
+        # Verify the file contains expected data
+        content = pskc_file.read_text()
+        assert "pskc" in content.lower()
+        assert "export-test" in content
+
+    def test_export_with_issuer(self, accounts_cli, tmp_path):
+        """Test exporting a credential with issuer to a PSKC file."""
+        pskc_file = tmp_path / "export_issuer.pskc"
+        accounts_cli(
+            "add",
+            "user@example.com",
+            "GEZDGNBVGY3TQOJQ",
+            "-i",
+            "ExampleIssuer",
+            "-O",
+            str(pskc_file),
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        content = pskc_file.read_text()
+        assert "ExampleIssuer" in content
+
+    def test_export_with_passphrase(self, accounts_cli, tmp_path):
+        """Test exporting a credential encrypted with a passphrase."""
+        pskc_file = tmp_path / "encrypted_pass.pskc"
+        accounts_cli(
+            "add",
+            "passphrase-test",
+            "GEZDGNBVGY3TQOJQ",
+            "-O",
+            str(pskc_file),
+            "--pskc-passphrase",
+            "testpassword123",
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        # Verify the file is encrypted (contains encryption info)
+        content = pskc_file.read_text()
+        assert "EncryptedValue" in content or "CipherData" in content
+
+    def test_export_with_preshared_key(self, accounts_cli, tmp_path):
+        """Test exporting a credential encrypted with a pre-shared key."""
+        pskc_file = tmp_path / "encrypted_key.pskc"
+        # 16 bytes = 32 hex characters
+        psk = "0123456789abcdef0123456789abcdef"
+        accounts_cli(
+            "add",
+            "psk-test",
+            "GEZDGNBVGY3TQOJQ",
+            "-O",
+            str(pskc_file),
+            "--pskc-key",
+            psk,
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        content = pskc_file.read_text()
+        assert "EncryptedValue" in content or "CipherData" in content
+
+    def test_export_pskc_passphrase_too_short(self, accounts_cli, tmp_path):
+        """Test that passphrase must be at least 8 characters."""
+        pskc_file = tmp_path / "fail.pskc"
+        with pytest.raises(SystemExit):
+            accounts_cli(
+                "add",
+                "fail-test",
+                "GEZDGNBVGY3TQOJQ",
+                "-O",
+                str(pskc_file),
+                "--pskc-passphrase",
+                "short",
+                "-f",
+            )
+
+    def test_export_pskc_key_wrong_length(self, accounts_cli, tmp_path):
+        """Test that pre-shared key must be 16 bytes."""
+        pskc_file = tmp_path / "fail.pskc"
+        with pytest.raises(SystemExit):
+            accounts_cli(
+                "add",
+                "fail-test",
+                "GEZDGNBVGY3TQOJQ",
+                "-O",
+                str(pskc_file),
+                "--pskc-key",
+                "0123456789abcdef",  # Only 8 bytes
+                "-f",
+            )
+
+    def test_export_pskc_key_and_passphrase_fails(self, accounts_cli, tmp_path):
+        """Test that --pskc-key and --pskc-passphrase cannot be used together."""
+        pskc_file = tmp_path / "fail.pskc"
+        with pytest.raises(SystemExit):
+            accounts_cli(
+                "add",
+                "fail-test",
+                "GEZDGNBVGY3TQOJQ",
+                "-O",
+                str(pskc_file),
+                "--pskc-key",
+                "0123456789abcdef0123456789abcdef",
+                "--pskc-passphrase",
+                "testpassword",
+                "-f",
+            )
+
+    def test_pskc_encryption_without_output_fails(self, accounts_cli):
+        """Test that encryption options require --output."""
+        with pytest.raises(SystemExit):
+            accounts_cli(
+                "add",
+                "fail-test",
+                "GEZDGNBVGY3TQOJQ",
+                "--pskc-passphrase",
+                "testpassword123",
+                "-f",
+            )
+
+    def test_generate_and_export(self, accounts_cli, tmp_path):
+        """Test generating a secret and exporting to PSKC."""
+        pskc_file = tmp_path / "generated_export.pskc"
+        accounts_cli("add", "gen-export-test", "--generate", "-O", str(pskc_file), "-f")
+        assert pskc_file.exists()
+
+        creds = accounts_cli("list").output
+        assert "gen-export-test" in creds
+
+    def test_import_pskc_file(self, accounts_cli, tmp_path):
+        """Test importing credentials from a PSKC file."""
+        # First export a credential
+        pskc_file = tmp_path / "import_test.pskc"
+        accounts_cli(
+            "add",
+            "to-import",
+            "GEZDGNBVGY3TQOJQ",
+            "-i",
+            "TestIssuer",
+            "-O",
+            str(pskc_file),
+            "-f",
+        )
+
+        # Delete the credential
+        accounts_cli("delete", "to-import", "-f")
+        creds = accounts_cli("list").output
+        assert "to-import" not in creds
+
+        # Re-import from PSKC
+        accounts_cli("import", str(pskc_file), "-f")
+        creds = accounts_cli("list").output
+        assert "to-import" in creds
+
+    def test_import_pskc_encrypted_with_passphrase(self, accounts_cli, tmp_path):
+        """Test importing credentials from a passphrase-encrypted PSKC file."""
+        passphrase = "testpassword123"
+        pskc_file = tmp_path / "encrypted_import.pskc"
+
+        # Export with encryption
+        accounts_cli(
+            "add",
+            "encrypted-import",
+            "GEZDGNBVGY3TQOJQ",
+            "-O",
+            str(pskc_file),
+            "--pskc-passphrase",
+            passphrase,
+            "-f",
+        )
+
+        # Delete the credential
+        accounts_cli("delete", "encrypted-import", "-f")
+
+        # Re-import with passphrase
+        accounts_cli("import", str(pskc_file), "-f", input=passphrase)
+        creds = accounts_cli("list").output
+        assert "encrypted-import" in creds
+
+    def test_import_pskc_encrypted_with_key(self, accounts_cli, tmp_path):
+        """Test importing credentials from a key-encrypted PSKC file."""
+        psk = "0123456789abcdef0123456789abcdef"
+        pskc_file = tmp_path / "key_encrypted_import.pskc"
+
+        # Export with encryption
+        accounts_cli(
+            "add",
+            "key-import",
+            "GEZDGNBVGY3TQOJQ",
+            "-O",
+            str(pskc_file),
+            "--pskc-key",
+            psk,
+            "-f",
+        )
+
+        # Delete the credential
+        accounts_cli("delete", "key-import", "-f")
+
+        # Re-import with key
+        accounts_cli("import", str(pskc_file), "-f", input=psk)
+        creds = accounts_cli("list").output
+        assert "key-import" in creds
+
+    def test_export_hotp_credential(self, accounts_cli, tmp_path):
+        """Test exporting an HOTP credential to PSKC."""
+        pskc_file = tmp_path / "hotp_export.pskc"
+        accounts_cli(
+            "add",
+            "hotp-export",
+            "GEZDGNBVGY3TQOJQ",
+            "-o",
+            "HOTP",
+            "-c",
+            "10",
+            "-O",
+            str(pskc_file),
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        content = pskc_file.read_text()
+        assert "hotp" in content.lower()
+
+    def test_export_totp_with_period(self, accounts_cli, tmp_path):
+        """Test exporting a TOTP credential with custom period."""
+        pskc_file = tmp_path / "totp_period.pskc"
+        accounts_cli(
+            "add",
+            "totp-period",
+            "GEZDGNBVGY3TQOJQ",
+            "-P",
+            "60",
+            "-O",
+            str(pskc_file),
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        content = pskc_file.read_text()
+        assert "60" in content
+
+    def test_export_with_algorithm(self, accounts_cli, tmp_path):
+        """Test exporting a credential with SHA256 algorithm."""
+        pskc_file = tmp_path / "sha256_export.pskc"
+        accounts_cli(
+            "add",
+            "sha256-test",
+            "GEZDGNBVGY3TQOJQ",
+            "-a",
+            "SHA256",
+            "-O",
+            str(pskc_file),
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        content = pskc_file.read_text()
+        assert "SHA256" in content
+
+    def test_export_with_digits(self, accounts_cli, tmp_path):
+        """Test exporting a credential with 8 digits."""
+        pskc_file = tmp_path / "8digits_export.pskc"
+        accounts_cli(
+            "add",
+            "8digits-test",
+            "GEZDGNBVGY3TQOJQ",
+            "-d",
+            "8",
+            "-O",
+            str(pskc_file),
+            "-f",
+        )
+        assert pskc_file.exists()
+
+        content = pskc_file.read_text()
+        assert "8" in content

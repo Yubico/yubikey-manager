@@ -241,7 +241,7 @@ def hsmauth(ctx):
             ctx.obj["session"].get_management_key_retries()
     except ApduError as e:
         if e.sw == SW.CONDITIONS_NOT_SATISFIED:
-            raise CliFail("Unable to manage HSMAuth over NFC without SCP")
+            raise CliFail("Unable to manage HSMAuth over NFC without SCP.")
         raise
 
     info = ctx.obj["info"]
@@ -368,7 +368,7 @@ def generate(ctx, label, credential_password, management_key, touch):
 
     if ctx.obj["fips_unready"]:
         raise CliFail(
-            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials."
         )
 
     if management_key is None:
@@ -412,7 +412,7 @@ def import_credential(
     """
     if ctx.obj["fips_unready"]:
         raise CliFail(
-            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials."
         )
 
     if management_key is None:
@@ -526,7 +526,7 @@ def symmetric(
 
     if ctx.obj["fips_unready"]:
         raise CliFail(
-            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials."
         )
 
     if management_key is None:
@@ -588,7 +588,7 @@ def derive(ctx, label, derivation_password, credential_password, management_key,
 
     if ctx.obj["fips_unready"]:
         raise CliFail(
-            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials"
+            "YubiKey FIPS must be in FIPS approved mode prior to adding credentials."
         )
 
     if management_key is None:
@@ -777,6 +777,11 @@ def change_management_key(ctx, management_key, new_management_key, generate):
 
     if new_management_key is None:
         if generate:
+            if ctx.obj["info"].version >= (5, 8):
+                raise CliFail(
+                    "Generating a random management key is not supported on this "
+                    "YubiKey."
+                )
             new_management_key = generate_random_management_key()
             click.echo(f"Generated management key: {new_management_key.hex()}")
         else:
@@ -793,7 +798,7 @@ def change_management_key(ctx, management_key, new_management_key, generate):
 
     if len(new_management_key) != MANAGEMENT_KEY_LEN:
         raise CliFail(
-            "Management key has the wrong length (expected %d bytes)"
+            "Management key has the wrong length (expected %d bytes)."
             % MANAGEMENT_KEY_LEN
         )
 
