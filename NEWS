@@ -1,4 +1,4 @@
-* Version 5.9.0
+* Version 5.9.0 (released 2026-01-22)
  ** OATH: Add support for importing credentials from PSKC files.
  ** OATH: Add --generate flag to "oath accounts add" command to generate random secrets.
  ** CLI: Include attached devices in error output when device selection fails.
