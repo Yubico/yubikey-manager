@@ -1,4 +1,3 @@
-from astroid.nodes import If
 import pytest
 
 from yubikit.core import TRANSPORT, YUBIKEY

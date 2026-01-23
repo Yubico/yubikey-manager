@@ -3,8 +3,7 @@ from enum import Enum
 
 import pytest
 
-from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import AID, ApduFormat, SmartCardProtocol
+from yubikit.core.smartcard import AID, SmartCardProtocol
 from yubikit.core.smartcard.scp import KeyRef, Scp11KeyParams
 from yubikit.securitydomain import SecurityDomainSession
 

@@ -64,7 +64,6 @@ testpaths = ["tests"]
 
 [tool.ruff.lint]
 extend-select = ["E", "I", "S"]
-exclude = ["tests/*"]
 
 [tool.pyright]
 venvPath = "."
