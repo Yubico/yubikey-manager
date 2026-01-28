@@ -18,7 +18,6 @@ from yubikit.piv import (
     Chuid,
     FascN,
     _do_check_key_support,
-    _cxf_dictionary,
     decompress_certificate,
 )
 
@@ -182,35 +181,35 @@ class TestDecompressCertificate:
         result = decompress_certificate(compressed_data)
         assert result == original_data
 
-    def test_cxf_deflate_decompression(self):
-        """Test decompression of CXF deflate format (used by Pointsharp Net iD)."""
-        original_data = b"Test certificate content for CXF format"
+    def test_zlib_deflate_decompression(self):
+        """Test decompression of zlib deflate format (used by Pointsharp Net iD)."""
+        original_data = b"Test certificate content for zlib format"
 
-        # CXF format: 0x01 0x00 + 2-byte little-endian length + zlib compressed data
-        compressor = zlib.compressobj(wbits=zlib.MAX_WBITS, zdict=_cxf_dictionary)
+        # zlib format: 0x01 0x00 + 2-byte little-endian length + zlib compressed data
+        compressor = zlib.compressobj(wbits=zlib.MAX_WBITS)
         compressed = compressor.compress(original_data) + compressor.flush()
 
-        # Build CXF format: magic bytes + length + compressed data
+        # Build zlib format: magic bytes + length + compressed data
         length_bytes = len(original_data).to_bytes(2, "little")
-        cxf_data = b"\x01\x00" + length_bytes + compressed
+        zlib_data = b"\x01\x00" + length_bytes + compressed
 
-        result = decompress_certificate(cxf_data)
+        result = decompress_certificate(zlib_data)
         assert result == original_data
 
-    def test_cxf_deflate_wrong_length_raises(self):
-        """Test that CXF deflate with wrong expected length raises ValueError."""
+    def test_zlib_deflate_wrong_length_raises(self):
+        """Test that zlib deflate with wrong expected length raises ValueError."""
         original_data = b"Test certificate content"
 
-        compressor = zlib.compressobj(wbits=zlib.MAX_WBITS, zdict=_cxf_dictionary)
+        compressor = zlib.compressobj(wbits=zlib.MAX_WBITS)
         compressed = compressor.compress(original_data) + compressor.flush()
 
         # Use wrong length (actual length + 10)
         wrong_length = len(original_data) + 10
         length_bytes = wrong_length.to_bytes(2, "little")
-        cxf_data = b"\x01\x00" + length_bytes + compressed
+        zlib_data = b"\x01\x00" + length_bytes + compressed
 
         with pytest.raises(BadResponseError):
-            decompress_certificate(cxf_data)
+            decompress_certificate(zlib_data)
 
     def test_invalid_data_raises_bad_response_error(self):
         """Test that invalid/uncompressed data raises BadResponseError."""
@@ -227,12 +226,12 @@ class TestDecompressCertificate:
         with pytest.raises(BadResponseError):
             decompress_certificate(corrupted_gzip)
 
-    def test_cxf_format_fallback_to_gzip(self):
-        """Test that invalid CXF data falls back to gzip decompression."""
+    def test_zlib_format_fallback_to_gzip(self):
+        """Test that invalid zlib data falls back to gzip decompression."""
         original_data = b"Fallback test data"
 
-        # Create data that starts with CXF magic but is actually gzip compressed
-        # The CXF decompression will fail and it should fall back to gzip
+        # Create data that starts with zlib magic but is actually gzip compressed
+        # The zlib decompression will fail and it should fall back to gzip
         gzip_data = gzip.compress(original_data)
 
         result = decompress_certificate(gzip_data)
