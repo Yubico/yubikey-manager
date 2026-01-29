@@ -138,6 +138,8 @@ jobs:
           rm 1.zip
           cd ..
           cp signed/ykman.exe ykman-builds-windows/ykman/ykman.exe
+          cp signed/pythoncom314.dll ykman-builds-windows/ykman/_internal/pywin32_system32/pythoncom314.dll
+          cp signed/pywintypes314.dll ykman-builds-windows/ykman/_internal/pywin32_system32/pywintypes314.dll
 
       - name: upload signed artifacts
         uses: actions/upload-artifact@v4

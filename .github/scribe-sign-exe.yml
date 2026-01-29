@@ -9,4 +9,5 @@ jobs:
         description: YubiKey Manager
         files:
           - ykman-builds-windows/ykman/ykman.exe
-          - ykman-builds-windows/ykman/_internal/**/*.dll
+          - ykman-builds-windows/ykman/_internal/pywin32_system32/pythoncom314.dll
+          - ykman-builds-windows/ykman/_internal/pywin32_system32/pywintypes314.dll
