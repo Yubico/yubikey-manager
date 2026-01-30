@@ -75,6 +75,7 @@ jobs:
           path: dist
 
   sign-exe:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [build]
     runs-on: ubuntu-latest
     steps:
