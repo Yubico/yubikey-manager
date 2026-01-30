@@ -94,12 +94,6 @@ jobs:
         with:
           path: ykman-builds-windows
 
-      - name: ls
-        run: ls
-
-      - name: ls
-        run: ls ykman-builds-windows
-
       - name: docker login
         uses: docker/login-action@v3
         with:
@@ -158,12 +152,6 @@ jobs:
         with:
           path: ykman-builds-windows
 
-      - name: ls
-        run: ls
-
-      - name: ls
-        run: ls ykman-builds-windows
-
       - name: Build installer
         working-directory: .\ykman-builds-windows\signed-files\
         run: .\scripts\make_msi.ps1
@@ -185,18 +173,6 @@ jobs:
       uses: actions/download-artifact@v5
       with:
         path: ykman-builds-windows
-
-    - name: ls
-      run: ls
-
-    - name: ls
-      run: ls ykman-builds-windows
-
-    - name: ls
-      run: ls ykman-builds-windows/signed-files
-
-    - name: ls
-      run: ls ykman-builds-windows/ykman-installer-windows
 
     - name: docker login
       uses: docker/login-action@v3
