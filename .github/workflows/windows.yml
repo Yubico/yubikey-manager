@@ -109,7 +109,7 @@ jobs:
           echo "${GAC}" > scribe_sa.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
 
-      - name: run scribe sign exe
+      - name: run scribe sign exe and dlls
         run: >
           docker run
           --user $(id -u):$(id -g)
@@ -123,7 +123,7 @@ jobs:
           --synchronous
           --download-artifacts
 
-      - name: unpack signed exe
+      - name: unpack signed exe and dlls
         run: |
           mkdir -p signed
           mv scribe-download/*/sign-source/1.zip signed/
@@ -219,3 +219,17 @@ jobs:
       with:
         name: signed-files-and-msi
         path: ykman-builds-windows/ykman-installer-windows
+
+  verify-signatures:
+    needs: [sign-msi]
+    runs-on: windows-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: signed-files-and-msi
+          path: ykman-builds-windows/ykman-installer-windows
+
+      - name: Check for unsigned DLLs
+        working-directory: .\ykman-builds-windows\ykman-installer-windows
+        run: .\scripts\verify_dll.ps1
