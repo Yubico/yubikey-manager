@@ -1,7 +1,7 @@
+from dataclasses import replace
 from typing import cast
 
 import pytest
-
 from yubikit.core import TRANSPORT, YUBIKEY, Tlv
 from yubikit.management import (
     CAPABILITY,
@@ -11,8 +11,6 @@ from yubikit.management import (
     Version,
 )
 from yubikit.support import get_name
-from dataclasses import replace
-
 
 DEFAULT_INFO = DeviceInfo(
     config=cast(DeviceConfig, None),
@@ -219,6 +217,10 @@ DEVICE_INFO_TESTDATA = [
     (
         "YubiKey 5Ci",
         "0102023f0302023f020400a0392204010505030502030602000007010f0801000a01000f010c",
+    ),
+    (
+        "YubiKey C Bio - FIDO Edition",
+        "01021206030212060204023251e904010705030000010602000007010f0801000a01000f010020030100002103030001100101110400000000120100130c3738434c5546583530303050140200001502000016010017010018020000190e0103050800020101030400000003",
     ),
 ]
 

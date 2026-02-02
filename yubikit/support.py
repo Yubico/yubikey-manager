@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 # Old U2F AID, only used to detect the presence of the applet
 _AID_U2F_YUBICO = bytes.fromhex("a0000005271002")
 
+# Only used for pre YK4 devices, does not need to include any newer applets
 _SCAN_APPLETS = (
     # OTP will be checked elsewhere and thus isn't needed here
     (AID.FIDO, CAPABILITY.U2F),
@@ -338,7 +339,19 @@ def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
 
 
 def _fido_only(capabilities):
-    return capabilities & ~(CAPABILITY.U2F | CAPABILITY.FIDO2) == 0
+    # Explicit list of non-FIDO capabilities, to prevent future capability additions
+    # from breaking this check.
+    return (
+        capabilities
+        & (
+            CAPABILITY.OTP
+            | CAPABILITY.OATH
+            | CAPABILITY.PIV
+            | CAPABILITY.OPENPGP
+            | CAPABILITY.HSMAUTH
+        )
+        == 0
+    ) and capabilities & (CAPABILITY.U2F | CAPABILITY.FIDO2) != 0
 
 
 def _is_preview(version):
