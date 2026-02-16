@@ -8,7 +8,6 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
-
 from ykman.piv import (
     check_key,
     generate_csr,
@@ -37,6 +36,10 @@ from yubikit.piv import (
 from ..util import open_file
 from . import condition
 
+_backend = default_backend()
+_mldsa = hasattr(_backend, "mldsa_supported") and _backend.mldsa_supported()
+_mlkem = hasattr(_backend, "mlkem_supported") and _backend.mlkem_supported()
+
 DEFAULT_PIN = "123456"
 NON_DEFAULT_PIN = "12341235"
 DEFAULT_PUK = "12345678"
@@ -50,7 +53,10 @@ NON_DEFAULT_MANAGEMENT_KEY = bytes.fromhex(
 
 NOW = datetime.datetime.now()
 
-SIGN_KEY_TYPES = list(set(KEY_TYPE) - {KEY_TYPE.X25519})
+SIGN_KEY_TYPES = list(
+    set(KEY_TYPE)
+    - {KEY_TYPE.X25519, KEY_TYPE.MLKEM512, KEY_TYPE.MLKEM768, KEY_TYPE.MLKEM1024}
+)
 ECDH_KEY_TYPES = [KEY_TYPE.ECCP256, KEY_TYPE.ECCP384, KEY_TYPE.X25519]
 
 
@@ -152,15 +158,35 @@ def generate_key(
 
 def generate_sw_key(key_type):
     if key_type.algorithm == ALGORITHM.RSA:
-        return rsa.generate_private_key(65537, key_type.bit_len, default_backend())
+        return rsa.generate_private_key(65537, key_type.bit_len, _backend)
     elif key_type == KEY_TYPE.ECCP256:
-        return ec.generate_private_key(ec.SECP256R1(), default_backend())
+        return ec.generate_private_key(ec.SECP256R1(), _backend)
     elif key_type == KEY_TYPE.ECCP384:
-        return ec.generate_private_key(ec.SECP384R1(), default_backend())
+        return ec.generate_private_key(ec.SECP384R1(), _backend)
     elif key_type == KEY_TYPE.ED25519:
         return ed25519.Ed25519PrivateKey.generate()
     elif key_type == KEY_TYPE.X25519:
         return x25519.X25519PrivateKey.generate()
+    elif key_type.algorithm == ALGORITHM.MLDSA and _mldsa:
+        from cryptography.hazmat.primitives.asymmetric import mldsa
+
+        match key_type:
+            case KEY_TYPE.MLDSA44:
+                return mldsa.MLDSA44PrivateKey.generate()
+            case KEY_TYPE.MLDSA65:
+                return mldsa.MLDSA65PrivateKey.generate()
+            case KEY_TYPE.MLDSA87:
+                return mldsa.MLDSA87PrivateKey.generate()
+    elif key_type.algorithm == ALGORITHM.MLKEM and _mlkem:
+        from cryptography.hazmat.primitives.asymmetric import mlkem
+
+        match key_type:
+            case KEY_TYPE.MLKEM768:
+                return mlkem.MLKEM768PrivateKey.generate()
+            case KEY_TYPE.MLKEM1024:
+                return mlkem.MLKEM1024PrivateKey.generate()
+
+    pytest.skip(f"Unsupported key type: {key_type}")
 
 
 def import_key(
@@ -214,6 +240,10 @@ class TestCertificateSignatures:
     def test_generate_self_signed_certificate(
         self, info, session, key_type, hash_algorithm, keys, scp
     ):
+        if key_type in (KEY_TYPE.MLDSA44, KEY_TYPE.MLDSA65, KEY_TYPE.MLDSA87):
+            # cryptography does not support ML-DSA keys in CertificateBuilder yet
+            pytest.skip(f"CertificateBuilder doesn't support {key_type}")
+
         skip_unsupported_key_type(key_type, info)
 
         slot = SLOT.SIGNATURE
@@ -766,6 +796,10 @@ class TestMetadata:
         assert data.pin_policy == PIN_POLICY.ALWAYS
         assert data.touch_policy == TOUCH_POLICY.NEVER
         assert data.generated is True
+
+        if key_type == KEY_TYPE.MLKEM512:
+            return  # cryptography does not support ML-KEM 512
+
         assert data.public_key.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -777,10 +811,10 @@ class TestMetadata:
     @pytest.mark.parametrize(
         "key",
         [
-            rsa.generate_private_key(65537, 1024, default_backend()),
-            rsa.generate_private_key(65537, 2048, default_backend()),
-            ec.generate_private_key(ec.SECP256R1(), default_backend()),
-            ec.generate_private_key(ec.SECP384R1(), default_backend()),
+            rsa.generate_private_key(65537, 1024, _backend),
+            rsa.generate_private_key(65537, 2048, _backend),
+            ec.generate_private_key(ec.SECP256R1(), _backend),
+            ec.generate_private_key(ec.SECP384R1(), _backend),
         ],
     )
     @pytest.mark.parametrize(
@@ -819,7 +853,7 @@ class TestMoveAndDelete:
         pass
 
     def test_move_key(self, session, keys):
-        key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        key = ec.generate_private_key(ec.SECP256R1(), _backend)
         session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, key)
         data_a = session.get_slot_metadata(SLOT.AUTHENTICATION)
@@ -832,7 +866,7 @@ class TestMoveAndDelete:
             session.get_slot_metadata(SLOT.AUTHENTICATION)
 
     def test_delete_key(self, session, keys):
-        key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        key = ec.generate_private_key(ec.SECP256R1(), _backend)
         session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, key)
         session.get_slot_metadata(SLOT.AUTHENTICATION)
@@ -883,3 +917,97 @@ class TestBioMpe:
     def test_verify_uv_without_fingerprints(self, session, bio_metadata):
         with pytest.raises(InvalidPinError):
             session.verify_uv(check_only=True)
+
+
+class TestMl:
+    @pytest.fixture(autouse=True)
+    @condition.min_version(6, 0)
+    def preconditions(self):
+        pass
+
+    @pytest.mark.parametrize(
+        "key_type", (KEY_TYPE.MLDSA44, KEY_TYPE.MLDSA65, KEY_TYPE.MLDSA87)
+    )
+    def test_generate_ml_key_sign(self, session, keys, key_type):
+        session.authenticate(keys.mgmt)
+        pk = session.generate_key(SLOT.AUTHENTICATION, key_type)
+        assert pk
+
+        message = b"test"
+        session.verify_pin(keys.pin)
+        sig = session.sign(SLOT.AUTHENTICATION, key_type, message)
+        assert sig
+
+        pk.verify(sig, message)
+
+    @pytest.mark.parametrize(
+        "key_type", (KEY_TYPE.MLDSA44, KEY_TYPE.MLDSA65, KEY_TYPE.MLDSA87)
+    )
+    def test_import_ml_key(self, session, keys, key_type):
+        session.authenticate(keys.mgmt)
+
+        from cryptography.hazmat.primitives.asymmetric import mldsa
+
+        match key_type:
+            case KEY_TYPE.MLDSA44:
+                sk = mldsa.MLDSA44PrivateKey.generate()
+            case KEY_TYPE.MLDSA65:
+                sk = mldsa.MLDSA65PrivateKey.generate()
+            case KEY_TYPE.MLDSA87:
+                sk = mldsa.MLDSA87PrivateKey.generate()
+
+        assert session.put_key(SLOT.AUTHENTICATION, sk) == key_type
+
+        pk = session.get_slot_metadata(SLOT.AUTHENTICATION).public_key
+
+        message = b"test"
+        session.verify_pin(keys.pin)
+        sig = session.sign(SLOT.AUTHENTICATION, key_type, message)
+        assert sig
+
+        pk.verify(sig, message)
+
+    @pytest.mark.parametrize(
+        "key_type", (KEY_TYPE.MLKEM512, KEY_TYPE.MLKEM768, KEY_TYPE.MLKEM1024)
+    )
+    def test_generate_ml_key_decrypt(self, session, keys, key_type):
+        session.authenticate(keys.mgmt)
+        pk = session.generate_key(SLOT.KEY_MANAGEMENT, key_type)
+        assert pk
+
+        if key_type == KEY_TYPE.MLKEM512:
+            pytest.skip("ML-KEM-512 not supported by cryptography")
+
+        host_secret, ciphertext = pk.encapsulate()
+
+        session.verify_pin(keys.pin)
+        yk_secret = session.calculate_secret(SLOT.KEY_MANAGEMENT, ciphertext)
+        assert yk_secret == host_secret
+
+    @pytest.mark.parametrize(
+        "key_type", (KEY_TYPE.MLKEM512, KEY_TYPE.MLKEM768, KEY_TYPE.MLKEM1024)
+    )
+    def test_import_ml_key_decrypt(self, session, keys, key_type):
+        session.authenticate(keys.mgmt)
+
+        from cryptography.hazmat.primitives.asymmetric import mlkem
+
+        match key_type:
+            case KEY_TYPE.MLKEM512:
+                pytest.skip("ML-KEM-512 not supported by cryptography")
+            case KEY_TYPE.MLKEM768:
+                sk = mlkem.MLKEM768PrivateKey.generate()
+            case KEY_TYPE.MLKEM1024:
+                sk = mlkem.MLKEM1024PrivateKey.generate()
+
+        assert session.put_key(SLOT.KEY_MANAGEMENT, sk) == key_type
+
+        pk = sk.public_key()
+
+        assert pk == session.get_slot_metadata(SLOT.KEY_MANAGEMENT).public_key
+
+        host_secret, ciphertext = pk.encapsulate()
+
+        session.verify_pin(keys.pin)
+        yk_secret = session.calculate_secret(SLOT.KEY_MANAGEMENT, ciphertext)
+        assert yk_secret == host_secret

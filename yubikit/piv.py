@@ -73,32 +73,48 @@ from .core.smartcard import (
     SmartCardProtocol,
 )
 
-if TYPE_CHECKING:
-    # This type isn't available on cryptography <40.
-    from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
-
+_backend = default_backend()
+_mldsa = hasattr(_backend, "mldsa_supported") and _backend.mldsa_supported()
+_mlkem = hasattr(_backend, "mlkem_supported") and _backend.mlkem_supported()
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    # This type isn't available on cryptography <40.
+    # This requires cryptography >= 47
+    from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem
+    from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 
-PublicKey: TypeAlias = (
-    rsa.RSAPublicKey
-    | ec.EllipticCurvePublicKey
-    | ed25519.Ed25519PublicKey
-    | x25519.X25519PublicKey
-)
-PrivateKey: TypeAlias = (
-    rsa.RSAPrivateKeyWithSerialization
-    | ec.EllipticCurvePrivateKeyWithSerialization
-    | ed25519.Ed25519PrivateKey
-    | x25519.X25519PrivateKey
-)
+    PublicKey: TypeAlias = (
+        rsa.RSAPublicKey
+        | ec.EllipticCurvePublicKey
+        | ed25519.Ed25519PublicKey
+        | x25519.X25519PublicKey
+        | mldsa.MLDSA44PublicKey
+        | mldsa.MLDSA65PublicKey
+        | mldsa.MLDSA87PublicKey
+        | mlkem.MLKEM768PublicKey
+        | mlkem.MLKEM1024PublicKey
+    )
+    PrivateKey: TypeAlias = (
+        rsa.RSAPrivateKeyWithSerialization
+        | ec.EllipticCurvePrivateKeyWithSerialization
+        | ed25519.Ed25519PrivateKey
+        | x25519.X25519PrivateKey
+        | mldsa.MLDSA44PrivateKey
+        | mldsa.MLDSA65PrivateKey
+        | mldsa.MLDSA87PrivateKey
+        | mlkem.MLKEM768PrivateKey
+        | mlkem.MLKEM1024PrivateKey
+    )
 
 
 @unique
 class ALGORITHM(str, Enum):
     EC = "ec"
     RSA = "rsa"
+    MLDSA = "mldsa"
+    MLKEM = "mlkem"
 
 
 @unique
@@ -111,13 +127,27 @@ class KEY_TYPE(IntEnum):
     ECCP384 = 0x14
     ED25519 = 0xE0
     X25519 = 0xE1
+    MLDSA44 = 0xE2
+    MLDSA65 = 0xE3
+    MLDSA87 = 0xE4
+    MLKEM512 = 0xE5
+    MLKEM768 = 0xE6
+    MLKEM1024 = 0xE7
 
     def __str__(self):
         return self.name
 
     @property
     def algorithm(self) -> ALGORITHM:
-        return ALGORITHM.RSA if self.name.startswith("RSA") else ALGORITHM.EC
+        return (
+            ALGORITHM.RSA
+            if self.name.startswith("RSA")
+            else ALGORITHM.MLDSA
+            if self.name.startswith("MLDSA")
+            else ALGORITHM.MLKEM
+            if self.name.startswith("MLKEM")
+            else ALGORITHM.EC
+        )
 
     @property
     def bit_len(self) -> int:
@@ -146,6 +176,25 @@ class KEY_TYPE(IntEnum):
             return cls.ED25519
         elif isinstance(key, x25519.X25519PublicKey):
             return cls.X25519
+
+        if _mldsa:
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+
+            if isinstance(key, mldsa.MLDSA44PublicKey):
+                return cls.MLDSA44
+            elif isinstance(key, mldsa.MLDSA65PublicKey):
+                return cls.MLDSA65
+            elif isinstance(key, mldsa.MLDSA87PublicKey):
+                return cls.MLDSA87
+        if _mlkem:
+            from cryptography.hazmat.primitives.asymmetric import mlkem
+
+            # ML-KEM-512 isn't supported by cryptography
+            if isinstance(key, mlkem.MLKEM768PublicKey):
+                return cls.MLKEM768
+            elif isinstance(key, mlkem.MLKEM1024PublicKey):
+                return cls.MLKEM1024
+
         raise ValueError(f"Unsupported key type: {type(key).__name__}")
 
 
@@ -317,6 +366,7 @@ TAG_AUTH_WITNESS = 0x80
 TAG_AUTH_CHALLENGE = 0x81
 TAG_AUTH_RESPONSE = 0x82
 TAG_AUTH_EXPONENTIATION = 0x85
+TAG_AUTH_KEM = 0x86
 TAG_GEN_ALGORITHM = 0x80
 TAG_OBJ_DATA = 0x53
 TAG_OBJ_ID = 0x5C
@@ -390,7 +440,7 @@ class SlotMetadata:
     public_key_encoded: bytes
 
     @property
-    def public_key(self):
+    def public_key(self) -> PublicKey | bytes:
         return _parse_device_public_key(self.key_type, self.public_key_encoded)
 
 
@@ -544,32 +594,36 @@ class Chuid:
 
 
 def _pad_message(key_type, message, hash_algorithm, padding):
-    if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
-        return message
-    if key_type.algorithm == ALGORITHM.EC:
-        if isinstance(hash_algorithm, Prehashed):
-            hashed = message
-        else:
-            h = hashes.Hash(hash_algorithm, default_backend())
-            h.update(message)
-            hashed = h.finalize()
-        byte_len = key_type.bit_len // 8
-        if len(hashed) < byte_len:
-            return hashed.rjust(byte_len // 8, b"\0")
-        return hashed[:byte_len]
-    elif key_type.algorithm == ALGORITHM.RSA:
-        # Sign with a dummy key, then encrypt the signature to get the padded message
-        e = 65537
-        dummy = rsa.generate_private_key(e, key_type.bit_len, default_backend())
-        signature = dummy.sign(message, padding, hash_algorithm)
-        # Raw (textbook) RSA encrypt
-        n = dummy.public_key().public_numbers().n
-        return int2bytes(pow(bytes2int(signature), e, n), key_type.bit_len // 8)
+    match key_type.algorithm:
+        case ALGORITHM.RSA:
+            # Sign with dummy key, then encrypt the signature to get the padded message
+            e = 65537
+            dummy = rsa.generate_private_key(e, key_type.bit_len, _backend)
+            signature = dummy.sign(message, padding, hash_algorithm)
+            # Raw (textbook) RSA encrypt
+            n = dummy.public_key().public_numbers().n
+            return int2bytes(pow(bytes2int(signature), e, n), key_type.bit_len // 8)
+        case ALGORITHM.EC:
+            if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+                return message
+            if isinstance(hash_algorithm, Prehashed):
+                hashed = message
+            else:
+                h = hashes.Hash(hash_algorithm, _backend)
+                h.update(message)
+                hashed = h.finalize()
+            byte_len = key_type.bit_len // 8
+            if len(hashed) < byte_len:
+                return hashed.rjust(byte_len // 8, b"\0")
+            return hashed[:byte_len]
+        case ALGORITHM.MLDSA | ALGORITHM.MLKEM:
+            return message
+    raise ValueError(f"Unsupported key type: {key_type}")
 
 
 def _unpad_message(padded, padding):
     e = 65537
-    dummy = rsa.generate_private_key(e, len(padded) * 8, default_backend())
+    dummy = rsa.generate_private_key(e, len(padded) * 8, _backend)
     # Raw (textbook) RSA encrypt
     n = dummy.public_key().public_numbers().n
     encrypted = int2bytes(pow(bytes2int(padded), e, n), len(padded))
@@ -637,24 +691,58 @@ def _do_check_key_support(
     ):
         require_version(version, (5, 7, 0), f"{key_type} requires YubiKey 5.7 or later")
 
+    if key_type.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM):
+        require_version(
+            version,
+            (6, 0, 0),
+            f"{key_type} requires YubiKey 6 or later",
+        )
 
-def _parse_device_public_key(key_type, encoded):
+
+def _parse_device_public_key(key_type: KEY_TYPE, encoded: bytes):
     data = Tlv.parse_dict(encoded)
-    if key_type.algorithm == ALGORITHM.RSA:
-        modulus = bytes2int(data[0x81])
-        exponent = bytes2int(data[0x82])
-        return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
-    elif key_type == KEY_TYPE.ED25519:
-        return ed25519.Ed25519PublicKey.from_public_bytes(data[0x86])
-    elif key_type == KEY_TYPE.X25519:
-        return x25519.X25519PublicKey.from_public_bytes(data[0x86])
-    else:
-        if key_type == KEY_TYPE.ECCP256:
-            curve: type[ec.EllipticCurve] = ec.SECP256R1
-        else:
-            curve = ec.SECP384R1
+    match key_type.algorithm:
+        case ALGORITHM.RSA:
+            modulus = bytes2int(data[0x81])
+            exponent = bytes2int(data[0x82])
+            return rsa.RSAPublicNumbers(exponent, modulus).public_key(_backend)
+        case ALGORITHM.EC:
+            if key_type == KEY_TYPE.ED25519:
+                return ed25519.Ed25519PublicKey.from_public_bytes(data[0x86])
+            elif key_type == KEY_TYPE.X25519:
+                return x25519.X25519PublicKey.from_public_bytes(data[0x86])
+            else:
+                if key_type == KEY_TYPE.ECCP256:
+                    curve: type[ec.EllipticCurve] = ec.SECP256R1
+                else:
+                    curve = ec.SECP384R1
 
-        return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
+                return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
+        case ALGORITHM.MLDSA:
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+
+            match key_type:
+                case KEY_TYPE.MLDSA44:
+                    return mldsa.MLDSA44PublicKey.from_public_bytes(data[0x87])
+                case KEY_TYPE.MLDSA65:
+                    return mldsa.MLDSA65PublicKey.from_public_bytes(data[0x87])
+                case KEY_TYPE.MLDSA87:
+                    return mldsa.MLDSA87PublicKey.from_public_bytes(data[0x87])
+            raise ValueError(f"Unsupported MLDSA key type: {key_type}")
+        case ALGORITHM.MLKEM:
+            from cryptography.hazmat.primitives.asymmetric import mlkem
+
+            match key_type:
+                case KEY_TYPE.MLKEM512:
+                    # cryptography doesn't support ML-KEM 512, so we return raw bytes
+                    return data[0x88]
+                case KEY_TYPE.MLKEM768:
+                    return mlkem.MLKEM768PublicKey.from_public_bytes(data[0x88])
+                case KEY_TYPE.MLKEM1024:
+                    return mlkem.MLKEM1024PublicKey.from_public_bytes(data[0x88])
+            raise ValueError(f"Unsupported MLKEM key type: {key_type}")
+
+    raise ValueError(f"Unsupported key type: {key_type}")
 
 
 def decompress_certificate(cert_data: bytes) -> bytes:
@@ -838,7 +926,7 @@ class PivSession:
         witness = Tlv.unpack(TAG_AUTH_WITNESS, Tlv.unpack(TAG_DYN_AUTH, response))
         challenge = os.urandom(key_type.challenge_len)
 
-        backend = default_backend()
+        backend = _backend
         cipher_key = _parse_management_key(key_type, management_key)
         cipher = Cipher(cipher_key, modes.ECB(), backend)  # noqa: S305
         decryptor = cipher.decryptor()
@@ -1137,7 +1225,7 @@ class PivSession:
         slot: SLOT,
         key_type: KEY_TYPE,
         message: bytes,
-        hash_algorithm: hashes.HashAlgorithm | None,
+        hash_algorithm: hashes.HashAlgorithm | None = None,
         padding: AsymmetricPadding | None = None,
     ) -> bytes:
         """Sign message with key.
@@ -1157,7 +1245,8 @@ class PivSession:
             f"hash={hash_algorithm}, padding={padding}"
         )
         padded = _pad_message(key_type, message, hash_algorithm, padding)
-        return self._use_private_key(slot, key_type, padded, False)
+        message_tlv = Tlv(TAG_AUTH_CHALLENGE, padded)
+        return self._use_private_key(slot, key_type, message_tlv)
 
     def decrypt(
         self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
@@ -1179,14 +1268,15 @@ class PivSession:
             f"Decrypting data with key in slot {slot} of type {key_type} using "
             f"padding={padding}"
         )
-        padded = self._use_private_key(slot, key_type, cipher_text, False)
+        message_tlv = Tlv(TAG_AUTH_CHALLENGE, cipher_text)
+        padded = self._use_private_key(slot, key_type, message_tlv)
         return _unpad_message(padded, padding)
 
     def calculate_secret(
         self,
         slot: SLOT,
         peer_public_key: (
-            ec.EllipticCurvePublicKeyWithSerialization | x25519.X25519PublicKey
+            ec.EllipticCurvePublicKeyWithSerialization | x25519.X25519PublicKey | bytes
         ),
     ) -> bytes:
         """Calculate shared secret using ECDH.
@@ -1197,19 +1287,36 @@ class PivSession:
         :param peer_public_key: The peer's public key.
         """
         slot = SLOT(slot)
-        key_type = KEY_TYPE.from_public_key(peer_public_key)
-        if key_type.algorithm != ALGORITHM.EC:
-            raise ValueError("Unsupported key type")
-        logger.debug(
-            f"Performing key agreement with key in slot {slot} of type {key_type}"
-        )
-        if key_type == KEY_TYPE.X25519:
-            data = peer_public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+        # TODO: Replace this, use bit_len
+        if isinstance(peer_public_key, bytes):
+            # ML key
+            if len(peer_public_key) == 768:
+                key_type = KEY_TYPE.MLKEM512
+            elif len(peer_public_key) == 1088:
+                key_type = KEY_TYPE.MLKEM768
+            elif len(peer_public_key) == 1568:
+                key_type = KEY_TYPE.MLKEM1024
+            else:
+                raise ValueError(
+                    "Invalid length of peer public key: %d" % len(peer_public_key)
+                )
+            message_tlv = Tlv(TAG_AUTH_KEM, peer_public_key)
         else:
-            data = peer_public_key.public_bytes(
-                Encoding.X962, PublicFormat.UncompressedPoint
-            )
-        return self._use_private_key(slot, key_type, data, True)
+            key_type = KEY_TYPE.from_public_key(peer_public_key)
+            if key_type.algorithm == ALGORITHM.EC:
+                logger.debug(
+                    f"Performing key agreement with slot {slot} of type {key_type}"
+                )
+                if key_type == KEY_TYPE.X25519:
+                    data = peer_public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+                else:
+                    data = peer_public_key.public_bytes(
+                        Encoding.X962, PublicFormat.UncompressedPoint
+                    )
+            else:
+                raise ValueError("Unsupported key type")
+            message_tlv = Tlv(TAG_AUTH_EXPONENTIATION, data)
+        return self._use_private_key(slot, key_type, message_tlv)
 
     def get_object(self, object_id: int) -> bytes:
         """Get object by ID.
@@ -1276,7 +1383,7 @@ class PivSession:
             raise NotSupportedError("Unsupported value in CertInfo")
 
         try:
-            return x509.load_der_x509_certificate(cert_data, default_backend())
+            return x509.load_der_x509_certificate(cert_data, _backend)
         except Exception as e:
             raise BadResponseError("Invalid certificate", e)
 
@@ -1338,9 +1445,10 @@ class PivSession:
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
+
         self.check_key_support(key_type, pin_policy, touch_policy, False)
-        ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
+            ln = key_type.bit_len // 8
             assert isinstance(private_key, rsa.RSAPrivateKey)  # noqa: S101
             rsa_numbers = private_key.private_numbers()
             if rsa_numbers.public_numbers.e != 65537:
@@ -1354,16 +1462,44 @@ class PivSession:
                 + Tlv(0x05, int2bytes(rsa_numbers.iqmp, ln))
             )
         elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+            assert isinstance(  # noqa: S101
+                private_key, (ed25519.Ed25519PrivateKey, x25519.X25519PrivateKey)
+            )
             data = Tlv(
                 0x07 if key_type == KEY_TYPE.ED25519 else 0x08,
                 private_key.private_bytes(
                     Encoding.Raw, PrivateFormat.Raw, NoEncryption()
                 ),
             )
-        else:
+        elif key_type.algorithm == ALGORITHM.EC:
+            ln = key_type.bit_len // 8
             assert isinstance(private_key, ec.EllipticCurvePrivateKey)  # noqa: S101
-            ec_numbers = private_key.private_numbers()
-            data = Tlv(0x06, int2bytes(ec_numbers.private_value, ln))
+            numbers = private_key.private_numbers()
+            numbers = numbers
+            data = Tlv(0x06, int2bytes(numbers.private_value, ln))
+        elif key_type.algorithm == ALGORITHM.MLDSA and _mldsa:
+            if TYPE_CHECKING:
+                from cryptography.hazmat.primitives.asymmetric import mldsa
+
+                assert isinstance(
+                    private_key,
+                    mldsa.MLDSA44PrivateKey
+                    | mldsa.MLDSA65PrivateKey
+                    | mldsa.MLDSA87PrivateKey,
+                )  # noqa: S101
+            data = Tlv(0x09, private_key.private_bytes_raw())
+        elif key_type.algorithm == ALGORITHM.MLKEM and _mlkem:
+            if TYPE_CHECKING:
+                from cryptography.hazmat.primitives.asymmetric import mlkem
+
+                assert isinstance(
+                    private_key,
+                    mlkem.MLKEM768PrivateKey | mlkem.MLKEM1024PrivateKey,
+                )  # noqa: S101
+            data = Tlv(0x0A, private_key.private_bytes_raw())
+        else:
+            raise ValueError(f"Unsupported key type: {key_type}")
+
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
@@ -1382,7 +1518,7 @@ class PivSession:
         key_type: KEY_TYPE,
         pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
         touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
-    ) -> PublicKey:
+    ) -> PublicKey | bytes:
         """Generate private key in slot.
 
         Requires authentication with management key.
@@ -1420,7 +1556,7 @@ class PivSession:
         slot = SLOT(slot)
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
         logger.debug(f"Attested key in slot {slot}")
-        return x509.load_der_x509_certificate(response, default_backend())
+        return x509.load_der_x509_certificate(response, _backend)
 
     def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
         """Move key from one slot to another.
@@ -1473,7 +1609,7 @@ class PivSession:
             attempts[INDEX_RETRIES_REMAINING],
         )
 
-    def _use_private_key(self, slot, key_type, message, exponentiation):
+    def _use_private_key(self, slot, key_type, message_tlv):
         try:
             response = self.protocol.send_apdu(
                 0,
@@ -1482,15 +1618,7 @@ class PivSession:
                 slot,
                 Tlv(
                     TAG_DYN_AUTH,
-                    Tlv(TAG_AUTH_RESPONSE)
-                    + Tlv(
-                        (
-                            TAG_AUTH_EXPONENTIATION
-                            if exponentiation
-                            else TAG_AUTH_CHALLENGE
-                        ),
-                        message,
-                    ),
+                    Tlv(TAG_AUTH_RESPONSE) + message_tlv,
                 ),
             )
             return Tlv.unpack(

@@ -276,6 +276,7 @@ class _MaxApduSize(IntEnum):
     NEO = 1390
     YK4 = 2038
     YK4_3 = 3062
+    YK6 = 4928
 
 
 class ScpProcessor(ApduProcessor):
@@ -416,7 +417,9 @@ class SmartCardProtocol:
         if self.connection.transport == TRANSPORT.USB and not force_short:
             self._apdu_format = ApduFormat.EXTENDED
         self._max_apdu_size = (
-            _MaxApduSize.YK4_3 if version >= (4, 3) else _MaxApduSize.YK4
+            _MaxApduSize.YK6
+            if version >= (6, 0)
+            else (_MaxApduSize.YK4_3 if version >= (4, 3) else _MaxApduSize.YK4)
         )
 
         self._reconfigure_processor()
