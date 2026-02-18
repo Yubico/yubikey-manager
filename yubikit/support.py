@@ -33,6 +33,7 @@ from .core import (
     TRANSPORT,
     YUBIKEY,
     ApplicationNotAvailableError,
+    CommandError,
     Connection,
     NotSupportedError,
     Version,
@@ -164,7 +165,11 @@ def _read_info_otp(conn, key_type, interfaces):
 
     # Synthesize info
     otp = YubiOtpSession(conn)
-    serial = otp.get_serial()
+    try:
+        serial = otp.get_serial()
+    except CommandError:
+        logger.debug("Unable to read serial over OTP, no serial", exc_info=True)
+        serial = None
     version = otp.version
 
     if key_type == YUBIKEY.NEO:
