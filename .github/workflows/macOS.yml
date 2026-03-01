@@ -72,7 +72,7 @@ jobs:
         run: ./scripts/make_pkg.sh
 
       - name: Upload build
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ykman-builds-macos
           path: dist
