@@ -18,34 +18,33 @@ with open("version_info.txt", "w") as f:
 
 
 # This recipe allows PyInstaller to understand the entrypoint.
-# See: https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Setuptools-Entry-Point
 def Entrypoint(dist, group, name, **kwargs):
-    import pkg_resources
+    from importlib.metadata import distribution, entry_points
 
     # get toplevel packages of distribution from metadata
-    def get_toplevel(dist):
-        distribution = pkg_resources.get_distribution(dist)
-        if distribution.has_metadata("top_level.txt"):
-            return list(distribution.get_metadata("top_level.txt").split())
+    def get_toplevel(dist_name):
+        d = distribution(dist_name)
+        top_level = d.read_text("top_level.txt")
+        if top_level:
+            return top_level.split()
         else:
             return []
 
     kwargs.setdefault("hiddenimports", [])
     packages = []
-    for distribution in kwargs["hiddenimports"]:
-        packages += get_toplevel(distribution)
+    for dep in kwargs["hiddenimports"]:
+        packages += get_toplevel(dep)
 
     kwargs.setdefault("pathex", [])
     # get the entry point
-    ep = pkg_resources.get_entry_info(dist, group, name)
-    # insert path of the egg at the verify front of the search path
-    kwargs["pathex"] = [ep.dist.location] + kwargs["pathex"]
+    eps = entry_points(group=group, name=name)
+    ep = [e for e in eps if e.dist.name == dist][0]
     # script name must not be a valid module name to avoid name clashes on import
     script_path = os.path.join(workpath, name + "-script.py")
     print("creating script for entry point", dist, group, name)
     with open(script_path, "w") as fh:
-        print("import", ep.module_name, file=fh)
-        print("%s.%s()" % (ep.module_name, ".".join(ep.attrs)), file=fh)
+        print("import", ep.module, file=fh)
+        print("%s.%s()" % (ep.module, ep.attr), file=fh)
         for package in packages:
             print("import", package, file=fh)
 
