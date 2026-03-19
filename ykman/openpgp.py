@@ -27,6 +27,7 @@
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from yubikit.core.smartcard import (
     AID,
@@ -129,7 +130,7 @@ def get_openpgp_info(session: OpenPgpSession):
     data = session.get_application_related_data()
     discretionary = data.discretionary
     retries = discretionary.pw_status
-    info = {
+    info: dict[str, Any] = {
         "OpenPGP version": "%d.%d" % data.aid.version,
         "Application version": "%d.%d.%d" % session.version,
         "PIN tries remaining": retries.attempts_user,

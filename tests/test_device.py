@@ -17,7 +17,7 @@ DEFAULT_INFO = DeviceInfo(
     serial=None,
     version=Version(5, 3, 0),
     form_factor=FORM_FACTOR.USB_A_KEYCHAIN,
-    supported_capabilities={TRANSPORT.USB: CAPABILITY(0xFF)},  # type: ignore
+    supported_capabilities={TRANSPORT.USB: CAPABILITY(0xFF)},
     is_locked=False,
     is_fips=False,
 )

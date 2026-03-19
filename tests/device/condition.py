@@ -55,8 +55,10 @@ def has_transport(transport):
 
 def capability(capability, transport=None):
     return check(
-        lambda info, device: capability
-        in info.config.enabled_capabilities.get(transport or device.transport, []),
+        lambda info, device: (
+            capability
+            in info.config.enabled_capabilities.get(transport or device.transport, [])
+        ),
         f"Requires {capability}",
     )
 

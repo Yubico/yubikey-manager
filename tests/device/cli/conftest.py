@@ -3,7 +3,6 @@ from functools import partial
 
 import pytest
 from click.testing import CliRunner
-
 from ykman._cli.__main__ import cli
 from ykman._cli.util import CliFail
 from yubikit.core import TRANSPORT
@@ -21,7 +20,7 @@ def ykman_cli(capsys, device, info):
         if result.exit_code != 0:
             if isinstance(result.exception, CliFail):
                 raise SystemExit()
-            raise result.exception
+            raise result.exception  # ty:ignore[invalid-raise]
         return result
 
     if device.transport == TRANSPORT.NFC:

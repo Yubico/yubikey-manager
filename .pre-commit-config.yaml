@@ -1,6 +1,6 @@
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.14.10
+  rev: v0.15.7
   hooks:
     # Run the linter, organize imports
     - id: ruff-check
@@ -14,7 +14,7 @@ repos:
       exclude: ^(tests/|docs/)  # keep in sync with mypy.ini
       additional_dependencies: []
 - repo: https://github.com/RobertCraigie/pyright-python
-  rev: v1.1.407
+  rev: v1.1.408
   hooks:
     - id: pyright
 - repo: local

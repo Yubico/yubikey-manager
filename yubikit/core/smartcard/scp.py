@@ -153,8 +153,7 @@ class KeyRef(bytes):
                 raise ValueError("kvn can only be provided if kid_or_data is a kid")
             data = kid_or_data
 
-        # mypy thinks this is wrong
-        return super(KeyRef, cls).__new__(cls, data)  # type: ignore
+        return super(KeyRef, cls).__new__(cls, data)
 
     def __init__(self, kid_or_data: int | bytes, kvn: int | None = None):
         if len(self) != 2:
@@ -354,7 +353,7 @@ class ScpState:
         # GPC v2.3 Amendment F (SCP11) v1.3 §3.1.2 Key Derivation
         key_agreement_data = data + epk_sd_ecka_tlv
         sharedinfo = key_usage + key_type + key_len
-        keys = X963KDF(hashes.SHA256(), 5 * key_len[0], sharedinfo).derive(
+        keybytes = X963KDF(hashes.SHA256(), 5 * key_len[0], sharedinfo).derive(
             esk_oce_ecka.exchange(
                 ec.ECDH(),
                 ec.EllipticCurvePublicKey.from_encoded_point(
@@ -366,7 +365,7 @@ class ScpState:
 
         # 5 keys were derived, one for verification of receipt
         ln = key_len[0]
-        keys = [keys[i : i + ln] for i in range(0, ln * 5, ln)]
+        keys = [keybytes[i : i + ln] for i in range(0, ln * 5, ln)]
         c = cmac.CMAC(algorithms.AES(keys.pop(0)))
         c.update(key_agreement_data)
         c.verify(receipt)

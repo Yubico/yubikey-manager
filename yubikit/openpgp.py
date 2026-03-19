@@ -417,8 +417,7 @@ EcPrivateKey: TypeAlias = (
 PrivateKey: TypeAlias = rsa.RSAPrivateKeyWithSerialization | EcPrivateKey
 
 
-# mypy doesn't handle abstract dataclasses well
-@dataclass  # type: ignore[misc]
+@dataclass
 class AlgorithmAttributes(abc.ABC):
     """OpenPGP key algorithm attributes."""
 
@@ -686,8 +685,7 @@ class SecuritySupportTemplate:
         return cls(bytes2int(data[TAG_SIGNATURE_COUNTER]))
 
 
-# mypy doesn't handle abstract dataclasses well
-@dataclass  # type: ignore[misc]
+@dataclass
 class Kdf(abc.ABC):
     algorithm: ClassVar[int]
 
@@ -821,8 +819,7 @@ class KdfIterSaltedS2k(Kdf):
         )
 
 
-# mypy doesn't handle abstract dataclasses well
-@dataclass  # type: ignore[misc]
+@dataclass
 class PrivateKeyTemplate(abc.ABC):
     crt: CRT
 

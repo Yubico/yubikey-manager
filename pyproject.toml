@@ -27,7 +27,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0,<9",
+    "pytest>=8.0,<10",
     "makefun>=1.9.5,<2",
     "pyinstaller>=6.10,<7",
     "sphinx>=7.4,<8",
@@ -70,3 +70,13 @@ venvPath = "."
 venv = ".venv"
 exclude = ["tests/", "docs/"]
 reportPrivateImportUsage = false
+
+[tool.ty.src]
+exclude = ["docs"]
+
+[[tool.ty.overrides]]
+include = ["tests/**", "**/test_*.py"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+invalid-argument-type = "ignore"

@@ -3,7 +3,6 @@
 import re
 
 import pytest
-
 from ykman import __version__ as version
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
 from ykman.util import (
@@ -208,4 +207,4 @@ def test_form_factor_from_code(code, expected):
 
 def test_form_factor_from_code_rejects_invalid_type():
     with pytest.raises(ValueError):
-        FORM_FACTOR.from_code("im a string")  # type: ignore[arg-type]
+        FORM_FACTOR.from_code("im a string")

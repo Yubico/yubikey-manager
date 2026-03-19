@@ -175,9 +175,10 @@ def _parse_management_key(key_type, management_key):
         # TripleDES moved to decrepit in cryptography 43
         try:
             from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
+
+            return TripleDES(management_key)
         except ImportError:
-            TripleDES = algorithms.TripleDES
-        return TripleDES(management_key)
+            return algorithms.TripleDES(management_key)
     else:
         return algorithms.AES(management_key)
 
@@ -1341,17 +1342,16 @@ class PivSession:
         ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
             assert isinstance(private_key, rsa.RSAPrivateKey)  # noqa: S101
-            numbers = private_key.private_numbers()
-            numbers = numbers
-            if numbers.public_numbers.e != 65537:
+            rsa_numbers = private_key.private_numbers()
+            if rsa_numbers.public_numbers.e != 65537:
                 raise NotSupportedError("RSA exponent must be 65537")
             ln //= 2
             data = (
-                Tlv(0x01, int2bytes(numbers.p, ln))
-                + Tlv(0x02, int2bytes(numbers.q, ln))
-                + Tlv(0x03, int2bytes(numbers.dmp1, ln))
-                + Tlv(0x04, int2bytes(numbers.dmq1, ln))
-                + Tlv(0x05, int2bytes(numbers.iqmp, ln))
+                Tlv(0x01, int2bytes(rsa_numbers.p, ln))
+                + Tlv(0x02, int2bytes(rsa_numbers.q, ln))
+                + Tlv(0x03, int2bytes(rsa_numbers.dmp1, ln))
+                + Tlv(0x04, int2bytes(rsa_numbers.dmq1, ln))
+                + Tlv(0x05, int2bytes(rsa_numbers.iqmp, ln))
             )
         elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
             data = Tlv(
@@ -1362,9 +1362,8 @@ class PivSession:
             )
         else:
             assert isinstance(private_key, ec.EllipticCurvePrivateKey)  # noqa: S101
-            numbers = private_key.private_numbers()
-            numbers = numbers
-            data = Tlv(0x06, int2bytes(numbers.private_value, ln))
+            ec_numbers = private_key.private_numbers()
+            data = Tlv(0x06, int2bytes(ec_numbers.private_value, ln))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
         if touch_policy:
