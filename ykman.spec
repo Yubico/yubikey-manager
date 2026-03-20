@@ -67,6 +67,8 @@ for _f in _native_dir.iterdir():
 
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+import sys
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -74,7 +76,7 @@ exe = EXE(
     exclude_binaries=True,
     name="ykman",
     icon="NONE",
-    target_arch="universal2",
+    target_arch="universal2" if sys.platform == "darwin" else None,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

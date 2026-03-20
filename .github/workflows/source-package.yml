@@ -24,7 +24,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev
+          sudo apt-get install -qq swig libpcsclite-dev libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install the project
         run: uv sync --locked
@@ -72,7 +75,10 @@ jobs:
       - name: Install python dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev
+          sudo apt-get install -qq swig libpcsclite-dev libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install the project
         run: uv sync --locked

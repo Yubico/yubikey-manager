@@ -22,6 +22,9 @@ jobs:
         with:
           python-version-file: ".python-version"
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install the project
         run: uv sync --locked
 
