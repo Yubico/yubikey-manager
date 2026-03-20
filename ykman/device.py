@@ -32,8 +32,6 @@ from collections import Counter
 from time import sleep, time
 from typing import Callable, Hashable, Iterable, Mapping, TypeAlias
 
-from smartcard.pcsc.PCSCExceptions import EstablishContextException
-
 from yubikit.core import PID, TRANSPORT, YUBIKEY, Connection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
@@ -76,7 +74,7 @@ def _warn_once(message, e_type=Exception):
 
 @_warn_once(
     "PC/SC not available. Smart card (CCID) protocols will not function.",
-    EstablishContextException,
+    OSError,
 )
 def list_ccid_devices():
     """List CCID devices."""

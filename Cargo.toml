@@ -1,0 +1,18 @@
+[package]
+name = "ykman-native"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "_ykman_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pcsc = "2"
+pyo3 = { version = "0.25", features = ["extension-module"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+hidapi = { version = "2", default-features = false, features = ["linux-static-hidraw"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+hidapi = { version = "2" }

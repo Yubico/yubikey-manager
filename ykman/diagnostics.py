@@ -125,17 +125,16 @@ def hsmauth_info(conn):
 def ccid_info():
     try:
         readers = {}
-        for reader in list_readers():
+        for reader_name in list_readers():
             try:
-                c = reader.createConnection()
-                c.connect()
-                c.disconnect()
-                if hasattr(c, "release"):
-                    c.release()
+                from _ykman_native.pcsc import PcscConnection
+
+                conn = PcscConnection(reader_name, exclusive=False)
+                conn.disconnect()
                 result = "Success"
             except Exception as e:
                 result = f"<{e.__class__.__name__}>"
-            readers[reader.name] = result
+            readers[reader_name] = result
 
         yubikeys: dict[str, Any] = {}
         for dev in list_ccid_devices():

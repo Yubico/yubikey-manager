@@ -18,6 +18,9 @@ ykman.pkg
 lib/
 **/_build
 
+# Rust
+/target/
+
 # Libraries unpacked by Windows VM
 /libjson-c*.dll
 /libusb-*.dll

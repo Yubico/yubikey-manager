@@ -26,11 +26,14 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
-import sys
 from threading import Event
 from typing import Callable
 
+from _ykman_native.hid import HidConnection
+from _ykman_native.hid import list_otp_devices as _native_list_otp
+
 from yubikit.core.otp import OtpConnection
+from yubikit.logging import LOG_LEVEL
 from yubikit.support import read_info
 
 from ..base import REINSERT_STATUS, CancelledException
@@ -44,21 +47,33 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-if sys.platform == "linux":
-    from .linux import list_devices
-elif sys.platform == "win32":
-    from .windows import list_devices
-elif sys.platform == "darwin":
-    from .macos import list_devices
-elif sys.platform == "freebsd":
-    from .freebsd import list_devices
-else:
+class NativeOtpConnection(OtpConnection):
+    """OTP connection backed by the Rust HID implementation."""
 
-    def list_devices() -> list:
-        raise NotImplementedError("OTP HID support is not implemented on this platform")
+    def __init__(self, path):
+        self._conn = HidConnection(path)
+
+    def close(self):
+        self._conn.close()
+
+    def receive(self):
+        data = bytes(self._conn.get_feature_report())
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
+        return data
+
+    def send(self, data):
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
+        self._conn.set_feature_report(data)
 
 
-list_otp_devices: Callable[[], list[OtpYubiKeyDevice]] = list_devices
+def _list_devices() -> list[OtpYubiKeyDevice]:
+    devices = []
+    for info in _native_list_otp():
+        devices.append(OtpYubiKeyDevice(info.path, info.pid, NativeOtpConnection))
+    return devices
+
+
+list_otp_devices: Callable[[], list[OtpYubiKeyDevice]] = _list_devices
 
 
 def _otp_reinsert(

@@ -29,8 +29,6 @@
 from time import sleep
 from typing import Generator
 
-from smartcard.Exceptions import CardConnectionException, NoCardException
-
 from yubikit.core import TRANSPORT
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
@@ -194,7 +192,7 @@ def single_nfc(reader="", *, prompt=True) -> ScriptingDevice:
             with device.open_connection(SmartCardConnection) as connection:
                 info = read_info(connection)
             return ScriptingDevice(device, info)
-        except NoCardException:
+        except OSError:
             if prompt:
                 print("Place YubiKey on NFC reader...")
                 prompt = False
@@ -220,7 +218,7 @@ def multi_nfc(
         with device.open_connection(SmartCardConnection) as connection:
             if not allow_initial:
                 raise ValueError("YubiKey must not be present initially.")
-    except NoCardException:
+    except OSError:
         if prompt:
             print("Place YubiKey on NFC reader...")
             prompted = True
@@ -242,15 +240,13 @@ def multi_nfc(
                     handled_serials.add(current)
                 yield ScriptingDevice(device, info)
                 prompted = False
-        except NoCardException:
+        except OSError:
             if None in handled_serials:
                 handled_serials.remove(None)  # Allow one key without serial at a time
             current = -1
             if prompt and not prompted:
                 print("Place YubiKey on NFC reader...")
                 prompted = True
-        except CardConnectionException:
-            pass
         try:
             sleep(1.0)  # No change, sleep for 1 second.
         except KeyboardInterrupt:

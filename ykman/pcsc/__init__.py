@@ -31,10 +31,8 @@ import subprocess  # nosec
 import sys
 from time import sleep
 
-from smartcard import System
-from smartcard.Exceptions import CardConnectionException, NoCardException
-from smartcard.ExclusiveConnectCardConnection import ExclusiveConnectCardConnection
-from smartcard.pcsc.PCSCExceptions import ListReadersException
+from _ykman_native.pcsc import PcscConnection
+from _ykman_native.pcsc import list_readers as _native_list_readers
 
 from yubikit.core import PID, TRANSPORT, YUBIKEY
 from yubikit.core.fido import SmartCardCtapDevice
@@ -69,17 +67,11 @@ def _pid_from_name(name):
     return PID.of(key_type, interfaces)
 
 
-def _release(connection):
-    if hasattr(connection, "release"):
-        connection.release()
-
-
 class ScardSmartCardConnection(SmartCardConnection):
-    def __init__(self, connection):
-        connection.connect()
-        self.connection = connection
+    def __init__(self, reader_name, exclusive=True):
+        self.connection = PcscConnection(reader_name, exclusive)
 
-        atr = self.connection.getATR()
+        atr = self.connection.get_atr()
         self._transport = (
             TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
         )
@@ -90,29 +82,28 @@ class ScardSmartCardConnection(SmartCardConnection):
 
     def close(self):
         self.connection.disconnect()
-        _release(self.connection)
 
     def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
         logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", apdu.hex())
-        data, sw1, sw2 = self.connection.transmit(list(apdu))
-        logger.log(
-            LOG_LEVEL.TRAFFIC, "RECV: %s SW=%02x%02x", bytes(data).hex(), sw1, sw2
-        )
-        return bytes(data), sw1 << 8 | sw2
+        resp = self.connection.transmit(apdu)
+        data = resp[:-2]
+        sw = resp[-2] << 8 | resp[-1]
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s SW=%04x", data.hex(), sw)
+        return bytes(data), sw
 
 
 class ScardYubiKeyDevice(YkmanDevice):
     """YubiKey Smart card device"""
 
-    def __init__(self, reader):
+    def __init__(self, reader_name):
         # Base transport on reader name: NFC readers will have a different name
-        if YK_READER_NAME in reader.name.lower():
+        if YK_READER_NAME in reader_name.lower():
             transport = TRANSPORT.USB
         else:
             transport = TRANSPORT.NFC
-        super().__init__(transport, reader.name, _pid_from_name(reader.name))
-        self.reader = reader
+        super().__init__(transport, reader_name, _pid_from_name(reader_name))
+        self.reader_name = reader_name
 
     def supports_connection(self, connection_type):
         if issubclass(SmartCardCtapDevice, connection_type):
@@ -128,37 +119,24 @@ class ScardYubiKeyDevice(YkmanDevice):
         return super().open_connection(connection_type)
 
     def _open_smartcard_connection(self, retry=True) -> SmartCardConnection:
-        connection = self.reader.createConnection()
         try:
             # Try an exclusive connection, unless disabled
             if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
-                excl_connection = ExclusiveConnectCardConnection(connection)
                 try:
-                    scard_conn = ScardSmartCardConnection(excl_connection)
+                    scard_conn = ScardSmartCardConnection(
+                        self.reader_name, exclusive=True
+                    )
                     logger.debug("Using exclusive CCID connection")
                     return scard_conn
-                except CardConnectionException:
+                except OSError:
                     logger.info("Failed to get exclusive CCID access")
 
             # Try a shared connection
-            return ScardSmartCardConnection(connection)
-        except CardConnectionException:
-            _release(connection)
+            return ScardSmartCardConnection(self.reader_name, exclusive=False)
+        except OSError:
             # Neither connection worked, maybe we need to kill stuff
             if retry and (kill_scdaemon() or kill_yubikey_agent()):
                 return self._open_smartcard_connection(False)
-            raise
-        except (NoCardException, ValueError):
-            _release(connection)
-            # Handle reclaim timeout
-            # TODO: Maybe only on NEO?
-            if retry and self.transport == TRANSPORT.USB:
-                for _ in range(6):
-                    try:
-                        sleep(0.5)
-                        return self._open_smartcard_connection(False)
-                    except (NoCardException, ValueError):
-                        continue
             raise
 
     def _do_reinsert(self, reinsert_cb, event):
@@ -181,9 +159,7 @@ class ScardYubiKeyDevice(YkmanDevice):
                         sleep(1.0)  # Wait for the device to settle
                         return
                     conn.close()
-                except CardConnectionException:
-                    pass  # Expected, ignore
-                except NoCardException:
+                except OSError:
                     if not removed:
                         reinsert_cb(REINSERT_STATUS.REINSERT)
                         removed = True
@@ -193,14 +169,13 @@ class ScardYubiKeyDevice(YkmanDevice):
             while not event.wait(0.5):
                 if not removed:
                     # Wait for the reader to be removed
-                    if self.reader not in list_readers():
+                    if self.reader_name not in list_readers():
                         reinsert_cb(REINSERT_STATUS.REINSERT)
                         removed = True
                 else:
                     # Wait for the reader to be reinserted
-                    for reader in list_readers():
-                        if reader.name == self.reader.name:
-                            self.reader = reader
+                    for reader_name in list_readers():
+                        if reader_name == self.reader_name:
                             with self.open_connection(SmartCardConnection) as conn:
                                 info2 = read_info(conn, self.pid)
                             if (
@@ -260,25 +235,15 @@ def kill_yubikey_agent():
 
 def list_readers():
     try:
-        return System.readers()
-    except ListReadersException as e:
-        # If the PCSC system has restarted the context might be stale, try
-        # forcing a new context (This happens on Windows if the last reader is
-        # removed):
-        try:
-            from smartcard.pcsc.PCSCContext import PCSCContext  # type: ignore
-
-            PCSCContext.instance = None
-            return System.readers()
-        except ImportError:
-            # As of pyscard 2.2.2 the PCSCContext singleton has been removed
-            raise e
+        return _native_list_readers()
+    except OSError:
+        return []
 
 
 def list_devices(name_filter=None):
     name_filter = YK_READER_NAME if name_filter is None else name_filter
     devices = []
-    for reader in list_readers():
-        if name_filter.lower() in reader.name.lower():
-            devices.append(ScardYubiKeyDevice(reader))
+    for reader_name in list_readers():
+        if name_filter.lower() in reader_name.lower():
+            devices.append(ScardYubiKeyDevice(reader_name))
     return devices
