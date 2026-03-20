@@ -69,6 +69,23 @@ fn list_otp_devices() -> PyResult<Vec<HidDeviceInfo>> {
     Ok(devices)
 }
 
+/// List all Yubico HID devices regardless of usage page.
+/// Returns (path, pid) for each device. Used for device scanning without opening.
+#[pyfunction]
+fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
+    let api = HidApi::new().map_err(hid_err)?;
+    let mut devices = Vec::new();
+    for dev in api.device_list() {
+        if dev.vendor_id() == YUBICO_VID {
+            devices.push(HidDeviceInfo {
+                path: dev.path().to_string_lossy().into_owned(),
+                pid: dev.product_id(),
+            });
+        }
+    }
+    Ok(devices)
+}
+
 /// An open connection to an OTP HID device for feature report I/O.
 #[pyclass(unsendable)]
 struct HidConnection {
@@ -138,6 +155,7 @@ impl HidConnection {
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "hid")?;
     sub.add_function(wrap_pyfunction!(list_otp_devices, &sub)?)?;
+    sub.add_function(wrap_pyfunction!(list_all_hid_devices, &sub)?)?;
     sub.add_class::<HidDeviceInfo>()?;
     sub.add_class::<HidConnection>()?;
     m.add_submodule(&sub)?;

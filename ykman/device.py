@@ -120,16 +120,17 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
         merged.update(Counter(d.pid for d in devs if d.pid is not None))
         fingerprints.update({d.fingerprint for d in devs})
     if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
-        from .hid.windows import list_paths
+        from _ykman_native.hid import list_all_hid_devices
 
         counter: Counter[PID] = Counter()
-        for pid, path in list_paths():
-            if pid not in merged:
+        for dev in list_all_hid_devices():
+            pid_int = dev.pid
+            if pid_int not in merged:
                 try:
-                    counter[PID(pid)] += 1
-                    fingerprints.add(path)
+                    counter[PID(pid_int)] += 1
+                    fingerprints.add(dev.path)
                 except ValueError:  # Unsupported PID
-                    logger.debug(f"Unsupported Yubico device with PID: {pid:02x}")
+                    logger.debug(f"Unsupported Yubico device with PID: {pid_int:02x}")
         merged.update(counter)
     return merged, hash(tuple(fingerprints))
 

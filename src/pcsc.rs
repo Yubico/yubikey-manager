@@ -100,8 +100,38 @@ impl PcscConnection {
     /// Disconnect from the card.
     fn disconnect(&mut self) -> PyResult<()> {
         if let Some(card) = self.card.take() {
-            card.disconnect(pcsc::Disposition::LeaveCard)
+            card.disconnect(pcsc::Disposition::ResetCard)
                 .map_err(|(_, e)| pcsc_err(e))?;
+        }
+        Ok(())
+    }
+
+    /// Connect (or reconnect) to the card.
+    #[pyo3(signature = (exclusive=false))]
+    fn connect(&mut self, exclusive: bool) -> PyResult<()> {
+        if let Some(card) = self.card.as_mut() {
+            // Already connected, reconnect
+            let share_mode = if exclusive {
+                ShareMode::Exclusive
+            } else {
+                ShareMode::Shared
+            };
+            card.reconnect(share_mode, Protocols::ANY, pcsc::Disposition::ResetCard)
+                .map_err(pcsc_err)?;
+        } else {
+            // Disconnected, establish new connection
+            let ctx = Context::establish(Scope::User).map_err(pcsc_err)?;
+            let reader = std::ffi::CString::new(self.reader_name.as_str())
+                .map_err(|_| PyValueError::new_err("Invalid reader name"))?;
+            let share_mode = if exclusive {
+                ShareMode::Exclusive
+            } else {
+                ShareMode::Shared
+            };
+            let card = ctx
+                .connect(&reader, share_mode, Protocols::ANY)
+                .map_err(pcsc_err)?;
+            self.card = Some(card);
         }
         Ok(())
     }
