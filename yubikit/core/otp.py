@@ -32,6 +32,13 @@ from threading import Event
 from time import sleep
 from typing import Callable
 
+from _ykman_native.core import (  # noqa: F401
+    calculate_crc,
+    check_crc,
+    modhex_decode,
+    modhex_encode,
+)
+
 from yubikit.logging import LOG_LEVEL
 
 from . import USB_INTERFACE, CommandError, Connection, TimeoutError, Version
@@ -59,38 +66,6 @@ class OtpConnection(Connection, metaclass=abc.ABCMeta):
 
 
 CRC_OK_RESIDUAL = 0xF0B8
-
-
-def calculate_crc(data: bytes) -> int:
-    crc = 0xFFFF
-    for index in range(len(data)):
-        crc ^= data[index]
-        for i in range(8):
-            j = crc & 1
-            crc >>= 1
-            if j == 1:
-                crc ^= 0x8408
-    return crc & 0xFFFF
-
-
-def check_crc(data: bytes) -> bool:
-    return calculate_crc(data) == CRC_OK_RESIDUAL
-
-
-def modhex_encode(data: bytes) -> str:
-    """Encode a bytes-like object using Modhex (modified hexadecimal) encoding."""
-    return "".join(MODHEX_ALPHABET[b >> 4] + MODHEX_ALPHABET[b & 0xF] for b in data)
-
-
-def modhex_decode(string: str) -> bytes:
-    """Decode the Modhex (modified hexadecimal) string."""
-    if len(string) % 2:
-        raise ValueError("Length must be a multiple of 2")
-
-    return bytes(
-        MODHEX_ALPHABET.index(string[i]) << 4 | MODHEX_ALPHABET.index(string[i + 1])
-        for i in range(0, len(string), 2)
-    )
 
 
 FEATURE_RPT_SIZE = 8

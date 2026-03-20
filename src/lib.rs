@@ -25,6 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+mod core;
 mod hid;
 mod pcsc;
 
@@ -34,5 +35,6 @@ use pyo3::prelude::*;
 fn _ykman_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     pcsc::register(m)?;
     hid::register(m)?;
+    core::register(m)?;
     Ok(())
 }

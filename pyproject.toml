@@ -67,6 +67,7 @@ venv = ".venv"
 exclude = ["tests/", "docs/"]
 reportPrivateImportUsage = false
 reportMissingImports = "warning"
+reportAttributeAccessIssue = "warning"
 
 [tool.ty.src]
 exclude = ["docs"]
