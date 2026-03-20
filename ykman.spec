@@ -56,6 +56,16 @@ block_cipher = None
 
 a = Entrypoint("yubikey-manager", "console_scripts", "ykman")
 
+# Collect the Rust native extension module
+import _ykman_native
+import pathlib
+
+_native_dir = pathlib.Path(_ykman_native.__file__).parent
+for _f in _native_dir.iterdir():
+    if _f.suffix in (".so", ".pyd", ".py"):
+        a.datas.append((f"_ykman_native/{_f.name}", str(_f), "DATA"))
+
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
