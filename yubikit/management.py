@@ -637,6 +637,17 @@ def _device_info_from_native(d: dict) -> DeviceInfo:
     fps_version = Version(*d["fps_version"]) if d.get("fps_version") else None
     stm_version = Version(*d["stm_version"]) if d.get("stm_version") else None
 
+    vq_data = d.get("version_qualifier")
+    if vq_data and isinstance(vq_data, dict):
+        vq_version = Version(*vq_data["version"])
+        vq = VersionQualifier(
+            vq_version,
+            RELEASE_TYPE(vq_data.get("release_type", 2)),
+            vq_data.get("iteration", 0),
+        )
+    else:
+        vq = VersionQualifier(version)
+
     return DeviceInfo(
         config=config,
         serial=d.get("serial"),
@@ -653,7 +664,7 @@ def _device_info_from_native(d: dict) -> DeviceInfo:
         reset_blocked=CAPABILITY(d.get("reset_blocked", 0)),
         fps_version=fps_version,
         stm_version=stm_version,
-        version_qualifier=VersionQualifier(version),
+        version_qualifier=vq,
     )
 
 

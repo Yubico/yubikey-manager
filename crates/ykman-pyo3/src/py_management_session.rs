@@ -48,6 +48,14 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
         dict.set_item("stm_version", (v.0, v.1, v.2))?;
     }
 
+    // Version qualifier
+    let vq = &info.version_qualifier;
+    let vq_dict = pyo3::types::PyDict::new(py);
+    vq_dict.set_item("version", (vq.version.0, vq.version.1, vq.version.2))?;
+    vq_dict.set_item("release_type", vq.release_type as u8)?;
+    vq_dict.set_item("iteration", vq.iteration)?;
+    dict.set_item("version_qualifier", vq_dict)?;
+
     Ok(dict.into())
 }
 
