@@ -27,6 +27,7 @@
 
 mod py_core;
 mod py_hid;
+mod py_oath;
 mod py_pcsc;
 mod py_scp;
 
@@ -38,5 +39,6 @@ fn _ykman_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_hid::register(m)?;
     py_core::register(m)?;
     py_scp::register(m)?;
+    py_oath::register(m)?;
     Ok(())
 }

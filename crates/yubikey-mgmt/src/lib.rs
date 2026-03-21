@@ -26,6 +26,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 pub mod iso7816;
+pub mod oath;
 pub mod otp_codec;
 pub mod scp;
 pub mod tlv;

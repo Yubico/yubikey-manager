@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 import os
-import re
-import struct
-from base64 import b32decode, b64encode
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
@@ -14,14 +9,52 @@ from time import time
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
+from _ykman_native.oath import (  # noqa: F401
+    build_put_data as _build_put_data,
+)
+from _ykman_native.oath import (
+    build_set_key_data as _build_set_key_data,
+)
+from _ykman_native.oath import (
+    build_validate_data as _build_validate_data,
+)
+from _ykman_native.oath import (
+    derive_key as _derive_key_native,
+)
+from _ykman_native.oath import (
+    format_code as _format_code_native,
+)
+from _ykman_native.oath import (
+    format_cred_id as _format_cred_id_native,
+)
+from _ykman_native.oath import (
+    get_challenge as _get_challenge_native,
+)
+from _ykman_native.oath import (
+    get_device_id as _get_device_id_native,
+)
+from _ykman_native.oath import (
+    hmac_sha1 as _hmac_sha1_native,
+)
+from _ykman_native.oath import (
+    hmac_shorten_key as _hmac_shorten_key_native,
+)
+from _ykman_native.oath import (
+    hmac_verify as _hmac_verify,
+)
+from _ykman_native.oath import (
+    parse_b32_key,
+)
+from _ykman_native.oath import (
+    parse_cred_id as _parse_cred_id_native,
+)
+
 from .core import (
     BadResponseError,
     NotSupportedError,
     Tlv,
     Version,
     _override_version,
-    bytes2int,
-    int2bytes,
     require_version,
 )
 from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
@@ -54,7 +87,7 @@ INS_VALIDATE = 0xA3
 INS_CALCULATE_ALL = 0xA4
 INS_SEND_REMAINING = 0xA5
 
-TOTP_ID_PATTERN = re.compile(r"^((\d+)/)?(([^:]+):)?(.+)$")
+TOTP_ID_PATTERN = None  # No longer used, parsing is in Rust
 
 MASK_ALGO = 0x0F
 MASK_TYPE = 0xF0
@@ -80,16 +113,6 @@ class OATH_TYPE(IntEnum):
 
 
 PROP_REQUIRE_TOUCH = 0x02
-
-
-def parse_b32_key(key: str):
-    """Parse Base32 encoded key.
-
-    :param key: The Base32 encoded key.
-    """
-    key = key.upper().replace(" ", "")
-    key += "=" * (-len(key) % 8)  # Support unpadded
-    return b32decode(key)
 
 
 def _parse_select(response):
@@ -146,7 +169,9 @@ class CredentialData:
         )
 
     def get_id(self) -> bytes:
-        return _format_cred_id(self.issuer, self.name, self.oath_type, self.period)
+        return bytes(
+            _format_cred_id(self.issuer, self.name, int(self.oath_type), self.period)
+        )
 
 
 @dataclass
@@ -188,78 +213,38 @@ class Credential:
 
 
 def _format_cred_id(issuer, name, oath_type, period=DEFAULT_PERIOD):
-    cred_id = ""
-    if oath_type == OATH_TYPE.TOTP and period != DEFAULT_PERIOD:
-        cred_id += "%d/" % period
-    if issuer:
-        cred_id += issuer + ":"
-    cred_id += name
-    return cred_id.encode()
+    return bytes(_format_cred_id_native(issuer, name, int(oath_type), period))
 
 
 def _parse_cred_id(cred_id, oath_type):
-    data = cred_id.decode()
-    if oath_type == OATH_TYPE.TOTP:
-        match = TOTP_ID_PATTERN.match(data)
-        if match:
-            period_str = match.group(2)
-            return (
-                match.group(4),
-                match.group(5),
-                int(period_str) if period_str else DEFAULT_PERIOD,
-            )
-        else:
-            return None, data, DEFAULT_PERIOD
-    else:
-        if ":" in data and data[0] != ":":
-            issuer, data = data.split(":", 1)
-        else:
-            issuer = None
-    return issuer, data, 0
+    return _parse_cred_id_native(cred_id, int(oath_type))
 
 
 def _get_device_id(salt):
-    d = hashlib.sha256(salt).digest()[:16]
-    return b64encode(d).replace(b"=", b"").decode()
+    return _get_device_id_native(salt)
 
 
 def _hmac_sha1(key, message):
-    return hmac.new(key, message, "sha1").digest()
+    return bytes(_hmac_sha1_native(key, message))
 
 
 def _derive_key(salt, passphrase):
-    return hashlib.pbkdf2_hmac("sha1", passphrase.encode(), salt, 1000, 16)
+    return bytes(_derive_key_native(salt, passphrase))
 
 
 def _hmac_shorten_key(key, algo):
-    h = hashlib.new(algo.name)
-
-    if len(key) > h.block_size:
-        h.update(key)
-        key = h.digest()
-    return key
+    return bytes(_hmac_shorten_key_native(key, int(algo)))
 
 
 def _get_challenge(timestamp, period):
-    time_step = timestamp // period
-    return struct.pack(">q", time_step)
+    return bytes(_get_challenge_native(timestamp, period))
 
 
 def _format_code(credential, timestamp, truncated):
-    if credential.oath_type == OATH_TYPE.TOTP:
-        time_step = timestamp // credential.period
-        valid_from = time_step * credential.period
-        valid_to = (time_step + 1) * credential.period
-    else:  # HOTP
-        valid_from = timestamp
-        valid_to = 0x7FFFFFFFFFFFFFFF
-    digits = truncated[0]
-
-    return Code(
-        str((bytes2int(truncated[1:]) & 0x7FFFFFFF) % 10**digits).rjust(digits, "0"),
-        valid_from,
-        valid_to,
+    code_str, valid_from, valid_to = _format_code_native(
+        int(credential.oath_type), credential.period, timestamp, bytes(truncated)
     )
+    return Code(code_str, valid_from, valid_to)
 
 
 class OathSession:
@@ -338,12 +323,12 @@ class OathSession:
         :param key: The access key.
         """
         logger.debug("Unlocking session")
-        response = _hmac_sha1(key, self._challenge)
-        challenge = os.urandom(8)
-        data = Tlv(TAG_RESPONSE, response) + Tlv(TAG_CHALLENGE, challenge)
+        data = bytes(_build_validate_data(key, self._challenge, os.urandom(8)))
+        # Extract the host challenge we sent (second TLV in data)
+        _, rest = Tlv.parse_from(data)
+        host_challenge = Tlv(rest).value
         resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
-        verification = _hmac_sha1(key, challenge)
-        if not hmac.compare_digest(Tlv.unpack(TAG_RESPONSE, resp), verification):
+        if not _hmac_verify(key, host_challenge, Tlv.unpack(TAG_RESPONSE, resp)):
             raise BadResponseError(
                 "Response from validation does not match verification!"
             )
@@ -356,18 +341,8 @@ class OathSession:
         :param key: The access key.
         """
         challenge = os.urandom(8)
-        response = _hmac_sha1(key, challenge)
-        self.protocol.send_apdu(
-            0,
-            INS_SET_CODE,
-            0,
-            0,
-            (
-                Tlv(TAG_KEY, int2bytes(OATH_TYPE.TOTP | HASH_ALGORITHM.SHA1) + key)
-                + Tlv(TAG_CHALLENGE, challenge)
-                + Tlv(TAG_RESPONSE, response)
-            ),
-        )
+        data = bytes(_build_set_key_data(key, challenge))
+        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, data)
         logger.info("New access code set")
         self._has_key = True
         if self._neo_unlock_workaround:
@@ -394,18 +369,17 @@ class OathSession:
         """
         d = credential_data
         cred_id = d.get_id()
-        secret = _hmac_shorten_key(d.secret, d.hash_algorithm)
-        secret = secret.ljust(HMAC_MINIMUM_KEY_SIZE, b"\0")
-        data = Tlv(TAG_NAME, cred_id) + Tlv(
-            TAG_KEY,
-            struct.pack(">BB", d.oath_type | d.hash_algorithm, d.digits) + secret,
+        data = bytes(
+            _build_put_data(
+                cred_id,
+                int(d.oath_type),
+                int(d.hash_algorithm),
+                d.digits,
+                d.secret,
+                touch_required,
+                d.counter,
+            )
         )
-
-        if touch_required:
-            data += struct.pack(">BB", TAG_PROPERTY, PROP_REQUIRE_TOUCH)
-
-        if d.counter > 0:
-            data += Tlv(TAG_IMF, struct.pack(">I", d.counter))
 
         logger.debug(
             f"Importing credential (type={d.oath_type!r}, hash={d.hash_algorithm!r}, "
@@ -498,7 +472,7 @@ class OathSession:
         :param timestamp: A timestamp used for the TOTP challenge.
         """
         timestamp = int(timestamp or time())
-        challenge = _get_challenge(timestamp, DEFAULT_PERIOD)
+        challenge = bytes(_get_challenge(timestamp, DEFAULT_PERIOD))
         logger.debug(f"Calculating all codes for time={timestamp}")
 
         entries = {}
@@ -548,7 +522,7 @@ class OathSession:
                 f"Calculating TOTP code for time={timestamp}, "
                 f"period={credential.period}"
             )
-            challenge = _get_challenge(timestamp, credential.period)
+            challenge = bytes(_get_challenge(timestamp, credential.period))
         else:  # HOTP
             logger.debug("Calculating HOTP code")
             challenge = b""
