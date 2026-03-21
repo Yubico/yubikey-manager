@@ -27,6 +27,7 @@
 
 mod py_bridge;
 mod py_core;
+mod py_device;
 mod py_hid;
 mod py_hsmauth_session;
 mod py_management_session;
@@ -48,6 +49,7 @@ fn _ykman_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_core::register(m)?;
     py_scp::register(m)?;
     py_oath::register(m)?;
+    py_device::register(m)?;
     register_sessions(m)?;
     Ok(())
 }

@@ -289,15 +289,59 @@ fn pid_to_version(pid: u16) -> Version {
 /// Read device info from a PC/SC reader.
 ///
 /// Opens a fresh [`PcscConnection`] and uses [`ManagementSession`] to read
-/// [`DeviceInfo`]. This works for YubiKey 4.1+ devices. For older devices a
-/// fallback that scans individual applets would be needed (not yet implemented).
+/// [`DeviceInfo`]. Applies standard fixups for known device quirks.
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     let conn = PcscConnection::new(reader_name, false)?;
     let mut session = ManagementSession::new(conn)?;
     // Use unchecked variant — dev devices report version 0.0.1 but still
     // support the DeviceInfo protocol.
-    let info = session.read_device_info_unchecked()?;
+    let mut info = session.read_device_info_unchecked()?;
+    apply_device_info_fixups(&mut info);
     Ok(info)
+}
+
+/// Apply standard fixups for known device quirks.
+///
+/// This corrects issues with certain YubiKey firmware versions that
+/// report incorrect or incomplete information.
+pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
+    // YK4-based FIPS (4.4.x)
+    if info.version >= Version(4, 4, 0) && info.version < Version(4, 5, 0) {
+        info.is_fips = true;
+    }
+
+    // Fix NFC: set enabled if missing
+    if info.has_transport(Transport::Nfc) {
+        if !info.config.enabled_capabilities.contains_key(&Transport::Nfc) {
+            if let Some(&nfc_sup) = info.supported_capabilities.get(&Transport::Nfc) {
+                info.config
+                    .enabled_capabilities
+                    .insert(Transport::Nfc, nfc_sup);
+            }
+        }
+        // Remove NFC for form factors known to not have NFC
+        let remove_nfc = matches!(
+            info.form_factor,
+            FormFactor::UsbANano | FormFactor::UsbCNano | FormFactor::UsbCLightning
+        ) || (info.form_factor == FormFactor::UsbCKeychain
+            && info.version < Version(5, 2, 4));
+
+        if remove_nfc {
+            info.supported_capabilities.remove(&Transport::Nfc);
+            info.config.enabled_capabilities.remove(&Transport::Nfc);
+        }
+    }
+
+    // Fix USB: set enabled if missing (pre-YubiKey 5)
+    if info.has_transport(Transport::Usb)
+        && !info.config.enabled_capabilities.contains_key(&Transport::Usb)
+    {
+        if let Some(&usb_sup) = info.supported_capabilities.get(&Transport::Usb) {
+            info.config
+                .enabled_capabilities
+                .insert(Transport::Usb, usb_sup);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ use yubikey_mgmt::management::{DeviceInfo, ManagementSession as RustManagementSe
 
 use crate::py_bridge::{PySmartCardConnection, smartcard_err};
 
-fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
+pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
     let dict = pyo3::types::PyDict::new(py);
 
     dict.set_item("serial", info.serial)?;
