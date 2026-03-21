@@ -50,7 +50,6 @@ from .core import (
     require_version,
 )
 from .core.smartcard import (
-    AID,
     SW,
     ApduError,
     ScpKeyParams,
@@ -229,27 +228,14 @@ class HsmAuthSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ) -> None:
-        self._native: _NativeHsmAuthSession | None
-        if scp_key_params is not None:
-            self._native = None
-            self.protocol = SmartCardProtocol(connection)
-            self._version = _override_version.patch(
-                _parse_select(self.protocol.select(AID.HSMAUTH))
-            )
-            self.protocol.configure(self._version)
-            self.protocol.init_scp(scp_key_params)
-        else:
-            native = _NativeHsmAuthSession(connection)
-            self._native = native
-            self._version = _override_version.patch(Version(*native.version))
-            if self._version != Version(*native.version):
-                native.version = tuple(self._version)
-            self.protocol = SmartCardProtocol(connection)
+        native = _NativeHsmAuthSession(connection, scp_key_params)
+        self._native = native
+        self._version = _override_version.patch(Version(*native.version))
+        if self._version != Version(*native.version):
+            native.version = tuple(self._version)
+        self.protocol = SmartCardProtocol(connection)
 
-        logger.debug(
-            f"YubiHSM Auth session initialized (version={self.version}, "
-            f"native={self._native is not None})"
-        )
+        logger.debug(f"YubiHSM Auth session initialized (version={self.version})")
 
     @property
     def version(self) -> Version:

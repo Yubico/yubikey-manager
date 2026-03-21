@@ -737,14 +737,32 @@ impl<C: SmartCardConnection> ManagementSession<C> {
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
         let mut protocol = SmartCardProtocol::new(connection);
         let select_bytes = protocol.select(Aid::MANAGEMENT)?;
+        Self::init(protocol, &select_bytes)
+    }
 
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::MANAGEMENT)` called already
+    /// (with the response passed as `select_response`). SCP may have been
+    /// initialized on the protocol before calling this.
+    pub fn from_protocol(
+        protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, SmartCardError> {
+        Self::init(protocol, select_response)
+    }
+
+    fn init(
+        mut protocol: SmartCardProtocol<C>,
+        select_bytes: &[u8],
+    ) -> Result<Self, SmartCardError> {
         // YubiKey Edge incorrectly appends SW twice
         let select_bytes = if select_bytes.len() >= 2
             && select_bytes[select_bytes.len() - 2..] == [0x90, 0x00]
         {
             &select_bytes[..select_bytes.len() - 2]
         } else {
-            &select_bytes
+            select_bytes
         };
 
         let version_str = std::str::from_utf8(select_bytes)
@@ -761,6 +779,11 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         protocol.configure(version);
 
         Ok(Self { protocol, version })
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
     }
 
     /// The firmware version of the YubiKey.

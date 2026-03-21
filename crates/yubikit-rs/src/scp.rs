@@ -30,6 +30,7 @@ use cbc::Decryptor as CbcDecryptor;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit, KeyIvInit};
 use cmac::{Cmac, Mac};
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
@@ -57,7 +58,7 @@ pub enum ScpError {
 }
 
 /// Compute AES-CMAC over data.
-fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
+pub fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
     let mut mac =
         <Cmac<Aes128> as Mac>::new_from_slice(key).map_err(|e| ScpError::CmacInit(e.to_string()))?;
     mac.update(data);
@@ -231,4 +232,20 @@ impl ScpState {
         }
         Ok(decrypted[..unpadded].to_vec())
     }
+}
+
+/// X9.63 KDF using SHA-256.
+pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(length);
+    let mut counter: u32 = 1;
+    while output.len() < length {
+        let mut hasher = Sha256::new();
+        hasher.update(shared_secret);
+        hasher.update(counter.to_be_bytes());
+        hasher.update(shared_info);
+        output.extend_from_slice(&hasher.finalize());
+        counter += 1;
+    }
+    output.truncate(length);
+    output
 }

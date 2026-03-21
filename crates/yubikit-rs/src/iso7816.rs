@@ -30,7 +30,7 @@ use std::time::Instant;
 
 use thiserror::Error;
 
-use crate::scp::ScpState;
+use crate::scp::{aes_cmac, constant_time_eq, scp03_derive, x963_kdf, ScpState};
 
 // Re-export types that were moved to core_types for backwards compatibility.
 pub use crate::core_types::{Transport, Version};
@@ -549,7 +549,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let scp = self.scp_state.as_mut().unwrap();
         let cla = cla | 0x04;
 
-        let enc_data = if encrypt && !data.is_empty() {
+        let enc_data = if encrypt {
             scp.encrypt(data)?
         } else {
             data.to_vec()
@@ -619,5 +619,266 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         data: &[u8],
     ) -> Result<(Vec<u8>, u16), SmartCardError> {
         self.send_apdu_scp(cla, ins, p1, p2, data, false)
+    }
+
+    // -------------------------------------------------------------------
+    // SCP03 initialization
+    // -------------------------------------------------------------------
+
+    /// Perform the SCP03 handshake and establish a secure channel.
+    pub fn init_scp03(
+        &mut self,
+        kvn: u8,
+        key_enc: &[u8],
+        key_mac: &[u8],
+        _key_dek: Option<&[u8]>,
+    ) -> Result<(), SmartCardError> {
+        // 1. Generate host challenge
+        let mut host_challenge = [0u8; 8];
+        getrandom::fill(&mut host_challenge)
+            .map_err(|e| SmartCardError::BadResponse(format!("RNG error: {e}")))?;
+
+        // 2. INITIALIZE UPDATE
+        let resp = self.send_apdu(0x80, 0x50, kvn, 0x00, &host_challenge)?;
+        if resp.len() < 29 {
+            return Err(SmartCardError::BadResponse(format!(
+                "INITIALIZE UPDATE response too short: {} bytes",
+                resp.len()
+            )));
+        }
+
+        // 3. Parse response
+        let card_challenge = &resp[13..21];
+        let card_cryptogram = &resp[21..29];
+
+        // 4. Derive session keys
+        let mut context = Vec::with_capacity(16);
+        context.extend_from_slice(&host_challenge);
+        context.extend_from_slice(card_challenge);
+
+        let key_senc = scp03_derive(key_enc, 0x04, &context, 0x80)?;
+        let key_smac = scp03_derive(key_mac, 0x06, &context, 0x80)?;
+        let key_srmac = scp03_derive(key_mac, 0x07, &context, 0x80)?;
+
+        // 5. Verify card cryptogram
+        let gen_card_crypto = scp03_derive(&key_smac, 0x00, &context, 0x40)?;
+        if !constant_time_eq(&gen_card_crypto, card_cryptogram) {
+            return Err(SmartCardError::BadResponse(
+                "Card cryptogram verification failed".into(),
+            ));
+        }
+
+        // 6. Compute host cryptogram
+        let host_cryptogram = scp03_derive(&key_smac, 0x01, &context, 0x40)?;
+
+        // 7. Set SCP state
+        let state = ScpState::new(key_senc, key_smac, key_srmac, None, None);
+        self.set_scp_state(state);
+
+        // 8. EXTERNAL AUTHENTICATE (MAC but no encryption)
+        self.send_apdu_scp_no_encrypt(0x84, 0x82, 0x33, 0x00, &host_cryptogram)?;
+
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------
+    // SCP11 initialization
+    // -------------------------------------------------------------------
+
+    /// Perform the SCP11 key agreement and establish a secure channel.
+    ///
+    /// - `kid`: SCP key ID (`0x11` for 11a, `0x13` for 11b, `0x15` for 11c)
+    /// - `kvn`: key version number
+    /// - `pk_sd_ecka`: card's static public key (uncompressed SEC1 point)
+    /// - `sk_oce_ecka`: OCE private key (raw 32-byte scalar, for 11a/c)
+    /// - `certificates`: DER-encoded certificate chain, leaf-last (for 11a/c)
+    /// - `oce_ref`: `(kid, kvn)` for the OCE key reference (for 11a/c)
+    pub fn init_scp11(
+        &mut self,
+        kid: u8,
+        kvn: u8,
+        pk_sd_ecka: &[u8],
+        sk_oce_ecka: Option<&[u8]>,
+        certificates: &[&[u8]],
+        oce_ref: Option<(u8, u8)>,
+    ) -> Result<(), SmartCardError> {
+        use crate::tlv::tlv_encode;
+        use elliptic_curve::sec1::FromEncodedPoint;
+        use p256::{
+            elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
+            EncodedPoint, PublicKey, SecretKey,
+        };
+
+        // SCP11 params byte
+        let params = match kid {
+            0x11 => 0x01u8, // SCP11a
+            0x13 => 0x00u8, // SCP11b
+            0x15 => 0x03u8, // SCP11c
+            _ => {
+                return Err(SmartCardError::BadResponse(format!(
+                    "Unknown SCP11 KID: 0x{kid:02X}"
+                )));
+            }
+        };
+        let is_scp11b = kid == 0x13;
+
+        // 2. Upload certificate chain for SCP11a/c
+        if !is_scp11b {
+            let (oce_kid, oce_kvn) = oce_ref.ok_or_else(|| {
+                SmartCardError::BadResponse("OCE key reference required for SCP11a/c".into())
+            })?;
+            let n = certificates.len();
+            for (i, cert) in certificates.iter().enumerate() {
+                let p2 = if i < n - 1 {
+                    oce_kid | 0x80
+                } else {
+                    oce_kid
+                };
+                self.send_apdu(0x80, 0x2A, oce_kvn, p2, cert)?;
+            }
+        }
+
+        // Generate host ephemeral P-256 key pair.
+        // Use SecretKey so the scalar remains available for a second ECDH in SCP11b.
+        let eph_sk = SecretKey::random(&mut OsRng);
+        let eph_pk = eph_sk.public_key();
+        let epk_bytes = eph_pk.to_encoded_point(false);
+
+        // Build key agreement TLV data
+        let key_usage: u8 = 0x3C;
+        let key_type: u8 = 0x88;
+        let key_len: u8 = 0x10;
+
+        let inner_a6 = {
+            let mut v = Vec::new();
+            v.extend_from_slice(&tlv_encode(0x90, &[0x11, params]));
+            v.extend_from_slice(&tlv_encode(0x95, &[key_usage]));
+            v.extend_from_slice(&tlv_encode(0x80, &[key_type]));
+            v.extend_from_slice(&tlv_encode(0x81, &[key_len]));
+            v
+        };
+        let a6 = tlv_encode(0xA6, &inner_a6);
+        let tag_5f49 = tlv_encode(0x5F49, epk_bytes.as_bytes());
+
+        let mut key_agreement_data = Vec::new();
+        key_agreement_data.extend_from_slice(&a6);
+        key_agreement_data.extend_from_slice(&tag_5f49);
+
+        // Send key agreement
+        let ins = if is_scp11b { 0x88 } else { 0x82 };
+        let resp = self.send_apdu(0x80, ins, kvn, kid, &key_agreement_data)?;
+
+        // Parse response TLVs
+        let mut epk_sd_ecka_bytes: Option<&[u8]> = None;
+        let mut epk_sd_ecka_tlv_range: Option<(usize, usize)> = None;
+        let mut receipt_bytes: Option<&[u8]> = None;
+        {
+            let mut offset = 0;
+            while offset < resp.len() {
+                let (tag, val_off, val_len, end) =
+                    crate::tlv::tlv_parse(&resp, offset).map_err(|e| {
+                        SmartCardError::BadResponse(format!("TLV parse error: {e}"))
+                    })?;
+                match tag {
+                    0x5F49 => {
+                        epk_sd_ecka_bytes = Some(&resp[val_off..val_off + val_len]);
+                        epk_sd_ecka_tlv_range = Some((offset, end));
+                    }
+                    0x86 => receipt_bytes = Some(&resp[val_off..val_off + val_len]),
+                    _ => {}
+                }
+                offset = end;
+            }
+        }
+        let epk_sd_ecka_bytes = epk_sd_ecka_bytes.ok_or_else(|| {
+            SmartCardError::BadResponse("Missing ephemeral public key (5F49) in response".into())
+        })?;
+        let (tlv_start, tlv_end) = epk_sd_ecka_tlv_range.unwrap();
+        let receipt = receipt_bytes
+            .ok_or_else(|| {
+                SmartCardError::BadResponse("Missing receipt (86) in response".into())
+            })?
+            .to_vec();
+
+        // key_agreement_data = request data + card's ephemeral public key TLV
+        key_agreement_data.extend_from_slice(&resp[tlv_start..tlv_end]);
+
+        // Perform ECDH
+        let card_eph_point = EncodedPoint::from_bytes(epk_sd_ecka_bytes).map_err(|e| {
+            SmartCardError::BadResponse(format!("Invalid card ephemeral key: {e}"))
+        })?;
+        let card_eph_pk = Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_eph_point))
+            .ok_or_else(|| {
+                SmartCardError::BadResponse("Card ephemeral key not on curve".into())
+            })?;
+
+        let card_static_point = EncodedPoint::from_bytes(pk_sd_ecka).map_err(|e| {
+            SmartCardError::BadResponse(format!("Invalid card static key: {e}"))
+        })?;
+        let card_static_pk =
+            Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_static_point))
+                .ok_or_else(|| {
+                    SmartCardError::BadResponse("Card static key not on curve".into())
+                })?;
+
+        // shared1 = ECDH(eph_sk, card_eph_pk)
+        let shared1 = p256::ecdh::diffie_hellman(
+            eph_sk.to_nonzero_scalar(),
+            card_eph_pk.as_affine(),
+        );
+
+        // shared2: for SCP11b reuse eph_sk, for 11a/c use the static OCE key
+        let shared2 = if is_scp11b {
+            p256::ecdh::diffie_hellman(
+                eph_sk.to_nonzero_scalar(),
+                card_static_pk.as_affine(),
+            )
+        } else {
+            let oce_scalar = sk_oce_ecka.ok_or_else(|| {
+                SmartCardError::BadResponse("OCE private key required for SCP11a/c".into())
+            })?;
+            let oce_sk = SecretKey::from_slice(oce_scalar).map_err(|e| {
+                SmartCardError::BadResponse(format!("Invalid OCE private key: {e}"))
+            })?;
+            p256::ecdh::diffie_hellman(
+                oce_sk.to_nonzero_scalar(),
+                card_static_pk.as_affine(),
+            )
+        };
+
+        // Concatenate shared secrets
+        let mut shared_secret = Vec::with_capacity(64);
+        shared_secret.extend_from_slice(shared1.raw_secret_bytes().as_slice());
+        shared_secret.extend_from_slice(shared2.raw_secret_bytes().as_slice());
+
+        // X9.63 KDF: derive 80 bytes (5 × 16-byte keys)
+        let shared_info = [key_usage, key_type, key_len];
+        let keybytes = x963_kdf(&shared_secret, &shared_info, 80);
+
+        // Verify receipt: CMAC(keys[0], key_agreement_data) == receipt
+        let receipt_key = &keybytes[0..16];
+        let expected_receipt = aes_cmac(receipt_key, &key_agreement_data)?;
+        if !constant_time_eq(&expected_receipt[..receipt.len()], &receipt) {
+            return Err(SmartCardError::BadResponse(
+                "SCP11 receipt verification failed".into(),
+            ));
+        }
+
+        // Session keys
+        let key_senc = keybytes[16..32].to_vec();
+        let key_smac = keybytes[32..48].to_vec();
+        let key_srmac = keybytes[48..64].to_vec();
+
+        // For SCP11 the MAC chain starts with the receipt
+        let state = ScpState::new(
+            key_senc,
+            key_smac,
+            key_srmac,
+            Some(receipt),
+            Some(1),
+        );
+        self.set_scp_state(state);
+
+        Ok(())
     }
 }

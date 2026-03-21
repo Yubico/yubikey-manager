@@ -36,7 +36,7 @@ import zlib
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from typing import TYPE_CHECKING, Any, TypeAlias, overload
+from typing import TYPE_CHECKING, TypeAlias, overload
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -65,7 +65,6 @@ from .core import (
     require_version,
 )
 from .core.smartcard import (
-    AID,
     SW,
     ApduError,
     ScpKeyParams,
@@ -707,44 +706,22 @@ class PivSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        self._native: Any
-        if scp_key_params is not None:
-            self._native = None
-            self.protocol = SmartCardProtocol(connection)
-            self.protocol.select(AID.PIV)
-            self.protocol.init_scp(scp_key_params)
-
-            logger.debug("Getting PIV version")
-            self._version = _override_version.patch(
-                Version.from_bytes(self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0))
-            )
-            self.protocol.configure(self.version)
-
-            try:
-                self._management_key_type = self.get_management_key_metadata().key_type
-            except NotSupportedError:
-                self._management_key_type = MANAGEMENT_KEY_TYPE.TDES
-            self._current_pin_retries = 3
-            self._max_pin_retries = 3
-        else:
-            if _NativePivSession is None:
-                raise RuntimeError("Native PIV session not available")
-            native = _NativePivSession(connection)
-            self._native = native
-            self._version = _override_version.patch(Version(*native.version))
-            if self._version != Version(*native.version):
-                native.version = tuple(self._version)
-            # Re-query management key type now that version may be patched
-            try:
-                key_type, _, _ = native.get_management_key_metadata()
-                self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
-            except Exception:
-                self._management_key_type = MANAGEMENT_KEY_TYPE(
-                    native.management_key_type
-                )
-            self._current_pin_retries = 3
-            self._max_pin_retries = 3
-            self.protocol = SmartCardProtocol(connection)
+        if _NativePivSession is None:
+            raise RuntimeError("Native PIV session not available")
+        native = _NativePivSession(connection, scp_key_params)
+        self._native = native
+        self._version = _override_version.patch(Version(*native.version))
+        if self._version != Version(*native.version):
+            native.version = tuple(self._version)
+        # Re-query management key type now that version may be patched
+        try:
+            key_type, _, _ = native.get_management_key_metadata()
+            self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
+        except Exception:
+            self._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)
+        self._current_pin_retries = 3
+        self._max_pin_retries = 3
+        self.protocol = SmartCardProtocol(connection)
 
         logger.debug(f"PIV session initialized (version={self.version})")
 

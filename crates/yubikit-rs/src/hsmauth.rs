@@ -257,9 +257,27 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     pub fn new(connection: C) -> Result<Self, HsmAuthError> {
         let mut protocol = SmartCardProtocol::new(connection);
         let select_response = protocol.select(Aid::HSMAUTH)?;
+        Self::init(protocol, &select_response)
+    }
 
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::HSMAUTH)` called already (with
+    /// the response passed as `select_response`). SCP may have been initialized
+    /// on the protocol before calling this.
+    pub fn from_protocol(
+        protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, HsmAuthError> {
+        Self::init(protocol, select_response)
+    }
+
+    fn init(
+        mut protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, HsmAuthError> {
         // Parse version from TAG_VERSION in select response
-        let entries = parse_tlv_list(&select_response)?;
+        let entries = parse_tlv_list(select_response)?;
         let version_data = entries
             .iter()
             .find(|(tag, _)| *tag == TAG_VERSION)
@@ -280,6 +298,11 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     pub fn set_version(&mut self, version: Version) {
         self.version = version;
         self.protocol.configure(version);
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
     }
 
     pub fn reset(&mut self) -> Result<(), HsmAuthError> {

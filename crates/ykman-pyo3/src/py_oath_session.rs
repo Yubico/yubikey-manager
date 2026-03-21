@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
+use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 use yubikit_rs::oath::{self, OathSession as RustOathSession};
 
-use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
 
 #[pyclass]
 pub struct OathSession {
@@ -11,10 +12,20 @@ pub struct OathSession {
 #[pymethods]
 impl OathSession {
     #[new]
-    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (connection, scp_key_params=None))]
+    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
-        let inner = RustOathSession::new(conn).map_err(smartcard_err)?;
-        Ok(Self { inner })
+        if let Some(params) = scp_key_params {
+            let mut protocol = SmartCardProtocol::new(conn)
+                .with_ins_send_remaining(oath::INS_SEND_REMAINING);
+            let resp = protocol.select(Aid::OATH).map_err(smartcard_err)?;
+            init_scp_from_py(&mut protocol, params)?;
+            let inner = RustOathSession::from_protocol(protocol, &resp).map_err(smartcard_err)?;
+            Ok(Self { inner })
+        } else {
+            let inner = RustOathSession::new(conn).map_err(smartcard_err)?;
+            Ok(Self { inner })
+        }
     }
 
     #[getter]

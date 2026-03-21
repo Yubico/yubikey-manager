@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 use yubikit_rs::management::{
     DeviceInfo,
     ManagementOtpSession as RustManagementOtpSession,
@@ -6,7 +7,7 @@ use yubikit_rs::management::{
 };
 use yubikit_rs::transport::hid::HidConnection;
 
-use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
 
 pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
     let dict = pyo3::types::PyDict::new(py);
@@ -77,10 +78,19 @@ pub struct ManagementSession {
 #[pymethods]
 impl ManagementSession {
     #[new]
-    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (connection, scp_key_params=None))]
+    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
-        let inner = RustManagementSession::new(conn).map_err(smartcard_err)?;
-        Ok(Self { inner })
+        if let Some(params) = scp_key_params {
+            let mut protocol = SmartCardProtocol::new(conn);
+            let resp = protocol.select(Aid::MANAGEMENT).map_err(smartcard_err)?;
+            init_scp_from_py(&mut protocol, params)?;
+            let inner = RustManagementSession::from_protocol(protocol, &resp).map_err(smartcard_err)?;
+            Ok(Self { inner })
+        } else {
+            let inner = RustManagementSession::new(conn).map_err(smartcard_err)?;
+            Ok(Self { inner })
+        }
     }
 
     #[getter]

@@ -1,9 +1,10 @@
 use pyo3::prelude::*;
+use yubikit_rs::iso7816::{Aid, SmartCardError, SmartCardProtocol};
 use yubikit_rs::openpgp::{
     self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
 };
 
-use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
 
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;
@@ -163,10 +164,29 @@ pub struct OpenPgpSession {
 #[pymethods]
 impl OpenPgpSession {
     #[new]
-    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (connection, scp_key_params=None))]
+    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
-        let inner = RustOpenPgpSession::new(conn).map_err(openpgp_err)?;
-        Ok(Self { inner })
+        if let Some(params) = scp_key_params {
+            let mut protocol = SmartCardProtocol::new(conn);
+            // SELECT with auto-activate on 0x6285 or 0x6985
+            match protocol.select(Aid::OPENPGP) {
+                Ok(_) => {}
+                Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6285 || sw == 0x6985 => {
+                    protocol
+                        .send_apdu(0, 0x44 /* INS_ACTIVATE */, 0, 0, &[])
+                        .map_err(smartcard_err)?;
+                    protocol.select(Aid::OPENPGP).map_err(smartcard_err)?;
+                }
+                Err(e) => return Err(smartcard_err(e)),
+            }
+            init_scp_from_py(&mut protocol, params)?;
+            let inner = RustOpenPgpSession::from_protocol(protocol).map_err(openpgp_err)?;
+            Ok(Self { inner })
+        } else {
+            let inner = RustOpenPgpSession::new(conn).map_err(openpgp_err)?;
+            Ok(Self { inner })
+        }
     }
 
     #[getter]

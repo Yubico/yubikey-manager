@@ -52,13 +52,12 @@ from _ykman_native.sessions import OathSession as _NativeOathSession
 
 from .core import (
     BadResponseError,
-    NotSupportedError,
     Tlv,
     Version,
     _override_version,
     require_version,
 )
-from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
+from .core.smartcard import ScpKeyParams, SmartCardConnection, SmartCardProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +251,6 @@ class OathSession:
     """A session with the OATH application.
 
     Delegates to the Rust OathSession implementation via PyO3.
-    Falls back to Python for SCP-encrypted sessions.
     """
 
     def __init__(
@@ -260,48 +258,20 @@ class OathSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        self._native: _NativeOathSession | None
-        if scp_key_params is not None:
-            # SCP requires Python SmartCardProtocol for initialization
-            self._native = None
-            self._init_python(connection, scp_key_params)
-        else:
-            # Use Rust session directly for non-SCP connections
-            native = _NativeOathSession(connection)
-            self._native = native
-            self._version = _override_version.patch(Version(*native.version))
-            if self._version != Version(*native.version):
-                # Dev device — update Rust session version for version checks
-                native.version = tuple(self._version)
-            self._device_id = native.device_id
-            self._has_key = native.has_key
-            self._challenge = b"" if native.locked else None
-            self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
+        native = _NativeOathSession(connection, scp_key_params)
+        self._native = native
+        self._version = _override_version.patch(Version(*native.version))
+        if self._version != Version(*native.version):
+            native.version = tuple(self._version)
+        self._device_id = native.device_id
+        self._has_key = native.has_key
+        self._challenge = b"" if native.locked else None
+        self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
 
         logger.debug(
             f"OATH session initialized (version={self.version}, "
-            f"has_key={self._has_key}, native={self._native is not None})"
+            f"has_key={self._has_key})"
         )
-
-    def _init_python(
-        self,
-        connection: SmartCardConnection,
-        scp_key_params: ScpKeyParams,
-    ) -> None:
-        """Initialize using Python SmartCardProtocol (for SCP sessions)."""
-        self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
-        self._version, self._salt, self._challenge = _parse_select(
-            self.protocol.select(AID.OATH)
-        )
-        self.protocol.configure(self.version)
-
-        if (5, 0, 0) <= self._version < (5, 6, 3):
-            raise NotSupportedError("SCP for OATH requires YubiKey 5.6.3 or later")
-        self.protocol.init_scp(scp_key_params)
-        self._scp_params = scp_key_params
-
-        self._has_key = self._challenge is not None
-        self._device_id = _get_device_id(self._salt)
 
     @property
     def version(self) -> Version:
@@ -336,15 +306,6 @@ class OathSession:
             self._native.reset()
             self._has_key = self._native.has_key
             self._device_id = self._native.device_id
-        else:
-            self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
-            _, self._salt, self._challenge = _parse_select(
-                self.protocol.select(AID.OATH)
-            )
-            if self._scp_params:
-                self.protocol.init_scp(self._scp_params)
-            self._has_key = False
-            self._device_id = _get_device_id(self._salt)
         logger.info("OATH application data reset performed")
 
     def derive_key(self, password: str) -> bytes:
@@ -354,7 +315,7 @@ class OathSession:
         """
         if self._native:
             return bytes(self._native.derive_key(password))
-        return _derive_key(self._salt, password)
+        raise RuntimeError("Native session not available")
 
     def validate(self, key: bytes) -> None:
         """Validate authentication with access key.

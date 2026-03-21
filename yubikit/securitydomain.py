@@ -2,31 +2,30 @@ from __future__ import annotations
 
 import logging
 from enum import IntEnum, unique
-from typing import Any, Mapping, Sequence, cast
+from typing import Mapping, Sequence
 
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from .core import BadResponseError, Tlv, Version, _override_version, int2bytes
+from .core import (
+    BadResponseError,
+    NotSupportedError,
+    Version,
+    _override_version,
+    int2bytes,
+)
 from .core.smartcard import (
-    AID,
     SW,
     ApduError,
-    ScpProcessor,
     SmartCardConnection,
     SmartCardProtocol,
 )
 from .core.smartcard.scp import (
-    INS_EXTERNAL_AUTHENTICATE,
-    INS_INITIALIZE_UPDATE,
-    INS_INTERNAL_AUTHENTICATE,
-    INS_PERFORM_SECURITY_OPERATION,
     KeyRef,
+    Scp03KeyParams,
     ScpKeyParams,
-    ScpKid,
     StaticKeys,
 )
 
@@ -38,30 +37,6 @@ except ImportError:
     _NativeSecurityDomainSession = None
 
 logger = logging.getLogger(__name__)
-
-
-INS_GET_DATA = 0xCA
-INS_PUT_KEY = 0xD8
-INS_STORE_DATA = 0xE2
-INS_DELETE = 0xE4
-INS_GENERATE_KEY = 0xF1
-
-TAG_KEY_INFORMATION = 0xE0
-TAG_CARD_RECOGNITION_DATA = 0x66
-TAG_CA_KLOC_IDENTIFIERS = 0xFF33
-TAG_CA_KLCC_IDENTIFIERS = 0xFF34
-TAG_CERTIFICATE_STORE = 0xBF21
-
-
-@unique
-class KeyType(IntEnum):
-    AES = 0x88
-    ECC_PUBLIC_KEY = 0xB0
-    ECC_PRIVATE_KEY = 0xB1
-    ECC_KEY_PARAMS = 0xF0
-
-
-_DEFAULT_KCV_IV = b"\1" * 16
 
 
 @unique
@@ -88,22 +63,6 @@ class Curve(IntEnum):
         return getattr(ec, self.name)()
 
 
-def _int2asn1(value: int) -> bytes:
-    bs = int2bytes(value)
-    if bs[0] & 0x80:
-        bs = b"\x00" + bs
-    return Tlv(0x93, bs)
-
-
-def _encrypt_cbc(key: bytes, data: bytes, iv: bytes = b"\0" * 16) -> bytes:
-    encryptor = Cipher(
-        algorithms.AES(key),
-        modes.CBC(iv),
-        backend=default_backend(),
-    ).encryptor()
-    return encryptor.update(data) + encryptor.finalize()
-
-
 class SecurityDomainSession:
     """A session for managing SCP keys.
 
@@ -112,24 +71,18 @@ class SecurityDomainSession:
     """
 
     def __init__(self, connection: SmartCardConnection):
-        self._native: Any
-        if _NativeSecurityDomainSession is not None:
-            native = _NativeSecurityDomainSession(connection)
-            self._native = native
-            self._version = _override_version.patch(Version(*native.version))
-            if self._version != Version(*native.version):
-                native.version = tuple(self._version)
-            self.protocol = SmartCardProtocol(connection)
-            self.protocol.configure(self._version)
-        else:
-            self._native = None
-            self.protocol = SmartCardProtocol(connection)
-            self.protocol.select(AID.SECURE_DOMAIN)
-            self._version = _override_version.patch(Version(5, 3, 0))
-            self.protocol.configure(self._version)
-        logger.debug(
-            f"SecurityDomain session initialized (native={self._native is not None})"
-        )
+        if _NativeSecurityDomainSession is None:
+            raise RuntimeError("Native security domain session not available")
+        native = _NativeSecurityDomainSession(connection)
+        self._native = native
+        self._version = _override_version.patch(Version(*native.version))
+        if self._version != Version(*native.version):
+            native.version = tuple(self._version)
+        self.protocol = SmartCardProtocol(connection)
+        self.protocol.configure(self._version)
+        self._authenticated = False
+        self._dek: bytes | None = None
+        logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
         """Initialize SCP and authenticate the session.
@@ -137,34 +90,39 @@ class SecurityDomainSession:
         SCP11b does not authenticate the OCE, and will not allow the usage of commands
         which require authentication of the OCE.
         """
-        if self._native:
-            self._native = None
-        self.protocol.init_scp(key_params)
+        try:
+            self._native.authenticate(key_params)
+        except ApduError as e:
+            if e.sw == SW.CLASS_NOT_SUPPORTED:
+                raise NotSupportedError(
+                    "This YubiKey does not support secure messaging"
+                )
+            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
+                raise ValueError("Incorrect SCP parameters")
+            raise
+        except BadResponseError as e:
+            if "receipt" in str(e).lower():
+                raise InvalidSignature(str(e))
+            raise ValueError("Incorrect SCP parameters")
+        # Store DEK for put_key operations
+        if isinstance(key_params, Scp03KeyParams):
+            self._dek = key_params.keys.key_dek
+        else:
+            self._dek = None
+        self._authenticated = True
 
     def get_data(self, tag: int, data: bytes = b"") -> bytes:
         """Read data from the security domain."""
-        if self._native:
-            return bytes(self._native.get_data(tag, data))
-        return self.protocol.send_apdu(0, INS_GET_DATA, tag >> 8, tag & 0xFF, data)
+        return bytes(self._native.get_data(tag, data))
 
     def get_key_information(self) -> Mapping[KeyRef, Mapping[int, int]]:
         """Get information about the currently loaded keys."""
-        if self._native:
-            raw = self._native.get_key_information()
-            return {KeyRef(kid, kvn): dict(v) for (kid, kvn), v in raw.items()}
-        # 11.3.3.1.1 Key Information Template ('E0')
-        keys = {}
-        for d in Tlv.parse_list(self.get_data(TAG_KEY_INFORMATION)):
-            data = Tlv.unpack(0xC0, d)
-            keys[KeyRef(data[:2])] = dict(zip(data[2::2], data[3::2]))
-        return keys
+        raw = self._native.get_key_information()
+        return {KeyRef(kid, kvn): dict(v) for (kid, kvn), v in raw.items()}
 
     def get_card_recognition_data(self) -> bytes:
         """Get information about the card."""
-        if self._native:
-            return bytes(self._native.get_card_recognition_data())
-        # 7.4.1.3 Card Recognition Data
-        return Tlv.unpack(0x73, self.get_data(TAG_CARD_RECOGNITION_DATA))
+        return bytes(self._native.get_card_recognition_data())
 
     def get_supported_ca_identifiers(
         self, kloc: bool = False, klcc: bool = False
@@ -177,28 +135,8 @@ class SecurityDomainSession:
         :param kloc: Get KLOC CAs.
         :param klcc: Get KLCC CAs.
         """
-        if self._native:
-            raw = self._native.get_supported_ca_identifiers(kloc, klcc)
-            return {KeyRef(kid, kvn): bytes(v) for (kid, kvn), v in raw.items()}
-        if not kloc and not klcc:
-            kloc = klcc = True
-        logger.debug(f"Getting CA identifiers KLOC={kloc}, KLCC={klcc}")
-        data = b""
-        # Combine CA list for KLCC and KLOC
-        for fetch, tag in (
-            (kloc, TAG_CA_KLOC_IDENTIFIERS),
-            (klcc, TAG_CA_KLCC_IDENTIFIERS),
-        ):
-            if fetch:
-                try:
-                    data += self.get_data(tag)
-                except ApduError as e:
-                    if e.sw != SW.REFERENCE_DATA_NOT_FOUND:
-                        raise
-        tlvs = Tlv.parse_list(data)
-        return {
-            KeyRef(tlvs[i + 1].value): tlvs[i].value for i in range(0, len(tlvs), 2)
-        }
+        raw = self._native.get_supported_ca_identifiers(kloc, klcc)
+        return {KeyRef(kid, kvn): bytes(v) for (kid, kvn), v in raw.items()}
 
     def get_certificate_bundle(self, key: KeyRef) -> Sequence[x509.Certificate]:
         """Get the certificates associated with the given SCP11 private key.
@@ -206,22 +144,10 @@ class SecurityDomainSession:
         Certificates are returned leaf-last.
         """
         logger.debug(f"Getting certificate bundle for {key}")
-        if self._native:
-            return [
-                x509.load_der_x509_certificate(der)
-                for der in self._native.get_certificate_bundle(key.kid, key.kvn)
-            ]
-        try:
-            return [
-                x509.load_der_x509_certificate(cert)
-                for cert in Tlv.parse_list(
-                    self.get_data(TAG_CERTIFICATE_STORE, Tlv(0xA6, Tlv(0x83, key)))
-                )
-            ]
-        except ApduError as e:
-            if e.sw == SW.REFERENCE_DATA_NOT_FOUND:
-                return []
-            raise
+        return [
+            x509.load_der_x509_certificate(der)
+            for der in self._native.get_certificate_bundle(key.kid, key.kvn)
+        ]
 
     def reset(self) -> None:
         """Perform a factory reset of the Security Domain.
@@ -230,39 +156,7 @@ class SecurityDomainSession:
         SCP03 static keys, and generate a new (attestable) SCP11b key.
         """
         logger.debug("Resetting all SCP keys")
-        if self._native:
-            self._native.reset()
-            logger.info("SCP keys reset")
-            return
-        # Reset is done by blocking all available keys
-        data = b"\0" * 8
-        for key in self.get_key_information().keys():
-            if key.kid == 0x01:
-                # SCP03 uses KID=0, we use KVN=0 to allow deleting the default keys
-                # which have an invalid KVN (0xff).
-                key = KeyRef(0, 0)
-                ins = INS_INITIALIZE_UPDATE
-            elif key.kid in (0x02, 0x03):
-                continue  # Skip these, will be deleted by 0x01
-            elif key.kid in (0x11, 0x15):
-                ins = INS_EXTERNAL_AUTHENTICATE
-            elif key.kid == 0x13:
-                ins = INS_INTERNAL_AUTHENTICATE
-            else:  # 0x10, 0x20-0x2F
-                ins = INS_PERFORM_SECURITY_OPERATION
-
-            for _ in range(65):
-                try:
-                    self.protocol.send_apdu(0x80, ins, key.kvn, key.kid, data)
-                except ApduError as e:
-                    if e.sw in (
-                        SW.AUTH_METHOD_BLOCKED,
-                        SW.SECURITY_CONDITION_NOT_SATISFIED,
-                    ):
-                        break
-                    elif e.sw == SW.INCORRECT_PARAMETERS:
-                        continue
-                    raise
+        self._native.reset()
         logger.info("SCP keys reset")
 
     def store_data(self, data: bytes) -> None:
@@ -270,10 +164,7 @@ class SecurityDomainSession:
 
         Requires OCE verification.
         """
-        if self._native:
-            self._native.store_data(data)
-            return
-        self.protocol.send_apdu(0, INS_STORE_DATA, 0x90, 0, data)
+        self._native.store_data(data)
 
     def store_certificate_bundle(
         self, key: KeyRef, certificates: Sequence[x509.Certificate]
@@ -285,22 +176,8 @@ class SecurityDomainSession:
         Certificates should be in order, with the leaf certificate last.
         """
         logger.debug(f"Storing certificate bundle for {key}")
-        if self._native:
-            der_certs = [
-                c.public_bytes(serialization.Encoding.DER) for c in certificates
-            ]
-            self._native.store_certificate_bundle(key.kid, key.kvn, der_certs)
-            logger.info("Certificate bundle stored")
-            return
-        self.store_data(
-            Tlv(0xA6, Tlv(0x83, key))
-            + Tlv(
-                TAG_CERTIFICATE_STORE,
-                b"".join(
-                    c.public_bytes(serialization.Encoding.DER) for c in certificates
-                ),
-            )
-        )
+        der_certs = [c.public_bytes(serialization.Encoding.DER) for c in certificates]
+        self._native.store_certificate_bundle(key.kid, key.kvn, der_certs)
         logger.info("Certificate bundle stored")
 
     def store_allowlist(self, key: KeyRef, serials: Sequence[int]) -> None:
@@ -311,14 +188,11 @@ class SecurityDomainSession:
         If no allowlist is stored, any certificate signed by the CA can be used.
         """
         logger.debug(f"Storing serial allowlist for {key}")
-        if self._native:
-            self._native.store_allowlist(key.kid, key.kvn, list(serials))
-            logger.info("Serial allowlist stored")
-            return
-        self.store_data(
-            Tlv(0xA6, Tlv(0x83, key))
-            + Tlv(0x70, b"".join(_int2asn1(s) for s in serials))
-        )
+        serial_bytes = [
+            s.to_bytes((s.bit_length() + 7) // 8, "big") if s > 0 else b"\x00"
+            for s in serials
+        ]
+        self._native.store_allowlist(key.kid, key.kvn, serial_bytes)
         logger.info("Serial allowlist stored")
 
     def store_ca_issuer(self, key: KeyRef, ski: bytes) -> None:
@@ -327,17 +201,7 @@ class SecurityDomainSession:
         Requires OCE verification.
         """
         logger.debug(f"Storing CA issuer SKI for {key}: {ski.hex()}")
-        if self._native:
-            self._native.store_ca_issuer(key.kid, key.kvn, ski)
-            logger.info("CA issuer SKI stored")
-            return
-        klcc = key.kid in (ScpKid.SCP11a, ScpKid.SCP11b, ScpKid.SCP11c)
-        self.store_data(
-            Tlv(
-                0xA6,
-                Tlv(0x80, b"\1" if klcc else b"\0") + Tlv(0x42, ski) + Tlv(0x83, key),
-            )
-        )
+        self._native.store_ca_issuer(key.kid, key.kvn, ski)
         logger.info("CA issuer SKI stored")
 
     def delete_key(self, kid: int = 0, kvn: int = 0, delete_last: bool = False) -> None:
@@ -352,22 +216,12 @@ class SecurityDomainSession:
             raise ValueError("Must specify at least one of kid, kvn.")
 
         if kid in (1, 2, 3):
-            # SCP03 keys can only be deleted by KVN
             if kvn:
                 kid = 0
             else:
                 raise ValueError("SCP03 keys can only be deleted by KVN")
         logger.debug(f"Deleting keys with KID={kid or 'ANY'}, KVN={kvn or 'ANY'}")
-        if self._native:
-            self._native.delete_key(kid, kvn, delete_last)
-            logger.info("Keys deleted")
-            return
-        data = b""
-        if kid:
-            data += Tlv(0xD0, bytes([kid]))
-        if kvn:
-            data += Tlv(0xD2, bytes([kvn]))
-        self.protocol.send_apdu(0x80, INS_DELETE, 0, int(delete_last), data)
+        self._native.delete_key(kid, kvn, delete_last)
         logger.info("Keys deleted")
 
     def generate_ec_key(
@@ -383,19 +237,9 @@ class SecurityDomainSession:
             f"Generating new key for {key}"
             + (f", replacing KVN={replace_kvn}" if replace_kvn else "")
         )
-        if self._native:
-            encoded_point = bytes(
-                self._native.generate_ec_key(key.kid, key.kvn, int(curve), replace_kvn)
-            )
-            logger.info("New key generated")
-            return ec.EllipticCurvePublicKey.from_encoded_point(
-                curve._curve, encoded_point
-            )
-        data = bytes([key.kvn]) + Tlv(KeyType.ECC_KEY_PARAMS, bytes([curve]))
-        resp = self.protocol.send_apdu(
-            0x80, INS_GENERATE_KEY, replace_kvn, key.kid, data
+        encoded_point = bytes(
+            self._native.generate_ec_key(key.kid, key.kvn, int(curve), replace_kvn)
         )
-        encoded_point = Tlv.unpack(KeyType.ECC_PUBLIC_KEY, resp)
         logger.info("New key generated")
         return ec.EllipticCurvePublicKey.from_encoded_point(curve._curve, encoded_point)
 
@@ -413,44 +257,41 @@ class SecurityDomainSession:
         Use replace_kvn to replace an existing key.
         """
         logger.debug(f"Importing key into {key} of type {type(sk)}")
-        processor = self.protocol._processor
-        if not isinstance(processor, ScpProcessor):
+        if not self._authenticated:
             raise ValueError("Must be authenticated!")
 
-        data = bytes([key.kvn])
-        expected = data
-        dek = processor.state._keys.key_dek
-        p2 = key.kid
         if isinstance(sk, StaticKeys):
-            if not dek:
+            if not self._dek:
                 raise ValueError("No session DEK key available")
             if not sk.key_dek:
                 raise ValueError("New DEK must be set in static keys")
-            p2 |= 0x80
-            for k in cast(Sequence[bytes], sk):
-                kcv = _encrypt_cbc(k, _DEFAULT_KCV_IV)[:3]
-                data += Tlv(KeyType.AES, _encrypt_cbc(dek, k)) + bytes([len(kcv)]) + kcv
-                expected += kcv
+            self._native.put_key_static(
+                key.kid,
+                key.kvn,
+                sk.key_enc,
+                sk.key_mac,
+                sk.key_dek,
+                self._dek,
+                replace_kvn,
+            )
+        elif isinstance(sk, ec.EllipticCurvePrivateKey):
+            if not self._dek:
+                raise ValueError("No session DEK key available")
+            n = (sk.key_size + 7) // 8
+            s = int2bytes(sk.private_numbers().private_value, n)
+            curve_val = Curve._from_key(sk)
+            self._native.put_key_ec_private(
+                key.kid, key.kvn, s, int(curve_val), self._dek, replace_kvn
+            )
+        elif isinstance(sk, ec.EllipticCurvePublicKey):
+            pk_bytes = sk.public_bytes(
+                serialization.Encoding.X962,
+                serialization.PublicFormat.UncompressedPoint,
+            )
+            curve_val = Curve._from_key(sk)
+            self._native.put_key_ec_public(
+                key.kid, key.kvn, pk_bytes, int(curve_val), replace_kvn
+            )
         else:
-            if isinstance(sk, ec.EllipticCurvePrivateKey):
-                if not dek:
-                    raise ValueError("No session DEK key available")
-                n = (sk.key_size + 7) // 8
-                s = int2bytes(sk.private_numbers().private_value, n)
-                data += Tlv(KeyType.ECC_PRIVATE_KEY, _encrypt_cbc(dek, s))
-            elif isinstance(sk, ec.EllipticCurvePublicKey):
-                data += Tlv(
-                    KeyType.ECC_PUBLIC_KEY,
-                    sk.public_bytes(
-                        serialization.Encoding.X962,
-                        serialization.PublicFormat.UncompressedPoint,
-                    ),
-                )
-            else:
-                raise TypeError("Unsupported key type")
-            data += Tlv(KeyType.ECC_KEY_PARAMS, bytes([Curve._from_key(sk)])) + b"\0"
-
-        resp = self.protocol.send_apdu(0x80, INS_PUT_KEY, replace_kvn, p2, data)
-        if resp != expected:
-            raise BadResponseError("Incorrect key check value")
+            raise TypeError("Unsupported key type")
         logger.info("Key imported")

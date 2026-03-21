@@ -475,7 +475,26 @@ impl<C: SmartCardConnection> OathSession<C> {
         let mut protocol = SmartCardProtocol::new(connection)
             .with_ins_send_remaining(INS_SEND_REMAINING);
         let resp = protocol.select(Aid::OATH)?;
-        let (version, salt, challenge) = parse_select(&resp)
+        Self::init(protocol, &resp)
+    }
+
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::OATH)` called already (with the
+    /// response passed as `select_response`). SCP may have been initialized on
+    /// the protocol before calling this.
+    pub fn from_protocol(
+        protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, SmartCardError> {
+        Self::init(protocol, select_response)
+    }
+
+    fn init(
+        mut protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, SmartCardError> {
+        let (version, salt, challenge) = parse_select(select_response)
             .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
         protocol.configure(version);
 

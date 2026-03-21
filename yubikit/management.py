@@ -682,14 +682,12 @@ class ManagementSession:
                 raise ValueError("SCP can only be used with SmartCardConnection")
             self.backend = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
-            if scp_key_params is None and _NativeManagementSession is not None:
-                native = _NativeManagementSession(connection)
-                self._native = native
-                self._version = Version(*native.version)
-                self.backend = None
-            else:
-                self.backend = _ManagementSmartCardBackend(connection, scp_key_params)
-                self._version = self.backend.version
+            if _NativeManagementSession is None:
+                raise RuntimeError("Native management session not available")
+            native = _NativeManagementSession(connection, scp_key_params)
+            self._native = native
+            self._version = Version(*native.version)
+            self.backend = None
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")

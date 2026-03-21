@@ -3,7 +3,7 @@ use yubikit_rs::securitydomain::{
     Curve, KeyRef, SecurityDomainSession as RustSecurityDomainSession, StaticKeys,
 };
 
-use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
 
 fn parse_curve(v: u8) -> PyResult<Curve> {
     Curve::from_u8(v).ok_or_else(|| {
@@ -23,6 +23,11 @@ impl SecurityDomainSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         let inner = RustSecurityDomainSession::new(conn).map_err(smartcard_err)?;
         Ok(Self { inner })
+    }
+
+    /// Initialize SCP and authenticate the session.
+    fn authenticate(&mut self, key_params: &Bound<'_, PyAny>) -> PyResult<()> {
+        init_scp_from_py(self.inner.protocol_mut(), key_params)
     }
 
     #[getter]
@@ -109,7 +114,7 @@ impl SecurityDomainSession {
             .map_err(smartcard_err)
     }
 
-    fn store_allowlist(&mut self, kid: u8, kvn: u8, serials: Vec<u64>) -> PyResult<()> {
+    fn store_allowlist(&mut self, kid: u8, kvn: u8, serials: Vec<Vec<u8>>) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
         self.inner
             .store_allowlist(key, &serials)

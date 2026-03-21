@@ -34,7 +34,6 @@ import struct
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
-    Any,
     ClassVar,
     Mapping,
     Sequence,
@@ -69,7 +68,6 @@ from .core import (
     require_version,
 )
 from .core.smartcard import (
-    AID,
     SW,
     ApduError,
     ScpKeyParams,
@@ -1057,66 +1055,19 @@ class OpenPgpSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        self._native: Any
-        if scp_key_params is not None:
-            self._native = None
-            self._init_python(connection, scp_key_params)
-        else:
-            if _NativeOpenPgpSession is None:
-                raise RuntimeError("Native OpenPGP session not available")
-            native = _NativeOpenPgpSession(connection)
-            self._native = native
-            self._version = _override_version.patch(Version(*native.version))
-            if self._version != Version(*native.version):
-                native.version = tuple(self._version)
-            self._app_data = ApplicationRelatedData.parse(
-                native.get_application_related_data()
-            )
-            self.protocol = SmartCardProtocol(connection)
-
-        logger.debug(
-            f"OpenPGP session initialized (version={self.version}, "
-            f"native={self._native is not None})"
+        if _NativeOpenPgpSession is None:
+            raise RuntimeError("Native OpenPGP session not available")
+        native = _NativeOpenPgpSession(connection, scp_key_params)
+        self._native = native
+        self._version = _override_version.patch(Version(*native.version))
+        if self._version != Version(*native.version):
+            native.version = tuple(self._version)
+        self._app_data = ApplicationRelatedData.parse(
+            native.get_application_related_data()
         )
-
-    def _init_python(
-        self,
-        connection: SmartCardConnection,
-        scp_key_params: ScpKeyParams | None = None,
-    ) -> None:
         self.protocol = SmartCardProtocol(connection)
-        try:
-            self.protocol.select(AID.OPENPGP)
-        except ApduError as e:
-            if e.sw in (SW.NO_INPUT_DATA, SW.CONDITIONS_NOT_SATISFIED):
-                # Not activated, activate
-                logger.warning("Application not active, sending ACTIVATE")
-                self.protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
-                self.protocol.select(AID.OPENPGP)
-            else:
-                raise
 
-        if scp_key_params:
-            self.protocol.init_scp(scp_key_params)
-
-        self._version = self._read_version()
-
-        self.protocol.configure(self.version)
-
-        # Note: This value is cached!
-        # Do not rely on contained information that can change!
-        self._app_data = self.get_application_related_data()
-
-    def _read_version(self) -> Version:
-        logger.debug("Getting version number")
-        try:
-            bcd = self.protocol.send_apdu(0, INS.GET_VERSION, 0, 0)
-            return _override_version.patch(Version(*(_bcd(x) for x in bcd)))
-        except ApduError as e:
-            # Pre 1.0.2 versions don't support reading the version
-            if e.sw == SW.CONDITIONS_NOT_SATISFIED:
-                return Version(1, 0, 0)
-            raise
+        logger.debug(f"OpenPGP session initialized (version={self.version})")
 
     @property
     def aid(self) -> OpenPgpAid:

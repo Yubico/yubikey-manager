@@ -883,6 +883,25 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
     pub fn new(connection: C) -> Result<Self, YubiOtpError> {
         let mut protocol = SmartCardProtocol::new(connection);
         let status = protocol.select(Aid::OTP)?;
+        Self::init(protocol, &status)
+    }
+
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::OTP)` called already (with the
+    /// response passed as `select_response`). SCP may have been initialized on
+    /// the protocol before calling this.
+    pub fn from_protocol(
+        protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, YubiOtpError> {
+        Self::init(protocol, select_response)
+    }
+
+    fn init(
+        mut protocol: SmartCardProtocol<C>,
+        status: &[u8],
+    ) -> Result<Self, YubiOtpError> {
         let version = Version::from_bytes(&status[..3]);
         let prog_seq = *status.get(3).unwrap_or(&0);
         protocol.configure(version);
@@ -890,7 +909,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         Ok(Self {
             protocol,
             version,
-            status,
+            status: status.to_vec(),
             prog_seq,
         })
     }

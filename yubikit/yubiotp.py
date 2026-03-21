@@ -35,8 +35,6 @@ from threading import Event
 from typing import Any, Callable, TypeVar
 
 from .core import (
-    TRANSPORT,
-    ApplicationNotAvailableError,
     BadResponseError,
     NotSupportedError,
     Version,
@@ -51,7 +49,7 @@ from .core.otp import (
     calculate_crc,
     check_crc,
 )
-from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
+from .core.smartcard import ScpKeyParams, SmartCardConnection
 
 try:
     from _ykman_native.sessions import (
@@ -745,17 +743,16 @@ class YubiOtpSession:
             self._version = _override_version.patch(otp_protocol.version)
             self.backend: _Backend = _YubiOtpOtpBackend(otp_protocol)
         elif isinstance(connection, SmartCardConnection):
-            if scp_key_params is None and _NativeYubiOtpSession is not None:
-                native = _NativeYubiOtpSession(connection)
-                self._native = native
-                self._version = _override_version.patch(Version(*native.version))
-                if self._version != Version(*native.version):
-                    native.version = tuple(self._version)
-                version_tuple, flags = native.get_config_state()
-                self._status = b""  # Status managed by native session
-                self.backend = _NativeSmartCardBackend(native)
-            else:
-                self._init_smartcard_python(connection, scp_key_params)
+            if _NativeYubiOtpSession is None:
+                raise RuntimeError("Native YubiOTP session not available")
+            native = _NativeYubiOtpSession(connection, scp_key_params)
+            self._native = native
+            self._version = _override_version.patch(Version(*native.version))
+            if self._version != Version(*native.version):
+                native.version = tuple(self._version)
+            version_tuple, flags = native.get_config_state()
+            self._status = b""  # Status managed by native session
+            self.backend = _NativeSmartCardBackend(native)
         else:
             raise TypeError("Unsupported connection type")
         logger.debug(
@@ -763,35 +760,6 @@ class YubiOtpSession:
             f"connection={type(connection).__name__}, version={self.version}, "
             f"state={self.get_config_state()}, "
             f"native={self._native is not None}"
-        )
-
-    def _init_smartcard_python(
-        self,
-        connection: SmartCardConnection,
-        scp_key_params: ScpKeyParams | None,
-    ) -> None:
-        """Initialize using Python SmartCardProtocol (for SCP or fallback)."""
-        card_protocol = SmartCardProtocol(connection)
-        mgmt_version = None
-        if connection.transport == TRANSPORT.NFC:
-            try:
-                card_protocol.select(AID.MANAGEMENT)
-                select_str = card_protocol.select(AID.MANAGEMENT).decode()
-                mgmt_version = Version.from_string(select_str)
-            except ApplicationNotAvailableError:
-                pass
-
-        self._status = card_protocol.select(AID.OTP)
-        otp_version = Version.from_bytes(self._status[:3])
-        if mgmt_version and mgmt_version[0] == 3:
-            self._version = max(mgmt_version, otp_version)
-        else:
-            self._version = _override_version.patch(mgmt_version or otp_version)
-        card_protocol.configure(self._version)
-        if scp_key_params:
-            card_protocol.init_scp(scp_key_params)
-        self.backend = _YubiOtpSmartCardBackend(
-            card_protocol, self._version, self._status[3]
         )
 
     def close(self) -> None:

@@ -873,7 +873,18 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn new(connection: C) -> Result<Self, PivError> {
         let mut protocol = SmartCardProtocol::new(connection);
         protocol.select(Aid::PIV)?;
+        Self::init(protocol)
+    }
 
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::PIV)` called already. SCP may
+    /// have been initialized on the protocol before calling this.
+    pub fn from_protocol(protocol: SmartCardProtocol<C>) -> Result<Self, PivError> {
+        Self::init(protocol)
+    }
+
+    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, PivError> {
         let version_data = protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[])?;
         let version = Version::from_bytes(&version_data);
         protocol.configure(version);
@@ -917,6 +928,11 @@ impl<C: SmartCardConnection> PivSession<C> {
     /// Consume the session and return the underlying protocol.
     pub fn into_protocol(self) -> SmartCardProtocol<C> {
         self.protocol
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
     }
 
     // -----------------------------------------------------------------------

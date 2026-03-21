@@ -34,7 +34,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit_rs::iso7816::{SmartCardConnection, SmartCardError, Transport};
+use yubikit_rs::iso7816::{SmartCardConnection, SmartCardError, SmartCardProtocol, Transport};
 
 /// A Rust `SmartCardConnection` backed by a Python connection object.
 ///
@@ -147,4 +147,112 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
         }
         _ => PyRuntimeError::new_err(e.to_string()),
     })
+}
+
+/// Initialize SCP on a `SmartCardProtocol` from Python `ScpKeyParams`.
+///
+/// Inspects the Python object's class name to determine whether to use SCP03
+/// or SCP11, then extracts the necessary fields and calls the Rust init method.
+pub fn init_scp_from_py<C: SmartCardConnection>(
+    protocol: &mut SmartCardProtocol<C>,
+    params: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let class_name = params
+        .get_type()
+        .name()?
+        .to_string();
+
+    if class_name.contains("Scp03KeyParams") {
+        init_scp03_from_py(protocol, params)
+    } else if class_name.contains("Scp11KeyParams") {
+        init_scp11_from_py(protocol, params)
+    } else {
+        Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Unsupported SCP key params type: {class_name}"
+        )))
+    }
+}
+
+fn init_scp03_from_py<C: SmartCardConnection>(
+    protocol: &mut SmartCardProtocol<C>,
+    params: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let key_ref = params.getattr("ref")?;
+    let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
+    let keys = params.getattr("keys")?;
+    let key_enc: Vec<u8> = keys.getattr("key_enc")?.call_method0("__bytes__")?.extract()?;
+    let key_mac: Vec<u8> = keys.getattr("key_mac")?.call_method0("__bytes__")?.extract()?;
+    let key_dek_obj = keys.getattr("key_dek")?;
+    let key_dek: Option<Vec<u8>> = if key_dek_obj.is_none() {
+        None
+    } else {
+        Some(key_dek_obj.call_method0("__bytes__")?.extract()?)
+    };
+
+    protocol
+        .init_scp03(kvn, &key_enc, &key_mac, key_dek.as_deref())
+        .map_err(smartcard_err)
+}
+
+fn init_scp11_from_py<C: SmartCardConnection>(
+    protocol: &mut SmartCardProtocol<C>,
+    params: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let key_ref = params.getattr("ref")?;
+    let kid: u8 = key_ref.getattr("kid")?.extract()?;
+    let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
+
+    // pk_sd_ecka: ec.EllipticCurvePublicKey → uncompressed point bytes
+    let pk = params.getattr("pk_sd_ecka")?;
+    let serialization = pk
+        .py()
+        .import("cryptography.hazmat.primitives.serialization")?;
+    let encoding_x962 = serialization.getattr("Encoding")?.getattr("X962")?;
+    let format_uncompressed = serialization
+        .getattr("PublicFormat")?
+        .getattr("UncompressedPoint")?;
+    let pk_bytes: Vec<u8> = pk
+        .call_method1("public_bytes", (encoding_x962, format_uncompressed))?
+        .extract()?;
+
+    // sk_oce_ecka: optional ec.EllipticCurvePrivateKey → raw scalar bytes
+    let sk_oce_obj = params.getattr("sk_oce_ecka")?;
+    let sk_oce: Option<Vec<u8>> = if sk_oce_obj.is_none() {
+        None
+    } else {
+        let numbers = sk_oce_obj.call_method0("private_numbers")?;
+        let private_value = numbers.getattr("private_value")?;
+        let bytes: Vec<u8> = private_value
+            .call_method1("to_bytes", (32usize, "big"))?
+            .extract()?;
+        Some(bytes)
+    };
+
+    // certificates: list[x509.Certificate] → Vec<DER bytes>
+    let certs_list = params.getattr("certificates")?;
+    let certs_len: usize = certs_list.len()?;
+    let encoding_der = serialization.getattr("Encoding")?.getattr("DER")?;
+    let mut cert_ders: Vec<Vec<u8>> = Vec::with_capacity(certs_len);
+    for i in 0..certs_len {
+        let cert = certs_list.get_item(i)?;
+        let der: Vec<u8> = cert
+            .call_method1("public_bytes", (encoding_der.clone(),))?
+            .extract()?;
+        cert_ders.push(der);
+    }
+    let cert_refs: Vec<&[u8]> = cert_ders.iter().map(|c| c.as_slice()).collect();
+
+    // oce_ref: optional KeyRef → (kid, kvn)
+    let oce_ref_obj = params.getattr("oce_ref")?;
+    let oce_ref: Option<(u8, u8)> = if oce_ref_obj.is_none() {
+        None
+    } else {
+        let oce_kid: u8 = oce_ref_obj.getattr("kid")?.extract()?;
+        let oce_kvn: u8 = oce_ref_obj.getattr("kvn")?.extract()?;
+        Some((oce_kid, oce_kvn))
+    };
+
+    protocol
+        .init_scp11(kid, kvn, &pk_bytes, sk_oce.as_deref(), &cert_refs, oce_ref)
+        .map_err(smartcard_err)
 }

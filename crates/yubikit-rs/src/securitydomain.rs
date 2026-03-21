@@ -35,7 +35,7 @@ use cipher::{BlockEncryptMut, KeyIvInit};
 use crate::iso7816::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version,
 };
-use crate::tlv::{int2bytes, tlv_encode, tlv_parse, TlvError};
+use crate::tlv::{tlv_encode, tlv_parse, TlvError};
 
 // ---------------------------------------------------------------------------
 // APDU instruction constants
@@ -282,8 +282,12 @@ impl StaticKeys {
 // ---------------------------------------------------------------------------
 
 /// Encode an integer as an ASN.1 INTEGER in TLV(0x93).
-fn int2asn1(value: u64) -> Vec<u8> {
-    let mut bs = int2bytes(value);
+fn int2asn1(value: &[u8]) -> Vec<u8> {
+    let mut bs = value.to_vec();
+    // Remove leading zeros
+    while bs.len() > 1 && bs[0] == 0 {
+        bs.remove(0);
+    }
     if bs[0] & 0x80 != 0 {
         bs.insert(0, 0x00);
     }
@@ -342,6 +346,16 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
         let mut protocol = SmartCardProtocol::new(connection);
         protocol.select(Aid::SECURE_DOMAIN)?;
+        let version = Version(5, 3, 0);
+        protocol.configure(version);
+        Ok(Self { protocol, version })
+    }
+
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::SECURE_DOMAIN)` called already.
+    /// SCP may have been initialized on the protocol before calling this.
+    pub fn from_protocol(mut protocol: SmartCardProtocol<C>) -> Result<Self, SmartCardError> {
         let version = Version(5, 3, 0);
         protocol.configure(version);
         Ok(Self { protocol, version })
@@ -587,11 +601,11 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     pub fn store_allowlist(
         &mut self,
         key: KeyRef,
-        serials: &[u64],
+        serials: &[Vec<u8>],
     ) -> Result<(), SmartCardError> {
         let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
         let serials_data: Vec<u8> =
-            serials.iter().flat_map(|&s| int2asn1(s)).collect();
+            serials.iter().flat_map(|s| int2asn1(s)).collect();
         let allowlist_tlv = tlv_encode(0x70, &serials_data);
 
         let mut data = key_tlv;
@@ -719,7 +733,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         let mut expected = vec![key.kvn];
 
         for k in [&static_keys.key_enc, &static_keys.key_mac, keys_dek] {
-            let kcv = &encrypt_cbc(k, &DEFAULT_KCV_IV, &DEFAULT_KCV_IV)[..3];
+            let kcv = &encrypt_cbc_zero_iv(k, &DEFAULT_KCV_IV)[..3];
             let encrypted = encrypt_cbc_zero_iv(dek, k);
             data.extend_from_slice(&tlv_encode(KeyType::Aes as u32, &encrypted));
             data.push(kcv.len() as u8);
@@ -967,12 +981,12 @@ mod tests {
     #[test]
     fn test_int2asn1() {
         // Small positive value (no leading zero needed)
-        let result = int2asn1(42);
+        let result = int2asn1(&[0x2A]);
         // Should be TLV(0x93, [0x2A])
         assert_eq!(result, tlv_encode(0x93, &[0x2A]));
 
         // Value with high bit set (needs leading zero)
-        let result = int2asn1(0x80);
+        let result = int2asn1(&[0x80]);
         assert_eq!(result, tlv_encode(0x93, &[0x00, 0x80]));
     }
 

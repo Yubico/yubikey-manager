@@ -1301,6 +1301,18 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             Err(e) => return Err(e.into()),
         }
 
+        Self::init(protocol)
+    }
+
+    /// Create a session from an already-initialized protocol.
+    ///
+    /// The protocol must have had `select(Aid::OPENPGP)` called already. SCP
+    /// may have been initialized on the protocol before calling this.
+    pub fn from_protocol(protocol: SmartCardProtocol<C>) -> Result<Self, OpenPgpError> {
+        Self::init(protocol)
+    }
+
+    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, OpenPgpError> {
         // Read version (BCD encoded)
         let version = match protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[]) {
             Ok(bcd_bytes) => Version(

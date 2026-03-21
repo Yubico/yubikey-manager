@@ -1,10 +1,11 @@
 use pyo3::prelude::*;
+use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 use yubikit_rs::piv::{
     self, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession as RustPivSession, Slot,
     TouchPolicy,
 };
 
-use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
 
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;
@@ -142,10 +143,19 @@ pub struct PivSession {
 #[pymethods]
 impl PivSession {
     #[new]
-    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (connection, scp_key_params=None))]
+    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
-        let inner = RustPivSession::new(conn).map_err(piv_err)?;
-        Ok(Self { inner })
+        if let Some(params) = scp_key_params {
+            let mut protocol = SmartCardProtocol::new(conn);
+            protocol.select(Aid::PIV).map_err(smartcard_err)?;
+            init_scp_from_py(&mut protocol, params)?;
+            let inner = RustPivSession::from_protocol(protocol).map_err(piv_err)?;
+            Ok(Self { inner })
+        } else {
+            let inner = RustPivSession::new(conn).map_err(piv_err)?;
+            Ok(Self { inner })
+        }
     }
 
     #[getter]
