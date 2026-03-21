@@ -1011,6 +1011,7 @@ def _hash_algorithm_to_int(hash_algorithm: hashes.HashAlgorithm) -> int:
 
 def _prepare_private_key_for_native(
     private_key: PrivateKey,
+    use_crt: bool = False,
 ) -> tuple[int, list[bytes]]:
     """Convert a private key to (key_type, components) for the native put_key.
 
@@ -1021,11 +1022,13 @@ def _prepare_private_key_for_native(
         e = int2bytes(pn.public_numbers.e)
         p = int2bytes(pn.p)
         q = int2bytes(pn.q)
-        iqmp = int2bytes(pn.iqmp)
-        dmp1 = int2bytes(pn.dmp1)
-        dmq1 = int2bytes(pn.dmq1)
-        n = int2bytes(pn.public_numbers.n)
-        return (1, [e, p, q, iqmp, dmp1, dmq1, n])
+        if use_crt:
+            iqmp = int2bytes(pn.iqmp)
+            dmp1 = int2bytes(pn.dmp1)
+            dmq1 = int2bytes(pn.dmq1)
+            n = int2bytes(pn.public_numbers.n)
+            return (1, [e, p, q, iqmp, dmp1, dmq1, n])
+        return (0, [e, p, q])
     elif isinstance(private_key, ec.EllipticCurvePrivateKeyWithSerialization):
         pn = private_key.private_numbers()
         scalar = int2bytes(pn.private_value)
@@ -1039,6 +1042,7 @@ def _prepare_private_key_for_native(
         return (2, [raw, pub])
     elif isinstance(private_key, x25519.X25519PrivateKey):
         raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        raw = raw[::-1]  # X25519 byte order needs to be reversed for the card
         pub = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         return (2, [raw, pub])
     else:
@@ -1762,7 +1766,7 @@ class OpenPgpSession:
         :param curve_oid: The curve OID.
         """
         if self._native:
-            raw = self._native.generate_ec_key(int(key_ref), str(curve_oid))
+            raw = self._native.generate_ec_key(int(key_ref), curve_oid.dotted_string)
             data = Tlv.parse_dict(raw)
             logger.info(f"EC key generated for {key_ref.name}")
             return _parse_ec_key(curve_oid, data)
@@ -1791,11 +1795,6 @@ class OpenPgpSession:
         """
 
         logger.debug(f"Importing a private key for {key_ref.name}")
-        if self._native:
-            key_type, components = _prepare_private_key_for_native(private_key)
-            self._native.put_key(int(key_ref), key_type, components)
-            logger.info(f"Private key imported for {key_ref.name}")
-            return
         attributes = _get_key_attributes(private_key, key_ref, self.version)
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
@@ -1808,6 +1807,13 @@ class OpenPgpSession:
                 and attributes.n_len == RSA_SIZE.RSA2048
             ):
                 raise NotSupportedError("This YubiKey only supports RSA 2048 keys")
+
+        if self._native:
+            use_crt = 0 < self.version[0] < 4
+            key_type, components = _prepare_private_key_for_native(private_key, use_crt)
+            self._native.put_key(int(key_ref), key_type, components)
+            logger.info(f"Private key imported for {key_ref.name}")
+            return
 
         template = _get_key_template(private_key, key_ref, 0 < self.version[0] < 4)
         self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, bytes(template))

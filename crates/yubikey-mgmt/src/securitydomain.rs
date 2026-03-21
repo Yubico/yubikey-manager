@@ -479,10 +479,18 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
 
         match self.get_data(TAG_CERTIFICATE_STORE, &key_tlv) {
             Ok(resp) => {
-                let entries = parse_tlv_list(&resp).map_err(|e| {
-                    SmartCardError::BadResponse(format!("TLV parse error: {e}"))
-                })?;
-                Ok(entries.into_iter().map(|(_, v)| v).collect())
+                // Each certificate is a full DER-encoded TLV (SEQUENCE).
+                // Return each entry as raw bytes including tag + length.
+                let mut certs = Vec::new();
+                let mut offset = 0;
+                while offset < resp.len() {
+                    let (_, _, _, end) = tlv_parse(&resp, offset).map_err(|e| {
+                        SmartCardError::BadResponse(format!("TLV parse error: {e}"))
+                    })?;
+                    certs.push(resp[offset..end].to_vec());
+                    offset = end;
+                }
+                Ok(certs)
             }
             Err(SmartCardError::Apdu { sw, .. })
                 if Sw::from_u16(sw) == Some(Sw::ReferenceDataNotFound) =>

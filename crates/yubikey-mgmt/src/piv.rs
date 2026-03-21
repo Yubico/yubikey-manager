@@ -904,6 +904,11 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn set_version(&mut self, version: Version) {
         self.version = version;
         self.protocol.configure(version);
+        // Re-query management key metadata now that version check may pass
+        self.mgmt_key_type = match self.get_management_key_metadata() {
+            Ok(meta) => meta.key_type,
+            Err(_) => self.mgmt_key_type,
+        };
     }
     pub fn management_key_type(&self) -> ManagementKeyType {
         self.mgmt_key_type

@@ -82,6 +82,10 @@ fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize,
         (ln_byte, offset + ln_byte)
     };
 
+    if end > data.len() {
+        return Err(TlvError::InvalidEncoding);
+    }
+
     Ok((tag, offset, ln, end))
 }
 

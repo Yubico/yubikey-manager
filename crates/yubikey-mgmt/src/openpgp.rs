@@ -2013,7 +2013,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         // We pass length in P1/P2=0 and rely on card behavior.
         let resp = self
             .protocol
-            .send_apdu(0, INS_GET_CHALLENGE, 0, 0, &[])?;
+            .send_apdu_with_le(0, INS_GET_CHALLENGE, 0, 0, &[], length)?;
         Ok(resp)
     }
 }

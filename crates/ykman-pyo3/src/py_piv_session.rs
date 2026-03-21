@@ -43,6 +43,18 @@ fn piv_err(e: piv::PivError) -> PyErr {
                 Err(_) => PyRuntimeError::new_err(msg),
             }
         }),
+        piv::PivError::BadResponse(msg) => Python::with_gil(|py| {
+            match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("BadResponseError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg),
+                },
+                Err(_) => PyRuntimeError::new_err(msg),
+            }
+        }),
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }

@@ -417,10 +417,23 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         p2: u8,
         data: &[u8],
     ) -> Result<Vec<u8>, SmartCardError> {
+        self.send_apdu_with_le(cla, ins, p1, p2, data, 0)
+    }
+
+    /// Send an APDU with an explicit Le (expected response length).
+    pub fn send_apdu_with_le(
+        &mut self,
+        cla: u8,
+        ins: u8,
+        p1: u8,
+        p2: u8,
+        data: &[u8],
+        le: u16,
+    ) -> Result<Vec<u8>, SmartCardError> {
         let (resp, sw) = if self.scp_state.is_some() {
             self.send_apdu_scp(cla, ins, p1, p2, data, true)?
         } else {
-            self.send_apdu_raw(cla, ins, p1, p2, data, 0)?
+            self.send_apdu_raw(cla, ins, p1, p2, data, le)?
         };
 
         if sw != SW_OK {
