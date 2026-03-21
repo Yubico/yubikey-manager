@@ -25,6 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+pub mod device;
 pub mod hsmauth;
 pub mod piv;
 pub mod iso7816;

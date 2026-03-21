@@ -810,10 +810,11 @@ impl<C: SmartCardConnection> ManagementSession<C> {
     // -- Backend helpers ---
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
-        if self.version < Version(4, 0, 0) {
-            // NEO: read via OTP slot
+        if self.version.0 == 3 {
+            // YubiKey NEO (v3): read via OTP slot
             self.protocol.send_apdu(0, 0x01, CONFIG_SLOT_YK4_CAPABILITIES, 0, &int2bytes(page as u64))
         } else {
+            // YubiKey 4+ and dev devices (version 0.0.1)
             self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0, &[])
         }
     }
