@@ -1,0 +1,333 @@
+// Copyright (c) 2026 Yubico AB
+// All rights reserved.
+//
+//   Redistribution and use in source and binary forms, with or
+//   without modification, are permitted provided that the following
+//   conditions are met:
+//
+//    1. Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//    2. Redistributions in binary form must reproduce the above
+//       copyright notice, this list of conditions and the following
+//       disclaimer in the documentation and/or other materials provided
+//       with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+// FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+// COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+// ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+
+//! Low-level OTP HID frame protocol and related helpers.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+
+use thiserror::Error;
+
+use crate::core_types::Version;
+use crate::iso7816::SmartCardError;
+use crate::otp_codec::calculate_crc;
+use crate::transport::hid::HidConnection;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+pub(crate) const SLOT_DATA_SIZE: usize = 64;
+const FRAME_SIZE: usize = SLOT_DATA_SIZE + 6; // 70
+pub(crate) const FEATURE_RPT_SIZE: usize = 8;
+pub(crate) const FEATURE_RPT_DATA_SIZE: usize = FEATURE_RPT_SIZE - 1; // 7
+
+const RESP_PENDING_FLAG: u8 = 0x40;
+const SLOT_WRITE_FLAG: u8 = 0x80;
+const RESP_TIMEOUT_WAIT_FLAG: u8 = 0x20;
+const SEQUENCE_MASK: u8 = 0x1F;
+
+pub(crate) const STATUS_OFFSET_PROG_SEQ: usize = 4;
+pub(crate) const STATUS_OFFSET_TOUCH_LOW: usize = 5;
+pub(crate) const CONFIG_SLOTS_PROGRAMMED_MASK: u8 = 0b0000_0011;
+
+/// ConfigSlot::ScanMap raw value, used to probe NEO devices.
+const SCAN_MAP_SLOT: u8 = 0x12;
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+pub enum YubiOtpError {
+    #[error("SmartCard error: {0}")]
+    SmartCard(#[from] SmartCardError),
+    #[error("Command rejected: {0}")]
+    CommandRejected(String),
+    #[error("Bad response: {0}")]
+    BadResponse(String),
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    #[error("Timeout: {0}")]
+    Timeout(String),
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
+    #[error("HID error: {0}")]
+    Hid(#[from] crate::transport::hid::HidError),
+}
+
+// ---------------------------------------------------------------------------
+// OTP HID protocol
+// ---------------------------------------------------------------------------
+
+/// Low-level OTP frame protocol over HID feature reports.
+pub struct OtpProtocol {
+    connection: HidConnection,
+    pub version: Version,
+}
+
+impl OtpProtocol {
+    pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+        let mut proto = Self {
+            connection,
+            version: Version(0, 0, 0),
+        };
+        let report = proto.receive()?;
+        proto.version = Version::from_bytes(&report[1..4]);
+
+        // NEO (version 3.x): force communication to refresh pgmSeq
+        if proto.version.0 == 3 {
+            // Write an invalid scan map — expected to be rejected
+            match proto.send_and_receive(SCAN_MAP_SLOT, Some(&[b'c'; 51])) {
+                Err(YubiOtpError::CommandRejected(_)) => {} // expected
+                _ => {}
+            }
+        }
+
+        Ok(proto)
+    }
+
+    /// Read status bytes from the YubiKey (first 3 bytes are firmware version).
+    pub fn read_status(&self) -> Result<Vec<u8>, YubiOtpError> {
+        let report = self.receive()?;
+        // Return bytes 1..7 (skip first byte, drop last byte = status flags)
+        Ok(report[1..FEATURE_RPT_DATA_SIZE].to_vec())
+    }
+
+    /// Send a command and read the response.
+    pub fn send_and_receive(
+        &self,
+        slot: u8,
+        data: Option<&[u8]>,
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        self.send_and_receive_with_cancel(slot, data, None, None)
+    }
+
+    /// Send a command with optional cancellation and keepalive callback.
+    pub fn send_and_receive_with_cancel(
+        &self,
+        slot: u8,
+        data: Option<&[u8]>,
+        cancel: Option<&AtomicBool>,
+        on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        let payload_data = data.unwrap_or(&[]);
+        if payload_data.len() > SLOT_DATA_SIZE {
+            return Err(YubiOtpError::InvalidParameter(
+                "Payload too large for HID frame".into(),
+            ));
+        }
+        let mut payload = [0u8; SLOT_DATA_SIZE];
+        payload[..payload_data.len()].copy_from_slice(payload_data);
+
+        let frame = format_frame(slot, &payload);
+        let prog_seq = self.send_frame(&frame)?;
+        self.read_frame(prog_seq, cancel, on_keepalive)
+    }
+
+    fn receive(&self) -> Result<Vec<u8>, YubiOtpError> {
+        let report = self.connection.get_feature_report()?;
+        if report.len() != FEATURE_RPT_SIZE {
+            return Err(YubiOtpError::BadResponse(format!(
+                "Incorrect feature report size (was {}, expected {FEATURE_RPT_SIZE})",
+                report.len()
+            )));
+        }
+        Ok(report)
+    }
+
+    fn await_ready_to_write(&self) -> Result<(), YubiOtpError> {
+        for _ in 0..20 {
+            let report = self.receive()?;
+            if report[FEATURE_RPT_DATA_SIZE] & SLOT_WRITE_FLAG == 0 {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        Err(YubiOtpError::Timeout(
+            "Timeout waiting for YubiKey to become ready to receive".into(),
+        ))
+    }
+
+    fn send_frame(&self, buf: &[u8]) -> Result<u8, YubiOtpError> {
+        debug_assert_eq!(buf.len(), FRAME_SIZE);
+        let prog_seq = self.receive()?[STATUS_OFFSET_PROG_SEQ];
+        let mut seq: u8 = 0;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = (offset + FEATURE_RPT_DATA_SIZE).min(buf.len());
+            let packet = &buf[offset..end];
+            if should_send(packet, seq) {
+                let mut report = [0u8; FEATURE_RPT_SIZE];
+                report[..packet.len()].copy_from_slice(packet);
+                report[FEATURE_RPT_DATA_SIZE] = 0x80 | seq;
+                self.await_ready_to_write()?;
+                self.connection.set_feature_report(&report)?;
+            }
+            seq += 1;
+            offset += FEATURE_RPT_DATA_SIZE;
+        }
+        Ok(prog_seq)
+    }
+
+    fn read_frame(
+        &self,
+        prog_seq: u8,
+        cancel: Option<&AtomicBool>,
+        on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        let mut response = Vec::new();
+        let mut seq: u8 = 0;
+        let mut needs_touch = false;
+
+        loop {
+            let report = self.receive()?;
+            let status_byte = report[FEATURE_RPT_DATA_SIZE];
+
+            if status_byte & RESP_PENDING_FLAG != 0 {
+                // Response packet
+                if seq == (status_byte & SEQUENCE_MASK) {
+                    response.extend_from_slice(&report[..FEATURE_RPT_DATA_SIZE]);
+                    seq += 1;
+                } else if (status_byte & SEQUENCE_MASK) == 0 {
+                    // Transmission complete
+                    self.reset_state()?;
+                    return Ok(response);
+                }
+            } else if status_byte == 0 {
+                // Status response
+                if !response.is_empty() {
+                    return Err(YubiOtpError::BadResponse("Incomplete transfer".into()));
+                } else if is_sequence_updated(&report, prog_seq) {
+                    // Return updated status bytes (1..7)
+                    return Ok(report[1..FEATURE_RPT_DATA_SIZE].to_vec());
+                } else if needs_touch {
+                    return Err(YubiOtpError::Timeout(
+                        "Timed out waiting for touch".into(),
+                    ));
+                } else {
+                    return Err(YubiOtpError::CommandRejected("No data".into()));
+                }
+            } else {
+                // Need to wait
+                if status_byte & RESP_TIMEOUT_WAIT_FLAG != 0 {
+                    if let Some(cb) = on_keepalive {
+                        cb(2); // STATUS_UPNEEDED
+                    }
+                    needs_touch = true;
+                    thread::sleep(Duration::from_millis(100));
+                } else {
+                    if let Some(cb) = on_keepalive {
+                        cb(1); // STATUS_PROCESSING
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+                if let Some(flag) = cancel {
+                    if flag.load(Ordering::Relaxed) {
+                        self.reset_state()?;
+                        return Err(YubiOtpError::Timeout("Command cancelled".into()));
+                    }
+                }
+            }
+        }
+    }
+
+    fn reset_state(&self) -> Result<(), YubiOtpError> {
+        let mut report = [0u8; FEATURE_RPT_SIZE];
+        report[FEATURE_RPT_DATA_SIZE] = 0xFF;
+        self.connection.set_feature_report(&report)?;
+        Ok(())
+    }
+}
+
+fn should_send(packet: &[u8], seq: u8) -> bool {
+    seq == 0 || seq == 9 || packet.iter().any(|&b| b != 0)
+}
+
+fn format_frame(slot: u8, payload: &[u8; SLOT_DATA_SIZE]) -> Vec<u8> {
+    let crc = calculate_crc(payload);
+    let mut frame = Vec::with_capacity(FRAME_SIZE);
+    frame.extend_from_slice(payload);
+    frame.push(slot);
+    frame.extend_from_slice(&crc.to_le_bytes());
+    frame.extend_from_slice(&[0u8; 3]);
+    debug_assert_eq!(frame.len(), FRAME_SIZE);
+    frame
+}
+
+fn is_sequence_updated(report: &[u8], prev_seq: u8) -> bool {
+    let next_seq = report[STATUS_OFFSET_PROG_SEQ];
+    next_seq == prev_seq.wrapping_add(1)
+        || (next_seq == 0
+            && prev_seq > 0
+            && report[STATUS_OFFSET_TOUCH_LOW] & CONFIG_SLOTS_PROGRAMMED_MASK == 0)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_frame_size() {
+        let payload = [0u8; SLOT_DATA_SIZE];
+        let frame = format_frame(0x01, &payload);
+        assert_eq!(frame.len(), FRAME_SIZE);
+    }
+
+    #[test]
+    fn test_should_send() {
+        // First and last packets always sent
+        assert!(should_send(&[0; 7], 0));
+        assert!(should_send(&[0; 7], 9));
+        // Zero packet in the middle is skipped
+        assert!(!should_send(&[0; 7], 5));
+        // Non-zero packet always sent
+        assert!(should_send(&[0, 0, 1, 0, 0, 0, 0], 5));
+    }
+
+    #[test]
+    fn test_is_sequence_updated() {
+        let mut report = [0u8; FEATURE_RPT_SIZE];
+        report[STATUS_OFFSET_PROG_SEQ] = 2;
+        assert!(is_sequence_updated(&report, 1));
+        assert!(!is_sequence_updated(&report, 2));
+
+        // Wrap-around: prog_seq goes to 0, all slots empty
+        report[STATUS_OFFSET_PROG_SEQ] = 0;
+        report[STATUS_OFFSET_TOUCH_LOW] = 0; // no slots programmed
+        assert!(is_sequence_updated(&report, 5));
+
+        // Wrap-around but slots still programmed → not updated
+        report[STATUS_OFFSET_TOUCH_LOW] = 0x01;
+        assert!(!is_sequence_updated(&report, 5));
+    }
+}

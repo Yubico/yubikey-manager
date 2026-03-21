@@ -32,29 +32,8 @@ use thiserror::Error;
 
 use crate::scp::ScpState;
 
-// ---------------------------------------------------------------------------
-// Version
-// ---------------------------------------------------------------------------
-
-/// 3-digit firmware version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Version(pub u8, pub u8, pub u8);
-
-impl Version {
-    pub fn from_bytes(data: &[u8]) -> Self {
-        Self(
-            data.first().copied().unwrap_or(0),
-            data.get(1).copied().unwrap_or(0),
-            data.get(2).copied().unwrap_or(0),
-        )
-    }
-}
-
-impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{}", self.0, self.1, self.2)
-    }
-}
+// Re-export types that were moved to core_types for backwards compatibility.
+pub use crate::core_types::{Transport, Version};
 
 // ---------------------------------------------------------------------------
 // AID — YubiKey application identifiers
@@ -187,13 +166,6 @@ impl SmartCardError {
 // ---------------------------------------------------------------------------
 // Connection trait
 // ---------------------------------------------------------------------------
-
-/// Transport type for a smart card connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Transport {
-    Usb,
-    Nfc,
-}
 
 /// Abstract smart card connection — send raw APDU bytes, get response + SW.
 pub trait SmartCardConnection {

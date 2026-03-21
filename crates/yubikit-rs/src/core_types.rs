@@ -25,18 +25,41 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-pub mod core_types;
-pub mod device;
-pub mod hsmauth;
-pub mod iso7816;
-pub mod management;
-pub mod oath;
-pub mod openpgp;
-pub mod otp_codec;
-pub mod otp_protocol;
-pub mod piv;
-pub mod scp;
-pub mod securitydomain;
-pub mod tlv;
-pub mod transport;
-pub mod yubiotp;
+//! Fundamental types shared across the crate.
+
+use std::fmt;
+
+// ---------------------------------------------------------------------------
+// Version
+// ---------------------------------------------------------------------------
+
+/// 3-digit firmware version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Version(pub u8, pub u8, pub u8);
+
+impl Version {
+    pub fn from_bytes(data: &[u8]) -> Self {
+        Self(
+            data.first().copied().unwrap_or(0),
+            data.get(1).copied().unwrap_or(0),
+            data.get(2).copied().unwrap_or(0),
+        )
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transport
+// ---------------------------------------------------------------------------
+
+/// Transport type for a smart card connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Transport {
+    Usb,
+    Nfc,
+}
