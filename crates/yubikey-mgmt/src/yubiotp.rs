@@ -1143,6 +1143,11 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         self.version
     }
 
+    /// Override the firmware version (used for dev devices).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
     /// Get the serial number of the YubiKey.
     pub fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
         let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
@@ -1272,9 +1277,10 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         &mut self.protocol
     }
 
-    // -- internal ----------------------------------------------------------
+    // -- internal (pub for PyO3 wrapper) -------------------------------------
 
-    fn write_config(
+    /// Write raw config bytes to a config slot (SmartCard).
+    pub fn write_config(
         &mut self,
         slot: ConfigSlot,
         config: &[u8],
@@ -1316,7 +1322,8 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         Err(YubiOtpError::CommandRejected("Not updated".into()))
     }
 
-    fn send_and_receive(
+    /// Send a command and receive a response of expected length.
+    pub fn send_and_receive(
         &mut self,
         slot: ConfigSlot,
         data: &[u8],
@@ -1364,6 +1371,11 @@ impl YubiOtpOtpSession {
     /// The firmware version of the YubiKey.
     pub fn version(&self) -> Version {
         self.version
+    }
+
+    /// Override the firmware version (used for dev devices).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
     }
 
     /// Get the serial number of the YubiKey.
@@ -1500,9 +1512,10 @@ impl YubiOtpOtpSession {
         }
     }
 
-    // -- internal ----------------------------------------------------------
+    // -- internal (pub for PyO3 wrapper) -------------------------------------
 
-    fn write_config(
+    /// Write raw config bytes to a config slot (HID/OTP).
+    pub fn write_config(
         &mut self,
         slot: ConfigSlot,
         config: &[u8],

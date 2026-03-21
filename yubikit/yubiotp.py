@@ -32,7 +32,7 @@ import warnings
 from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from .core import (
     TRANSPORT,
@@ -52,6 +52,13 @@ from .core.otp import (
     check_crc,
 )
 from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
+
+try:
+    from _ykman_native.sessions import (
+        YubiOtpSession as _NativeYubiOtpSession,
+    )
+except ImportError:
+    _NativeYubiOtpSession = None
 
 logger = logging.getLogger(__name__)
 
@@ -669,6 +676,22 @@ class _YubiOtpOtpBackend(_Backend):
         raise BadResponseError("Invalid CRC")
 
 
+class _NativeSmartCardBackend(_Backend):
+    """Backend that delegates to the native Rust YubiOTP session."""
+
+    def __init__(self, native: Any):
+        self._native = native
+
+    def close(self):
+        pass  # Managed by the connection
+
+    def write_update(self, slot, data):
+        raise NotImplementedError("write_update not used with native backend")
+
+    def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
+        raise NotImplementedError("send_and_receive not used with native backend")
+
+
 INS_CONFIG = 0x01
 INS_YK2_STATUS = 0x03
 
@@ -713,6 +736,7 @@ class YubiOtpSession:
         connection: OtpConnection | SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        self._native: Any = None
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
@@ -721,36 +745,53 @@ class YubiOtpSession:
             self._version = _override_version.patch(otp_protocol.version)
             self.backend: _Backend = _YubiOtpOtpBackend(otp_protocol)
         elif isinstance(connection, SmartCardConnection):
-            card_protocol = SmartCardProtocol(connection)
-            mgmt_version = None
-            if connection.transport == TRANSPORT.NFC:
-                # This version is more reliable over NFC
-                try:
-                    card_protocol.select(AID.MANAGEMENT)
-                    select_str = card_protocol.select(AID.MANAGEMENT).decode()
-                    mgmt_version = Version.from_string(select_str)
-                except ApplicationNotAvailableError:
-                    pass  # Not available (probably NEO), get version from status
-
-            self._status = card_protocol.select(AID.OTP)
-            otp_version = Version.from_bytes(self._status[:3])
-            if mgmt_version and mgmt_version[0] == 3:
-                # NEO reports the highest of these two
-                self._version = max(mgmt_version, otp_version)
+            if scp_key_params is None and _NativeYubiOtpSession is not None:
+                native = _NativeYubiOtpSession(connection)
+                self._native = native
+                self._version = _override_version.patch(Version(*native.version))
+                if self._version != Version(*native.version):
+                    native.version = tuple(self._version)
+                version_tuple, flags = native.get_config_state()
+                self._status = b""  # Status managed by native session
+                self.backend = _NativeSmartCardBackend(native)
             else:
-                self._version = _override_version.patch(mgmt_version or otp_version)
-            card_protocol.configure(self._version)
-            if scp_key_params:
-                card_protocol.init_scp(scp_key_params)
-            self.backend = _YubiOtpSmartCardBackend(
-                card_protocol, self._version, self._status[3]
-            )
+                self._init_smartcard_python(connection, scp_key_params)
         else:
             raise TypeError("Unsupported connection type")
         logger.debug(
             "YubiOTP session initialized for "
             f"connection={type(connection).__name__}, version={self.version}, "
-            f"state={self.get_config_state()}"
+            f"state={self.get_config_state()}, "
+            f"native={self._native is not None}"
+        )
+
+    def _init_smartcard_python(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: ScpKeyParams | None,
+    ) -> None:
+        """Initialize using Python SmartCardProtocol (for SCP or fallback)."""
+        card_protocol = SmartCardProtocol(connection)
+        mgmt_version = None
+        if connection.transport == TRANSPORT.NFC:
+            try:
+                card_protocol.select(AID.MANAGEMENT)
+                select_str = card_protocol.select(AID.MANAGEMENT).decode()
+                mgmt_version = Version.from_string(select_str)
+            except ApplicationNotAvailableError:
+                pass
+
+        self._status = card_protocol.select(AID.OTP)
+        otp_version = Version.from_bytes(self._status[:3])
+        if mgmt_version and mgmt_version[0] == 3:
+            self._version = max(mgmt_version, otp_version)
+        else:
+            self._version = _override_version.patch(mgmt_version or otp_version)
+        card_protocol.configure(self._version)
+        if scp_key_params:
+            card_protocol.init_scp(scp_key_params)
+        self.backend = _YubiOtpSmartCardBackend(
+            card_protocol, self._version, self._status[3]
         )
 
     def close(self) -> None:
@@ -772,12 +813,20 @@ class YubiOtpSession:
 
     def get_serial(self) -> int:
         """Get serial number."""
+        if self._native:
+            return self._native.get_serial()
         return bytes2int(
             self.backend.send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4)
         )
 
     def get_config_state(self) -> ConfigState:
         """Get configuration state of the YubiOTP application."""
+        if self._native:
+            version_tuple, flags = self._native.get_config_state()
+            return ConfigState(
+                Version(*version_tuple),
+                flags,
+            )
         return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
 
     def _write_config(self, slot, config, cur_acc_code):
@@ -811,6 +860,14 @@ class YubiOtpSession:
             f"Writing configuration of type {type(configuration).__name__} to "
             f"slot {slot}"
         )
+        if self._native:
+            self._native.put_configuration(
+                int(slot),
+                configuration.get_config(acc_code),
+                acc_code,
+                cur_acc_code,
+            )
+            return
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             configuration.get_config(acc_code),
@@ -842,6 +899,14 @@ class YubiOtpSession:
             )
         slot = SLOT(slot)
         logger.debug(f"Writing configuration update to slot {slot}")
+        if self._native:
+            self._native.update_configuration(
+                int(slot),
+                configuration.get_config(acc_code),
+                acc_code,
+                cur_acc_code,
+            )
+            return
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
             configuration.get_config(acc_code),
@@ -851,6 +916,9 @@ class YubiOtpSession:
     def swap_slots(self) -> None:
         """Swap the two slot configurations."""
         logger.debug("Swapping touch slots")
+        if self._native:
+            self._native.swap_slots()
+            return
         self._write_config(CONFIG_SLOT.SWAP, b"", None)
 
     def delete_slot(self, slot: SLOT, cur_acc_code: bytes | None = None) -> None:
@@ -861,6 +929,9 @@ class YubiOtpSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Deleting slot {slot}")
+        if self._native:
+            self._native.delete_slot(int(slot), cur_acc_code)
+            return
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
             b"\0" * CONFIG_SIZE,
@@ -874,6 +945,9 @@ class YubiOtpSession:
         will use when typing out OTPs.
         """
         logger.debug("Writing scan map")
+        if self._native:
+            self._native.set_scan_map(scan_map, cur_acc_code)
+            return
         self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
 
     def set_ndef_configuration(
@@ -892,6 +966,11 @@ class YubiOtpSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Writing NDEF configuration for slot {slot} of type {ndef_type}")
+        if self._native:
+            self._native.set_ndef_configuration(
+                int(slot), int(ndef_type), uri, cur_acc_code
+            )
+            return
         self._write_config(
             SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
             _build_ndef_config(uri, ndef_type),
@@ -914,6 +993,8 @@ class YubiOtpSession:
         require_version(self.version, (2, 2, 0))
         slot = SLOT(slot)
         logger.debug(f"Calculating response for slot {slot}")
+        if self._native:
+            return bytes(self._native.calculate_hmac_sha1(int(slot), challenge))
 
         # Pad challenge with byte different from last
         challenge = challenge.ljust(

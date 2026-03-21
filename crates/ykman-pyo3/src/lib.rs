@@ -37,6 +37,7 @@ mod py_pcsc;
 mod py_piv_session;
 mod py_scp;
 mod py_securitydomain_session;
+mod py_yubiotp_session;
 
 use pyo3::prelude::*;
 
@@ -59,6 +60,8 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_hsmauth_session::HsmAuthSession>()?;
     m.add_class::<py_management_session::ManagementSession>()?;
     m.add_class::<py_securitydomain_session::SecurityDomainSession>()?;
+    m.add_class::<py_yubiotp_session::PyYubiOtpSession>()?;
+    m.add_class::<py_yubiotp_session::PyYubiOtpOtpSession>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;
