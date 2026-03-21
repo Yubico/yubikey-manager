@@ -48,6 +48,7 @@ from _ykman_native.oath import (
 from _ykman_native.oath import (
     parse_cred_id as _parse_cred_id_native,
 )
+from _ykman_native.sessions import OathSession as _NativeOathSession
 
 from .core import (
     BadResponseError,
@@ -248,32 +249,59 @@ def _format_code(credential, timestamp, truncated):
 
 
 class OathSession:
-    """A session with the OATH application."""
+    """A session with the OATH application.
+
+    Delegates to the Rust OathSession implementation via PyO3.
+    Falls back to Python for SCP-encrypted sessions.
+    """
 
     def __init__(
         self,
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        self._native: _NativeOathSession | None
+        if scp_key_params is not None:
+            # SCP requires Python SmartCardProtocol for initialization
+            self._native = None
+            self._init_python(connection, scp_key_params)
+        else:
+            # Use Rust session directly for non-SCP connections
+            native = _NativeOathSession(connection)
+            self._native = native
+            self._version = _override_version.patch(Version(*native.version))
+            if self._version != Version(*native.version):
+                # Dev device — update Rust session version for version checks
+                native.version = tuple(self._version)
+            self._device_id = native.device_id
+            self._has_key = native.has_key
+            self._challenge = b"" if native.locked else None
+            self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
+
+        logger.debug(
+            f"OATH session initialized (version={self.version}, "
+            f"has_key={self._has_key}, native={self._native is not None})"
+        )
+
+    def _init_python(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: ScpKeyParams,
+    ) -> None:
+        """Initialize using Python SmartCardProtocol (for SCP sessions)."""
         self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
         self._version, self._salt, self._challenge = _parse_select(
             self.protocol.select(AID.OATH)
         )
         self.protocol.configure(self.version)
 
-        if scp_key_params:
-            if (5, 0, 0) <= self._version < (5, 6, 3):
-                raise NotSupportedError("SCP for OATH requires YubiKey 5.6.3 or later")
-            self.protocol.init_scp(scp_key_params)
+        if (5, 0, 0) <= self._version < (5, 6, 3):
+            raise NotSupportedError("SCP for OATH requires YubiKey 5.6.3 or later")
+        self.protocol.init_scp(scp_key_params)
         self._scp_params = scp_key_params
 
         self._has_key = self._challenge is not None
         self._device_id = _get_device_id(self._salt)
-        self._neo_unlock_workaround = not scp_key_params and self.version < (3, 0, 0)
-        logger.debug(
-            f"OATH session initialized (version={self.version}, "
-            f"has_key={self._has_key})"
-        )
 
     @property
     def version(self) -> Version:
@@ -291,28 +319,41 @@ class OathSession:
     @property
     def has_key(self) -> bool:
         """If True, the YubiKey has an access key set."""
+        if self._native:
+            return self._native.has_key
         return self._has_key
 
     @property
     def locked(self) -> bool:
         """If True, the OATH application is currently locked via an access key."""
+        if self._native:
+            return self._native.locked
         return self._challenge is not None
 
     def reset(self) -> None:
         """Perform a factory reset on the OATH application."""
-        self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
-        _, self._salt, self._challenge = _parse_select(self.protocol.select(AID.OATH))
-        if self._scp_params:
-            self.protocol.init_scp(self._scp_params)
+        if self._native:
+            self._native.reset()
+            self._has_key = self._native.has_key
+            self._device_id = self._native.device_id
+        else:
+            self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
+            _, self._salt, self._challenge = _parse_select(
+                self.protocol.select(AID.OATH)
+            )
+            if self._scp_params:
+                self.protocol.init_scp(self._scp_params)
+            self._has_key = False
+            self._device_id = _get_device_id(self._salt)
         logger.info("OATH application data reset performed")
-        self._has_key = False
-        self._device_id = _get_device_id(self._salt)
 
     def derive_key(self, password: str) -> bytes:
         """Derive an access key from a password.
 
         :param password: The derivation password.
         """
+        if self._native:
+            return bytes(self._native.derive_key(password))
         return _derive_key(self._salt, password)
 
     def validate(self, key: bytes) -> None:
@@ -323,39 +364,44 @@ class OathSession:
         :param key: The access key.
         """
         logger.debug("Unlocking session")
-        data = bytes(_build_validate_data(key, self._challenge, os.urandom(8)))
-        # Extract the host challenge we sent (second TLV in data)
-        _, rest = Tlv.parse_from(data)
-        host_challenge = Tlv(rest).value
-        resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
-        if not _hmac_verify(key, host_challenge, Tlv.unpack(TAG_RESPONSE, resp)):
-            raise BadResponseError(
-                "Response from validation does not match verification!"
-            )
-        self._challenge = None
-        self._neo_unlock_workaround = False
+        if self._native:
+            self._native.validate(key)
+            self._challenge = None
+        else:
+            data = bytes(_build_validate_data(key, self._challenge, os.urandom(8)))
+            _, rest = Tlv.parse_from(data)
+            host_challenge = Tlv(rest).value
+            resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
+            if not _hmac_verify(key, host_challenge, Tlv.unpack(TAG_RESPONSE, resp)):
+                raise BadResponseError(
+                    "Response from validation does not match verification!"
+                )
+            self._challenge = None
 
     def set_key(self, key: bytes) -> None:
         """Set an access key for authentication.
 
         :param key: The access key.
         """
-        challenge = os.urandom(8)
-        data = bytes(_build_set_key_data(key, challenge))
-        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, data)
+        if self._native:
+            self._native.set_key(key)
+            self._has_key = True
+        else:
+            challenge = os.urandom(8)
+            data = bytes(_build_set_key_data(key, challenge))
+            self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, data)
+            self._has_key = True
         logger.info("New access code set")
-        self._has_key = True
-        if self._neo_unlock_workaround:
-            logger.debug("Performing NEO workaround, re-select and unlock")
-            self._challenge = _parse_select(self.protocol.select(AID.OATH))[2]
-            self.validate(key)
 
     def unset_key(self) -> None:
         """Remove the access key.
 
         This removes the need to authentication a session before using it.
         """
-        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
+        if self._native:
+            self._native.unset_key()
+        else:
+            self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
         logger.info("Access code removed")
         self._has_key = False
 
@@ -368,6 +414,29 @@ class OathSession:
         :param touch_required: The touch policy.
         """
         d = credential_data
+        if self._native:
+            result = self._native.put_credential(
+                name=d.name,
+                oath_type=int(d.oath_type),
+                hash_algorithm=int(d.hash_algorithm),
+                secret=d.secret,
+                digits=d.digits,
+                period=d.period,
+                counter=d.counter,
+                issuer=d.issuer,
+                touch_required=touch_required,
+            )
+            logger.info("Credential imported")
+            return Credential(
+                result[0],
+                result[1],
+                result[2],
+                result[3],
+                OATH_TYPE(result[4]),
+                result[5],
+                result[6],
+            )
+
         cred_id = d.get_id()
         data = bytes(
             _build_put_data(
@@ -380,15 +449,8 @@ class OathSession:
                 d.counter,
             )
         )
-
-        logger.debug(
-            f"Importing credential (type={d.oath_type!r}, hash={d.hash_algorithm!r}, "
-            f"digits={d.digits}, period={d.period}, imf={d.counter}, "
-            f"touch_required={touch_required})"
-        )
         self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
         logger.info("Credential imported")
-
         return Credential(
             self.device_id,
             cred_id,
@@ -409,6 +471,11 @@ class OathSession:
         :param issuer: The credential issuer.
         """
         logger.debug(f"Renaming credential '{credential_id!r}' to '{issuer}:{name}'")
+        if self._native:
+            result = self._native.rename_credential(credential_id, name, issuer)
+            logger.info("Credential renamed")
+            return bytes(result)
+
         require_version(self.version, (5, 3, 1))
         _, _, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
         new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
@@ -421,6 +488,13 @@ class OathSession:
     def list_credentials(self) -> list[Credential]:
         """List OATH credentials."""
         logger.debug("Listing OATH credentials...")
+        if self._native:
+            raw = self._native.list_credentials()
+            return [
+                Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6])
+                for r in raw
+            ]
+
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
             data = Tlv.unpack(TAG_NAME_LIST, tlv)
@@ -441,6 +515,9 @@ class OathSession:
         :param challenge: The challenge.
         """
         logger.debug(f"Calculating response for credential: {credential_id!r}")
+        if self._native:
+            return bytes(self._native.calculate(credential_id, challenge))
+
         resp = Tlv.unpack(
             TAG_RESPONSE,
             self.protocol.send_apdu(
@@ -459,7 +536,10 @@ class OathSession:
         :param credential_id: The id of the credential.
         """
         logger.debug(f"Deleting crededential: {credential_id!r}")
-        self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
+        if self._native:
+            self._native.delete_credential(credential_id)
+        else:
+            self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
         logger.info("Credential deleted")
 
     def calculate_all(
@@ -472,6 +552,19 @@ class OathSession:
         :param timestamp: A timestamp used for the TOTP challenge.
         """
         timestamp = int(timestamp or time())
+
+        if self._native:
+            raw = self._native.calculate_all(timestamp)
+            entries: dict[Credential, Code | None] = {}
+            for r in raw:
+                cred = Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6])
+                if r[7] is not None:
+                    code: Code | None = Code(r[7], r[8], r[9])
+                else:
+                    code = None
+                entries[cred] = code
+            return entries
+
         challenge = bytes(_get_challenge(timestamp, DEFAULT_PERIOD))
         logger.debug(f"Calculating all codes for time={timestamp}")
 
@@ -517,6 +610,20 @@ class OathSession:
             raise ValueError("Credential does not belong to this YubiKey")
 
         timestamp = int(timestamp or time())
+
+        if self._native:
+            result = self._native.calculate_code(
+                device_id=credential.device_id,
+                cred_id=credential.id,
+                issuer=credential.issuer,
+                name=credential.name,
+                oath_type=int(credential.oath_type),
+                period=credential.period,
+                touch_required=credential.touch_required,
+                timestamp=timestamp,
+            )
+            return Code(result[0], result[1], result[2])
+
         if credential.oath_type == OATH_TYPE.TOTP:
             logger.debug(
                 f"Calculating TOTP code for time={timestamp}, "
