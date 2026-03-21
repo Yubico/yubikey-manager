@@ -1,0 +1,344 @@
+use pyo3::prelude::*;
+use yubikey_mgmt::piv::{
+    self, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession as RustPivSession, Slot,
+    TouchPolicy,
+};
+
+use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+
+fn piv_err(e: piv::PivError) -> PyErr {
+    use pyo3::exceptions::*;
+    match e {
+        piv::PivError::SmartCard(sc) => smartcard_err(sc),
+        piv::PivError::InvalidPin(retries) => {
+            PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
+        }
+        piv::PivError::NotSupported(msg) => PyRuntimeError::new_err(msg),
+        other => PyRuntimeError::new_err(other.to_string()),
+    }
+}
+
+fn parse_slot(v: u8) -> PyResult<Slot> {
+    Slot::from_u8(v)
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("Invalid slot: 0x{:02X}", v)))
+}
+
+fn parse_key_type(v: u8) -> PyResult<KeyType> {
+    KeyType::from_u8(v).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid key type: 0x{:02X}", v))
+    })
+}
+
+fn parse_mgmt_key_type(v: u8) -> PyResult<ManagementKeyType> {
+    ManagementKeyType::from_u8(v).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid management key type: 0x{:02X}",
+            v
+        ))
+    })
+}
+
+fn parse_pin_policy(v: u8) -> PyResult<PinPolicy> {
+    PinPolicy::from_u8(v).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid pin policy: 0x{:02X}", v))
+    })
+}
+
+fn parse_touch_policy(v: u8) -> PyResult<TouchPolicy> {
+    TouchPolicy::from_u8(v).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid touch policy: 0x{:02X}", v))
+    })
+}
+
+fn parse_object_id(v: u32) -> PyResult<ObjectId> {
+    match v {
+        0x5FC107 => Ok(ObjectId::Capability),
+        0x5FC102 => Ok(ObjectId::Chuid),
+        0x5FC105 => Ok(ObjectId::Authentication),
+        0x5FC103 => Ok(ObjectId::Fingerprints),
+        0x5FC106 => Ok(ObjectId::Security),
+        0x5FC108 => Ok(ObjectId::Facial),
+        0x5FC109 => Ok(ObjectId::Printed),
+        0x5FC10A => Ok(ObjectId::Signature),
+        0x5FC10B => Ok(ObjectId::KeyManagement),
+        0x5FC101 => Ok(ObjectId::CardAuth),
+        0x7E => Ok(ObjectId::Discovery),
+        0x5FC10C => Ok(ObjectId::KeyHistory),
+        0x5FC121 => Ok(ObjectId::Iris),
+        0x5FC10D => Ok(ObjectId::Retired1),
+        0x5FC10E => Ok(ObjectId::Retired2),
+        0x5FC10F => Ok(ObjectId::Retired3),
+        0x5FC110 => Ok(ObjectId::Retired4),
+        0x5FC111 => Ok(ObjectId::Retired5),
+        0x5FC112 => Ok(ObjectId::Retired6),
+        0x5FC113 => Ok(ObjectId::Retired7),
+        0x5FC114 => Ok(ObjectId::Retired8),
+        0x5FC115 => Ok(ObjectId::Retired9),
+        0x5FC116 => Ok(ObjectId::Retired10),
+        0x5FC117 => Ok(ObjectId::Retired11),
+        0x5FC118 => Ok(ObjectId::Retired12),
+        0x5FC119 => Ok(ObjectId::Retired13),
+        0x5FC11A => Ok(ObjectId::Retired14),
+        0x5FC11B => Ok(ObjectId::Retired15),
+        0x5FC11C => Ok(ObjectId::Retired16),
+        0x5FC11D => Ok(ObjectId::Retired17),
+        0x5FC11E => Ok(ObjectId::Retired18),
+        0x5FC11F => Ok(ObjectId::Retired19),
+        0x5FC120 => Ok(ObjectId::Retired20),
+        0x5FFF01 => Ok(ObjectId::Attestation),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid object ID: 0x{:06X}",
+            v
+        ))),
+    }
+}
+
+#[pyclass]
+pub struct PivSession {
+    inner: RustPivSession<PySmartCardConnection>,
+}
+
+#[pymethods]
+impl PivSession {
+    #[new]
+    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let conn = PySmartCardConnection::from_py(connection)?;
+        let inner = RustPivSession::new(conn).map_err(piv_err)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn version(&self) -> (u8, u8, u8) {
+        let v = self.inner.version();
+        (v.0, v.1, v.2)
+    }
+
+    #[getter]
+    fn management_key_type(&self) -> u8 {
+        self.inner.management_key_type() as u8
+    }
+
+    fn reset(&mut self) -> PyResult<()> {
+        self.inner.reset().map_err(piv_err)
+    }
+
+    fn get_serial(&mut self) -> PyResult<u32> {
+        self.inner.get_serial().map_err(piv_err)
+    }
+
+    fn authenticate(&mut self, management_key: &[u8]) -> PyResult<()> {
+        self.inner.authenticate(management_key).map_err(piv_err)
+    }
+
+    fn set_management_key(
+        &mut self,
+        key_type: u8,
+        management_key: &[u8],
+        require_touch: bool,
+    ) -> PyResult<()> {
+        let kt = parse_mgmt_key_type(key_type)?;
+        self.inner
+            .set_management_key(kt, management_key, require_touch)
+            .map_err(piv_err)
+    }
+
+    fn verify_pin(&mut self, pin: &str) -> PyResult<()> {
+        self.inner.verify_pin(pin).map_err(piv_err)
+    }
+
+    #[pyo3(signature = (temporary_pin=false, check_only=false))]
+    fn verify_uv(
+        &mut self,
+        temporary_pin: bool,
+        check_only: bool,
+    ) -> PyResult<Option<Vec<u8>>> {
+        self.inner
+            .verify_uv(temporary_pin, check_only)
+            .map_err(piv_err)
+    }
+
+    fn verify_temporary_pin(&mut self, pin: &[u8]) -> PyResult<()> {
+        self.inner.verify_temporary_pin(pin).map_err(piv_err)
+    }
+
+    fn get_pin_attempts(&mut self) -> PyResult<u32> {
+        self.inner.get_pin_attempts().map_err(piv_err)
+    }
+
+    fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
+        self.inner.change_pin(old_pin, new_pin).map_err(piv_err)
+    }
+
+    fn change_puk(&mut self, old_puk: &str, new_puk: &str) -> PyResult<()> {
+        self.inner.change_puk(old_puk, new_puk).map_err(piv_err)
+    }
+
+    fn unblock_pin(&mut self, puk: &str, new_pin: &str) -> PyResult<()> {
+        self.inner.unblock_pin(puk, new_pin).map_err(piv_err)
+    }
+
+    fn set_pin_attempts(&mut self, pin_attempts: u8, puk_attempts: u8) -> PyResult<()> {
+        self.inner
+            .set_pin_attempts(pin_attempts, puk_attempts)
+            .map_err(piv_err)
+    }
+
+    /// Returns (default_value, total_attempts, attempts_remaining).
+    fn get_pin_metadata(&mut self) -> PyResult<(bool, u32, u32)> {
+        let m = self.inner.get_pin_metadata().map_err(piv_err)?;
+        Ok((m.default_value, m.total_attempts, m.attempts_remaining))
+    }
+
+    /// Returns (default_value, total_attempts, attempts_remaining).
+    fn get_puk_metadata(&mut self) -> PyResult<(bool, u32, u32)> {
+        let m = self.inner.get_puk_metadata().map_err(piv_err)?;
+        Ok((m.default_value, m.total_attempts, m.attempts_remaining))
+    }
+
+    /// Returns (key_type, default_value, touch_policy).
+    fn get_management_key_metadata(&mut self) -> PyResult<(u8, bool, u8)> {
+        let m = self.inner.get_management_key_metadata().map_err(piv_err)?;
+        Ok((m.key_type as u8, m.default_value, m.touch_policy as u8))
+    }
+
+    /// Returns (key_type, pin_policy, touch_policy, generated, public_key_der).
+    fn get_slot_metadata(&mut self, slot: u8) -> PyResult<(u8, u8, u8, bool, Vec<u8>)> {
+        let s = parse_slot(slot)?;
+        let m = self.inner.get_slot_metadata(s).map_err(piv_err)?;
+        Ok((
+            m.key_type as u8,
+            m.pin_policy as u8,
+            m.touch_policy as u8,
+            m.generated,
+            m.public_key_der,
+        ))
+    }
+
+    /// Returns (configured, attempts_remaining, temporary_pin).
+    fn get_bio_metadata(&mut self) -> PyResult<(bool, u32, bool)> {
+        let m = self.inner.get_bio_metadata().map_err(piv_err)?;
+        Ok((m.configured, m.attempts_remaining, m.temporary_pin))
+    }
+
+    /// Sign pre-processed data. Returns raw signature bytes.
+    fn sign(&mut self, slot: u8, key_type: u8, message: &[u8]) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        let kt = parse_key_type(key_type)?;
+        self.inner.sign(s, kt, message).map_err(piv_err)
+    }
+
+    fn decrypt(&mut self, slot: u8, cipher_text: &[u8]) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        self.inner.decrypt(s, cipher_text).map_err(piv_err)
+    }
+
+    fn calculate_secret(
+        &mut self,
+        slot: u8,
+        key_type: u8,
+        peer_public_key: &[u8],
+    ) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        let kt = parse_key_type(key_type)?;
+        self.inner
+            .calculate_secret(s, kt, peer_public_key)
+            .map_err(piv_err)
+    }
+
+    fn get_object(&mut self, object_id: u32) -> PyResult<Vec<u8>> {
+        let oid = parse_object_id(object_id)?;
+        self.inner.get_object(oid).map_err(piv_err)
+    }
+
+    /// Put an object. Pass `None` to delete.
+    fn put_object(&mut self, object_id: u32, data: Option<&[u8]>) -> PyResult<()> {
+        let oid = parse_object_id(object_id)?;
+        self.inner.put_object(oid, data).map_err(piv_err)
+    }
+
+    /// Get certificate as DER bytes.
+    fn get_certificate(&mut self, slot: u8) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        self.inner.get_certificate(s).map_err(piv_err)
+    }
+
+    fn put_certificate(&mut self, slot: u8, cert_der: &[u8], compress: bool) -> PyResult<()> {
+        let s = parse_slot(slot)?;
+        self.inner
+            .put_certificate(s, cert_der, compress)
+            .map_err(piv_err)
+    }
+
+    fn delete_certificate(&mut self, slot: u8) -> PyResult<()> {
+        let s = parse_slot(slot)?;
+        self.inner.delete_certificate(s).map_err(piv_err)
+    }
+
+    /// Import a private key. `key_der` is the raw key material.
+    fn put_key(
+        &mut self,
+        slot: u8,
+        key_type: u8,
+        key_der: &[u8],
+        pin_policy: u8,
+        touch_policy: u8,
+    ) -> PyResult<()> {
+        let s = parse_slot(slot)?;
+        let kt = parse_key_type(key_type)?;
+        let pp = parse_pin_policy(pin_policy)?;
+        let tp = parse_touch_policy(touch_policy)?;
+        self.inner
+            .put_key(s, kt, key_der, pp, tp)
+            .map_err(piv_err)
+    }
+
+    /// Generate a key pair. Returns public key bytes.
+    fn generate_key(
+        &mut self,
+        slot: u8,
+        key_type: u8,
+        pin_policy: u8,
+        touch_policy: u8,
+    ) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        let kt = parse_key_type(key_type)?;
+        let pp = parse_pin_policy(pin_policy)?;
+        let tp = parse_touch_policy(touch_policy)?;
+        self.inner
+            .generate_key(s, kt, pp, tp)
+            .map_err(piv_err)
+    }
+
+    /// Attest a key in a slot. Returns DER certificate.
+    fn attest_key(&mut self, slot: u8) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        self.inner.attest_key(s).map_err(piv_err)
+    }
+
+    fn move_key(&mut self, from_slot: u8, to_slot: u8) -> PyResult<()> {
+        let f = parse_slot(from_slot)?;
+        let t = parse_slot(to_slot)?;
+        self.inner.move_key(f, t).map_err(piv_err)
+    }
+
+    fn delete_key(&mut self, slot: u8) -> PyResult<()> {
+        let s = parse_slot(slot)?;
+        self.inner.delete_key(s).map_err(piv_err)
+    }
+
+    fn check_key_support(
+        &mut self,
+        key_type: u8,
+        pin_policy: u8,
+        touch_policy: u8,
+        generate: bool,
+        fips_restrictions: bool,
+    ) -> PyResult<()> {
+        let kt = parse_key_type(key_type)?;
+        let pp = parse_pin_policy(pin_policy)?;
+        let tp = parse_touch_policy(touch_policy)?;
+        self.inner
+            .check_key_support(kt, pp, tp, generate, fips_restrictions)
+            .map_err(piv_err)
+    }
+}

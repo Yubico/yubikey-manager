@@ -25,11 +25,18 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+mod py_bridge;
 mod py_core;
 mod py_hid;
+mod py_hsmauth_session;
+mod py_management_session;
 mod py_oath;
+mod py_oath_session;
+mod py_openpgp_session;
 mod py_pcsc;
+mod py_piv_session;
 mod py_scp;
+mod py_securitydomain_session;
 
 use pyo3::prelude::*;
 
@@ -40,5 +47,23 @@ fn _ykman_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_core::register(m)?;
     py_scp::register(m)?;
     py_oath::register(m)?;
+    register_sessions(m)?;
+    Ok(())
+}
+
+fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    let m = PyModule::new(parent.py(), "sessions")?;
+    m.add_class::<py_oath_session::OathSession>()?;
+    m.add_class::<py_piv_session::PivSession>()?;
+    m.add_class::<py_openpgp_session::OpenPgpSession>()?;
+    m.add_class::<py_hsmauth_session::HsmAuthSession>()?;
+    m.add_class::<py_management_session::ManagementSession>()?;
+    m.add_class::<py_securitydomain_session::SecurityDomainSession>()?;
+    parent.add_submodule(&m)?;
+
+    let sys = parent.py().import("sys")?;
+    let modules = sys.getattr("modules")?;
+    modules.set_item("_ykman_native.sessions", &m)?;
+
     Ok(())
 }

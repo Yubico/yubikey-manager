@@ -1019,6 +1019,8 @@ dependencies = [
 name = "ykman-pyo3"
 version = "0.1.0"
 dependencies = [
+ "elliptic-curve",
+ "p256",
  "pyo3",
  "yubikey-mgmt",
 ]

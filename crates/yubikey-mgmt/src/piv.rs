@@ -145,8 +145,8 @@ impl KeyType {
         let algo_data = &seq_data[algo_off..algo_off + algo_len];
 
         // Parse OID
-        let (_, oid_off, oid_len, _) = tlv_parse(algo_data, 0)
-            .map_err(|_| PivError::InvalidValue("Invalid OID".into()))?;
+        let (_, oid_off, oid_len, _) =
+            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidValue("Invalid OID".into()))?;
         let oid = &algo_data[oid_off..oid_off + oid_len];
 
         // RSA OID: 1.2.840.113549.1.1.1
@@ -518,8 +518,8 @@ pub struct BioMetadata {
 // ---------------------------------------------------------------------------
 
 pub const DEFAULT_MANAGEMENT_KEY: &[u8] = &[
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 ];
 
 const PIN_LEN: usize = 8;
@@ -776,14 +776,12 @@ fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
             (0x01, 0x00) => {
                 // Net iD zlib format
                 if cert_data.len() >= 4 {
-                    let expected_len =
-                        u16::from_le_bytes([cert_data[2], cert_data[3]]) as usize;
-                    let mut decoder =
-                        flate2::read::ZlibDecoder::new(&cert_data[4..]);
+                    let expected_len = u16::from_le_bytes([cert_data[2], cert_data[3]]) as usize;
+                    let mut decoder = flate2::read::ZlibDecoder::new(&cert_data[4..]);
                     let mut decompressed = Vec::new();
-                    decoder.read_to_end(&mut decompressed).map_err(|_| {
-                        PivError::BadResponse("Failed to decompress zlib".into())
-                    })?;
+                    decoder
+                        .read_to_end(&mut decompressed)
+                        .map_err(|_| PivError::BadResponse("Failed to decompress zlib".into()))?;
                     if decompressed.len() != expected_len {
                         return Err(PivError::BadResponse(
                             "Decompressed length does not match expected length".into(),
@@ -891,9 +889,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         session.mgmt_key_type = match session.get_management_key_metadata() {
             Ok(meta) => meta.key_type,
             Err(PivError::NotSupported(_))
-            | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => {
-                ManagementKeyType::Tdes
-            }
+            | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => ManagementKeyType::Tdes,
             Err(e) => return Err(e),
         };
 
@@ -983,8 +979,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         let key_type = self.mgmt_key_type;
 
         // Step 1: Request witness from card
-        let witness_request =
-            tlv_encode(TAG_DYN_AUTH, &tlv_encode(TAG_AUTH_WITNESS, &[]));
+        let witness_request = tlv_encode(TAG_DYN_AUTH, &tlv_encode(TAG_AUTH_WITNESS, &[]));
         let response = self.protocol.send_apdu(
             0,
             INS_AUTHENTICATE,
@@ -1162,7 +1157,8 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
         match self.get_pin_metadata() {
             Ok(meta) => return Ok(meta.attempts_remaining),
-            Err(PivError::NotSupported(_)) | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => {}
+            Err(PivError::NotSupported(_))
+            | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => {}
             Err(e) => return Err(e),
         }
 
@@ -1217,11 +1213,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
-    pub fn set_pin_attempts(
-        &mut self,
-        pin_attempts: u8,
-        puk_attempts: u8,
-    ) -> Result<(), PivError> {
+    pub fn set_pin_attempts(&mut self, pin_attempts: u8, puk_attempts: u8) -> Result<(), PivError> {
         match self
             .protocol
             .send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts, &[])
@@ -1256,9 +1248,9 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     pub fn get_management_key_metadata(&mut self) -> Result<ManagementKeyMetadata, PivError> {
         require_version(self.version, Version(5, 3, 0))?;
-        let response = self
-            .protocol
-            .send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT, &[])?;
+        let response =
+            self.protocol
+                .send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT, &[])?;
         let data = parse_tlv_map(&response)?;
 
         let algo_byte = data
@@ -1302,9 +1294,8 @@ impl<C: SmartCardConnection> PivSession<C> {
             .get(&TAG_METADATA_ALGO)
             .and_then(|v| v.first().copied())
             .ok_or_else(|| PivError::BadResponse("Missing algorithm in metadata".into()))?;
-        let key_type = KeyType::from_u8(algo_byte).ok_or_else(|| {
-            PivError::BadResponse(format!("Unknown key type: 0x{algo_byte:02X}"))
-        })?;
+        let key_type = KeyType::from_u8(algo_byte)
+            .ok_or_else(|| PivError::BadResponse(format!("Unknown key type: 0x{algo_byte:02X}")))?;
 
         let policy = data
             .get(&TAG_METADATA_POLICY)
@@ -1395,11 +1386,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     /// Decrypt ciphertext with an RSA private key in a slot.
-    pub fn decrypt(
-        &mut self,
-        slot: Slot,
-        cipher_text: &[u8],
-    ) -> Result<Vec<u8>, PivError> {
+    pub fn decrypt(&mut self, slot: Slot, cipher_text: &[u8]) -> Result<Vec<u8>, PivError> {
         let key_type = match cipher_text.len() * 8 {
             1024 => KeyType::Rsa1024,
             2048 => KeyType::Rsa2048,
@@ -1449,11 +1436,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             .map_err(|_| PivError::BadResponse("Malformed object data".into()))
     }
 
-    pub fn put_object(
-        &mut self,
-        object_id: ObjectId,
-        data: Option<&[u8]>,
-    ) -> Result<(), PivError> {
+    pub fn put_object(&mut self, object_id: ObjectId, data: Option<&[u8]>) -> Result<(), PivError> {
         let id_bytes = object_id_bytes(object_id);
         let obj_data = data.unwrap_or(&[]);
         let mut request = tlv_encode(TAG_OBJ_ID, &id_bytes);
@@ -1558,7 +1541,10 @@ impl<C: SmartCardConnection> PivSession<C> {
         let mut data = build_put_key_data(key_type, key_der)?;
 
         if pin_policy != PinPolicy::Default {
-            data.extend_from_slice(&tlv_encode(TAG_PIN_POLICY, &u32_to_bytes(pin_policy as u32)));
+            data.extend_from_slice(&tlv_encode(
+                TAG_PIN_POLICY,
+                &u32_to_bytes(pin_policy as u32),
+            ));
         }
         if touch_policy != TouchPolicy::Default {
             data.extend_from_slice(&tlv_encode(
@@ -1591,7 +1577,10 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         let mut inner = tlv_encode(TAG_GEN_ALGORITHM, &u32_to_bytes(key_type as u32));
         if pin_policy != PinPolicy::Default {
-            inner.extend_from_slice(&tlv_encode(TAG_PIN_POLICY, &u32_to_bytes(pin_policy as u32)));
+            inner.extend_from_slice(&tlv_encode(
+                TAG_PIN_POLICY,
+                &u32_to_bytes(pin_policy as u32),
+            ));
         }
         if touch_policy != TouchPolicy::Default {
             inner.extend_from_slice(&tlv_encode(
@@ -1601,13 +1590,9 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
 
         let request = tlv_encode(0xAC, &inner);
-        let response = self.protocol.send_apdu(
-            0,
-            INS_GENERATE_ASYMMETRIC,
-            0,
-            slot as u8,
-            &request,
-        )?;
+        let response =
+            self.protocol
+                .send_apdu(0, INS_GENERATE_ASYMMETRIC, 0, slot as u8, &request)?;
 
         // Return the 0x7F49 container contents (device public key encoding)
         tlv_unpack(0x7F49, &response)
@@ -1616,22 +1601,15 @@ impl<C: SmartCardConnection> PivSession<C> {
     /// Attest key in slot. Returns DER-encoded X.509 certificate.
     pub fn attest_key(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
         require_version(self.version, Version(4, 3, 0))?;
-        let response = self
-            .protocol
-            .send_apdu(0, INS_ATTEST, slot as u8, 0, &[])?;
+        let response = self.protocol.send_apdu(0, INS_ATTEST, slot as u8, 0, &[])?;
         Ok(response)
     }
 
     /// Move key from one slot to another. Requires firmware >= 5.7.0.
     pub fn move_key(&mut self, from_slot: Slot, to_slot: Slot) -> Result<(), PivError> {
         require_version(self.version, Version(5, 7, 0))?;
-        self.protocol.send_apdu(
-            0,
-            INS_MOVE_KEY,
-            to_slot as u8,
-            from_slot as u8,
-            &[],
-        )?;
+        self.protocol
+            .send_apdu(0, INS_MOVE_KEY, to_slot as u8, from_slot as u8, &[])?;
         Ok(())
     }
 
@@ -1702,9 +1680,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     fn get_pin_puk_metadata(&mut self, p2: u8) -> Result<PinMetadata, PivError> {
         require_version(self.version, Version(5, 3, 0))?;
-        let response = self
-            .protocol
-            .send_apdu(0, INS_GET_METADATA, 0, p2, &[])?;
+        let response = self.protocol.send_apdu(0, INS_GET_METADATA, 0, p2, &[])?;
         let data = parse_tlv_map(&response)?;
 
         let default_value = data
@@ -1740,13 +1716,10 @@ impl<C: SmartCardConnection> PivSession<C> {
         inner.extend_from_slice(&tlv_encode(tag, message));
         let request = tlv_encode(TAG_DYN_AUTH, &inner);
 
-        match self.protocol.send_apdu(
-            0,
-            INS_AUTHENTICATE,
-            key_type as u8,
-            slot as u8,
-            &request,
-        ) {
+        match self
+            .protocol
+            .send_apdu(0, INS_AUTHENTICATE, key_type as u8, slot as u8, &request)
+        {
             Ok(response) => {
                 let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
                 tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth)
@@ -1830,9 +1803,7 @@ fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
     // Verify exponent is 65537
     let e_val = bytes_to_u32(strip_leading_zeros(e));
     if e_val != 65537 {
-        return Err(PivError::NotSupported(
-            "RSA exponent must be 65537".into(),
-        ));
+        return Err(PivError::NotSupported("RSA exponent must be 65537".into()));
     }
 
     let p = bigint_to_bytes(fields[4], ln);
@@ -1945,10 +1916,22 @@ mod tests {
 
     #[test]
     fn test_management_key_type_from_u8() {
-        assert_eq!(ManagementKeyType::from_u8(0x03), Some(ManagementKeyType::Tdes));
-        assert_eq!(ManagementKeyType::from_u8(0x08), Some(ManagementKeyType::Aes128));
-        assert_eq!(ManagementKeyType::from_u8(0x0A), Some(ManagementKeyType::Aes192));
-        assert_eq!(ManagementKeyType::from_u8(0x0C), Some(ManagementKeyType::Aes256));
+        assert_eq!(
+            ManagementKeyType::from_u8(0x03),
+            Some(ManagementKeyType::Tdes)
+        );
+        assert_eq!(
+            ManagementKeyType::from_u8(0x08),
+            Some(ManagementKeyType::Aes128)
+        );
+        assert_eq!(
+            ManagementKeyType::from_u8(0x0A),
+            Some(ManagementKeyType::Aes192)
+        );
+        assert_eq!(
+            ManagementKeyType::from_u8(0x0C),
+            Some(ManagementKeyType::Aes256)
+        );
         assert_eq!(ManagementKeyType::from_u8(0xFF), None);
     }
 
@@ -1997,10 +1980,7 @@ mod tests {
         assert_eq!(padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0xFF, 0xFF]);
 
         let padded = pin_bytes("12345678").unwrap();
-        assert_eq!(
-            padded,
-            [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]
-        );
+        assert_eq!(padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]);
 
         let padded = pin_bytes("").unwrap();
         assert_eq!(padded, [0xFF; 8]);
