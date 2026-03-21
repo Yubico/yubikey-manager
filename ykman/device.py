@@ -184,7 +184,12 @@ class _PidGroup:
 
         resolved = self._resolved[key].get(iface)
         if resolved:
-            return resolved.open_connection(conn_type)
+            try:
+                return resolved.open_connection(conn_type)
+            except Exception:
+                logger.debug("Failed to open resolved device, will re-resolve")
+                del self._resolved[key][iface]
+                self._unresolved.setdefault(iface, []).append(resolved)
 
         devs = self._unresolved.get(iface, [])
         failed = []
