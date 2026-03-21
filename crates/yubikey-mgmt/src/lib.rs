@@ -31,3 +31,4 @@ pub mod otp_codec;
 pub mod scp;
 pub mod tlv;
 pub mod transport;
+pub mod yubiotp;
