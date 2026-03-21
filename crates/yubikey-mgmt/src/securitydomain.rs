@@ -334,6 +334,7 @@ fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, SmartCardError>
 /// A session for managing SCP keys on the YubiKey Security Domain.
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
+    version: Version,
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -341,8 +342,20 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
         let mut protocol = SmartCardProtocol::new(connection);
         protocol.select(Aid::SECURE_DOMAIN)?;
-        protocol.configure(Version(5, 3, 0));
-        Ok(Self { protocol })
+        let version = Version(5, 3, 0);
+        protocol.configure(version);
+        Ok(Self { protocol, version })
+    }
+
+    /// The Security Domain version.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Override the version (for development devices).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+        self.protocol.configure(version);
     }
 
     /// Get a reference to the underlying protocol.
@@ -377,8 +390,13 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
 
         let mut keys = HashMap::new();
-        for (_, entry_data) in entries {
-            let inner = tlv_unpack(0xC0, &entry_data)?;
+        for (tag, entry_data) in entries {
+            if tag != 0xC0 {
+                return Err(SmartCardError::BadResponse(format!(
+                    "Expected tag 0xC0, got 0x{tag:02X}"
+                )));
+            }
+            let inner = &entry_data;
             if inner.len() < 2 {
                 return Err(SmartCardError::BadResponse(
                     "Key info entry too short".into(),

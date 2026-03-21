@@ -25,6 +25,18 @@ impl SecurityDomainSession {
         Ok(Self { inner })
     }
 
+    #[getter]
+    fn version(&self) -> (u8, u8, u8) {
+        let v = self.inner.version();
+        (v.0, v.1, v.2)
+    }
+
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner
+            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+    }
+
     fn get_data(&mut self, tag: u32, data: &[u8]) -> PyResult<Vec<u8>> {
         self.inner.get_data(tag, data).map_err(smartcard_err)
     }
