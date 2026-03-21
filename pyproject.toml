@@ -45,6 +45,7 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [tool.maturin]
+manifest-path = "crates/ykman-pyo3/Cargo.toml"
 module-name = "_ykman_native"
 python-packages = ["ykman", "yubikit"]
 include = [

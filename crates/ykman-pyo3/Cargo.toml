@@ -1,0 +1,12 @@
+[package]
+name = "ykman-pyo3"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "_ykman_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+yubikey-mgmt = { path = "../yubikey-mgmt" }
+pyo3 = { version = "0.25", features = ["extension-module"] }

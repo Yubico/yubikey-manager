@@ -26,34 +26,31 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 use hidapi::HidApi;
-use pyo3::exceptions::PyOSError;
-use pyo3::prelude::*;
-use pyo3::types::PyBytes;
 
 const YUBICO_VID: u16 = 0x1050;
-
-// OTP HID usage: usage_page=1 (Generic Desktop), usage=6 (Keyboard)
 const USAGE_PAGE_OTP: u16 = 0x0001;
 const USAGE_OTP: u16 = 0x0006;
 
-fn hid_err(e: hidapi::HidError) -> PyErr {
-    PyOSError::new_err(format!("HID error: {e}"))
+#[derive(Debug, thiserror::Error)]
+pub enum HidError {
+    #[error("HID error: {0}")]
+    Hid(#[from] hidapi::HidError),
+    #[error("Invalid device path")]
+    InvalidPath,
+    #[error("Connection is closed")]
+    ConnectionClosed,
 }
 
 /// Information about an enumerated HID device.
-#[pyclass]
-#[derive(Clone)]
-struct HidDeviceInfo {
-    #[pyo3(get)]
-    path: String,
-    #[pyo3(get)]
-    pid: u16,
+#[derive(Clone, Debug)]
+pub struct HidDeviceInfo {
+    pub path: String,
+    pub pid: u16,
 }
 
-/// List Yubico OTP HID devices, returning (path, pid) info for each.
-#[pyfunction]
-fn list_otp_devices() -> PyResult<Vec<HidDeviceInfo>> {
-    let api = HidApi::new().map_err(hid_err)?;
+/// List Yubico OTP HID devices.
+pub fn list_otp_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
+    let api = HidApi::new()?;
     let mut devices = Vec::new();
     for dev in api.device_list() {
         if dev.vendor_id() == YUBICO_VID
@@ -70,10 +67,8 @@ fn list_otp_devices() -> PyResult<Vec<HidDeviceInfo>> {
 }
 
 /// List all Yubico HID devices regardless of usage page.
-/// Returns (path, pid) for each device. Used for device scanning without opening.
-#[pyfunction]
-fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
-    let api = HidApi::new().map_err(hid_err)?;
+pub fn list_all_hid_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
+    let api = HidApi::new()?;
     let mut devices = Vec::new();
     for dev in api.device_list() {
         if dev.vendor_id() == YUBICO_VID {
@@ -87,83 +82,43 @@ fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
 }
 
 /// An open connection to an OTP HID device for feature report I/O.
-#[pyclass(unsendable)]
-struct HidConnection {
+pub struct HidConnection {
     device: Option<hidapi::HidDevice>,
 }
 
-#[pymethods]
 impl HidConnection {
-    #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        let api = HidApi::new().map_err(hid_err)?;
-        let cpath = std::ffi::CString::new(path)
-            .map_err(|_| PyOSError::new_err("Invalid device path"))?;
-        let device = api.open_path(&cpath).map_err(hid_err)?;
+    pub fn new(path: &str) -> Result<Self, HidError> {
+        let api = HidApi::new()?;
+        let cpath =
+            std::ffi::CString::new(path).map_err(|_| HidError::InvalidPath)?;
+        let device = api.open_path(&cpath)?;
         Ok(Self {
             device: Some(device),
         })
     }
 
     /// Read an 8-byte feature report from the device.
-    fn get_feature_report<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let dev = self.device.as_ref().ok_or_else(|| {
-            PyOSError::new_err("Connection is closed")
-        })?;
-        // Report ID 0 + 8 bytes of data
+    pub fn get_feature_report(&self) -> Result<Vec<u8>, HidError> {
+        let dev = self.device.as_ref().ok_or(HidError::ConnectionClosed)?;
         let mut buf = [0u8; 9];
         buf[0] = 0; // report ID
-        let n = dev.get_feature_report(&mut buf).map_err(hid_err)?;
-        // Return only the data portion (skip report ID byte)
+        let n = dev.get_feature_report(&mut buf)?;
         let start = if n > 0 && buf[0] == 0 { 1 } else { 0 };
         let end = n.min(buf.len());
-        Ok(PyBytes::new(py, &buf[start..end]))
+        Ok(buf[start..end].to_vec())
     }
 
     /// Write an 8-byte feature report to the device.
-    fn set_feature_report(&self, data: &[u8]) -> PyResult<()> {
-        let dev = self.device.as_ref().ok_or_else(|| {
-            PyOSError::new_err("Connection is closed")
-        })?;
-        // Prepend report ID 0
+    pub fn set_feature_report(&self, data: &[u8]) -> Result<(), HidError> {
+        let dev = self.device.as_ref().ok_or(HidError::ConnectionClosed)?;
         let mut buf = vec![0u8; data.len() + 1];
         buf[0] = 0; // report ID
         buf[1..].copy_from_slice(data);
-        dev.send_feature_report(&buf).map_err(hid_err)?;
+        dev.send_feature_report(&buf)?;
         Ok(())
     }
 
-    fn close(&mut self) -> PyResult<()> {
+    pub fn close(&mut self) {
         self.device.take();
-        Ok(())
     }
-
-    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-
-    fn __exit__(
-        &mut self,
-        _exc_type: Option<&Bound<'_, PyAny>>,
-        _exc_val: Option<&Bound<'_, PyAny>>,
-        _exc_tb: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<()> {
-        self.close()
-    }
-}
-
-pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let sub = PyModule::new(m.py(), "hid")?;
-    sub.add_function(wrap_pyfunction!(list_otp_devices, &sub)?)?;
-    sub.add_function(wrap_pyfunction!(list_all_hid_devices, &sub)?)?;
-    sub.add_class::<HidDeviceInfo>()?;
-    sub.add_class::<HidConnection>()?;
-    m.add_submodule(&sub)?;
-
-    // Register in sys.modules so `from _ykman_native.hid import ...` works
-    let sys = m.py().import("sys")?;
-    let modules = sys.getattr("modules")?;
-    modules.set_item("_ykman_native.hid", &sub)?;
-
-    Ok(())
 }

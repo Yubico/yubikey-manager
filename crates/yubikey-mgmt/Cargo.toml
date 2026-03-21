@@ -1,0 +1,21 @@
+[package]
+name = "yubikey-mgmt"
+version = "0.1.0"
+edition = "2024"
+description = "YubiKey management library"
+license = "BSD-2-Clause"
+
+[dependencies]
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+cmac = "0.7"
+cipher = "0.4"
+pcsc = "2"
+subtle = "2"
+thiserror = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+hidapi = { version = "2", default-features = false, features = ["linux-static-hidraw"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+hidapi = { version = "2" }
