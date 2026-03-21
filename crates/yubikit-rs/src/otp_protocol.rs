@@ -52,7 +52,7 @@ const SLOT_WRITE_FLAG: u8 = 0x80;
 const RESP_TIMEOUT_WAIT_FLAG: u8 = 0x20;
 const SEQUENCE_MASK: u8 = 0x1F;
 
-pub(crate) const STATUS_OFFSET_PROG_SEQ: usize = 4;
+pub const STATUS_OFFSET_PROG_SEQ: usize = 4;
 pub(crate) const STATUS_OFFSET_TOUCH_LOW: usize = 5;
 pub(crate) const CONFIG_SLOTS_PROGRAMMED_MASK: u8 = 0b0000_0011;
 

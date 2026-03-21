@@ -61,6 +61,7 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_openpgp_session::OpenPgpSession>()?;
     m.add_class::<py_hsmauth_session::HsmAuthSession>()?;
     m.add_class::<py_management_session::ManagementSession>()?;
+    m.add_class::<py_management_session::ManagementOtpSession>()?;
     m.add_class::<py_securitydomain_session::SecurityDomainSession>()?;
     m.add_class::<py_yubiotp_session::PyYubiOtpSession>()?;
     m.add_class::<py_yubiotp_session::PyYubiOtpOtpSession>()?;

@@ -47,6 +47,7 @@ class _NativeOtpConnection(OtpConnection):
     """OTP connection backed by the Rust HID implementation."""
 
     def __init__(self, path: str):
+        self._path = path
         self._conn = HidConnection(path)
 
     def close(self) -> None:

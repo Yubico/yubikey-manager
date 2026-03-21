@@ -675,11 +675,12 @@ class ManagementSession:
         scp_key_params: ScpKeyParams | None = None,
     ):
         self._native: Any = None
+        self.backend: _Backend | None = None
 
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            self.backend: _Backend | None = _ManagementOtpBackend(connection)
+            self.backend = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
             if scp_key_params is None and _NativeManagementSession is not None:
                 native = _NativeManagementSession(connection)
@@ -881,7 +882,7 @@ class ManagementSession:
         applications. This will factory reset the global PIN as well as the associated
         applications.
         """
-        if self._native:
+        if self._native and hasattr(self._native, "device_reset"):
             logger.debug("Performing device reset")
             self._native.device_reset()
             logger.info("Device reset performed")

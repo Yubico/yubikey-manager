@@ -34,7 +34,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version};
+use crate::otp_codec::check_crc;
+use crate::otp_protocol::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
+use crate::transport::hid::HidConnection;
+use crate::yubiotp::ConfigSlot;
 
 // ---------------------------------------------------------------------------
 // APDU instruction constants
@@ -658,7 +662,68 @@ impl DeviceInfo {
 }
 
 // ---------------------------------------------------------------------------
-// ManagementSession
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/// Read device info by iterating config pages via the supplied reader closure.
+fn read_device_info_from_config(
+    version: Version,
+    read_config: &mut dyn FnMut(u8) -> Result<Vec<u8>, SmartCardError>,
+) -> Result<DeviceInfo, SmartCardError> {
+    let mut tlvs: HashMap<u32, Vec<u8>> = HashMap::new();
+    let mut page: u8 = 0;
+    loop {
+        let encoded = read_config(page)?;
+        if encoded.is_empty() {
+            return Err(SmartCardError::BadResponse("Empty config response".into()));
+        }
+        let expected_len = encoded[0] as usize;
+        if encoded.len() - 1 != expected_len {
+            return Err(SmartCardError::BadResponse("Invalid length".into()));
+        }
+        let page_tlvs = parse_tlv_dict(&encoded[1..])?;
+        let more_data = page_tlvs.get(&TAG_MORE_DATA).map_or(false, |v| v == &[0x01]);
+        for (tag, value) in page_tlvs {
+            if tag != TAG_MORE_DATA {
+                tlvs.insert(tag, value);
+            }
+        }
+        if !more_data {
+            break;
+        }
+        page += 1;
+    }
+    DeviceInfo::parse_tlvs(&tlvs, version)
+}
+
+/// Serialize a write_device_config call into bytes, with validation.
+fn validate_and_serialize_device_config(
+    version: Version,
+    config: &DeviceConfig,
+    reboot: bool,
+    cur_lock_code: Option<&[u8]>,
+    new_lock_code: Option<&[u8]>,
+) -> Result<Vec<u8>, SmartCardError> {
+    if version < Version(5, 0, 0) {
+        return Err(SmartCardError::NotSupported(
+            "write_device_config requires YubiKey 5.0.0 or later".into(),
+        ));
+    }
+    if let Some(code) = cur_lock_code {
+        if code.len() != 16 {
+            return Err(SmartCardError::BadResponse("Lock code must be 16 bytes".into()));
+        }
+    }
+    if let Some(code) = new_lock_code {
+        if code.len() != 16 {
+            return Err(SmartCardError::BadResponse("Lock code must be 16 bytes".into()));
+        }
+    }
+    config.get_bytes(reboot, cur_lock_code, new_lock_code)
+}
+
+// ---------------------------------------------------------------------------
+// ManagementSession (SmartCard)
 // ---------------------------------------------------------------------------
 
 /// Management application session over SmartCard (CCID).
@@ -725,30 +790,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
     }
 
     fn do_read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        let mut tlvs: HashMap<u32, Vec<u8>> = HashMap::new();
-        let mut page: u8 = 0;
-        loop {
-            let encoded = self.read_config(page)?;
-            if encoded.is_empty() {
-                return Err(SmartCardError::BadResponse("Empty config response".into()));
-            }
-            let expected_len = encoded[0] as usize;
-            if encoded.len() - 1 != expected_len {
-                return Err(SmartCardError::BadResponse("Invalid length".into()));
-            }
-            let page_tlvs = parse_tlv_dict(&encoded[1..])?;
-            let more_data = page_tlvs.get(&TAG_MORE_DATA).map_or(false, |v| v == &[0x01]);
-            for (tag, value) in page_tlvs {
-                if tag != TAG_MORE_DATA {
-                    tlvs.insert(tag, value);
-                }
-            }
-            if !more_data {
-                break;
-            }
-            page += 1;
-        }
-        DeviceInfo::parse_tlvs(&tlvs, self.version)
+        read_device_info_from_config(self.version, &mut |page| self.read_config(page))
     }
 
     /// Write configuration settings for YubiKey (requires 5.0.0+).
@@ -759,22 +801,9 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         cur_lock_code: Option<&[u8]>,
         new_lock_code: Option<&[u8]>,
     ) -> Result<(), SmartCardError> {
-        if self.version < Version(5, 0, 0) {
-            return Err(SmartCardError::NotSupported(
-                "write_device_config requires YubiKey 5.0.0 or later".into(),
-            ));
-        }
-        if let Some(code) = cur_lock_code {
-            if code.len() != 16 {
-                return Err(SmartCardError::BadResponse("Lock code must be 16 bytes".into()));
-            }
-        }
-        if let Some(code) = new_lock_code {
-            if code.len() != 16 {
-                return Err(SmartCardError::BadResponse("Lock code must be 16 bytes".into()));
-            }
-        }
-        let data = config.get_bytes(reboot, cur_lock_code, new_lock_code)?;
+        let data = validate_and_serialize_device_config(
+            self.version, config, reboot, cur_lock_code, new_lock_code,
+        )?;
         self.write_config(&data)
     }
 
@@ -822,6 +851,132 @@ impl<C: SmartCardConnection> ManagementSession<C> {
     fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
         self.protocol.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)?;
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ManagementOtpSession (OTP/HID)
+// ---------------------------------------------------------------------------
+
+/// Management operations over the OTP (HID) interface.
+pub struct ManagementOtpSession {
+    protocol: OtpProtocol,
+    version: Version,
+}
+
+impl ManagementOtpSession {
+    /// Open a management session over OTP HID.
+    pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+        let protocol = OtpProtocol::new(connection)?;
+        let version = protocol.version;
+        if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {
+            return Err(YubiOtpError::NotSupported(
+                "Management over OTP not supported for YubiKey v1.x-v2.x".into(),
+            ));
+        }
+        Ok(Self { protocol, version })
+    }
+
+    /// The firmware version of the YubiKey.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Override the version (for development devices reporting 0.0.1).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    /// Read a configuration page via OTP slot, with CRC validation.
+    pub fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
+        let data = int2bytes(page as u64);
+        let response = self
+            .protocol
+            .send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data))
+            .map_err(otp_to_smartcard_err)?;
+        let r_len = response[0] as usize;
+        if r_len + 1 + 2 <= response.len() && check_crc(&response[..r_len + 1 + 2]) {
+            Ok(response[..r_len + 1].to_vec())
+        } else {
+            Err(SmartCardError::BadResponse("Invalid checksum".into()))
+        }
+    }
+
+    /// Write configuration via OTP slot.
+    pub fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
+        self.protocol
+            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config))
+            .map_err(otp_to_smartcard_err)?;
+        Ok(())
+    }
+
+    /// Read device info, iterating over config pages.
+    pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        if self.version < Version(4, 1, 0) {
+            return Err(SmartCardError::NotSupported(
+                "DeviceInfo requires YubiKey 4.1.0 or later".into(),
+            ));
+        }
+        self.do_read_device_info()
+    }
+
+    /// Read device info without version check (for dev device version override).
+    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        self.do_read_device_info()
+    }
+
+    fn do_read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        read_device_info_from_config(self.version, &mut |page| self.read_config(page))
+    }
+
+    /// Write configuration settings for YubiKey (requires 5.0.0+).
+    pub fn write_device_config(
+        &mut self,
+        config: &DeviceConfig,
+        reboot: bool,
+        cur_lock_code: Option<&[u8]>,
+        new_lock_code: Option<&[u8]>,
+    ) -> Result<(), SmartCardError> {
+        let data = validate_and_serialize_device_config(
+            self.version, config, reboot, cur_lock_code, new_lock_code,
+        )?;
+        self.write_config(&data)
+    }
+
+    /// Set USB mode via OTP slot.
+    pub fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), YubiOtpError> {
+        let data = [
+            mode_code,
+            chalresp_timeout,
+            (auto_eject_timeout & 0xFF) as u8,
+            (auto_eject_timeout >> 8) as u8,
+        ];
+        let empty = self.protocol.read_status()?[STATUS_OFFSET_PROG_SEQ] == 0;
+        match self
+            .protocol
+            .send_and_receive(ConfigSlot::DeviceConfig as u8, Some(&data))
+        {
+            Err(YubiOtpError::CommandRejected(_)) if empty => Ok(()),
+            other => {
+                other?;
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Convert a [`YubiOtpError`] into a [`SmartCardError`].
+fn otp_to_smartcard_err(e: YubiOtpError) -> SmartCardError {
+    match e {
+        YubiOtpError::SmartCard(sc) => sc,
+        YubiOtpError::BadResponse(msg) => SmartCardError::BadResponse(msg),
+        YubiOtpError::NotSupported(msg) => SmartCardError::NotSupported(msg),
+        other => SmartCardError::Transport(Box::new(other)),
     }
 }
 

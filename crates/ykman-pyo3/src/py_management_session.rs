@@ -1,5 +1,10 @@
 use pyo3::prelude::*;
-use yubikit_rs::management::{DeviceInfo, ManagementSession as RustManagementSession};
+use yubikit_rs::management::{
+    DeviceInfo,
+    ManagementOtpSession as RustManagementOtpSession,
+    ManagementSession as RustManagementSession,
+};
+use yubikit_rs::transport::hid::HidConnection;
 
 use crate::py_bridge::{PySmartCardConnection, smartcard_err};
 
@@ -164,5 +169,113 @@ impl ManagementSession {
 
     fn device_reset(&mut self) -> PyResult<()> {
         self.inner.device_reset().map_err(smartcard_err)
+    }
+}
+
+fn yubiotp_err(e: yubikit_rs::otp_protocol::YubiOtpError) -> PyErr {
+    use yubikit_rs::otp_protocol::YubiOtpError;
+    match e {
+        YubiOtpError::CommandRejected(msg) => {
+            pyo3::exceptions::PyValueError::new_err(format!("Command rejected: {msg}"))
+        }
+        YubiOtpError::NotSupported(msg) => {
+            pyo3::exceptions::PyValueError::new_err(format!("Not supported: {msg}"))
+        }
+        other => pyo3::exceptions::PyOSError::new_err(other.to_string()),
+    }
+}
+
+#[pyclass(name = "ManagementOtpSession", unsendable)]
+pub struct ManagementOtpSession {
+    inner: RustManagementOtpSession,
+}
+
+#[pymethods]
+impl ManagementOtpSession {
+    #[new]
+    fn new(path: &str) -> PyResult<Self> {
+        let hid_conn = HidConnection::new(path)
+            .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+        let inner = RustManagementOtpSession::new(hid_conn).map_err(yubiotp_err)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn version(&self) -> (u8, u8, u8) {
+        let v = self.inner.version();
+        (v.0, v.1, v.2)
+    }
+
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner
+            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
+    }
+
+    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let info = self.inner.read_device_info().map_err(smartcard_err)?;
+        device_info_to_dict(py, &info)
+    }
+
+    fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let info = self.inner.read_device_info_unchecked().map_err(smartcard_err)?;
+        device_info_to_dict(py, &info)
+    }
+
+    #[pyo3(signature = (enabled_capabilities, reboot, cur_lock_code=None, new_lock_code=None, auto_eject_timeout=None, challenge_response_timeout=None, device_flags=None, nfc_restricted=None))]
+    fn write_device_config(
+        &mut self,
+        enabled_capabilities: &Bound<'_, pyo3::types::PyDict>,
+        reboot: bool,
+        cur_lock_code: Option<&[u8]>,
+        new_lock_code: Option<&[u8]>,
+        auto_eject_timeout: Option<u16>,
+        challenge_response_timeout: Option<u8>,
+        device_flags: Option<u8>,
+        nfc_restricted: Option<bool>,
+    ) -> PyResult<()> {
+        use std::collections::HashMap;
+        use yubikit_rs::iso7816::Transport;
+        use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag};
+
+        let mut caps = HashMap::new();
+        for (key, value) in enabled_capabilities.iter() {
+            let transport_name: String = key.extract()?;
+            let cap_val: u16 = value.extract()?;
+            let transport = match transport_name.as_str() {
+                "Usb" => Transport::Usb,
+                "Nfc" => Transport::Nfc,
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Invalid transport: {}",
+                        transport_name
+                    )));
+                }
+            };
+            caps.insert(transport, Capability(cap_val));
+        }
+
+        let config = DeviceConfig {
+            enabled_capabilities: caps,
+            auto_eject_timeout,
+            challenge_response_timeout,
+            device_flags: device_flags.map(DeviceFlag),
+            nfc_restricted,
+        };
+
+        self.inner
+            .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
+            .map_err(smartcard_err)
+    }
+
+    fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> PyResult<()> {
+        self.inner
+            .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
+            .map_err(yubiotp_err)
     }
 }
