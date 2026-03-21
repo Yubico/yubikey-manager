@@ -30,6 +30,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv;
 
 // TLV tags
@@ -70,7 +71,7 @@ const PROP_REQUIRE_TOUCH: u8 = 0x02;
 
 type HmacSha1 = Hmac<Sha1>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HashAlgorithm {
     Sha1 = 0x01,
@@ -105,7 +106,7 @@ impl HashAlgorithm {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum OathType {
     Hotp = 0x10,
@@ -362,6 +363,419 @@ pub fn parse_b32_key(key: &str) -> Result<Vec<u8>, OathError> {
     };
     base32::decode(base32::Alphabet::Rfc4648 { padding: true }, &padded)
         .ok_or(OathError::InvalidHashAlgorithm("Invalid base32 key".into()))
+}
+
+// ---------------------------------------------------------------------------
+// Credential / Code types
+// ---------------------------------------------------------------------------
+
+/// An OATH credential on the device.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Credential {
+    pub device_id: String,
+    pub id: Vec<u8>,
+    pub issuer: Option<String>,
+    pub name: String,
+    pub oath_type: OathType,
+    pub period: u32,
+    pub touch_required: Option<bool>,
+}
+
+/// A computed OATH code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Code {
+    pub value: String,
+    pub valid_from: u64,
+    pub valid_to: u64,
+}
+
+/// Data needed to create a credential.
+#[derive(Debug, Clone)]
+pub struct CredentialData {
+    pub name: String,
+    pub oath_type: OathType,
+    pub hash_algorithm: HashAlgorithm,
+    pub secret: Vec<u8>,
+    pub digits: u8,
+    pub period: u32,
+    pub counter: u32,
+    pub issuer: Option<String>,
+}
+
+impl CredentialData {
+    /// Get the credential ID for this data.
+    pub fn get_id(&self) -> Vec<u8> {
+        format_cred_id(self.issuer.as_deref(), &self.name, self.oath_type, self.period)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parse SELECT response
+// ---------------------------------------------------------------------------
+
+fn parse_select(response: &[u8]) -> Result<(Version, Vec<u8>, Option<Vec<u8>>), OathError> {
+    let tlvs = parse_tlv_list(response)?;
+    let version_data = tlv_get(&tlvs, TAG_VERSION)
+        .ok_or_else(|| OathError::InvalidOathType("Missing version in SELECT".into()))?;
+    let version = Version::from_bytes(version_data);
+
+    let salt = tlv_get(&tlvs, TAG_NAME)
+        .ok_or_else(|| OathError::InvalidOathType("Missing salt in SELECT".into()))?
+        .to_vec();
+
+    let challenge = tlv_get(&tlvs, TAG_CHALLENGE).map(|c| c.to_vec());
+
+    Ok((version, salt, challenge))
+}
+
+/// Simple TLV list parser (tag, value) pairs.
+fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, OathError> {
+    let mut result = Vec::new();
+    let mut offset = 0;
+    while offset < data.len() {
+        let (tag, val_offset, val_len, end) = tlv::tlv_parse(data, offset)?;
+        result.push((tag, data[val_offset..val_offset + val_len].to_vec()));
+        offset = end;
+    }
+    Ok(result)
+}
+
+fn tlv_get<'a>(tlvs: &'a [(u32, Vec<u8>)], tag: u32) -> Option<&'a [u8]> {
+    tlvs.iter().find(|(t, _)| *t == tag).map(|(_, v)| v.as_slice())
+}
+
+/// Unpack a single TLV and verify the tag matches.
+fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, OathError> {
+    let (tag, val_offset, val_len, _) = tlv::tlv_parse(data, 0)?;
+    if tag != expected_tag {
+        return Err(OathError::InvalidOathType(
+            format!("Wrong tag, got 0x{tag:02x} expected 0x{expected_tag:02x}"),
+        ));
+    }
+    Ok(data[val_offset..val_offset + val_len].to_vec())
+}
+
+// ---------------------------------------------------------------------------
+// OathSession — full session over SmartCardProtocol
+// ---------------------------------------------------------------------------
+
+/// A session with the OATH application on a YubiKey.
+pub struct OathSession<C: SmartCardConnection> {
+    protocol: SmartCardProtocol<C>,
+    version: Version,
+    salt: Vec<u8>,
+    challenge: Option<Vec<u8>>,
+    device_id: String,
+    has_key: bool,
+}
+
+impl<C: SmartCardConnection> OathSession<C> {
+    /// Open an OATH session on the given connection.
+    pub fn new(connection: C) -> Result<Self, SmartCardError> {
+        let mut protocol = SmartCardProtocol::new(connection)
+            .with_ins_send_remaining(INS_SEND_REMAINING);
+        let resp = protocol.select(Aid::OATH)?;
+        let (version, salt, challenge) = parse_select(&resp)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        protocol.configure(version);
+
+        let has_key = challenge.is_some();
+        let device_id = get_device_id(&salt);
+
+        Ok(Self {
+            protocol,
+            version,
+            salt,
+            challenge,
+            device_id,
+            has_key,
+        })
+    }
+
+    /// The OATH application version.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// A random static identifier, re-generated on reset.
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
+    /// Whether an access key is configured.
+    pub fn has_key(&self) -> bool {
+        self.has_key
+    }
+
+    /// Whether the session is currently locked.
+    pub fn locked(&self) -> bool {
+        self.challenge.is_some()
+    }
+
+    /// Get a reference to the underlying protocol.
+    pub fn protocol(&self) -> &SmartCardProtocol<C> {
+        &self.protocol
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
+    }
+
+    /// Factory reset the OATH application.
+    pub fn reset(&mut self) -> Result<(), SmartCardError> {
+        self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
+        let resp = self.protocol.select(Aid::OATH)?;
+        let (_, salt, challenge) = parse_select(&resp)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        self.salt = salt;
+        self.challenge = challenge;
+        self.has_key = false;
+        self.device_id = get_device_id(&self.salt);
+        Ok(())
+    }
+
+    /// Derive an access key from a password.
+    pub fn derive_key(&self, password: &str) -> Vec<u8> {
+        derive_key(&self.salt, password)
+    }
+
+    /// Validate (unlock) the session with an access key.
+    pub fn validate(&mut self, key: &[u8]) -> Result<(), SmartCardError> {
+        let challenge = self.challenge.as_ref()
+            .ok_or_else(|| SmartCardError::BadResponse("Session is not locked".into()))?;
+
+        let host_challenge: [u8; 8] = rand_bytes();
+        let data = build_validate_data(key, challenge, &host_challenge);
+        let resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, &data)?;
+
+        let resp_value = tlv_unpack(TAG_RESPONSE, &resp)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        if !hmac_verify(key, &host_challenge, &resp_value) {
+            return Err(SmartCardError::BadResponse(
+                "Response from validation does not match verification".into(),
+            ));
+        }
+
+        self.challenge = None;
+        Ok(())
+    }
+
+    /// Set an access key.
+    pub fn set_key(&mut self, key: &[u8]) -> Result<(), SmartCardError> {
+        let challenge: [u8; 8] = rand_bytes();
+        let data = build_set_key_data(key, &challenge);
+        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
+        self.has_key = true;
+        Ok(())
+    }
+
+    /// Remove the access key.
+    pub fn unset_key(&mut self) -> Result<(), SmartCardError> {
+        let data = tlv::tlv_encode(TAG_KEY, &[]);
+        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
+        self.has_key = false;
+        Ok(())
+    }
+
+    /// Add a credential.
+    pub fn put_credential(
+        &mut self,
+        cred_data: &CredentialData,
+        touch_required: bool,
+    ) -> Result<Credential, SmartCardError> {
+        let cred_id = cred_data.get_id();
+        let data = build_put_data(
+            &cred_id,
+            cred_data.oath_type,
+            cred_data.hash_algorithm,
+            cred_data.digits,
+            &cred_data.secret,
+            touch_required,
+            cred_data.counter,
+        );
+        self.protocol.send_apdu(0, INS_PUT, 0, 0, &data)?;
+
+        Ok(Credential {
+            device_id: self.device_id.clone(),
+            id: cred_id,
+            issuer: cred_data.issuer.clone(),
+            name: cred_data.name.clone(),
+            oath_type: cred_data.oath_type,
+            period: cred_data.period,
+            touch_required: Some(touch_required),
+        })
+    }
+
+    /// Rename a credential (requires YubiKey 5.3.1+).
+    pub fn rename_credential(
+        &mut self,
+        credential_id: &[u8],
+        name: &str,
+        issuer: Option<&str>,
+    ) -> Result<Vec<u8>, SmartCardError> {
+        if self.version < Version(5, 3, 1) {
+            return Err(SmartCardError::NotSupported(
+                "Rename requires YubiKey 5.3.1 or later".into(),
+            ));
+        }
+        let (_, _, period) = parse_cred_id(credential_id, OathType::Totp);
+        let new_id = format_cred_id(issuer, name, OathType::Totp, period);
+        let mut data = tlv::tlv_encode(TAG_NAME, credential_id);
+        data.extend_from_slice(&tlv::tlv_encode(TAG_NAME, &new_id));
+        self.protocol.send_apdu(0, INS_RENAME, 0, 0, &data)?;
+        Ok(new_id)
+    }
+
+    /// List all credentials.
+    pub fn list_credentials(&mut self) -> Result<Vec<Credential>, SmartCardError> {
+        let resp = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
+        let tlvs = parse_tlv_list(&resp)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+
+        let mut creds = Vec::new();
+        for (tag, value) in &tlvs {
+            if *tag != TAG_NAME_LIST {
+                continue;
+            }
+            let oath_type = OathType::from_u8(MASK_TYPE & value[0])
+                .ok_or_else(|| SmartCardError::BadResponse("Invalid OATH type".into()))?;
+            let cred_id = &value[1..];
+            let (issuer, name, period) = parse_cred_id(cred_id, oath_type);
+            creds.push(Credential {
+                device_id: self.device_id.clone(),
+                id: cred_id.to_vec(),
+                issuer,
+                name,
+                oath_type,
+                period,
+                touch_required: None,
+            });
+        }
+        Ok(creds)
+    }
+
+    /// Perform a raw calculate for a credential.
+    pub fn calculate(
+        &mut self,
+        credential_id: &[u8],
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, SmartCardError> {
+        let mut data = tlv::tlv_encode(TAG_NAME, credential_id);
+        data.extend_from_slice(&tlv::tlv_encode(TAG_CHALLENGE, challenge));
+        let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, &data)?;
+        let value = tlv_unpack(TAG_RESPONSE, &resp)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        // Skip the first byte (digits indicator)
+        Ok(value[1..].to_vec())
+    }
+
+    /// Delete a credential.
+    pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), SmartCardError> {
+        let data = tlv::tlv_encode(TAG_NAME, credential_id);
+        self.protocol.send_apdu(0, INS_DELETE, 0, 0, &data)?;
+        Ok(())
+    }
+
+    /// Calculate codes for all credentials. Returns (credential, optional code) pairs.
+    pub fn calculate_all(
+        &mut self,
+        timestamp: u64,
+    ) -> Result<Vec<(Credential, Option<Code>)>, SmartCardError> {
+        let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
+        let mut data = tlv::tlv_encode(TAG_CHALLENGE, &challenge);
+        let _ = &data; // suppress warning
+        let resp = self.protocol.send_apdu(
+            0, INS_CALCULATE_ALL, 0, 0x01, &data,
+        )?;
+        data = resp; // reuse variable
+
+        let tlvs = parse_tlv_list(&data)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+
+        let mut entries = Vec::new();
+        let mut iter = tlvs.into_iter();
+        while let Some((tag, value)) = iter.next() {
+            if tag != TAG_NAME {
+                continue;
+            }
+            let cred_id = value;
+            let (resp_tag, resp_value) = iter.next()
+                .ok_or_else(|| SmartCardError::BadResponse("Missing response TLV".into()))?;
+
+            let oath_type = if resp_tag == TAG_HOTP {
+                OathType::Hotp
+            } else {
+                OathType::Totp
+            };
+            let touch = resp_tag == TAG_TOUCH;
+            let (issuer, name, period) = parse_cred_id(&cred_id, oath_type);
+
+            let credential = Credential {
+                device_id: self.device_id.clone(),
+                id: cred_id,
+                issuer,
+                name,
+                oath_type,
+                period,
+                touch_required: Some(touch),
+            };
+
+            let code = if resp_tag == TAG_TRUNCATED {
+                if period == DEFAULT_PERIOD {
+                    let (val, vf, vt) = format_code(oath_type, period, timestamp, &resp_value);
+                    Some(Code { value: val, valid_from: vf, valid_to: vt })
+                } else {
+                    // Non-standard period: recalculate
+                    Some(self.calculate_code(&credential, timestamp)?)
+                }
+            } else {
+                None
+            };
+
+            entries.push((credential, code));
+        }
+
+        Ok(entries)
+    }
+
+    /// Calculate code for a specific credential.
+    pub fn calculate_code(
+        &mut self,
+        credential: &Credential,
+        timestamp: u64,
+    ) -> Result<Code, SmartCardError> {
+        if credential.device_id != self.device_id {
+            return Err(SmartCardError::BadResponse(
+                "Credential does not belong to this YubiKey".into(),
+            ));
+        }
+
+        let challenge = if credential.oath_type == OathType::Totp {
+            get_challenge(timestamp, credential.period).to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let mut data = tlv::tlv_encode(TAG_NAME, &credential.id);
+        data.extend_from_slice(&tlv::tlv_encode(TAG_CHALLENGE, &challenge));
+        let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0x01, &data)?;
+
+        let response = tlv_unpack(TAG_TRUNCATED, &resp)
+            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+
+        let (val, vf, vt) = format_code(
+            credential.oath_type, credential.period, timestamp, &response,
+        );
+        Ok(Code { value: val, valid_from: vf, valid_to: vt })
+    }
+}
+
+/// Generate random bytes (uses getrandom for cross-platform support).
+fn rand_bytes<const N: usize>() -> [u8; N] {
+    let mut buf = [0u8; N];
+    getrandom::fill(&mut buf).expect("getrandom failed");
+    buf
 }
 
 #[cfg(test)]

@@ -28,6 +28,8 @@
 use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
 use std::ffi::CString;
 
+use crate::iso7816::{SmartCardConnection, SmartCardError, Transport};
+
 #[derive(Debug, thiserror::Error)]
 pub enum PcscError {
     #[error("PC/SC error: {0}")]
@@ -36,6 +38,12 @@ pub enum PcscError {
     InvalidReaderName,
     #[error("Connection is closed")]
     ConnectionClosed,
+}
+
+impl From<PcscError> for SmartCardError {
+    fn from(e: PcscError) -> Self {
+        SmartCardError::Transport(Box::new(e))
+    }
 }
 
 /// List available PC/SC reader names.
@@ -54,6 +62,7 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
 pub struct PcscConnection {
     card: Option<Card>,
     reader_name: String,
+    transport: Transport,
 }
 
 impl PcscConnection {
@@ -71,7 +80,13 @@ impl PcscConnection {
         Ok(Self {
             card: Some(card),
             reader_name: reader_name.to_owned(),
+            transport: Transport::Usb,
         })
+    }
+
+    /// Set the transport type (USB or NFC).
+    pub fn set_transport(&mut self, transport: Transport) {
+        self.transport = transport;
     }
 
     /// Get the ATR (Answer-To-Reset) of the connected card.
@@ -126,6 +141,24 @@ impl PcscConnection {
         };
         card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard)?;
         Ok(())
+    }
+}
+
+impl SmartCardConnection for PcscConnection {
+    fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        let resp = self.transmit(apdu).map_err(SmartCardError::from)?;
+        if resp.len() < 2 {
+            return Err(SmartCardError::BadResponse(
+                "Response too short (no status word)".into(),
+            ));
+        }
+        let sw = ((resp[resp.len() - 2] as u16) << 8) | (resp[resp.len() - 1] as u16);
+        let data = resp[..resp.len() - 2].to_vec();
+        Ok((data, sw))
+    }
+
+    fn transport(&self) -> Transport {
+        self.transport
     }
 }
 
