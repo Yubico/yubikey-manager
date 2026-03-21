@@ -41,6 +41,17 @@ from typing import (
     TypeVar,
 )
 
+from _ykman_native.core import (  # noqa: F401
+    bytes2int,
+    int2bytes,
+)
+from _ykman_native.core import (
+    tlv_encode as _tlv_encode,
+)
+from _ykman_native.core import (
+    tlv_parse as _tlv_parse,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -261,46 +272,6 @@ def require_version(
         raise NotSupportedError(message)
 
 
-def int2bytes(value: int, min_len: int = 1) -> bytes:
-    min_len = max(min_len, (value.bit_length() + 7) // 8)
-    return value.to_bytes(min_len, "big")
-
-
-def bytes2int(data: bytes) -> int:
-    return int.from_bytes(data, "big")
-
-
-def _tlv_parse(data, offset=0):
-    try:
-        tag = data[offset]
-        offset += 1
-        if tag & 0x1F == 0x1F:  # Long form
-            tag = tag << 8 | data[offset]
-            offset += 1
-            while tag & 0x80 == 0x80:  # Additional bytes
-                tag = tag << 8 | data[offset]
-                offset += 1
-
-        ln = data[offset]
-        offset += 1
-        if ln == 0x80:  # Indefinite length
-            end = offset
-            while data[end] or data[end + 1]:  # Run until 0x0000
-                end = _tlv_parse(data, end)[3]  # Skip over TLV
-            ln = end - offset
-            end += 2  # End after 0x0000
-        else:
-            if ln > 0x80:  # Length spans multiple bytes
-                n_bytes = ln - 0x80
-                ln = bytes2int(data[offset : offset + n_bytes])
-                offset += n_bytes
-            end = offset + ln
-
-        return tag, offset, ln, end
-    except IndexError:
-        raise ValueError("Invalid encoding of tag/length")
-
-
 class Tlv(bytes):
     @property
     def tag(self) -> int:
@@ -317,21 +288,7 @@ class Tlv(bytes):
     def __new__(cls, tag_or_data: int | bytes, value: bytes | None = None):
         """This allows creation by passing either binary data, or tag and value."""
         if isinstance(tag_or_data, int):  # Tag and (optional) value
-            tag = tag_or_data
-
-            # Pack into Tlv
-            buf = bytearray()
-            buf.extend(int2bytes(tag))
-            value = value or b""
-            length = len(value)
-            if length < 0x80:
-                buf.append(length)
-            else:
-                ln_bytes = int2bytes(length)
-                buf.append(0x80 | len(ln_bytes))
-                buf.extend(ln_bytes)
-            buf.extend(value)
-            data = bytes(buf)
+            data = bytes(_tlv_encode(tag_or_data, value or b""))
         else:  # Binary TLV data
             if value is not None:
                 raise ValueError("value can only be provided if tag_or_data is a tag")
