@@ -201,6 +201,65 @@ fn bytes2int<'py>(py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyAny>> {
     int_type.call_method1("from_bytes", (data, "big"))
 }
 
+/// Decode OID bytes to dotted string notation.
+#[pyfunction]
+fn oid_to_string(data: &[u8]) -> PyResult<String> {
+    if data.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err("Empty OID data"));
+    }
+    let mut parts = vec![
+        (data[0] / 40) as u32,
+        (data[0] % 40) as u32,
+    ];
+    let mut num: u32 = 0;
+    for &x in &data[1..] {
+        num = (num << 7) | (x & 0x7F) as u32;
+        if x & 0x80 == 0 {
+            parts.push(num);
+            num = 0;
+        }
+    }
+    Ok(parts.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("."))
+}
+
+/// Encode a dotted string OID into bytes.
+#[pyfunction]
+fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
+    let parts: Vec<u32> = data
+        .split('.')
+        .map(|s| {
+            s.parse::<u32>()
+                .map_err(|_| pyo3::exceptions::PyValueError::new_err("Invalid OID arc"))
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
+    if parts.len() < 2 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "OID must have at least two arcs",
+        ));
+    }
+
+    let mut buf = vec![(parts[0] * 40 + parts[1]) as u8];
+
+    for &part in &parts[2..] {
+        let mut part = part;
+        let mut part_buf = Vec::new();
+        while part > 0x7F {
+            part_buf.push((part & 0x7F) as u8);
+            part >>= 7;
+        }
+        part_buf.push(part as u8);
+        part_buf.reverse();
+        let last = part_buf.len() - 1;
+        for b in &mut part_buf[..last] {
+            *b |= 0x80;
+        }
+        buf.extend_from_slice(&part_buf);
+    }
+
+    Ok(buf)
+}
+
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "core")?;
     m.add_function(wrap_pyfunction!(calculate_crc, &m)?)?;
@@ -211,6 +270,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tlv_encode, &m)?)?;
     m.add_function(wrap_pyfunction!(int2bytes, &m)?)?;
     m.add_function(wrap_pyfunction!(bytes2int, &m)?)?;
+    m.add_function(wrap_pyfunction!(oid_to_string, &m)?)?;
+    m.add_function(wrap_pyfunction!(oid_from_string, &m)?)?;
     parent.add_submodule(&m)?;
 
     // Register in sys.modules for "from _ykman_native.core import ..." to work

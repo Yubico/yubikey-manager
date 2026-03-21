@@ -46,6 +46,12 @@ from _ykman_native.core import (  # noqa: F401
     int2bytes,
 )
 from _ykman_native.core import (
+    oid_from_string as _oid_from_string,
+)
+from _ykman_native.core import (
+    oid_to_string as _oid_to_string,
+)
+from _ykman_native.core import (
     tlv_encode as _tlv_encode,
 )
 from _ykman_native.core import (
@@ -332,36 +338,11 @@ class Tlv(bytes):
 class Oid(bytes):
     @property
     def dotted_string(self) -> str:
-        parts = [self[0] // 40, self[0] % 40]
-        num = 0
-        for x in self[1:]:
-            num = (num << 7) | (x & 0x7F)
-            if not 0x80 & x:
-                parts.append(num)
-                num = 0
-
-        return ".".join(str(x) for x in parts)
+        return _oid_to_string(self)
 
     @classmethod
     def from_string(cls, data: str) -> Oid:
-        parts = [int(x) for x in data.split(".")]
-        if len(parts) < 2:
-            raise ValueError("OID must have at least two arcs")
-
-        buf = bytearray([(parts[0] * 40) + parts[1]])
-
-        for part in parts[2:]:
-            if part < 0:
-                raise ValueError("OID parts must be non-negative")
-            partbuf = bytearray()
-            while part > 0x7F:
-                partbuf.insert(0, part & 0x7F)
-                part >>= 7
-            partbuf.insert(0, part)
-            buf.extend(0x80 | b for b in partbuf)
-            buf[-1] ^= 0x80
-
-        return cls(buf)
+        return cls(_oid_from_string(data))
 
     def __repr__(self) -> str:
         return f"Oid({self.dotted_string})"
