@@ -260,6 +260,63 @@ fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
     Ok(buf)
 }
 
+/// Format a short APDU (ISO 7816-4, case 1-4).
+#[pyfunction]
+fn format_short_apdu(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u8) -> PyResult<Vec<u8>> {
+    if data.len() > 0xFF {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Data length {} exceeds maximum APDU size 255",
+            data.len()
+        )));
+    }
+    let mut buf = Vec::with_capacity(5 + data.len() + 1);
+    buf.extend_from_slice(&[cla, ins, p1, p2]);
+    if !data.is_empty() {
+        buf.push(data.len() as u8);
+        buf.extend_from_slice(data);
+    }
+    if le > 0 {
+        buf.push(le);
+    } else if data.is_empty() {
+        buf.push(0);
+    }
+    Ok(buf)
+}
+
+/// Format an extended APDU (ISO 7816-4 extended length).
+#[pyfunction]
+fn format_extended_apdu(
+    cla: u8,
+    ins: u8,
+    p1: u8,
+    p2: u8,
+    data: &[u8],
+    le: u16,
+    max_apdu_size: usize,
+) -> PyResult<Vec<u8>> {
+    let mut buf = Vec::with_capacity(7 + data.len() + 2);
+    buf.extend_from_slice(&[cla, ins, p1, p2]);
+    if !data.is_empty() {
+        buf.push(0); // Extended length marker
+        buf.push((data.len() >> 8) as u8);
+        buf.push(data.len() as u8);
+        buf.extend_from_slice(data);
+    }
+    if le > 0 {
+        if data.is_empty() {
+            buf.push(0); // 3-byte Le
+        }
+        buf.push((le >> 8) as u8);
+        buf.push(le as u8);
+    }
+    if max_apdu_size > 0 && buf.len() > max_apdu_size {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "APDU length exceeds YubiKey capability",
+        ));
+    }
+    Ok(buf)
+}
+
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "core")?;
     m.add_function(wrap_pyfunction!(calculate_crc, &m)?)?;
@@ -272,6 +329,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bytes2int, &m)?)?;
     m.add_function(wrap_pyfunction!(oid_to_string, &m)?)?;
     m.add_function(wrap_pyfunction!(oid_from_string, &m)?)?;
+    m.add_function(wrap_pyfunction!(format_short_apdu, &m)?)?;
+    m.add_function(wrap_pyfunction!(format_extended_apdu, &m)?)?;
     parent.add_submodule(&m)?;
 
     // Register in sys.modules for "from _ykman_native.core import ..." to work

@@ -27,10 +27,11 @@
 
 import abc
 import logging
-import struct
 import warnings
 from enum import Enum, IntEnum, unique
 from time import time
+
+from _ykman_native.core import format_extended_apdu, format_short_apdu
 
 from yubikit.logging import LOG_LEVEL
 
@@ -149,22 +150,7 @@ SHORT_APDU_MAX_CHUNK = 0xFF
 
 class ShortApduFormatter(ApduFormatter):
     def format_apdu(self, cla, ins, p1, p2, data, le):
-        if len(data) > SHORT_APDU_MAX_CHUNK:
-            raise ValueError(
-                f"Data length {len(data)} exceeds maximum APDU size "
-                f"{SHORT_APDU_MAX_CHUNK}"
-            )
-
-        buf = struct.pack(">BBBB", cla, ins, p1, p2)
-        if data:
-            buf += struct.pack(">B", len(data)) + data
-        if le:
-            buf += struct.pack(">B", le)
-        elif not data:
-            # No data nor Le, need explicit Lc
-            buf += b"\0"
-
-        return buf
+        return bytes(format_short_apdu(cla, ins, p1, p2, data, le))
 
 
 class ExtendedApduFormatter(ApduFormatter):
@@ -172,18 +158,9 @@ class ExtendedApduFormatter(ApduFormatter):
         self._max_apdu_size = max_apdu_size
 
     def format_apdu(self, cla, ins, p1, p2, data, le):
-        buf = struct.pack(">BBBB", cla, ins, p1, p2)
-        if data:
-            buf += struct.pack(">BH", 0, len(data)) + data
-        if le:
-            if not data:
-                # Use 3-byte Le
-                buf += b"\0"
-            buf += struct.pack(">H", le)
-
-        if len(buf) > self._max_apdu_size:
-            raise NotSupportedError("APDU length exceeds YubiKey capability")
-        return buf
+        return bytes(
+            format_extended_apdu(cla, ins, p1, p2, data, le, self._max_apdu_size)
+        )
 
 
 class ApduProcessor(abc.ABC):
