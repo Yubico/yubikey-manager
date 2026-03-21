@@ -1,7 +1,55 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::management::ManagementSession as RustManagementSession;
+use yubikey_mgmt::management::{DeviceInfo, ManagementSession as RustManagementSession};
 
 use crate::py_bridge::{PySmartCardConnection, smartcard_err};
+
+fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
+    let dict = pyo3::types::PyDict::new(py);
+
+    dict.set_item("serial", info.serial)?;
+    dict.set_item("version", (info.version.0, info.version.1, info.version.2))?;
+    dict.set_item("form_factor", info.form_factor as u8)?;
+    dict.set_item("is_locked", info.is_locked)?;
+    dict.set_item("is_fips", info.is_fips)?;
+    dict.set_item("is_sky", info.is_sky)?;
+    dict.set_item("part_number", &info.part_number)?;
+    dict.set_item("pin_complexity", info.pin_complexity)?;
+    dict.set_item("fips_capable", info.fips_capable.0)?;
+    dict.set_item("fips_approved", info.fips_approved.0)?;
+    dict.set_item("reset_blocked", info.reset_blocked.0)?;
+
+    let supported = pyo3::types::PyDict::new(py);
+    for (transport, cap) in &info.supported_capabilities {
+        supported.set_item(format!("{:?}", transport), cap.0)?;
+    }
+    dict.set_item("supported_capabilities", supported)?;
+
+    let enabled = pyo3::types::PyDict::new(py);
+    for (transport, cap) in &info.config.enabled_capabilities {
+        enabled.set_item(format!("{:?}", transport), cap.0)?;
+    }
+    dict.set_item("enabled_capabilities", enabled)?;
+
+    dict.set_item("auto_eject_timeout", info.config.auto_eject_timeout)?;
+    dict.set_item(
+        "challenge_response_timeout",
+        info.config.challenge_response_timeout,
+    )?;
+    dict.set_item(
+        "device_flags",
+        info.config.device_flags.map(|f| f.0),
+    )?;
+    dict.set_item("nfc_restricted", info.config.nfc_restricted)?;
+
+    if let Some(v) = info.fps_version {
+        dict.set_item("fps_version", (v.0, v.1, v.2))?;
+    }
+    if let Some(v) = info.stm_version {
+        dict.set_item("stm_version", (v.0, v.1, v.2))?;
+    }
+
+    Ok(dict.into())
+}
 
 #[pyclass]
 pub struct ManagementSession {
@@ -23,55 +71,22 @@ impl ManagementSession {
         (v.0, v.1, v.2)
     }
 
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner
+            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+    }
+
     /// Read device info. Returns a dict with parsed fields.
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self.inner.read_device_info().map_err(smartcard_err)?;
-        let dict = pyo3::types::PyDict::new(py);
+        device_info_to_dict(py, &info)
+    }
 
-        dict.set_item("serial", info.serial)?;
-        dict.set_item("version", (info.version.0, info.version.1, info.version.2))?;
-        dict.set_item("form_factor", info.form_factor as u8)?;
-        dict.set_item("is_locked", info.is_locked)?;
-        dict.set_item("is_fips", info.is_fips)?;
-        dict.set_item("is_sky", info.is_sky)?;
-        dict.set_item("part_number", info.part_number)?;
-        dict.set_item("pin_complexity", info.pin_complexity)?;
-        dict.set_item("fips_capable", info.fips_capable.0)?;
-        dict.set_item("fips_approved", info.fips_approved.0)?;
-        dict.set_item("reset_blocked", info.reset_blocked.0)?;
-
-        // Capabilities as dicts keyed by transport name
-        let supported = pyo3::types::PyDict::new(py);
-        for (transport, cap) in &info.supported_capabilities {
-            supported.set_item(format!("{:?}", transport), cap.0)?;
-        }
-        dict.set_item("supported_capabilities", supported)?;
-
-        let enabled = pyo3::types::PyDict::new(py);
-        for (transport, cap) in &info.config.enabled_capabilities {
-            enabled.set_item(format!("{:?}", transport), cap.0)?;
-        }
-        dict.set_item("enabled_capabilities", enabled)?;
-
-        dict.set_item("auto_eject_timeout", info.config.auto_eject_timeout)?;
-        dict.set_item(
-            "challenge_response_timeout",
-            info.config.challenge_response_timeout,
-        )?;
-        dict.set_item(
-            "device_flags",
-            info.config.device_flags.map(|f| f.0),
-        )?;
-        dict.set_item("nfc_restricted", info.config.nfc_restricted)?;
-
-        if let Some(v) = info.fps_version {
-            dict.set_item("fps_version", (v.0, v.1, v.2))?;
-        }
-        if let Some(v) = info.stm_version {
-            dict.set_item("stm_version", (v.0, v.1, v.2))?;
-        }
-
-        Ok(dict.into())
+    /// Read device info without version check (for dev device version override).
+    fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let info = self.inner.read_device_info_unchecked().map_err(smartcard_err)?;
+        device_info_to_dict(py, &info)
     }
 
     /// Write device config from individual parameters.

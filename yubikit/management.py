@@ -33,7 +33,7 @@ import struct
 import warnings
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
-from typing import Mapping
+from typing import Any, Mapping
 
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
@@ -58,6 +58,13 @@ from .core.otp import (
     check_crc,
 )
 from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
+
+try:
+    from _ykman_native.sessions import (
+        ManagementSession as _NativeManagementSession,
+    )
+except ImportError:
+    _NativeManagementSession = None  # type: ignore[assignment, misc]
 
 logger = logging.getLogger(__name__)
 
@@ -595,18 +602,82 @@ class _ManagementCtapBackend(_Backend):
         self.ctap.call(CTAP_WRITE_CONFIG, config)
 
 
+def _transport_from_name(name: str) -> TRANSPORT:
+    """Convert transport name string from Rust to TRANSPORT enum."""
+    if name == "Usb":
+        return TRANSPORT.USB
+    elif name == "Nfc":
+        return TRANSPORT.NFC
+    raise ValueError(f"Unknown transport: {name}")
+
+
+def _device_info_from_native(d: dict) -> DeviceInfo:
+    """Convert a native ManagementSession device info dict to a DeviceInfo object."""
+    version = Version(*d["version"])
+
+    supported: dict[TRANSPORT, CAPABILITY] = {}
+    for name, val in d.get("supported_capabilities", {}).items():
+        supported[_transport_from_name(name)] = CAPABILITY(val)
+
+    enabled: dict[TRANSPORT, CAPABILITY] = {}
+    for name, val in d.get("enabled_capabilities", {}).items():
+        enabled[_transport_from_name(name)] = CAPABILITY(val)
+
+    device_flags = (
+        DEVICE_FLAG(d["device_flags"]) if d.get("device_flags") is not None else None
+    )
+    config = DeviceConfig(
+        enabled,
+        d.get("auto_eject_timeout"),
+        d.get("challenge_response_timeout"),
+        device_flags,
+        d.get("nfc_restricted"),
+    )
+
+    fps_version = Version(*d["fps_version"]) if d.get("fps_version") else None
+    stm_version = Version(*d["stm_version"]) if d.get("stm_version") else None
+
+    return DeviceInfo(
+        config=config,
+        serial=d.get("serial"),
+        version=version,
+        form_factor=FORM_FACTOR.from_code(d.get("form_factor", 0)),
+        supported_capabilities=supported,
+        is_locked=d.get("is_locked", False),
+        is_fips=d.get("is_fips", False),
+        is_sky=d.get("is_sky", False),
+        part_number=d.get("part_number"),
+        fips_capable=CAPABILITY(d.get("fips_capable", 0)),
+        fips_approved=CAPABILITY(d.get("fips_approved", 0)),
+        pin_complexity=d.get("pin_complexity", False),
+        reset_blocked=CAPABILITY(d.get("reset_blocked", 0)),
+        fps_version=fps_version,
+        stm_version=stm_version,
+        version_qualifier=VersionQualifier(version),
+    )
+
+
 class ManagementSession:
     def __init__(
         self,
         connection: OtpConnection | SmartCardConnection | FidoConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        self._native: Any = None
+
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            self.backend: _Backend = _ManagementOtpBackend(connection)
+            self.backend: _Backend | None = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
-            self.backend = _ManagementSmartCardBackend(connection, scp_key_params)
+            if scp_key_params is None and _NativeManagementSession is not None:
+                native = _NativeManagementSession(connection)
+                self._native = native
+                self._version = Version(*native.version)
+                self.backend = None
+            else:
+                self.backend = _ManagementSmartCardBackend(connection, scp_key_params)
+                self._version = self.backend.version
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
@@ -614,9 +685,17 @@ class ManagementSession:
         else:
             raise TypeError("Unsupported connection type")
 
-        if self.backend.version == (0, 0, 1):
+        if not self._native and self.backend:
+            self._version = self.backend.version
+
+        if self._version == (0, 0, 1):
             logger.debug("Overriding development version...")
-            self.backend.version = self._do_read_device_info().version_qualifier.version
+            info = self._do_read_device_info()
+            self._version = info.version_qualifier.version
+            if self._native:
+                self._native.version = tuple(self._version)
+            elif self.backend:
+                self.backend.version = self._version
 
         logger.debug(
             "Management session initialized for "
@@ -632,12 +711,13 @@ class ManagementSession:
             "Deprecated: call .close() on the underlying connection instead.",
             DeprecationWarning,
         )
-        self.backend.close()
+        if self.backend:
+            self.backend.close()
 
     @property
     def version(self) -> Version:
         """The firmware version of the YubiKey"""
-        return self.backend.version
+        return self._version
 
     def read_device_info(self) -> DeviceInfo:
         """Get detailed information about the YubiKey."""
@@ -645,8 +725,17 @@ class ManagementSession:
         return self._do_read_device_info()
 
     def _do_read_device_info(self) -> DeviceInfo:
+        if self._native:
+            try:
+                d = self._native.read_device_info()
+            except Exception:
+                d = self._native.read_device_info_unchecked()
+            return _device_info_from_native(d)
+
+        if self.backend is None:
+            raise RuntimeError("No backend available")
         more_data = True
-        tlvs = {}
+        tlvs: dict = {}
         page = 0
         while more_data:
             logger.debug(f"Reading DeviceInfo page: {page}")
@@ -685,9 +774,27 @@ class ManagementSession:
             f"current lock code: {cur_lock_code is not None}, "
             f"new lock code: {new_lock_code is not None}"
         )
-        self.backend.write_config(
-            config.get_bytes(reboot, cur_lock_code, new_lock_code)
-        )
+        if self._native:
+            enabled_caps = {}
+            for transport, cap in config.enabled_capabilities.items():
+                name = "Usb" if transport == TRANSPORT.USB else "Nfc"
+                enabled_caps[name] = int(cap)
+            self._native.write_device_config(
+                enabled_caps,
+                reboot,
+                cur_lock_code,
+                new_lock_code,
+                config.auto_eject_timeout,
+                config.challenge_response_timeout,
+                int(config.device_flags) if config.device_flags is not None else None,
+                config.nfc_restricted,
+            )
+        else:
+            if self.backend is None:
+                raise RuntimeError("No backend available")
+            self.backend.write_config(
+                config.get_bytes(reboot, cur_lock_code, new_lock_code)
+            )
         logger.info("Device config written")
 
     def set_mode(
@@ -745,10 +852,15 @@ class ManagementSession:
                     code |= DEVICE_FLAG.EJECT
                 else:
                     raise ValueError("Touch-eject only applicable for mode: CCID")
-            self.backend.set_mode(
-                # N.B. This is little endian!
-                struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
-            )
+            if self._native:
+                self._native.set_mode(code, chalresp_timeout, auto_eject_timeout or 0)
+            else:
+                if self.backend is None:
+                    raise RuntimeError("No backend available")
+                self.backend.set_mode(
+                    # N.B. This is little endian!
+                    struct.pack("<BBH", code, chalresp_timeout, auto_eject_timeout or 0)
+                )
             logger.info("Mode configuration written")
 
     def device_reset(self) -> None:
@@ -758,8 +870,13 @@ class ManagementSession:
         applications. This will factory reset the global PIN as well as the associated
         applications.
         """
-        if not isinstance(self.backend, _ManagementSmartCardBackend):
+        if self._native:
+            logger.debug("Performing device reset")
+            self._native.device_reset()
+            logger.info("Device reset performed")
+        elif isinstance(self.backend, _ManagementSmartCardBackend):
+            logger.debug("Performing device reset")
+            self.backend.device_reset()
+            logger.info("Device reset performed")
+        else:
             raise NotSupportedError("Device reset can only be performed over CCID")
-        logger.debug("Performing device reset")
-        self.backend.device_reset()
-        logger.info("Device reset performed")

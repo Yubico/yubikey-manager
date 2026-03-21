@@ -703,6 +703,12 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         self.version
     }
 
+    /// Override the version (for development devices reporting 0.0.1).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+        self.protocol.configure(version);
+    }
+
     /// Get detailed information about the YubiKey.
     pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
         if self.version < Version(4, 1, 0) {
@@ -710,6 +716,11 @@ impl<C: SmartCardConnection> ManagementSession<C> {
                 "DeviceInfo requires YubiKey 4.1.0 or later".into(),
             ));
         }
+        self.do_read_device_info()
+    }
+
+    /// Read device info without version check (for dev device version override).
+    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
         self.do_read_device_info()
     }
 
@@ -819,15 +830,33 @@ impl<C: SmartCardConnection> ManagementSession<C> {
 
 /// Parse a version string like "5.7.1" into a [`Version`].
 fn parse_version_string(s: &str) -> Result<Version, SmartCardError> {
+    // Try exact "X.Y.Z" first
     let parts: Vec<&str> = s.trim().split('.').collect();
-    if parts.len() != 3 {
-        return Err(SmartCardError::BadResponse(format!("Invalid version string: {s:?}")));
+    if parts.len() == 3 {
+        if let (Ok(a), Ok(b), Ok(c)) = (
+            parts[0].parse::<u8>(),
+            parts[1].parse::<u8>(),
+            parts[2].parse::<u8>(),
+        ) {
+            return Ok(Version(a, b, c));
+        }
     }
-    let parse = |p: &str| -> Result<u8, SmartCardError> {
-        p.parse::<u8>()
-            .map_err(|_| SmartCardError::BadResponse(format!("Invalid version component: {p:?}")))
-    };
-    Ok(Version(parse(parts[0])?, parse(parts[1])?, parse(parts[2])?))
+    // Search for N.N.N pattern anywhere in the string
+    for window in s.split_whitespace() {
+        let segs: Vec<&str> = window.split('.').collect();
+        if segs.len() == 3 {
+            if let (Ok(a), Ok(b), Ok(c)) = (
+                segs[0].parse::<u8>(),
+                segs[1].parse::<u8>(),
+                segs[2].parse::<u8>(),
+            ) {
+                return Ok(Version(a, b, c));
+            }
+        }
+    }
+    Err(SmartCardError::BadResponse(format!(
+        "Invalid version string: {s:?}"
+    )))
 }
 
 /// Decode big-endian bytes to a u64 value.
