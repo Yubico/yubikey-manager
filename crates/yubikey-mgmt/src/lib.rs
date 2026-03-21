@@ -31,6 +31,7 @@ pub mod management;
 pub mod oath;
 pub mod otp_codec;
 pub mod scp;
+pub mod securitydomain;
 pub mod tlv;
 pub mod transport;
 pub mod yubiotp;
