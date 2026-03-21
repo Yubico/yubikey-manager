@@ -34,6 +34,7 @@ from enum import IntEnum, unique
 from functools import total_ordering
 from typing import NamedTuple
 
+from _ykman_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -228,14 +229,27 @@ class HsmAuthSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ) -> None:
-        self.protocol = SmartCardProtocol(connection)
-        self._version = _override_version.patch(
-            _parse_select(self.protocol.select(AID.HSMAUTH))
-        )
-
-        self.protocol.configure(self._version)
-        if scp_key_params:
+        self._native: _NativeHsmAuthSession | None
+        if scp_key_params is not None:
+            self._native = None
+            self.protocol = SmartCardProtocol(connection)
+            self._version = _override_version.patch(
+                _parse_select(self.protocol.select(AID.HSMAUTH))
+            )
+            self.protocol.configure(self._version)
             self.protocol.init_scp(scp_key_params)
+        else:
+            native = _NativeHsmAuthSession(connection)
+            self._native = native
+            self._version = _override_version.patch(Version(*native.version))
+            if self._version != Version(*native.version):
+                native.version = tuple(self._version)
+            self.protocol = SmartCardProtocol(connection)
+
+        logger.debug(
+            f"YubiHSM Auth session initialized (version={self.version}, "
+            f"native={self._native is not None})"
+        )
 
     @property
     def version(self) -> Version:
@@ -244,11 +258,22 @@ class HsmAuthSession:
 
     def reset(self) -> None:
         """Perform a factory reset on the YubiHSM Auth application."""
-        self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
+        if self._native:
+            self._native.reset()
+        else:
+            self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD)
         logger.info("YubiHSM Auth application data reset performed")
 
     def list_credentials(self) -> list[Credential]:
         """List YubiHSM Auth credentials on YubiKey"""
+
+        if self._native:
+            return [
+                Credential(label, ALGORITHM(algo), counter, touch_required)
+                for label, algo, counter, touch_required in (
+                    self._native.list_credentials()
+                )
+            ]
 
         creds = []
         for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
@@ -334,6 +359,14 @@ class HsmAuthSession:
         :param touch_required: The touch requirement policy.
         """
 
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            result = self._native.put_credential_symmetric(
+                management_key, label, key_enc, key_mac, pw, touch_required
+            )
+            logger.info("Credential imported")
+            return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
+
         aes128_key_len = ALGORITHM.AES128_YUBICO_AUTHENTICATION.key_len
         if len(key_enc) != aes128_key_len or len(key_mac) != aes128_key_len:
             raise ValueError(
@@ -367,6 +400,14 @@ class HsmAuthSession:
         :param touch_required: The touch requirement policy.
         """
 
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            result = self._native.put_credential_derived(
+                management_key, label, derivation_password, pw, touch_required
+            )
+            logger.info("Credential imported")
+            return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
+
         key_enc, key_mac = _password_to_key(derivation_password)
 
         return self.put_credential_symmetric(
@@ -398,11 +439,20 @@ class HsmAuthSession:
 
         ln = ALGORITHM.EC_P256_YUBICO_AUTHENTICATION.key_len
         numbers = private_key.private_numbers()
+        raw_key = int2bytes(numbers.private_value, ln)
+
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            result = self._native.put_credential_asymmetric(
+                management_key, label, raw_key, pw, touch_required
+            )
+            logger.info("Credential imported")
+            return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
 
         return self._put_credential(
             management_key,
             label,
-            int2bytes(numbers.private_value, ln),
+            raw_key,
             ALGORITHM.EC_P256_YUBICO_AUTHENTICATION,
             credential_password,
             touch_required,
@@ -428,6 +478,15 @@ class HsmAuthSession:
         """
 
         require_version(self.version, (5, 6, 0))
+
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            result = self._native.generate_credential_asymmetric(
+                management_key, label, pw, touch_required
+            )
+            logger.info("Credential imported")
+            return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
+
         return self._put_credential(
             management_key,
             label,
@@ -446,6 +505,13 @@ class HsmAuthSession:
         :param label: The label of the credential.
         """
         require_version(self.version, (5, 6, 0))
+
+        if self._native:
+            sec1_bytes = self._native.get_public_key(label)
+            return ec.EllipticCurvePublicKey.from_encoded_point(
+                ec.SECP256R1(), bytes(sec1_bytes)
+            )
+
         data = Tlv(TAG_LABEL, _parse_label(label))
         res = self.protocol.send_apdu(0, INS_GET_PUBLIC_KEY, 0, 0, data)
 
@@ -457,6 +523,11 @@ class HsmAuthSession:
         :param management_key: The management key.
         :param label: The label of the credential.
         """
+
+        if self._native:
+            self._native.delete_credential(management_key, label)
+            logger.info("Credential deleted")
+            return
 
         if len(management_key) != MANAGEMENT_KEY_LEN:
             raise ValueError(
@@ -513,6 +584,13 @@ class HsmAuthSession:
         :param credential_password: The current credential password.
         :param new_credential_password: The new credential password.
         """
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            new_pw = _parse_credential_password(new_credential_password)
+            self._native.change_credential_password(label, pw, new_pw)
+            logger.info("Credential password changed")
+            return
+
         data = (
             Tlv(TAG_LABEL, _parse_label(label))
             + Tlv(
@@ -537,6 +615,12 @@ class HsmAuthSession:
         :param management_key: The management key.
         :param new_credential_password: The new credential password.
         """
+        if self._native:
+            new_pw = _parse_credential_password(new_credential_password)
+            self._native.change_credential_password_admin(management_key, label, new_pw)
+            logger.info("Credential password changed")
+            return
+
         if len(management_key) != MANAGEMENT_KEY_LEN:
             raise ValueError(
                 "Management key must be %d bytes long" % MANAGEMENT_KEY_LEN
@@ -562,6 +646,11 @@ class HsmAuthSession:
         :param management_key: The current management key.
         :param new_management_key: The new management key.
         """
+
+        if self._native:
+            self._native.put_management_key(management_key, new_management_key)
+            logger.info("New management key set")
+            return
 
         if (
             len(management_key) != MANAGEMENT_KEY_LEN
@@ -589,6 +678,9 @@ class HsmAuthSession:
 
     def get_management_key_retries(self) -> int:
         """Get retries remaining for Management key"""
+
+        if self._native:
+            return self._native.get_management_key_retries()
 
         res = self.protocol.send_apdu(0, INS_GET_MANAGEMENT_KEY_RETRIES, 0, 0)
         return bytes2int(res)
@@ -643,6 +735,17 @@ class HsmAuthSession:
         :param card_crypto: The card cryptogram.
         """
 
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            result = self._native.calculate_session_keys_symmetric(
+                label, context, pw, card_crypto
+            )
+            return SessionKeys(
+                key_senc=bytes(result[0]),
+                key_smac=bytes(result[1]),
+                key_srmac=bytes(result[2]),
+            )
+
         return SessionKeys.parse(
             self._calculate_session_keys(
                 label=label,
@@ -675,12 +778,22 @@ class HsmAuthSession:
             raise ValueError("Unsupported curve")
 
         numbers = public_key.public_numbers()
-
         public_key_data = (
             struct.pack("!B", 4)
             + int.to_bytes(numbers.x, public_key.key_size // 8, "big")
             + int.to_bytes(numbers.y, public_key.key_size // 8, "big")
         )
+
+        if self._native:
+            pw = _parse_credential_password(credential_password)
+            result = self._native.calculate_session_keys_asymmetric(
+                label, context, public_key_data, pw, card_crypto
+            )
+            return SessionKeys(
+                key_senc=bytes(result[0]),
+                key_smac=bytes(result[1]),
+                key_srmac=bytes(result[2]),
+            )
 
         return SessionKeys.parse(
             self._calculate_session_keys(
@@ -705,6 +818,12 @@ class HsmAuthSession:
             credential, needed for asymmetric credentials.
         """
         require_version(self.version, (5, 6, 0))
+
+        if self._native:
+            pw: bytes | None = None
+            if credential_password is not None:
+                pw = _parse_credential_password(credential_password)
+            return bytes(self._native.get_challenge(label, pw))
 
         data: bytes = Tlv(TAG_LABEL, _parse_label(label))
 

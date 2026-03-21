@@ -7,10 +7,29 @@ fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         hsmauth::HsmAuthError::SmartCard(sc) => smartcard_err(sc),
-        hsmauth::HsmAuthError::InvalidPin(retries) => {
-            PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
-        }
+        hsmauth::HsmAuthError::InvalidPin(retries) => Python::with_gil(|py| {
+            match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("InvalidPinError") {
+                    Ok(cls) => match cls.call1((retries,)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyValueError::new_err(format!(
+                            "Invalid PIN, {} attempts remaining",
+                            retries
+                        )),
+                    },
+                    Err(_) => PyValueError::new_err(format!(
+                        "Invalid PIN, {} attempts remaining",
+                        retries
+                    )),
+                },
+                Err(_) => PyValueError::new_err(format!(
+                    "Invalid PIN, {} attempts remaining",
+                    retries
+                )),
+            }
+        }),
         hsmauth::HsmAuthError::NotSupported(msg) => PyRuntimeError::new_err(msg),
+        hsmauth::HsmAuthError::InvalidParameter(msg) => PyValueError::new_err(msg),
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }
@@ -38,6 +57,13 @@ impl HsmAuthSession {
     fn version(&self) -> (u8, u8, u8) {
         let v = self.inner.version();
         (v.0, v.1, v.2)
+    }
+
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner.set_version(yubikey_mgmt::iso7816::Version(
+            version.0, version.1, version.2,
+        ));
     }
 
     fn reset(&mut self) -> PyResult<()> {

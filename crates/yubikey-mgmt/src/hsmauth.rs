@@ -277,6 +277,11 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.version
     }
 
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+        self.protocol.configure(version);
+    }
+
     pub fn reset(&mut self) -> Result<(), HsmAuthError> {
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
         Ok(())
@@ -339,9 +344,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
                 data.extend_from_slice(&tlv_encode(TAG_KEY_MAC, &key[16..]));
             }
             Algorithm::EcP256YubicoAuthentication => {
-                if !key.is_empty() {
-                    data.extend_from_slice(&tlv_encode(TAG_PRIVATE_KEY, key));
-                }
+                data.extend_from_slice(&tlv_encode(TAG_PRIVATE_KEY, key));
             }
         }
 
