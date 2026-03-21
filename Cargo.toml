@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/yubikey-mgmt", "crates/ykman-pyo3"]
+members = ["crates/yubikit-rs", "crates/ykman-pyo3"]
 resolver = "3"

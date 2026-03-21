@@ -1,7 +1,7 @@
 //! List OATH accounts on the first connected YubiKey.
 
-use yubikey_mgmt::device::list_devices;
-use yubikey_mgmt::oath::OathSession;
+use yubikit_rs::device::list_devices;
+use yubikit_rs::oath::OathSession;
 
 fn main() {
     let devices = list_devices().expect("Failed to enumerate devices");

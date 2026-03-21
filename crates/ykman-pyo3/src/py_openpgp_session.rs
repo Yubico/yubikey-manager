@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::openpgp::{
+use yubikit_rs::openpgp::{
     self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
 };
 
@@ -178,7 +178,7 @@ impl OpenPgpSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
     }
 
     #[getter]

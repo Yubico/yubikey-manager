@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::securitydomain::{
+use yubikit_rs::securitydomain::{
     Curve, KeyRef, SecurityDomainSession as RustSecurityDomainSession, StaticKeys,
 };
 
@@ -34,7 +34,7 @@ impl SecurityDomainSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
     }
 
     fn get_data(&mut self, tag: u32, data: &[u8]) -> PyResult<Vec<u8>> {

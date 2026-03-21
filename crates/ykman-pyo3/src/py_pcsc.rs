@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikey_mgmt::transport::pcsc;
+use yubikit_rs::transport::pcsc;
 
 fn pcsc_err(e: pcsc::PcscError) -> PyErr {
     PyOSError::new_err(e.to_string())

@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::{iso7816, otp_codec, tlv};
+use yubikit_rs::{iso7816, otp_codec, tlv};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {

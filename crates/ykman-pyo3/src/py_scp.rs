@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::scp;
+use yubikit_rs::scp;
 
 #[pyfunction]
 #[pyo3(signature = (key, t, context, l=0x80))]

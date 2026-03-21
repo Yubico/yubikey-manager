@@ -8,7 +8,7 @@ name = "_ykman_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-yubikey-mgmt = { path = "../yubikey-mgmt" }
+yubikit-rs = { path = "../yubikit-rs" }
 pyo3 = { version = "0.25", features = ["extension-module"] }
 p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
 elliptic-curve = { version = "0.13", features = ["sec1"] }

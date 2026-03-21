@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikey_mgmt::transport::hid;
+use yubikit_rs::transport::hid;
 
 fn hid_err(e: hid::HidError) -> PyErr {
     PyOSError::new_err(e.to_string())

@@ -34,7 +34,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikey_mgmt::iso7816::{SmartCardConnection, SmartCardError, Transport};
+use yubikit_rs::iso7816::{SmartCardConnection, SmartCardError, Transport};
 
 /// A Rust `SmartCardConnection` backed by a Python connection object.
 ///

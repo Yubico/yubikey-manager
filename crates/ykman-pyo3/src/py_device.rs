@@ -27,7 +27,7 @@
 
 use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
-use yubikey_mgmt::device;
+use yubikit_rs::device;
 use crate::py_management_session::device_info_to_dict;
 
 fn device_err(e: device::DeviceError) -> PyErr {
@@ -60,8 +60,8 @@ pub fn get_name(
     has_nfc: bool,
 ) -> PyResult<String> {
     use std::collections::HashMap;
-    use yubikey_mgmt::iso7816::{Transport, Version};
-    use yubikey_mgmt::management::{
+    use yubikit_rs::iso7816::{Transport, Version};
+    use yubikit_rs::management::{
         Capability, DeviceConfig, DeviceInfo, FormFactor, VersionQualifier,
     };
 

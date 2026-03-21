@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::piv::{
+use yubikit_rs::piv::{
     self, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession as RustPivSession, Slot,
     TouchPolicy,
 };
@@ -157,7 +157,7 @@ impl PivSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
     }
 
     #[getter]

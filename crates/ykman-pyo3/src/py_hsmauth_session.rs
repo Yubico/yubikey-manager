@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
+use yubikit_rs::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
 
 use crate::py_bridge::{PySmartCardConnection, smartcard_err};
 
@@ -61,7 +61,7 @@ impl HsmAuthSession {
 
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner.set_version(yubikey_mgmt::iso7816::Version(
+        self.inner.set_version(yubikit_rs::iso7816::Version(
             version.0, version.1, version.2,
         ));
     }

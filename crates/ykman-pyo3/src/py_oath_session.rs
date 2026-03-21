@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::oath::{self, OathSession as RustOathSession};
+use yubikit_rs::oath::{self, OathSession as RustOathSession};
 
 use crate::py_bridge::{PySmartCardConnection, smartcard_err};
 
@@ -26,7 +26,7 @@ impl OathSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
     }
 
     #[getter]

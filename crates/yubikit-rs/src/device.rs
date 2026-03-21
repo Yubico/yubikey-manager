@@ -33,7 +33,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikey_mgmt::device::list_devices;
+//! use yubikit_rs::device::list_devices;
 //!
 //! let devices = list_devices().unwrap();
 //! for dev in &devices {

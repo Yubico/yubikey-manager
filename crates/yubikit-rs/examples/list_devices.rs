@@ -1,6 +1,6 @@
 //! List all connected YubiKeys and display their information.
 
-use yubikey_mgmt::device::list_devices;
+use yubikit_rs::device::list_devices;
 
 fn main() {
     match list_devices() {

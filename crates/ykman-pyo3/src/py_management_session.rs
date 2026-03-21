@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::management::{DeviceInfo, ManagementSession as RustManagementSession};
+use yubikit_rs::management::{DeviceInfo, ManagementSession as RustManagementSession};
 
 use crate::py_bridge::{PySmartCardConnection, smartcard_err};
 
@@ -87,7 +87,7 @@ impl ManagementSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
     }
 
     /// Read device info. Returns a dict with parsed fields.
@@ -118,8 +118,8 @@ impl ManagementSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
-        use yubikey_mgmt::iso7816::Transport;
-        use yubikey_mgmt::management::{Capability, DeviceConfig, DeviceFlag};
+        use yubikit_rs::iso7816::Transport;
+        use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag};
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {

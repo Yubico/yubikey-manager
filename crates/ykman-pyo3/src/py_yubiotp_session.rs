@@ -1,8 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikey_mgmt::iso7816::Version;
-use yubikey_mgmt::transport::hid::HidConnection;
-use yubikey_mgmt::yubiotp::{
+use yubikit_rs::iso7816::Version;
+use yubikit_rs::transport::hid::HidConnection;
+use yubikit_rs::yubiotp::{
     self, ConfigSlot, NdefType, Slot, YubiOtpOtpSession as RustYubiOtpOtpSession,
     YubiOtpSession as RustYubiOtpSession,
 };

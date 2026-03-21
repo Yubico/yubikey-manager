@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikey_mgmt::oath;
+use yubikit_rs::oath;
 
 #[pyfunction]
 fn format_cred_id(

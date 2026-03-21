@@ -1022,11 +1022,11 @@ dependencies = [
  "elliptic-curve",
  "p256",
  "pyo3",
- "yubikey-mgmt",
+ "yubikit-rs",
 ]
 
 [[package]]
-name = "yubikey-mgmt"
+name = "yubikit-rs"
 version = "0.1.0"
 dependencies = [
  "aes",
