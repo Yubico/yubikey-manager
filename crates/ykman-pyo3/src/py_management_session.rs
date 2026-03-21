@@ -19,13 +19,18 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
     dict.set_item("reset_blocked", info.reset_blocked.0)?;
 
     let supported = pyo3::types::PyDict::new(py);
-    for (transport, cap) in &info.supported_capabilities {
+    // Ensure deterministic order: USB before NFC (matching Python convention)
+    let mut supported_entries: Vec<_> = info.supported_capabilities.iter().collect();
+    supported_entries.sort_by_key(|(t, _)| **t);
+    for (transport, cap) in supported_entries {
         supported.set_item(format!("{:?}", transport), cap.0)?;
     }
     dict.set_item("supported_capabilities", supported)?;
 
     let enabled = pyo3::types::PyDict::new(py);
-    for (transport, cap) in &info.config.enabled_capabilities {
+    let mut enabled_entries: Vec<_> = info.config.enabled_capabilities.iter().collect();
+    enabled_entries.sort_by_key(|(t, _)| **t);
+    for (transport, cap) in enabled_entries {
         enabled.set_item(format!("{:?}", transport), cap.0)?;
     }
     dict.set_item("enabled_capabilities", enabled)?;

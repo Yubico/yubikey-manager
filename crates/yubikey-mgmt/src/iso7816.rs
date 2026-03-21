@@ -189,7 +189,7 @@ impl SmartCardError {
 // ---------------------------------------------------------------------------
 
 /// Transport type for a smart card connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Transport {
     Usb,
     Nfc,
