@@ -30,16 +30,22 @@ from __future__ import annotations
 import abc
 import logging
 import os
-import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
 from typing import Callable, NamedTuple, Sequence
 
+from _ykman_native.scp import (  # noqa: F401
+    ScpState as _RustScpState,
+)
+from _ykman_native.scp import (
+    constant_time_eq,
+    scp_calculate_mac,
+    scp_derive,
+)
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import cmac, constant_time, hashes, serialization
+from cryptography.hazmat.primitives import cmac, hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 
 from .. import BadResponseError, Tlv
@@ -62,38 +68,12 @@ _HOST_CRYPTOGRAM = 0x01
 
 
 def _derive(key: bytes, t: int, context: bytes, L: int = 0x80) -> bytes:
-    # this only supports aes128
-    if L != 0x80 and L != 0x40:
-        raise ValueError("L must be 0x40 or 0x80")
-
-    i = b"\0" * 11 + struct.pack("!BBHB", t, 0, L, 1) + context
-
-    c = cmac.CMAC(algorithms.AES(key), backend=default_backend())
-    c.update(i)
-    return c.finalize()[: L // 8]
+    return bytes(scp_derive(key, t, context, L))
 
 
 def _calculate_mac(key: bytes, chain: bytes, message: bytes) -> tuple[bytes, bytes]:
-    c = cmac.CMAC(algorithms.AES(key), backend=default_backend())
-    c.update(chain)
-    c.update(message)
-    chain = c.finalize()
-    return chain, chain[:8]
-
-
-def _init_cipher(key: bytes, counter: int, response=False) -> Cipher:
-    encryptor = Cipher(
-        algorithms.AES(key),
-        modes.ECB(),  # noqa: S305
-        backend=default_backend(),
-    ).encryptor()
-    iv_data = (b"\x80" if response else b"\x00") + int.to_bytes(counter, 15, "big")
-    iv = encryptor.update(iv_data) + encryptor.finalize()
-    return Cipher(
-        algorithms.AES(key),
-        modes.CBC(iv),
-        backend=default_backend(),
-    )
+    new_chain, mac = scp_calculate_mac(key, chain, message)
+    return bytes(new_chain), bytes(mac)
 
 
 class SessionKeys(NamedTuple):
@@ -198,50 +178,31 @@ class ScpState:
         enc_counter: int = 1,
     ):
         self._keys = session_keys
-        self._mac_chain = mac_chain
-        self._enc_counter = enc_counter
+        self._state = _RustScpState(
+            session_keys.key_senc,
+            session_keys.key_smac,
+            session_keys.key_srmac,
+            mac_chain,
+            enc_counter,
+        )
 
     def encrypt(self, data: bytes) -> bytes:
-        # Pad the data
-        msg = data
-        padlen = 15 - len(msg) % 16
-        msg += b"\x80"
-        msg = msg.ljust(len(msg) + padlen, b"\0")
-
-        # Encrypt
-        cipher = _init_cipher(self._keys.key_senc, self._enc_counter)
-        encryptor = cipher.encryptor()
-        encrypted = encryptor.update(msg) + encryptor.finalize()
-        self._enc_counter += 1
-        return encrypted
+        return bytes(self._state.encrypt(data))
 
     def mac(self, data: bytes) -> bytes:
-        next_mac_chain, mac = _calculate_mac(self._keys.key_smac, self._mac_chain, data)
-        self._mac_chain = next_mac_chain
-        return mac
+        return bytes(self._state.mac(data))
 
     def unmac(self, data: bytes, sw: int) -> bytes:
-        msg, mac = data[:-8], data[-8:]
-        rmac = _calculate_mac(
-            self._keys.key_srmac, self._mac_chain, msg + struct.pack("!H", sw)
-        )[1]
-        if not constant_time.bytes_eq(mac, rmac):
-            raise BadResponseError("Wrong MAC")
-        return msg
+        try:
+            return bytes(self._state.unmac(data, sw))
+        except ValueError as e:
+            raise BadResponseError(str(e)) from None
 
     def decrypt(self, encrypted: bytes) -> bytes:
-        # Decrypt
-        cipher = _init_cipher(self._keys.key_senc, self._enc_counter - 1, True)
-        decryptor = cipher.decryptor()
-        decrypted = decryptor.update(encrypted) + decryptor.finalize()
-
-        # Unpad
-        unpadded = decrypted.rstrip(b"\x00")
-        if unpadded[-1] != 0x80:
-            raise BadResponseError("Wrong padding")
-        unpadded = unpadded[:-1]
-
-        return unpadded
+        try:
+            return bytes(self._state.decrypt(encrypted))
+        except ValueError as e:
+            raise BadResponseError(str(e)) from None
 
     @classmethod
     def scp03_init(
@@ -268,7 +229,7 @@ class ScpState:
         gen_card_crypto = _derive(
             session_keys.key_smac, _CARD_CRYPTOGRAM, context, 0x40
         )
-        if not constant_time.bytes_eq(gen_card_crypto, card_cryptogram):
+        if not constant_time_eq(gen_card_crypto, card_cryptogram):
             # This means wrong keys
             raise BadResponseError("Wrong SCP03 key set")
 
