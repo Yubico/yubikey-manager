@@ -9,11 +9,51 @@ fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         openpgp::OpenPgpError::SmartCard(sc) => smartcard_err(sc),
-        openpgp::OpenPgpError::InvalidPin(retries) => {
-            PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
-        }
-        openpgp::OpenPgpError::PinBlocked => PyRuntimeError::new_err("PIN blocked"),
-        openpgp::OpenPgpError::NotSupported(msg) => PyRuntimeError::new_err(msg),
+        openpgp::OpenPgpError::InvalidPin(retries) => Python::with_gil(|py| {
+            match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("InvalidPinError") {
+                    Ok(cls) => match cls.call1((retries,)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyValueError::new_err(format!(
+                            "Invalid PIN, {} attempts remaining",
+                            retries
+                        )),
+                    },
+                    Err(_) => PyValueError::new_err(format!(
+                        "Invalid PIN, {} attempts remaining",
+                        retries
+                    )),
+                },
+                Err(_) => PyValueError::new_err(format!(
+                    "Invalid PIN, {} attempts remaining",
+                    retries
+                )),
+            }
+        }),
+        openpgp::OpenPgpError::PinBlocked => Python::with_gil(|py| {
+            match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("InvalidPinError") {
+                    Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err("PIN blocked"),
+                    },
+                    Err(_) => PyRuntimeError::new_err("PIN blocked"),
+                },
+                Err(_) => PyRuntimeError::new_err("PIN blocked"),
+            }
+        }),
+        openpgp::OpenPgpError::NotSupported(msg) => Python::with_gil(|py| {
+            match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("NotSupportedError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg.clone()),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg.clone()),
+                },
+                Err(_) => PyRuntimeError::new_err(msg.clone()),
+            }
+        }),
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }
@@ -133,6 +173,12 @@ impl OpenPgpSession {
     fn version(&self) -> (u8, u8, u8) {
         let v = self.inner.version();
         (v.0, v.1, v.2)
+    }
+
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner
+            .set_version(yubikey_mgmt::iso7816::Version(version.0, version.1, version.2));
     }
 
     #[getter]

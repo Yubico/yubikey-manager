@@ -34,6 +34,7 @@ import struct
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
+    Any,
     ClassVar,
     Mapping,
     Sequence,
@@ -75,6 +76,11 @@ from .core.smartcard import (
     SmartCardConnection,
     SmartCardProtocol,
 )
+
+try:
+    from _ykman_native.sessions import OpenPgpSession as _NativeOpenPgpSession
+except ImportError:
+    _NativeOpenPgpSession = None  # type: ignore[assignment, misc]
 
 logger = logging.getLogger(__name__)
 
@@ -984,6 +990,61 @@ def _pad_message(attributes, message, hash_algorithm):
         raise ValueError(f"Unsupported algorithm attributes: {attributes}")
 
 
+# Map cryptography hash algorithm to Rust SignHashAlgorithm int value
+_HASH_ALGORITHM_MAP: dict[type, int] = {
+    type(None): 0,  # SignHashAlgorithm::None
+    hashes.SHA1: 1,
+    hashes.SHA256: 2,
+    hashes.SHA384: 3,
+    hashes.SHA512: 4,
+}
+
+
+def _hash_algorithm_to_int(hash_algorithm: hashes.HashAlgorithm) -> int:
+    if isinstance(hash_algorithm, Prehashed):
+        return 5  # SignHashAlgorithm::Prehashed
+    ha_type = type(hash_algorithm)
+    if ha_type in _HASH_ALGORITHM_MAP:
+        return _HASH_ALGORITHM_MAP[ha_type]
+    raise ValueError(f"Unsupported hash algorithm: {hash_algorithm}")
+
+
+def _prepare_private_key_for_native(
+    private_key: PrivateKey,
+) -> tuple[int, list[bytes]]:
+    """Convert a private key to (key_type, components) for the native put_key.
+
+    key_type: 0=RSA, 1=RSA-CRT, 2=EC
+    """
+    if isinstance(private_key, rsa.RSAPrivateKeyWithSerialization):
+        pn = private_key.private_numbers()
+        e = int2bytes(pn.public_numbers.e)
+        p = int2bytes(pn.p)
+        q = int2bytes(pn.q)
+        iqmp = int2bytes(pn.iqmp)
+        dmp1 = int2bytes(pn.dmp1)
+        dmq1 = int2bytes(pn.dmq1)
+        n = int2bytes(pn.public_numbers.n)
+        return (1, [e, p, q, iqmp, dmp1, dmq1, n])
+    elif isinstance(private_key, ec.EllipticCurvePrivateKeyWithSerialization):
+        pn = private_key.private_numbers()
+        scalar = int2bytes(pn.private_value)
+        pub_bytes = private_key.public_key().public_bytes(
+            Encoding.X962, PublicFormat.UncompressedPoint
+        )
+        return (2, [scalar, pub_bytes])
+    elif isinstance(private_key, ed25519.Ed25519PrivateKey):
+        raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        pub = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        return (2, [raw, pub])
+    elif isinstance(private_key, x25519.X25519PrivateKey):
+        raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        pub = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        return (2, [raw, pub])
+    else:
+        raise ValueError(f"Unsupported key type: {type(private_key)}")
+
+
 class OpenPgpSession:
     """A session with the OpenPGP application."""
 
@@ -992,6 +1053,33 @@ class OpenPgpSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        self._native: Any
+        if scp_key_params is not None:
+            self._native = None
+            self._init_python(connection, scp_key_params)
+        else:
+            if _NativeOpenPgpSession is None:
+                raise RuntimeError("Native OpenPGP session not available")
+            native = _NativeOpenPgpSession(connection)
+            self._native = native
+            self._version = _override_version.patch(Version(*native.version))
+            if self._version != Version(*native.version):
+                native.version = tuple(self._version)
+            self._app_data = ApplicationRelatedData.parse(
+                native.get_application_related_data()
+            )
+            self.protocol = SmartCardProtocol(connection)
+
+        logger.debug(
+            f"OpenPGP session initialized (version={self.version}, "
+            f"native={self._native is not None})"
+        )
+
+    def _init_python(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: ScpKeyParams | None = None,
+    ) -> None:
         self.protocol = SmartCardProtocol(connection)
         try:
             self.protocol.select(AID.OPENPGP)
@@ -1014,7 +1102,6 @@ class OpenPgpSession:
         # Note: This value is cached!
         # Do not rely on contained information that can change!
         self._app_data = self.get_application_related_data()
-        logger.debug(f"OpenPGP session initialized (version={self.version})")
 
     def _read_version(self) -> Version:
         logger.debug("Getting version number")
@@ -1050,6 +1137,8 @@ class OpenPgpSession:
 
         :param length: Length of the returned data.
         """
+        if self._native:
+            return bytes(self._native.get_challenge(length))
         e = self.extended_capabilities
         if EXTENDED_CAPABILITY_FLAGS.GET_CHALLENGE not in e.flags:
             raise NotSupportedError("GET_CHALLENGE is not supported")
@@ -1064,6 +1153,8 @@ class OpenPgpSession:
 
         :param do: The Data Object to get.
         """
+        if self._native:
+            return bytes(self._native.get_data(int(do)))
         logger.debug(f"Reading Data Object {do.name} ({do:X})")
         return self.protocol.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
 
@@ -1073,21 +1164,35 @@ class OpenPgpSession:
         :param do: The Data Object to write to.
         :param data: The data to write.
         """
+        if self._native:
+            self._native.put_data(int(do), bytes(data))
+            return
         self.protocol.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, bytes(data))
         logger.info(f"Wrote Data Object {do.name} ({do:X})")
 
     def get_pin_status(self) -> PwStatus:
         """Get the current status of PINS."""
+        if self._native:
+            t = self._native.get_pin_status()
+            return PwStatus(PIN_POLICY(t[0]), t[1], t[2], t[3], t[4], t[5], t[6])
         return PwStatus.parse(self.get_data(DO.PW_STATUS_BYTES))
 
     def get_signature_counter(self) -> int:
         """Get the number of times the signature key has been used."""
+        if self._native:
+            return self._native.get_signature_counter()
         s = SecuritySupportTemplate.parse(self.get_data(DO.SECURITY_SUPPORT_TEMPLATE))
         return s.signature_counter
 
     def get_application_related_data(self) -> ApplicationRelatedData:
         """Read the Application Related Data."""
-        data = ApplicationRelatedData.parse(self.get_data(DO.APPLICATION_RELATED_DATA))
+        if self._native:
+            raw = self._native.get_application_related_data()
+            data = ApplicationRelatedData.parse(raw)
+        else:
+            data = ApplicationRelatedData.parse(
+                self.get_data(DO.APPLICATION_RELATED_DATA)
+            )
         # Pre 3.0 the UIF is readable separately, but missing from discretionary
         if data.aid.version < (3, 0):
             data.discretionary.uif_sig = self.get_uif(KEY_REF.SIG)
@@ -1103,6 +1208,10 @@ class OpenPgpSession:
         :param pin_policy: The PIN policy.
         """
         logger.debug(f"Setting Signature PIN policy to {pin_policy}")
+        if self._native:
+            self._native.set_signature_pin_policy(int(pin_policy))
+            logger.info("Signature PIN policy set")
+            return
         data = struct.pack(">B", pin_policy)
         self.put_data(DO.PW_STATUS_BYTES, data)
         logger.info("Signature PIN policy set")
@@ -1112,6 +1221,10 @@ class OpenPgpSession:
 
         WARNING: This will delete all stored keys, certificates and other data.
         """
+        if self._native:
+            self._native.reset()
+            logger.info("OpenPGP application data reset performed")
+            return
         require_version(self.version, (1, 0, 6))
         logger.debug("Preparing OpenPGP reset")
 
@@ -1145,6 +1258,10 @@ class OpenPgpSession:
         :param reset_attempts: The Reset Code attempts.
         :param admin_attempts: The Admin PIN attempts.
         """
+        if self._native:
+            self._native.set_pin_attempts(user_attempts, reset_attempts, admin_attempts)
+            logger.info("Number of PIN attempts has been changed")
+            return
         if self.version[0] == 1:
             # YubiKey NEO
             require_version(self.version, (1, 0, 7))
@@ -1164,6 +1281,11 @@ class OpenPgpSession:
 
     def get_kdf(self) -> Kdf:
         """Get the Key Derivation Function data object."""
+        if self._native:
+            raw = self._native.get_kdf()
+            result = Kdf.parse(raw)
+            logger.debug(f"Using KDF: {type(result).__name__}")
+            return result
         if EXTENDED_CAPABILITY_FLAGS.KDF not in self.extended_capabilities.flags:
             kdf: Kdf = KdfNone()
         else:
@@ -1183,6 +1305,10 @@ class OpenPgpSession:
 
         :param kdf: The key derivation function.
         """
+        if self._native:
+            self._native.set_kdf(bytes(kdf))
+            logger.info("KDF settings changed")
+            return
         e = self._app_data.discretionary.extended_capabilities
         if EXTENDED_CAPABILITY_FLAGS.KDF not in e.flags:
             raise NotSupportedError("KDF is not supported")
@@ -1229,6 +1355,9 @@ class OpenPgpSession:
             otherwise sign operations are NOT allowed.
         """
         logger.debug(f"Verifying User PIN in mode {'82' if extended else '81'}")
+        if self._native:
+            self._native.verify_pin(pin, extended)
+            return
         self._verify(PW.USER, pin, 1 if extended else 0)
 
     def verify_admin(self, admin_pin):
@@ -1239,6 +1368,9 @@ class OpenPgpSession:
         :param admin_pin: The Admin PIN.
         """
         logger.debug("Verifying Admin PIN")
+        if self._native:
+            self._native.verify_admin(admin_pin)
+            return
         self._verify(PW.ADMIN, admin_pin)
 
     def unverify_pin(self, pw: PW) -> None:
@@ -1246,6 +1378,9 @@ class OpenPgpSession:
 
         :param pw: The User, Admin or Reset PIN
         """
+        if self._native:
+            self._native.unverify_pin(int(pw))
+            return
         require_version(self.version, (5, 6, 0))
         logger.debug(f"Resetting verification for {pw.name} PIN")
         self.protocol.send_apdu(0, INS.VERIFY, 0xFF, pw)
@@ -1280,6 +1415,9 @@ class OpenPgpSession:
         :param pin: The current User PIN.
         :param new_pin: The new User PIN.
         """
+        if self._native:
+            self._native.change_pin(pin, new_pin)
+            return
         self._change(PW.USER, pin, new_pin)
 
     def change_admin(self, admin_pin: str, new_admin_pin: str) -> None:
@@ -1288,6 +1426,9 @@ class OpenPgpSession:
         :param admin_pin: The current Admin PIN.
         :param new_admin_pin: The new Admin PIN.
         """
+        if self._native:
+            self._native.change_admin(admin_pin, new_admin_pin)
+            return
         self._change(PW.ADMIN, admin_pin, new_admin_pin)
 
     def set_reset_code(self, reset_code: str) -> None:
@@ -1300,6 +1441,10 @@ class OpenPgpSession:
 
         :param reset_code: The Reset Code for User PIN.
         """
+        if self._native:
+            self._native.set_reset_code(reset_code)
+            logger.info("New Reset Code has been set")
+            return
         logger.debug("Setting a new PIN Reset Code")
         data = self._process_pin(self.get_kdf(), PW.RESET, reset_code)
         self.put_data(DO.RESETTING_CODE, data)
@@ -1313,6 +1458,10 @@ class OpenPgpSession:
         :param new_pin: The new user PIN.
         :param reset_code: The Reset Code.
         """
+        if self._native:
+            self._native.reset_pin(new_pin, reset_code)
+            logger.info("New User PIN has been set")
+            return
         logger.debug("Resetting User PIN")
         kdf = self.get_kdf()
         data = self._process_pin(kdf, PW.USER, new_pin)
@@ -1343,6 +1492,9 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         """
         logger.debug(f"Getting Algorithm Attributes for {key_ref.name}")
+        if self._native:
+            raw = self._native.get_algorithm_attributes(int(key_ref))
+            return AlgorithmAttributes.parse(raw)
         data = self.get_application_related_data()
         return data.discretionary.get_algorithm_attributes(key_ref)
 
@@ -1354,6 +1506,12 @@ class OpenPgpSession:
         The return value is a mapping of KEY_REF to a list of supported algorithm
         attributes, which can be set using set_algorithm_attributes.
         """
+        if self._native:
+            raw = self._native.get_algorithm_information()
+            return {
+                KEY_REF(k): [AlgorithmAttributes.parse(a) for a in v]
+                for k, v in raw.items()
+            }
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
             not in self.extended_capabilities.flags
@@ -1418,6 +1576,10 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param attributes: The algorithm attributes to set.
         """
+        if self._native:
+            self._native.set_algorithm_attributes(int(key_ref), bytes(attributes))
+            logger.info("Algorithm Attributes have been changed")
+            return
         logger.debug(f"Setting Algorithm Attributes for {key_ref.name}")
         supported = self.get_algorithm_information()
         if self.version[0] > 0:  # Don't check support on major version 0
@@ -1434,6 +1596,8 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
+        if self._native:
+            return UIF(self._native.get_uif(int(key_ref)))
         if self.version >= (4, 2, 0):
             return UIF.parse(self.get_data(key_ref.uif_do))
 
@@ -1448,6 +1612,10 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param uif: The User Interaction Flag.
         """
+        if self._native:
+            self._native.set_uif(int(key_ref), int(uif))
+            logger.info(f"UIF changed for {key_ref.name}")
+            return
         require_version(self.version, (4, 2, 0))
         if key_ref == KEY_REF.ATT:
             require_version(
@@ -1472,11 +1640,17 @@ class OpenPgpSession:
     def get_key_information(self) -> KeyInformation:
         """Get the status of the keys."""
         logger.debug("Getting Key Information")
+        if self._native:
+            raw = self._native.get_key_information()
+            return {KEY_REF(k): KEY_STATUS(v) for k, v in raw.items()}
         return self.get_application_related_data().discretionary.key_information
 
     def get_generation_times(self) -> GenerationTimes:
         """Get timestamps for when keys were generated."""
         logger.debug("Getting key generation timestamps")
+        if self._native:
+            raw = self._native.get_generation_times()
+            return {KEY_REF(k): v for k, v in raw.items()}
         return self.get_application_related_data().discretionary.generation_times
 
     def set_generation_time(self, key_ref: KEY_REF, timestamp: int) -> None:
@@ -1488,12 +1662,19 @@ class OpenPgpSession:
         :param timestamp: The timestamp.
         """
         logger.debug(f"Setting key generation timestamp for {key_ref.name}")
+        if self._native:
+            self._native.set_generation_time(int(key_ref), timestamp)
+            logger.info(f"Key generation timestamp set for {key_ref.name}")
+            return
         self.put_data(key_ref.generation_time_do, struct.pack(">I", timestamp))
         logger.info(f"Key generation timestamp set for {key_ref.name}")
 
     def get_fingerprints(self) -> Fingerprints:
         """Get key fingerprints."""
         logger.debug("Getting key fingerprints")
+        if self._native:
+            raw = self._native.get_fingerprints()
+            return {KEY_REF(k): bytes(v) for k, v in raw.items()}
         return self.get_application_related_data().discretionary.fingerprints
 
     def set_fingerprint(self, key_ref: KEY_REF, fingerprint: bytes) -> None:
@@ -1505,6 +1686,10 @@ class OpenPgpSession:
         :param fingerprint: The fingerprint.
         """
         logger.debug(f"Setting key fingerprint for {key_ref.name}")
+        if self._native:
+            self._native.set_fingerprint(int(key_ref), fingerprint)
+            logger.info(f"Key fingerprint set for {key_ref.name}")
+            return
         self.put_data(key_ref.fingerprint_do, fingerprint)
         logger.info("Key fingerprint set for {key_ref.name}")
 
@@ -1514,6 +1699,14 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         """
         logger.debug(f"Getting public key for {key_ref.name}")
+        if self._native:
+            raw = self._native.get_public_key(int(key_ref))
+            data = Tlv.parse_dict(raw)
+            attributes = self.get_algorithm_attributes(key_ref)
+            if isinstance(attributes, EcAttributes):
+                return _parse_ec_key(attributes.oid, data)
+            else:
+                return _parse_rsa_key(data)
         resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x81, 0x00, key_ref.crt)
         data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
         attributes = self.get_algorithm_attributes(key_ref)
@@ -1532,6 +1725,11 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param key_size: The size of the RSA key.
         """
+        if self._native:
+            raw = self._native.generate_rsa_key(int(key_ref), int(key_size))
+            data = Tlv.parse_dict(raw)
+            logger.info(f"RSA key generated for {key_ref.name}")
+            return _parse_rsa_key(data)
         if (4, 2, 0) <= self.version < (4, 3, 5):
             raise NotSupportedError("RSA key generation not supported on this YubiKey")
 
@@ -1563,6 +1761,11 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param curve_oid: The curve OID.
         """
+        if self._native:
+            raw = self._native.generate_ec_key(int(key_ref), str(curve_oid))
+            data = Tlv.parse_dict(raw)
+            logger.info(f"EC key generated for {key_ref.name}")
+            return _parse_ec_key(curve_oid, data)
 
         require_version(self.version, (5, 2, 0))
 
@@ -1588,6 +1791,11 @@ class OpenPgpSession:
         """
 
         logger.debug(f"Importing a private key for {key_ref.name}")
+        if self._native:
+            key_type, components = _prepare_private_key_for_native(private_key)
+            self._native.put_key(int(key_ref), key_type, components)
+            logger.info(f"Private key imported for {key_ref.name}")
+            return
         attributes = _get_key_attributes(private_key, key_ref, self.version)
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
@@ -1612,6 +1820,9 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
+        if self._native:
+            self._native.delete_key(int(key_ref))
+            return
         if 0 < self.version[0] < 4:
             # Import over the key
             self.put_key(
@@ -1652,6 +1863,11 @@ class OpenPgpSession:
         :param key_ref: The slot.
         """
         logger.debug(f"Getting certificate for key {key_ref.name}")
+        if self._native:
+            der = self._native.get_certificate(int(key_ref))
+            if not der:
+                raise ValueError("No certificate found!")
+            return x509.load_der_x509_certificate(bytes(der), default_backend())
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
             data = self.get_data(DO.ATT_CERTIFICATE)
@@ -1672,6 +1888,10 @@ class OpenPgpSession:
         """
         cert_data = certificate.public_bytes(Encoding.DER)
         logger.debug(f"Importing certificate for key {key_ref.name}")
+        if self._native:
+            self._native.put_certificate(int(key_ref), cert_data)
+            logger.info(f"Certificate imported for key {key_ref.name}")
+            return
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
             self.put_data(DO.ATT_CERTIFICATE, cert_data)
@@ -1688,6 +1908,10 @@ class OpenPgpSession:
         :param key_ref: The slot.
         """
         logger.debug(f"Deleting certificate for key {key_ref.name}")
+        if self._native:
+            self._native.delete_certificate(int(key_ref))
+            logger.info(f"Certificate deleted for key {key_ref.name}")
+            return
         if key_ref == KEY_REF.ATT:
             require_version(self.version, (5, 2, 0))
             self.put_data(DO.ATT_CERTIFICATE, b"")
@@ -1706,6 +1930,10 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
+        if self._native:
+            der = self._native.attest_key(int(key_ref))
+            logger.info(f"Attestation certificate created for {key_ref.name}")
+            return x509.load_der_x509_certificate(bytes(der), default_backend())
         require_version(self.version, (5, 2, 0))
         logger.debug(f"Attesting key {key_ref.name}")
         self.protocol.send_apdu(0x80, INS.GET_ATTESTATION, key_ref, 0)
@@ -1720,6 +1948,18 @@ class OpenPgpSession:
         :param message: The message to sign.
         :param hash_algorithm: The pre-signature hash algorithm.
         """
+        if self._native:
+            ha_int = _hash_algorithm_to_int(hash_algorithm)
+            response = bytes(self._native.sign(message, ha_int))
+            attributes = self.get_algorithm_attributes(KEY_REF.SIG)
+            logger.info("Message signed")
+            if attributes.algorithm_id == 0x13:
+                ln = len(response) // 2
+                return encode_dss_signature(
+                    int.from_bytes(response[:ln], "big"),
+                    int.from_bytes(response[ln:], "big"),
+                )
+            return response
         attributes = self.get_algorithm_attributes(KEY_REF.SIG)
         padded = _pad_message(attributes, message, hash_algorithm)
         logger.debug(f"Signing a message with {attributes}")
@@ -1744,6 +1984,18 @@ class OpenPgpSession:
 
         :param value: The value to decrypt.
         """
+        if self._native:
+            if isinstance(value, ec.EllipticCurvePublicKey):
+                data = value.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+            elif isinstance(value, x25519.X25519PublicKey):
+                data = value.public_bytes(Encoding.Raw, PublicFormat.Raw)
+            elif isinstance(value, bytes):
+                data = value
+            else:
+                raise ValueError("Value must be a bytes or public key")
+            response = bytes(self._native.decrypt(data))
+            logger.info("Value decrypted")
+            return response
         attributes = self.get_algorithm_attributes(KEY_REF.DEC)
         logger.debug(f"Decrypting a value with {attributes}")
 
@@ -1777,6 +2029,18 @@ class OpenPgpSession:
         :param message: The message to authenticate.
         :param hash_algorithm: The pre-authentication hash algorithm.
         """
+        if self._native:
+            ha_int = _hash_algorithm_to_int(hash_algorithm)
+            response = bytes(self._native.authenticate(message, ha_int))
+            attributes = self.get_algorithm_attributes(KEY_REF.AUT)
+            logger.info("Message authenticated")
+            if attributes.algorithm_id == 0x13:
+                ln = len(response) // 2
+                return encode_dss_signature(
+                    int.from_bytes(response[:ln], "big"),
+                    int.from_bytes(response[ln:], "big"),
+                )
+            return response
         attributes = self.get_algorithm_attributes(KEY_REF.AUT)
         padded = _pad_message(attributes, message, hash_algorithm)
         logger.debug(f"Authenticating a message with {attributes}")
