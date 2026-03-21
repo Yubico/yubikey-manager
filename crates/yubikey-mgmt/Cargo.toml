@@ -20,6 +20,12 @@ sha2 = "0.10"
 subtle = "2"
 elliptic-curve = { version = "0.13", features = ["sec1"] }
 p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+p384 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+rsa = "0.9"
+ed25519-dalek = "2"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+des = "0.8"
+flate2 = "1"
 thiserror = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -26,9 +26,11 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 pub mod hsmauth;
+pub mod piv;
 pub mod iso7816;
 pub mod management;
 pub mod oath;
+pub mod openpgp;
 pub mod otp_codec;
 pub mod scp;
 pub mod securitydomain;
