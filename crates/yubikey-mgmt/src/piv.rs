@@ -900,6 +900,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         self.version
     }
 
+    /// Override the version (for development devices reporting 0.0.1).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+        self.protocol.configure(version);
+    }
     pub fn management_key_type(&self) -> ManagementKeyType {
         self.mgmt_key_type
     }

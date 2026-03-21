@@ -36,7 +36,7 @@ import zlib
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from typing import TYPE_CHECKING, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, TypeAlias, overload
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -76,6 +76,11 @@ from .core.smartcard import (
 if TYPE_CHECKING:
     # This type isn't available on cryptography <40.
     from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
+
+try:
+    from _ykman_native.sessions import PivSession as _NativePivSession
+except ImportError:
+    _NativePivSession = None  # type: ignore[assignment, misc]
 
 
 logger = logging.getLogger(__name__)
@@ -702,24 +707,45 @@ class PivSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        self.protocol = SmartCardProtocol(connection)
-        self.protocol.select(AID.PIV)
-
-        if scp_key_params:
+        self._native: Any
+        if scp_key_params is not None:
+            self._native = None
+            self.protocol = SmartCardProtocol(connection)
+            self.protocol.select(AID.PIV)
             self.protocol.init_scp(scp_key_params)
 
-        logger.debug("Getting PIV version")
-        self._version = _override_version.patch(
-            Version.from_bytes(self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0))
-        )
-        self.protocol.configure(self.version)
+            logger.debug("Getting PIV version")
+            self._version = _override_version.patch(
+                Version.from_bytes(self.protocol.send_apdu(0, INS_GET_VERSION, 0, 0))
+            )
+            self.protocol.configure(self.version)
 
-        try:
-            self._management_key_type = self.get_management_key_metadata().key_type
-        except NotSupportedError:
-            self._management_key_type = MANAGEMENT_KEY_TYPE.TDES
-        self._current_pin_retries = 3
-        self._max_pin_retries = 3
+            try:
+                self._management_key_type = self.get_management_key_metadata().key_type
+            except NotSupportedError:
+                self._management_key_type = MANAGEMENT_KEY_TYPE.TDES
+            self._current_pin_retries = 3
+            self._max_pin_retries = 3
+        else:
+            if _NativePivSession is None:
+                raise RuntimeError("Native PIV session not available")
+            native = _NativePivSession(connection)
+            self._native = native
+            self._version = _override_version.patch(Version(*native.version))
+            if self._version != Version(*native.version):
+                native.version = tuple(self._version)
+            # Re-query management key type now that version may be patched
+            try:
+                key_type, _, _ = native.get_management_key_metadata()
+                self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
+            except Exception:
+                self._management_key_type = MANAGEMENT_KEY_TYPE(
+                    native.management_key_type
+                )
+            self._current_pin_retries = 3
+            self._max_pin_retries = 3
+            self.protocol = SmartCardProtocol(connection)
+
         logger.debug(f"PIV session initialized (version={self.version})")
 
     @property
@@ -739,6 +765,21 @@ class PivSession:
         This deletes all user-data from the PIV application, and resets the default
         values for PIN, PUK, and management key.
         """
+        if self._native:
+            logger.debug("Performing PIV reset (native)")
+            self._native.reset()
+            self._current_pin_retries = 3
+            self._max_pin_retries = 3
+            try:
+                key_type, _, _ = self._native.get_management_key_metadata()
+                self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
+            except Exception:
+                self._management_key_type = MANAGEMENT_KEY_TYPE(
+                    self._native.management_key_type
+                )
+            logger.info("PIV application data reset performed")
+            return
+
         logger.debug("Preparing PIV reset")
 
         try:
@@ -789,6 +830,8 @@ class PivSession:
     def get_serial(self) -> int:
         """Get the serial number of the YubiKey."""
         logger.debug("Getting serial number")
+        if self._native:
+            return self._native.get_serial()
         require_version(self.version, (5, 0, 3))
         response = self.protocol.send_apdu(0, INS_GET_SERIAL, 0, 0)
         return bytes2int(response)
@@ -825,6 +868,11 @@ class PivSession:
                 raise ValueError("Incorrect management key type")
         if not isinstance(management_key, bytes):
             raise TypeError("management_key must be bytes")
+
+        if self._native:
+            logger.debug("Authenticating with management key (native)")
+            self._native.authenticate(management_key)
+            return
 
         key_type = self.management_key_type
         logger.debug(f"Authenticating with key type: {key_type}")
@@ -875,6 +923,14 @@ class PivSession:
         key_type = MANAGEMENT_KEY_TYPE(key_type)
         logger.debug(f"Setting management key of type: {key_type}")
 
+        if self._native:
+            self._native.set_management_key(
+                int(key_type), management_key, require_touch
+            )
+            self._management_key_type = key_type
+            logger.info("Management key set")
+            return
+
         if key_type != MANAGEMENT_KEY_TYPE.TDES:
             require_version(self.version, (5, 4, 0))
         if len(management_key) != key_type.key_len:
@@ -899,6 +955,10 @@ class PivSession:
         :param pin: The PIN.
         """
         logger.debug("Verifying PIN")
+        if self._native:
+            self._native.verify_pin(pin)
+            self._current_pin_retries = self._max_pin_retries
+            return
         try:
             self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, _pin_bytes(pin))
             self._current_pin_retries = self._max_pin_retries
@@ -929,6 +989,12 @@ class PivSession:
                 "Cannot request temporary PIN when doing check-only verification"
             )
 
+        if self._native:
+            result = self._native.verify_uv(temporary_pin, check_only)
+            if result is not None:
+                return bytes(result)
+            return None
+
         if check_only:
             data = b""
         elif temporary_pin:
@@ -957,6 +1023,9 @@ class PivSession:
         :param pin: A temporary PIN previously requested via verify_uv.
         """
         logger.debug("Verifying temporary PIN")
+        if self._native:
+            self._native.verify_temporary_pin(pin)
+            return
         if len(pin) != TEMPORARY_PIN_LEN:
             raise ValueError(f"Temporary PIN must be exactly {TEMPORARY_PIN_LEN} bytes")
         try:
@@ -976,6 +1045,8 @@ class PivSession:
     def get_pin_attempts(self) -> int:
         """Get remaining PIN attempts."""
         logger.debug("Getting PIN attempts")
+        if self._native:
+            return self._native.get_pin_attempts()
         try:
             return self.get_pin_metadata().attempts_remaining
         except NotSupportedError:
@@ -1002,6 +1073,10 @@ class PivSession:
         :param new_pin: The new PIN.
         """
         logger.debug("Changing PIN")
+        if self._native:
+            self._native.change_pin(old_pin, new_pin)
+            logger.info("New PIN set")
+            return
         self._change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)
         logger.info("New PIN set")
 
@@ -1015,6 +1090,10 @@ class PivSession:
         :param new_puk: The new PUK.
         """
         logger.debug("Changing PUK")
+        if self._native:
+            self._native.change_puk(old_puk, new_puk)
+            logger.info("New PUK set")
+            return
         try:
             self._change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk)
             logger.info("New PUK set")
@@ -1033,6 +1112,10 @@ class PivSession:
         :param new_pin: The new PIN.
         """
         logger.debug("Using PUK to set new PIN")
+        if self._native:
+            self._native.unblock_pin(puk, new_pin)
+            logger.info("New PIN set")
+            return
         try:
             self._change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin)
             logger.info("New PIN set")
@@ -1054,6 +1137,12 @@ class PivSession:
         :param puk_attempts: The PUK attempts.
         """
         logger.debug(f"Setting PIN/PUK attempts ({pin_attempts}, {puk_attempts})")
+        if self._native:
+            self._native.set_pin_attempts(pin_attempts, puk_attempts)
+            self._max_pin_retries = pin_attempts
+            self._current_pin_retries = pin_attempts
+            logger.info("PIN/PUK attempts set")
+            return
         try:
             self.protocol.send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts)
             self._max_pin_retries = pin_attempts
@@ -1069,16 +1158,35 @@ class PivSession:
     def get_pin_metadata(self) -> PinMetadata:
         """Get PIN metadata."""
         logger.debug("Getting PIN metadata")
+        if self._native:
+            default_value, total_attempts, attempts_remaining = (
+                self._native.get_pin_metadata()
+            )
+            return PinMetadata(default_value, total_attempts, attempts_remaining)
         return self._get_pin_puk_metadata(PIN_P2)
 
     def get_puk_metadata(self) -> PinMetadata:
         """Get PUK metadata."""
         logger.debug("Getting PUK metadata")
+        if self._native:
+            default_value, total_attempts, attempts_remaining = (
+                self._native.get_puk_metadata()
+            )
+            return PinMetadata(default_value, total_attempts, attempts_remaining)
         return self._get_pin_puk_metadata(PUK_P2)
 
     def get_management_key_metadata(self) -> ManagementKeyMetadata:
         """Get management key metadata."""
         logger.debug("Getting management key metadata")
+        if self._native:
+            key_type, default_value, touch_policy = (
+                self._native.get_management_key_metadata()
+            )
+            return ManagementKeyMetadata(
+                MANAGEMENT_KEY_TYPE(key_type),
+                default_value,
+                TOUCH_POLICY(touch_policy),
+            )
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(
             self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT)
@@ -1097,6 +1205,17 @@ class PivSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Getting metadata for slot {slot}")
+        if self._native:
+            key_type, pin_policy, touch_policy, generated, public_key_encoded = (
+                self._native.get_slot_metadata(int(slot))
+            )
+            return SlotMetadata(
+                KEY_TYPE(key_type),
+                PIN_POLICY(pin_policy),
+                TOUCH_POLICY(touch_policy),
+                generated,
+                bytes(public_key_encoded),
+            )
         require_version(self.version, (5, 3, 0))
         data = Tlv.parse_dict(self.protocol.send_apdu(0, INS_GET_METADATA, 0, slot))
         policy = data[TAG_METADATA_POLICY]
@@ -1116,6 +1235,11 @@ class PivSession:
         active.
         """
         logger.debug("Getting bio metadata")
+        if self._native:
+            configured, attempts_remaining, temporary_pin = (
+                self._native.get_bio_metadata()
+            )
+            return BioMetadata(configured, attempts_remaining, temporary_pin)
         try:
             data = Tlv.parse_dict(
                 self.protocol.send_apdu(0, INS_GET_METADATA, 0, SLOT_OCC_AUTH)
@@ -1157,6 +1281,8 @@ class PivSession:
             f"hash={hash_algorithm}, padding={padding}"
         )
         padded = _pad_message(key_type, message, hash_algorithm, padding)
+        if self._native:
+            return bytes(self._native.sign(int(slot), int(key_type), padded))
         return self._use_private_key(slot, key_type, padded, False)
 
     def decrypt(
@@ -1179,6 +1305,9 @@ class PivSession:
             f"Decrypting data with key in slot {slot} of type {key_type} using "
             f"padding={padding}"
         )
+        if self._native:
+            padded = bytes(self._native.decrypt(int(slot), cipher_text))
+            return _unpad_message(padded, padding)
         padded = self._use_private_key(slot, key_type, cipher_text, False)
         return _unpad_message(padded, padding)
 
@@ -1209,6 +1338,8 @@ class PivSession:
             data = peer_public_key.public_bytes(
                 Encoding.X962, PublicFormat.UncompressedPoint
             )
+        if self._native:
+            return bytes(self._native.calculate_secret(int(slot), int(key_type), data))
         return self._use_private_key(slot, key_type, data, True)
 
     def get_object(self, object_id: int) -> bytes:
@@ -1219,6 +1350,11 @@ class PivSession:
         :param object_id: The object identifier.
         """
         logger.debug(f"Reading data from object slot {hex(object_id)}")
+        if self._native:
+            try:
+                return bytes(self._native.get_object(object_id))
+            except ValueError:
+                pass  # Unknown object ID, fall back to Python
         if object_id == OBJECT_ID.DISCOVERY:
             expected: int = OBJECT_ID.DISCOVERY
         else:
@@ -1246,6 +1382,13 @@ class PivSession:
         :param object_id: The object identifier.
         :param data: The object data.
         """
+        if self._native:
+            try:
+                self._native.put_object(object_id, data)
+                logger.info(f"Data written to object slot {hex(object_id)}")
+                return
+            except ValueError:
+                pass  # Unknown object ID, fall back to Python
         self.protocol.send_apdu(
             0,
             INS_PUT_DATA,
@@ -1262,6 +1405,12 @@ class PivSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Reading certificate in slot {slot}")
+        if self._native:
+            der_bytes = bytes(self._native.get_certificate(int(slot)))
+            try:
+                return x509.load_der_x509_certificate(der_bytes, default_backend())
+            except Exception as e:
+                raise BadResponseError("Invalid certificate", e)
         try:
             data = Tlv.parse_dict(self.get_object(OBJECT_ID.from_slot(slot)))
             cert_data = data[TAG_CERTIFICATE]
@@ -1293,6 +1442,11 @@ class PivSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Storing certificate in slot {slot}")
+        if self._native:
+            cert_der = certificate.public_bytes(Encoding.DER)
+            self._native.put_certificate(int(slot), cert_der, compress)
+            logger.info(f"Certificate written to slot {slot}, compression={compress}")
+            return
         cert_data = certificate.public_bytes(Encoding.DER)
         logger.debug(f"Certificate is {len(cert_data)} bytes, compression={compress}")
         if compress:
@@ -1318,6 +1472,9 @@ class PivSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Deleting certificate in slot {slot}")
+        if self._native:
+            self._native.delete_certificate(int(slot))
+            return
         self.put_object(OBJECT_ID.from_slot(slot))
 
     def put_key(
@@ -1339,6 +1496,34 @@ class PivSession:
         slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
         self.check_key_support(key_type, pin_policy, touch_policy, False)
+
+        if self._native:
+            if key_type.algorithm == ALGORITHM.RSA:
+                key_der = private_key.private_bytes(
+                    Encoding.DER, PrivateFormat.TraditionalOpenSSL, NoEncryption()
+                )
+            elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+                key_der = private_key.private_bytes(
+                    Encoding.Raw, PrivateFormat.Raw, NoEncryption()
+                )
+            else:
+                assert isinstance(  # noqa: S101
+                    private_key, ec.EllipticCurvePrivateKey
+                )
+                key_der = int2bytes(
+                    private_key.private_numbers().private_value,
+                    key_type.bit_len // 8,
+                )
+            self._native.put_key(
+                int(slot),
+                int(key_type),
+                key_der,
+                int(pin_policy),
+                int(touch_policy),
+            )
+            logger.info(f"Private key imported in slot {slot} of type {key_type}")
+            return key_type
+
         ln = key_type.bit_len // 8
         if key_type.algorithm == ALGORITHM.RSA:
             assert isinstance(private_key, rsa.RSAPrivateKey)  # noqa: S101
@@ -1395,6 +1580,23 @@ class PivSession:
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
         self.check_key_support(key_type, pin_policy, touch_policy, True)
+
+        if self._native:
+            logger.debug(
+                f"Generating key with pin_policy={pin_policy}, "
+                f"touch_policy={touch_policy}"
+            )
+            pub_key_encoded = bytes(
+                self._native.generate_key(
+                    int(slot),
+                    int(key_type),
+                    int(pin_policy),
+                    int(touch_policy),
+                )
+            )
+            logger.info(f"Private key generated in slot {slot} of type {key_type}")
+            return _parse_device_public_key(key_type, pub_key_encoded)
+
         data: bytes = Tlv(TAG_GEN_ALGORITHM, int2bytes(key_type))
         if pin_policy:
             data += Tlv(TAG_PIN_POLICY, int2bytes(pin_policy))
@@ -1418,6 +1620,10 @@ class PivSession:
         """
         require_version(self.version, (4, 3, 0))
         slot = SLOT(slot)
+        if self._native:
+            der_bytes = bytes(self._native.attest_key(int(slot)))
+            logger.debug(f"Attested key in slot {slot}")
+            return x509.load_der_x509_certificate(der_bytes, default_backend())
         response = self.protocol.send_apdu(0, INS_ATTEST, slot, 0)
         logger.debug(f"Attested key in slot {slot}")
         return x509.load_der_x509_certificate(response, default_backend())
@@ -1434,6 +1640,10 @@ class PivSession:
         from_slot = SLOT(from_slot)
         to_slot = SLOT(to_slot)
         logger.debug(f"Moving key from slot {from_slot} to {to_slot}")
+        if self._native:
+            self._native.move_key(int(from_slot), int(to_slot))
+            logger.info(f"Key moved from slot {from_slot} to {to_slot}")
+            return
         self.protocol.send_apdu(0, INS_MOVE_KEY, to_slot, from_slot)
         logger.info(f"Key moved from slot {from_slot} to {to_slot}")
 
@@ -1447,6 +1657,10 @@ class PivSession:
         require_version(self.version, (5, 7, 0))
         slot = SLOT(slot)
         logger.debug(f"Deleting key in slot {slot}")
+        if self._native:
+            self._native.delete_key(int(slot))
+            logger.info(f"Key deleted in slot {slot}")
+            return
         self.protocol.send_apdu(0, INS_MOVE_KEY, 0xFF, slot)
         logger.info(f"Key deleted in slot {slot}")
 
@@ -1523,6 +1737,18 @@ class PivSession:
 
         Set fips_restrictions to True to apply restrictions based on FIPS status.
         """
+
+        if self._native:
+            self._native.check_key_support(
+                int(key_type),
+                int(pin_policy),
+                int(touch_policy),
+                generate,
+                fips_restrictions,
+            )
+            if pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):
+                self.get_bio_metadata()
+            return
 
         _do_check_key_support(
             self.version,
