@@ -616,8 +616,8 @@ impl DeviceInfo {
 
         let config = DeviceConfig {
             enabled_capabilities: enabled,
-            auto_eject_timeout: if auto_eject_to == 0 { None } else { Some(auto_eject_to) },
-            challenge_response_timeout: if chal_resp_to == 0 { None } else { Some(chal_resp_to) },
+            auto_eject_timeout: Some(auto_eject_to),
+            challenge_response_timeout: Some(chal_resp_to),
             device_flags: Some(flags),
             nfc_restricted: Some(nfc_restricted),
         };
