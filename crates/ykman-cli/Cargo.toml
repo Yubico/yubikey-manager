@@ -13,3 +13,4 @@ path = "src/main.rs"
 yubikit-rs = { path = "../yubikit-rs" }
 clap = { version = "4", features = ["derive"] }
 getrandom = "0.3"
+hex = "0.4.3"
