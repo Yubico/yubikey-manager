@@ -12,3 +12,4 @@ path = "src/main.rs"
 [dependencies]
 yubikit-rs = { path = "../yubikit-rs" }
 clap = { version = "4", features = ["derive"] }
+getrandom = "0.3"

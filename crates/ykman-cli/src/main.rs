@@ -5,6 +5,7 @@ use yubikit_rs::core_types::set_override_version;
 use yubikit_rs::device::{list_devices, list_readers, open_reader, YubiKeyDevice};
 use yubikit_rs::management::ReleaseType;
 
+mod config;
 mod info;
 mod list;
 mod util;
@@ -49,6 +50,116 @@ enum Commands {
     },
     /// Show general information
     Info,
+    /// Enable or disable applications and settings
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Configure USB applications
+    Usb {
+        /// Enable an application (can be repeated)
+        #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
+        enable: Vec<String>,
+        /// Disable an application (can be repeated)
+        #[arg(long = "disable", action = clap::ArgAction::Append)]
+        disable: Vec<String>,
+        /// Enable all supported applications
+        #[arg(short = 'a', long)]
+        enable_all: bool,
+        /// List enabled applications
+        #[arg(short = 'l', long)]
+        list: bool,
+        /// Current lock code (hex)
+        #[arg(short = 'L', long = "lock-code")]
+        lock_code: Option<String>,
+        /// Enable touch-eject
+        #[arg(long)]
+        touch_eject: bool,
+        /// Disable touch-eject
+        #[arg(long)]
+        no_touch_eject: bool,
+        /// Auto-eject timeout in seconds
+        #[arg(long)]
+        autoeject_timeout: Option<u16>,
+        /// Challenge-response timeout in seconds
+        #[arg(long)]
+        chalresp_timeout: Option<u8>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Configure NFC applications
+    Nfc {
+        /// Enable an application (can be repeated)
+        #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
+        enable: Vec<String>,
+        /// Disable an application (can be repeated)
+        #[arg(long = "disable", action = clap::ArgAction::Append)]
+        disable: Vec<String>,
+        /// Enable all supported applications
+        #[arg(short = 'a', long)]
+        enable_all: bool,
+        /// Disable all supported applications
+        #[arg(short = 'D', long)]
+        disable_all: bool,
+        /// List enabled applications
+        #[arg(short = 'l', long)]
+        list: bool,
+        /// Current lock code (hex)
+        #[arg(short = 'L', long = "lock-code")]
+        lock_code: Option<String>,
+        /// Disable NFC until next USB power cycle
+        #[arg(short = 'R', long)]
+        restrict: bool,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Set or change the configuration lock code
+    SetLockCode {
+        /// Current lock code (hex)
+        #[arg(short = 'l', long = "lock-code")]
+        lock_code: Option<String>,
+        /// New lock code (hex)
+        #[arg(short = 'n', long = "new-lock-code")]
+        new_lock_code: Option<String>,
+        /// Clear the lock code
+        #[arg(short = 'c', long)]
+        clear: bool,
+        /// Generate a random lock code
+        #[arg(short = 'g', long)]
+        generate: bool,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Set connection mode (for older YubiKeys)
+    Mode {
+        /// Mode string (e.g., OTP+FIDO+CCID) or number (0-6)
+        mode: String,
+        /// Enable touch-eject (CCID mode)
+        #[arg(long)]
+        touch_eject: bool,
+        /// Auto-eject timeout in seconds
+        #[arg(long)]
+        autoeject_timeout: Option<u16>,
+        /// Challenge-response timeout in seconds
+        #[arg(long)]
+        chalresp_timeout: Option<u8>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Factory reset the YubiKey (Bio only)
+    Reset {
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
 }
 
 /// Resolve a YubiKey device based on CLI options.
@@ -109,6 +220,85 @@ fn run() -> Result<(), CliError> {
             let dev = resolve_device(cli.device, &cli.reader)?;
             apply_version_override(&dev);
             info::run(&dev)
+        }
+        Commands::Config { action } => {
+            let dev = resolve_device(cli.device, &cli.reader)?;
+            apply_version_override(&dev);
+            match action {
+                ConfigAction::Usb {
+                    enable,
+                    disable,
+                    enable_all,
+                    list,
+                    lock_code,
+                    touch_eject,
+                    no_touch_eject,
+                    autoeject_timeout,
+                    chalresp_timeout,
+                    force,
+                } => config::run_usb(
+                    &dev,
+                    &enable,
+                    &disable,
+                    enable_all,
+                    list,
+                    lock_code.as_deref(),
+                    touch_eject,
+                    no_touch_eject,
+                    autoeject_timeout,
+                    chalresp_timeout,
+                    force,
+                ),
+                ConfigAction::Nfc {
+                    enable,
+                    disable,
+                    enable_all,
+                    disable_all,
+                    list,
+                    lock_code,
+                    restrict,
+                    force,
+                } => config::run_nfc(
+                    &dev,
+                    &enable,
+                    &disable,
+                    enable_all,
+                    disable_all,
+                    list,
+                    lock_code.as_deref(),
+                    restrict,
+                    force,
+                ),
+                ConfigAction::SetLockCode {
+                    lock_code,
+                    new_lock_code,
+                    clear,
+                    generate,
+                    force,
+                } => config::run_set_lock_code(
+                    &dev,
+                    lock_code.as_deref(),
+                    new_lock_code.as_deref(),
+                    clear,
+                    generate,
+                    force,
+                ),
+                ConfigAction::Mode {
+                    mode,
+                    touch_eject,
+                    autoeject_timeout,
+                    chalresp_timeout,
+                    force,
+                } => config::run_mode(
+                    &dev,
+                    &mode,
+                    touch_eject,
+                    autoeject_timeout,
+                    chalresp_timeout,
+                    force,
+                ),
+                ConfigAction::Reset { force } => config::run_reset(&dev, force),
+            }
         }
     }
 }
