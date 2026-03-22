@@ -5,12 +5,16 @@ use yubikit_rs::core_types::set_override_version;
 use yubikit_rs::device::{list_devices, list_readers, open_reader, YubiKeyDevice};
 use yubikit_rs::management::ReleaseType;
 
+mod apdu;
 mod config;
+mod hsmauth;
 mod info;
 mod list;
 mod oath;
+mod openpgp;
 mod otp;
 mod piv;
+mod securitydomain;
 mod util;
 
 use util::CliError;
@@ -72,6 +76,30 @@ enum Commands {
     Piv {
         #[command(subcommand)]
         action: PivAction,
+    },
+    /// Manage the OpenPGP application
+    Openpgp {
+        #[command(subcommand)]
+        action: OpenpgpAction,
+    },
+    /// Manage the YubiHSM Auth application
+    Hsmauth {
+        #[command(subcommand)]
+        action: HsmauthAction,
+    },
+    /// Manage the Security Domain
+    #[command(name = "sd")]
+    SecurityDomain {
+        #[command(subcommand)]
+        action: SecurityDomainAction,
+    },
+    /// Send raw APDUs to the YubiKey
+    Apdu {
+        /// APDUs to send (format: [CLA]INS[P1P2][:DATA][/LE])
+        apdus: Vec<String>,
+        /// Print only hex output
+        #[arg(short = 'x', long)]
+        no_pretty: bool,
     },
 }
 
@@ -711,6 +739,278 @@ enum PivObjectAction {
     },
 }
 
+#[derive(Subcommand)]
+enum OpenpgpAction {
+    /// Display OpenPGP status
+    Info,
+    /// Reset the OpenPGP application
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage access (PINs)
+    #[command(subcommand)]
+    Access(OpenpgpAccessAction),
+    /// Manage keys
+    #[command(subcommand)]
+    Keys(OpenpgpKeysAction),
+    /// Manage certificates
+    #[command(subcommand)]
+    Certificates(OpenpgpCertAction),
+}
+
+#[derive(Subcommand)]
+enum OpenpgpAccessAction {
+    /// Set PIN retry counts
+    SetRetries {
+        pin_retries: u8,
+        reset_code_retries: u8,
+        admin_pin_retries: u8,
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Change user PIN
+    ChangePin {
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short, long)]
+        new_pin: Option<String>,
+    },
+    /// Change admin PIN
+    ChangeAdminPin {
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+        #[arg(short, long)]
+        new_admin_pin: Option<String>,
+    },
+    /// Change reset code
+    ChangeResetCode {
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+        /// New reset code
+        reset_code: String,
+    },
+    /// Unblock PIN
+    UnblockPin {
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+        #[arg(long)]
+        reset_code: Option<String>,
+        #[arg(short, long)]
+        new_pin: Option<String>,
+    },
+    /// Set signature PIN policy
+    SetSignaturePolicy {
+        /// Policy (once or always)
+        policy: String,
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OpenpgpKeysAction {
+    /// Show key metadata
+    Info {
+        /// Key reference (sig, dec, aut, att)
+        key: String,
+    },
+    /// Set touch policy for a key
+    SetTouch {
+        /// Key reference
+        key: String,
+        /// Policy (off, on, fixed, cached, cached-fixed)
+        policy: String,
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Import attestation key
+    Import {
+        /// Key reference
+        key: String,
+        /// Key file
+        key_file: String,
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+    },
+    /// Generate attestation certificate
+    Attest {
+        /// Key reference
+        key: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'f', long, default_value = "PEM")]
+        format: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum OpenpgpCertAction {
+    /// Export certificate
+    Export {
+        /// Key reference
+        key: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'f', long, default_value = "PEM")]
+        format: String,
+    },
+    /// Import certificate
+    Import {
+        /// Key reference
+        key: String,
+        /// Certificate file
+        cert_file: String,
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+    },
+    /// Delete certificate
+    Delete {
+        /// Key reference
+        key: String,
+        #[arg(short, long)]
+        admin_pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HsmauthAction {
+    /// Display HSM Auth status
+    Info,
+    /// Reset the HSM Auth application
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage credentials
+    #[command(subcommand)]
+    Credentials(HsmauthCredAction),
+    /// Manage access
+    #[command(subcommand)]
+    Access(HsmauthAccessAction),
+}
+
+#[derive(Subcommand)]
+enum HsmauthCredAction {
+    /// List credentials
+    List,
+    /// Generate asymmetric credential
+    Generate {
+        label: String,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Import symmetric credential
+    Symmetric {
+        label: String,
+        #[arg(short = 'E', long)]
+        enc_key: Option<String>,
+        #[arg(short = 'M', long)]
+        mac_key: Option<String>,
+        #[arg(short, long)]
+        generate: bool,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Import credential derived from password
+    Derive {
+        label: String,
+        /// Derivation password
+        derivation_password: String,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Delete credential
+    Delete {
+        label: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Change credential password
+    ChangePassword {
+        label: String,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// New credential password
+        #[arg(short, long)]
+        new_credential_password: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum HsmauthAccessAction {
+    /// Change management key
+    ChangeManagementKey {
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short, long)]
+        new_management_key: Option<String>,
+        #[arg(short, long)]
+        generate: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SecurityDomainAction {
+    /// Display Security Domain info
+    Info,
+    /// Reset Security Domain
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage keys
+    #[command(subcommand)]
+    Keys(SecurityDomainKeysAction),
+}
+
+#[derive(Subcommand)]
+enum SecurityDomainKeysAction {
+    /// Generate EC key pair
+    Generate {
+        /// Key ID (hex)
+        kid: String,
+        /// Key Version Number (hex)
+        kvn: String,
+        /// Output file for public key
+        output: String,
+        /// Replace existing KVN
+        #[arg(long)]
+        replace_kvn: Option<String>,
+    },
+    /// Export certificate bundle
+    Export {
+        kid: String,
+        kvn: String,
+        output: String,
+    },
+    /// Delete a key
+    Delete {
+        kid: String,
+        kvn: String,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
 /// Resolve a YubiKey device based on CLI options.
 fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKeyDevice, CliError> {
     if let Some(reader_name) = reader {
@@ -1290,6 +1590,252 @@ fn run() -> Result<(), CliError> {
                     ),
                 },
             }
+        }
+        Commands::Openpgp { action } => {
+            let dev = resolve_device(cli.device, &cli.reader)?;
+            apply_version_override(&dev);
+            match action {
+                OpenpgpAction::Info => openpgp::run_info(&dev),
+                OpenpgpAction::Reset { force } => openpgp::run_reset(&dev, force),
+                OpenpgpAction::Access(access) => match access {
+                    OpenpgpAccessAction::SetRetries {
+                        pin_retries,
+                        reset_code_retries,
+                        admin_pin_retries,
+                        admin_pin,
+                        force,
+                    } => openpgp::run_set_retries(
+                        &dev,
+                        pin_retries,
+                        reset_code_retries,
+                        admin_pin_retries,
+                        admin_pin.as_deref(),
+                        force,
+                    ),
+                    OpenpgpAccessAction::ChangePin { pin, new_pin } => {
+                        openpgp::run_change_pin(&dev, pin.as_deref(), new_pin.as_deref())
+                    }
+                    OpenpgpAccessAction::ChangeAdminPin {
+                        admin_pin,
+                        new_admin_pin,
+                    } => openpgp::run_change_admin_pin(
+                        &dev,
+                        admin_pin.as_deref(),
+                        new_admin_pin.as_deref(),
+                    ),
+                    OpenpgpAccessAction::ChangeResetCode {
+                        admin_pin,
+                        reset_code,
+                    } => openpgp::run_change_reset_code(
+                        &dev,
+                        admin_pin.as_deref(),
+                        &reset_code,
+                    ),
+                    OpenpgpAccessAction::UnblockPin {
+                        admin_pin,
+                        reset_code,
+                        new_pin,
+                    } => openpgp::run_unblock_pin(
+                        &dev,
+                        admin_pin.as_deref(),
+                        reset_code.as_deref(),
+                        new_pin.as_deref(),
+                    ),
+                    OpenpgpAccessAction::SetSignaturePolicy { policy, admin_pin } => {
+                        openpgp::run_set_signature_policy(
+                            &dev,
+                            &policy,
+                            admin_pin.as_deref(),
+                        )
+                    }
+                },
+                OpenpgpAction::Keys(keys) => match keys {
+                    OpenpgpKeysAction::Info { key } => openpgp::run_keys_info(&dev, &key),
+                    OpenpgpKeysAction::SetTouch {
+                        key,
+                        policy,
+                        admin_pin,
+                        force,
+                    } => openpgp::run_keys_set_touch(
+                        &dev,
+                        &key,
+                        &policy,
+                        admin_pin.as_deref(),
+                        force,
+                    ),
+                    OpenpgpKeysAction::Import {
+                        key,
+                        key_file,
+                        admin_pin,
+                    } => openpgp::run_keys_import(
+                        &dev,
+                        &key,
+                        &key_file,
+                        admin_pin.as_deref(),
+                    ),
+                    OpenpgpKeysAction::Attest {
+                        key,
+                        output,
+                        format,
+                    } => openpgp::run_keys_attest(&dev, &key, &output, &format),
+                },
+                OpenpgpAction::Certificates(certs) => match certs {
+                    OpenpgpCertAction::Export {
+                        key,
+                        output,
+                        format,
+                    } => openpgp::run_certificates_export(&dev, &key, &output, &format),
+                    OpenpgpCertAction::Import {
+                        key,
+                        cert_file,
+                        admin_pin,
+                    } => openpgp::run_certificates_import(
+                        &dev,
+                        &key,
+                        &cert_file,
+                        admin_pin.as_deref(),
+                    ),
+                    OpenpgpCertAction::Delete { key, admin_pin } => {
+                        openpgp::run_certificates_delete(&dev, &key, admin_pin.as_deref())
+                    }
+                },
+            }
+        }
+        Commands::Hsmauth { action } => {
+            let dev = resolve_device(cli.device, &cli.reader)?;
+            apply_version_override(&dev);
+            match action {
+                HsmauthAction::Info => hsmauth::run_info(&dev),
+                HsmauthAction::Reset { force } => hsmauth::run_reset(&dev, force),
+                HsmauthAction::Credentials(cred) => match cred {
+                    HsmauthCredAction::List => hsmauth::run_credentials_list(&dev),
+                    HsmauthCredAction::Generate {
+                        label,
+                        credential_password,
+                        management_key,
+                        touch,
+                    } => hsmauth::run_credentials_generate(
+                        &dev,
+                        &label,
+                        credential_password.as_deref(),
+                        management_key.as_deref(),
+                        touch,
+                    ),
+                    HsmauthCredAction::Symmetric {
+                        label,
+                        enc_key,
+                        mac_key,
+                        generate,
+                        credential_password,
+                        management_key,
+                        touch,
+                    } => hsmauth::run_credentials_symmetric(
+                        &dev,
+                        &label,
+                        enc_key.as_deref(),
+                        mac_key.as_deref(),
+                        generate,
+                        credential_password.as_deref(),
+                        management_key.as_deref(),
+                        touch,
+                    ),
+                    HsmauthCredAction::Derive {
+                        label,
+                        derivation_password,
+                        credential_password,
+                        management_key,
+                        touch,
+                    } => hsmauth::run_credentials_derive(
+                        &dev,
+                        &label,
+                        &derivation_password,
+                        credential_password.as_deref(),
+                        management_key.as_deref(),
+                        touch,
+                    ),
+                    HsmauthCredAction::Delete {
+                        label,
+                        management_key,
+                        force,
+                    } => hsmauth::run_credentials_delete(
+                        &dev,
+                        &label,
+                        management_key.as_deref(),
+                        force,
+                    ),
+                    HsmauthCredAction::ChangePassword {
+                        label,
+                        credential_password,
+                        new_credential_password,
+                    } => hsmauth::run_credentials_change_password(
+                        &dev,
+                        &label,
+                        credential_password.as_deref(),
+                        &new_credential_password,
+                    ),
+                },
+                HsmauthAction::Access(access) => match access {
+                    HsmauthAccessAction::ChangeManagementKey {
+                        management_key,
+                        new_management_key,
+                        generate,
+                    } => hsmauth::run_access_change_management_key(
+                        &dev,
+                        management_key.as_deref(),
+                        new_management_key.as_deref(),
+                        generate,
+                    ),
+                },
+            }
+        }
+        Commands::SecurityDomain { action } => {
+            let dev = resolve_device(cli.device, &cli.reader)?;
+            apply_version_override(&dev);
+            match action {
+                SecurityDomainAction::Info => securitydomain::run_info(&dev),
+                SecurityDomainAction::Reset { force } => {
+                    securitydomain::run_reset(&dev, force)
+                }
+                SecurityDomainAction::Keys(keys) => {
+                    let parse_hex_u8 = |s: &str| -> Result<u8, CliError> {
+                        u8::from_str_radix(
+                            s.trim_start_matches("0x").trim_start_matches("0X"),
+                            16,
+                        )
+                        .map_err(|_| CliError(format!("Invalid hex value: {s}")))
+                    };
+                    match keys {
+                        SecurityDomainKeysAction::Generate {
+                            kid,
+                            kvn,
+                            output,
+                            replace_kvn,
+                        } => {
+                            let kid = parse_hex_u8(&kid)?;
+                            let kvn = parse_hex_u8(&kvn)?;
+                            let rkvn = replace_kvn
+                                .as_deref()
+                                .map(|s| parse_hex_u8(s))
+                                .transpose()?;
+                            securitydomain::run_keys_generate(&dev, kid, kvn, &output, rkvn)
+                        }
+                        SecurityDomainKeysAction::Export { kid, kvn, output } => {
+                            let kid = parse_hex_u8(&kid)?;
+                            let kvn = parse_hex_u8(&kvn)?;
+                            securitydomain::run_keys_export(&dev, kid, kvn, &output)
+                        }
+                        SecurityDomainKeysAction::Delete { kid, kvn, force } => {
+                            let kid = parse_hex_u8(&kid)?;
+                            let kvn = parse_hex_u8(&kvn)?;
+                            securitydomain::run_keys_delete(&dev, kid, kvn, force)
+                        }
+                    }
+                }
+            }
+        }
+        Commands::Apdu { apdus, no_pretty } => {
+            let dev = resolve_device(cli.device, &cli.reader)?;
+            apdu::run_apdu(&dev, &apdus, no_pretty)
         }
     }
 }
