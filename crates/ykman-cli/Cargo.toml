@@ -1,0 +1,14 @@
+[package]
+name = "ykman-cli"
+version = "0.1.0"
+edition = "2024"
+description = "YubiKey Manager CLI (Rust)"
+license = "BSD-2-Clause"
+
+[[bin]]
+name = "ykman-rs"
+path = "src/main.rs"
+
+[dependencies]
+yubikit-rs = { path = "../yubikit-rs" }
+clap = { version = "4", features = ["derive"] }

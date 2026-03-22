@@ -45,7 +45,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use crate::iso7816::{SmartCardError, Transport, Version};
-use crate::management::{Capability, DeviceInfo, FormFactor, ManagementSession};
+use crate::management::{Capability, DeviceInfo, FormFactor, ManagementSession, UsbInterface};
 use crate::transport::hid::{HidConnection, HidDeviceInfo, HidError, list_otp_devices};
 use crate::transport::pcsc::{PcscConnection, PcscError};
 pub use crate::transport::pcsc::list_readers;
@@ -151,6 +151,20 @@ impl YubiKeyDevice {
     /// Returns the HID device path, if this device was found over HID.
     pub fn hid_path(&self) -> Option<&str> {
         self.hid_path.as_deref()
+    }
+
+    /// Returns detected USB interfaces based on which transports were found.
+    pub fn usb_interfaces(&self) -> UsbInterface {
+        let mut ifaces = UsbInterface(0);
+        if self.reader_name.is_some() {
+            ifaces = ifaces | UsbInterface::CCID;
+            // CCID readers on YubiKey usually also have FIDO
+            ifaces = ifaces | UsbInterface::FIDO;
+        }
+        if self.hid_path.is_some() {
+            ifaces = ifaces | UsbInterface::OTP;
+        }
+        ifaces
     }
 
     /// Open a SmartCard (PC/SC) connection to this device.

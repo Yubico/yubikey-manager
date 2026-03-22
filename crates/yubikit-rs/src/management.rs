@@ -136,6 +136,31 @@ impl Capability {
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
+
+    /// All known capabilities in display order.
+    pub const ALL: &[Self] = &[
+        Self::OTP,
+        Self::U2F,
+        Self::FIDO2,
+        Self::OATH,
+        Self::PIV,
+        Self::OPENPGP,
+        Self::HSMAUTH,
+    ];
+
+    /// Human-readable display name for this capability.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::OTP => "Yubico OTP",
+            Self::U2F => "FIDO U2F",
+            Self::FIDO2 => "FIDO2",
+            Self::OATH => "OATH",
+            Self::PIV => "PIV",
+            Self::OPENPGP => "OpenPGP",
+            Self::HSMAUTH => "YubiHSM Auth",
+            _ => "Unknown",
+        }
+    }
 }
 
 impl std::ops::BitOr for Capability {
@@ -369,6 +394,22 @@ impl std::ops::BitOr for UsbInterface {
 impl std::ops::BitAnd for UsbInterface {
     type Output = Self;
     fn bitand(self, rhs: Self) -> Self { Self(self.0 & rhs.0) }
+}
+
+impl fmt::Display for UsbInterface {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        if self.0 & Self::OTP.0 != 0 {
+            parts.push("OTP");
+        }
+        if self.0 & Self::FIDO.0 != 0 {
+            parts.push("FIDO");
+        }
+        if self.0 & Self::CCID.0 != 0 {
+            parts.push("CCID");
+        }
+        write!(f, "{}", parts.join(", "))
+    }
 }
 
 /// Predefined USB interface mode combinations.
