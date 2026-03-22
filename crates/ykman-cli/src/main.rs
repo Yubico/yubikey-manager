@@ -10,6 +10,7 @@ mod info;
 mod list;
 mod oath;
 mod otp;
+mod piv;
 mod util;
 
 use util::CliError;
@@ -66,6 +67,11 @@ enum Commands {
     Otp {
         #[command(subcommand)]
         action: OtpAction,
+    },
+    /// Manage the PIV application
+    Piv {
+        #[command(subcommand)]
+        action: PivAction,
     },
 }
 
@@ -489,6 +495,222 @@ enum OtpAction {
     },
 }
 
+#[derive(Subcommand)]
+enum PivAction {
+    /// Display PIV status
+    Info,
+    /// Reset the PIV application
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage PIV access (PIN, PUK, management key)
+    #[command(subcommand)]
+    Access(PivAccessAction),
+    /// Manage PIV keys
+    #[command(subcommand)]
+    Keys(PivKeysAction),
+    /// Manage PIV certificates
+    #[command(subcommand)]
+    Certificates(PivCertAction),
+    /// Manage PIV data objects
+    #[command(subcommand)]
+    Objects(PivObjectAction),
+}
+
+#[derive(Subcommand)]
+enum PivAccessAction {
+    /// Change the PIV PIN
+    ChangePin {
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short, long)]
+        new_pin: Option<String>,
+    },
+    /// Change the PIV PUK
+    ChangePuk {
+        #[arg(short, long)]
+        puk: Option<String>,
+        #[arg(short, long)]
+        new_puk: Option<String>,
+    },
+    /// Unblock the PIN using PUK
+    UnblockPin {
+        #[arg(short, long)]
+        puk: Option<String>,
+        #[arg(short, long)]
+        new_pin: Option<String>,
+    },
+    /// Set PIN and PUK retry counts
+    SetRetries {
+        /// PIN retry count
+        pin_retries: u8,
+        /// PUK retry count
+        puk_retries: u8,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Change the management key
+    ChangeManagementKey {
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short, long)]
+        new_management_key: Option<String>,
+        #[arg(short, long, default_value = "TDES")]
+        algorithm: String,
+        #[arg(short, long)]
+        touch: bool,
+        #[arg(short, long)]
+        generate: bool,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PivKeysAction {
+    /// Generate an asymmetric key pair
+    Generate {
+        /// PIV slot
+        slot: String,
+        /// Output file for public key
+        output: String,
+        #[arg(short, long, default_value = "ECCP256")]
+        algorithm: String,
+        #[arg(long, default_value = "DEFAULT")]
+        pin_policy: String,
+        #[arg(long, default_value = "DEFAULT")]
+        touch_policy: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short = 'f', long, default_value = "PEM")]
+        format: String,
+    },
+    /// Import a private key
+    Import {
+        /// PIV slot
+        slot: String,
+        /// Private key file
+        key_file: String,
+        #[arg(long, default_value = "DEFAULT")]
+        pin_policy: String,
+        #[arg(long, default_value = "DEFAULT")]
+        touch_policy: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Show key metadata
+    Info {
+        /// PIV slot
+        slot: String,
+    },
+    /// Generate attestation certificate
+    Attest {
+        /// PIV slot
+        slot: String,
+        /// Output certificate file
+        output: String,
+        #[arg(short = 'f', long, default_value = "PEM")]
+        format: String,
+    },
+    /// Export public key
+    Export {
+        /// PIV slot
+        slot: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'f', long, default_value = "PEM")]
+        format: String,
+    },
+    /// Move key between slots
+    Move {
+        /// Source slot
+        source: String,
+        /// Destination slot
+        dest: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Delete key in slot
+    Delete {
+        /// PIV slot
+        slot: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PivCertAction {
+    /// Export certificate from slot
+    Export {
+        /// PIV slot
+        slot: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'f', long, default_value = "PEM")]
+        format: String,
+    },
+    /// Import certificate to slot
+    Import {
+        /// PIV slot
+        slot: String,
+        /// Certificate file
+        cert_file: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short, long)]
+        compress: bool,
+    },
+    /// Delete certificate from slot
+    Delete {
+        /// PIV slot
+        slot: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PivObjectAction {
+    /// Export a PIV data object
+    Export {
+        /// Object ID (CHUID, CCC, etc.)
+        object: String,
+        /// Output file (- for stdout)
+        output: String,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Import a PIV data object
+    Import {
+        /// Object ID
+        object: String,
+        /// Data file
+        data: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
 /// Resolve a YubiKey device based on CLI options.
 fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKeyDevice, CliError> {
     if let Some(reader_name) = reader {
@@ -899,6 +1121,174 @@ fn run() -> Result<(), CliError> {
                         force,
                     )
                 }
+            }
+        }
+        Commands::Piv { action } => {
+            let dev = resolve_device(cli.device, &cli.reader)?;
+            apply_version_override(&dev);
+            match action {
+                PivAction::Info => piv::run_info(&dev),
+                PivAction::Reset { force } => piv::run_reset(&dev, force),
+                PivAction::Access(access) => match access {
+                    PivAccessAction::ChangePin { pin, new_pin } => {
+                        piv::run_change_pin(&dev, pin.as_deref(), new_pin.as_deref())
+                    }
+                    PivAccessAction::ChangePuk { puk, new_puk } => {
+                        piv::run_change_puk(&dev, puk.as_deref(), new_puk.as_deref())
+                    }
+                    PivAccessAction::UnblockPin { puk, new_pin } => {
+                        piv::run_unblock_pin(&dev, puk.as_deref(), new_pin.as_deref())
+                    }
+                    PivAccessAction::SetRetries {
+                        pin_retries,
+                        puk_retries,
+                        management_key,
+                        pin,
+                        force,
+                    } => piv::run_set_retries(
+                        &dev,
+                        pin_retries,
+                        puk_retries,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                        force,
+                    ),
+                    PivAccessAction::ChangeManagementKey {
+                        management_key,
+                        new_management_key,
+                        algorithm,
+                        touch,
+                        generate,
+                        force,
+                    } => piv::run_change_management_key(
+                        &dev,
+                        management_key.as_deref(),
+                        new_management_key.as_deref(),
+                        &algorithm,
+                        touch,
+                        generate,
+                        force,
+                    ),
+                },
+                PivAction::Keys(keys) => match keys {
+                    PivKeysAction::Generate {
+                        slot,
+                        output,
+                        algorithm,
+                        pin_policy,
+                        touch_policy,
+                        management_key,
+                        pin,
+                        format,
+                    } => piv::run_keys_generate(
+                        &dev,
+                        &slot,
+                        &output,
+                        &algorithm,
+                        &pin_policy,
+                        &touch_policy,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                        &format,
+                    ),
+                    PivKeysAction::Import {
+                        slot,
+                        key_file,
+                        pin_policy,
+                        touch_policy,
+                        management_key,
+                        pin,
+                    } => piv::run_keys_import(
+                        &dev,
+                        &slot,
+                        &key_file,
+                        &pin_policy,
+                        &touch_policy,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                    PivKeysAction::Info { slot } => piv::run_keys_info(&dev, &slot),
+                    PivKeysAction::Attest {
+                        slot,
+                        output,
+                        format,
+                    } => piv::run_keys_attest(&dev, &slot, &output, &format),
+                    PivKeysAction::Export {
+                        slot,
+                        output,
+                        format,
+                    } => piv::run_keys_export(&dev, &slot, &output, &format),
+                    PivKeysAction::Move {
+                        source,
+                        dest,
+                        management_key,
+                        pin,
+                    } => piv::run_keys_move(
+                        &dev,
+                        &source,
+                        &dest,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                    PivKeysAction::Delete {
+                        slot,
+                        management_key,
+                        pin,
+                    } => piv::run_keys_delete(
+                        &dev,
+                        &slot,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                },
+                PivAction::Certificates(certs) => match certs {
+                    PivCertAction::Export {
+                        slot,
+                        output,
+                        format,
+                    } => piv::run_certificates_export(&dev, &slot, &output, &format),
+                    PivCertAction::Import {
+                        slot,
+                        cert_file,
+                        management_key,
+                        pin,
+                        compress,
+                    } => piv::run_certificates_import(
+                        &dev,
+                        &slot,
+                        &cert_file,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                        compress,
+                    ),
+                    PivCertAction::Delete {
+                        slot,
+                        management_key,
+                        pin,
+                    } => piv::run_certificates_delete(
+                        &dev,
+                        &slot,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                },
+                PivAction::Objects(objs) => match objs {
+                    PivObjectAction::Export { object, output, pin } => {
+                        piv::run_objects_export(&dev, &object, &output, pin.as_deref())
+                    }
+                    PivObjectAction::Import {
+                        object,
+                        data,
+                        management_key,
+                        pin,
+                    } => piv::run_objects_import(
+                        &dev,
+                        &object,
+                        &data,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                },
             }
         }
     }
