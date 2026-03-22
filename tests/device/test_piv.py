@@ -19,7 +19,7 @@ from ykman.piv import (
 )
 from ykman.util import parse_certificates, parse_private_key
 from yubikit.core import TRANSPORT, NotSupportedError
-from yubikit.core.smartcard import AID, ApduError
+from yubikit.core.smartcard import AID, ApduError, SmartCardProtocol
 from yubikit.management import CAPABILITY, RELEASE_TYPE, ManagementSession
 from yubikit.piv import (
     ALGORITHM,
@@ -82,7 +82,7 @@ def session(ccid_connection, scp, info):
         piv = PivSession(ccid_connection, scp)
         piv.reset()
     yield piv
-    reset_state(piv, scp)
+    reset_state(ccid_connection, scp)
 
 
 class Keys(NamedTuple):
@@ -97,7 +97,7 @@ def default_keys():
 
 
 @pytest.fixture
-def keys(session, info, default_keys, scp):
+def keys(session, info, default_keys, scp, ccid_connection):
     if info.pin_complexity:
         new_keys = Keys(
             "12345679" if CAPABILITY.PIV in info.fips_capable else "123458",
@@ -108,7 +108,7 @@ def keys(session, info, default_keys, scp):
         session.change_puk(default_keys.puk, new_keys.puk)
         session.authenticate(default_keys.mgmt)
         session.set_management_key(session.management_key_type, new_keys.mgmt)
-        reset_state(session, scp)
+        reset_state(ccid_connection, scp)
 
         yield new_keys
     else:
@@ -119,12 +119,17 @@ def not_roca(version):
     return not ((4, 2, 0) <= version < (4, 3, 5))
 
 
-def reset_state(session, scp_params):
-    session.protocol.connection.connection.disconnect()
-    session.protocol.connection.connection.connect()
-    session.protocol.select(AID.PIV)
+def reset_state(session_or_connection, scp_params):
+    if isinstance(session_or_connection, PivSession):
+        connection = session_or_connection.protocol.connection
+    else:
+        connection = session_or_connection
+    connection.connection.disconnect()
+    connection.connection.connect()
+    protocol = SmartCardProtocol(connection)
+    protocol.select(AID.PIV)
     if scp_params:
-        session.protocol.init_scp(scp_params)
+        protocol.init_scp(scp_params)
 
 
 def assert_mgm_key_is(session, key):

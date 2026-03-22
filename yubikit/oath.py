@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
@@ -11,12 +10,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from _ykman_native.oath import (  # noqa: F401
     build_put_data as _build_put_data,
-)
-from _ykman_native.oath import (
-    build_set_key_data as _build_set_key_data,
-)
-from _ykman_native.oath import (
-    build_validate_data as _build_validate_data,
 )
 from _ykman_native.oath import (
     derive_key as _derive_key_native,
@@ -40,9 +33,6 @@ from _ykman_native.oath import (
     hmac_shorten_key as _hmac_shorten_key_native,
 )
 from _ykman_native.oath import (
-    hmac_verify as _hmac_verify,
-)
-from _ykman_native.oath import (
     parse_b32_key,
 )
 from _ykman_native.oath import (
@@ -51,13 +41,11 @@ from _ykman_native.oath import (
 from _ykman_native.sessions import OathSession as _NativeOathSession
 
 from .core import (
-    BadResponseError,
     Tlv,
     Version,
     _override_version,
-    require_version,
 )
-from .core.smartcard import ScpKeyParams, SmartCardConnection, SmartCardProtocol
+from .core.smartcard import ScpKeyParams, SmartCardConnection
 
 logger = logging.getLogger(__name__)
 
@@ -264,13 +252,9 @@ class OathSession:
         if self._version != Version(*native.version):
             native.version = tuple(self._version)
         self._device_id = native.device_id
-        self._has_key = native.has_key
-        self._challenge = b"" if native.locked else None
-        self.protocol = SmartCardProtocol(connection, INS_SEND_REMAINING)
 
         logger.debug(
-            f"OATH session initialized (version={self.version}, "
-            f"has_key={self._has_key})"
+            f"OATH session initialized (version={self.version}, has_key={self.has_key})"
         )
 
     @property
@@ -289,23 +273,17 @@ class OathSession:
     @property
     def has_key(self) -> bool:
         """If True, the YubiKey has an access key set."""
-        if self._native:
-            return self._native.has_key
-        return self._has_key
+        return self._native.has_key
 
     @property
     def locked(self) -> bool:
         """If True, the OATH application is currently locked via an access key."""
-        if self._native:
-            return self._native.locked
-        return self._challenge is not None
+        return self._native.locked
 
     def reset(self) -> None:
         """Perform a factory reset on the OATH application."""
-        if self._native:
-            self._native.reset()
-            self._has_key = self._native.has_key
-            self._device_id = self._native.device_id
+        self._native.reset()
+        self._device_id = self._native.device_id
         logger.info("OATH application data reset performed")
 
     def derive_key(self, password: str) -> bytes:
@@ -313,9 +291,7 @@ class OathSession:
 
         :param password: The derivation password.
         """
-        if self._native:
-            return bytes(self._native.derive_key(password))
-        raise RuntimeError("Native session not available")
+        return bytes(self._native.derive_key(password))
 
     def validate(self, key: bytes) -> None:
         """Validate authentication with access key.
@@ -325,33 +301,14 @@ class OathSession:
         :param key: The access key.
         """
         logger.debug("Unlocking session")
-        if self._native:
-            self._native.validate(key)
-            self._challenge = None
-        else:
-            data = bytes(_build_validate_data(key, self._challenge, os.urandom(8)))
-            _, rest = Tlv.parse_from(data)
-            host_challenge = Tlv(rest).value
-            resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, data)
-            if not _hmac_verify(key, host_challenge, Tlv.unpack(TAG_RESPONSE, resp)):
-                raise BadResponseError(
-                    "Response from validation does not match verification!"
-                )
-            self._challenge = None
+        self._native.validate(key)
 
     def set_key(self, key: bytes) -> None:
         """Set an access key for authentication.
 
         :param key: The access key.
         """
-        if self._native:
-            self._native.set_key(key)
-            self._has_key = True
-        else:
-            challenge = os.urandom(8)
-            data = bytes(_build_set_key_data(key, challenge))
-            self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, data)
-            self._has_key = True
+        self._native.set_key(key)
         logger.info("New access code set")
 
     def unset_key(self) -> None:
@@ -359,12 +316,8 @@ class OathSession:
 
         This removes the need to authentication a session before using it.
         """
-        if self._native:
-            self._native.unset_key()
-        else:
-            self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, Tlv(TAG_KEY))
+        self._native.unset_key()
         logger.info("Access code removed")
-        self._has_key = False
 
     def put_credential(
         self, credential_data: CredentialData, touch_required: bool = False
@@ -375,51 +328,26 @@ class OathSession:
         :param touch_required: The touch policy.
         """
         d = credential_data
-        if self._native:
-            result = self._native.put_credential(
-                name=d.name,
-                oath_type=int(d.oath_type),
-                hash_algorithm=int(d.hash_algorithm),
-                secret=d.secret,
-                digits=d.digits,
-                period=d.period,
-                counter=d.counter,
-                issuer=d.issuer,
-                touch_required=touch_required,
-            )
-            logger.info("Credential imported")
-            return Credential(
-                result[0],
-                result[1],
-                result[2],
-                result[3],
-                OATH_TYPE(result[4]),
-                result[5],
-                result[6],
-            )
-
-        cred_id = d.get_id()
-        data = bytes(
-            _build_put_data(
-                cred_id,
-                int(d.oath_type),
-                int(d.hash_algorithm),
-                d.digits,
-                d.secret,
-                touch_required,
-                d.counter,
-            )
+        result = self._native.put_credential(
+            name=d.name,
+            oath_type=int(d.oath_type),
+            hash_algorithm=int(d.hash_algorithm),
+            secret=d.secret,
+            digits=d.digits,
+            period=d.period,
+            counter=d.counter,
+            issuer=d.issuer,
+            touch_required=touch_required,
         )
-        self.protocol.send_apdu(0, INS_PUT, 0, 0, data)
         logger.info("Credential imported")
         return Credential(
-            self.device_id,
-            cred_id,
-            d.issuer,
-            d.name,
-            d.oath_type,
-            d.period,
-            touch_required,
+            result[0],
+            result[1],
+            result[2],
+            result[3],
+            OATH_TYPE(result[4]),
+            result[5],
+            result[6],
         )
 
     def rename_credential(
@@ -432,42 +360,17 @@ class OathSession:
         :param issuer: The credential issuer.
         """
         logger.debug(f"Renaming credential '{credential_id!r}' to '{issuer}:{name}'")
-        if self._native:
-            result = self._native.rename_credential(credential_id, name, issuer)
-            logger.info("Credential renamed")
-            return bytes(result)
-
-        require_version(self.version, (5, 3, 1))
-        _, _, period = _parse_cred_id(credential_id, OATH_TYPE.TOTP)
-        new_id = _format_cred_id(issuer, name, OATH_TYPE.TOTP, period)
-        self.protocol.send_apdu(
-            0, INS_RENAME, 0, 0, Tlv(TAG_NAME, credential_id) + Tlv(TAG_NAME, new_id)
-        )
+        result = self._native.rename_credential(credential_id, name, issuer)
         logger.info("Credential renamed")
-        return new_id
+        return bytes(result)
 
     def list_credentials(self) -> list[Credential]:
         """List OATH credentials."""
         logger.debug("Listing OATH credentials...")
-        if self._native:
-            raw = self._native.list_credentials()
-            return [
-                Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6])
-                for r in raw
-            ]
-
-        creds = []
-        for tlv in Tlv.parse_list(self.protocol.send_apdu(0, INS_LIST, 0, 0)):
-            data = Tlv.unpack(TAG_NAME_LIST, tlv)
-            oath_type = OATH_TYPE(MASK_TYPE & data[0])
-            cred_id = data[1:]
-            issuer, name, period = _parse_cred_id(cred_id, oath_type)
-            creds.append(
-                Credential(
-                    self.device_id, cred_id, issuer, name, oath_type, period, None
-                )
-            )
-        return creds
+        raw = self._native.list_credentials()
+        return [
+            Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6]) for r in raw
+        ]
 
     def calculate(self, credential_id: bytes, challenge: bytes) -> bytes:
         """Perform a calculate for an OATH credential.
@@ -476,20 +379,7 @@ class OathSession:
         :param challenge: The challenge.
         """
         logger.debug(f"Calculating response for credential: {credential_id!r}")
-        if self._native:
-            return bytes(self._native.calculate(credential_id, challenge))
-
-        resp = Tlv.unpack(
-            TAG_RESPONSE,
-            self.protocol.send_apdu(
-                0,
-                INS_CALCULATE,
-                0,
-                0,
-                Tlv(TAG_NAME, credential_id) + Tlv(TAG_CHALLENGE, challenge),
-            ),
-        )
-        return resp[1:]
+        return bytes(self._native.calculate(credential_id, challenge))
 
     def delete_credential(self, credential_id: bytes) -> None:
         """Delete an OATH credential.
@@ -497,10 +387,7 @@ class OathSession:
         :param credential_id: The id of the credential.
         """
         logger.debug(f"Deleting crededential: {credential_id!r}")
-        if self._native:
-            self._native.delete_credential(credential_id)
-        else:
-            self.protocol.send_apdu(0, INS_DELETE, 0, 0, Tlv(TAG_NAME, credential_id))
+        self._native.delete_credential(credential_id)
         logger.info("Credential deleted")
 
     def calculate_all(
@@ -514,49 +401,15 @@ class OathSession:
         """
         timestamp = int(timestamp or time())
 
-        if self._native:
-            raw = self._native.calculate_all(timestamp)
-            entries: dict[Credential, Code | None] = {}
-            for r in raw:
-                cred = Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6])
-                if r[7] is not None:
-                    code: Code | None = Code(r[7], r[8], r[9])
-                else:
-                    code = None
-                entries[cred] = code
-            return entries
-
-        challenge = bytes(_get_challenge(timestamp, DEFAULT_PERIOD))
-        logger.debug(f"Calculating all codes for time={timestamp}")
-
-        entries = {}
-        data = Tlv.parse_list(
-            self.protocol.send_apdu(
-                0, INS_CALCULATE_ALL, 0, 1, Tlv(TAG_CHALLENGE, challenge)
-            )
-        )
-        while data:
-            cred_id = Tlv.unpack(TAG_NAME, data.pop(0))
-            tlv = data.pop(0)
-            resp_tag = tlv.tag
-            oath_type = OATH_TYPE.HOTP if resp_tag == TAG_HOTP else OATH_TYPE.TOTP
-            touch = resp_tag == TAG_TOUCH
-            issuer, name, period = _parse_cred_id(cred_id, oath_type)
-
-            credential = Credential(
-                self.device_id, cred_id, issuer, name, oath_type, period, touch
-            )
-
-            code = None  # Will be None for HOTP and touch
-            if resp_tag == TAG_TRUNCATED:  # Only TOTP, no-touch here
-                if period == DEFAULT_PERIOD:
-                    code = _format_code(credential, timestamp, tlv.value)
-                else:
-                    # Non-standard period, recalculate
-                    logger.debug(f"Recalculating code for period={period}")
-                    code = self.calculate_code(credential, timestamp)
-            entries[credential] = code
-
+        raw = self._native.calculate_all(timestamp)
+        entries: dict[Credential, Code | None] = {}
+        for r in raw:
+            cred = Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6])
+            if r[7] is not None:
+                code: Code | None = Code(r[7], r[8], r[9])
+            else:
+                code = None
+            entries[cred] = code
         return entries
 
     def calculate_code(
@@ -572,37 +425,14 @@ class OathSession:
 
         timestamp = int(timestamp or time())
 
-        if self._native:
-            result = self._native.calculate_code(
-                device_id=credential.device_id,
-                cred_id=credential.id,
-                issuer=credential.issuer,
-                name=credential.name,
-                oath_type=int(credential.oath_type),
-                period=credential.period,
-                touch_required=credential.touch_required,
-                timestamp=timestamp,
-            )
-            return Code(result[0], result[1], result[2])
-
-        if credential.oath_type == OATH_TYPE.TOTP:
-            logger.debug(
-                f"Calculating TOTP code for time={timestamp}, "
-                f"period={credential.period}"
-            )
-            challenge = bytes(_get_challenge(timestamp, credential.period))
-        else:  # HOTP
-            logger.debug("Calculating HOTP code")
-            challenge = b""
-
-        response = Tlv.unpack(
-            TAG_TRUNCATED,
-            self.protocol.send_apdu(
-                0,
-                INS_CALCULATE,
-                0,
-                0x01,  # Truncate
-                Tlv(TAG_NAME, credential.id) + Tlv(TAG_CHALLENGE, challenge),
-            ),
+        result = self._native.calculate_code(
+            device_id=credential.device_id,
+            cred_id=credential.id,
+            issuer=credential.issuer,
+            name=credential.name,
+            oath_type=int(credential.oath_type),
+            period=credential.period,
+            touch_required=credential.touch_required,
+            timestamp=timestamp,
         )
-        return _format_code(credential, timestamp, response)
+        return Code(result[0], result[1], result[2])

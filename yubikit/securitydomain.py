@@ -4,6 +4,9 @@ import logging
 from enum import IntEnum, unique
 from typing import Mapping, Sequence
 
+from _ykman_native.sessions import (
+    SecurityDomainSession as _NativeSecurityDomainSession,
+)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -28,13 +31,6 @@ from .core.smartcard.scp import (
     ScpKeyParams,
     StaticKeys,
 )
-
-try:
-    from _ykman_native.sessions import (
-        SecurityDomainSession as _NativeSecurityDomainSession,
-    )
-except ImportError:
-    _NativeSecurityDomainSession = None
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +67,6 @@ class SecurityDomainSession:
     """
 
     def __init__(self, connection: SmartCardConnection):
-        if _NativeSecurityDomainSession is None:
-            raise RuntimeError("Native security domain session not available")
         native = _NativeSecurityDomainSession(connection)
         self._native = native
         self._version = _override_version.patch(Version(*native.version))

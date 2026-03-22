@@ -34,6 +34,10 @@ from hashlib import sha1
 from threading import Event
 from typing import Any, Callable, TypeVar
 
+from _ykman_native.sessions import (
+    YubiOtpSession as _NativeYubiOtpSession,
+)
+
 from .core import (
     BadResponseError,
     NotSupportedError,
@@ -43,20 +47,12 @@ from .core import (
     require_version,
 )
 from .core.otp import (
-    CommandRejectedError,
     OtpConnection,
     OtpProtocol,
     calculate_crc,
     check_crc,
 )
 from .core.smartcard import ScpKeyParams, SmartCardConnection
-
-try:
-    from _ykman_native.sessions import (
-        YubiOtpSession as _NativeYubiOtpSession,
-    )
-except ImportError:
-    _NativeYubiOtpSession = None
 
 logger = logging.getLogger(__name__)
 
@@ -644,14 +640,52 @@ class _Backend(abc.ABC):
     def close(self) -> None: ...
 
     @abc.abstractmethod
-    def write_update(self, slot: CONFIG_SLOT, data: bytes) -> bytes: ...
+    def get_serial(self) -> int: ...
 
     @abc.abstractmethod
-    def send_and_receive(
+    def get_config_state(self, version: Version) -> "ConfigState": ...
+
+    @abc.abstractmethod
+    def put_configuration(
         self,
-        slot: CONFIG_SLOT,
-        data: bytes,
-        expected_len: int,
+        slot: SLOT,
+        config: bytes,
+        acc_code: bytes | None,
+        cur_acc_code: bytes | None,
+    ) -> None: ...
+
+    @abc.abstractmethod
+    def update_configuration(
+        self,
+        slot: SLOT,
+        config: bytes,
+        acc_code: bytes | None,
+        cur_acc_code: bytes | None,
+    ) -> None: ...
+
+    @abc.abstractmethod
+    def swap_slots(self) -> None: ...
+
+    @abc.abstractmethod
+    def delete_slot(self, slot: SLOT, cur_acc_code: bytes | None) -> None: ...
+
+    @abc.abstractmethod
+    def set_scan_map(self, scan_map: bytes, cur_acc_code: bytes | None) -> None: ...
+
+    @abc.abstractmethod
+    def set_ndef_configuration(
+        self,
+        slot: SLOT,
+        ndef_type: "NDEF_TYPE",
+        uri: str | None,
+        cur_acc_code: bytes | None,
+    ) -> None: ...
+
+    @abc.abstractmethod
+    def calculate_hmac_sha1(
+        self,
+        slot: SLOT,
+        challenge: bytes,
         event: Event | None = None,
         on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
@@ -660,18 +694,82 @@ class _Backend(abc.ABC):
 class _YubiOtpOtpBackend(_Backend):
     def __init__(self, protocol):
         self.protocol = protocol
+        self._status = protocol.read_status()
 
     def close(self):
         self.protocol.close()
 
-    def write_update(self, slot, data):
+    def _write_update(self, slot, data):
         return self.protocol.send_and_receive(slot, data)
 
-    def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
+    def _send_and_receive(
+        self, slot, data, expected_len, event=None, on_keepalive=None
+    ):
         response = self.protocol.send_and_receive(slot, data, event, on_keepalive)
         if check_crc(response[: expected_len + 2]):
             return response[:expected_len]
         raise BadResponseError("Invalid CRC")
+
+    def _write_config(self, slot, config, cur_acc_code):
+        has_acc = bool(cur_acc_code)
+        logger.debug(f"Writing configuration to slot {slot}, access code: {has_acc}")
+        self._status = self._write_update(
+            slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
+        )
+        logger.info("Configuration written")
+
+    def get_serial(self):
+        return bytes2int(self._send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4))
+
+    def get_config_state(self, version):
+        return ConfigState(version, struct.unpack("<H", self._status[4:6])[0])
+
+    def put_configuration(self, slot, config, acc_code, cur_acc_code):
+        self._write_config(
+            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
+            config,
+            cur_acc_code,
+        )
+
+    def update_configuration(self, slot, config, acc_code, cur_acc_code):
+        self._write_config(
+            SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
+            config,
+            cur_acc_code,
+        )
+
+    def swap_slots(self):
+        self._write_config(CONFIG_SLOT.SWAP, b"", None)
+
+    def delete_slot(self, slot, cur_acc_code):
+        self._write_config(
+            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
+            b"\0" * CONFIG_SIZE,
+            cur_acc_code,
+        )
+
+    def set_scan_map(self, scan_map, cur_acc_code):
+        self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
+
+    def set_ndef_configuration(self, slot, ndef_type, uri, cur_acc_code):
+        self._write_config(
+            SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
+            _build_ndef_config(uri, ndef_type),
+            cur_acc_code,
+        )
+
+    def calculate_hmac_sha1(self, slot, challenge, event=None, on_keepalive=None):
+        # Pad challenge with byte different from last
+        challenge = challenge.ljust(
+            HMAC_CHALLENGE_SIZE, b"\1" if challenge.endswith(b"\0") else b"\0"
+        )
+        return self._send_and_receive(
+            SLOT.map(slot, CONFIG_SLOT.CHAL_HMAC_1, CONFIG_SLOT.CHAL_HMAC_2),
+            challenge,
+            HMAC_RESPONSE_SIZE,
+            event,
+            on_keepalive,
+        )
 
 
 class _NativeSmartCardBackend(_Backend):
@@ -683,47 +781,35 @@ class _NativeSmartCardBackend(_Backend):
     def close(self):
         pass  # Managed by the connection
 
-    def write_update(self, slot, data):
-        raise NotImplementedError("write_update not used with native backend")
+    def get_serial(self):
+        return self._native.get_serial()
 
-    def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
-        raise NotImplementedError("send_and_receive not used with native backend")
+    def get_config_state(self, version):
+        version_tuple, flags = self._native.get_config_state()
+        return ConfigState(Version(*version_tuple), flags)
 
+    def put_configuration(self, slot, config, acc_code, cur_acc_code):
+        self._native.put_configuration(int(slot), config, acc_code, cur_acc_code)
 
-INS_CONFIG = 0x01
-INS_YK2_STATUS = 0x03
+    def update_configuration(self, slot, config, acc_code, cur_acc_code):
+        self._native.update_configuration(int(slot), config, acc_code, cur_acc_code)
 
+    def swap_slots(self):
+        self._native.swap_slots()
 
-class _YubiOtpSmartCardBackend(_Backend):
-    def __init__(self, protocol, version, prog_seq):
-        self.protocol = protocol
-        self._version = version
-        self._prog_seq = prog_seq
+    def delete_slot(self, slot, cur_acc_code):
+        self._native.delete_slot(int(slot), cur_acc_code)
 
-    def close(self):
-        self.protocol.close()
+    def set_scan_map(self, scan_map, cur_acc_code):
+        self._native.set_scan_map(scan_map, cur_acc_code)
 
-    def write_update(self, slot, data):
-        status = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
-        if not status:  # Some commands don't return status on some YubiKeys
-            status = self.protocol.send_apdu(0, INS_YK2_STATUS, 0, 0)
+    def set_ndef_configuration(self, slot, ndef_type, uri, cur_acc_code):
+        self._native.set_ndef_configuration(
+            int(slot), int(ndef_type), uri, cur_acc_code
+        )
 
-        prev_prog_seq, self._prog_seq = self._prog_seq, status[3]
-        if self._prog_seq == prev_prog_seq + 1:
-            return status
-        if self._prog_seq == 0 and prev_prog_seq > 0:
-            version = Version.from_bytes(status[:3])
-            if status[4] & 0x1F == 0:
-                return status
-            if (5, 0, 0) <= version < (5, 4, 3):  # Programming state does not update
-                return status
-        raise CommandRejectedError("Not updated")
-
-    def send_and_receive(self, slot, data, expected_len, event=None, on_keepalive=None):
-        response = self.protocol.send_apdu(0, INS_CONFIG, slot, 0, data)
-        if expected_len == len(response):
-            return response
-        raise BadResponseError("Unexpected response length")
+    def calculate_hmac_sha1(self, slot, challenge, event=None, on_keepalive=None):
+        return bytes(self._native.calculate_hmac_sha1(int(slot), challenge))
 
 
 class YubiOtpSession:
@@ -734,32 +820,24 @@ class YubiOtpSession:
         connection: OtpConnection | SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        self._native: Any = None
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
             otp_protocol = OtpProtocol(connection)
-            self._status = otp_protocol.read_status()
             self._version = _override_version.patch(otp_protocol.version)
             self.backend: _Backend = _YubiOtpOtpBackend(otp_protocol)
         elif isinstance(connection, SmartCardConnection):
-            if _NativeYubiOtpSession is None:
-                raise RuntimeError("Native YubiOTP session not available")
             native = _NativeYubiOtpSession(connection, scp_key_params)
-            self._native = native
             self._version = _override_version.patch(Version(*native.version))
             if self._version != Version(*native.version):
                 native.version = tuple(self._version)
-            version_tuple, flags = native.get_config_state()
-            self._status = b""  # Status managed by native session
             self.backend = _NativeSmartCardBackend(native)
         else:
             raise TypeError("Unsupported connection type")
         logger.debug(
             "YubiOTP session initialized for "
             f"connection={type(connection).__name__}, version={self.version}, "
-            f"state={self.get_config_state()}, "
-            f"native={self._native is not None}"
+            f"state={self.get_config_state()}"
         )
 
     def close(self) -> None:
@@ -781,29 +859,11 @@ class YubiOtpSession:
 
     def get_serial(self) -> int:
         """Get serial number."""
-        if self._native:
-            return self._native.get_serial()
-        return bytes2int(
-            self.backend.send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4)
-        )
+        return self.backend.get_serial()
 
     def get_config_state(self) -> ConfigState:
         """Get configuration state of the YubiOTP application."""
-        if self._native:
-            version_tuple, flags = self._native.get_config_state()
-            return ConfigState(
-                Version(*version_tuple),
-                flags,
-            )
-        return ConfigState(self.version, struct.unpack("<H", self._status[4:6])[0])
-
-    def _write_config(self, slot, config, cur_acc_code):
-        has_acc = bool(cur_acc_code)
-        logger.debug(f"Writing configuration to slot {slot}, access code: {has_acc}")
-        self._status = self.backend.write_update(
-            slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
-        )
-        logger.info("Configuration written")
+        return self.backend.get_config_state(self.version)
 
     def put_configuration(
         self,
@@ -828,18 +888,8 @@ class YubiOtpSession:
             f"Writing configuration of type {type(configuration).__name__} to "
             f"slot {slot}"
         )
-        if self._native:
-            self._native.put_configuration(
-                int(slot),
-                configuration.get_config(acc_code),
-                acc_code,
-                cur_acc_code,
-            )
-            return
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
-            configuration.get_config(acc_code),
-            cur_acc_code,
+        self.backend.put_configuration(
+            slot, configuration.get_config(acc_code), acc_code, cur_acc_code
         )
 
     def update_configuration(
@@ -867,27 +917,14 @@ class YubiOtpSession:
             )
         slot = SLOT(slot)
         logger.debug(f"Writing configuration update to slot {slot}")
-        if self._native:
-            self._native.update_configuration(
-                int(slot),
-                configuration.get_config(acc_code),
-                acc_code,
-                cur_acc_code,
-            )
-            return
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
-            configuration.get_config(acc_code),
-            cur_acc_code,
+        self.backend.update_configuration(
+            slot, configuration.get_config(acc_code), acc_code, cur_acc_code
         )
 
     def swap_slots(self) -> None:
         """Swap the two slot configurations."""
         logger.debug("Swapping touch slots")
-        if self._native:
-            self._native.swap_slots()
-            return
-        self._write_config(CONFIG_SLOT.SWAP, b"", None)
+        self.backend.swap_slots()
 
     def delete_slot(self, slot: SLOT, cur_acc_code: bytes | None = None) -> None:
         """Delete configuration stored in slot.
@@ -897,14 +934,7 @@ class YubiOtpSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Deleting slot {slot}")
-        if self._native:
-            self._native.delete_slot(int(slot), cur_acc_code)
-            return
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
-            b"\0" * CONFIG_SIZE,
-            cur_acc_code,
-        )
+        self.backend.delete_slot(slot, cur_acc_code)
 
     def set_scan_map(self, scan_map: bytes, cur_acc_code: bytes | None = None) -> None:
         """Update scan-codes on YubiKey.
@@ -913,10 +943,7 @@ class YubiOtpSession:
         will use when typing out OTPs.
         """
         logger.debug("Writing scan map")
-        if self._native:
-            self._native.set_scan_map(scan_map, cur_acc_code)
-            return
-        self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
+        self.backend.set_scan_map(scan_map, cur_acc_code)
 
     def set_ndef_configuration(
         self,
@@ -934,16 +961,7 @@ class YubiOtpSession:
         """
         slot = SLOT(slot)
         logger.debug(f"Writing NDEF configuration for slot {slot} of type {ndef_type}")
-        if self._native:
-            self._native.set_ndef_configuration(
-                int(slot), int(ndef_type), uri, cur_acc_code
-            )
-            return
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
-            _build_ndef_config(uri, ndef_type),
-            cur_acc_code,
-        )
+        self.backend.set_ndef_configuration(slot, ndef_type, uri, cur_acc_code)
 
     def calculate_hmac_sha1(
         self,
@@ -961,17 +979,4 @@ class YubiOtpSession:
         require_version(self.version, (2, 2, 0))
         slot = SLOT(slot)
         logger.debug(f"Calculating response for slot {slot}")
-        if self._native:
-            return bytes(self._native.calculate_hmac_sha1(int(slot), challenge))
-
-        # Pad challenge with byte different from last
-        challenge = challenge.ljust(
-            HMAC_CHALLENGE_SIZE, b"\1" if challenge.endswith(b"\0") else b"\0"
-        )
-        return self.backend.send_and_receive(
-            SLOT.map(slot, CONFIG_SLOT.CHAL_HMAC_1, CONFIG_SLOT.CHAL_HMAC_2),
-            challenge,
-            HMAC_RESPONSE_SIZE,
-            event,
-            on_keepalive,
-        )
+        return self.backend.calculate_hmac_sha1(slot, challenge, event, on_keepalive)

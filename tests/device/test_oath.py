@@ -1,7 +1,7 @@
 import pytest
 
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import AID, SW, ApduError
+from yubikit.core.smartcard import AID, SW, ApduError, SmartCardProtocol
 from yubikit.management import CAPABILITY
 from yubikit.oath import (
     HASH_ALGORITHM,
@@ -53,15 +53,15 @@ class TestFunctions:
 
 class TestLockPreventsAccess:
     @pytest.fixture(autouse=True)
-    def set_lock(self, session):
+    def set_lock(self, session, ccid_connection):
         assert not session.locked
         session.put_credential(CRED_DATA)
         session.set_key(KEY)
 
         # Force re-select to lock
-        session.protocol.connection.connection.disconnect()
-        session.protocol.connection.connection.connect()
-        session.protocol.select(AID.OATH)
+        ccid_connection.connection.disconnect()
+        ccid_connection.connection.connect()
+        SmartCardProtocol(ccid_connection).select(AID.OATH)
 
     def test_list(self, session):
         with pytest.raises(ApduError) as ctx:

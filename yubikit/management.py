@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
 from typing import Any, Mapping
 
+from _ykman_native.sessions import ManagementSession as _NativeManagementSession
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from .core import (
@@ -57,14 +58,7 @@ from .core.otp import (
     OtpProtocol,
     check_crc,
 )
-from .core.smartcard import AID, ScpKeyParams, SmartCardConnection, SmartCardProtocol
-
-try:
-    from _ykman_native.sessions import (
-        ManagementSession as _NativeManagementSession,
-    )
-except ImportError:
-    _NativeManagementSession = None  # type: ignore[assignment, misc]
+from .core.smartcard import AID, ScpKeyParams, SmartCardConnection
 
 logger = logging.getLogger(__name__)
 
@@ -522,55 +516,6 @@ INS_DEVICE_RESET = 0x1F
 P1_DEVICE_CONFIG = 0x11
 
 
-class _ManagementSmartCardBackend(_Backend):
-    def __init__(self, smartcard_connection, scp_key_params):
-        self.protocol = SmartCardProtocol(smartcard_connection)
-        try:
-            select_bytes = self.protocol.select(AID.MANAGEMENT)
-            if select_bytes[-2:] == b"\x90\x00":
-                # YubiKey Edge incorrectly appends SW twice.
-                select_bytes = select_bytes[:-2]
-
-            select_str = select_bytes.decode()
-            self.version = Version.from_string(select_str)
-            # For YubiKey NEO, we use the OTP application for further commands
-            if self.version[0] == 3:
-                # Workaround to "de-select" on NEO, otherwise it gets stuck.
-                smartcard_connection.send_and_receive(b"\xa4\x04\x00\x08")
-                if scp_key_params:
-                    raise ValueError("SCP is not supported")
-                self.protocol.select(AID.OTP)
-
-        except ApplicationNotAvailableError:
-            if smartcard_connection.transport == TRANSPORT.NFC and not scp_key_params:
-                # Probably NEO over NFC
-                status = self.protocol.select(AID.OTP)
-                self.version = Version.from_bytes(status[:3])
-            else:
-                raise
-        self.protocol.configure(self.version)
-        if scp_key_params:
-            self.protocol.init_scp(scp_key_params)
-
-    def close(self):
-        self.protocol.close()
-
-    def set_mode(self, data):
-        if self.version[0] == 3:  # Using the OTP application
-            self.protocol.send_apdu(0, 0x01, SLOT_DEVICE_CONFIG, 0, data)
-        else:
-            self.protocol.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, data)
-
-    def read_config(self, page: int = 0):
-        return self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0)
-
-    def write_config(self, config):
-        self.protocol.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)
-
-    def device_reset(self):
-        self.protocol.send_apdu(0, INS_DEVICE_RESET, 0, 0)
-
-
 CTAP_VENDOR_FIRST = 0x40
 CTAP_YUBIKEY_DEVICE_CONFIG = CTAP_VENDOR_FIRST
 CTAP_READ_CONFIG = CTAP_VENDOR_FIRST + 2
@@ -682,8 +627,6 @@ class ManagementSession:
                 raise ValueError("SCP can only be used with SmartCardConnection")
             self.backend = _ManagementOtpBackend(connection)
         elif isinstance(connection, SmartCardConnection):
-            if _NativeManagementSession is None:
-                raise RuntimeError("Native management session not available")
             native = _NativeManagementSession(connection, scp_key_params)
             self._native = native
             self._version = Version(*native.version)
@@ -704,7 +647,7 @@ class ManagementSession:
             self._version = info.version_qualifier.version
             if self._native:
                 self._native.version = tuple(self._version)
-            elif self.backend:
+            if self.backend:
                 self.backend.version = self._version
 
         logger.debug(
@@ -880,13 +823,9 @@ class ManagementSession:
         applications. This will factory reset the global PIN as well as the associated
         applications.
         """
-        if self._native and hasattr(self._native, "device_reset"):
+        if self._native:
             logger.debug("Performing device reset")
             self._native.device_reset()
-            logger.info("Device reset performed")
-        elif isinstance(self.backend, _ManagementSmartCardBackend):
-            logger.debug("Performing device reset")
-            self.backend.device_reset()
             logger.info("Device reset performed")
         else:
             raise NotSupportedError("Device reset can only be performed over CCID")

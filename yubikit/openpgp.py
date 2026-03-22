@@ -41,6 +41,7 @@ from typing import (
     TypeAlias,
 )
 
+from _ykman_native.sessions import OpenPgpSession as _NativeOpenPgpSession
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -57,7 +58,6 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from .core import (
-    InvalidPinError,
     NotSupportedError,
     Oid,
     Tlv,
@@ -65,20 +65,12 @@ from .core import (
     _override_version,
     bytes2int,
     int2bytes,
-    require_version,
 )
 from .core.smartcard import (
-    SW,
-    ApduError,
     ScpKeyParams,
     SmartCardConnection,
     SmartCardProtocol,
 )
-
-try:
-    from _ykman_native.sessions import OpenPgpSession as _NativeOpenPgpSession
-except ImportError:
-    _NativeOpenPgpSession = None  # type: ignore[assignment, misc]
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +148,6 @@ TAG_CA_FINGERPRINTS = 0xC6
 TAG_GENERATION_TIMES = 0xCD
 TAG_SIGNATURE_COUNTER = 0x93
 TAG_KEY_INFORMATION = 0xDE
-TAG_PUBLIC_KEY = 0x7F49
 
 
 @unique
@@ -901,43 +892,6 @@ def _get_key_attributes(
     return EcAttributes.create(key_ref, OID._from_key(private_key))
 
 
-def _get_key_template(
-    private_key: PrivateKey, key_ref: KEY_REF, use_crt: bool = False
-) -> PrivateKeyTemplate:
-    if isinstance(private_key, rsa.RSAPrivateKeyWithSerialization):
-        rsa_numbers = private_key.private_numbers()
-        ln = (private_key.key_size // 8) // 2
-
-        e = b"\x01\x00\x01"  # e=65537
-        p = int2bytes(rsa_numbers.p, ln)
-        q = int2bytes(rsa_numbers.q, ln)
-        if not use_crt:
-            return RsaKeyTemplate(key_ref.crt, e, p, q)
-        else:
-            dp = int2bytes(rsa_numbers.dmp1, ln)
-            dq = int2bytes(rsa_numbers.dmq1, ln)
-            qinv = int2bytes(rsa_numbers.iqmp, ln)
-            n = int2bytes(rsa_numbers.public_numbers.n, 2 * ln)
-            return RsaCrtKeyTemplate(key_ref.crt, e, p, q, qinv, dp, dq, n)
-
-    elif isinstance(private_key, ec.EllipticCurvePrivateKeyWithSerialization):
-        ec_numbers = private_key.private_numbers()
-        ln = private_key.key_size // 8
-        return EcKeyTemplate(key_ref.crt, int2bytes(ec_numbers.private_value, ln), None)
-
-    elif isinstance(private_key, (ed25519.Ed25519PrivateKey, x25519.X25519PrivateKey)):
-        pkb = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-        if isinstance(private_key, x25519.X25519PrivateKey):
-            pkb = pkb[::-1]  # byte order needs to be reversed
-        return EcKeyTemplate(
-            key_ref.crt,
-            pkb,
-            None,
-        )
-
-    raise ValueError("Unsupported key type")
-
-
 def _parse_rsa_key(data: Mapping[int, bytes]) -> rsa.RSAPublicKey:
     numbers = rsa.RSAPublicNumbers(bytes2int(data[0x82]), bytes2int(data[0x81]))
     return numbers.public_key(default_backend())
@@ -952,40 +906,6 @@ def _parse_ec_key(oid: CurveOid, data: Mapping[int, bytes]) -> EcPublicKey:
 
     curve = getattr(ec, oid._get_name())
     return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
-
-
-_pkcs1v15_headers = {
-    hashes.MD5: bytes.fromhex("3020300C06082A864886F70D020505000410"),
-    hashes.SHA1: bytes.fromhex("3021300906052B0E03021A05000414"),
-    hashes.SHA224: bytes.fromhex("302D300D06096086480165030402040500041C"),
-    hashes.SHA256: bytes.fromhex("3031300D060960864801650304020105000420"),
-    hashes.SHA384: bytes.fromhex("3041300D060960864801650304020205000430"),
-    hashes.SHA512: bytes.fromhex("3051300D060960864801650304020305000440"),
-    hashes.SHA512_224: bytes.fromhex("302D300D06096086480165030402050500041C"),
-    hashes.SHA512_256: bytes.fromhex("3031300D060960864801650304020605000420"),
-}
-
-
-def _pad_message(attributes, message, hash_algorithm):
-    if attributes.algorithm_id == 0x16:  # EdDSA, never hash
-        return message
-
-    if isinstance(hash_algorithm, Prehashed):
-        hashed = message
-    else:
-        h = hashes.Hash(hash_algorithm, default_backend())
-        h.update(message)
-        hashed = h.finalize()
-
-    if isinstance(attributes, EcAttributes):
-        return hashed
-    elif isinstance(attributes, RsaAttributes):
-        try:
-            return _pkcs1v15_headers[type(hash_algorithm)] + hashed
-        except KeyError:
-            raise ValueError(f"Unsupported hash algorithm for RSA: {hash_algorithm}")
-    else:
-        raise ValueError(f"Unsupported algorithm attributes: {attributes}")
 
 
 # Map cryptography hash algorithm to Rust SignHashAlgorithm int value
@@ -1055,8 +975,6 @@ class OpenPgpSession:
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        if _NativeOpenPgpSession is None:
-            raise RuntimeError("Native OpenPGP session not available")
         native = _NativeOpenPgpSession(connection, scp_key_params)
         self._native = native
         self._version = _override_version.patch(Version(*native.version))
@@ -1092,26 +1010,14 @@ class OpenPgpSession:
 
         :param length: Length of the returned data.
         """
-        if self._native:
-            return bytes(self._native.get_challenge(length))
-        e = self.extended_capabilities
-        if EXTENDED_CAPABILITY_FLAGS.GET_CHALLENGE not in e.flags:
-            raise NotSupportedError("GET_CHALLENGE is not supported")
-        if not 0 < length <= e.challenge_max_length:
-            raise NotSupportedError("Unsupported challenge length")
-
-        logger.debug(f"Getting {length} random bytes")
-        return self.protocol.send_apdu(0, INS.GET_CHALLENGE, 0, 0, le=length)
+        return bytes(self._native.get_challenge(length))
 
     def get_data(self, do: DO) -> bytes:
         """Get a Data Object from the YubiKey.
 
         :param do: The Data Object to get.
         """
-        if self._native:
-            return bytes(self._native.get_data(int(do)))
-        logger.debug(f"Reading Data Object {do.name} ({do:X})")
-        return self.protocol.send_apdu(0, INS.GET_DATA, do >> 8, do & 0xFF)
+        return bytes(self._native.get_data(int(do)))
 
     def put_data(self, do: DO, data: bytes | SupportsBytes) -> None:
         """Write a Data Object to the YubiKey.
@@ -1119,35 +1025,21 @@ class OpenPgpSession:
         :param do: The Data Object to write to.
         :param data: The data to write.
         """
-        if self._native:
-            self._native.put_data(int(do), bytes(data))
-            return
-        self.protocol.send_apdu(0, INS.PUT_DATA, do >> 8, do & 0xFF, bytes(data))
-        logger.info(f"Wrote Data Object {do.name} ({do:X})")
+        self._native.put_data(int(do), bytes(data))
 
     def get_pin_status(self) -> PwStatus:
         """Get the current status of PINS."""
-        if self._native:
-            t = self._native.get_pin_status()
-            return PwStatus(PIN_POLICY(t[0]), t[1], t[2], t[3], t[4], t[5], t[6])
-        return PwStatus.parse(self.get_data(DO.PW_STATUS_BYTES))
+        t = self._native.get_pin_status()
+        return PwStatus(PIN_POLICY(t[0]), t[1], t[2], t[3], t[4], t[5], t[6])
 
     def get_signature_counter(self) -> int:
         """Get the number of times the signature key has been used."""
-        if self._native:
-            return self._native.get_signature_counter()
-        s = SecuritySupportTemplate.parse(self.get_data(DO.SECURITY_SUPPORT_TEMPLATE))
-        return s.signature_counter
+        return self._native.get_signature_counter()
 
     def get_application_related_data(self) -> ApplicationRelatedData:
         """Read the Application Related Data."""
-        if self._native:
-            raw = self._native.get_application_related_data()
-            data = ApplicationRelatedData.parse(raw)
-        else:
-            data = ApplicationRelatedData.parse(
-                self.get_data(DO.APPLICATION_RELATED_DATA)
-            )
+        raw = self._native.get_application_related_data()
+        data = ApplicationRelatedData.parse(raw)
         # Pre 3.0 the UIF is readable separately, but missing from discretionary
         if data.aid.version < (3, 0):
             data.discretionary.uif_sig = self.get_uif(KEY_REF.SIG)
@@ -1163,12 +1055,7 @@ class OpenPgpSession:
         :param pin_policy: The PIN policy.
         """
         logger.debug(f"Setting Signature PIN policy to {pin_policy}")
-        if self._native:
-            self._native.set_signature_pin_policy(int(pin_policy))
-            logger.info("Signature PIN policy set")
-            return
-        data = struct.pack(">B", pin_policy)
-        self.put_data(DO.PW_STATUS_BYTES, data)
+        self._native.set_signature_pin_policy(int(pin_policy))
         logger.info("Signature PIN policy set")
 
     def reset(self) -> None:
@@ -1176,28 +1063,7 @@ class OpenPgpSession:
 
         WARNING: This will delete all stored keys, certificates and other data.
         """
-        if self._native:
-            self._native.reset()
-            logger.info("OpenPGP application data reset performed")
-            return
-        require_version(self.version, (1, 0, 6))
-        logger.debug("Preparing OpenPGP reset")
-
-        # Ensure the User and Admin PINs are blocked
-        status = self.get_pin_status()
-        for pw in (PW.USER, PW.ADMIN):
-            logger.debug(f"Verify {pw.name} PIN with invalid attempts until blocked")
-            for _ in range(status.get_attempts(pw)):
-                try:
-                    self.protocol.send_apdu(0, INS.VERIFY, 0, pw, _INVALID_PIN)
-                except ApduError:
-                    pass
-
-        # Reset the application
-        logger.debug("Sending TERMINATE, then ACTIVATE")
-        self.protocol.send_apdu(0, INS.TERMINATE, 0, 0)
-        self.protocol.send_apdu(0, INS.ACTIVATE, 0, 0)
-
+        self._native.reset()
         logger.info("OpenPGP application data reset performed")
 
     def set_pin_attempts(
@@ -1213,40 +1079,15 @@ class OpenPgpSession:
         :param reset_attempts: The Reset Code attempts.
         :param admin_attempts: The Admin PIN attempts.
         """
-        if self._native:
-            self._native.set_pin_attempts(user_attempts, reset_attempts, admin_attempts)
-            logger.info("Number of PIN attempts has been changed")
-            return
-        if self.version[0] == 1:
-            # YubiKey NEO
-            require_version(self.version, (1, 0, 7))
-        else:
-            require_version(self.version, (4, 3, 1))
-
-        attempts = (user_attempts, reset_attempts, admin_attempts)
-        logger.debug(f"Setting PIN attempts to {attempts}")
-        self.protocol.send_apdu(
-            0,
-            INS.SET_PIN_RETRIES,
-            0,
-            0,
-            struct.pack(">BBB", *attempts),
-        )
+        self._native.set_pin_attempts(user_attempts, reset_attempts, admin_attempts)
         logger.info("Number of PIN attempts has been changed")
 
     def get_kdf(self) -> Kdf:
         """Get the Key Derivation Function data object."""
-        if self._native:
-            raw = self._native.get_kdf()
-            result = Kdf.parse(raw)
-            logger.debug(f"Using KDF: {type(result).__name__}")
-            return result
-        if EXTENDED_CAPABILITY_FLAGS.KDF not in self.extended_capabilities.flags:
-            kdf: Kdf = KdfNone()
-        else:
-            kdf = Kdf.parse(self.get_data(DO.KDF))
-        logger.debug(f"Using KDF: {type(kdf).__name__}")
-        return kdf
+        raw = self._native.get_kdf()
+        result = Kdf.parse(raw)
+        logger.debug(f"Using KDF: {type(result).__name__}")
+        return result
 
     def set_kdf(self, kdf: Kdf) -> None:
         """Set up a PIN Key Derivation Function.
@@ -1260,43 +1101,8 @@ class OpenPgpSession:
 
         :param kdf: The key derivation function.
         """
-        if self._native:
-            self._native.set_kdf(bytes(kdf))
-            logger.info("KDF settings changed")
-            return
-        e = self._app_data.discretionary.extended_capabilities
-        if EXTENDED_CAPABILITY_FLAGS.KDF not in e.flags:
-            raise NotSupportedError("KDF is not supported")
-
-        logger.debug(f"Setting PIN KDF to algorithm: {kdf.algorithm}")
-        self.put_data(DO.KDF, kdf)
+        self._native.set_kdf(bytes(kdf))
         logger.info("KDF settings changed")
-
-    def _process_pin(self, kdf: Kdf, pw: PW, pin: str) -> bytes:
-        pin_bytes = kdf.process(pw, pin)
-        pin_len = len(pin_bytes)
-        min_len = 6 if pw is PW.USER else 8
-        max_len = self._app_data.discretionary.pw_status.get_max_len(pw)
-        if not (min_len <= pin_len <= max_len):
-            raise ValueError(
-                f"{pw.name} PIN length must be in the range {min_len}-{max_len}"
-            )
-        return pin_bytes
-
-    def _verify(self, pw: PW, pin: str, mode: int = 0) -> None:
-        pin_enc = self._process_pin(self.get_kdf(), pw, pin)
-        try:
-            self.protocol.send_apdu(0, INS.VERIFY, 0, pw + mode, pin_enc)
-        except ApduError as e:
-            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED or (
-                # Pre 4.0 firmware returns this on incorrect PIN/PUK
-                (e.sw >> 8) == 0x63 and self._version < (4, 0, 0)
-            ):
-                attempts = self.get_pin_status().get_attempts(pw)
-                raise InvalidPinError(attempts)
-            if e.sw == SW.AUTH_METHOD_BLOCKED:
-                raise InvalidPinError(0, f"{pw.name} PIN blocked")
-            raise e
 
     def verify_pin(self, pin, extended: bool = False):
         """Verify the User PIN.
@@ -1310,10 +1116,7 @@ class OpenPgpSession:
             otherwise sign operations are NOT allowed.
         """
         logger.debug(f"Verifying User PIN in mode {'82' if extended else '81'}")
-        if self._native:
-            self._native.verify_pin(pin, extended)
-            return
-        self._verify(PW.USER, pin, 1 if extended else 0)
+        self._native.verify_pin(pin, extended)
 
     def verify_admin(self, admin_pin):
         """Verify the Admin PIN.
@@ -1323,46 +1126,14 @@ class OpenPgpSession:
         :param admin_pin: The Admin PIN.
         """
         logger.debug("Verifying Admin PIN")
-        if self._native:
-            self._native.verify_admin(admin_pin)
-            return
-        self._verify(PW.ADMIN, admin_pin)
+        self._native.verify_admin(admin_pin)
 
     def unverify_pin(self, pw: PW) -> None:
         """Reset verification for PIN.
 
         :param pw: The User, Admin or Reset PIN
         """
-        if self._native:
-            self._native.unverify_pin(int(pw))
-            return
-        require_version(self.version, (5, 6, 0))
-        logger.debug(f"Resetting verification for {pw.name} PIN")
-        self.protocol.send_apdu(0, INS.VERIFY, 0xFF, pw)
-
-    def _change(self, pw: PW, pin: str, new_pin: str) -> None:
-        logger.debug(f"Changing {pw.name} PIN")
-        kdf = self.get_kdf()
-        try:
-            self.protocol.send_apdu(
-                0,
-                INS.CHANGE_PIN,
-                0,
-                pw,
-                self._process_pin(kdf, pw, pin) + self._process_pin(kdf, pw, new_pin),
-            )
-        except ApduError as e:
-            if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED or (
-                # Pre 4.0 firmware returns this on incorrect PIN/PUK
-                e.sw == SW.CONDITIONS_NOT_SATISFIED and self._version < (4, 0, 0)
-            ):
-                attempts = self.get_pin_status().get_attempts(pw)
-                raise InvalidPinError(attempts)
-            if e.sw == SW.AUTH_METHOD_BLOCKED:
-                raise InvalidPinError(0, f"{pw.name} PIN blocked")
-            raise e
-
-        logger.info(f"New {pw.name} PIN set")
+        self._native.unverify_pin(int(pw))
 
     def change_pin(self, pin: str, new_pin: str) -> None:
         """Change the User PIN.
@@ -1370,10 +1141,7 @@ class OpenPgpSession:
         :param pin: The current User PIN.
         :param new_pin: The new User PIN.
         """
-        if self._native:
-            self._native.change_pin(pin, new_pin)
-            return
-        self._change(PW.USER, pin, new_pin)
+        self._native.change_pin(pin, new_pin)
 
     def change_admin(self, admin_pin: str, new_admin_pin: str) -> None:
         """Change the Admin PIN.
@@ -1381,10 +1149,7 @@ class OpenPgpSession:
         :param admin_pin: The current Admin PIN.
         :param new_admin_pin: The new Admin PIN.
         """
-        if self._native:
-            self._native.change_admin(admin_pin, new_admin_pin)
-            return
-        self._change(PW.ADMIN, admin_pin, new_admin_pin)
+        self._native.change_admin(admin_pin, new_admin_pin)
 
     def set_reset_code(self, reset_code: str) -> None:
         """Set the Reset Code for User PIN.
@@ -1396,13 +1161,7 @@ class OpenPgpSession:
 
         :param reset_code: The Reset Code for User PIN.
         """
-        if self._native:
-            self._native.set_reset_code(reset_code)
-            logger.info("New Reset Code has been set")
-            return
-        logger.debug("Setting a new PIN Reset Code")
-        data = self._process_pin(self.get_kdf(), PW.RESET, reset_code)
-        self.put_data(DO.RESETTING_CODE, data)
+        self._native.set_reset_code(reset_code)
         logger.info("New Reset Code has been set")
 
     def reset_pin(self, new_pin: str, reset_code: str | None = None) -> None:
@@ -1413,32 +1172,7 @@ class OpenPgpSession:
         :param new_pin: The new user PIN.
         :param reset_code: The Reset Code.
         """
-        if self._native:
-            self._native.reset_pin(new_pin, reset_code)
-            logger.info("New User PIN has been set")
-            return
-        logger.debug("Resetting User PIN")
-        kdf = self.get_kdf()
-        data = self._process_pin(kdf, PW.USER, new_pin)
-        if reset_code:
-            logger.debug("Using Reset Code")
-            data = self._process_pin(kdf, PW.RESET, reset_code) + data
-            p1 = 0
-        else:
-            p1 = 2
-
-        try:
-            self.protocol.send_apdu(0, INS.RESET_RETRY_COUNTER, p1, PW.USER, data)
-        except ApduError as e:
-            if reset_code:
-                if e.sw == SW.SECURITY_CONDITION_NOT_SATISFIED:
-                    attempts = self.get_pin_status().attempts_reset
-                    raise InvalidPinError(
-                        attempts, f"Invalid Reset Code, {attempts} remaining"
-                    )
-                if e.sw in (SW.AUTH_METHOD_BLOCKED, SW.INCORRECT_PARAMETERS):
-                    raise InvalidPinError(0, "Reset Code blocked")
-            raise e
+        self._native.reset_pin(new_pin, reset_code)
         logger.info("New User PIN has been set")
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
@@ -1447,11 +1181,8 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         """
         logger.debug(f"Getting Algorithm Attributes for {key_ref.name}")
-        if self._native:
-            raw = self._native.get_algorithm_attributes(int(key_ref))
-            return AlgorithmAttributes.parse(raw)
-        data = self.get_application_related_data()
-        return data.discretionary.get_algorithm_attributes(key_ref)
+        raw = self._native.get_algorithm_attributes(int(key_ref))
+        return AlgorithmAttributes.parse(raw)
 
     def get_algorithm_information(
         self,
@@ -1461,62 +1192,11 @@ class OpenPgpSession:
         The return value is a mapping of KEY_REF to a list of supported algorithm
         attributes, which can be set using set_algorithm_attributes.
         """
-        if self._native:
-            raw = self._native.get_algorithm_information()
-            return {
-                KEY_REF(k): [AlgorithmAttributes.parse(a) for a in v]
-                for k, v in raw.items()
-            }
-        if (
-            EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
-            not in self.extended_capabilities.flags
-        ):
-            raise NotSupportedError("Writing Algorithm Attributes is not supported")
-
-        if self.version < (5, 2, 0) and self.version[0] > 0:
-            sizes = [RSA_SIZE.RSA2048]
-            if 0 < self.version[0] < 4:  # Neo needs CRT
-                fmt = RSA_IMPORT_FORMAT.CRT_W_MOD
-            else:
-                fmt = RSA_IMPORT_FORMAT.STANDARD
-                if self.version[:2] != (4, 4):  # Non-FIPS
-                    sizes.extend([RSA_SIZE.RSA3072, RSA_SIZE.RSA4096])
-            return {
-                KEY_REF.SIG: [RsaAttributes.create(size, fmt) for size in sizes],
-                KEY_REF.DEC: [RsaAttributes.create(size, fmt) for size in sizes],
-                KEY_REF.AUT: [RsaAttributes.create(size, fmt) for size in sizes],
-            }
-
-        logger.debug("Getting supported Algorithm Information")
-        buf = self.get_data(DO.ALGORITHM_INFORMATION)
-        try:
-            buf = Tlv.unpack(DO.ALGORITHM_INFORMATION, buf)
-        except ValueError:
-            buf = Tlv.unpack(DO.ALGORITHM_INFORMATION, buf + b"\0\0")[:-2]
-
-        slots = {slot.algorithm_attributes_do: slot for slot in KEY_REF}
-        data: dict[KEY_REF, list[AlgorithmAttributes]] = {}
-        for tlv in Tlv.parse_list(buf):
-            data.setdefault(slots[DO(tlv.tag)], []).append(
-                AlgorithmAttributes.parse(tlv.value)
-            )
-
-        if self.version < (5, 6, 1) and self.version[0] > 0:
-            # Fix for invalid Curve25519 entries:
-            # Remove X25519 with EdDSA from all keys
-            invalid_x25519 = EcAttributes(0x16, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
-            for values in data.values():
-                values.remove(invalid_x25519)
-            x25519 = EcAttributes(0x12, OID.X25519, EC_IMPORT_FORMAT.STANDARD)
-            # Add X25519 ECDH for DEC
-            if x25519 not in data[KEY_REF.DEC]:
-                data[KEY_REF.DEC].append(x25519)
-            # Remove EdDSA from DEC, ATT
-            ed25519_attr = EcAttributes(0x16, OID.Ed25519, EC_IMPORT_FORMAT.STANDARD)
-            data[KEY_REF.DEC].remove(ed25519_attr)
-            data[KEY_REF.ATT].remove(ed25519_attr)
-
-        return data
+        raw = self._native.get_algorithm_information()
+        return {
+            KEY_REF(k): [AlgorithmAttributes.parse(a) for a in v]
+            for k, v in raw.items()
+        }
 
     def set_algorithm_attributes(
         self, key_ref: KEY_REF, attributes: AlgorithmAttributes
@@ -1531,19 +1211,7 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param attributes: The algorithm attributes to set.
         """
-        if self._native:
-            self._native.set_algorithm_attributes(int(key_ref), bytes(attributes))
-            logger.info("Algorithm Attributes have been changed")
-            return
-        logger.debug(f"Setting Algorithm Attributes for {key_ref.name}")
-        supported = self.get_algorithm_information()
-        if self.version[0] > 0:  # Don't check support on major version 0
-            if key_ref not in supported:
-                raise NotSupportedError("Key slot not supported")
-            if attributes not in supported[key_ref]:
-                raise NotSupportedError("Algorithm attributes not supported")
-
-        self.put_data(key_ref.algorithm_attributes_do, attributes)
+        self._native.set_algorithm_attributes(int(key_ref), bytes(attributes))
         logger.info("Algorithm Attributes have been changed")
 
     def get_uif(self, key_ref: KEY_REF) -> UIF:
@@ -1551,13 +1219,7 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
-        if self._native:
-            return UIF(self._native.get_uif(int(key_ref)))
-        if self.version >= (4, 2, 0):
-            return UIF.parse(self.get_data(key_ref.uif_do))
-
-        # Not supported
-        return UIF.OFF
+        return UIF(self._native.get_uif(int(key_ref)))
 
     def set_uif(self, key_ref: KEY_REF, uif: UIF) -> None:
         """Set the User Interaction Flag (touch requirement) for a key.
@@ -1567,46 +1229,20 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param uif: The User Interaction Flag.
         """
-        if self._native:
-            self._native.set_uif(int(key_ref), int(uif))
-            logger.info(f"UIF changed for {key_ref.name}")
-            return
-        require_version(self.version, (4, 2, 0))
-        if key_ref == KEY_REF.ATT:
-            require_version(
-                self.version,
-                (5, 2, 1),
-                "Attestation key requires YubiKey 5.2.1 or later.",
-            )
-        if uif.is_cached:
-            require_version(
-                self.version,
-                (5, 2, 1),
-                "Cached UIF values require YubiKey 5.2.1 or later.",
-            )
-
-        logger.debug(f"Setting UIF for {key_ref.name} to {uif.name}")
-        if self.get_uif(key_ref).is_fixed:
-            raise ValueError("Cannot change UIF when set to FIXED.")
-
-        self.put_data(key_ref.uif_do, uif)
+        self._native.set_uif(int(key_ref), int(uif))
         logger.info(f"UIF changed for {key_ref.name}")
 
     def get_key_information(self) -> KeyInformation:
         """Get the status of the keys."""
         logger.debug("Getting Key Information")
-        if self._native:
-            raw = self._native.get_key_information()
-            return {KEY_REF(k): KEY_STATUS(v) for k, v in raw.items()}
-        return self.get_application_related_data().discretionary.key_information
+        raw = self._native.get_key_information()
+        return {KEY_REF(k): KEY_STATUS(v) for k, v in raw.items()}
 
     def get_generation_times(self) -> GenerationTimes:
         """Get timestamps for when keys were generated."""
         logger.debug("Getting key generation timestamps")
-        if self._native:
-            raw = self._native.get_generation_times()
-            return {KEY_REF(k): v for k, v in raw.items()}
-        return self.get_application_related_data().discretionary.generation_times
+        raw = self._native.get_generation_times()
+        return {KEY_REF(k): v for k, v in raw.items()}
 
     def set_generation_time(self, key_ref: KEY_REF, timestamp: int) -> None:
         """Set the generation timestamp for a key.
@@ -1617,20 +1253,14 @@ class OpenPgpSession:
         :param timestamp: The timestamp.
         """
         logger.debug(f"Setting key generation timestamp for {key_ref.name}")
-        if self._native:
-            self._native.set_generation_time(int(key_ref), timestamp)
-            logger.info(f"Key generation timestamp set for {key_ref.name}")
-            return
-        self.put_data(key_ref.generation_time_do, struct.pack(">I", timestamp))
+        self._native.set_generation_time(int(key_ref), timestamp)
         logger.info(f"Key generation timestamp set for {key_ref.name}")
 
     def get_fingerprints(self) -> Fingerprints:
         """Get key fingerprints."""
         logger.debug("Getting key fingerprints")
-        if self._native:
-            raw = self._native.get_fingerprints()
-            return {KEY_REF(k): bytes(v) for k, v in raw.items()}
-        return self.get_application_related_data().discretionary.fingerprints
+        raw = self._native.get_fingerprints()
+        return {KEY_REF(k): bytes(v) for k, v in raw.items()}
 
     def set_fingerprint(self, key_ref: KEY_REF, fingerprint: bytes) -> None:
         """Set the fingerprint for a key.
@@ -1641,12 +1271,8 @@ class OpenPgpSession:
         :param fingerprint: The fingerprint.
         """
         logger.debug(f"Setting key fingerprint for {key_ref.name}")
-        if self._native:
-            self._native.set_fingerprint(int(key_ref), fingerprint)
-            logger.info(f"Key fingerprint set for {key_ref.name}")
-            return
-        self.put_data(key_ref.fingerprint_do, fingerprint)
-        logger.info("Key fingerprint set for {key_ref.name}")
+        self._native.set_fingerprint(int(key_ref), fingerprint)
+        logger.info(f"Key fingerprint set for {key_ref.name}")
 
     def get_public_key(self, key_ref: KEY_REF) -> PublicKey:
         """Get the public key from a slot.
@@ -1654,20 +1280,12 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         """
         logger.debug(f"Getting public key for {key_ref.name}")
-        if self._native:
-            raw = self._native.get_public_key(int(key_ref))
-            data = Tlv.parse_dict(raw)
-            attributes = self.get_algorithm_attributes(key_ref)
-            if isinstance(attributes, EcAttributes):
-                return _parse_ec_key(attributes.oid, data)
-            else:
-                return _parse_rsa_key(data)
-        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x81, 0x00, key_ref.crt)
-        data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        raw = self._native.get_public_key(int(key_ref))
+        data = Tlv.parse_dict(raw)
         attributes = self.get_algorithm_attributes(key_ref)
         if isinstance(attributes, EcAttributes):
             return _parse_ec_key(attributes.oid, data)
-        else:  # RSA
+        else:
             return _parse_rsa_key(data)
 
     def generate_rsa_key(
@@ -1680,31 +1298,8 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param key_size: The size of the RSA key.
         """
-        if self._native:
-            raw = self._native.generate_rsa_key(int(key_ref), int(key_size))
-            data = Tlv.parse_dict(raw)
-            logger.info(f"RSA key generated for {key_ref.name}")
-            return _parse_rsa_key(data)
-        if (4, 2, 0) <= self.version < (4, 3, 5):
-            raise NotSupportedError("RSA key generation not supported on this YubiKey")
-
-        logger.debug(f"Generating RSA private key for {key_ref.name}")
-        if (
-            EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
-            in self.extended_capabilities.flags
-        ):
-            import_format = (
-                RSA_IMPORT_FORMAT.CRT_W_MOD
-                if 0 < self.version[0] < 4  # Use CRT for NEO
-                else RSA_IMPORT_FORMAT.STANDARD
-            )
-            attributes = RsaAttributes.create(key_size, import_format)
-            self.set_algorithm_attributes(key_ref, attributes)
-        elif key_size != RSA_SIZE.RSA2048:
-            raise NotSupportedError("Algorithm attributes not supported")
-
-        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_ref.crt)
-        data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        raw = self._native.generate_rsa_key(int(key_ref), int(key_size))
+        data = Tlv.parse_dict(raw)
         logger.info(f"RSA key generated for {key_ref.name}")
         return _parse_rsa_key(data)
 
@@ -1716,23 +1311,8 @@ class OpenPgpSession:
         :param key_ref: The key slot.
         :param curve_oid: The curve OID.
         """
-        if self._native:
-            raw = self._native.generate_ec_key(int(key_ref), curve_oid.dotted_string)
-            data = Tlv.parse_dict(raw)
-            logger.info(f"EC key generated for {key_ref.name}")
-            return _parse_ec_key(curve_oid, data)
-
-        require_version(self.version, (5, 2, 0))
-
-        if curve_oid not in OID:
-            raise ValueError("Curve OID is not recognized")
-
-        logger.debug(f"Generating EC private key for {key_ref.name}")
-        attributes = EcAttributes.create(key_ref, curve_oid)
-        self.set_algorithm_attributes(key_ref, attributes)
-
-        resp = self.protocol.send_apdu(0, INS.GENERATE_ASYM, 0x80, 0x00, key_ref.crt)
-        data = Tlv.parse_dict(Tlv.unpack(TAG_PUBLIC_KEY, resp))
+        raw = self._native.generate_ec_key(int(key_ref), curve_oid.dotted_string)
+        data = Tlv.parse_dict(raw)
         logger.info(f"EC key generated for {key_ref.name}")
         return _parse_ec_key(curve_oid, data)
 
@@ -1759,15 +1339,9 @@ class OpenPgpSession:
             ):
                 raise NotSupportedError("This YubiKey only supports RSA 2048 keys")
 
-        if self._native:
-            use_crt = 0 < self.version[0] < 4
-            key_type, components = _prepare_private_key_for_native(private_key, use_crt)
-            self._native.put_key(int(key_ref), key_type, components)
-            logger.info(f"Private key imported for {key_ref.name}")
-            return
-
-        template = _get_key_template(private_key, key_ref, 0 < self.version[0] < 4)
-        self.protocol.send_apdu(0, INS.PUT_DATA_ODD, 0x3F, 0xFF, bytes(template))
+        use_crt = 0 < self.version[0] < 4
+        key_type, components = _prepare_private_key_for_native(private_key, use_crt)
+        self._native.put_key(int(key_ref), key_type, components)
         logger.info(f"Private key imported for {key_ref.name}")
 
     def delete_key(self, key_ref: KEY_REF) -> None:
@@ -1777,42 +1351,7 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
-        if self._native:
-            self._native.delete_key(int(key_ref))
-            return
-        if 0 < self.version[0] < 4:
-            # Import over the key
-            self.put_key(
-                key_ref, rsa.generate_private_key(65537, 2048, default_backend())
-            )
-        else:
-            # Delete key by changing the key attributes twice.
-            self.put_data(  # Use put_data to avoid checking for RSA 4096 support
-                key_ref.algorithm_attributes_do, RsaAttributes.create(RSA_SIZE.RSA4096)
-            )
-            self.set_algorithm_attributes(
-                key_ref, RsaAttributes.create(RSA_SIZE.RSA2048)
-            )
-
-    def _select_certificate(self, key_ref: KEY_REF) -> None:
-        logger.debug(f"Selecting certificate for key {key_ref.name}")
-        try:
-            require_version(self.version, (5, 2, 0))
-            data: bytes = Tlv(0x60, Tlv(0x5C, int2bytes(DO.CARDHOLDER_CERTIFICATE)))
-            if self.version <= (5, 4, 3):
-                # These use a non-standard byte in the command.
-                data = b"\x06" + data  # 6 is the length of the data.
-            self.protocol.send_apdu(
-                0,
-                INS.SELECT_DATA,
-                3 - key_ref,
-                0x04,
-                data,
-            )
-        except NotSupportedError:
-            if key_ref == KEY_REF.AUT:
-                return  # Older version still support AUT, which is the default slot.
-            raise
+        self._native.delete_key(int(key_ref))
 
     def get_certificate(self, key_ref: KEY_REF) -> x509.Certificate:
         """Get a certificate from a slot.
@@ -1820,20 +1359,10 @@ class OpenPgpSession:
         :param key_ref: The slot.
         """
         logger.debug(f"Getting certificate for key {key_ref.name}")
-        if self._native:
-            der = self._native.get_certificate(int(key_ref))
-            if not der:
-                raise ValueError("No certificate found!")
-            return x509.load_der_x509_certificate(bytes(der), default_backend())
-        if key_ref == KEY_REF.ATT:
-            require_version(self.version, (5, 2, 0))
-            data = self.get_data(DO.ATT_CERTIFICATE)
-        else:
-            self._select_certificate(key_ref)
-            data = self.get_data(DO.CARDHOLDER_CERTIFICATE)
-        if not data:
+        der = self._native.get_certificate(int(key_ref))
+        if not der:
             raise ValueError("No certificate found!")
-        return x509.load_der_x509_certificate(data, default_backend())
+        return x509.load_der_x509_certificate(bytes(der), default_backend())
 
     def put_certificate(self, key_ref: KEY_REF, certificate: x509.Certificate) -> None:
         """Import a certificate into a slot.
@@ -1845,16 +1374,7 @@ class OpenPgpSession:
         """
         cert_data = certificate.public_bytes(Encoding.DER)
         logger.debug(f"Importing certificate for key {key_ref.name}")
-        if self._native:
-            self._native.put_certificate(int(key_ref), cert_data)
-            logger.info(f"Certificate imported for key {key_ref.name}")
-            return
-        if key_ref == KEY_REF.ATT:
-            require_version(self.version, (5, 2, 0))
-            self.put_data(DO.ATT_CERTIFICATE, cert_data)
-        else:
-            self._select_certificate(key_ref)
-            self.put_data(DO.CARDHOLDER_CERTIFICATE, cert_data)
+        self._native.put_certificate(int(key_ref), cert_data)
         logger.info(f"Certificate imported for key {key_ref.name}")
 
     def delete_certificate(self, key_ref: KEY_REF) -> None:
@@ -1865,16 +1385,7 @@ class OpenPgpSession:
         :param key_ref: The slot.
         """
         logger.debug(f"Deleting certificate for key {key_ref.name}")
-        if self._native:
-            self._native.delete_certificate(int(key_ref))
-            logger.info(f"Certificate deleted for key {key_ref.name}")
-            return
-        if key_ref == KEY_REF.ATT:
-            require_version(self.version, (5, 2, 0))
-            self.put_data(DO.ATT_CERTIFICATE, b"")
-        else:
-            self._select_certificate(key_ref)
-            self.put_data(DO.CARDHOLDER_CERTIFICATE, b"")
+        self._native.delete_certificate(int(key_ref))
         logger.info(f"Certificate deleted for key {key_ref.name}")
 
     def attest_key(self, key_ref: KEY_REF) -> x509.Certificate:
@@ -1887,15 +1398,9 @@ class OpenPgpSession:
 
         :param key_ref: The key slot.
         """
-        if self._native:
-            der = self._native.attest_key(int(key_ref))
-            logger.info(f"Attestation certificate created for {key_ref.name}")
-            return x509.load_der_x509_certificate(bytes(der), default_backend())
-        require_version(self.version, (5, 2, 0))
-        logger.debug(f"Attesting key {key_ref.name}")
-        self.protocol.send_apdu(0x80, INS.GET_ATTESTATION, key_ref, 0)
+        der = self._native.attest_key(int(key_ref))
         logger.info(f"Attestation certificate created for {key_ref.name}")
-        return self.get_certificate(key_ref)
+        return x509.load_der_x509_certificate(bytes(der), default_backend())
 
     def sign(self, message: bytes, hash_algorithm: hashes.HashAlgorithm) -> bytes:
         """Sign a message using the SIG key.
@@ -1905,22 +1410,9 @@ class OpenPgpSession:
         :param message: The message to sign.
         :param hash_algorithm: The pre-signature hash algorithm.
         """
-        if self._native:
-            ha_int = _hash_algorithm_to_int(hash_algorithm)
-            response = bytes(self._native.sign(message, ha_int))
-            attributes = self.get_algorithm_attributes(KEY_REF.SIG)
-            logger.info("Message signed")
-            if attributes.algorithm_id == 0x13:
-                ln = len(response) // 2
-                return encode_dss_signature(
-                    int.from_bytes(response[:ln], "big"),
-                    int.from_bytes(response[ln:], "big"),
-                )
-            return response
+        ha_int = _hash_algorithm_to_int(hash_algorithm)
+        response = bytes(self._native.sign(message, ha_int))
         attributes = self.get_algorithm_attributes(KEY_REF.SIG)
-        padded = _pad_message(attributes, message, hash_algorithm)
-        logger.debug(f"Signing a message with {attributes}")
-        response = self.protocol.send_apdu(0, INS.PSO, 0x9E, 0x9A, padded)
         logger.info("Message signed")
         if attributes.algorithm_id == 0x13:
             ln = len(response) // 2
@@ -1941,21 +1433,6 @@ class OpenPgpSession:
 
         :param value: The value to decrypt.
         """
-        if self._native:
-            if isinstance(value, ec.EllipticCurvePublicKey):
-                data = value.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
-            elif isinstance(value, x25519.X25519PublicKey):
-                data = value.public_bytes(Encoding.Raw, PublicFormat.Raw)
-            elif isinstance(value, bytes):
-                data = value
-            else:
-                raise ValueError("Value must be a bytes or public key")
-            response = bytes(self._native.decrypt(data))
-            logger.info("Value decrypted")
-            return response
-        attributes = self.get_algorithm_attributes(KEY_REF.DEC)
-        logger.debug(f"Decrypting a value with {attributes}")
-
         if isinstance(value, ec.EllipticCurvePublicKey):
             data = value.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
         elif isinstance(value, x25519.X25519PublicKey):
@@ -1964,15 +1441,7 @@ class OpenPgpSession:
             data = value
         else:
             raise ValueError("Value must be a bytes or public key")
-
-        if isinstance(attributes, RsaAttributes):
-            data = b"\0" + data
-        elif isinstance(attributes, EcAttributes):
-            data = Tlv(0xA6, Tlv(0x7F49, Tlv(0x86, data)))
-        else:
-            raise ValueError("Unsupported algorithm attributes")
-
-        response = self.protocol.send_apdu(0, INS.PSO, 0x80, 0x86, data)
+        response = bytes(self._native.decrypt(data))
         logger.info("Value decrypted")
         return response
 
@@ -1986,24 +1455,9 @@ class OpenPgpSession:
         :param message: The message to authenticate.
         :param hash_algorithm: The pre-authentication hash algorithm.
         """
-        if self._native:
-            ha_int = _hash_algorithm_to_int(hash_algorithm)
-            response = bytes(self._native.authenticate(message, ha_int))
-            attributes = self.get_algorithm_attributes(KEY_REF.AUT)
-            logger.info("Message authenticated")
-            if attributes.algorithm_id == 0x13:
-                ln = len(response) // 2
-                return encode_dss_signature(
-                    int.from_bytes(response[:ln], "big"),
-                    int.from_bytes(response[ln:], "big"),
-                )
-            return response
+        ha_int = _hash_algorithm_to_int(hash_algorithm)
+        response = bytes(self._native.authenticate(message, ha_int))
         attributes = self.get_algorithm_attributes(KEY_REF.AUT)
-        padded = _pad_message(attributes, message, hash_algorithm)
-        logger.debug(f"Authenticating a message with {attributes}")
-        response = self.protocol.send_apdu(
-            0, INS.INTERNAL_AUTHENTICATE, 0x0, 0x0, padded
-        )
         logger.info("Message authenticated")
         if attributes.algorithm_id == 0x13:
             ln = len(response) // 2

@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 
 from yubikit.core import TRANSPORT, InvalidPinError
-from yubikit.core.smartcard import AID, ApduError
+from yubikit.core.smartcard import AID, ApduError, SmartCardProtocol
 from yubikit.management import CAPABILITY
 from yubikit.openpgp import (
     KEY_REF,
@@ -59,7 +59,7 @@ def not_fips_capable(info):
 
 
 @pytest.fixture
-def keys(session, info, transport, scp_params):
+def keys(session, info, transport, scp_params, ccid_connection):
     if fips_capable(info):
         new_keys = Keys(
             "12345679",
@@ -68,11 +68,12 @@ def keys(session, info, transport, scp_params):
         session.change_pin(DEFAULT_PIN, new_keys.pin)
         session.change_admin(DEFAULT_ADMIN_PIN, new_keys.admin)
 
-        session.protocol.connection.connection.disconnect()
-        session.protocol.connection.connection.connect()
-        session.protocol.select(AID.OPENPGP)
+        ccid_connection.connection.disconnect()
+        ccid_connection.connection.connect()
+        protocol = SmartCardProtocol(ccid_connection)
+        protocol.select(AID.OPENPGP)
         if transport == TRANSPORT.NFC and scp_params:
-            session.protocol.init_scp(scp_params)
+            protocol.init_scp(scp_params)
 
         yield new_keys
     else:

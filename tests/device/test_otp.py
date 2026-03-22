@@ -48,7 +48,7 @@ def not_usb_ccid(conn_type, transport):
 
 
 @pytest.fixture()
-def read_config(session, conn_type, info, transport, await_reboot):
+def read_config(session, conn_type, info, transport, await_reboot, device):
     need_reboot = conn_type == SmartCardConnection and (4, 0) <= info.version < (5, 5)
     if need_reboot and info.version[0] == 4:
         pytest.skip("Can't read config")
@@ -56,13 +56,14 @@ def read_config(session, conn_type, info, transport, await_reboot):
     def call():
         otp = session
         if need_reboot:
-            protocol = session.backend.protocol
             if transport == TRANSPORT.NFC:
-                protocol.connection.connection.disconnect()
-                conn = protocol.connection
-                conn.connection.connect()
+                # Reconnect NFC by opening a new connection
+                with device.open_connection(SmartCardConnection) as conn:
+                    otp = YubiOtpSession(conn)
+                    return otp.get_config_state()
             else:
-                ManagementSession(protocol.connection).write_device_config(reboot=True)
+                with device.open_connection(SmartCardConnection) as conn:
+                    ManagementSession(conn).write_device_config(reboot=True)
                 await_reboot()
                 devs = list_all_devices([SmartCardConnection])
                 if len(devs) != 1:
@@ -72,8 +73,8 @@ def read_config(session, conn_type, info, transport, await_reboot):
                     raise Exception("Connected YubiKey has wrong serial")
                 conn = dev.open_connection(SmartCardConnection)
 
-            otp = YubiOtpSession(conn)
-            session.backend = otp.backend
+                otp = YubiOtpSession(conn)
+                session.backend = otp.backend
         return otp.get_config_state()
 
     return call
