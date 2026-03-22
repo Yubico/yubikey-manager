@@ -14,6 +14,7 @@
 //! Only run against a test/development YubiKey.
 
 use std::sync::OnceLock;
+use rstest::{fixture, rstest};
 use yubikit_rs::core_types::{set_override_version, Version};
 use yubikit_rs::device::{list_devices, YubiKeyDevice};
 use yubikit_rs::iso7816::{Aid, SmartCardProtocol, Transport};
@@ -30,6 +31,15 @@ enum TestConnection {
     UsbOtp,
     NfcSmartCard,
     NfcSmartCardScp11b,
+}
+
+macro_rules! skip_if_needed {
+    ($tc:expr) => {
+        if let Some(reason) = should_skip(&$tc) {
+            eprintln!("  SKIP {:?}: {}", $tc, reason);
+            return;
+        }
+    };
 }
 
 /// Cached device info so we only enumerate once.
@@ -194,21 +204,16 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
     }
 }
 
-/// SmartCard configs (USB plain, USB+SCP11b, NFC plain, NFC+SCP11b).
-fn test_configs_smartcard() -> Vec<TestConnection> {
-    vec![
-        TestConnection::UsbSmartCard,
-        TestConnection::UsbSmartCardScp11b,
-        TestConnection::NfcSmartCard,
-        TestConnection::NfcSmartCardScp11b,
-    ]
+/// Fixture providing the USB device info (cached via OnceLock).
+#[fixture]
+fn device_info() -> &'static DeviceInfo {
+    &get_device_and_info().1
 }
 
-/// SmartCard configs plus USB OTP (for sessions that support OtpConnection).
-fn test_configs_with_otp() -> Vec<TestConnection> {
-    let mut configs = test_configs_smartcard();
-    configs.push(TestConnection::UsbOtp);
-    configs
+/// Fixture providing USB device capabilities.
+#[fixture]
+fn capabilities(device_info: &DeviceInfo) -> Capability {
+    device_info.supported_capabilities.get(&Transport::Usb).copied().unwrap_or(Capability::NONE)
 }
 
 fn usb_capabilities() -> Capability {
@@ -263,48 +268,48 @@ fn test_list_devices_finds_key() {
     );
 }
 
-#[test]
-fn test_management_read_device_info() {
-    for tc in test_configs_with_otp() {
-        if let Some(reason) = should_skip(&tc) {
-            eprintln!("  SKIP {tc:?}: {reason}");
-            continue;
+#[rstest]
+#[case(TestConnection::UsbSmartCard)]
+#[case(TestConnection::UsbSmartCardScp11b)]
+#[case(TestConnection::UsbOtp)]
+#[case(TestConnection::NfcSmartCard)]
+#[case(TestConnection::NfcSmartCardScp11b)]
+fn test_management_read_device_info(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    match tc {
+        TestConnection::UsbOtp => {
+            use yubikit_rs::management::ManagementOtpSession;
+            let (dev, _) = get_device_and_info();
+            let conn = dev.open_otp().expect("open OTP");
+            let mut session =
+                ManagementOtpSession::new(conn).expect("ManagementOtpSession::new");
+            let info = session
+                .read_device_info_unchecked()
+                .expect("read_device_info_unchecked");
+            assert_eq!(info.serial, Some(required_serial()));
         }
-        match tc {
-            TestConnection::UsbOtp => {
-                use yubikit_rs::management::ManagementOtpSession;
-                let (dev, _) = get_device_and_info();
-                let conn = dev.open_otp().expect("open OTP");
-                let mut session =
-                    ManagementOtpSession::new(conn).expect("ManagementOtpSession::new");
-                let info = session
-                    .read_device_info_unchecked()
-                    .expect("read_device_info_unchecked");
+        _ => {
+            let conn = open_smartcard_connection(&tc);
+            let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
+                let (protocol, resp) =
+                    setup_scp_protocol(conn, Aid::MANAGEMENT, *kid, *kvn, pk);
+                ManagementSession::from_protocol(protocol, &resp)
+                    .expect("ManagementSession with SCP")
+            } else {
+                ManagementSession::new(conn).expect("ManagementSession::new")
+            };
+            let info = session
+                .read_device_info_unchecked()
+                .expect("read_device_info_unchecked");
+            assert!(info.serial.is_some(), "Expected serial number");
+            // Only verify specific serial for USB (NFC may be a different key)
+            if matches!(tc, TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b)
+            {
                 assert_eq!(info.serial, Some(required_serial()));
             }
-            _ => {
-                let conn = open_smartcard_connection(&tc);
-                let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
-                    let (protocol, resp) =
-                        setup_scp_protocol(conn, Aid::MANAGEMENT, *kid, *kvn, pk);
-                    ManagementSession::from_protocol(protocol, &resp)
-                        .expect("ManagementSession with SCP")
-                } else {
-                    ManagementSession::new(conn).expect("ManagementSession::new")
-                };
-                let info = session
-                    .read_device_info_unchecked()
-                    .expect("read_device_info_unchecked");
-                assert!(info.serial.is_some(), "Expected serial number");
-                // Only verify specific serial for USB (NFC may be a different key)
-                if matches!(tc, TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b)
-                {
-                    assert_eq!(info.serial, Some(required_serial()));
-                }
-            }
         }
-        eprintln!("  PASS {tc:?}");
     }
+    eprintln!("  PASS {tc:?}");
 }
 
 #[test]
@@ -334,112 +339,108 @@ mod oath {
         }
     }
 
-    #[test]
-    fn test_oath_session_version() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_oath_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::OATH);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let session = open_oath_session(&tc);
-            let _v = session.version();
-            eprintln!("  PASS {tc:?}");
-        }
+        skip_if_needed!(tc);
+        let session = open_oath_session(&tc);
+        let _v = session.version();
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_oath_reset_and_list() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_oath_reset_and_list(#[case] tc: TestConnection) {
         require_capability!(Capability::OATH);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_oath_session(&tc);
-            session.reset().expect("reset");
+        skip_if_needed!(tc);
+        let mut session = open_oath_session(&tc);
+        session.reset().expect("reset");
 
-            let creds = session.list_credentials().expect("list_credentials");
-            assert!(creds.is_empty(), "Expected no credentials after reset");
-            eprintln!("  PASS {tc:?}");
-        }
+        let creds = session.list_credentials().expect("list_credentials");
+        assert!(creds.is_empty(), "Expected no credentials after reset");
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_oath_put_list_delete() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_oath_put_list_delete(#[case] tc: TestConnection) {
         require_capability!(Capability::OATH);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_oath_session(&tc);
-            session.reset().expect("reset");
+        skip_if_needed!(tc);
+        let mut session = open_oath_session(&tc);
+        session.reset().expect("reset");
 
-            let cred_data = CredentialData {
-                name: "test@example.com".into(),
-                oath_type: OathType::Totp,
-                hash_algorithm: HashAlgorithm::Sha1,
-                secret: b"12345678901234567890".to_vec(),
-                digits: 6,
-                period: 30,
-                counter: 0,
-                issuer: Some("TestIssuer".into()),
-            };
+        let cred_data = CredentialData {
+            name: "test@example.com".into(),
+            oath_type: OathType::Totp,
+            hash_algorithm: HashAlgorithm::Sha1,
+            secret: b"12345678901234567890".to_vec(),
+            digits: 6,
+            period: 30,
+            counter: 0,
+            issuer: Some("TestIssuer".into()),
+        };
 
-            let cred = session
-                .put_credential(&cred_data, false)
-                .expect("put_credential");
-            assert_eq!(cred.issuer.as_deref(), Some("TestIssuer"));
+        let cred = session
+            .put_credential(&cred_data, false)
+            .expect("put_credential");
+        assert_eq!(cred.issuer.as_deref(), Some("TestIssuer"));
 
-            let creds = session.list_credentials().expect("list_credentials");
-            assert_eq!(creds.len(), 1);
+        let creds = session.list_credentials().expect("list_credentials");
+        assert_eq!(creds.len(), 1);
 
-            session
-                .delete_credential(&cred_data.get_id())
-                .expect("delete_credential");
+        session
+            .delete_credential(&cred_data.get_id())
+            .expect("delete_credential");
 
-            let creds = session.list_credentials().expect("list_credentials");
-            assert!(creds.is_empty());
-            eprintln!("  PASS {tc:?}");
-        }
+        let creds = session.list_credentials().expect("list_credentials");
+        assert!(creds.is_empty());
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_oath_calculate_all() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_oath_calculate_all(#[case] tc: TestConnection) {
         require_capability!(Capability::OATH);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_oath_session(&tc);
-            session.reset().expect("reset");
+        skip_if_needed!(tc);
+        let mut session = open_oath_session(&tc);
+        session.reset().expect("reset");
 
-            let cred_data = CredentialData {
-                name: "calc@test.com".into(),
-                oath_type: OathType::Totp,
-                hash_algorithm: HashAlgorithm::Sha1,
-                secret: b"12345678901234567890".to_vec(),
-                digits: 6,
-                period: 30,
-                counter: 0,
-                issuer: None,
-            };
-            session
-                .put_credential(&cred_data, false)
-                .expect("put_credential");
+        let cred_data = CredentialData {
+            name: "calc@test.com".into(),
+            oath_type: OathType::Totp,
+            hash_algorithm: HashAlgorithm::Sha1,
+            secret: b"12345678901234567890".to_vec(),
+            digits: 6,
+            period: 30,
+            counter: 0,
+            issuer: None,
+        };
+        session
+            .put_credential(&cred_data, false)
+            .expect("put_credential");
 
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            let results = session.calculate_all(now).expect("calculate_all");
-            assert_eq!(results.len(), 1);
-            let (_, code) = &results[0];
-            assert!(code.is_some(), "Expected a TOTP code");
-            eprintln!("  PASS {tc:?}");
-        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let results = session.calculate_all(now).expect("calculate_all");
+        assert_eq!(results.len(), 1);
+        let (_, code) = &results[0];
+        assert!(code.is_some(), "Expected a TOTP code");
+        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -459,51 +460,48 @@ mod piv {
         }
     }
 
-    #[test]
-    fn test_piv_session_version() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_piv_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::PIV);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let session = open_piv_session(&tc);
-            let _v = session.version();
-            eprintln!("  PASS {tc:?}");
-        }
+        skip_if_needed!(tc);
+        let session = open_piv_session(&tc);
+        let _v = session.version();
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_piv_verify_default_pin() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_piv_verify_default_pin(#[case] tc: TestConnection) {
         require_capability!(Capability::PIV);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_piv_session(&tc);
-            session.reset().expect("reset");
+        skip_if_needed!(tc);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
 
-            session.verify_pin("123456").expect("verify default PIN");
-            eprintln!("  PASS {tc:?}");
-        }
+        session.verify_pin("123456").expect("verify default PIN");
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_piv_pin_attempts() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_piv_pin_attempts(#[case] tc: TestConnection) {
         require_capability!(Capability::PIV);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_piv_session(&tc);
-            session.reset().expect("reset");
+        skip_if_needed!(tc);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
 
-            let attempts = session.get_pin_attempts().expect("get_pin_attempts");
-            assert!(attempts > 0, "Expected positive PIN attempts");
-            eprintln!("  PASS {tc:?}");
-        }
+        let attempts = session.get_pin_attempts().expect("get_pin_attempts");
+        assert!(attempts > 0, "Expected positive PIN attempts");
+        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -523,61 +521,58 @@ mod openpgp {
         }
     }
 
-    #[test]
-    fn test_openpgp_session_version() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_openpgp_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let session = open_openpgp_session(&tc);
-            let _v = session.version();
-            eprintln!("  PASS {tc:?}");
-        }
+        skip_if_needed!(tc);
+        let session = open_openpgp_session(&tc);
+        let _v = session.version();
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_openpgp_get_application_data() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_openpgp_session(&tc);
-            let app_data = session
-                .get_application_related_data()
-                .expect("get_application_related_data");
-            let (major, minor) = app_data.aid.version();
-            assert!(
-                major >= 2,
-                "Expected OpenPGP version >= 2.0, got {major}.{minor}"
-            );
-            eprintln!("  PASS {tc:?}");
-        }
+        skip_if_needed!(tc);
+        let mut session = open_openpgp_session(&tc);
+        let app_data = session
+            .get_application_related_data()
+            .expect("get_application_related_data");
+        let (major, minor) = app_data.aid.version();
+        assert!(
+            major >= 2,
+            "Expected OpenPGP version >= 2.0, got {major}.{minor}"
+        );
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_openpgp_get_challenge() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
+        skip_if_needed!(tc);
+        let mut session = open_openpgp_session(&tc);
+        match session.get_challenge(8) {
+            Ok(challenge) => {
+                assert_eq!(challenge.len(), 8);
+                assert!(challenge.iter().any(|&b| b != 0));
             }
-            let mut session = open_openpgp_session(&tc);
-            match session.get_challenge(8) {
-                Ok(challenge) => {
-                    assert_eq!(challenge.len(), 8);
-                    assert!(challenge.iter().any(|&b| b != 0));
-                }
-                Err(_) => {
-                    eprintln!("  NOTE: get_challenge not supported on this device");
-                }
+            Err(_) => {
+                eprintln!("  NOTE: get_challenge not supported on this device");
             }
-            eprintln!("  PASS {tc:?}");
         }
+        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -587,37 +582,37 @@ mod yubiotp {
     use super::*;
     use yubikit_rs::yubiotp::{YubiOtpOtpSession, YubiOtpSession};
 
-    #[test]
-    fn test_yubiotp_session_version() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::UsbOtp)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_yubiotp_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::OTP);
-        for tc in test_configs_with_otp() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
+        skip_if_needed!(tc);
+        match tc {
+            TestConnection::UsbOtp => {
+                let (dev, _) = get_device_and_info();
+                let conn = dev.open_otp().expect("open OTP");
+                let session =
+                    YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession::new");
+                let _v = session.version();
             }
-            match tc {
-                TestConnection::UsbOtp => {
-                    let (dev, _) = get_device_and_info();
-                    let conn = dev.open_otp().expect("open OTP");
-                    let session =
-                        YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession::new");
-                    let _v = session.version();
-                }
-                _ => {
-                    let conn = open_smartcard_connection(&tc);
-                    let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
-                        let (protocol, resp) =
-                            setup_scp_protocol(conn, Aid::OTP, *kid, *kvn, pk);
-                        YubiOtpSession::from_protocol(protocol, &resp)
-                            .expect("YubiOtpSession with SCP")
-                    } else {
-                        YubiOtpSession::new(conn).expect("YubiOtpSession::new")
-                    };
-                    let _v = session.version();
-                }
+            _ => {
+                let conn = open_smartcard_connection(&tc);
+                let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
+                    let (protocol, resp) =
+                        setup_scp_protocol(conn, Aid::OTP, *kid, *kvn, pk);
+                    YubiOtpSession::from_protocol(protocol, &resp)
+                        .expect("YubiOtpSession with SCP")
+                } else {
+                    YubiOtpSession::new(conn).expect("YubiOtpSession::new")
+                };
+                let _v = session.version();
             }
-            eprintln!("  PASS {tc:?}");
         }
+        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -637,35 +632,33 @@ mod hsmauth {
         }
     }
 
-    #[test]
-    fn test_hsmauth_session_version() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_hsmauth_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::HSMAUTH);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let session = open_hsmauth_session(&tc);
-            let _v = session.version();
-            eprintln!("  PASS {tc:?}");
-        }
+        skip_if_needed!(tc);
+        let session = open_hsmauth_session(&tc);
+        let _v = session.version();
+        eprintln!("  PASS {tc:?}");
     }
 
-    #[test]
-    fn test_hsmauth_reset_and_list() {
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::UsbSmartCardScp11b)]
+    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::NfcSmartCardScp11b)]
+    fn test_hsmauth_reset_and_list(#[case] tc: TestConnection) {
         require_capability!(Capability::HSMAUTH);
-        for tc in test_configs_smartcard() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
-            }
-            let mut session = open_hsmauth_session(&tc);
-            session.reset().expect("reset");
+        skip_if_needed!(tc);
+        let mut session = open_hsmauth_session(&tc);
+        session.reset().expect("reset");
 
-            let creds = session.list_credentials().expect("list_credentials");
-            assert!(creds.is_empty(), "Expected no credentials after reset");
-            eprintln!("  PASS {tc:?}");
-        }
+        let creds = session.list_credentials().expect("list_credentials");
+        assert!(creds.is_empty(), "Expected no credentials after reset");
+        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -676,50 +669,39 @@ mod securitydomain {
     use super::*;
     use yubikit_rs::securitydomain::SecurityDomainSession;
 
-    /// SecurityDomain configs: USB plain + NFC plain only (no SCP).
-    fn sd_test_configs() -> Vec<TestConnection> {
-        vec![TestConnection::UsbSmartCard, TestConnection::NfcSmartCard]
-    }
-
-    #[test]
-    fn test_securitydomain_version() {
-        for tc in sd_test_configs() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::NfcSmartCard)]
+    fn test_securitydomain_version(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        let conn = open_smartcard_connection(&tc);
+        match SecurityDomainSession::new(conn) {
+            Ok(session) => {
+                let _v = session.version();
+                eprintln!("  PASS {tc:?}");
             }
-            let conn = open_smartcard_connection(&tc);
-            match SecurityDomainSession::new(conn) {
-                Ok(session) => {
-                    let _v = session.version();
-                    eprintln!("  PASS {tc:?}");
-                }
-                Err(_) => {
-                    eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                }
+            Err(_) => {
+                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
             }
         }
     }
 
-    #[test]
-    fn test_securitydomain_get_key_information() {
-        for tc in sd_test_configs() {
-            if let Some(reason) = should_skip(&tc) {
-                eprintln!("  SKIP {tc:?}: {reason}");
-                continue;
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::NfcSmartCard)]
+    fn test_securitydomain_get_key_information(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        let conn = open_smartcard_connection(&tc);
+        let mut session = match SecurityDomainSession::new(conn) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
+                return;
             }
-            let conn = open_smartcard_connection(&tc);
-            let mut session = match SecurityDomainSession::new(conn) {
-                Ok(s) => s,
-                Err(_) => {
-                    eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                    continue;
-                }
-            };
-            let key_info = session.get_key_information().expect("get_key_information");
-            // Default key set should always exist
-            assert!(!key_info.is_empty(), "Expected at least one key entry");
-            eprintln!("  PASS {tc:?}");
-        }
+        };
+        let key_info = session.get_key_information().expect("get_key_information");
+        // Default key set should always exist
+        assert!(!key_info.is_empty(), "Expected at least one key entry");
+        eprintln!("  PASS {tc:?}");
     }
 }
