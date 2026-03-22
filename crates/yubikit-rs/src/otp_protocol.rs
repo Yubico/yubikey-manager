@@ -82,17 +82,36 @@ pub enum YubiOtpError {
 }
 
 // ---------------------------------------------------------------------------
+// OTP transport trait
+// ---------------------------------------------------------------------------
+
+/// Trait for low-level OTP HID transport (feature report read/write).
+pub trait OtpTransport {
+    fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError>;
+    fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError>;
+}
+
+impl OtpTransport for HidConnection {
+    fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError> {
+        self.get_feature_report().map_err(YubiOtpError::from)
+    }
+    fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError> {
+        self.set_feature_report(data).map_err(YubiOtpError::from)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // OTP HID protocol
 // ---------------------------------------------------------------------------
 
 /// Low-level OTP frame protocol over HID feature reports.
-pub struct OtpProtocol {
-    connection: HidConnection,
+pub struct OtpProtocol<T: OtpTransport> {
+    connection: T,
     pub version: Version,
 }
 
-impl OtpProtocol {
-    pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+impl<T: OtpTransport> OtpProtocol<T> {
+    pub fn new(connection: T) -> Result<Self, YubiOtpError> {
         let mut proto = Self {
             connection,
             version: Version(0, 0, 0),
@@ -151,7 +170,7 @@ impl OtpProtocol {
     }
 
     fn receive(&self) -> Result<Vec<u8>, YubiOtpError> {
-        let report = self.connection.get_feature_report()?;
+        let report = self.connection.otp_receive()?;
         if report.len() != FEATURE_RPT_SIZE {
             return Err(YubiOtpError::BadResponse(format!(
                 "Incorrect feature report size (was {}, expected {FEATURE_RPT_SIZE})",
@@ -187,7 +206,7 @@ impl OtpProtocol {
                 report[..packet.len()].copy_from_slice(packet);
                 report[FEATURE_RPT_DATA_SIZE] = 0x80 | seq;
                 self.await_ready_to_write()?;
-                self.connection.set_feature_report(&report)?;
+                self.connection.otp_send(&report)?;
             }
             seq += 1;
             offset += FEATURE_RPT_DATA_SIZE;
@@ -260,7 +279,7 @@ impl OtpProtocol {
     fn reset_state(&self) -> Result<(), YubiOtpError> {
         let mut report = [0u8; FEATURE_RPT_SIZE];
         report[FEATURE_RPT_DATA_SIZE] = 0xFF;
-        self.connection.set_feature_report(&report)?;
+        self.connection.otp_send(&report)?;
         Ok(())
     }
 }

@@ -64,7 +64,6 @@ from .core import (
 from .core.smartcard import (
     ScpKeyParams,
     SmartCardConnection,
-    SmartCardProtocol,
 )
 
 if TYPE_CHECKING:
@@ -669,6 +668,7 @@ class PivSession:
     ):
         native = _NativePivSession(connection, scp_key_params)
         self._native = native
+        self.connection = connection
         self._version = _override_version.patch(Version(*native.version))
         if self._version != Version(*native.version):
             native.version = tuple(self._version)
@@ -680,7 +680,6 @@ class PivSession:
             self._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
-        self.protocol = SmartCardProtocol(connection)
 
         logger.debug(f"PIV session initialized (version={self.version})")
 
@@ -1023,28 +1022,7 @@ class PivSession:
         :param object_id: The object identifier.
         """
         logger.debug(f"Reading data from object slot {hex(object_id)}")
-        try:
-            return bytes(self._native.get_object(object_id))
-        except ValueError:
-            pass  # Unknown object ID, fall back to Python
-        if object_id == OBJECT_ID.DISCOVERY:
-            expected: int = OBJECT_ID.DISCOVERY
-        else:
-            expected = TAG_OBJ_DATA
-
-        try:
-            return Tlv.unpack(
-                expected,
-                self.protocol.send_apdu(
-                    0,
-                    INS_GET_DATA,
-                    0x3F,
-                    0xFF,
-                    Tlv(TAG_OBJ_ID, int2bytes(object_id)),
-                ),
-            )
-        except ValueError as e:
-            raise BadResponseError("Malformed object data", e)
+        return bytes(self._native.get_object(object_id))
 
     def put_object(self, object_id: int, data: bytes | None = None) -> None:
         """Write data to PIV object.
@@ -1054,19 +1032,7 @@ class PivSession:
         :param object_id: The object identifier.
         :param data: The object data.
         """
-        try:
-            self._native.put_object(object_id, data)
-            logger.info(f"Data written to object slot {hex(object_id)}")
-            return
-        except ValueError:
-            pass  # Unknown object ID, fall back to Python
-        self.protocol.send_apdu(
-            0,
-            INS_PUT_DATA,
-            0x3F,
-            0xFF,
-            Tlv(TAG_OBJ_ID, int2bytes(object_id)) + Tlv(TAG_OBJ_DATA, data or b""),
-        )
+        self._native.put_object(object_id, data)
         logger.info(f"Data written to object slot {hex(object_id)}")
 
     def get_certificate(self, slot: SLOT) -> x509.Certificate:

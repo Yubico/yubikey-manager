@@ -885,7 +885,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
 
 /// Management operations over the OTP (HID) interface.
 pub struct ManagementOtpSession {
-    protocol: OtpProtocol,
+    protocol: OtpProtocol<HidConnection>,
     version: Version,
 }
 

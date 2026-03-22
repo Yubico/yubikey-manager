@@ -41,7 +41,7 @@ use crate::otp_codec::{calculate_crc, check_crc};
 use crate::transport::hid::HidConnection;
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
-pub use crate::otp_protocol::{OtpProtocol, YubiOtpError};
+pub use crate::otp_protocol::{OtpProtocol, OtpTransport, YubiOtpError};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1126,7 +1126,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
 
 /// A session with the YubiOTP application over an OTP HID connection.
 pub struct YubiOtpOtpSession {
-    protocol: OtpProtocol,
+    protocol: OtpProtocol<HidConnection>,
     status: Vec<u8>,
     version: Version,
 }

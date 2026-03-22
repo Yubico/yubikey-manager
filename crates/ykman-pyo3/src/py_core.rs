@@ -93,6 +93,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_short_apdu, &m)?)?;
     m.add_function(wrap_pyfunction!(format_extended_apdu, &m)?)?;
     m.add_function(wrap_pyfunction!(set_override_version, &m)?)?;
+    m.add_class::<crate::py_smartcard_protocol::SmartCardProtocol>()?;
+    m.add_class::<crate::py_otp_protocol::OtpProtocol>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

@@ -34,10 +34,12 @@ mod py_management_session;
 mod py_oath;
 mod py_oath_session;
 mod py_openpgp_session;
+mod py_otp_protocol;
 mod py_pcsc;
 mod py_piv_session;
 mod py_scp;
 mod py_securitydomain_session;
+mod py_smartcard_protocol;
 mod py_yubiotp_session;
 
 use pyo3::prelude::*;

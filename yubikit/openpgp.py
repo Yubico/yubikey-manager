@@ -69,7 +69,6 @@ from .core import (
 from .core.smartcard import (
     ScpKeyParams,
     SmartCardConnection,
-    SmartCardProtocol,
 )
 
 logger = logging.getLogger(__name__)
@@ -983,7 +982,6 @@ class OpenPgpSession:
         self._app_data = ApplicationRelatedData.parse(
             native.get_application_related_data()
         )
-        self.protocol = SmartCardProtocol(connection)
 
         logger.debug(f"OpenPGP session initialized (version={self.version})")
 

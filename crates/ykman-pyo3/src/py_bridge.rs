@@ -143,7 +143,16 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
             PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
         }
         SmartCardError::ApplicationNotAvailable => {
-            PyRuntimeError::new_err("Application not available")
+            match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("ApplicationNotAvailableError") {
+                    Ok(cls) => match cls.call0() {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err("Application not available"),
+                    },
+                    Err(_) => PyRuntimeError::new_err("Application not available"),
+                },
+                Err(_) => PyRuntimeError::new_err("Application not available"),
+            }
         }
         _ => PyRuntimeError::new_err(e.to_string()),
     })

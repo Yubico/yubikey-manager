@@ -23,7 +23,6 @@ from .core.smartcard import (
     SW,
     ApduError,
     SmartCardConnection,
-    SmartCardProtocol,
 )
 from .core.smartcard.scp import (
     KeyRef,
@@ -72,8 +71,6 @@ class SecurityDomainSession:
         self._version = _override_version.patch(Version(*native.version))
         if self._version != Version(*native.version):
             native.version = tuple(self._version)
-        self.protocol = SmartCardProtocol(connection)
-        self.protocol.configure(self._version)
         self._authenticated = False
         self._dek: bytes | None = None
         logger.debug("SecurityDomain session initialized")

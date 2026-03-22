@@ -121,7 +121,7 @@ def not_roca(version):
 
 def reset_state(session_or_connection, scp_params):
     if isinstance(session_or_connection, PivSession):
-        connection = session_or_connection.protocol.connection
+        connection = session_or_connection.connection
     else:
         connection = session_or_connection
     connection.connection.disconnect()

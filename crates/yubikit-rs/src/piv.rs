@@ -852,11 +852,6 @@ pub fn check_key_support(
     Ok(())
 }
 
-/// Encode an object ID as big-endian bytes.
-fn object_id_bytes(oid: ObjectId) -> Vec<u8> {
-    let v = oid as u32;
-    u32_to_bytes(v)
-}
 
 // ---------------------------------------------------------------------------
 // PivSession
@@ -1447,13 +1442,21 @@ impl<C: SmartCardConnection> PivSession<C> {
     // -----------------------------------------------------------------------
 
     pub fn get_object(&mut self, object_id: ObjectId) -> Result<Vec<u8>, PivError> {
-        let expected = if object_id == ObjectId::Discovery {
+        self.get_object_raw(object_id as u32)
+    }
+
+    pub fn put_object(&mut self, object_id: ObjectId, data: Option<&[u8]>) -> Result<(), PivError> {
+        self.put_object_raw(object_id as u32, data)
+    }
+
+    pub fn get_object_raw(&mut self, object_id: u32) -> Result<Vec<u8>, PivError> {
+        let expected = if object_id == ObjectId::Discovery as u32 {
             ObjectId::Discovery as u32
         } else {
             TAG_OBJ_DATA
         };
 
-        let id_bytes = object_id_bytes(object_id);
+        let id_bytes = u32_to_bytes(object_id);
         let request = tlv_encode(TAG_OBJ_ID, &id_bytes);
         let response = self
             .protocol
@@ -1463,8 +1466,8 @@ impl<C: SmartCardConnection> PivSession<C> {
             .map_err(|_| PivError::BadResponse("Malformed object data".into()))
     }
 
-    pub fn put_object(&mut self, object_id: ObjectId, data: Option<&[u8]>) -> Result<(), PivError> {
-        let id_bytes = object_id_bytes(object_id);
+    pub fn put_object_raw(&mut self, object_id: u32, data: Option<&[u8]>) -> Result<(), PivError> {
+        let id_bytes = u32_to_bytes(object_id);
         let obj_data = data.unwrap_or(&[]);
         let mut request = tlv_encode(TAG_OBJ_ID, &id_bytes);
         request.extend_from_slice(&tlv_encode(TAG_OBJ_DATA, obj_data));

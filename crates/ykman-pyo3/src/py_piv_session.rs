@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 use yubikit_rs::piv::{
-    self, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession as RustPivSession, Slot,
+    self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot,
     TouchPolicy,
 };
 
@@ -90,49 +90,6 @@ fn parse_touch_policy(v: u8) -> PyResult<TouchPolicy> {
     TouchPolicy::from_u8(v).ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!("Invalid touch policy: 0x{:02X}", v))
     })
-}
-
-fn parse_object_id(v: u32) -> PyResult<ObjectId> {
-    match v {
-        0x5FC107 => Ok(ObjectId::Capability),
-        0x5FC102 => Ok(ObjectId::Chuid),
-        0x5FC105 => Ok(ObjectId::Authentication),
-        0x5FC103 => Ok(ObjectId::Fingerprints),
-        0x5FC106 => Ok(ObjectId::Security),
-        0x5FC108 => Ok(ObjectId::Facial),
-        0x5FC109 => Ok(ObjectId::Printed),
-        0x5FC10A => Ok(ObjectId::Signature),
-        0x5FC10B => Ok(ObjectId::KeyManagement),
-        0x5FC101 => Ok(ObjectId::CardAuth),
-        0x7E => Ok(ObjectId::Discovery),
-        0x5FC10C => Ok(ObjectId::KeyHistory),
-        0x5FC121 => Ok(ObjectId::Iris),
-        0x5FC10D => Ok(ObjectId::Retired1),
-        0x5FC10E => Ok(ObjectId::Retired2),
-        0x5FC10F => Ok(ObjectId::Retired3),
-        0x5FC110 => Ok(ObjectId::Retired4),
-        0x5FC111 => Ok(ObjectId::Retired5),
-        0x5FC112 => Ok(ObjectId::Retired6),
-        0x5FC113 => Ok(ObjectId::Retired7),
-        0x5FC114 => Ok(ObjectId::Retired8),
-        0x5FC115 => Ok(ObjectId::Retired9),
-        0x5FC116 => Ok(ObjectId::Retired10),
-        0x5FC117 => Ok(ObjectId::Retired11),
-        0x5FC118 => Ok(ObjectId::Retired12),
-        0x5FC119 => Ok(ObjectId::Retired13),
-        0x5FC11A => Ok(ObjectId::Retired14),
-        0x5FC11B => Ok(ObjectId::Retired15),
-        0x5FC11C => Ok(ObjectId::Retired16),
-        0x5FC11D => Ok(ObjectId::Retired17),
-        0x5FC11E => Ok(ObjectId::Retired18),
-        0x5FC11F => Ok(ObjectId::Retired19),
-        0x5FC120 => Ok(ObjectId::Retired20),
-        0x5FFF01 => Ok(ObjectId::Attestation),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid object ID: 0x{:06X}",
-            v
-        ))),
-    }
 }
 
 #[pyclass]
@@ -303,14 +260,12 @@ impl PivSession {
     }
 
     fn get_object(&mut self, object_id: u32) -> PyResult<Vec<u8>> {
-        let oid = parse_object_id(object_id)?;
-        self.inner.get_object(oid).map_err(piv_err)
+        self.inner.get_object_raw(object_id).map_err(piv_err)
     }
 
     /// Put an object. Pass `None` to delete.
     fn put_object(&mut self, object_id: u32, data: Option<&[u8]>) -> PyResult<()> {
-        let oid = parse_object_id(object_id)?;
-        self.inner.put_object(oid, data).map_err(piv_err)
+        self.inner.put_object_raw(object_id, data).map_err(piv_err)
     }
 
     /// Get certificate as DER bytes.
