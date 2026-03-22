@@ -124,12 +124,22 @@ def reset_state(session_or_connection, scp_params):
         connection = session_or_connection.connection
     else:
         connection = session_or_connection
-    connection.connection.disconnect()
-    connection.connection.connect()
-    protocol = SmartCardProtocol(connection)
-    protocol.select(AID.PIV)
-    if scp_params:
-        protocol.init_scp(scp_params)
+    if connection.transport == TRANSPORT.NFC:
+        # NFC disconnect/reconnect doesn't power-cycle the card.
+        # Select a different applet first to force PIV state reset.
+        protocol = SmartCardProtocol(connection)
+        protocol.select(AID.OATH)
+        protocol = SmartCardProtocol(connection)
+        protocol.select(AID.PIV)
+        if scp_params:
+            protocol.init_scp(scp_params)
+    else:
+        connection.connection.disconnect()
+        connection.connection.connect()
+        protocol = SmartCardProtocol(connection)
+        protocol.select(AID.PIV)
+        if scp_params:
+            protocol.init_scp(scp_params)
 
 
 def assert_mgm_key_is(session, key):

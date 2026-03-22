@@ -54,6 +54,8 @@ class TestFunctions:
 class TestLockPreventsAccess:
     @pytest.fixture(autouse=True)
     def set_lock(self, session, ccid_connection):
+        if ccid_connection.transport == TRANSPORT.NFC:
+            pytest.skip("Disconnect/reconnect does not reset NFC card state")
         assert not session.locked
         session.put_credential(CRED_DATA)
         session.set_key(KEY)

@@ -24,7 +24,7 @@ def ykman_cli(capsys, device, info):
         return result
 
     if device.transport == TRANSPORT.NFC:
-        return partial(_ykman_cli, "--reader", device.reader.name)
+        return partial(_ykman_cli, "--reader", device.reader_name)
     elif info.serial is not None:
         return partial(_ykman_cli, "--device", info.serial)
     else:

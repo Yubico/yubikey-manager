@@ -36,7 +36,9 @@ def no_pin_complexity(info):
 @condition.capability(CAPABILITY.OTP)
 def session(conn_type, info, device):
     with device.open_connection(conn_type) as c:
-        yield YubiOtpSession(c)
+        s = YubiOtpSession(c)
+        s._test_connection = c
+        yield s
 
 
 def test_status(info, session):
@@ -57,10 +59,9 @@ def read_config(session, conn_type, info, transport, await_reboot, device):
         otp = session
         if need_reboot:
             if transport == TRANSPORT.NFC:
-                # Reconnect NFC by opening a new connection
-                with device.open_connection(SmartCardConnection) as conn:
-                    otp = YubiOtpSession(conn)
-                    return otp.get_config_state()
+                # NFC only allows one connection; reuse the existing one
+                otp = YubiOtpSession(session._test_connection)
+                return otp.get_config_state()
             else:
                 with device.open_connection(SmartCardConnection) as conn:
                     ManagementSession(conn).write_device_config(reboot=True)

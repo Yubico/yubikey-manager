@@ -4,10 +4,11 @@
 //! environment variable to be set to the device's serial number.
 //!
 //! Optional: Set `YUBIKEY_READER` to a partial PC/SC reader name (case-insensitive)
-//! to also run tests over NFC.
+//! and `YUBIKEY_NFC_SERIAL` to the NFC device's serial to also run tests over NFC.
 //!
 //! ```sh
 //! YUBIKEY_SERIAL=12345678 cargo test -p yubikit-rs --test device_tests -- --test-threads=1
+//! YUBIKEY_SERIAL=12345678 YUBIKEY_READER=OMNIKEY YUBIKEY_NFC_SERIAL=19762577 cargo test ...
 //! ```
 //!
 //! **WARNING**: Some tests are destructive (they reset applications).
@@ -62,6 +63,12 @@ fn required_serial() -> u32 {
         )
         .parse()
         .expect("YUBIKEY_SERIAL must be a valid integer")
+}
+
+fn required_nfc_serial() -> Option<u32> {
+    std::env::var("YUBIKEY_NFC_SERIAL")
+        .ok()
+        .map(|s| s.parse().expect("YUBIKEY_NFC_SERIAL must be a valid integer"))
 }
 
 fn get_device_and_info() -> &'static (YubiKeyDevice, DeviceInfo) {
@@ -188,6 +195,8 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
         TestConnection::NfcSmartCard => {
             if nfc_reader().is_none() {
                 Some("YUBIKEY_READER not set or reader not found".into())
+            } else if required_nfc_serial().is_none() {
+                Some("YUBIKEY_NFC_SERIAL not set".into())
             } else {
                 None
             }
@@ -195,6 +204,8 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
         TestConnection::NfcSmartCardScp11b => {
             if nfc_reader().is_none() {
                 Some("YUBIKEY_READER not set or reader not found".into())
+            } else if required_nfc_serial().is_none() {
+                Some("YUBIKEY_NFC_SERIAL not set".into())
             } else if get_nfc_scp11b_params().is_none() {
                 Some("SCP11b not available on NFC device".into())
             } else {
@@ -302,10 +313,11 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
                 .read_device_info_unchecked()
                 .expect("read_device_info_unchecked");
             assert!(info.serial.is_some(), "Expected serial number");
-            // Only verify specific serial for USB (NFC may be a different key)
             if matches!(tc, TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b)
             {
                 assert_eq!(info.serial, Some(required_serial()));
+            } else if let Some(nfc_serial) = required_nfc_serial() {
+                assert_eq!(info.serial, Some(nfc_serial));
             }
         }
     }
