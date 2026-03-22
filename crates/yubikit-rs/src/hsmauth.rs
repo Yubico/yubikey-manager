@@ -27,6 +27,7 @@
 
 use thiserror::Error;
 
+use crate::core_types::patch_version;
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv::{tlv_encode, tlv_parse};
 
@@ -285,7 +286,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             .ok_or_else(|| {
                 HsmAuthError::InvalidResponse("Missing version tag in SELECT response".into())
             })?;
-        let version = Version::from_bytes(version_data);
+        let version = patch_version(Version::from_bytes(version_data));
         protocol.configure(version);
 
         Ok(Self { protocol, version })

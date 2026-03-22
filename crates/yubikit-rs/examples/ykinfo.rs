@@ -7,12 +7,15 @@
 //!   cargo run -p yubikit-rs --example ykinfo
 //!   cargo run -p yubikit-rs --example ykinfo -- --serial 12345678
 //!   cargo run -p yubikit-rs --example ykinfo -- --all
+//!   cargo run -p yubikit-rs --example ykinfo -- --list-readers
+//!   cargo run -p yubikit-rs --example ykinfo -- --reader ACR122
 
 use std::env;
-use yubikit_rs::device::{list_devices, YubiKeyDevice};
+use yubikit_rs::core_types::{set_override_version, Version};
+use yubikit_rs::device::{list_devices, list_readers, open_reader, YubiKeyDevice};
 use yubikit_rs::hsmauth::HsmAuthSession;
 use yubikit_rs::iso7816::Transport;
-use yubikit_rs::management::Capability;
+use yubikit_rs::management::{Capability, ReleaseType};
 use yubikit_rs::oath::OathSession;
 use yubikit_rs::openpgp::OpenPgpSession;
 use yubikit_rs::piv::PivSession;
@@ -26,12 +29,64 @@ fn main() {
         .find(|w| w[0] == "--serial")
         .and_then(|w| w[1].parse().ok());
     let show_all = args.iter().any(|a| a == "--all");
+    let list_readers_flag = args.iter().any(|a| a == "--list-readers");
+    let reader_filter: Option<&str> = args
+        .windows(2)
+        .find(|w| w[0] == "--reader")
+        .map(|w| w[1].as_str());
 
-    let devices = match list_devices() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("Failed to enumerate devices: {e}");
+    if list_readers_flag {
+        match list_readers() {
+            Ok(readers) => {
+                if readers.is_empty() {
+                    println!("No PC/SC readers found.");
+                } else {
+                    println!("Available PC/SC readers:");
+                    for r in &readers {
+                        println!("  {r}");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to list readers: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let devices: Vec<YubiKeyDevice> = if let Some(filter) = reader_filter {
+        let filter_lower = filter.to_ascii_lowercase();
+        let readers = match list_readers() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Failed to list readers: {e}");
+                std::process::exit(1);
+            }
+        };
+        let matching: Vec<_> = readers
+            .into_iter()
+            .filter(|r| r.to_ascii_lowercase().contains(&filter_lower))
+            .collect();
+        if matching.is_empty() {
+            eprintln!("No reader matching \"{filter}\" found.");
             std::process::exit(1);
+        }
+        let mut devs = Vec::new();
+        for reader in &matching {
+            match open_reader(reader) {
+                Ok(dev) => devs.push(dev),
+                Err(e) => eprintln!("Warning: could not open reader \"{reader}\": {e}"),
+            }
+        }
+        devs
+    } else {
+        match list_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Failed to enumerate devices: {e}");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -66,6 +121,15 @@ fn print_device_info(dev: &YubiKeyDevice) {
     println!("  Serial:      {}", info.serial.map_or("N/A".into(), |s| s.to_string()));
     println!("  Version:     {}", info.version);
     println!("  Form factor: {}", info.form_factor);
+
+    if info.version == Version(0, 0, 1) {
+        let real_version = info.version_qualifier.version;
+        println!("  Development device, overriding version to {}", real_version);
+        set_override_version(real_version);
+    } else if info.version_qualifier.release_type != ReleaseType::Final {
+        println!("  Pre-release device, overriding version to {}", info.version);
+        set_override_version(info.version);
+    }
 
     if info.is_fips {
         println!("  FIPS:        yes");

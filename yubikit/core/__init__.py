@@ -259,6 +259,12 @@ class _OverrideVersion:
     def __call__(self, value: Version) -> None:
         logger.info(f"Overriding version check for development devices with {value}")
         self._version = value
+        try:
+            from _ykman_native.core import set_override_version
+
+            set_override_version(*value)
+        except ImportError:
+            pass
 
     def patch(self, version: Version) -> Version:
         return version == (0, 0, 1) and _override_version._version or version

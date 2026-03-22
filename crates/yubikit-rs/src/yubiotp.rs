@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use sha1::{Digest, Sha1};
 
+use crate::core_types::patch_version;
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardProtocol, Version};
 use crate::otp_codec::{calculate_crc, check_crc};
 use crate::transport::hid::HidConnection;
@@ -902,7 +903,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         mut protocol: SmartCardProtocol<C>,
         status: &[u8],
     ) -> Result<Self, YubiOtpError> {
-        let version = Version::from_bytes(&status[..3]);
+        let version = patch_version(Version::from_bytes(&status[..3]));
         let prog_seq = *status.get(3).unwrap_or(&0);
         protocol.configure(version);
 
@@ -1135,7 +1136,7 @@ impl YubiOtpOtpSession {
     pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
         let protocol = OtpProtocol::new(connection)?;
         let status = protocol.read_status()?;
-        let version = protocol.version;
+        let version = patch_version(protocol.version);
 
         Ok(Self {
             protocol,

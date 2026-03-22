@@ -39,6 +39,7 @@ use flate2::Compression;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+use crate::core_types::patch_version;
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
 
@@ -886,7 +887,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, PivError> {
         let version_data = protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[])?;
-        let version = Version::from_bytes(&version_data);
+        let version = patch_version(Version::from_bytes(&version_data));
         protocol.configure(version);
 
         let mut session = Self {

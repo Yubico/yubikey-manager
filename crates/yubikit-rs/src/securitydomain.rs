@@ -32,6 +32,7 @@ use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
 
+use crate::core_types::patch_version;
 use crate::iso7816::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version,
 };
@@ -346,7 +347,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
         let mut protocol = SmartCardProtocol::new(connection);
         protocol.select(Aid::SECURE_DOMAIN)?;
-        let version = Version(5, 3, 0);
+        let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
         Ok(Self { protocol, version })
     }
@@ -356,7 +357,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// The protocol must have had `select(Aid::SECURE_DOMAIN)` called already.
     /// SCP may have been initialized on the protocol before calling this.
     pub fn from_protocol(mut protocol: SmartCardProtocol<C>) -> Result<Self, SmartCardError> {
-        let version = Version(5, 3, 0);
+        let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
         Ok(Self { protocol, version })
     }

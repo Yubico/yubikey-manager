@@ -47,7 +47,8 @@ use std::fmt;
 use crate::iso7816::{SmartCardError, Transport, Version};
 use crate::management::{Capability, DeviceInfo, FormFactor, ManagementSession};
 use crate::transport::hid::{HidConnection, HidDeviceInfo, HidError, list_otp_devices};
-use crate::transport::pcsc::{PcscConnection, PcscError, list_readers};
+use crate::transport::pcsc::{PcscConnection, PcscError};
+pub use crate::transport::pcsc::list_readers;
 
 // ---------------------------------------------------------------------------
 // DeviceError
@@ -184,6 +185,19 @@ impl fmt::Display for YubiKeyDevice {
 // ---------------------------------------------------------------------------
 // Device enumeration
 // ---------------------------------------------------------------------------
+
+/// Open a device on a specific PC/SC reader by name.
+///
+/// Unlike [`list_devices`], this does not filter by reader name, so it works
+/// for external NFC readers.
+pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
+    let info = read_info(reader_name)?;
+    Ok(YubiKeyDevice {
+        reader_name: Some(reader_name.to_string()),
+        hid_path: None,
+        info,
+    })
+}
 
 /// Discover all connected YubiKeys.
 ///

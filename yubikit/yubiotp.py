@@ -35,22 +35,21 @@ from threading import Event
 from typing import Any, Callable, TypeVar
 
 from _ykman_native.sessions import (
+    YubiOtpOtpSession as _NativeYubiOtpOtpSession,
+)
+from _ykman_native.sessions import (
     YubiOtpSession as _NativeYubiOtpSession,
 )
 
 from .core import (
-    BadResponseError,
     NotSupportedError,
     Version,
     _override_version,
-    bytes2int,
     require_version,
 )
 from .core.otp import (
     OtpConnection,
-    OtpProtocol,
     calculate_crc,
-    check_crc,
 )
 from .core.smartcard import ScpKeyParams, SmartCardConnection
 
@@ -691,89 +690,8 @@ class _Backend(abc.ABC):
     ) -> bytes: ...
 
 
-class _YubiOtpOtpBackend(_Backend):
-    def __init__(self, protocol):
-        self.protocol = protocol
-        self._status = protocol.read_status()
-
-    def close(self):
-        self.protocol.close()
-
-    def _write_update(self, slot, data):
-        return self.protocol.send_and_receive(slot, data)
-
-    def _send_and_receive(
-        self, slot, data, expected_len, event=None, on_keepalive=None
-    ):
-        response = self.protocol.send_and_receive(slot, data, event, on_keepalive)
-        if check_crc(response[: expected_len + 2]):
-            return response[:expected_len]
-        raise BadResponseError("Invalid CRC")
-
-    def _write_config(self, slot, config, cur_acc_code):
-        has_acc = bool(cur_acc_code)
-        logger.debug(f"Writing configuration to slot {slot}, access code: {has_acc}")
-        self._status = self._write_update(
-            slot, config + (cur_acc_code or b"\0" * ACC_CODE_SIZE)
-        )
-        logger.info("Configuration written")
-
-    def get_serial(self):
-        return bytes2int(self._send_and_receive(CONFIG_SLOT.DEVICE_SERIAL, b"", 4))
-
-    def get_config_state(self, version):
-        return ConfigState(version, struct.unpack("<H", self._status[4:6])[0])
-
-    def put_configuration(self, slot, config, acc_code, cur_acc_code):
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
-            config,
-            cur_acc_code,
-        )
-
-    def update_configuration(self, slot, config, acc_code, cur_acc_code):
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.UPDATE_1, CONFIG_SLOT.UPDATE_2),
-            config,
-            cur_acc_code,
-        )
-
-    def swap_slots(self):
-        self._write_config(CONFIG_SLOT.SWAP, b"", None)
-
-    def delete_slot(self, slot, cur_acc_code):
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.CONFIG_1, CONFIG_SLOT.CONFIG_2),
-            b"\0" * CONFIG_SIZE,
-            cur_acc_code,
-        )
-
-    def set_scan_map(self, scan_map, cur_acc_code):
-        self._write_config(CONFIG_SLOT.SCAN_MAP, scan_map, cur_acc_code)
-
-    def set_ndef_configuration(self, slot, ndef_type, uri, cur_acc_code):
-        self._write_config(
-            SLOT.map(slot, CONFIG_SLOT.NDEF_1, CONFIG_SLOT.NDEF_2),
-            _build_ndef_config(uri, ndef_type),
-            cur_acc_code,
-        )
-
-    def calculate_hmac_sha1(self, slot, challenge, event=None, on_keepalive=None):
-        # Pad challenge with byte different from last
-        challenge = challenge.ljust(
-            HMAC_CHALLENGE_SIZE, b"\1" if challenge.endswith(b"\0") else b"\0"
-        )
-        return self._send_and_receive(
-            SLOT.map(slot, CONFIG_SLOT.CHAL_HMAC_1, CONFIG_SLOT.CHAL_HMAC_2),
-            challenge,
-            HMAC_RESPONSE_SIZE,
-            event,
-            on_keepalive,
-        )
-
-
-class _NativeSmartCardBackend(_Backend):
-    """Backend that delegates to the native Rust YubiOTP session."""
+class _NativeBackend(_Backend):
+    """Backend that delegates to a native Rust YubiOTP session."""
 
     def __init__(self, native: Any):
         self._native = native
@@ -823,15 +741,17 @@ class YubiOtpSession:
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            otp_protocol = OtpProtocol(connection)
-            self._version = _override_version.patch(otp_protocol.version)
-            self.backend: _Backend = _YubiOtpOtpBackend(otp_protocol)
+            native = _NativeYubiOtpOtpSession(connection._path)  # type: ignore[attr-defined]
+            self._version = _override_version.patch(Version(*native.version))
+            if self._version != Version(*native.version):
+                native.version = tuple(self._version)
+            self.backend: _Backend = _NativeBackend(native)
         elif isinstance(connection, SmartCardConnection):
             native = _NativeYubiOtpSession(connection, scp_key_params)
             self._version = _override_version.patch(Version(*native.version))
             if self._version != Version(*native.version):
                 native.version = tuple(self._version)
-            self.backend = _NativeSmartCardBackend(native)
+            self.backend = _NativeBackend(native)
         else:
             raise TypeError("Unsupported connection type")
         logger.debug(

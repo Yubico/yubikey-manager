@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use sha2::Digest;
 use thiserror::Error;
 
+use crate::core_types::patch_version;
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv::{self, TlvError};
 
@@ -1325,6 +1326,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             }
             Err(e) => return Err(e.into()),
         };
+        let version = patch_version(version);
 
         protocol.configure(version);
 

@@ -30,6 +30,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::core_types::patch_version;
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv;
 
@@ -496,6 +497,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     ) -> Result<Self, SmartCardError> {
         let (version, salt, challenge) = parse_select(select_response)
             .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let version = patch_version(version);
         protocol.configure(version);
 
         let has_key = challenge.is_some();

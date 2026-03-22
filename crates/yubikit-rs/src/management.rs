@@ -33,6 +33,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::core_types::patch_version;
 use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version};
 use crate::otp_codec::check_crc;
 use crate::otp_protocol::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
@@ -768,6 +769,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         let version_str = std::str::from_utf8(select_bytes)
             .map_err(|_| SmartCardError::BadResponse("Invalid version string".into()))?;
         let version = parse_version_string(version_str)?;
+        let version = patch_version(version);
 
         // For YubiKey NEO (v3), switch to OTP applet for further commands
         if version.0 == 3 {
@@ -891,7 +893,7 @@ impl ManagementOtpSession {
     /// Open a management session over OTP HID.
     pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
         let protocol = OtpProtocol::new(connection)?;
-        let version = protocol.version;
+        let version = patch_version(protocol.version);
         if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {
             return Err(YubiOtpError::NotSupported(
                 "Management over OTP not supported for YubiKey v1.x-v2.x".into(),

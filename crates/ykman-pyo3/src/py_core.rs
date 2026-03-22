@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikit_rs::{iso7816, otp_codec, tlv};
+use yubikit_rs::{core_types, iso7816, otp_codec, tlv};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {
@@ -73,6 +73,11 @@ fn format_extended_apdu(
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
+#[pyfunction]
+fn set_override_version(major: u8, minor: u8, patch: u8) {
+    core_types::set_override_version(core_types::Version(major, minor, patch));
+}
+
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "core")?;
     m.add_function(wrap_pyfunction!(calculate_crc, &m)?)?;
@@ -87,6 +92,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(oid_from_string, &m)?)?;
     m.add_function(wrap_pyfunction!(format_short_apdu, &m)?)?;
     m.add_function(wrap_pyfunction!(format_extended_apdu, &m)?)?;
+    m.add_function(wrap_pyfunction!(set_override_version, &m)?)?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

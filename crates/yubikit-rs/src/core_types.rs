@@ -28,6 +28,7 @@
 //! Fundamental types shared across the crate.
 
 use std::fmt;
+use std::sync::RwLock;
 
 // ---------------------------------------------------------------------------
 // Version
@@ -50,6 +51,31 @@ impl Version {
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
+
+/// Development devices report version 0.0.1.
+const DEV_VERSION: Version = Version(0, 0, 1);
+
+static OVERRIDE_VERSION: RwLock<Option<Version>> = RwLock::new(None);
+
+/// Set the global version override for development devices.
+///
+/// When set, any session detecting version 0.0.1 will use this instead.
+pub fn set_override_version(version: Version) {
+    *OVERRIDE_VERSION.write().unwrap() = Some(version);
+}
+
+/// If `version` is the development placeholder (0.0.1) and an override has been
+/// set, return the override; otherwise return `version` unchanged.
+pub fn patch_version(version: Version) -> Version {
+    if version == DEV_VERSION {
+        OVERRIDE_VERSION
+            .read()
+            .unwrap()
+            .unwrap_or(version)
+    } else {
+        version
     }
 }
 

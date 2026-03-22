@@ -35,13 +35,13 @@ from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
 from typing import Any, Mapping
 
+from _ykman_native.sessions import ManagementOtpSession as _NativeManagementOtpSession
 from _ykman_native.sessions import ManagementSession as _NativeManagementSession
 from fido2.hid import CAPABILITY as CTAP_CAPABILITY
 
 from .core import (
     TRANSPORT,
     USB_INTERFACE,
-    ApplicationNotAvailableError,
     BadResponseError,
     NotSupportedError,
     Tlv,
@@ -52,11 +52,7 @@ from .core import (
 )
 from .core.fido import FidoConnection
 from .core.otp import (
-    STATUS_OFFSET_PROG_SEQ,
-    CommandRejectedError,
     OtpConnection,
-    OtpProtocol,
-    check_crc,
 )
 from .core.smartcard import AID, ScpKeyParams, SmartCardConnection
 
@@ -456,11 +452,6 @@ class Mode:
             raise ValueError("Invalid mode code")
 
 
-SLOT_DEVICE_CONFIG = 0x11
-SLOT_YK4_CAPABILITIES = 0x13
-SLOT_YK4_SET_DEVICE_INFO = 0x15
-
-
 class _Backend(abc.ABC):
     version: Version
 
@@ -475,38 +466,6 @@ class _Backend(abc.ABC):
 
     @abc.abstractmethod
     def write_config(self, config: bytes) -> None: ...
-
-
-class _ManagementOtpBackend(_Backend):
-    def __init__(self, otp_connection):
-        self.protocol = OtpProtocol(otp_connection)
-        self.version = self.protocol.version
-        if (1, 0, 0) <= self.version < (3, 0, 0):
-            raise ApplicationNotAvailableError()
-
-    def close(self):
-        self.protocol.close()
-
-    def set_mode(self, data):
-        empty = self.protocol.read_status()[STATUS_OFFSET_PROG_SEQ] == 0
-        try:
-            self.protocol.send_and_receive(SLOT_DEVICE_CONFIG, data)
-        except CommandRejectedError:
-            if empty:
-                return  # ProgSeq isn't updated by set mode when empty
-            raise
-
-    def read_config(self, page: int = 0):
-        response = self.protocol.send_and_receive(
-            SLOT_YK4_CAPABILITIES, int2bytes(page)
-        )
-        r_len = response[0]
-        if check_crc(response[: r_len + 1 + 2]):
-            return response[: r_len + 1]
-        raise BadResponseError("Invalid checksum")
-
-    def write_config(self, config):
-        self.protocol.send_and_receive(SLOT_YK4_SET_DEVICE_INFO, config)
 
 
 INS_SET_MODE = 0x16
@@ -625,7 +584,10 @@ class ManagementSession:
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            self.backend = _ManagementOtpBackend(connection)
+            native = _NativeManagementOtpSession(connection._path)  # type: ignore[attr-defined]
+            self._native = native
+            self._version = Version(*native.version)
+            self.backend = None
         elif isinstance(connection, SmartCardConnection):
             native = _NativeManagementSession(connection, scp_key_params)
             self._native = native
