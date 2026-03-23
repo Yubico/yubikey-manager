@@ -12,8 +12,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
         return Ok(());
     }
 
-    let devices =
-        list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+    let devices = list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
 
     if devices.is_empty() && !serials {
         println!("No YubiKeys detected.");

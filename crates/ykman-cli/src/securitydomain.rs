@@ -83,25 +83,15 @@ pub fn run_keys_generate(
         )
         .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
 
-    std::fs::write(output, &pub_key)
-        .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+    std::fs::write(output, &pub_key).map_err(|e| CliError(format!("Failed to write: {e}")))?;
     println!(
         "EC key generated (KID=0x{kid:02X}, KVN=0x{kvn:02X}). Public key written to {output}."
     );
     Ok(())
 }
 
-pub fn run_keys_delete(
-    dev: &YubiKeyDevice,
-    kid: u8,
-    kvn: u8,
-    force: bool,
-) -> Result<(), CliError> {
-    if !force
-        && !confirm(&format!(
-            "Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?"
-        ))
-    {
+pub fn run_keys_delete(dev: &YubiKeyDevice, kid: u8, kvn: u8, force: bool) -> Result<(), CliError> {
+    if !force && !confirm(&format!("Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?")) {
         return Err(CliError("Aborted.".into()));
     }
     let mut session = open_session(dev)?;
@@ -140,11 +130,144 @@ pub fn run_keys_export(
         }
         pem_out.push_str("-----END CERTIFICATE-----\n");
     }
-    std::fs::write(output, &pem_out)
-        .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+    std::fs::write(output, &pem_out).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+    println!("Exported {} certificate(s) to {output}.", certs.len());
+    Ok(())
+}
+
+pub fn run_keys_import(
+    dev: &YubiKeyDevice,
+    kid: u8,
+    kvn: u8,
+    key_type: &str,
+    input: &str,
+    replace_kvn: Option<u8>,
+) -> Result<(), CliError> {
+    let key_ref = KeyRef::new(kid, kvn);
+    let mut session = open_session(dev)?;
+
+    match key_type {
+        "scp03" => {
+            // Input is K-ENC:K-MAC[:K-DEK] hex
+            let parts: Vec<&str> = input.split(':').collect();
+            if parts.len() < 2 || parts.len() > 3 {
+                return Err(CliError("SCP03 keys format: K-ENC:K-MAC[:K-DEK]".into()));
+            }
+            let enc = hex::decode(parts[0]).map_err(|_| CliError("Invalid K-ENC hex".into()))?;
+            let mac = hex::decode(parts[1]).map_err(|_| CliError("Invalid K-MAC hex".into()))?;
+            let dek = if parts.len() == 3 {
+                Some(hex::decode(parts[2]).map_err(|_| CliError("Invalid K-DEK hex".into()))?)
+            } else {
+                None
+            };
+            let static_keys = yubikit_rs::securitydomain::StaticKeys {
+                key_enc: enc,
+                key_mac: mac,
+                key_dek: dek,
+            };
+            session
+                .put_key_static(key_ref, &static_keys, &[0u8; 16], replace_kvn.unwrap_or(0))
+                .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;
+            println!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
+        }
+        "scp11" => {
+            // Input is a PEM file with certificate(s) and/or private key
+            let pem_data = std::fs::read_to_string(input)
+                .map_err(|e| CliError(format!("Failed to read {input}: {e}")))?;
+
+            let mut certs = Vec::new();
+            let mut private_key: Option<Vec<u8>> = None;
+
+            for block in pem_data.split("-----BEGIN ") {
+                if block.trim().is_empty() {
+                    continue;
+                }
+                if block.starts_with("CERTIFICATE-----") {
+                    if let Some(b64) = block.split("-----END").next() {
+                        let b64 = b64.trim_start_matches("CERTIFICATE-----").trim();
+                        use base64::Engine;
+                        let der = base64::engine::general_purpose::STANDARD
+                            .decode(b64.replace('\n', "").replace('\r', ""))
+                            .map_err(|_| CliError("Invalid certificate PEM".into()))?;
+                        certs.push(der);
+                    }
+                } else if block.starts_with("EC PRIVATE KEY-----")
+                    || block.starts_with("PRIVATE KEY-----")
+                {
+                    if let Some(b64) = block.split("-----END").next() {
+                        let label = if block.starts_with("EC") {
+                            "EC PRIVATE KEY-----"
+                        } else {
+                            "PRIVATE KEY-----"
+                        };
+                        let b64 = b64.trim_start_matches(label).trim();
+                        use base64::Engine;
+                        let der = base64::engine::general_purpose::STANDARD
+                            .decode(b64.replace('\n', "").replace('\r', ""))
+                            .map_err(|_| CliError("Invalid private key PEM".into()))?;
+                        private_key = Some(der);
+                    }
+                }
+            }
+
+            if let Some(pk) = &private_key {
+                session
+                    .put_key_ec_private(
+                        key_ref,
+                        pk,
+                        yubikit_rs::securitydomain::Curve::Secp256r1,
+                        &[0u8; 16],
+                        replace_kvn.unwrap_or(0),
+                    )
+                    .map_err(|e| CliError(format!("Failed to import EC private key: {e}")))?;
+                println!("EC private key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
+            }
+
+            if !certs.is_empty() {
+                let cert_refs: Vec<&[u8]> = certs.iter().map(|c| c.as_slice()).collect();
+                session
+                    .store_certificate_bundle(key_ref, &cert_refs)
+                    .map_err(|e| CliError(format!("Failed to store certificate bundle: {e}")))?;
+                println!(
+                    "{} certificate(s) imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).",
+                    certs.len()
+                );
+            }
+
+            if private_key.is_none() && certs.is_empty() {
+                return Err(CliError(
+                    "No certificate or private key found in PEM file.".into(),
+                ));
+            }
+        }
+        other => {
+            return Err(CliError(format!(
+                "Unknown key type: {other}. Use 'scp03' or 'scp11'."
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn run_keys_set_allowlist(
+    dev: &YubiKeyDevice,
+    kid: u8,
+    kvn: u8,
+    serials: &[String],
+) -> Result<(), CliError> {
+    let key_ref = KeyRef::new(kid, kvn);
+    let serial_bytes: Vec<Vec<u8>> = serials
+        .iter()
+        .map(|s| hex::decode(s).map_err(|_| CliError(format!("Invalid hex serial: {s}"))))
+        .collect::<Result<_, _>>()?;
+
+    let mut session = open_session(dev)?;
+    session
+        .store_allowlist(key_ref, &serial_bytes)
+        .map_err(|e| CliError(format!("Failed to set allowlist: {e}")))?;
     println!(
-        "Exported {} certificate(s) to {output}.",
-        certs.len()
+        "Allowlist set for KID=0x{kid:02X}, KVN=0x{kvn:02X} ({} serial(s)).",
+        serial_bytes.len()
     );
     Ok(())
 }

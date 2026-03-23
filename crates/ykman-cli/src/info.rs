@@ -63,7 +63,11 @@ pub fn run(dev: &YubiKeyDevice) -> Result<(), CliError> {
         for &cap in Capability::ALL {
             if info.fips_capable.contains(cap) {
                 let approved = info.fips_approved.contains(cap);
-                println!("  {}: {}", cap.display_name(), if approved { "Yes" } else { "No" });
+                println!(
+                    "  {}: {}",
+                    cap.display_name(),
+                    if approved { "Yes" } else { "No" }
+                );
             }
         }
     }
@@ -75,10 +79,19 @@ fn print_app_status_table(
     supported: &std::collections::HashMap<Transport, Capability>,
     enabled: &std::collections::HashMap<Transport, Capability>,
 ) {
-    let usb_supported = supported.get(&Transport::Usb).copied().unwrap_or(Capability::NONE);
-    let usb_enabled = enabled.get(&Transport::Usb).copied().unwrap_or(Capability::NONE);
+    let usb_supported = supported
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE);
+    let usb_enabled = enabled
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE);
     let nfc_supported = supported.get(&Transport::Nfc).copied();
-    let nfc_enabled = enabled.get(&Transport::Nfc).copied().unwrap_or(Capability::NONE);
+    let nfc_enabled = enabled
+        .get(&Transport::Nfc)
+        .copied()
+        .unwrap_or(Capability::NONE);
 
     let has_nfc = nfc_supported.is_some();
     let nfc_supported = nfc_supported.unwrap_or(Capability::NONE);
@@ -93,12 +106,20 @@ fn print_app_status_table(
     let mut rows = Vec::new();
     for &cap in Capability::ALL {
         let usb_status = if usb_supported.contains(cap) {
-            if usb_enabled.contains(cap) { "Enabled" } else { "Disabled" }
+            if usb_enabled.contains(cap) {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
         } else {
             "Not available"
         };
         let nfc_status = if nfc_supported.contains(cap) {
-            if nfc_enabled.contains(cap) { "Enabled" } else { "Disabled" }
+            if nfc_enabled.contains(cap) {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
         } else {
             "Not available"
         };

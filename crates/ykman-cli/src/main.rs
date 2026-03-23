@@ -2,7 +2,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit_rs::core_types::set_override_version;
-use yubikit_rs::device::{list_devices, list_readers, open_reader, YubiKeyDevice};
+use yubikit_rs::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
 use yubikit_rs::management::ReleaseType;
 
 mod apdu;
@@ -92,6 +92,16 @@ struct Cli {
     command: Option<Commands>,
 }
 
+fn parse_app_name(s: &str) -> Result<String, String> {
+    match s.to_lowercase().as_str() {
+        "otp" | "management" | "openpgp" | "oath" | "piv" | "fido" | "hsmauth"
+        | "secure-domain" => Ok(s.to_lowercase()),
+        _ => Err(format!(
+            "Unknown app: {s}. Must be one of: otp, management, openpgp, oath, piv, fido, hsmauth, secure-domain"
+        )),
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// List connected YubiKeys
@@ -143,11 +153,20 @@ enum Commands {
     },
     /// Send raw APDUs to the YubiKey
     Apdu {
-        /// APDUs to send (format: [CLA]INS[P1P2][:DATA][/LE])
+        /// APDUs to send (format: [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW])
         apdus: Vec<String>,
         /// Print only hex output
         #[arg(short = 'x', long)]
         no_pretty: bool,
+        /// Select application before sending APDUs
+        #[arg(short = 'a', long, value_parser = parse_app_name)]
+        app: Option<String>,
+        /// Force short APDUs
+        #[arg(long)]
+        short: bool,
+        /// Send full hex APDU strings (alternative to positional)
+        #[arg(short = 'S', long = "send-apdu")]
+        send_apdu: Vec<String>,
     },
 }
 
@@ -370,6 +389,20 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Confirm without prompting
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Add account from otpauth:// URI
+    Uri {
+        /// otpauth:// URI string
+        uri: String,
+        /// Password to unlock OATH
+        #[arg(short, long)]
+        password: Option<String>,
+        /// Require touch for code generation
+        #[arg(short, long)]
+        touch: bool,
         /// Confirm without prompting
         #[arg(short, long)]
         force: bool,
@@ -761,6 +794,39 @@ enum PivCertAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
+    /// Generate a self-signed certificate
+    Generate {
+        /// PIV slot
+        slot: String,
+        /// Subject common name
+        #[arg(short, long)]
+        subject: String,
+        /// Validity period in days
+        #[arg(short, long, default_value_t = 365)]
+        valid_days: u32,
+        /// Hash algorithm (SHA256, SHA384, SHA512)
+        #[arg(long, default_value = "SHA256")]
+        hash_algorithm: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Generate a Certificate Signing Request (CSR)
+    Request {
+        /// PIV slot
+        slot: String,
+        /// Subject common name
+        #[arg(short, long)]
+        subject: String,
+        /// Hash algorithm (SHA256, SHA384, SHA512)
+        #[arg(long, default_value = "SHA256")]
+        hash_algorithm: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -780,6 +846,15 @@ enum PivObjectAction {
         object: String,
         /// Data file
         data: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Generate a data object (CHUID or CCC)
+    Generate {
+        /// Object type: CHUID or CCC
+        object: String,
         #[arg(short, long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
@@ -1001,6 +1076,13 @@ enum HsmauthCredAction {
         #[arg(short, long)]
         new_credential_password: String,
     },
+    /// Export public key for asymmetric credential
+    Export {
+        /// Credential label
+        label: String,
+        /// Output file (- for stdout)
+        output: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1057,18 +1139,48 @@ enum SecurityDomainKeysAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
+    /// Import a key (SCP03 static keys or SCP11 certificate/private key)
+    Import {
+        /// Key ID (hex)
+        kid: String,
+        /// Key Version Number (hex)
+        kvn: String,
+        /// Key type: scp03 or scp11
+        #[arg(short = 't', long, default_value = "scp11")]
+        key_type: String,
+        /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM file with certificate(s) and/or private key
+        input: String,
+        /// Replace existing KVN
+        #[arg(long)]
+        replace_kvn: Option<String>,
+    },
+    /// Set certificate serial number allowlist
+    SetAllowlist {
+        /// Key ID (hex)
+        kid: String,
+        /// Key Version Number (hex)
+        kvn: String,
+        /// Certificate serial numbers (hex)
+        serials: Vec<String>,
+    },
 }
 
 /// Resolve a YubiKey device based on CLI options.
 fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKeyDevice, CliError> {
     if let Some(reader_name) = reader {
-        let readers = list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
+        let readers =
+            list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
         let matching: Vec<_> = readers
             .iter()
-            .filter(|r| r.to_ascii_lowercase().contains(&reader_name.to_ascii_lowercase()))
+            .filter(|r| {
+                r.to_ascii_lowercase()
+                    .contains(&reader_name.to_ascii_lowercase())
+            })
             .collect();
         match matching.len() {
-            0 => Err(CliError(format!("No reader matching '{reader_name}' found."))),
+            0 => Err(CliError(format!(
+                "No reader matching '{reader_name}' found."
+            ))),
             1 => open_reader(matching[0])
                 .map_err(|e| CliError(format!("Failed to open reader: {e}"))),
             _ => Err(CliError(format!(
@@ -1076,8 +1188,8 @@ fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKe
             ))),
         }
     } else {
-        let devices = list_devices()
-            .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+        let devices =
+            list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
         match (serial, devices.len()) {
             (None, 0) => Err(CliError("No YubiKey detected!".into())),
             (None, 1) => Ok(devices.into_iter().next().unwrap()),
@@ -1132,13 +1244,15 @@ fn parse_scp_params(cli: &Cli) -> Result<ScpParams, CliError> {
         // Check if it looks like SCP03 hex keys: K-ENC:K-MAC[:K-DEK]
         let parts: Vec<&str> = first.split(':').collect();
         if (parts.len() == 2 || parts.len() == 3)
-            && parts.iter().all(|p| p.len() == 32 && p.chars().all(|c| c.is_ascii_hexdigit()))
+            && parts
+                .iter()
+                .all(|p| p.len() == 32 && p.chars().all(|c| c.is_ascii_hexdigit()))
         {
             // SCP03 keys
-            let key_enc = hex::decode(parts[0])
-                .map_err(|_| CliError("Invalid SCP03 K-ENC hex.".into()))?;
-            let key_mac = hex::decode(parts[1])
-                .map_err(|_| CliError("Invalid SCP03 K-MAC hex.".into()))?;
+            let key_enc =
+                hex::decode(parts[0]).map_err(|_| CliError("Invalid SCP03 K-ENC hex.".into()))?;
+            let key_mac =
+                hex::decode(parts[1]).map_err(|_| CliError("Invalid SCP03 K-MAC hex.".into()))?;
             let key_dek = if parts.len() == 3 {
                 Some(
                     hex::decode(parts[2])
@@ -1248,7 +1362,9 @@ fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
             return Ok(der[i + 2..i + 34].to_vec());
         }
     }
-    Err(CliError("Could not extract EC private key from DER.".into()))
+    Err(CliError(
+        "Could not extract EC private key from DER.".into(),
+    ))
 }
 
 fn apply_version_override(dev: &YubiKeyDevice) {
@@ -1378,9 +1494,7 @@ fn run() -> Result<(), CliError> {
             let dev = resolve_device(cli.device, &cli.reader)?;
             apply_version_override(&dev);
             match action {
-                OathAction::Info { password } => {
-                    oath::run_info(&dev, password.as_deref())
-                }
+                OathAction::Info { password } => oath::run_info(&dev, password.as_deref()),
                 OathAction::Reset { force } => oath::run_reset(&dev, force),
                 OathAction::Access {
                     password,
@@ -1446,12 +1560,7 @@ fn run() -> Result<(), CliError> {
                         query,
                         password,
                         force,
-                    } => oath::run_accounts_delete(
-                        &dev,
-                        password.as_deref(),
-                        &query,
-                        force,
-                    ),
+                    } => oath::run_accounts_delete(&dev, password.as_deref(), &query, force),
                     OathAccountAction::Rename {
                         query,
                         new_name,
@@ -1464,6 +1573,12 @@ fn run() -> Result<(), CliError> {
                         &new_name,
                         force,
                     ),
+                    OathAccountAction::Uri {
+                        uri,
+                        password,
+                        touch,
+                        force,
+                    } => oath::run_accounts_uri(&dev, &uri, password.as_deref(), touch, force),
                 },
             }
         }
@@ -1579,13 +1694,7 @@ fn run() -> Result<(), CliError> {
                     challenge,
                     totp,
                     digits,
-                } => otp::run_calculate(
-                    &dev,
-                    &slot,
-                    challenge.as_deref(),
-                    totp,
-                    digits,
-                ),
+                } => otp::run_calculate(&dev, &slot, challenge.as_deref(), totp, digits),
                 OtpAction::Hotp {
                     slot,
                     key,
@@ -1759,12 +1868,9 @@ fn run() -> Result<(), CliError> {
                         slot,
                         management_key,
                         pin,
-                    } => piv::run_keys_delete(
-                        &dev,
-                        &slot,
-                        management_key.as_deref(),
-                        pin.as_deref(),
-                    ),
+                    } => {
+                        piv::run_keys_delete(&dev, &slot, management_key.as_deref(), pin.as_deref())
+                    }
                 },
                 PivAction::Certificates(certs) => match certs {
                     PivCertAction::Export {
@@ -1796,11 +1902,43 @@ fn run() -> Result<(), CliError> {
                         management_key.as_deref(),
                         pin.as_deref(),
                     ),
+                    PivCertAction::Generate {
+                        slot,
+                        subject,
+                        valid_days,
+                        hash_algorithm,
+                        management_key,
+                        pin,
+                    } => piv::run_certificates_generate(
+                        &dev,
+                        &slot,
+                        &subject,
+                        valid_days,
+                        &hash_algorithm,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                    PivCertAction::Request {
+                        slot,
+                        subject,
+                        hash_algorithm,
+                        output,
+                        pin,
+                    } => piv::run_certificates_request(
+                        &dev,
+                        &slot,
+                        &subject,
+                        &hash_algorithm,
+                        &output,
+                        pin.as_deref(),
+                    ),
                 },
                 PivAction::Objects(objs) => match objs {
-                    PivObjectAction::Export { object, output, pin } => {
-                        piv::run_objects_export(&dev, &object, &output, pin.as_deref())
-                    }
+                    PivObjectAction::Export {
+                        object,
+                        output,
+                        pin,
+                    } => piv::run_objects_export(&dev, &object, &output, pin.as_deref()),
                     PivObjectAction::Import {
                         object,
                         data,
@@ -1810,6 +1948,16 @@ fn run() -> Result<(), CliError> {
                         &dev,
                         &object,
                         &data,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                    ),
+                    PivObjectAction::Generate {
+                        object,
+                        management_key,
+                        pin,
+                    } => piv::run_objects_generate(
+                        &dev,
+                        &object,
                         management_key.as_deref(),
                         pin.as_deref(),
                     ),
@@ -1851,11 +1999,7 @@ fn run() -> Result<(), CliError> {
                     OpenpgpAccessAction::ChangeResetCode {
                         admin_pin,
                         reset_code,
-                    } => openpgp::run_change_reset_code(
-                        &dev,
-                        admin_pin.as_deref(),
-                        &reset_code,
-                    ),
+                    } => openpgp::run_change_reset_code(&dev, admin_pin.as_deref(), &reset_code),
                     OpenpgpAccessAction::UnblockPin {
                         admin_pin,
                         reset_code,
@@ -1867,11 +2011,7 @@ fn run() -> Result<(), CliError> {
                         new_pin.as_deref(),
                     ),
                     OpenpgpAccessAction::SetSignaturePolicy { policy, admin_pin } => {
-                        openpgp::run_set_signature_policy(
-                            &dev,
-                            &policy,
-                            admin_pin.as_deref(),
-                        )
+                        openpgp::run_set_signature_policy(&dev, &policy, admin_pin.as_deref())
                     }
                 },
                 OpenpgpAction::Keys(keys) => match keys {
@@ -1892,12 +2032,7 @@ fn run() -> Result<(), CliError> {
                         key,
                         key_file,
                         admin_pin,
-                    } => openpgp::run_keys_import(
-                        &dev,
-                        &key,
-                        &key_file,
-                        admin_pin.as_deref(),
-                    ),
+                    } => openpgp::run_keys_import(&dev, &key, &key_file, admin_pin.as_deref()),
                     OpenpgpKeysAction::Attest {
                         key,
                         output,
@@ -1998,6 +2133,9 @@ fn run() -> Result<(), CliError> {
                         credential_password.as_deref(),
                         &new_credential_password,
                     ),
+                    HsmauthCredAction::Export { label, output } => {
+                        hsmauth::run_credentials_export(&dev, &label, &output)
+                    }
                 },
                 HsmauthAction::Access(access) => match access {
                     HsmauthAccessAction::ChangeManagementKey {
@@ -2018,16 +2156,11 @@ fn run() -> Result<(), CliError> {
             apply_version_override(&dev);
             match action {
                 SecurityDomainAction::Info => securitydomain::run_info(&dev),
-                SecurityDomainAction::Reset { force } => {
-                    securitydomain::run_reset(&dev, force)
-                }
+                SecurityDomainAction::Reset { force } => securitydomain::run_reset(&dev, force),
                 SecurityDomainAction::Keys(keys) => {
                     let parse_hex_u8 = |s: &str| -> Result<u8, CliError> {
-                        u8::from_str_radix(
-                            s.trim_start_matches("0x").trim_start_matches("0X"),
-                            16,
-                        )
-                        .map_err(|_| CliError(format!("Invalid hex value: {s}")))
+                        u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
+                            .map_err(|_| CliError(format!("Invalid hex value: {s}")))
                     };
                     match keys {
                         SecurityDomainKeysAction::Generate {
@@ -2054,13 +2187,41 @@ fn run() -> Result<(), CliError> {
                             let kvn = parse_hex_u8(&kvn)?;
                             securitydomain::run_keys_delete(&dev, kid, kvn, force)
                         }
+                        SecurityDomainKeysAction::Import {
+                            kid,
+                            kvn,
+                            key_type,
+                            input,
+                            replace_kvn,
+                        } => {
+                            let kid = parse_hex_u8(&kid)?;
+                            let kvn = parse_hex_u8(&kvn)?;
+                            let rkvn = replace_kvn
+                                .as_deref()
+                                .map(|s| parse_hex_u8(s))
+                                .transpose()?;
+                            securitydomain::run_keys_import(&dev, kid, kvn, &key_type, &input, rkvn)
+                        }
+                        SecurityDomainKeysAction::SetAllowlist { kid, kvn, serials } => {
+                            let kid = parse_hex_u8(&kid)?;
+                            let kvn = parse_hex_u8(&kvn)?;
+                            securitydomain::run_keys_set_allowlist(&dev, kid, kvn, &serials)
+                        }
                     }
                 }
             }
         }
-        Commands::Apdu { apdus, no_pretty } => {
+        Commands::Apdu {
+            apdus,
+            no_pretty,
+            app,
+            short,
+            send_apdu,
+        } => {
             let dev = resolve_device(cli.device, &cli.reader)?;
-            apdu::run_apdu(&dev, &apdus, no_pretty)
+            let mut all_apdus = apdus;
+            all_apdus.extend(send_apdu);
+            apdu::run_apdu(&dev, &all_apdus, no_pretty, app.as_deref(), short)
         }
     }
 }

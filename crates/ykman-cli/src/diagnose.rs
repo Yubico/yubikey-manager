@@ -38,7 +38,9 @@ pub fn run_diagnose() -> Result<(), CliError> {
                     println!(
                         "  {} (serial: {})",
                         dev.reader_name().unwrap_or("unknown"),
-                        dev.serial().map(|s| s.to_string()).unwrap_or_else(|| "N/A".into()),
+                        dev.serial()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "N/A".into()),
                     );
 
                     // Management info
@@ -48,7 +50,10 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             match info {
                                 Ok(di) => {
                                     println!("    Device info:");
-                                    println!("      Serial:          {}", di.serial.map(|s| s.to_string()).unwrap_or("N/A".into()));
+                                    println!(
+                                        "      Serial:          {}",
+                                        di.serial.map(|s| s.to_string()).unwrap_or("N/A".into())
+                                    );
                                     println!("      Firmware:        {}", di.version);
                                     println!("      Form factor:     {:?}", di.form_factor);
                                     if let Some(ref pn) = di.part_number {
@@ -66,16 +71,30 @@ pub fn run_diagnose() -> Result<(), CliError> {
                                         );
                                     }
                                     // Capabilities
-                                    if let Some(usb) = di.config.enabled_capabilities.get(&yubikit_rs::iso7816::Transport::Usb) {
+                                    if let Some(usb) = di
+                                        .config
+                                        .enabled_capabilities
+                                        .get(&yubikit_rs::iso7816::Transport::Usb)
+                                    {
                                         println!("      USB enabled:     0x{:04X}", usb.0);
                                     }
-                                    if let Some(nfc) = di.config.enabled_capabilities.get(&yubikit_rs::iso7816::Transport::Nfc) {
+                                    if let Some(nfc) = di
+                                        .config
+                                        .enabled_capabilities
+                                        .get(&yubikit_rs::iso7816::Transport::Nfc)
+                                    {
                                         println!("      NFC enabled:     0x{:04X}", nfc.0);
                                     }
-                                    if let Some(usb) = di.supported_capabilities.get(&yubikit_rs::iso7816::Transport::Usb) {
+                                    if let Some(usb) = di
+                                        .supported_capabilities
+                                        .get(&yubikit_rs::iso7816::Transport::Usb)
+                                    {
                                         println!("      USB supported:   0x{:04X}", usb.0);
                                     }
-                                    if let Some(nfc) = di.supported_capabilities.get(&yubikit_rs::iso7816::Transport::Nfc) {
+                                    if let Some(nfc) = di
+                                        .supported_capabilities
+                                        .get(&yubikit_rs::iso7816::Transport::Nfc)
+                                    {
                                         println!("      NFC supported:   0x{:04X}", nfc.0);
                                     }
                                 }
@@ -90,11 +109,13 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             let state = session.get_config_state();
                             println!("    OTP:");
                             println!("      Version:  {}", session.version());
-                            for slot in [yubikit_rs::yubiotp::Slot::One, yubikit_rs::yubiotp::Slot::Two] {
+                            for slot in [
+                                yubikit_rs::yubiotp::Slot::One,
+                                yubikit_rs::yubiotp::Slot::Two,
+                            ] {
                                 let num = slot.map(1, 2);
-                                let configured = state
-                                    .is_configured(slot)
-                                    .map_or("unknown".into(), |b| {
+                                let configured =
+                                    state.is_configured(slot).map_or("unknown".into(), |b| {
                                         if b { "programmed" } else { "empty" }.to_string()
                                     });
                                 println!("      Slot {num}: {configured}");

@@ -3,8 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::oath::{
-    Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType,
-    parse_b32_key,
+    Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
 
 use crate::util::CliError;
@@ -53,20 +52,28 @@ fn format_cred_name(cred: &Credential) -> String {
 }
 
 fn is_hidden(cred: &Credential) -> bool {
-    cred.issuer.as_deref().unwrap_or("").starts_with('_')
-        || cred.name.starts_with('_')
+    cred.issuer.as_deref().unwrap_or("").starts_with('_') || cred.name.starts_with('_')
 }
 
 pub fn run_info(dev: &YubiKeyDevice, password: Option<&str>) -> Result<(), CliError> {
     let session = open_session(dev, password)?;
     println!("OATH version: {}", session.version());
-    println!("Password protection: {}", if session.has_key() { "enabled" } else { "disabled" });
+    println!(
+        "Password protection: {}",
+        if session.has_key() {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     Ok(())
 }
 
 pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
     if !force {
-        eprintln!("WARNING! This will delete all stored OATH accounts and restore factory settings of the OATH application.");
+        eprintln!(
+            "WARNING! This will delete all stored OATH accounts and restore factory settings of the OATH application."
+        );
         if !confirm("Proceed?") {
             return Err(CliError("Aborted by user.".into()));
         }
@@ -138,8 +145,7 @@ pub fn run_accounts_code(
             }
             if let Some(q) = query {
                 let name = format_cred_name(cred);
-                name.to_ascii_lowercase()
-                    .contains(&q.to_ascii_lowercase())
+                name.to_ascii_lowercase().contains(&q.to_ascii_lowercase())
             } else {
                 true
             }
@@ -223,8 +229,9 @@ pub fn run_accounts_add(
     };
 
     let secret_bytes = match secret {
-        Some(s) => parse_b32_key(s)
-            .map_err(|_| CliError("Invalid Base32-encoded secret.".into()))?,
+        Some(s) => {
+            parse_b32_key(s).map_err(|_| CliError("Invalid Base32-encoded secret.".into()))?
+        }
         None => {
             // Generate random secret
             let mut key = vec![0u8; 20];
@@ -257,7 +264,9 @@ pub fn run_accounts_add(
             None => name.to_string(),
         };
         if existing.iter().any(|c| format_cred_name(c) == display_name) {
-            if !confirm(&format!("A credential called {display_name} already exists, overwrite?")) {
+            if !confirm(&format!(
+                "A credential called {display_name} already exists, overwrite?"
+            )) {
                 return Err(CliError("Aborted by user.".into()));
             }
         }
@@ -298,9 +307,11 @@ pub fn run_accounts_delete(
     let cred = match matching.len() {
         0 => return Err(CliError(format!("No credential matching '{query}'."))),
         1 => matching[0],
-        _ => return Err(CliError(format!(
-            "Multiple credentials matching '{query}'. Be more specific."
-        ))),
+        _ => {
+            return Err(CliError(format!(
+                "Multiple credentials matching '{query}'. Be more specific."
+            )));
+        }
     };
 
     let name = format_cred_name(cred);
@@ -339,9 +350,11 @@ pub fn run_accounts_rename(
     let cred = match matching.len() {
         0 => return Err(CliError(format!("No credential matching '{query}'."))),
         1 => matching[0],
-        _ => return Err(CliError(format!(
-            "Multiple credentials matching '{query}'. Be more specific."
-        ))),
+        _ => {
+            return Err(CliError(format!(
+                "Multiple credentials matching '{query}'. Be more specific."
+            )));
+        }
     };
 
     let old_name = format_cred_name(cred);
@@ -377,8 +390,7 @@ pub fn run_access_change(
             .map_err(|e| CliError(format!("Failed to clear password: {e}")))?;
         println!("Password cleared.");
     } else {
-        let new_pw = new_password
-            .ok_or_else(|| CliError("--new-password is required.".into()))?;
+        let new_pw = new_password.ok_or_else(|| CliError("--new-password is required.".into()))?;
         let key = session.derive_key(new_pw);
         session
             .set_key(&key)
@@ -386,4 +398,144 @@ pub fn run_access_change(
         println!("Password set.");
     }
     Ok(())
+}
+
+pub fn run_accounts_uri(
+    dev: &YubiKeyDevice,
+    uri: &str,
+    password: Option<&str>,
+    touch: bool,
+    force: bool,
+) -> Result<(), CliError> {
+    // Parse otpauth:// URI
+    let url = uri
+        .strip_prefix("otpauth://")
+        .ok_or_else(|| CliError("URI must start with otpauth://".into()))?;
+
+    let (oath_type_str, rest) = url
+        .split_once('/')
+        .ok_or_else(|| CliError("Invalid otpauth URI format".into()))?;
+
+    let oath_type = match oath_type_str.to_lowercase().as_str() {
+        "totp" => OathType::Totp,
+        "hotp" => OathType::Hotp,
+        _ => return Err(CliError(format!("Unknown oath type: {oath_type_str}"))),
+    };
+
+    // Split path from query
+    let (label, query) = rest.split_once('?').unwrap_or((rest, ""));
+
+    let label = urldecode(label);
+
+    // Parse issuer:name from label
+    let (issuer, name) = if let Some((i, n)) = label.split_once(':') {
+        (Some(i.to_string()), n.trim().to_string())
+    } else {
+        (None, label.to_string())
+    };
+
+    // Parse query parameters
+    let mut secret = None;
+    let mut algorithm = HashAlgorithm::Sha1;
+    let mut digits = 6u8;
+    let mut period = 30u32;
+    let mut counter = 0u32;
+    let mut query_issuer = issuer;
+
+    for param in query.split('&') {
+        if param.is_empty() {
+            continue;
+        }
+        let (key, value) = param.split_once('=').unwrap_or((param, ""));
+        match key.to_lowercase().as_str() {
+            "secret" => {
+                secret = Some(value.to_string());
+            }
+            "algorithm" => {
+                algorithm = match value.to_uppercase().as_str() {
+                    "SHA1" => HashAlgorithm::Sha1,
+                    "SHA256" => HashAlgorithm::Sha256,
+                    "SHA512" => HashAlgorithm::Sha512,
+                    _ => return Err(CliError(format!("Unknown algorithm: {value}"))),
+                };
+            }
+            "digits" => {
+                digits = value
+                    .parse()
+                    .map_err(|_| CliError(format!("Invalid digits: {value}")))?;
+            }
+            "period" => {
+                period = value
+                    .parse()
+                    .map_err(|_| CliError(format!("Invalid period: {value}")))?;
+            }
+            "counter" => {
+                counter = value
+                    .parse()
+                    .map_err(|_| CliError(format!("Invalid counter: {value}")))?;
+            }
+            "issuer" => {
+                query_issuer = Some(urldecode(value));
+            }
+            _ => {}
+        }
+    }
+
+    let secret_str = secret.ok_or_else(|| CliError("URI missing 'secret' parameter".into()))?;
+    let secret_bytes = parse_b32_key(&secret_str)
+        .map_err(|_| CliError("Invalid Base32-encoded secret.".into()))?;
+
+    let issuer_ref = query_issuer.as_deref();
+
+    if !force {
+        eprintln!(
+            "Add credential: {}{name} ({oath_type_str})?",
+            issuer_ref.map(|i| format!("{i}:")).unwrap_or_default()
+        );
+        if !confirm("Proceed?") {
+            return Err(CliError("Aborted by user.".into()));
+        }
+    }
+
+    let cred_data = CredentialData {
+        name: name.clone(),
+        oath_type,
+        hash_algorithm: algorithm,
+        secret: secret_bytes,
+        digits,
+        period,
+        counter,
+        issuer: issuer_ref.map(|s| s.to_string()),
+    };
+
+    let mut session = open_session(dev, password)?;
+
+    session
+        .put_credential(&cred_data, touch)
+        .map_err(|e| CliError(format!("Failed to add credential: {e}")))?;
+    println!(
+        "Credential added: {}{name}",
+        issuer_ref.map(|i| format!("{i}:")).unwrap_or_default()
+    );
+    Ok(())
+}
+
+fn urldecode(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let h1 = chars.next().unwrap_or(0);
+            let h2 = chars.next().unwrap_or(0);
+            let hex_str = format!("{}{}", h1 as char, h2 as char);
+            if let Ok(byte) = u8::from_str_radix(&hex_str, 16) {
+                result.push(byte as char);
+            }
+        } else if b == b'+' {
+            result.push(' ');
+        } else {
+            result.push(b as char);
+        }
+    }
+    result
 }

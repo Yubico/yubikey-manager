@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::hsmauth::{credential_password_from_str, HsmAuthSession};
+use yubikit_rs::hsmauth::{HsmAuthSession, credential_password_from_str};
 
 use crate::util::CliError;
 
@@ -13,8 +13,7 @@ fn open_session(
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    HsmAuthSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+    HsmAuthSession::new(conn).map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
 }
 
 fn confirm(msg: &str) -> bool {
@@ -27,8 +26,9 @@ fn confirm(msg: &str) -> bool {
 
 fn parse_mgmt_key(s: Option<&str>) -> Result<Vec<u8>, CliError> {
     match s {
-        Some(k) => hex::decode(k)
-            .map_err(|_| CliError("Management key must be hex-encoded.".into())),
+        Some(k) => {
+            hex::decode(k).map_err(|_| CliError("Management key must be hex-encoded.".into()))
+        }
         None => Ok(DEFAULT_MANAGEMENT_KEY.to_vec()),
     }
 }
@@ -138,10 +138,8 @@ pub fn run_credentials_symmetric(
     let (enc, mac) = if generate {
         let mut e = [0u8; 16];
         let mut m = [0u8; 16];
-        getrandom::fill(&mut e)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
-        getrandom::fill(&mut m)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut e).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut m).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         (e.to_vec(), m.to_vec())
     } else {
         let e = enc_key
@@ -209,6 +207,68 @@ pub fn run_credentials_change_password(
     Ok(())
 }
 
+pub fn run_credentials_export(
+    dev: &YubiKeyDevice,
+    label: &str,
+    output: &str,
+) -> Result<(), CliError> {
+    let mut session = open_session(dev)?;
+    let public_key = session
+        .get_public_key(label)
+        .map_err(|e| CliError(format!("Failed to get public key: {e}")))?;
+
+    // Export as PEM (SubjectPublicKeyInfo)
+    use base64::Engine;
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+    let pk_point = public_key.to_encoded_point(false);
+    let pk_bytes = pk_point.as_bytes();
+
+    // EC P256 AlgorithmIdentifier OID: 1.2.840.10045.2.1 + 1.2.840.10045.3.1.7
+    let oid_bytes: &[u8] = &[
+        0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86,
+        0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+    ];
+    let bitstring_len = pk_bytes.len() + 1; // +1 for unused bits byte
+    let mut spki = Vec::new();
+    // SEQUENCE
+    let inner_len = oid_bytes.len() + 2 + bitstring_len;
+    spki.push(0x30);
+    if inner_len >= 128 {
+        spki.push(0x81);
+        spki.push(inner_len as u8);
+    } else {
+        spki.push(inner_len as u8);
+    }
+    spki.extend_from_slice(oid_bytes);
+    // BIT STRING
+    spki.push(0x03);
+    if bitstring_len >= 128 {
+        spki.push(0x81);
+        spki.push(bitstring_len as u8);
+    } else {
+        spki.push(bitstring_len as u8);
+    }
+    spki.push(0x00); // unused bits
+    spki.extend_from_slice(pk_bytes);
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&spki);
+    let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
+    for chunk in b64.as_bytes().chunks(64) {
+        pem.push_str(std::str::from_utf8(chunk).unwrap());
+        pem.push('\n');
+    }
+    pem.push_str("-----END PUBLIC KEY-----\n");
+
+    if output == "-" {
+        print!("{pem}");
+    } else {
+        std::fs::write(output, &pem).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+        println!("Public key exported to {output}.");
+    }
+    Ok(())
+}
+
 pub fn run_access_change_management_key(
     dev: &YubiKeyDevice,
     management_key: Option<&str>,
@@ -219,8 +279,7 @@ pub fn run_access_change_management_key(
 
     let new_key = if generate {
         let mut k = [0u8; 16];
-        getrandom::fill(&mut k)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         k.to_vec()
     } else if let Some(k) = new_management_key {
         hex::decode(k).map_err(|_| CliError("Management key must be hex-encoded.".into()))?

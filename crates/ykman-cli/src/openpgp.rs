@@ -1,9 +1,7 @@
 use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::openpgp::{
-    KeyRef, OpenPgpSession, PinPolicy, Uif,
-};
+use yubikit_rs::openpgp::{KeyRef, OpenPgpSession, PinPolicy, Uif};
 
 use crate::util::CliError;
 
@@ -13,8 +11,7 @@ fn open_session(
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    OpenPgpSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
+    OpenPgpSession::new(conn).map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
 }
 
 fn confirm(msg: &str) -> bool {
@@ -97,7 +94,9 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
 
 pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
     if !force {
-        eprintln!("WARNING! This will delete all stored OpenPGP keys and restore factory settings.");
+        eprintln!(
+            "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
+        );
         if !confirm("Proceed?") {
             return Err(CliError("Aborted.".into()));
         }
@@ -212,7 +211,11 @@ pub fn run_set_signature_policy(
     let pp = match policy.to_ascii_uppercase().as_str() {
         "ONCE" => PinPolicy::Once,
         "ALWAYS" => PinPolicy::Always,
-        _ => return Err(CliError(format!("Invalid policy: {policy}. Use once or always."))),
+        _ => {
+            return Err(CliError(format!(
+                "Invalid policy: {policy}. Use once or always."
+            )));
+        }
     };
     let ap = admin_pin.unwrap_or("12345678");
     let mut session = open_session(dev)?;
@@ -288,8 +291,8 @@ pub fn run_keys_import(
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let _key_ref = parse_key_ref(key)?;
-    let _data = std::fs::read(key_file)
-        .map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let _data =
+        std::fs::read(key_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
 
     let _ap = admin_pin.unwrap_or("12345678");
 
@@ -339,8 +342,8 @@ pub fn run_certificates_import(
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
-    let data = std::fs::read(cert_file)
-        .map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data =
+        std::fs::read(cert_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
 
     let der = if let Ok(text) = std::str::from_utf8(&data) {
         if text.contains("-----BEGIN") {
@@ -385,13 +388,11 @@ pub fn run_certificates_delete(
 fn write_output(path: &str, der: &[u8], format: &str, label: &str) -> Result<(), CliError> {
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            std::fs::write(path, der)
-                .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            std::fs::write(path, der).map_err(|e| CliError(format!("Failed to write: {e}")))?;
         }
         _ => {
             let pem = pem_encode(label, der);
-            std::fs::write(path, pem)
-                .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            std::fs::write(path, pem).map_err(|e| CliError(format!("Failed to write: {e}")))?;
         }
     }
     Ok(())

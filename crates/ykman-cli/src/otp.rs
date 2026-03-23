@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::otp_codec::{modhex_decode, modhex_encode};
 use yubikit_rs::yubiotp::{
-    NdefType, Slot, SlotConfiguration, YubiOtpOtpSession, YubiOtpSession, ACC_CODE_SIZE,
-    KEY_SIZE, UID_SIZE,
+    ACC_CODE_SIZE, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE, YubiOtpOtpSession,
+    YubiOtpSession,
 };
 
 use crate::util::CliError;
@@ -79,9 +79,7 @@ const MODHEX_CHARS: &str = "cbdefghijklnrtuv";
 fn modhex_scancodes() -> HashMap<char, u8> {
     let mut m = HashMap::new();
     for c in MODHEX_CHARS.chars() {
-        let idx = "abcdefghijklmnopqrstuvwxyz"
-            .find(c)
-            .unwrap();
+        let idx = "abcdefghijklmnopqrstuvwxyz".find(c).unwrap();
         m.insert(c, 0x04 + idx as u8);
     }
     m
@@ -91,21 +89,29 @@ fn encode_password(password: &str, layout: &str) -> Result<Vec<u8>, CliError> {
     let map = match layout.to_ascii_uppercase().as_str() {
         "US" => us_scancodes(),
         "MODHEX" => modhex_scancodes(),
-        _ => return Err(CliError(format!("Unsupported keyboard layout: {layout}. Supported: US, MODHEX"))),
+        _ => {
+            return Err(CliError(format!(
+                "Unsupported keyboard layout: {layout}. Supported: US, MODHEX"
+            )));
+        }
     };
     password
         .chars()
         .map(|c| {
-            map.get(&c)
-                .copied()
-                .ok_or_else(|| CliError(format!("Character '{c}' not supported in {layout} layout")))
+            map.get(&c).copied().ok_or_else(|| {
+                CliError(format!("Character '{c}' not supported in {layout} layout"))
+            })
         })
         .collect()
 }
 
 fn generate_static_pw(length: usize, layout: &str) -> Result<String, CliError> {
     let chars: Vec<char> = match layout.to_ascii_uppercase().as_str() {
-        "US" => us_scancodes().keys().copied().filter(|c| !"\t\n ".contains(*c)).collect(),
+        "US" => us_scancodes()
+            .keys()
+            .copied()
+            .filter(|c| !"\t\n ".contains(*c))
+            .collect(),
         "MODHEX" => MODHEX_CHARS.chars().collect(),
         _ => return Err(CliError(format!("Unsupported keyboard layout: {layout}"))),
     };
@@ -128,8 +134,7 @@ fn parse_slot(s: &str) -> Result<Slot, CliError> {
 }
 
 fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE], CliError> {
-    let bytes = hex::decode(s)
-        .map_err(|_| CliError("Access code must be hex-encoded.".into()))?;
+    let bytes = hex::decode(s).map_err(|_| CliError("Access code must be hex-encoded.".into()))?;
     if bytes.len() != ACC_CODE_SIZE {
         return Err(CliError(format!(
             "Access code must be {ACC_CODE_SIZE} bytes ({} hex chars).",
@@ -175,8 +180,7 @@ fn open_otp_session(dev: &YubiKeyDevice) -> Result<YubiOtpOtpSession, CliError> 
     let conn = dev
         .open_otp()
         .map_err(|e| CliError(format!("Failed to open OTP HID connection: {e}")))?;
-    YubiOtpOtpSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+    YubiOtpOtpSession::new(conn).map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
 }
 
 pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
@@ -184,15 +188,13 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     let state = session.get_config_state();
     for slot in [Slot::One, Slot::Two] {
         let num = slot.map(1, 2);
-        let configured = state
-            .is_configured(slot)
-            .map_or("unknown".into(), |b| {
-                if b {
-                    "programmed".to_string()
-                } else {
-                    "empty".to_string()
-                }
-            });
+        let configured = state.is_configured(slot).map_or("unknown".into(), |b| {
+            if b {
+                "programmed".to_string()
+            } else {
+                "empty".to_string()
+            }
+        });
         println!("Slot {num}: {configured}");
     }
     Ok(())
@@ -296,12 +298,11 @@ pub fn run_yubiotp(
     // Resolve private ID
     let priv_id: [u8; UID_SIZE] = if generate_private_id {
         let mut id = [0u8; UID_SIZE];
-        getrandom::fill(&mut id)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut id).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         id
     } else if let Some(pid) = private_id {
-        let bytes = hex::decode(pid)
-            .map_err(|_| CliError("Private ID must be hex-encoded.".into()))?;
+        let bytes =
+            hex::decode(pid).map_err(|_| CliError("Private ID must be hex-encoded.".into()))?;
         if bytes.len() != UID_SIZE {
             return Err(CliError(format!(
                 "Private ID must be {UID_SIZE} bytes ({} hex chars).",
@@ -320,12 +321,10 @@ pub fn run_yubiotp(
     // Resolve key
     let key_bytes: [u8; KEY_SIZE] = if generate_key {
         let mut k = [0u8; KEY_SIZE];
-        getrandom::fill(&mut k)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         k
     } else if let Some(k) = key {
-        let bytes =
-            hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))?;
+        let bytes = hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))?;
         if bytes.len() != KEY_SIZE {
             return Err(CliError(format!(
                 "Key must be {KEY_SIZE} bytes ({} hex chars).",
@@ -339,12 +338,7 @@ pub fn run_yubiotp(
         return Err(CliError("Provide --key or --generate-key.".into()));
     };
 
-    if !force
-        && !confirm(&format!(
-            "Program Yubico OTP in slot {}?",
-            slot.map(1, 2)
-        ))
-    {
+    if !force && !confirm(&format!("Program Yubico OTP in slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
     }
 
@@ -386,9 +380,7 @@ pub fn run_static(
     } else if let Some(p) = password {
         p.to_string()
     } else {
-        return Err(CliError(
-            "Provide a password or use --generate.".into(),
-        ));
+        return Err(CliError("Provide a password or use --generate.".into()));
     };
 
     let scan_codes = encode_password(&pw, keyboard_layout)?;
@@ -436,8 +428,7 @@ pub fn run_chalresp(
 
     let key_bytes: Vec<u8> = if generate {
         let mut k = vec![0u8; 20];
-        getrandom::fill(&mut k)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         k
     } else if let Some(k) = key {
         hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))?
@@ -494,9 +485,7 @@ pub fn run_calculate(
     } else if let Some(c) = challenge {
         hex::decode(c).map_err(|_| CliError("Challenge must be hex-encoded.".into()))?
     } else {
-        return Err(CliError(
-            "Provide a challenge or use --totp.".into(),
-        ));
+        return Err(CliError("Provide a challenge or use --totp.".into()));
     };
 
     // Prefer OTP HID for challenge-response (supports touch keepalive)
@@ -535,21 +524,14 @@ pub fn run_hotp(
 
     let key_bytes = key
         .ok_or_else(|| CliError("A key is required.".into()))
-        .and_then(|k| {
-            hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))
-        })?;
+        .and_then(|k| hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into())))?;
 
-    if !force
-        && !confirm(&format!(
-            "Program HOTP in slot {}?",
-            slot.map(1, 2)
-        ))
-    {
+    if !force && !confirm(&format!("Program HOTP in slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
     }
 
-    let mut config = SlotConfiguration::hotp(&key_bytes)
-        .map_err(|e| CliError(format!("Invalid key: {e}")))?;
+    let mut config =
+        SlotConfiguration::hotp(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
     if digits == "8" {
         config = config.digits8(true);
     }
@@ -592,12 +574,7 @@ pub fn run_settings(
         new_access_code.map(parse_access_code).transpose()?
     };
 
-    if !force
-        && !confirm(&format!(
-            "Update settings for slot {}?",
-            slot.map(1, 2)
-        ))
-    {
+    if !force && !confirm(&format!("Update settings for slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
     }
 

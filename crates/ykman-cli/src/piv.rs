@@ -2,8 +2,8 @@ use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::piv::{
-    KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession, Slot, TouchPolicy,
-    DEFAULT_MANAGEMENT_KEY,
+    DEFAULT_MANAGEMENT_KEY, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession, Slot,
+    TouchPolicy,
 };
 
 use crate::util::CliError;
@@ -31,16 +31,15 @@ fn parse_slot(s: &str) -> Result<Slot, CliError> {
     match s_up.as_str() {
         "AUTHENTICATION" | "9A" => Ok(Slot::Authentication),
         "SIGNATURE" | "9C" => Ok(Slot::Signature),
-        "KEY-MANAGEMENT" | "KEY_MANAGEMENT" | "KEYMANAGEMENT" | "9D" => {
-            Ok(Slot::KeyManagement)
-        }
+        "KEY-MANAGEMENT" | "KEY_MANAGEMENT" | "KEYMANAGEMENT" | "9D" => Ok(Slot::KeyManagement),
         "CARD-AUTH" | "CARD_AUTH" | "CARDAUTH" | "9E" => Ok(Slot::CardAuth),
         "ATTESTATION" | "F9" => Ok(Slot::Attestation),
         _ => {
             // Try parsing as hex byte for retired slots
-            if let Ok(v) = u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16) {
-                Slot::from_u8(v)
-                    .ok_or_else(|| CliError(format!("Invalid PIV slot: 0x{v:02X}")))
+            if let Ok(v) =
+                u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
+            {
+                Slot::from_u8(v).ok_or_else(|| CliError(format!("Invalid PIV slot: 0x{v:02X}")))
             } else {
                 Err(CliError(format!(
                     "Invalid slot: {s}. Use 9a, 9c, 9d, 9e, f9, or 82-95."
@@ -150,12 +149,10 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
                 println!("WARNING: PIN is set to factory default.");
             }
         }
-        Err(_) => {
-            match session.get_pin_attempts() {
-                Ok(n) => println!("PIN tries remaining: {n}"),
-                Err(_) => {}
-            }
-        }
+        Err(_) => match session.get_pin_attempts() {
+            Ok(n) => println!("PIN tries remaining: {n}"),
+            Err(_) => {}
+        },
     }
 
     // PUK metadata
@@ -180,7 +177,10 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
 
     // Bio metadata
     if let Ok(meta) = session.get_bio_metadata() {
-        println!("Biometric: configured={}, attempts_remaining={}", meta.configured, meta.attempts_remaining);
+        println!(
+            "Biometric: configured={}, attempts_remaining={}",
+            meta.configured, meta.attempts_remaining
+        );
     }
 
     Ok(())
@@ -316,8 +316,7 @@ pub fn run_change_management_key(
 
     let new_key = if generate {
         let mut k = vec![0u8; key_len];
-        getrandom::fill(&mut k)
-            .map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         k
     } else if let Some(k) = new_mgmt_key {
         let bytes = parse_management_key(k)?;
@@ -392,9 +391,7 @@ pub fn run_keys_generate(
         }
     }
 
-    println!(
-        "Generated {algorithm} key in slot {slot}. Public key written to {output}."
-    );
+    println!("Generated {algorithm} key in slot {slot}. Public key written to {output}.");
     Ok(())
 }
 
@@ -411,8 +408,8 @@ pub fn run_keys_import(
     let pp = parse_pin_policy(pin_policy)?;
     let tp = parse_touch_policy(touch_policy)?;
 
-    let data = std::fs::read(key_file)
-        .map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data =
+        std::fs::read(key_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
 
     // Try to detect PEM vs DER
     let der = if let Ok(text) = std::str::from_utf8(&data) {
@@ -454,7 +451,14 @@ pub fn run_keys_info(dev: &YubiKeyDevice, slot: &str) -> Result<(), CliError> {
 
     println!("Slot: {slot}");
     println!("Algorithm: {:?}", meta.key_type);
-    println!("Origin: {}", if meta.generated { "generated" } else { "imported" });
+    println!(
+        "Origin: {}",
+        if meta.generated {
+            "generated"
+        } else {
+            "imported"
+        }
+    );
     println!("PIN policy: {:?}", meta.pin_policy);
     println!("Touch policy: {:?}", meta.touch_policy);
     Ok(())
@@ -579,8 +583,8 @@ pub fn run_certificates_import(
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
 
-    let data = std::fs::read(cert_file)
-        .map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data =
+        std::fs::read(cert_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
 
     let der = if let Ok(text) = std::str::from_utf8(&data) {
         if text.contains("-----BEGIN") {
@@ -665,8 +669,8 @@ pub fn run_objects_import(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let obj_id = parse_object_id(object)?;
-    let data = std::fs::read(data_file)
-        .map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data =
+        std::fs::read(data_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
 
     let mut session = open_session(dev)?;
     authenticate_session(&mut session, mgmt_key)?;
@@ -682,7 +686,123 @@ pub fn run_objects_import(
     Ok(())
 }
 
-// Simple PEM encode/decode helpers
+pub fn run_objects_generate(
+    dev: &YubiKeyDevice,
+    object: &str,
+    management_key: Option<&str>,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let mut session = open_session(dev)?;
+    if let Some(p) = pin {
+        session
+            .verify_pin(p)
+            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+    }
+    authenticate_session(&mut session, management_key)?;
+
+    match object.to_uppercase().as_str() {
+        "CHUID" => {
+            // Generate CHUID per SP 800-73-4
+            let mut chuid = Vec::new();
+            // FASC-N (tag 0x30, 25 bytes, all 0x9E = default)
+            chuid.extend_from_slice(&[0x30, 0x19]);
+            chuid.extend_from_slice(&[0x9E; 25]);
+            // GUID (tag 0x34, 16 bytes random UUID v4)
+            chuid.push(0x34);
+            chuid.push(0x10);
+            let mut guid = [0u8; 16];
+            getrandom::fill(&mut guid).map_err(|e| CliError(format!("RNG error: {e}")))?;
+            guid[6] = (guid[6] & 0x0f) | 0x40;
+            guid[8] = (guid[8] & 0x3f) | 0x80;
+            chuid.extend_from_slice(&guid);
+            // Expiry date (tag 0x35, 8 bytes YYYYMMDD)
+            chuid.push(0x35);
+            chuid.push(0x08);
+            chuid.extend_from_slice(b"20301231");
+            // Issuer asymmetric signature (empty, tag 0x3E)
+            chuid.push(0x3E);
+            chuid.push(0x00);
+            // Error Detection Code (tag 0xFE)
+            chuid.push(0xFE);
+            chuid.push(0x00);
+
+            session
+                .put_object(ObjectId::Chuid, Some(&chuid))
+                .map_err(|e| CliError(format!("Failed to write CHUID: {e}")))?;
+            println!("CHUID generated.");
+        }
+        "CCC" => {
+            // Generate CCC per SP 800-73-4
+            let mut ccc = Vec::new();
+            // Card Identifier (tag 0xF0, 21 bytes)
+            ccc.push(0xF0);
+            ccc.push(0x15);
+            let mut card_id = [0u8; 21];
+            getrandom::fill(&mut card_id).map_err(|e| CliError(format!("RNG error: {e}")))?;
+            ccc.extend_from_slice(&card_id);
+            // Capability Container version number (tag 0xF1)
+            ccc.extend_from_slice(&[0xF1, 0x01, 0x21]);
+            // Capability Grammar version number (tag 0xF2)
+            ccc.extend_from_slice(&[0xF2, 0x01, 0x21]);
+            // Applications CardURL (tag 0xF3, empty)
+            ccc.extend_from_slice(&[0xF3, 0x00]);
+            // PKCS#15 (tag 0xF4)
+            ccc.extend_from_slice(&[0xF4, 0x01, 0x00]);
+            // Registered Data Model (tag 0xF5)
+            ccc.extend_from_slice(&[0xF5, 0x01, 0x10]);
+            // Access Control Rule Table (tag 0xF6, empty)
+            ccc.extend_from_slice(&[0xF6, 0x00]);
+            // Error Detection Code (tag 0xFE)
+            ccc.push(0xFE);
+            ccc.push(0x00);
+
+            session
+                .put_object(ObjectId::Capability, Some(&ccc))
+                .map_err(|e| CliError(format!("Failed to write CCC: {e}")))?;
+            println!("CCC generated.");
+        }
+        other => {
+            return Err(CliError(format!(
+                "Unknown object type: {other}. Use CHUID or CCC."
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn run_certificates_generate(
+    _dev: &YubiKeyDevice,
+    _slot: &str,
+    _subject: &str,
+    _valid_days: u32,
+    _hash_algorithm: &str,
+    _management_key: Option<&str>,
+    _pin: Option<&str>,
+) -> Result<(), CliError> {
+    Err(CliError(
+        "Self-signed certificate generation requires an x509 library. \
+         Use 'piv keys generate' to create a key, then use an external tool \
+         (e.g., openssl) to generate a certificate and import it with \
+         'piv certificates import'."
+            .into(),
+    ))
+}
+
+pub fn run_certificates_request(
+    _dev: &YubiKeyDevice,
+    _slot: &str,
+    _subject: &str,
+    _hash_algorithm: &str,
+    _output: &str,
+    _pin: Option<&str>,
+) -> Result<(), CliError> {
+    Err(CliError(
+        "CSR generation requires an x509 library. \
+         Use 'piv keys generate' to create a key, then use an external tool \
+         (e.g., openssl) to generate a CSR."
+            .into(),
+    ))
+}
 fn pem_encode(label: &str, der: &[u8]) -> String {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(der);
@@ -719,13 +839,11 @@ fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
 fn write_cert_file(output: &str, der: &[u8], format: &str) -> Result<(), CliError> {
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            std::fs::write(output, der)
-                .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            std::fs::write(output, der).map_err(|e| CliError(format!("Failed to write: {e}")))?;
         }
         _ => {
             let pem = pem_encode("CERTIFICATE", der);
-            std::fs::write(output, pem)
-                .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            std::fs::write(output, pem).map_err(|e| CliError(format!("Failed to write: {e}")))?;
         }
     }
     Ok(())

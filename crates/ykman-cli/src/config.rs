@@ -2,9 +2,7 @@ use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::iso7816::Transport;
-use yubikit_rs::management::{
-    Capability, DeviceConfig, DeviceFlag, ManagementSession,
-};
+use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag, ManagementSession};
 
 use crate::util::CliError;
 
@@ -132,15 +130,11 @@ pub fn run_usb(
     }
 
     if changes.is_empty() {
-        return Err(CliError(
-            "No configuration changes specified.".into(),
-        ));
+        return Err(CliError("No configuration changes specified.".into()));
     }
 
     if new_enabled.is_empty() {
-        return Err(CliError(
-            "Cannot disable all USB applications.".into(),
-        ));
+        return Err(CliError("Cannot disable all USB applications.".into()));
     }
 
     let reboot = new_enabled != usb_enabled;
@@ -241,7 +235,9 @@ pub fn run_nfc(
         session
             .write_device_config(&config, false, lc.as_deref(), None)
             .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
-        println!("YubiKey NFC disabled. It will be re-enabled automatically the next time it is connected to USB power.");
+        println!(
+            "YubiKey NFC disabled. It will be re-enabled automatically the next time it is connected to USB power."
+        );
         return Ok(());
     }
 
@@ -287,9 +283,7 @@ pub fn run_nfc(
     }
 
     if changes.is_empty() {
-        return Err(CliError(
-            "No configuration changes specified.".into(),
-        ));
+        return Err(CliError("No configuration changes specified.".into()));
     }
 
     if !force {
@@ -361,9 +355,7 @@ pub fn run_set_lock_code(
 
 pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
     if !force {
-        eprintln!(
-            "WARNING! This will delete all stored data and restore factory settings."
-        );
+        eprintln!("WARNING! This will delete all stored data and restore factory settings.");
         if !confirm("Proceed?") {
             return Err(CliError("Aborted by user.".into()));
         }
@@ -436,9 +428,15 @@ pub fn run_mode(
     let mut session = ManagementSession::new(conn)
         .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
     session
-        .set_mode(code, chalresp_timeout.unwrap_or(0), autoeject_timeout.unwrap_or(0))
+        .set_mode(
+            code,
+            chalresp_timeout.unwrap_or(0),
+            autoeject_timeout.unwrap_or(0),
+        )
         .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
 
-    println!("Mode set! You must remove and re-insert your YubiKey for this change to take effect.");
+    println!(
+        "Mode set! You must remove and re-insert your YubiKey for this change to take effect."
+    );
     Ok(())
 }
