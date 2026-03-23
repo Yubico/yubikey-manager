@@ -7,6 +7,7 @@ use yubikit_rs::management::ReleaseType;
 
 mod apdu;
 mod config;
+mod diagnose;
 mod hsmauth;
 mod info;
 mod list;
@@ -18,6 +19,29 @@ mod securitydomain;
 mod util;
 
 use util::CliError;
+
+/// SCP parameters parsed from global options
+#[derive(Clone, Default)]
+struct ScpParams {
+    /// SCP03 keys: K-ENC:K-MAC[:K-DEK] (hex)
+    scp03_keys: Option<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>,
+    /// SCP11 private key (raw 32-byte scalar)
+    scp11_private_key: Option<Vec<u8>>,
+    /// SCP11 certificate chain (DER, leaf-last)
+    scp11_certificates: Vec<Vec<u8>>,
+    /// Card key reference (kid, kvn)
+    sd_ref: Option<(u8, u8)>,
+    /// OCE key reference (kid, kvn)
+    oce_ref: Option<(u8, u8)>,
+    /// CA certificate for SCP11 verification (DER)
+    ca_cert: Option<Vec<u8>>,
+}
+
+impl ScpParams {
+    fn is_active(&self) -> bool {
+        self.scp03_keys.is_some() || self.scp11_private_key.is_some() || self.ca_cert.is_some()
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -40,8 +64,32 @@ struct Cli {
     #[arg(short = 'r', long = "reader", global = true)]
     reader: Option<String>,
 
+    /// SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
+    #[arg(long = "scp", global = true)]
+    scp_cred: Vec<String>,
+
+    /// CA certificate for SCP11 card key verification (PEM/DER file)
+    #[arg(long = "scp-ca", global = true)]
+    scp_ca: Option<String>,
+
+    /// Card key reference for SCP (KID KVN, hex)
+    #[arg(long = "scp-sd", global = true, num_args = 2, value_names = ["KID", "KVN"])]
+    scp_sd: Option<Vec<String>>,
+
+    /// OCE key reference for SCP (KID KVN, hex)
+    #[arg(long = "scp-oce", global = true, num_args = 2, value_names = ["KID", "KVN"])]
+    scp_oce: Option<Vec<String>>,
+
+    /// Password for SCP credential file
+    #[arg(long = "scp-password", global = true)]
+    scp_password: Option<String>,
+
+    /// Show diagnostic information
+    #[arg(long = "diagnose")]
+    diagnose: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -1045,6 +1093,164 @@ fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKe
 }
 
 /// After resolving a device, apply version override if needed.
+fn parse_scp_params(cli: &Cli) -> Result<ScpParams, CliError> {
+    let mut params = ScpParams::default();
+
+    // Parse --scp-sd
+    if let Some(ref sd) = cli.scp_sd {
+        let kid = parse_hex_u8(&sd[0])?;
+        let kvn = parse_hex_u8(&sd[1])?;
+        params.sd_ref = Some((kid, kvn));
+    }
+
+    // Parse --scp-oce
+    if let Some(ref oce) = cli.scp_oce {
+        let kid = parse_hex_u8(&oce[0])?;
+        let kvn = parse_hex_u8(&oce[1])?;
+        params.oce_ref = Some((kid, kvn));
+    }
+
+    // Parse --scp-ca
+    if let Some(ref ca_path) = cli.scp_ca {
+        let data = std::fs::read(ca_path)
+            .map_err(|e| CliError(format!("Failed to read SCP CA file: {e}")))?;
+        let der = if let Ok(text) = std::str::from_utf8(&data) {
+            if text.contains("-----BEGIN") {
+                pem_decode_first(text)?
+            } else {
+                data
+            }
+        } else {
+            data
+        };
+        params.ca_cert = Some(der);
+    }
+
+    // Parse --scp credentials
+    if !cli.scp_cred.is_empty() {
+        let first = &cli.scp_cred[0];
+        // Check if it looks like SCP03 hex keys: K-ENC:K-MAC[:K-DEK]
+        let parts: Vec<&str> = first.split(':').collect();
+        if (parts.len() == 2 || parts.len() == 3)
+            && parts.iter().all(|p| p.len() == 32 && p.chars().all(|c| c.is_ascii_hexdigit()))
+        {
+            // SCP03 keys
+            let key_enc = hex::decode(parts[0])
+                .map_err(|_| CliError("Invalid SCP03 K-ENC hex.".into()))?;
+            let key_mac = hex::decode(parts[1])
+                .map_err(|_| CliError("Invalid SCP03 K-MAC hex.".into()))?;
+            let key_dek = if parts.len() == 3 {
+                Some(
+                    hex::decode(parts[2])
+                        .map_err(|_| CliError("Invalid SCP03 K-DEK hex.".into()))?,
+                )
+            } else {
+                None
+            };
+            params.scp03_keys = Some((key_enc, key_mac, key_dek));
+        } else {
+            // SCP11: files (private key + certificates)
+            for path in &cli.scp_cred {
+                let data = std::fs::read(path)
+                    .map_err(|e| CliError(format!("Failed to read SCP file '{path}': {e}")))?;
+                let pem_text = std::str::from_utf8(&data).ok();
+
+                if let Some(text) = pem_text {
+                    if text.contains("-----BEGIN") {
+                        // Could be private key or certificates
+                        if text.contains("PRIVATE KEY") {
+                            let der = pem_decode_first(text)?;
+                            // Extract raw 32-byte key from PKCS#8 or SEC1 DER
+                            let raw_key = extract_ec_private_key(&der)?;
+                            params.scp11_private_key = Some(raw_key);
+                        }
+                        // Also extract any certificates
+                        for cert_der in pem_decode_all_certs(text)? {
+                            params.scp11_certificates.push(cert_der);
+                        }
+                    } else {
+                        // Raw DER — try to detect type
+                        params.scp11_certificates.push(data);
+                    }
+                } else {
+                    params.scp11_certificates.push(data);
+                }
+            }
+        }
+    }
+
+    Ok(params)
+}
+
+fn parse_hex_u8(s: &str) -> Result<u8, CliError> {
+    u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
+        .map_err(|_| CliError(format!("Invalid hex value: {s}")))
+}
+
+fn pem_decode_first(text: &str) -> Result<Vec<u8>, CliError> {
+    use base64::Engine;
+    let mut in_block = false;
+    let mut b64 = String::new();
+    for line in text.lines() {
+        if line.starts_with("-----BEGIN") {
+            in_block = true;
+            continue;
+        }
+        if line.starts_with("-----END") {
+            break;
+        }
+        if in_block {
+            b64.push_str(line.trim());
+        }
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))
+}
+
+fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>, CliError> {
+    use base64::Engine;
+    let mut certs = Vec::new();
+    let mut in_cert = false;
+    let mut b64 = String::new();
+    for line in text.lines() {
+        if line.starts_with("-----BEGIN CERTIFICATE") {
+            in_cert = true;
+            b64.clear();
+            continue;
+        }
+        if line.starts_with("-----END CERTIFICATE") {
+            in_cert = false;
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(&b64)
+                .map_err(|e| CliError(format!("Invalid PEM cert: {e}")))?;
+            certs.push(der);
+            continue;
+        }
+        if in_cert {
+            b64.push_str(line.trim());
+        }
+    }
+    Ok(certs)
+}
+
+fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
+    // Very minimal PKCS#8 / SEC1 extraction for P-256 keys
+    // PKCS#8: SEQUENCE { version, algorithmIdentifier, OCTET STRING { SEC1 key } }
+    // SEC1 EC: SEQUENCE { version, OCTET STRING (privkey), [0] OID, [1] pubkey }
+    // We look for a 32-byte octet string which is the raw private key
+    if der.len() < 34 {
+        return Err(CliError("EC private key too short.".into()));
+    }
+    // Search for 0x04 0x20 (OCTET STRING, 32 bytes) pattern
+    for i in 0..der.len().saturating_sub(33) {
+        if der[i] == 0x04 && der[i + 1] == 0x20 {
+            return Ok(der[i + 2..i + 34].to_vec());
+        }
+    }
+    Err(CliError("Could not extract EC private key from DER.".into()))
+}
+
 fn apply_version_override(dev: &YubiKeyDevice) {
     let info = dev.info();
     if info.version_qualifier.release_type != ReleaseType::Final {
@@ -1055,7 +1261,26 @@ fn apply_version_override(dev: &YubiKeyDevice) {
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
-    match cli.command {
+    // Handle --diagnose
+    if cli.diagnose {
+        return diagnose::run_diagnose();
+    }
+
+    // Parse SCP params before consuming command
+    let _scp = parse_scp_params(&cli)?;
+
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            cmd.print_help().ok();
+            println!();
+            std::process::exit(0);
+        }
+    };
+
+    match command {
         Commands::List { serials, readers } => {
             if cli.device.is_some() {
                 return Err(CliError("--device can't be used with 'list'.".into()));
