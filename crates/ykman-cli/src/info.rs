@@ -4,7 +4,7 @@ use yubikit_rs::management::Capability;
 
 use crate::util::CliError;
 
-pub fn run(dev: &YubiKeyDevice) -> Result<(), CliError> {
+pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     let info = dev.info();
 
     println!("Device type: {}", dev.name());
@@ -69,6 +69,21 @@ pub fn run(dev: &YubiKeyDevice) -> Result<(), CliError> {
                     if approved { "Yes" } else { "No" }
                 );
             }
+        }
+    }
+
+    if check_fips {
+        println!();
+        if info.fips_capable.is_empty() {
+            println!("FIPS approved mode: Not applicable (device is not FIPS capable)");
+        } else {
+            let all_approved = Capability::ALL
+                .iter()
+                .all(|&cap| !info.fips_capable.contains(cap) || info.fips_approved.contains(cap));
+            println!(
+                "FIPS approved mode: {}",
+                if all_approved { "Yes" } else { "No" }
+            );
         }
     }
 

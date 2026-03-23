@@ -68,44 +68,39 @@ fn parse_uif(s: &str) -> Result<Uif, CliError> {
 
 pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     let mut session = open_session(dev)?;
-    let version = session.version();
-    println!("OpenPGP version: {version}");
 
     let aid = session.aid().clone();
     let (major, minor) = aid.version();
-    println!("Application version: {major}.{minor}");
-    println!("Manufacturer: {:04X}", aid.manufacturer());
-
-    let serial = aid.serial();
-    if serial > 0 {
-        println!("Serial number: {serial}");
-    }
+    // OpenPGP spec version is from the AID, application version is firmware
+    println!("OpenPGP version:            {major}.{minor}");
+    println!("Application version:        {}", session.version());
 
     if let Ok(pw_status) = session.get_pin_status() {
         println!(
-            "PIN tries remaining: {}/{}/{}",
+            "PIN tries remaining:        {}",
             pw_status.get_attempts(yubikit_rs::openpgp::Pw::User),
+        );
+        println!(
+            "Reset code tries remaining: {}",
             pw_status.get_attempts(yubikit_rs::openpgp::Pw::Reset),
+        );
+        println!(
+            "Admin PIN tries remaining:  {}",
             pw_status.get_attempts(yubikit_rs::openpgp::Pw::Admin),
         );
+
+        let pin_policy = match pw_status.pin_policy_user {
+            PinPolicy::Once => "Once",
+            PinPolicy::Always => "Always",
+        };
+        println!("Require PIN for signature:  {pin_policy}");
     }
 
-    if let Ok(counter) = session.get_signature_counter() {
-        println!("Signature counter: {counter}");
-    }
-
-    // Key info
-    if let Ok(key_info) = session.get_key_information() {
-        for (key_ref, status) in key_info.iter() {
-            println!("Key {key_ref:?}: {status:?}");
-        }
-    }
-
-    // Touch policies
-    for key in [KeyRef::Sig, KeyRef::Dec, KeyRef::Aut, KeyRef::Att] {
-        if let Ok(uif) = session.get_uif(key) {
-            println!("Touch policy ({key:?}): {uif:?}");
-        }
+    if let Ok(kdf) = session.get_kdf() {
+        let enabled = !matches!(kdf, yubikit_rs::openpgp::Kdf::None);
+        println!("KDF enabled:                {enabled}");
+    } else {
+        println!("KDF enabled:                False");
     }
 
     Ok(())
@@ -188,15 +183,17 @@ pub fn run_change_admin_pin(
 pub fn run_change_reset_code(
     dev: &YubiKeyDevice,
     admin_pin: Option<&str>,
-    reset_code: &str,
+    reset_code: Option<&str>,
 ) -> Result<(), CliError> {
+    let rc = reset_code
+        .ok_or_else(|| CliError("--reset-code is required.".into()))?;
     let ap = admin_pin.unwrap_or("12345678");
     let mut session = open_session(dev)?;
     session
         .verify_admin(ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
-        .set_reset_code(reset_code)
+        .set_reset_code(rc)
         .map_err(|e| CliError(format!("Failed to set reset code: {e}")))?;
     println!("Reset code set.");
     Ok(())
@@ -325,9 +322,15 @@ pub fn run_keys_attest(
     key: &str,
     output: &str,
     format: &str,
+    pin: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
     let mut session = open_session(dev)?;
+    if let Some(p) = pin {
+        session
+            .verify_pin(p, false)
+            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+    }
     let cert_der = session
         .attest_key(key_ref)
         .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;

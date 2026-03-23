@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::iso7816::SmartCardProtocol;
@@ -44,6 +44,18 @@ fn confirm(msg: &str) -> bool {
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok();
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+fn read_file_or_stdin(path: &str) -> Result<Vec<u8>, CliError> {
+    if path == "-" {
+        let mut buf = Vec::new();
+        io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(|e| CliError(format!("Failed to read from stdin: {e}")))?;
+        Ok(buf)
+    } else {
+        std::fs::read(path).map_err(|e| CliError(format!("Failed to read file '{path}': {e}")))
+    }
 }
 
 fn parse_slot(s: &str) -> Result<Slot, CliError> {
@@ -157,21 +169,21 @@ fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
 pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     let mut session = open_session(dev)?;
     let version = session.version();
-    println!("PIV version: {version}");
+    println!("PIV version:              {version}");
 
     // PIN metadata
     match session.get_pin_metadata() {
         Ok(meta) => {
             println!(
-                "PIN tries remaining: {}/{}",
+                "PIN tries remaining:      {}/{}",
                 meta.attempts_remaining, meta.total_attempts
             );
             if meta.default_value {
-                println!("WARNING: PIN is set to factory default.");
+                println!("WARNING: Using default PIN!");
             }
         }
         Err(_) => match session.get_pin_attempts() {
-            Ok(n) => println!("PIN tries remaining: {n}"),
+            Ok(n) => println!("PIN tries remaining:      {n}"),
             Err(_) => {}
         },
     }
@@ -179,32 +191,302 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     // PUK metadata
     if let Ok(meta) = session.get_puk_metadata() {
         println!(
-            "PUK tries remaining: {}/{}",
+            "PUK tries remaining:      {}/{}",
             meta.attempts_remaining, meta.total_attempts
         );
         if meta.default_value {
-            println!("WARNING: PUK is set to factory default.");
+            println!("WARNING: Using default PUK!");
         }
     }
 
     // Management key metadata
     if let Ok(meta) = session.get_management_key_metadata() {
-        println!("Management key algorithm: {:?}", meta.key_type);
+        let algo = format!("{:?}", meta.key_type).to_ascii_uppercase();
+        println!("Management key algorithm: {algo}");
         if meta.default_value {
-            println!("WARNING: Management key is set to factory default.");
+            println!("WARNING: Using default Management key!");
         }
-        println!("Management key touch policy: {:?}", meta.touch_policy);
     }
 
-    // Bio metadata
-    if let Ok(meta) = session.get_bio_metadata() {
-        println!(
-            "Biometric: configured={}, attempts_remaining={}",
-            meta.configured, meta.attempts_remaining
-        );
+    // CHUID
+    match session.get_object(ObjectId::Chuid) {
+        Ok(data) => println!("CHUID: {}", hex::encode(&data)),
+        Err(_) => println!("CHUID: No data available"),
+    }
+
+    // CCC
+    match session.get_object(ObjectId::Capability) {
+        Ok(data) => println!("CCC:   {}", hex::encode(&data)),
+        Err(_) => println!("CCC:   No data available"),
+    }
+
+    // Slot details
+    let slots = [
+        (Slot::Authentication, "9A", "AUTHENTICATION"),
+        (Slot::Signature, "9C", "SIGNATURE"),
+        (Slot::KeyManagement, "9D", "KEY MANAGEMENT"),
+        (Slot::CardAuth, "9E", "CARD AUTH"),
+    ];
+
+    for (slot, hex_id, name) in slots {
+        let has_key = session.get_slot_metadata(slot).ok();
+        let has_cert = session.get_certificate(slot).ok();
+
+        if has_key.is_none() && has_cert.is_none() {
+            continue;
+        }
+
+        println!("\nSlot {hex_id} ({name}):");
+
+        if let Some(ref meta) = has_key {
+            println!("  Private key type: {:?}", meta.key_type);
+        }
+
+        if let Some(ref cert_der) = has_cert {
+            // Parse certificate to show details
+            if let Some(info) = parse_cert_info(cert_der) {
+                if has_key.is_some() {
+                    println!("  Public key type:  {}", info.key_type);
+                }
+                println!("  Subject DN:       {}", info.subject);
+                println!("  Issuer DN:        {}", info.issuer);
+                println!("  Serial:           {}", info.serial);
+                println!("  Fingerprint:      {}", info.fingerprint);
+                println!("  Not before:       {}", info.not_before);
+                println!("  Not after:        {}", info.not_after);
+            }
+        }
     }
 
     Ok(())
+}
+
+struct CertInfo {
+    key_type: String,
+    subject: String,
+    issuer: String,
+    serial: String,
+    fingerprint: String,
+    not_before: String,
+    not_after: String,
+}
+
+fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
+    use sha2::Digest;
+    let fingerprint = hex::encode(sha2::Sha256::digest(cert_der));
+
+    // Parse the outer SEQUENCE
+    let (_, seq_off, seq_len, _) = parse_der_tlv(cert_der, 0).ok()?;
+    let seq = &cert_der[seq_off..seq_off + seq_len];
+
+    // TBSCertificate is the first element
+    let (_, tbs_off, tbs_len, tbs_end) = parse_der_tlv(seq, 0).ok()?;
+    let tbs = &seq[tbs_off..tbs_off + tbs_len];
+
+    // Parse TBS fields: version, serialNumber, signature, issuer, validity, subject, spki
+    let mut pos = 0;
+
+    // version [0] EXPLICIT - optional
+    let (tag, _, _, next) = parse_der_tlv(tbs, pos).ok()?;
+    if tag == 0xA0 {
+        pos = next;
+    }
+
+    // serialNumber INTEGER
+    let (_, sn_off, sn_len, next) = parse_der_tlv(tbs, pos).ok()?;
+    let serial_bytes = &tbs[sn_off..sn_off + sn_len];
+    let serial = serial_bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    pos = next;
+
+    // signature AlgorithmIdentifier
+    let (_, _, _, next) = parse_der_tlv(tbs, pos).ok()?;
+    pos = next;
+
+    // issuer Name
+    let (_, iss_off, iss_len, next) = parse_der_tlv(tbs, pos).ok()?;
+    let issuer = parse_dn_from_der(&tbs[iss_off..iss_off + iss_len]);
+    pos = next;
+
+    // validity Sequence { notBefore, notAfter }
+    let (_, val_off, val_len, next) = parse_der_tlv(tbs, pos).ok()?;
+    let validity = &tbs[val_off..val_off + val_len];
+    let (_, nb_off, nb_len, nb_end) = parse_der_tlv(validity, 0).ok()?;
+    let not_before = std::str::from_utf8(&validity[nb_off..nb_off + nb_len])
+        .unwrap_or("?")
+        .to_string();
+    let (_, na_off, na_len, _) = parse_der_tlv(validity, nb_end).ok()?;
+    let not_after = std::str::from_utf8(&validity[na_off..na_off + na_len])
+        .unwrap_or("?")
+        .to_string();
+    pos = next;
+
+    // subject Name
+    let (_, sub_off, sub_len, next) = parse_der_tlv(tbs, pos).ok()?;
+    let subject = parse_dn_from_der(&tbs[sub_off..sub_off + sub_len]);
+    pos = next;
+
+    // subjectPublicKeyInfo
+    let (_, spki_off, spki_len, _) = parse_der_tlv(tbs, pos).ok()?;
+    let spki = &tbs[spki_off..spki_off + spki_len];
+    let key_type = identify_key_type_from_spki(spki);
+
+    // Format times with ISO 8601-ish format
+    let not_before = format_asn1_time(&not_before);
+    let not_after = format_asn1_time(&not_after);
+
+    Some(CertInfo {
+        key_type,
+        subject,
+        issuer,
+        serial,
+        fingerprint,
+        not_before,
+        not_after,
+    })
+}
+
+fn parse_der_tlv(data: &[u8], offset: usize) -> Result<(u32, usize, usize, usize), ()> {
+    if offset >= data.len() {
+        return Err(());
+    }
+    let tag = data[offset] as u32;
+    let mut pos = offset + 1;
+    if pos >= data.len() {
+        return Err(());
+    }
+    let len = if data[pos] < 0x80 {
+        let l = data[pos] as usize;
+        pos += 1;
+        l
+    } else if data[pos] == 0x81 {
+        pos += 1;
+        if pos >= data.len() {
+            return Err(());
+        }
+        let l = data[pos] as usize;
+        pos += 1;
+        l
+    } else if data[pos] == 0x82 {
+        pos += 1;
+        if pos + 1 >= data.len() {
+            return Err(());
+        }
+        let l = ((data[pos] as usize) << 8) | data[pos + 1] as usize;
+        pos += 2;
+        l
+    } else {
+        return Err(());
+    };
+    Ok((tag, pos, len, pos + len))
+}
+
+fn parse_dn_from_der(dn_content: &[u8]) -> String {
+    // Parse SEQUENCE of SETs of SEQUENCE { OID, value }
+    let mut parts = Vec::new();
+    let mut pos = 0;
+    while pos < dn_content.len() {
+        if let Ok((_, set_off, set_len, set_end)) = parse_der_tlv(dn_content, pos) {
+            let set_data = &dn_content[set_off..set_off + set_len];
+            if let Ok((_, seq_off, seq_len, _)) = parse_der_tlv(set_data, 0) {
+                let seq_data = &set_data[seq_off..seq_off + seq_len];
+                if let Ok((_, oid_off, oid_len, oid_end)) = parse_der_tlv(seq_data, 0) {
+                    let oid = &seq_data[oid_off..oid_off + oid_len];
+                    if let Ok((_, val_off, val_len, _)) = parse_der_tlv(seq_data, oid_end) {
+                        let value =
+                            std::str::from_utf8(&seq_data[val_off..val_off + val_len]).unwrap_or("?");
+                        let attr_name = oid_to_attr_name(oid);
+                        parts.push(format!("{attr_name}={value}"));
+                    }
+                }
+            }
+            pos = set_end;
+        } else {
+            break;
+        }
+    }
+    parts.join(", ")
+}
+
+fn oid_to_attr_name(oid: &[u8]) -> &'static str {
+    match oid {
+        [0x55, 0x04, 0x03] => "CN",
+        [0x55, 0x04, 0x06] => "C",
+        [0x55, 0x04, 0x07] => "L",
+        [0x55, 0x04, 0x08] => "ST",
+        [0x55, 0x04, 0x0A] => "O",
+        [0x55, 0x04, 0x0B] => "OU",
+        _ => "OID",
+    }
+}
+
+fn identify_key_type_from_spki(spki_content: &[u8]) -> String {
+    // Parse AlgorithmIdentifier to determine key type
+    if let Ok((_, algo_off, algo_len, _)) = parse_der_tlv(spki_content, 0) {
+        let algo = &spki_content[algo_off..algo_off + algo_len];
+        if let Ok((_, oid_off, oid_len, _)) = parse_der_tlv(algo, 0) {
+            let oid = &algo[oid_off..oid_off + oid_len];
+            return match oid {
+                // EC public key OID
+                [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01] => {
+                    // Check curve parameter OID
+                    if let Ok((_, p_off, p_len, _)) = parse_der_tlv(algo, oid_off + oid_len) {
+                        match &algo[p_off..p_off + p_len] {
+                            [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07] => {
+                                "ECCP256".to_string()
+                            }
+                            [0x2B, 0x81, 0x04, 0x00, 0x22] => "ECCP384".to_string(),
+                            _ => "EC".to_string(),
+                        }
+                    } else {
+                        "EC".to_string()
+                    }
+                }
+                // RSA OID
+                [0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01] => "RSA".to_string(),
+                // Ed25519 OID
+                [0x2B, 0x65, 0x70] => "ED25519".to_string(),
+                // X25519 OID
+                [0x2B, 0x65, 0x6E] => "X25519".to_string(),
+                _ => "Unknown".to_string(),
+            };
+        }
+    }
+    "Unknown".to_string()
+}
+
+fn format_asn1_time(t: &str) -> String {
+    // Parse UTCTime (YYMMDDHHmmSSZ) or GeneralizedTime (YYYYMMDDHHmmSSZ)
+    let t = t.trim_end_matches('Z');
+    if t.len() == 12 {
+        // UTCTime: YYMMDDHHMMSS
+        let yy: u16 = t[0..2].parse().unwrap_or(0);
+        let year = if yy >= 50 { 1900 + yy } else { 2000 + yy };
+        format!(
+            "{year}-{}-{}T{}:{}:{}+00:00",
+            &t[2..4],
+            &t[4..6],
+            &t[6..8],
+            &t[8..10],
+            &t[10..12]
+        )
+    } else if t.len() == 14 {
+        // GeneralizedTime: YYYYMMDDHHMMSS
+        format!(
+            "{}-{}-{}T{}:{}:{}+00:00",
+            &t[0..4],
+            &t[4..6],
+            &t[6..8],
+            &t[8..10],
+            &t[10..12],
+            &t[12..14]
+        )
+    } else {
+        t.to_string()
+    }
 }
 
 pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
@@ -331,6 +613,8 @@ pub fn run_change_management_key(
     touch: bool,
     generate: bool,
     force: bool,
+    pin: Option<&str>,
+    protect: bool,
 ) -> Result<(), CliError> {
     let key_type = parse_mgmt_key_type(algorithm)?;
     let key_len = key_type.key_len();
@@ -358,10 +642,19 @@ pub fn run_change_management_key(
     }
 
     let mut session = open_session(dev)?;
+    if let Some(p) = pin {
+        session
+            .verify_pin(p)
+            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+    }
     authenticate_session(&mut session, mgmt_key)?;
     session
         .set_management_key(key_type, &new_key, touch)
         .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
+
+    if protect {
+        eprintln!("WARNING: --protect (storing management key on device) is not yet supported.");
+    }
 
     if generate {
         println!("Management key set: {}", hex::encode(&new_key));
@@ -603,6 +896,7 @@ pub fn run_certificates_import(
     mgmt_key: Option<&str>,
     pin: Option<&str>,
     compress: bool,
+    update_chuid: bool,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
 
@@ -631,6 +925,10 @@ pub fn run_certificates_import(
         .put_certificate(slot, &der, compress)
         .map_err(|e| CliError(format!("Failed to import certificate: {e}")))?;
     println!("Certificate imported to slot {slot}.");
+
+    if update_chuid {
+        generate_chuid(dev, mgmt_key, pin)?;
+    }
     Ok(())
 }
 
@@ -639,6 +937,7 @@ pub fn run_certificates_delete(
     slot: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
+    update_chuid: bool,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev)?;
@@ -652,6 +951,10 @@ pub fn run_certificates_delete(
         .delete_certificate(slot)
         .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
     println!("Certificate in slot {slot} deleted.");
+
+    if update_chuid {
+        generate_chuid(dev, mgmt_key, pin)?;
+    }
     Ok(())
 }
 
@@ -706,6 +1009,44 @@ pub fn run_objects_import(
         .put_object(obj_id, Some(&data))
         .map_err(|e| CliError(format!("Failed to write object: {e}")))?;
     println!("Object imported.");
+    Ok(())
+}
+
+/// Generate a new CHUID and write it to the device.
+fn generate_chuid(
+    dev: &YubiKeyDevice,
+    management_key: Option<&str>,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let mut session = open_session(dev)?;
+    if let Some(p) = pin {
+        session
+            .verify_pin(p)
+            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+    }
+    authenticate_session(&mut session, management_key)?;
+
+    let mut chuid = Vec::new();
+    chuid.extend_from_slice(&[0x30, 0x19]);
+    chuid.extend_from_slice(&[0x9E; 25]);
+    chuid.push(0x34);
+    chuid.push(0x10);
+    let mut guid = [0u8; 16];
+    getrandom::fill(&mut guid).map_err(|e| CliError(format!("RNG error: {e}")))?;
+    guid[6] = (guid[6] & 0x0f) | 0x40;
+    guid[8] = (guid[8] & 0x3f) | 0x80;
+    chuid.extend_from_slice(&guid);
+    chuid.push(0x35);
+    chuid.push(0x08);
+    chuid.extend_from_slice(b"20301231");
+    chuid.push(0x3E);
+    chuid.push(0x00);
+    chuid.push(0xFE);
+    chuid.push(0x00);
+
+    session
+        .put_object(ObjectId::Chuid, Some(&chuid))
+        .map_err(|e| CliError(format!("Failed to update CHUID: {e}")))?;
     Ok(())
 }
 
@@ -801,6 +1142,8 @@ pub fn run_certificates_generate(
     hash_algorithm: &str,
     management_key: Option<&str>,
     pin: Option<&str>,
+    public_key_file: Option<&str>,
+    update_chuid: bool,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
@@ -813,12 +1156,28 @@ pub fn run_certificates_generate(
             .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
     }
 
-    let metadata = session
-        .get_slot_metadata(slot)
-        .map_err(|e| CliError(format!("Failed to get slot metadata (is a key present?): {e}")))?;
-
-    let key_type = metadata.key_type;
-    let spki_der = device_pubkey_to_spki(key_type, &metadata.public_key_der)?;
+    let (key_type, spki_der) = if let Some(pk_file) = public_key_file {
+        let data = read_file_or_stdin(pk_file)?;
+        let der = if let Ok(text) = std::str::from_utf8(&data) {
+            if text.contains("-----BEGIN") {
+                pem_decode(text)?
+            } else {
+                data
+            }
+        } else {
+            data
+        };
+        let kt = KeyType::from_public_key_der(&der)
+            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
+        (kt, der)
+    } else {
+        let metadata = session
+            .get_slot_metadata(slot)
+            .map_err(|e| CliError(format!("Failed to get slot metadata (is a key present?): {e}")))?;
+        let kt = metadata.key_type;
+        let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)?;
+        (kt, spki)
+    };
 
     let sig_alg_id = signature_algorithm_id(key_type, hash_alg)?;
     let subject_dn = encode_distinguished_name(subject)?;
@@ -835,6 +1194,10 @@ pub fn run_certificates_generate(
         .map_err(|e| CliError(format!("Failed to store certificate: {e}")))?;
 
     println!("Certificate generated and stored in slot {slot:?}.");
+
+    if update_chuid {
+        generate_chuid(dev, management_key, pin)?;
+    }
     Ok(())
 }
 
@@ -845,6 +1208,7 @@ pub fn run_certificates_request(
     hash_algorithm: &str,
     output: &str,
     pin: Option<&str>,
+    public_key_file: Option<&str>,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
@@ -856,12 +1220,28 @@ pub fn run_certificates_request(
             .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
     }
 
-    let metadata = session
-        .get_slot_metadata(slot)
-        .map_err(|e| CliError(format!("Failed to get slot metadata (is a key present?): {e}")))?;
-
-    let key_type = metadata.key_type;
-    let spki_der = device_pubkey_to_spki(key_type, &metadata.public_key_der)?;
+    let (key_type, spki_der) = if let Some(pk_file) = public_key_file {
+        let data = read_file_or_stdin(pk_file)?;
+        let der = if let Ok(text) = std::str::from_utf8(&data) {
+            if text.contains("-----BEGIN") {
+                pem_decode(text)?
+            } else {
+                data
+            }
+        } else {
+            data
+        };
+        let kt = KeyType::from_public_key_der(&der)
+            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
+        (kt, der)
+    } else {
+        let metadata = session
+            .get_slot_metadata(slot)
+            .map_err(|e| CliError(format!("Failed to get slot metadata (is a key present?): {e}")))?;
+        let kt = metadata.key_type;
+        let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)?;
+        (kt, spki)
+    };
 
     let sig_alg_id = signature_algorithm_id(key_type, hash_alg)?;
     let subject_dn = encode_distinguished_name(subject)?;

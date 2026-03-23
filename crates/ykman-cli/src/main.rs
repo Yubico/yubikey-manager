@@ -109,7 +109,11 @@ enum Commands {
         readers: bool,
     },
     /// Show general information
-    Info,
+    Info {
+        /// Check FIPS approved mode status
+        #[arg(short = 'c', long)]
+        check_fips: bool,
+    },
     /// Enable or disable applications and settings
     Config {
         #[command(subcommand)]
@@ -289,14 +293,14 @@ enum OathAction {
     Accounts(OathAccountAction),
     /// Manage OATH access (password)
     Access {
-        /// Password to unlock OATH
-        #[arg(short, long)]
+        /// Current password to unlock OATH
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// New password to set
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         new_password: Option<String>,
         /// Remove the password
-        #[arg(short, long)]
+        #[arg(short = 'c', long)]
         clear: bool,
     },
 }
@@ -430,10 +434,10 @@ enum OtpAction {
         /// Slot number (1 or 2)
         slot: String,
         /// URI or text prefix
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         prefix: Option<String>,
         /// NDEF type
-        #[arg(long, default_value = "URI")]
+        #[arg(short = 't', long, default_value = "URI")]
         ndef_type: String,
         /// Access code (hex)
         #[arg(short = 'A', long)]
@@ -447,22 +451,22 @@ enum OtpAction {
         /// Slot number (1 or 2)
         slot: String,
         /// Public ID (modhex)
-        #[arg(long)]
+        #[arg(short = 'P', long)]
         public_id: Option<String>,
         /// Private ID (hex)
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         private_id: Option<String>,
         /// AES key (hex)
-        #[arg(long)]
+        #[arg(short = 'k', long)]
         key: Option<String>,
         /// Use serial number as public ID
         #[arg(short = 'S', long)]
         serial_public_id: bool,
         /// Generate random private ID
-        #[arg(long)]
+        #[arg(short = 'g', long)]
         generate_private_id: bool,
         /// Generate random key
-        #[arg(long)]
+        #[arg(short = 'G', long)]
         generate_key: bool,
         /// Append Enter after OTP
         #[arg(long)]
@@ -476,6 +480,9 @@ enum OtpAction {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
+        /// File path to output configuration
+        #[arg(short = 'O', long)]
+        config_output: Option<String>,
     },
     /// Program a static password
     Static {
@@ -547,10 +554,10 @@ enum OtpAction {
         /// HMAC key (hex)
         key: Option<String>,
         /// Number of digits (6 or 8)
-        #[arg(long, default_value = "6")]
+        #[arg(short = 'd', long, default_value = "6")]
         digits: String,
         /// Initial counter value
-        #[arg(long, default_value_t = 0)]
+        #[arg(short = 'c', long, default_value_t = 0)]
         counter: u32,
         /// Append Enter after code
         #[arg(long)]
@@ -564,6 +571,9 @@ enum OtpAction {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
+        /// Token identifier string
+        #[arg(short = 'i', long)]
+        identifier: Option<String>,
     },
     /// Update slot settings
     Settings {
@@ -576,7 +586,7 @@ enum OtpAction {
         #[arg(long, conflicts_with = "enter")]
         no_enter: bool,
         /// Keystroke pacing (0, 20, 40, or 60 ms)
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         pacing: Option<u8>,
         /// Use numeric keypad for digits
         #[arg(long)]
@@ -672,6 +682,12 @@ enum PivAccessAction {
         generate: bool,
         #[arg(short = 'f', long)]
         force: bool,
+        /// Verify PIN before changing management key
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Store management key on YubiKey, protected by PIN
+        #[arg(short = 'p', long)]
+        protect: bool,
     },
 }
 
@@ -693,7 +709,7 @@ enum PivKeysAction {
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        #[arg(short = 'f', long, default_value = "PEM")]
+        #[arg(short = 'F', long, default_value = "PEM")]
         format: String,
     },
     /// Import a private key
@@ -710,6 +726,9 @@ enum PivKeysAction {
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Password for decrypting password-protected key files
+        #[arg(short = 'p', long)]
+        password: Option<String>,
     },
     /// Show key metadata
     Info {
@@ -722,7 +741,7 @@ enum PivKeysAction {
         slot: String,
         /// Output certificate file
         output: String,
-        #[arg(short = 'f', long, default_value = "PEM")]
+        #[arg(short = 'F', long, default_value = "PEM")]
         format: String,
     },
     /// Export public key
@@ -731,8 +750,14 @@ enum PivKeysAction {
         slot: String,
         /// Output file
         output: String,
-        #[arg(short = 'f', long, default_value = "PEM")]
+        #[arg(short = 'F', long, default_value = "PEM")]
         format: String,
+        /// Verify public key against slot certificate
+        #[arg(short = 'v', long)]
+        verify: bool,
+        /// PIN for verification
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
     },
     /// Move key between slots
     Move {
@@ -764,7 +789,7 @@ enum PivCertAction {
         slot: String,
         /// Output file
         output: String,
-        #[arg(short = 'f', long, default_value = "PEM")]
+        #[arg(short = 'F', long, default_value = "PEM")]
         format: String,
     },
     /// Import certificate to slot
@@ -779,6 +804,15 @@ enum PivCertAction {
         pin: Option<String>,
         #[arg(short, long)]
         compress: bool,
+        /// Password for decrypting the certificate file
+        #[arg(short = 'p', long)]
+        password: Option<String>,
+        /// Verify certificate against slot key
+        #[arg(short = 'v', long)]
+        verify: bool,
+        /// Don't update CHUID after importing certificate
+        #[arg(long)]
+        no_update_chuid: bool,
     },
     /// Delete certificate from slot
     Delete {
@@ -788,34 +822,46 @@ enum PivCertAction {
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Don't update CHUID after deleting certificate
+        #[arg(long)]
+        no_update_chuid: bool,
     },
     /// Generate a self-signed certificate
     Generate {
         /// PIV slot
         slot: String,
+        /// File containing a public key (use '-' for stdin). Optional if YubiKey >= 5.4.
+        #[arg(value_name = "PUBLIC-KEY")]
+        public_key: Option<String>,
         /// Subject common name
         #[arg(short, long)]
         subject: String,
         /// Validity period in days
-        #[arg(short, long, default_value_t = 365)]
+        #[arg(long, default_value_t = 365)]
         valid_days: u32,
         /// Hash algorithm (SHA256, SHA384, SHA512)
-        #[arg(long, default_value = "SHA256")]
+        #[arg(short = 'a', long, default_value = "SHA256")]
         hash_algorithm: String,
         #[arg(short, long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Don't update CHUID after generating certificate
+        #[arg(long)]
+        no_update_chuid: bool,
     },
     /// Generate a Certificate Signing Request (CSR)
     Request {
         /// PIV slot
         slot: String,
+        /// File containing a public key (use '-' for stdin)
+        #[arg(value_name = "PUBLIC-KEY")]
+        public_key: Option<String>,
         /// Subject common name
         #[arg(short, long)]
         subject: String,
         /// Hash algorithm (SHA256, SHA384, SHA512)
-        #[arg(long, default_value = "SHA256")]
+        #[arg(short = 'a', long, default_value = "SHA256")]
         hash_algorithm: String,
         /// Output file
         output: String,
@@ -908,7 +954,8 @@ enum OpenpgpAccessAction {
         #[arg(short, long)]
         admin_pin: Option<String>,
         /// New reset code
-        reset_code: String,
+        #[arg(short = 'r', long)]
+        reset_code: Option<String>,
     },
     /// Unblock PIN
     UnblockPin {
@@ -961,8 +1008,11 @@ enum OpenpgpKeysAction {
         key: String,
         /// Output file
         output: String,
-        #[arg(short = 'f', long, default_value = "PEM")]
+        #[arg(short = 'F', long, default_value = "PEM")]
         format: String,
+        /// PIN for attestation
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
     },
 }
 
@@ -974,7 +1024,7 @@ enum OpenpgpCertAction {
         key: String,
         /// Output file
         output: String,
-        #[arg(short = 'f', long, default_value = "PEM")]
+        #[arg(short = 'F', long, default_value = "PEM")]
         format: String,
     },
     /// Import certificate
@@ -1077,6 +1127,9 @@ enum HsmauthCredAction {
         label: String,
         /// Output file (- for stdout)
         output: String,
+        /// Output format (PEM or DER)
+        #[arg(short = 'F', long, default_value = "PEM")]
+        format: String,
     },
 }
 
@@ -1148,6 +1201,9 @@ enum SecurityDomainKeysAction {
         /// Replace existing KVN
         #[arg(long)]
         replace_kvn: Option<String>,
+        /// Password for decrypting private key files
+        #[arg(short = 'p', long)]
+        password: Option<String>,
     },
     /// Set certificate serial number allowlist
     SetAllowlist {
@@ -1401,10 +1457,10 @@ fn run() -> Result<(), CliError> {
             }
             list::run(serials, readers)
         }
-        Commands::Info => {
+        Commands::Info { check_fips } => {
             let dev = resolve_device(cli.device, &cli.reader)?;
             apply_version_override(&dev);
-            info::run(&dev)
+            info::run(&dev, check_fips)
         }
         Commands::Config { action } => {
             let dev = resolve_device(cli.device, &cli.reader)?;
@@ -1614,7 +1670,11 @@ fn run() -> Result<(), CliError> {
                     no_enter,
                     access_code,
                     force,
+                    config_output,
                 } => {
+                    if config_output.is_some() {
+                        eprintln!("WARNING: --config-output is not yet implemented.");
+                    }
                     let enter_flag = if enter {
                         Some(true)
                     } else if no_enter {
@@ -1699,7 +1759,11 @@ fn run() -> Result<(), CliError> {
                     no_enter,
                     access_code,
                     force,
+                    identifier,
                 } => {
+                    if identifier.is_some() {
+                        eprintln!("WARNING: --identifier is not yet implemented.");
+                    }
                     let enter_flag = if enter {
                         Some(true)
                     } else if no_enter {
@@ -1789,6 +1853,8 @@ fn run() -> Result<(), CliError> {
                         touch,
                         generate,
                         force,
+                        pin,
+                        protect,
                     } => piv::run_change_management_key(
                         &dev,
                         management_key.as_deref(),
@@ -1797,6 +1863,8 @@ fn run() -> Result<(), CliError> {
                         touch,
                         generate,
                         force,
+                        pin.as_deref(),
+                        protect,
                     ),
                 },
                 PivAction::Keys(keys) => match keys {
@@ -1827,15 +1895,21 @@ fn run() -> Result<(), CliError> {
                         touch_policy,
                         management_key,
                         pin,
-                    } => piv::run_keys_import(
-                        &dev,
-                        &slot,
-                        &key_file,
-                        &pin_policy,
-                        &touch_policy,
-                        management_key.as_deref(),
-                        pin.as_deref(),
-                    ),
+                        password,
+                    } => {
+                        if password.is_some() {
+                            eprintln!("WARNING: password-protected keys not yet supported.");
+                        }
+                        piv::run_keys_import(
+                            &dev,
+                            &slot,
+                            &key_file,
+                            &pin_policy,
+                            &touch_policy,
+                            management_key.as_deref(),
+                            pin.as_deref(),
+                        )
+                    }
                     PivKeysAction::Info { slot } => piv::run_keys_info(&dev, &slot),
                     PivKeysAction::Attest {
                         slot,
@@ -1846,7 +1920,14 @@ fn run() -> Result<(), CliError> {
                         slot,
                         output,
                         format,
-                    } => piv::run_keys_export(&dev, &slot, &output, &format),
+                        verify,
+                        pin: _,
+                    } => {
+                        if verify {
+                            eprintln!("NOTE: --verify is not yet implemented for key export.");
+                        }
+                        piv::run_keys_export(&dev, &slot, &output, &format)
+                    }
                     PivKeysAction::Move {
                         source,
                         dest,
@@ -1879,31 +1960,47 @@ fn run() -> Result<(), CliError> {
                         management_key,
                         pin,
                         compress,
-                    } => piv::run_certificates_import(
-                        &dev,
-                        &slot,
-                        &cert_file,
-                        management_key.as_deref(),
-                        pin.as_deref(),
-                        compress,
-                    ),
+                        password,
+                        verify,
+                        no_update_chuid,
+                    } => {
+                        if password.is_some() {
+                            eprintln!("WARNING: --password is not yet implemented for certificate import.");
+                        }
+                        if verify {
+                            eprintln!("WARNING: --verify is not yet implemented for certificate import.");
+                        }
+                        piv::run_certificates_import(
+                            &dev,
+                            &slot,
+                            &cert_file,
+                            management_key.as_deref(),
+                            pin.as_deref(),
+                            compress,
+                            !no_update_chuid,
+                        )
+                    }
                     PivCertAction::Delete {
                         slot,
                         management_key,
                         pin,
+                        no_update_chuid,
                     } => piv::run_certificates_delete(
                         &dev,
                         &slot,
                         management_key.as_deref(),
                         pin.as_deref(),
+                        !no_update_chuid,
                     ),
                     PivCertAction::Generate {
                         slot,
+                        public_key,
                         subject,
                         valid_days,
                         hash_algorithm,
                         management_key,
                         pin,
+                        no_update_chuid,
                     } => piv::run_certificates_generate(
                         &dev,
                         &slot,
@@ -1912,9 +2009,12 @@ fn run() -> Result<(), CliError> {
                         &hash_algorithm,
                         management_key.as_deref(),
                         pin.as_deref(),
+                        public_key.as_deref(),
+                        !no_update_chuid,
                     ),
                     PivCertAction::Request {
                         slot,
+                        public_key,
                         subject,
                         hash_algorithm,
                         output,
@@ -1926,6 +2026,7 @@ fn run() -> Result<(), CliError> {
                         &hash_algorithm,
                         &output,
                         pin.as_deref(),
+                        public_key.as_deref(),
                     ),
                 },
                 PivAction::Objects(objs) => match objs {
@@ -1994,7 +2095,11 @@ fn run() -> Result<(), CliError> {
                     OpenpgpAccessAction::ChangeResetCode {
                         admin_pin,
                         reset_code,
-                    } => openpgp::run_change_reset_code(&dev, admin_pin.as_deref(), &reset_code),
+                    } => openpgp::run_change_reset_code(
+                        &dev,
+                        admin_pin.as_deref(),
+                        reset_code.as_deref(),
+                    ),
                     OpenpgpAccessAction::UnblockPin {
                         admin_pin,
                         reset_code,
@@ -2032,7 +2137,8 @@ fn run() -> Result<(), CliError> {
                         key,
                         output,
                         format,
-                    } => openpgp::run_keys_attest(&dev, &key, &output, &format),
+                        pin,
+                    } => openpgp::run_keys_attest(&dev, &key, &output, &format, pin.as_deref()),
                 },
                 OpenpgpAction::Certificates(certs) => match certs {
                     OpenpgpCertAction::Export {
@@ -2128,8 +2234,8 @@ fn run() -> Result<(), CliError> {
                         credential_password.as_deref(),
                         &new_credential_password,
                     ),
-                    HsmauthCredAction::Export { label, output } => {
-                        hsmauth::run_credentials_export(&dev, &label, &output)
+                    HsmauthCredAction::Export { label, output, format } => {
+                        hsmauth::run_credentials_export(&dev, &label, &output, &format)
                     }
                 },
                 HsmauthAction::Access(access) => match access {
@@ -2188,7 +2294,11 @@ fn run() -> Result<(), CliError> {
                             key_type,
                             input,
                             replace_kvn,
+                            password,
                         } => {
+                            if password.is_some() {
+                                eprintln!("WARNING: --password is not yet implemented for SD key import.");
+                            }
                             let kid = parse_hex_u8(&kid)?;
                             let kvn = parse_hex_u8(&kvn)?;
                             let rkvn = replace_kvn

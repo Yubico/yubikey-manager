@@ -230,13 +230,14 @@ pub fn run_credentials_export(
     dev: &YubiKeyDevice,
     label: &str,
     output: &str,
+    format: &str,
 ) -> Result<(), CliError> {
     let mut session = open_session(dev)?;
     let public_key = session
         .get_public_key(label)
         .map_err(|e| CliError(format!("Failed to get public key: {e}")))?;
 
-    // Export as PEM (SubjectPublicKeyInfo)
+    // Export as SubjectPublicKeyInfo
     use base64::Engine;
     use p256::elliptic_curve::sec1::ToEncodedPoint;
 
@@ -271,19 +272,36 @@ pub fn run_credentials_export(
     spki.push(0x00); // unused bits
     spki.extend_from_slice(pk_bytes);
 
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&spki);
-    let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
-    for chunk in b64.as_bytes().chunks(64) {
-        pem.push_str(std::str::from_utf8(chunk).unwrap());
-        pem.push('\n');
-    }
-    pem.push_str("-----END PUBLIC KEY-----\n");
+    match format.to_ascii_uppercase().as_str() {
+        "DER" => {
+            if output == "-" {
+                use std::io::Write;
+                std::io::stdout()
+                    .write_all(&spki)
+                    .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            } else {
+                std::fs::write(output, &spki)
+                    .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+                println!("Public key exported to {output}.");
+            }
+        }
+        _ => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&spki);
+            let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
+            for chunk in b64.as_bytes().chunks(64) {
+                pem.push_str(std::str::from_utf8(chunk).unwrap());
+                pem.push('\n');
+            }
+            pem.push_str("-----END PUBLIC KEY-----\n");
 
-    if output == "-" {
-        print!("{pem}");
-    } else {
-        std::fs::write(output, &pem).map_err(|e| CliError(format!("Failed to write: {e}")))?;
-        println!("Public key exported to {output}.");
+            if output == "-" {
+                print!("{pem}");
+            } else {
+                std::fs::write(output, &pem)
+                    .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+                println!("Public key exported to {output}.");
+            }
+        }
     }
     Ok(())
 }
