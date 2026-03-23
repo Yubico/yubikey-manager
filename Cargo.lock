@@ -1366,6 +1366,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "p256",
+ "sha2",
  "yubikit-rs",
 ]
 

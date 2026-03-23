@@ -38,12 +38,6 @@ struct ScpParams {
     ca_cert: Option<Vec<u8>>,
 }
 
-impl ScpParams {
-    fn is_active(&self) -> bool {
-        self.scp03_keys.is_some() || self.scp11_private_key.is_some() || self.ca_cert.is_some()
-    }
-}
-
 #[derive(Parser)]
 #[command(
     name = "ykman-rs",
