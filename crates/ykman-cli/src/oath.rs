@@ -2,21 +2,39 @@ use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use yubikit_rs::device::YubiKeyDevice;
+use yubikit_rs::management::Capability;
 use yubikit_rs::oath::{
     Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
 
+use crate::scp;
 use crate::util::CliError;
 
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     password: Option<&str>,
 ) -> Result<OathSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = OathSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?;
+    let mut session = if scp::needs_scp11b(dev, Capability::OATH) {
+        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+        let resp = protocol
+            .select(yubikit_rs::iso7816::Aid::OATH)
+            .map_err(|e| CliError(format!("Failed to select OATH: {e}")))?;
+        protocol
+            .init_scp11(kid, kvn, &pk, None, &[], None)
+            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
+        OathSession::from_protocol(protocol, &resp)
+            .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+    } else {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        OathSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+    };
     if session.locked() {
         let pw = password.ok_or_else(|| {
             CliError("OATH is password-protected. Use --password to unlock.".into())

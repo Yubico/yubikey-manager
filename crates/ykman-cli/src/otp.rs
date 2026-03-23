@@ -3,12 +3,14 @@ use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use yubikit_rs::device::YubiKeyDevice;
+use yubikit_rs::management::Capability;
 use yubikit_rs::otp_codec::{modhex_decode, modhex_encode};
 use yubikit_rs::yubiotp::{
     ACC_CODE_SIZE, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE, YubiOtpOtpSession,
     YubiOtpSession,
 };
 
+use crate::scp;
 use crate::util::CliError;
 
 const SHIFT: u8 = 0x80;
@@ -170,10 +172,27 @@ fn format_oath_code(response: &[u8], digits: u8) -> String {
 fn open_sc_session(
     dev: &YubiKeyDevice,
 ) -> Result<YubiOtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    YubiOtpSession::new(conn).map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+    if scp::needs_scp11b(dev, Capability::OTP) {
+        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+        let resp = protocol
+            .select(yubikit_rs::iso7816::Aid::OTP)
+            .map_err(|e| CliError(format!("Failed to select OTP: {e}")))?;
+        protocol
+            .init_scp11(kid, kvn, &pk, None, &[], None)
+            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
+        YubiOtpSession::from_protocol(protocol, &resp)
+            .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+    } else {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        YubiOtpSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+    }
 }
 
 fn open_otp_session(dev: &YubiKeyDevice) -> Result<YubiOtpOtpSession, CliError> {

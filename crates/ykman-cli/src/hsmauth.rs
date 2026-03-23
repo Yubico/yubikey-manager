@@ -2,7 +2,9 @@ use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::hsmauth::{HsmAuthSession, credential_password_from_str};
+use yubikit_rs::management::Capability;
 
+use crate::scp;
 use crate::util::CliError;
 
 const DEFAULT_MANAGEMENT_KEY: &[u8] = &[0u8; 16];
@@ -10,10 +12,27 @@ const DEFAULT_MANAGEMENT_KEY: &[u8] = &[0u8; 16];
 fn open_session(
     dev: &YubiKeyDevice,
 ) -> Result<HsmAuthSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    HsmAuthSession::new(conn).map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+    if scp::needs_scp11b(dev, Capability::HSMAUTH) {
+        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+        let resp = protocol
+            .select(yubikit_rs::iso7816::Aid::HSMAUTH)
+            .map_err(|e| CliError(format!("Failed to select HSM Auth: {e}")))?;
+        protocol
+            .init_scp11(kid, kvn, &pk, None, &[], None)
+            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
+        HsmAuthSession::from_protocol(protocol, &resp)
+            .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+    } else {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        HsmAuthSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+    }
 }
 
 fn confirm(msg: &str) -> bool {

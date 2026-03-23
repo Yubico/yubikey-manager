@@ -1,20 +1,41 @@
 use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
+use yubikit_rs::iso7816::SmartCardProtocol;
+use yubikit_rs::management::Capability;
 use yubikit_rs::piv::{
     DEFAULT_MANAGEMENT_KEY, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession, Slot,
     TouchPolicy,
 };
 
+use crate::scp;
 use crate::util::CliError;
 
 fn open_session(
     dev: &YubiKeyDevice,
 ) -> Result<PivSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    PivSession::new(conn).map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+    if scp::needs_scp11b(dev, Capability::PIV) {
+        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        let mut protocol = SmartCardProtocol::new(conn);
+        // Select PIV first, then init SCP (matching Python's approach)
+        protocol
+            .select(yubikit_rs::iso7816::Aid::PIV)
+            .map_err(|e| CliError(format!("Failed to select PIV: {e}")))?;
+        protocol
+            .init_scp11(kid, kvn, &pk, None, &[], None)
+            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
+        PivSession::from_protocol(protocol)
+            .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+    } else {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        PivSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+    }
 }
 
 fn confirm(msg: &str) -> bool {
