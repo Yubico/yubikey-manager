@@ -1288,6 +1288,7 @@ pub struct OpenPgpSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> OpenPgpSession<C> {
     pub fn new(connection: C) -> Result<Self, OpenPgpError> {
+        log::debug!("Opening OpenPgpSession");
         let mut protocol = SmartCardProtocol::new(connection);
 
         // SELECT OpenPGP application; auto-activate if needed

@@ -11,6 +11,7 @@ mod diagnose;
 mod hsmauth;
 mod info;
 mod list;
+mod logging;
 mod oath;
 mod openpgp;
 mod otp;
@@ -83,8 +84,21 @@ struct Cli {
     #[arg(long = "diagnose")]
     diagnose: bool,
 
+    /// Enable logging at given verbosity level
+    #[arg(short = 'l', long = "log-level", value_parser = parse_log_level)]
+    log_level: Option<logging::LogLevel>,
+
+    /// Write log to FILE instead of printing to stderr (requires --log-level)
+    #[arg(long = "log-file", value_name = "FILE")]
+    log_file: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+fn parse_log_level(s: &str) -> Result<logging::LogLevel, String> {
+    logging::LogLevel::from_str_insensitive(s)
+        .ok_or_else(|| format!("Invalid log level: '{s}'. Use ERROR, WARNING, INFO, DEBUG, or TRAFFIC"))
 }
 
 fn parse_app_name(s: &str) -> Result<String, String> {
@@ -1483,6 +1497,22 @@ fn apply_version_override(dev: &YubiKeyDevice) {
 
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
+
+    // Initialize logging
+    if let Some(level) = cli.log_level {
+        logging::init_logging(level, cli.log_file.as_deref())
+            .map_err(|e| CliError(e))?;
+        log::info!(
+            "System info:\n  ykman-rs:  {}\n  Platform:  {}\n  Arch:      {}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+    } else if cli.log_file.is_some() {
+        return Err(CliError(
+            "--log-file requires specifying --log-level.".into(),
+        ));
+    }
 
     // Handle --diagnose
     if cli.diagnose {

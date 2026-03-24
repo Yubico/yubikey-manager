@@ -30,6 +30,7 @@ mod py_core;
 mod py_device;
 mod py_hid;
 mod py_hsmauth_session;
+mod py_logging;
 mod py_management_session;
 mod py_oath;
 mod py_oath_session;
@@ -46,6 +47,7 @@ use pyo3::prelude::*;
 
 #[pymodule]
 fn _ykman_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    py_logging::init();
     py_pcsc::register(m)?;
     py_hid::register(m)?;
     py_core::register(m)?;

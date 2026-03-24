@@ -256,6 +256,7 @@ pub struct HsmAuthSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> HsmAuthSession<C> {
     pub fn new(connection: C) -> Result<Self, HsmAuthError> {
+        log::debug!("Opening HsmAuthSession");
         let mut protocol = SmartCardProtocol::new(connection);
         let select_response = protocol.select(Aid::HSMAUTH)?;
         Self::init(protocol, &select_response)

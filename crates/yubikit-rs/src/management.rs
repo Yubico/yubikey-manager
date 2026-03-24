@@ -777,6 +777,7 @@ pub struct ManagementSession<C: SmartCardConnection> {
 impl<C: SmartCardConnection> ManagementSession<C> {
     /// Open a management session, selecting the management AID.
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
+        log::debug!("Opening ManagementSession");
         let mut protocol = SmartCardProtocol::new(connection);
         let select_bytes = protocol.select(Aid::MANAGEMENT)?;
         Self::init(protocol, &select_bytes)
@@ -842,6 +843,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
 
     /// Get detailed information about the YubiKey.
     pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        log::debug!("Reading device info");
         if self.version < Version(4, 1, 0) {
             return Err(SmartCardError::NotSupported(
                 "DeviceInfo requires YubiKey 4.1.0 or later".into(),
@@ -933,6 +935,7 @@ pub struct ManagementOtpSession {
 impl ManagementOtpSession {
     /// Open a management session over OTP HID.
     pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+        log::debug!("Opening ManagementOtpSession");
         let protocol = OtpProtocol::new(connection)?;
         let version = patch_version(protocol.version);
         if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {

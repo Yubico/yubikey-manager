@@ -29,6 +29,7 @@ use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
 use std::ffi::CString;
 
 use crate::iso7816::{SmartCardConnection, SmartCardError, Transport};
+use crate::log_traffic;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PcscError {
@@ -146,6 +147,8 @@ impl PcscConnection {
 
 impl SmartCardConnection for PcscConnection {
     fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        use crate::logging::hex_encode;
+        log_traffic!("SEND: {}", hex_encode(apdu));
         let resp = self.transmit(apdu).map_err(SmartCardError::from)?;
         if resp.len() < 2 {
             return Err(SmartCardError::BadResponse(
@@ -154,6 +157,7 @@ impl SmartCardConnection for PcscConnection {
         }
         let sw = ((resp[resp.len() - 2] as u16) << 8) | (resp[resp.len() - 1] as u16);
         let data = resp[..resp.len() - 2].to_vec();
+        log_traffic!("RECV: {} SW={:04x}", hex_encode(&data), sw);
         Ok((data, sw))
     }
 

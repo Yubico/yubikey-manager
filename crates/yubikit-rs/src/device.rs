@@ -241,15 +241,18 @@ pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
 /// both PC/SC and HID (matched by serial number) are merged into a single
 /// entry.
 pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!("Listing YubiKey devices");
     let mut devices = Vec::new();
     let mut seen_serials = HashSet::new();
 
     // Scan PC/SC readers
     if let Ok(readers) = list_readers() {
+        log::debug!("Found {} PC/SC reader(s)", readers.len());
         for reader in readers {
             if !reader.to_ascii_lowercase().contains("yubi") {
                 continue;
             }
+            log::debug!("Checking PC/SC reader: {reader}");
             {
                 if let Ok(info) = read_info(&reader) {
                     if let Some(serial) = info.serial {

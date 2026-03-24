@@ -882,6 +882,7 @@ pub struct YubiOtpSession<C: SmartCardConnection> {
 impl<C: SmartCardConnection> YubiOtpSession<C> {
     /// Open a YubiOTP session on the given SmartCard connection.
     pub fn new(connection: C) -> Result<Self, YubiOtpError> {
+        log::debug!("Opening YubiOtpSession (SmartCard)");
         let mut protocol = SmartCardProtocol::new(connection);
         let status = protocol.select(Aid::OTP)?;
         Self::init(protocol, &status)
@@ -1134,6 +1135,7 @@ pub struct YubiOtpOtpSession {
 impl YubiOtpOtpSession {
     /// Open a YubiOTP session on the given HID connection.
     pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+        log::debug!("Opening YubiOtpOtpSession (HID)");
         let protocol = OtpProtocol::new(connection)?;
         let status = protocol.read_status()?;
         let version = patch_version(protocol.version);

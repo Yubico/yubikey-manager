@@ -358,6 +358,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// SELECT an application by AID.
     pub fn select(&mut self, aid: &[u8]) -> Result<Vec<u8>, SmartCardError> {
+        log::debug!("Selecting AID: {}", crate::logging::hex_encode(aid));
         // Reset SCP state for SELECT
         self.scp_state = None;
 
@@ -528,6 +529,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Set the SCP state for encrypted messaging.
     pub fn set_scp_state(&mut self, state: ScpState) {
+        log::debug!("SCP secure channel established");
         self.scp_state = Some(state);
     }
 

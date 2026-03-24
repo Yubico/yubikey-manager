@@ -29,6 +29,7 @@ pub mod core_types;
 pub mod device;
 pub mod hsmauth;
 pub mod iso7816;
+pub mod logging;
 pub mod management;
 pub mod oath;
 pub mod openpgp;

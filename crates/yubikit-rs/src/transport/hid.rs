@@ -27,6 +27,8 @@
 
 use hidapi::HidApi;
 
+use crate::log_traffic;
+
 const YUBICO_VID: u16 = 0x1050;
 const USAGE_PAGE_OTP: u16 = 0x0001;
 const USAGE_OTP: u16 = 0x0006;
@@ -105,11 +107,14 @@ impl HidConnection {
         let n = dev.get_feature_report(&mut buf)?;
         let start = if n > 0 && buf[0] == 0 { 1 } else { 0 };
         let end = n.min(buf.len());
-        Ok(buf[start..end].to_vec())
+        let data = buf[start..end].to_vec();
+        log_traffic!("RECV: {}", crate::logging::hex_encode(&data));
+        Ok(data)
     }
 
     /// Write an 8-byte feature report to the device.
     pub fn set_feature_report(&self, data: &[u8]) -> Result<(), HidError> {
+        log_traffic!("SEND: {}", crate::logging::hex_encode(data));
         let dev = self.device.as_ref().ok_or(HidError::ConnectionClosed)?;
         let mut buf = vec![0u8; data.len() + 1];
         buf[0] = 0; // report ID
