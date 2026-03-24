@@ -46,12 +46,12 @@ fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
 }
 
 #[pyclass(unsendable)]
-struct HidConnection {
+struct OtpConnection {
     inner: hid::OtpConnection,
 }
 
 #[pymethods]
-impl HidConnection {
+impl OtpConnection {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
         Ok(Self {
@@ -199,7 +199,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_function(wrap_pyfunction!(list_all_hid_devices, &sub)?)?;
     sub.add_function(wrap_pyfunction!(list_fido_devices, &sub)?)?;
     sub.add_class::<HidDeviceInfo>()?;
-    sub.add_class::<HidConnection>()?;
+    sub.add_class::<OtpConnection>()?;
     sub.add_class::<FidoDeviceInfo>()?;
     sub.add_class::<FidoConnection>()?;
     m.add_submodule(&sub)?;

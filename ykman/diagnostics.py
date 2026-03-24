@@ -9,7 +9,7 @@ from typing import Any
 from fido2.ctap import CtapError
 from fido2.ctap2 import ClientPin, Ctap2
 
-from yubikit.core import Tlv, _override_version
+from yubikit.core import _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -57,19 +57,8 @@ def sys_info():
 def mgmt_info(pid, conn):
     data: list[Any] = []
     try:
-        m = ManagementSession(conn)
-        if m.backend is not None:
-            raw_info = m.backend.read_config()[1:]
-            if Tlv.parse_dict(raw_info).get(0x10) == b"\1":
-                raw_info += m.backend.read_config(1)[1:]
-            data.append(
-                {
-                    "Raw Info": raw_info,
-                }
-            )
-        else:
-            # Using native Rust session; raw config not directly accessible
-            data.append({"Raw Info": "(native session)"})
+        ManagementSession(conn)
+        data.append({"Raw Info": "(native session)"})
     except Exception as e:
         data.append(f"Failed to read device info via Management: {e!r}")
 

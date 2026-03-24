@@ -30,7 +30,7 @@ from threading import Event
 from time import sleep
 from typing import Callable
 
-from _ykman_native.hid import HidConnection
+from _ykman_native.hid import OtpConnection as _NativeOtpConnectionImpl
 from _ykman_native.hid import list_otp_devices as _native_list_otp
 
 from yubikit.core import PID, TRANSPORT, USB_INTERFACE
@@ -48,7 +48,7 @@ class _NativeOtpConnection(OtpConnection):
 
     def __init__(self, path: str):
         self._path = path
-        self._conn = HidConnection(path)
+        self._conn = _NativeOtpConnectionImpl(path)
 
     def close(self) -> None:
         self._conn.close()

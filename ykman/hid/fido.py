@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from threading import Event
@@ -25,8 +27,10 @@ class _FidoDescriptor:
     pid: int
 
 
-class NativeFidoConnection(CtapDevice):
+class NativeFidoConnection(CtapDevice, Connection):
     """FIDO connection backed by the native Rust CTAP HID transport."""
+
+    usb_interface = USB_INTERFACE.FIDO
 
     def __init__(self, path: str, pid: int):
         self._native = _NativeFidoConnection(path, pid)
@@ -67,14 +71,9 @@ class NativeFidoConnection(CtapDevice):
         self._native.close()
 
     @classmethod
-    def list_devices(cls) -> Iterator["NativeFidoConnection"]:
+    def list_devices(cls) -> Iterator[NativeFidoConnection]:
         for dev in _native_list_fido_devices():
             yield cls(dev.path, dev.pid)
-
-
-# Register as a Connection type
-NativeFidoConnection.usb_interface = USB_INTERFACE.FIDO  # type: ignore[attr-defined]
-Connection.register(NativeFidoConnection)
 
 
 class CtapYubiKeyDevice(YkmanDevice):
