@@ -45,7 +45,7 @@ def is_in_fips_mode(session: YubiOtpSession) -> bool:
 
     :param session: The YubiOTP session.
     """
-    return session.backend.send_and_receive(0x14, b"", 1) == b"\1"  # type: ignore
+    return session._native.is_in_fips_mode()
 
 
 DEFAULT_PW_CHAR_BLOCKLIST = ["\t", "\n", " "]

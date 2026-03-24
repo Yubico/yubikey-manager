@@ -535,23 +535,20 @@ class ManagementSession:
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
             native = _NativeManagementOtpSession(connection._path)  # type: ignore[attr-defined]
-            self._native = native
-            self._version = Version(*native.version)
         elif isinstance(connection, SmartCardConnection):
             native = _NativeManagementSession(connection, scp_key_params)
-            self._native = native
-            self._version = Version(*native.version)
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            path = connection.descriptor.path  # type: ignore[attr-defined]
+            path = connection._path  # type: ignore[attr-defined]
             if isinstance(path, bytes):
                 path = path.decode()
             native = _NativeManagementFidoSession(path)
-            self._native = native
-            self._version = Version(*native.version)
         else:
             raise TypeError("Unsupported connection type")
+
+        self._native = native
+        self._version = Version(*native.version)
 
         if self._version == (0, 0, 1):
             logger.debug("Overriding development version...")

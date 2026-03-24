@@ -200,6 +200,10 @@ impl PyYubiOtpSession {
             .map_err(yubiotp_err)?;
         Ok(PyBytes::new(py, &result))
     }
+
+    fn is_in_fips_mode(&mut self) -> PyResult<bool> {
+        self.session.is_in_fips_mode().map_err(yubiotp_err)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -320,5 +324,9 @@ impl PyYubiOtpOtpSession {
             .calculate_hmac_sha1(s, challenge, None, None)
             .map_err(yubiotp_err)?;
         Ok(PyBytes::new(py, &result))
+    }
+
+    fn is_in_fips_mode(&self) -> PyResult<bool> {
+        self.session.is_in_fips_mode().map_err(yubiotp_err)
     }
 }
