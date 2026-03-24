@@ -38,7 +38,7 @@ use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtoc
 use crate::otp::check_crc;
 use crate::otp::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
-use crate::transport::hid::HidConnection;
+use crate::transport::otphid::OtpConnection;
 use crate::transport::ctaphid::{CtapHidTransportError, FidoConnection};
 use crate::yubiotp::ConfigSlot;
 
@@ -928,13 +928,13 @@ impl<C: SmartCardConnection> ManagementSession<C> {
 
 /// Management operations over the OTP (HID) interface.
 pub struct ManagementOtpSession {
-    protocol: OtpProtocol<HidConnection>,
+    protocol: OtpProtocol<OtpConnection>,
     version: Version,
 }
 
 impl ManagementOtpSession {
     /// Open a management session over OTP HID.
-    pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: OtpConnection) -> Result<Self, YubiOtpError> {
         log::debug!("Opening ManagementOtpSession");
         let protocol = OtpProtocol::new(connection)?;
         let version = patch_version(protocol.version);

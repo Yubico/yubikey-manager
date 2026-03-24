@@ -1,14 +1,80 @@
 import logging
+from dataclasses import dataclass
+from threading import Event
+from typing import Callable, Iterator
 
-from fido2.hid import CtapHidDevice, list_descriptors, open_connection
+from _ykman_native.hid import FidoConnection as _NativeFidoConnection
+from _ykman_native.hid import list_fido_devices as _native_list_fido_devices
+from fido2.ctap import STATUS, CtapDevice
 
-from yubikit.core import PID, TRANSPORT, Connection
+from yubikit.core import PID, TRANSPORT, USB_INTERFACE, Connection
 from yubikit.support import read_info
 
 from ..base import REINSERT_STATUS, CancelledException, YkmanDevice
 from ..fido import FidoConnection
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _FidoDescriptor:
+    """Minimal descriptor for NativeFidoConnection, compatible with CtapHidDevice."""
+
+    path: str
+    vid: int
+    pid: int
+
+
+class NativeFidoConnection(CtapDevice):
+    """FIDO connection backed by the native Rust CTAP HID transport."""
+
+    def __init__(self, path: str, pid: int):
+        self._native = _NativeFidoConnection(path, pid)
+        self._device_version = self._native.device_version
+        self._capabilities = self._native.capabilities
+        self.descriptor = _FidoDescriptor(path=path, vid=0x1050, pid=pid)
+
+    @property
+    def capabilities(self) -> int:
+        return self._capabilities
+
+    @property
+    def device_version(self) -> tuple[int, int, int]:
+        return self._device_version
+
+    @property
+    def version(self) -> int:
+        return 2  # CTAP HID protocol version
+
+    @property
+    def product_name(self) -> str | None:
+        return None
+
+    @property
+    def serial_number(self) -> str | None:
+        return None
+
+    def call(
+        self,
+        cmd: int,
+        data: bytes = b"",
+        event: Event | None = None,
+        on_keepalive: Callable[[STATUS], None] | None = None,
+    ) -> bytes:
+        return bytes(self._native.call(cmd, data))
+
+    def close(self) -> None:
+        self._native.close()
+
+    @classmethod
+    def list_devices(cls) -> Iterator["NativeFidoConnection"]:
+        for dev in _native_list_fido_devices():
+            yield cls(dev.path, dev.pid)
+
+
+# Register as a Connection type
+NativeFidoConnection.usb_interface = USB_INTERFACE.FIDO  # type: ignore[attr-defined]
+Connection.register(NativeFidoConnection)
 
 
 class CtapYubiKeyDevice(YkmanDevice):
@@ -19,12 +85,15 @@ class CtapYubiKeyDevice(YkmanDevice):
         self.descriptor = descriptor
 
     def supports_connection(self, connection_type):
-        return issubclass(CtapHidDevice, connection_type)
+        return issubclass(NativeFidoConnection, connection_type)
 
     def open_connection(self, connection_type):
         assert isinstance(connection_type, type)  # noqa: S101
         if self.supports_connection(connection_type):
-            dev = CtapHidDevice(self.descriptor, open_connection(self.descriptor))
+            dev = NativeFidoConnection(
+                str(self.descriptor.path),
+                self.descriptor.pid,
+            )
             assert isinstance(dev, Connection)  # noqa: S101
             return dev
         return super().open_connection(connection_type)
@@ -70,10 +139,10 @@ class CtapYubiKeyDevice(YkmanDevice):
 
 def list_ctap_devices() -> list[CtapYubiKeyDevice]:
     devs = []
-    for desc in list_descriptors():
-        if desc.vid == 0x1050:
-            try:
-                devs.append(CtapYubiKeyDevice(desc))
-            except ValueError:
-                logger.debug(f"Unsupported Yubico device with PID: {desc.pid:02x}")
+    for dev in _native_list_fido_devices():
+        try:
+            desc = _FidoDescriptor(path=dev.path, vid=0x1050, pid=dev.pid)
+            devs.append(CtapYubiKeyDevice(desc))
+        except ValueError:
+            logger.debug(f"Unsupported Yubico device with PID: {dev.pid:02x}")
     return devs

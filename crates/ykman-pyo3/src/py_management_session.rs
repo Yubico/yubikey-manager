@@ -6,7 +6,7 @@ use yubikit_rs::management::{
     ManagementSession as RustManagementSession,
 };
 use yubikit_rs::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
-use yubikit_rs::transport::hid::HidConnection;
+use yubikit_rs::transport::otphid::OtpConnection;
 
 use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
 
@@ -203,7 +203,7 @@ pub struct ManagementOtpSession {
 impl ManagementOtpSession {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
-        let hid_conn = HidConnection::new(path)
+        let hid_conn = OtpConnection::new(path)
             .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
         let inner = RustManagementOtpSession::new(hid_conn).map_err(yubiotp_err)?;
         Ok(Self { inner })

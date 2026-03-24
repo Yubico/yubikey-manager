@@ -3,12 +3,12 @@ use std::io::{self, Write};
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::{
-    Capability, DeviceConfig, DeviceFlag, ManagementOtpSession, ManagementSession,
+    Capability, DeviceConfig, DeviceFlag, ManagementFidoSession, ManagementOtpSession, ManagementSession,
 };
 
 use crate::util::CliError;
 
-/// Open a management session, trying SmartCard first, falling back to OTP HID.
+/// Open a management session, trying SmartCard first, then OTP HID, then FIDO HID.
 fn write_config(
     dev: &YubiKeyDevice,
     config: &DeviceConfig,
@@ -28,9 +28,15 @@ fn write_config(
         session
             .write_device_config(config, reboot, lock_code, new_lock_code)
             .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+    } else if let Ok(conn) = dev.open_fido() {
+        let mut session = ManagementFidoSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open FIDO management session: {e}")))?;
+        session
+            .write_device_config(config, reboot, lock_code, new_lock_code)
+            .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
     } else {
         return Err(CliError(
-            "Failed to open connection: No SmartCard or OTP connection available.".into(),
+            "Failed to open connection: No SmartCard, OTP, or FIDO connection available.".into(),
         ));
     }
     Ok(())
@@ -424,18 +430,31 @@ pub fn run_mode(
         return Err(CliError("Aborted by user.".into()));
     }
 
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
-    session
-        .set_mode(
-            code,
-            chalresp_timeout.unwrap_or(0),
-            autoeject_timeout.unwrap_or(0),
-        )
-        .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
+    if let Ok(conn) = dev.open_smartcard() {
+        let mut session = ManagementSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+        session
+            .set_mode(
+                code,
+                chalresp_timeout.unwrap_or(0),
+                autoeject_timeout.unwrap_or(0),
+            )
+            .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
+    } else if let Ok(conn) = dev.open_fido() {
+        let mut session = ManagementFidoSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open FIDO management session: {e}")))?;
+        session
+            .set_mode(
+                code,
+                chalresp_timeout.unwrap_or(0),
+                autoeject_timeout.unwrap_or(0),
+            )
+            .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
+    } else {
+        return Err(CliError(
+            "Failed to open connection: No SmartCard or FIDO connection available.".into(),
+        ));
+    }
 
     println!(
         "Mode set! You must remove and re-insert your YubiKey for this change to take effect."

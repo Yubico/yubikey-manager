@@ -37,7 +37,7 @@ use thiserror::Error;
 
 use crate::core_types::Version;
 use crate::smartcard::SmartCardError;
-use crate::transport::hid::HidConnection;
+use crate::transport::otphid::OtpConnection;
 
 
 // --- OTP Codec ---
@@ -152,7 +152,7 @@ pub enum YubiOtpError {
     #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
     #[error("HID error: {0}")]
-    Hid(#[from] crate::transport::hid::HidError),
+    Hid(#[from] crate::transport::otphid::HidError),
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ pub trait OtpTransport {
     fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError>;
 }
 
-impl OtpTransport for HidConnection {
+impl OtpTransport for OtpConnection {
     fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError> {
         self.get_feature_report().map_err(YubiOtpError::from)
     }

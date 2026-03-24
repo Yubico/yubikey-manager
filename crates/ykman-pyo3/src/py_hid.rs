@@ -1,7 +1,8 @@
 use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit_rs::transport::hid;
+use yubikit_rs::transport::otphid as hid;
+use yubikit_rs::transport::ctaphid;
 
 fn hid_err(e: hid::HidError) -> PyErr {
     PyOSError::new_err(e.to_string())
@@ -46,7 +47,7 @@ fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
 
 #[pyclass(unsendable)]
 struct HidConnection {
-    inner: hid::HidConnection,
+    inner: hid::OtpConnection,
 }
 
 #[pymethods]
@@ -54,7 +55,7 @@ impl HidConnection {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: hid::HidConnection::new(path).map_err(hid_err)?,
+            inner: hid::OtpConnection::new(path).map_err(hid_err)?,
         })
     }
 
@@ -86,12 +87,121 @@ impl HidConnection {
     }
 }
 
+// ---------------------------------------------------------------------------
+// FIDO HID (CTAP)
+// ---------------------------------------------------------------------------
+
+fn ctap_err(e: ctaphid::CtapHidTransportError) -> PyErr {
+    PyOSError::new_err(e.to_string())
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct FidoDeviceInfo {
+    #[pyo3(get)]
+    pub path: String,
+    #[pyo3(get)]
+    pub pid: u16,
+}
+
+#[pyfunction]
+fn list_fido_devices() -> PyResult<Vec<FidoDeviceInfo>> {
+    ctaphid::list_fido_devices()
+        .map(|devs| {
+            devs.into_iter()
+                .map(|d| FidoDeviceInfo {
+                    path: d.path,
+                    pid: d.pid,
+                })
+                .collect()
+        })
+        .map_err(ctap_err)
+}
+
+/// Native FIDO HID connection wrapping the Rust CTAP HID transport.
+#[pyclass(unsendable)]
+pub struct FidoConnection {
+    inner: Option<ctaphid::FidoConnection>,
+    path: String,
+    device_version: (u8, u8, u8),
+    capabilities: u8,
+}
+
+#[pymethods]
+impl FidoConnection {
+    #[new]
+    fn new(path: &str, pid: u16) -> PyResult<Self> {
+        let info = ctaphid::FidoDeviceInfo {
+            path: path.to_string(),
+            pid,
+            report_size_in: 64,
+            report_size_out: 64,
+        };
+        let conn = ctaphid::FidoConnection::open(&info).map_err(ctap_err)?;
+        let device_version = conn.device_version();
+        let capabilities = conn.capabilities().raw();
+        Ok(Self {
+            inner: Some(conn),
+            path: path.to_string(),
+            device_version,
+            capabilities,
+        })
+    }
+
+    /// Send a CTAP HID command and receive the response.
+    fn call<'py>(&self, py: Python<'py>, cmd: u8, data: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
+        let conn = self.inner.as_ref().ok_or_else(|| {
+            PyOSError::new_err("Connection is closed")
+        })?;
+        let response = conn.call(cmd, data).map_err(ctap_err)?;
+        Ok(PyBytes::new(py, &response))
+    }
+
+    #[getter]
+    fn device_version(&self) -> (u8, u8, u8) {
+        self.device_version
+    }
+
+    #[getter]
+    fn capabilities(&self) -> u8 {
+        self.capabilities
+    }
+
+    #[getter]
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    fn close(&mut self) -> PyResult<()> {
+        if let Some(mut conn) = self.inner.take() {
+            conn.close();
+        }
+        Ok(())
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_val: Option<&Bound<'_, PyAny>>,
+        _exc_tb: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        self.close()
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "hid")?;
     sub.add_function(wrap_pyfunction!(list_otp_devices, &sub)?)?;
     sub.add_function(wrap_pyfunction!(list_all_hid_devices, &sub)?)?;
+    sub.add_function(wrap_pyfunction!(list_fido_devices, &sub)?)?;
     sub.add_class::<HidDeviceInfo>()?;
     sub.add_class::<HidConnection>()?;
+    sub.add_class::<FidoDeviceInfo>()?;
+    sub.add_class::<FidoConnection>()?;
     m.add_submodule(&sub)?;
 
     let sys = m.py().import("sys")?;

@@ -1,7 +1,7 @@
 use yubikit_rs::device::{get_name, list_readers, read_info, read_info_fido, read_info_otp};
 use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::{Capability, DeviceInfo, ReleaseType};
-use yubikit_rs::transport::hid::{HidConnection, list_otp_devices};
+use yubikit_rs::transport::otphid::{OtpConnection, list_otp_devices};
 use yubikit_rs::transport::ctaphid::{FidoConnection, list_fido_devices};
 use yubikit_rs::transport::pcsc::PcscConnection;
 
@@ -357,7 +357,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
 
                     println!();
                     println!("    OTP:");
-                    match HidConnection::new(&hid.path) {
+                    match OtpConnection::new(&hid.path) {
                         Ok(conn) => {
                             match yubikit_rs::yubiotp::YubiOtpOtpSession::new(conn) {
                                 Ok(session) => {

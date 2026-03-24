@@ -46,7 +46,7 @@ use std::fmt;
 
 use crate::smartcard::{SmartCardError, Transport, Version};
 use crate::management::{Capability, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession, ManagementSession, UsbInterface};
-use crate::transport::hid::{HidConnection, HidDeviceInfo, HidError, list_otp_devices};
+use crate::transport::otphid::{OtpConnection, HidDeviceInfo, HidError, list_otp_devices};
 use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
 use crate::transport::pcsc::{PcscConnection, PcscError};
 pub use crate::transport::pcsc::list_readers;
@@ -205,12 +205,29 @@ impl YubiKeyDevice {
     }
 
     /// Open an OTP HID connection to this device.
-    pub fn open_otp(&self) -> Result<HidConnection, DeviceError> {
+    pub fn open_otp(&self) -> Result<OtpConnection, DeviceError> {
         let path = self
             .hid_path
             .as_deref()
             .ok_or(DeviceError::NoDeviceFound)?;
-        Ok(HidConnection::new(path)?)
+        Ok(OtpConnection::new(path)?)
+    }
+
+    /// Open a FIDO HID (CTAP) connection to this device.
+    pub fn open_fido(&self) -> Result<FidoConnection, DeviceError> {
+        let path = self
+            .fido_path
+            .as_deref()
+            .ok_or(DeviceError::NoDeviceFound)?;
+        // Find the matching FIDO device info from enumeration
+        let fido_devs = list_fido_devices()
+            .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))?;
+        let info = fido_devs
+            .into_iter()
+            .find(|d| d.path == path)
+            .ok_or(DeviceError::NoDeviceFound)?;
+        FidoConnection::open(&info)
+            .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))
     }
 }
 
@@ -542,10 +559,10 @@ pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
 
 /// Read device info via OTP HID.
 ///
-/// Opens an [`HidConnection`] and uses [`ManagementOtpSession`] to read
+/// Opens an [`OtpConnection`] and uses [`ManagementOtpSession`] to read
 /// [`DeviceInfo`]. Applies standard fixups for known device quirks.
 pub fn read_info_otp(hid_path: &str) -> Result<DeviceInfo, DeviceError> {
-    let conn = HidConnection::new(hid_path)?;
+    let conn = OtpConnection::new(hid_path)?;
     let mut session = ManagementOtpSession::new(conn)
         .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
     // Use unchecked variant — dev devices report version 0.0.1 but still

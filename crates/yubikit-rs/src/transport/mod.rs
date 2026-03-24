@@ -26,5 +26,5 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 pub mod ctaphid;
-pub mod hid;
+pub mod otphid;
 pub mod pcsc;

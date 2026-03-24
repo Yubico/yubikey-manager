@@ -38,7 +38,7 @@ use sha1::{Digest, Sha1};
 use crate::core_types::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
 use crate::otp::{calculate_crc, check_crc};
-use crate::transport::hid::HidConnection;
+use crate::transport::otphid::OtpConnection;
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
 pub use crate::otp::{OtpProtocol, OtpTransport, YubiOtpError};
@@ -1126,14 +1126,14 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
 
 /// A session with the YubiOTP application over an OTP HID connection.
 pub struct YubiOtpOtpSession {
-    protocol: OtpProtocol<HidConnection>,
+    protocol: OtpProtocol<OtpConnection>,
     status: Vec<u8>,
     version: Version,
 }
 
 impl YubiOtpOtpSession {
     /// Open a YubiOTP session on the given HID connection.
-    pub fn new(connection: HidConnection) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: OtpConnection) -> Result<Self, YubiOtpError> {
         log::debug!("Opening YubiOtpOtpSession (HID)");
         let protocol = OtpProtocol::new(connection)?;
         let status = protocol.read_status()?;
