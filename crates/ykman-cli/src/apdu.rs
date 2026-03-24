@@ -1,29 +1,39 @@
 use yubikit_rs::core_types::Version;
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
+use yubikit_rs::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 use crate::util::CliError;
 
-fn parse_apdu(s: &str) -> Result<(u8, u8, u8, u8, Vec<u8>, Option<u16>, Option<u16>), CliError> {
+/// Parsed APDU: (cla, ins, p1, p2, data, le), expected_sw
+type ParsedApdu = ((u8, u8, u8, u8, Vec<u8>, u16), Option<u16>);
+
+fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
     // Format: [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]
     let s = s.trim();
 
-    // Check for expected SW suffix (=XXXX)
-    let (main_str, expected_sw) = if let Some((m, sw_str)) = s.rsplit_once('=') {
-        let sw = u16::from_str_radix(sw_str, 16)
-            .map_err(|_| CliError(format!("Invalid expected SW: {sw_str}")))?;
-        (m, Some(sw))
+    // Check for expected SW suffix: "=" alone means 9000, "=XXXX" means that SW
+    let (main_str, expected_sw) = if let Some(idx) = s.rfind('=') {
+        let sw_str = &s[idx + 1..];
+        let sw = if sw_str.is_empty() {
+            0x9000
+        } else {
+            u16::from_str_radix(sw_str, 16)
+                .map_err(|_| CliError(format!("Invalid expected SW: {sw_str}")))?
+        };
+        (&s[..idx], Some(sw))
     } else {
         (s, None)
     };
 
-    // Split off LE suffix
+    // Split off LE suffix (/XX)
     let (main_part, le) = if let Some((m, le_str)) = main_str.rsplit_once('/') {
-        let le = u16::from_str_radix(le_str, 16)
-            .map_err(|_| CliError(format!("Invalid LE: {le_str}")))?;
-        (m, Some(le))
+        let le = u16::from(
+            u8::from_str_radix(le_str, 16)
+                .map_err(|_| CliError(format!("Invalid LE: {le_str}")))?,
+        );
+        (m, le)
     } else {
-        (main_str, None)
+        (main_str, 0)
     };
 
     // Split off DATA
@@ -56,7 +66,7 @@ fn parse_apdu(s: &str) -> Result<(u8, u8, u8, u8, Vec<u8>, Option<u16>, Option<u
         }
     };
 
-    Ok((cla, ins, p1, p2, data, le, expected_sw))
+    Ok(((cla, ins, p1, p2, data, le), expected_sw))
 }
 
 fn app_to_aid(app: &str) -> Result<&'static [u8], CliError> {
@@ -73,79 +83,128 @@ fn app_to_aid(app: &str) -> Result<&'static [u8], CliError> {
     }
 }
 
+fn hex_spaced(data: &[u8]) -> String {
+    data.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+}
+
+/// Print response in the same format as Python ykman.
+fn print_response(resp: &[u8], sw: u16, no_pretty: bool) {
+    if resp.is_empty() {
+        println!("RECV (SW={sw:04X})");
+    } else {
+        println!("RECV (SW={sw:04X}):");
+        if no_pretty {
+            println!("{}", hex::encode_upper(resp));
+        } else {
+            for i in (0..resp.len()).step_by(16) {
+                let chunk = &resp[i..resp.len().min(i + 16)];
+                let hex_part = chunk
+                    .iter()
+                    .map(|b| format!("{b:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let ascii_part: String = chunk
+                    .iter()
+                    .map(|&b| if b > 31 && b < 127 { b as char } else { '·' })
+                    .collect();
+                println!("{:<50}{ascii_part}", hex_part);
+            }
+        }
+    }
+}
+
 pub fn run_apdu(
     dev: &YubiKeyDevice,
     apdus: &[String],
     no_pretty: bool,
     app: Option<&str>,
     short: bool,
+    send_apdu: &[String],
 ) -> Result<(), CliError> {
+    if apdus.is_empty() && send_apdu.is_empty() && app.is_none() {
+        return Err(CliError("No commands provided.".into()));
+    }
+    if (app.is_some() || !apdus.is_empty()) && !send_apdu.is_empty() {
+        return Err(CliError(
+            "Cannot mix positional APDUs and -s/--send-apdu.".into(),
+        ));
+    }
+
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
 
+    if !send_apdu.is_empty() {
+        // Raw send-apdu mode: send full hex APDUs directly
+        let mut is_first = true;
+        for apdu_hex in send_apdu {
+            if !is_first {
+                println!();
+            }
+            is_first = false;
+            let apdu_bytes = hex::decode(apdu_hex)
+                .map_err(|_| CliError(format!("Invalid hex APDU: {apdu_hex}")))?;
+            println!("SEND: {}", hex_spaced(&apdu_bytes));
+            let (resp, sw) = conn
+                .send_and_receive(&apdu_bytes)
+                .map_err(|e| CliError(format!("APDU error: {e}")))?;
+            print_response(&resp, sw, no_pretty);
+        }
+        return Ok(());
+    }
+
+    // Standard mode with protocol
     let mut protocol = SmartCardProtocol::new(conn);
 
     if short {
         protocol.configure_force_short(Version(0, 0, 0), true);
     }
 
+    let mut is_first = true;
+
     // Select app if specified
     if let Some(app_name) = app {
+        is_first = false;
         let aid = app_to_aid(app_name)?;
-        protocol
+        println!("SELECT AID: {}", hex_spaced(aid));
+        let resp = protocol
             .select(aid)
             .map_err(|e| CliError(format!("Failed to select {app_name}: {e}")))?;
-        if !no_pretty {
-            eprintln!("Selected application: {app_name}");
-        }
+        print_response(&resp, 0x9000, no_pretty);
     }
 
     for apdu_str in apdus {
-        let (cla, ins, p1, p2, data, _le, expected_sw) = parse_apdu(apdu_str)?;
+        let ((cla, ins, p1, p2, data, le), expected_sw) = parse_apdu(apdu_str)?;
 
-        if !no_pretty {
-            eprintln!(
-                ">> {:02X} {:02X} {:02X} {:02X} {}",
-                cla,
-                ins,
-                p1,
-                p2,
-                if data.is_empty() {
-                    String::new()
-                } else {
-                    hex::encode(&data)
-                }
-            );
+        if !is_first {
+            println!();
         }
+        is_first = false;
 
-        let response = protocol.send_apdu(cla, ins, p1, p2, &data);
+        // Format SEND line like Python: header -- data (LE=XX)
+        let mut send_line = format!("{:02X} {:02X} {:02X} {:02X}", cla, ins, p1, p2);
+        if !data.is_empty() {
+            send_line.push_str(&format!(" -- {}", hex_spaced(&data)));
+        }
+        if le > 0 {
+            send_line.push_str(&format!(" (LE={le:02X})"));
+        }
+        println!("SEND: {send_line}");
 
-        match response {
-            Ok(resp) => {
-                let sw = 0x9000u16;
-                if no_pretty {
-                    if !resp.is_empty() {
-                        print!("{}", hex::encode(&resp));
-                    }
-                    println!("{sw:04X}");
-                } else {
-                    if !resp.is_empty() {
-                        eprintln!("<< {} ({} bytes)", hex::encode(&resp), resp.len());
-                    }
-                    eprintln!("SW: {sw:04X}");
-                }
+        // Send APDU and capture both success and error responses
+        let (resp, sw) = match protocol.send_apdu_with_le(cla, ins, p1, p2, &data, le) {
+            Ok(resp) => (resp, 0x9000u16),
+            Err(SmartCardError::Apdu { data, sw }) => (data, sw),
+            Err(e) => return Err(CliError(format!("APDU error: {e}"))),
+        };
 
-                if let Some(expected) = expected_sw {
-                    if sw != expected {
-                        return Err(CliError(format!(
-                            "Expected SW {expected:04X}, got {sw:04X}"
-                        )));
-                    }
-                }
-            }
-            Err(e) => {
-                return Err(CliError(format!("APDU error: {e}")));
+        print_response(&resp, sw, no_pretty);
+
+        if let Some(expected) = expected_sw {
+            if sw != expected {
+                return Err(CliError(format!(
+                    "Aborted due to error (expected SW={expected:04X})."
+                )));
             }
         }
     }

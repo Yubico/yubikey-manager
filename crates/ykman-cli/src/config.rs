@@ -2,9 +2,39 @@ use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::iso7816::Transport;
-use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag, ManagementSession};
+use yubikit_rs::management::{
+    Capability, DeviceConfig, DeviceFlag, ManagementOtpSession, ManagementSession,
+};
 
 use crate::util::CliError;
+
+/// Open a management session, trying SmartCard first, falling back to OTP HID.
+fn write_config(
+    dev: &YubiKeyDevice,
+    config: &DeviceConfig,
+    reboot: bool,
+    lock_code: Option<&[u8]>,
+    new_lock_code: Option<&[u8]>,
+) -> Result<(), CliError> {
+    if let Ok(conn) = dev.open_smartcard() {
+        let mut session = ManagementSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+        session
+            .write_device_config(config, reboot, lock_code, new_lock_code)
+            .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+    } else if let Ok(conn) = dev.open_otp() {
+        let mut session = ManagementOtpSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open OTP management session: {e}")))?;
+        session
+            .write_device_config(config, reboot, lock_code, new_lock_code)
+            .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+    } else {
+        return Err(CliError(
+            "Failed to open connection: No SmartCard or OTP connection available.".into(),
+        ));
+    }
+    Ok(())
+}
 
 /// Parse a capability name (case-insensitive) to a Capability value.
 fn parse_capability(name: &str) -> Result<Capability, CliError> {
@@ -165,14 +195,7 @@ pub fn run_usb(
     config.challenge_response_timeout = chalresp_timeout;
 
     let lc = lock_code.map(parse_lock_code).transpose()?;
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
-    session
-        .write_device_config(&config, reboot, lc.as_deref(), None)
-        .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+    write_config(dev, &config, reboot, lc.as_deref(), None)?;
 
     println!("USB application configuration updated.");
     Ok(())
@@ -227,14 +250,7 @@ pub fn run_nfc(
                 return Err(CliError("Aborted by user.".into()));
             }
         }
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        let mut session = ManagementSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
-        session
-            .write_device_config(&config, false, lc.as_deref(), None)
-            .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+        write_config(dev, &config, false, lc.as_deref(), None)?;
         println!(
             "YubiKey NFC disabled. It will be re-enabled automatically the next time it is connected to USB power."
         );
@@ -301,14 +317,7 @@ pub fn run_nfc(
         .enabled_capabilities
         .insert(Transport::Nfc, new_enabled);
     let lc = lock_code.map(parse_lock_code).transpose()?;
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
-    session
-        .write_device_config(&config, false, lc.as_deref(), None)
-        .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+    write_config(dev, &config, false, lc.as_deref(), None)?;
 
     println!("NFC application configuration updated.");
     Ok(())
@@ -340,14 +349,7 @@ pub fn run_set_lock_code(
     };
 
     let config = DeviceConfig::default();
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
-    session
-        .write_device_config(&config, false, cur.as_deref(), new.as_deref())
-        .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
+    write_config(dev, &config, false, cur.as_deref(), new.as_deref())?;
 
     println!("Lock code updated.");
     Ok(())

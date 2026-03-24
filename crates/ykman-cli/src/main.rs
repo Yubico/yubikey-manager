@@ -167,7 +167,7 @@ enum Commands {
         #[arg(long)]
         short: bool,
         /// Send full hex APDU strings (alternative to positional)
-        #[arg(short = 'S', long = "send-apdu")]
+        #[arg(short = 's', long = "send-apdu")]
         send_apdu: Vec<String>,
     },
 }
@@ -2415,9 +2415,7 @@ fn run() -> Result<(), CliError> {
             send_apdu,
         } => {
             let dev = resolve_device(cli.device, &cli.reader)?;
-            let mut all_apdus = apdus;
-            all_apdus.extend(send_apdu);
-            apdu::run_apdu(&dev, &all_apdus, no_pretty, app.as_deref(), short)
+            apdu::run_apdu(&dev, &apdus, no_pretty, app.as_deref(), short, &send_apdu)
         }
     }
 }
