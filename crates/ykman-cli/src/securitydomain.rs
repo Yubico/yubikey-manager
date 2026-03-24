@@ -35,7 +35,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
         .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
 
     if keys.is_empty() {
-        println!("No keys stored.");
+        eprintln!("No keys stored.");
     } else {
         for (key_ref, components) in &keys {
             let comps: Vec<String> = components
@@ -65,7 +65,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset: {e}")))?;
-    println!("Security Domain has been reset.");
+    eprintln!("Security Domain has been reset.");
     Ok(())
 }
 
@@ -104,7 +104,7 @@ pub fn run_keys_delete(dev: &YubiKeyDevice, scp_params: &ScpParams, kid: u8, kvn
     session
         .delete_key(kid, kvn, false)
         .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
-    println!("Key deleted.");
+    eprintln!("Key deleted.");
     Ok(())
 }
 
@@ -178,7 +178,7 @@ pub fn run_keys_import(
             session
                 .put_key_static(key_ref, &static_keys, &[0u8; 16], replace_kvn.unwrap_or(0))
                 .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;
-            println!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
+            eprintln!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
         }
         "scp11" => {
             // Input is a PEM file with certificate(s) and/or private key
@@ -231,7 +231,7 @@ pub fn run_keys_import(
                         replace_kvn.unwrap_or(0),
                     )
                     .map_err(|e| CliError(format!("Failed to import EC private key: {e}")))?;
-                println!("EC private key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
+                eprintln!("EC private key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
             }
 
             if !certs.is_empty() {

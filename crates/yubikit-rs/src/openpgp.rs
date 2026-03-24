@@ -1288,7 +1288,6 @@ pub struct OpenPgpSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> OpenPgpSession<C> {
     pub fn new(connection: C) -> Result<Self, OpenPgpError> {
-        log::debug!("Opening OpenPgpSession");
         let mut protocol = SmartCardProtocol::new(connection);
 
         // SELECT OpenPGP application; auto-activate if needed
@@ -1315,6 +1314,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, OpenPgpError> {
+        log::debug!("Opening OpenPgpSession");
         // Read version (BCD encoded)
         let version = match protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[]) {
             Ok(bcd_bytes) => Version(

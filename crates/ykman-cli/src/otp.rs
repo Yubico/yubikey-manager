@@ -6,14 +6,141 @@ use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::management::Capability;
 use yubikit_rs::otp_codec::{modhex_decode, modhex_encode};
 use yubikit_rs::yubiotp::{
-    ACC_CODE_SIZE, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE, YubiOtpOtpSession,
-    YubiOtpSession,
+    ACC_CODE_SIZE, ConfigState, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE,
+    YubiOtpError, YubiOtpOtpSession, YubiOtpSession,
 };
 
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
 const SHIFT: u8 = 0x80;
+
+/// Unified OTP session that can be either HID or SmartCard backed.
+enum OtpSession<C: yubikit_rs::iso7816::SmartCardConnection> {
+    Otp(YubiOtpOtpSession),
+    Sc(YubiOtpSession<C>),
+}
+
+macro_rules! delegate {
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        match $self {
+            OtpSession::Otp(s) => s.$method($($arg),*),
+            OtpSession::Sc(s) => s.$method($($arg),*),
+        }
+    };
+}
+
+impl<C: yubikit_rs::iso7816::SmartCardConnection> OtpSession<C> {
+    fn get_config_state(&self) -> ConfigState {
+        delegate!(self, get_config_state)
+    }
+
+    fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
+        delegate!(self, get_serial)
+    }
+
+    fn swap_slots(&mut self) -> Result<(), YubiOtpError> {
+        delegate!(self, swap_slots)
+    }
+
+    fn delete_slot(&mut self, slot: Slot, cur_acc_code: Option<&[u8]>) -> Result<(), YubiOtpError> {
+        delegate!(self, delete_slot, slot, cur_acc_code)
+    }
+
+    fn set_ndef_configuration(
+        &mut self,
+        slot: Slot,
+        uri: Option<&str>,
+        cur_acc_code: Option<&[u8]>,
+        ndef_type: NdefType,
+    ) -> Result<(), YubiOtpError> {
+        delegate!(self, set_ndef_configuration, slot, uri, cur_acc_code, ndef_type)
+    }
+
+    fn put_configuration(
+        &mut self,
+        slot: Slot,
+        config: &SlotConfiguration,
+        acc_code: Option<&[u8]>,
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError> {
+        delegate!(self, put_configuration, slot, config, acc_code, cur_acc_code)
+    }
+
+    fn update_configuration(
+        &mut self,
+        slot: Slot,
+        config: &SlotConfiguration,
+        acc_code: Option<&[u8]>,
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError> {
+        delegate!(self, update_configuration, slot, config, acc_code, cur_acc_code)
+    }
+
+    fn calculate_hmac_sha1_otp(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        match self {
+            OtpSession::Otp(s) => s.calculate_hmac_sha1(slot, challenge, None, None),
+            OtpSession::Sc(s) => s.calculate_hmac_sha1(slot, challenge),
+        }
+    }
+}
+
+/// Open an OTP session, preferring HID. Falls back to SmartCard if HID is
+/// unavailable, SCP is specified, or the device is on NFC.
+fn open_session<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<OtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
+
+    // If SCP is needed or NFC, must use SmartCard
+    if !matches!(scp_config, ScpConfig::None) || scp::is_nfc(dev) {
+        return open_sc(dev, scp_config);
+    }
+
+    // Try OTP HID first
+    if let Ok(conn) = dev.open_otp() {
+        if let Ok(session) = YubiOtpOtpSession::new(conn) {
+            return Ok(OtpSession::Otp(session));
+        }
+    }
+
+    // Fall back to SmartCard
+    open_sc(dev, scp_config)
+}
+
+fn open_sc<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_config: ScpConfig,
+) -> Result<OtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+    match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let session = YubiOtpSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
+            Ok(OtpSession::Sc(session))
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+            let resp = protocol
+                .select(yubikit_rs::iso7816::Aid::OTP)
+                .map_err(|e| CliError(format!("Failed to select OTP: {e}")))?;
+            scp::apply_scp(&mut protocol, config)?;
+            let session = YubiOtpSession::from_protocol(protocol, &resp)
+                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
+            Ok(OtpSession::Sc(session))
+        }
+    }
+}
 
 fn us_scancodes() -> HashMap<char, u8> {
     let mut m = HashMap::new();
@@ -168,44 +295,8 @@ fn format_oath_code(response: &[u8], digits: u8) -> String {
     format!("{:0>width$}", code % modulus, width = digits as usize)
 }
 
-// Use SmartCard-based session (works over both USB and NFC)
-fn open_sc_session<'a>(
-    dev: &'a YubiKeyDevice,
-    scp_params: &ScpParams,
-) -> Result<YubiOtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
-    match scp_config {
-        ScpConfig::None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            YubiOtpSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
-        }
-        ref config => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-            let resp = protocol
-                .select(yubikit_rs::iso7816::Aid::OTP)
-                .map_err(|e| CliError(format!("Failed to select OTP: {e}")))?;
-            scp::apply_scp(&mut protocol, config)?;
-            YubiOtpSession::from_protocol(protocol, &resp)
-                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
-        }
-    }
-}
-
-fn open_otp_session(dev: &YubiKeyDevice) -> Result<YubiOtpOtpSession, CliError> {
-    let conn = dev
-        .open_otp()
-        .map_err(|e| CliError(format!("Failed to open OTP HID connection: {e}")))?;
-    YubiOtpOtpSession::new(conn).map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
-}
-
 pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
-    let session = open_sc_session(dev, scp_params)?;
+    let session = open_session(dev, scp_params)?;
     let state = session.get_config_state();
     for slot in [Slot::One, Slot::Two] {
         let num = slot.map(1, 2);
@@ -225,11 +316,11 @@ pub fn run_swap(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Res
     if !force && !confirm("Swap the two OTP slot configurations?") {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .swap_slots()
         .map_err(|e| CliError(format!("Failed to swap slots: {e}")))?;
-    println!("Slot configurations swapped.");
+    eprintln!("Slot configurations swapped.");
     Ok(())
 }
 
@@ -245,11 +336,11 @@ pub fn run_delete(
     if !force && !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .delete_slot(slot, acc.as_ref().map(|a| a.as_slice()))
         .map_err(|e| CliError(format!("Failed to delete slot: {e}")))?;
-    println!("Slot {} deleted.", slot.map(1, 2));
+    eprintln!("Slot {} deleted.", slot.map(1, 2));
     Ok(())
 }
 
@@ -277,11 +368,11 @@ pub fn run_ndef(
     {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .set_ndef_configuration(slot, prefix, acc.as_ref().map(|a| a.as_slice()), nt)
         .map_err(|e| CliError(format!("Failed to configure NDEF: {e}")))?;
-    println!("NDEF configured for slot {}.", slot.map(1, 2));
+    eprintln!("NDEF configured for slot {}.", slot.map(1, 2));
     Ok(())
 }
 
@@ -304,7 +395,7 @@ pub fn run_yubiotp(
 
     // Resolve public ID
     let pub_id_bytes: Vec<u8> = if serial_public_id {
-        let mut session = open_sc_session(dev, scp_params)?;
+        let mut session = open_session(dev, scp_params)?;
         let serial = session
             .get_serial()
             .map_err(|e| CliError(format!("Failed to get serial: {e}")))?;
@@ -372,12 +463,12 @@ pub fn run_yubiotp(
         config = config.append_cr(cr);
     }
 
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
-    println!("Yubico OTP programmed in slot {}.", slot.map(1, 2));
+    eprintln!("Yubico OTP programmed in slot {}.", slot.map(1, 2));
     println!("Public ID: {}", modhex_encode(&pub_id_bytes));
     println!("Private ID: {}", hex::encode(priv_id));
     println!("Key: {}", hex::encode(key_bytes));
@@ -425,15 +516,15 @@ pub fn run_static(
         config = config.append_cr(cr);
     }
 
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
     if generate {
-        println!("Static password set in slot {}: {pw}", slot.map(1, 2));
+        eprintln!("Static password set in slot {}: {pw}", slot.map(1, 2));
     } else {
-        println!("Static password set in slot {}.", slot.map(1, 2));
+        eprintln!("Static password set in slot {}.", slot.map(1, 2));
     }
     Ok(())
 }
@@ -480,7 +571,7 @@ pub fn run_chalresp(
         config = config.digits8(true);
     }
 
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
@@ -516,16 +607,10 @@ pub fn run_calculate(
     };
 
     // Prefer OTP HID for challenge-response (supports touch keepalive)
-    let result = if let Ok(mut session) = open_otp_session(dev) {
-        session
-            .calculate_hmac_sha1(slot, &challenge_bytes, None, None)
-            .map_err(|e| CliError(format!("Failed to calculate: {e}")))?
-    } else {
-        let mut session = open_sc_session(dev, scp_params)?;
-        session
-            .calculate_hmac_sha1(slot, &challenge_bytes)
-            .map_err(|e| CliError(format!("Failed to calculate: {e}")))?
-    };
+    let mut session = open_session(dev, scp_params)?;
+    let result = session
+        .calculate_hmac_sha1_otp(slot, &challenge_bytes)
+        .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
 
     if totp {
         println!("{}", format_oath_code(&result, digits));
@@ -572,12 +657,12 @@ pub fn run_hotp(
         config = config.append_cr(cr);
     }
 
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
-    println!("HOTP programmed in slot {}.", slot.map(1, 2));
+    eprintln!("HOTP programmed in slot {}.", slot.map(1, 2));
     Ok(())
 }
 
@@ -621,7 +706,7 @@ pub fn run_settings(
         config = config.serial_usb_visible(v);
     }
 
-    let mut session = open_sc_session(dev, scp_params)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .update_configuration(
             slot,
@@ -631,6 +716,6 @@ pub fn run_settings(
         )
         .map_err(|e| CliError(format!("Failed to update settings: {e}")))?;
 
-    println!("Settings updated for slot {}.", slot.map(1, 2));
+    eprintln!("Settings updated for slot {}.", slot.map(1, 2));
     Ok(())
 }

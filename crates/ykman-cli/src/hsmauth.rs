@@ -75,7 +75,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset: {e}")))?;
-    println!("HSM Auth application has been reset.");
+    eprintln!("HSM Auth application has been reset.");
     Ok(())
 }
 
@@ -86,7 +86,7 @@ pub fn run_credentials_list(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Resu
         .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
 
     if creds.is_empty() {
-        println!("No credentials stored.");
+        eprintln!("No credentials stored.");
     } else {
         for cred in &creds {
             let touch = if cred.touch_required {
@@ -120,7 +120,7 @@ pub fn run_credentials_generate(
     session
         .generate_credential_asymmetric(&mgmt, label, &pw, touch)
         .map_err(|e| CliError(format!("Failed to generate credential: {e}")))?;
-    println!("Asymmetric credential generated: {label}");
+    eprintln!("Asymmetric credential generated: {label}");
     Ok(())
 }
 
@@ -139,7 +139,7 @@ pub fn run_credentials_delete(
     session
         .delete_credential(&mgmt, label)
         .map_err(|e| CliError(format!("Failed to delete credential: {e}")))?;
-    println!("Credential deleted: {label}");
+    eprintln!("Credential deleted: {label}");
     Ok(())
 }
 
@@ -183,7 +183,7 @@ pub fn run_credentials_symmetric(
     session
         .put_credential_symmetric(&mgmt, label, &enc, &mac, &pw, touch)
         .map_err(|e| CliError(format!("Failed to store credential: {e}")))?;
-    println!("Symmetric credential stored: {label}");
+    eprintln!("Symmetric credential stored: {label}");
     if generate {
         println!("ENC key: {}", hex::encode(&enc));
         println!("MAC key: {}", hex::encode(&mac));
@@ -209,7 +209,7 @@ pub fn run_credentials_derive(
     session
         .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
         .map_err(|e| CliError(format!("Failed to derive credential: {e}")))?;
-    println!("Derived credential stored: {label}");
+    eprintln!("Derived credential stored: {label}");
     Ok(())
 }
 
@@ -229,7 +229,7 @@ pub fn run_credentials_change_password(
     session
         .change_credential_password(label, &old_pw, &new_pw)
         .map_err(|e| CliError(format!("Failed to change password: {e}")))?;
-    println!("Credential password changed for: {label}");
+    eprintln!("Credential password changed for: {label}");
     Ok(())
 }
 
@@ -284,7 +284,7 @@ pub fn run_credentials_export(
         "DER" => {
             write_file_or_stdout(output, &spki)?;
             if output != "-" {
-                println!("Public key exported to {output}.");
+                eprintln!("Public key exported to {output}.");
             }
         }
         _ => {
@@ -298,7 +298,7 @@ pub fn run_credentials_export(
 
             write_file_or_stdout(output, pem.as_bytes())?;
             if output != "-" {
-                println!("Public key exported to {output}.");
+                eprintln!("Public key exported to {output}.");
             }
         }
     }
@@ -332,9 +332,9 @@ pub fn run_access_change_management_key(
         .put_management_key(&old_mgmt, &new_key)
         .map_err(|e| CliError(format!("Failed to change management key: {e}")))?;
     if generate {
-        println!("Management key changed: {}", hex::encode(&new_key));
+        eprintln!("Management key changed: {}", hex::encode(&new_key));
     } else {
-        println!("Management key changed.");
+        eprintln!("Management key changed.");
     }
     Ok(())
 }

@@ -503,7 +503,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset PIV: {e}")))?;
-    println!("PIV application has been reset.");
+    eprintln!("PIV application has been reset.");
     Ok(())
 }
 
@@ -524,7 +524,7 @@ pub fn run_change_pin(
     session
         .change_pin(old, new)
         .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
-    println!("PIN changed.");
+    eprintln!("PIN changed.");
     Ok(())
 }
 
@@ -545,7 +545,7 @@ pub fn run_change_puk(
     session
         .change_puk(old, new)
         .map_err(|e| CliError(format!("Failed to change PUK: {e}")))?;
-    println!("PUK changed.");
+    eprintln!("PUK changed.");
     Ok(())
 }
 
@@ -566,7 +566,7 @@ pub fn run_unblock_pin(
     session
         .unblock_pin(puk, new)
         .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
-    println!("PIN unblocked.");
+    eprintln!("PIN unblocked.");
     Ok(())
 }
 
@@ -601,7 +601,7 @@ pub fn run_set_retries(
     session
         .set_pin_attempts(pin_retries, puk_retries)
         .map_err(|e| CliError(format!("Failed to set retries: {e}")))?;
-    println!("PIN and PUK retry counts set.");
+    eprintln!("PIN and PUK retry counts set.");
     Ok(())
 }
 
@@ -658,9 +658,9 @@ pub fn run_change_management_key(
     }
 
     if generate {
-        println!("Management key set: {}", hex::encode(&new_key));
+        eprintln!("Management key set: {}", hex::encode(&new_key));
     } else {
-        println!("Management key changed.");
+        eprintln!("Management key changed.");
     }
     Ok(())
 }
@@ -706,7 +706,7 @@ pub fn run_keys_generate(
         }
     }
 
-    println!("Generated {algorithm} key in slot {slot}. Public key written to {output}.");
+    eprintln!("Generated {algorithm} key in slot {slot}. Public key written to {output}.");
     Ok(())
 }
 
@@ -753,7 +753,7 @@ pub fn run_keys_import(
         .put_key(slot, key_type, &der, pp, tp)
         .map_err(|e| CliError(format!("Failed to import key: {e}")))?;
 
-    println!("Private key imported to slot {slot}.");
+    eprintln!("Private key imported to slot {slot}.");
     Ok(())
 }
 
@@ -793,7 +793,7 @@ pub fn run_keys_attest(
         .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;
 
     write_cert_file(output, &cert_der, format)?;
-    println!("Attestation certificate written to {output}.");
+    eprintln!("Attestation certificate written to {output}.");
     Ok(())
 }
 
@@ -818,7 +818,7 @@ pub fn run_keys_export(
                     write_file_or_stdout(output, pem.as_bytes())?;
                 }
             }
-            println!("Public key exported to {output}.");
+            eprintln!("Public key exported to {output}.");
             return Ok(());
         }
     }
@@ -870,7 +870,7 @@ pub fn run_keys_delete(
     session
         .delete_key(slot)
         .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
-    println!("Key in slot {slot} deleted.");
+    eprintln!("Key in slot {slot} deleted.");
     Ok(())
 }
 
@@ -888,7 +888,7 @@ pub fn run_certificates_export(
         .map_err(|e| CliError(format!("Failed to get certificate: {e}")))?;
 
     write_cert_file(output, &cert_der, format)?;
-    println!("Certificate exported to {output}.");
+    eprintln!("Certificate exported to {output}.");
     Ok(())
 }
 
@@ -927,7 +927,7 @@ pub fn run_certificates_import(
     session
         .put_certificate(slot, &der, compress)
         .map_err(|e| CliError(format!("Failed to import certificate: {e}")))?;
-    println!("Certificate imported to slot {slot}.");
+    eprintln!("Certificate imported to slot {slot}.");
 
     if update_chuid {
         generate_chuid(dev, scp_params, mgmt_key, pin)?;
@@ -954,7 +954,7 @@ pub fn run_certificates_delete(
     session
         .delete_certificate(slot)
         .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
-    println!("Certificate in slot {slot} deleted.");
+    eprintln!("Certificate in slot {slot} deleted.");
 
     if update_chuid {
         generate_chuid(dev, scp_params, mgmt_key, pin)?;
@@ -982,7 +982,7 @@ pub fn run_objects_export(
 
     write_file_or_stdout(output, &data)?;
     if output != "-" {
-        println!("Object exported to {output}.");
+        eprintln!("Object exported to {output}.");
     }
     Ok(())
 }
@@ -1008,7 +1008,7 @@ pub fn run_objects_import(
     session
         .put_object(obj_id, Some(&data))
         .map_err(|e| CliError(format!("Failed to write object: {e}")))?;
-    println!("Object imported.");
+    eprintln!("Object imported.");
     Ok(())
 }
 
@@ -1095,7 +1095,7 @@ pub fn run_objects_generate(
             session
                 .put_object(ObjectId::Chuid, Some(&chuid))
                 .map_err(|e| CliError(format!("Failed to write CHUID: {e}")))?;
-            println!("CHUID generated.");
+            eprintln!("CHUID generated.");
         }
         "CCC" => {
             // Generate CCC per SP 800-73-4
@@ -1125,7 +1125,7 @@ pub fn run_objects_generate(
             session
                 .put_object(ObjectId::Capability, Some(&ccc))
                 .map_err(|e| CliError(format!("Failed to write CCC: {e}")))?;
-            println!("CCC generated.");
+            eprintln!("CCC generated.");
         }
         other => {
             return Err(CliError(format!(
@@ -1196,7 +1196,7 @@ pub fn run_certificates_generate(
         .put_certificate(slot, &cert_der, false)
         .map_err(|e| CliError(format!("Failed to store certificate: {e}")))?;
 
-    println!("Certificate generated and stored in slot {slot:?}.");
+    eprintln!("Certificate generated and stored in slot {slot:?}.");
 
     if update_chuid {
         generate_chuid(dev, scp_params, management_key, pin)?;
@@ -1258,7 +1258,7 @@ pub fn run_certificates_request(
     let pem = pem_encode("CERTIFICATE REQUEST", &csr_der);
     write_file_or_stdout(output, pem.as_bytes())?;
     if output != "-" {
-        println!("CSR written to {output}.");
+        eprintln!("CSR written to {output}.");
     }
     Ok(())
 }

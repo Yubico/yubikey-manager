@@ -256,7 +256,6 @@ pub struct HsmAuthSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> HsmAuthSession<C> {
     pub fn new(connection: C) -> Result<Self, HsmAuthError> {
-        log::debug!("Opening HsmAuthSession");
         let mut protocol = SmartCardProtocol::new(connection);
         let select_response = protocol.select(Aid::HSMAUTH)?;
         Self::init(protocol, &select_response)
@@ -278,6 +277,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         mut protocol: SmartCardProtocol<C>,
         select_response: &[u8],
     ) -> Result<Self, HsmAuthError> {
+        log::debug!("Opening HsmAuthSession");
         // Parse version from TAG_VERSION in select response
         let entries = parse_tlv_list(select_response)?;
         let version_data = entries

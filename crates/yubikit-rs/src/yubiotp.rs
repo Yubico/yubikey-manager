@@ -882,7 +882,6 @@ pub struct YubiOtpSession<C: SmartCardConnection> {
 impl<C: SmartCardConnection> YubiOtpSession<C> {
     /// Open a YubiOTP session on the given SmartCard connection.
     pub fn new(connection: C) -> Result<Self, YubiOtpError> {
-        log::debug!("Opening YubiOtpSession (SmartCard)");
         let mut protocol = SmartCardProtocol::new(connection);
         let status = protocol.select(Aid::OTP)?;
         Self::init(protocol, &status)
@@ -904,6 +903,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         mut protocol: SmartCardProtocol<C>,
         status: &[u8],
     ) -> Result<Self, YubiOtpError> {
+        log::debug!("Opening YubiOtpSession (SmartCard)");
         let version = patch_version(Version::from_bytes(&status[..3]));
         let prog_seq = *status.get(3).unwrap_or(&0);
         protocol.configure(version);

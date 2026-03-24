@@ -197,7 +197,7 @@ pub fn run_usb(
     let lc = lock_code.map(parse_lock_code).transpose()?;
     write_config(dev, &config, reboot, lc.as_deref(), None)?;
 
-    println!("USB application configuration updated.");
+    eprintln!("USB application configuration updated.");
     Ok(())
 }
 
@@ -319,7 +319,7 @@ pub fn run_nfc(
     let lc = lock_code.map(parse_lock_code).transpose()?;
     write_config(dev, &config, false, lc.as_deref(), None)?;
 
-    println!("NFC application configuration updated.");
+    eprintln!("NFC application configuration updated.");
     Ok(())
 }
 
@@ -351,7 +351,7 @@ pub fn run_set_lock_code(
     let config = DeviceConfig::default();
     write_config(dev, &config, false, cur.as_deref(), new.as_deref())?;
 
-    println!("Lock code updated.");
+    eprintln!("Lock code updated.");
     Ok(())
 }
 
@@ -372,7 +372,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
         .device_reset()
         .map_err(|e| CliError(format!("Failed to reset device: {e}")))?;
 
-    println!("Reset complete. All data has been cleared from the YubiKey.");
+    eprintln!("Reset complete. All data has been cleared from the YubiKey.");
     Ok(())
 }
 

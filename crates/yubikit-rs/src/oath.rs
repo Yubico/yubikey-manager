@@ -473,7 +473,6 @@ pub struct OathSession<C: SmartCardConnection> {
 impl<C: SmartCardConnection> OathSession<C> {
     /// Open an OATH session on the given connection.
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
-        log::debug!("Opening OathSession");
         let mut protocol = SmartCardProtocol::new(connection)
             .with_ins_send_remaining(INS_SEND_REMAINING);
         let resp = protocol.select(Aid::OATH)?;
@@ -496,6 +495,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         mut protocol: SmartCardProtocol<C>,
         select_response: &[u8],
     ) -> Result<Self, SmartCardError> {
+        log::debug!("Opening OathSession");
         let (version, salt, challenge) = parse_select(select_response)
             .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
         let version = patch_version(version);

@@ -867,7 +867,6 @@ pub struct PivSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> PivSession<C> {
     pub fn new(connection: C) -> Result<Self, PivError> {
-        log::debug!("Opening PivSession");
         let mut protocol = SmartCardProtocol::new(connection);
         protocol.select(Aid::PIV)?;
         Self::init(protocol)
@@ -882,6 +881,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, PivError> {
+        log::debug!("Opening PivSession");
         let version_data = protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[])?;
         let version = patch_version(Version::from_bytes(&version_data));
         protocol.configure(version);

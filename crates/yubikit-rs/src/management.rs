@@ -777,7 +777,6 @@ pub struct ManagementSession<C: SmartCardConnection> {
 impl<C: SmartCardConnection> ManagementSession<C> {
     /// Open a management session, selecting the management AID.
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
-        log::debug!("Opening ManagementSession");
         let mut protocol = SmartCardProtocol::new(connection);
         let select_bytes = protocol.select(Aid::MANAGEMENT)?;
         Self::init(protocol, &select_bytes)
@@ -799,6 +798,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         mut protocol: SmartCardProtocol<C>,
         select_bytes: &[u8],
     ) -> Result<Self, SmartCardError> {
+        log::debug!("Opening ManagementSession");
         // YubiKey Edge incorrectly appends SW twice
         let select_bytes = if select_bytes.len() >= 2
             && select_bytes[select_bytes.len() - 2..] == [0x90, 0x00]

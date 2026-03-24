@@ -107,7 +107,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset OATH: {e}")))?;
-    println!("OATH application has been reset.");
+    eprintln!("OATH application has been reset.");
     Ok(())
 }
 
@@ -347,7 +347,7 @@ pub fn run_accounts_delete(
     session
         .delete_credential(&cred.id)
         .map_err(|e| CliError(format!("Failed to delete: {e}")))?;
-    println!("Credential deleted: {name}");
+    eprintln!("Credential deleted: {name}");
     Ok(())
 }
 
@@ -422,7 +422,7 @@ pub fn run_access_change(
         session
             .set_key(&key)
             .map_err(|e| CliError(format!("Failed to set password: {e}")))?;
-        println!("Password set.");
+        eprintln!("Password set.");
     }
     Ok(())
 }

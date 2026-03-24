@@ -100,9 +100,9 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
 
     if let Ok(kdf) = session.get_kdf() {
         let enabled = if matches!(kdf, yubikit_rs::openpgp::Kdf::None) { "False" } else { "True" };
-        println!("KDF enabled:                {enabled}");
+        eprintln!("KDF enabled:                {enabled}");
     } else {
-        println!("KDF enabled:                False");
+        eprintln!("KDF enabled:                False");
     }
 
     Ok(())
@@ -121,7 +121,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
-    println!("OpenPGP application has been reset.");
+    eprintln!("OpenPGP application has been reset.");
     Ok(())
 }
 
@@ -149,7 +149,7 @@ pub fn run_set_retries(
     session
         .set_pin_attempts(pin_retries, reset_code_retries, admin_pin_retries)
         .map_err(|e| CliError(format!("Failed to set retries: {e}")))?;
-    println!("Retry counts set.");
+    eprintln!("Retry counts set.");
     Ok(())
 }
 
@@ -165,7 +165,7 @@ pub fn run_change_pin(
     session
         .change_pin(old, new)
         .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
-    println!("PIN changed.");
+    eprintln!("PIN changed.");
     Ok(())
 }
 
@@ -181,7 +181,7 @@ pub fn run_change_admin_pin(
     session
         .change_admin(old, new)
         .map_err(|e| CliError(format!("Failed to change Admin PIN: {e}")))?;
-    println!("Admin PIN changed.");
+    eprintln!("Admin PIN changed.");
     Ok(())
 }
 
@@ -201,7 +201,7 @@ pub fn run_change_reset_code(
     session
         .set_reset_code(rc)
         .map_err(|e| CliError(format!("Failed to set reset code: {e}")))?;
-    println!("Reset code set.");
+    eprintln!("Reset code set.");
     Ok(())
 }
 
@@ -222,7 +222,7 @@ pub fn run_unblock_pin(
     session
         .reset_pin(new, reset_code)
         .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
-    println!("PIN unblocked.");
+    eprintln!("PIN unblocked.");
     Ok(())
 }
 
@@ -249,7 +249,7 @@ pub fn run_set_signature_policy(
     session
         .set_signature_pin_policy(pp)
         .map_err(|e| CliError(format!("Failed to set policy: {e}")))?;
-    println!("Signature PIN policy set to {policy}.");
+    eprintln!("Signature PIN policy set to {policy}.");
     Ok(())
 }
 
@@ -305,7 +305,7 @@ pub fn run_keys_set_touch(
     session
         .set_uif(key_ref, uif)
         .map_err(|e| CliError(format!("Failed to set touch policy: {e}")))?;
-    println!("Touch policy for {key} set to {policy}.");
+    eprintln!("Touch policy for {key} set to {policy}.");
     Ok(())
 }
 
@@ -346,7 +346,7 @@ pub fn run_keys_attest(
         .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;
 
     write_output(output, &cert_der, format, "CERTIFICATE")?;
-    println!("Attestation certificate written to {output}.");
+    eprintln!("Attestation certificate written to {output}.");
     Ok(())
 }
 
@@ -364,7 +364,7 @@ pub fn run_certificates_export(
         .map_err(|e| CliError(format!("Failed to get certificate: {e}")))?;
 
     write_output(output, &cert_der, format, "CERTIFICATE")?;
-    println!("Certificate exported to {output}.");
+    eprintln!("Certificate exported to {output}.");
     Ok(())
 }
 
@@ -396,7 +396,7 @@ pub fn run_certificates_import(
     session
         .put_certificate(key_ref, &der)
         .map_err(|e| CliError(format!("Failed to import certificate: {e}")))?;
-    println!("Certificate imported.");
+    eprintln!("Certificate imported.");
     Ok(())
 }
 
@@ -415,7 +415,7 @@ pub fn run_certificates_delete(
     session
         .delete_certificate(key_ref)
         .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
-    println!("Certificate deleted.");
+    eprintln!("Certificate deleted.");
     Ok(())
 }
 

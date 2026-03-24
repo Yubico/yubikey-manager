@@ -1276,6 +1276,8 @@ enum TransportPreference {
     Any,
     /// Only scan CCID (for PIV, OATH, OpenPGP, HSMAuth, SecurityDomain)
     CcidOnly,
+    /// Prefer OTP HID, fall back to Any (for OTP commands)
+    OtpPreferred,
 }
 
 /// Resolve a YubiKey device based on CLI options.
@@ -1309,6 +1311,17 @@ fn resolve_device(
             TransportPreference::CcidOnly => {
                 yubikit_rs::device::list_devices_ccid()
                     .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
+            }
+            TransportPreference::OtpPreferred => {
+                let otp_devs = yubikit_rs::device::list_devices_otp()
+                    .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+                if otp_devs.is_empty() {
+                    // Fall back to full scan if no OTP HID devices found
+                    list_devices()
+                        .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
+                } else {
+                    otp_devs
+                }
             }
             TransportPreference::Any => {
                 list_devices()
@@ -1748,7 +1761,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Otp { access_code, action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::Any)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::OtpPreferred)?;
             apply_version_override(&dev);
             // access_code from parent command overrides per-subcommand access_code
             let _ = access_code; // available for subcommands that need it

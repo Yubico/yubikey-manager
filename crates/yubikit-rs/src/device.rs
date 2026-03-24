@@ -398,6 +398,30 @@ fn pid_to_version(pid: u16) -> Version {
     }
 }
 
+/// Discover YubiKeys using only OTP HID.
+///
+/// Scans HID devices only (no PC/SC), returning devices that have OTP HID
+/// interfaces. Use this for OTP-preferred commands to avoid opening CCID
+/// connections unnecessarily.
+pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!("Listing YubiKey devices (OTP HID only)");
+    let mut devices = Vec::new();
+
+    if let Ok(hid_devices) = list_otp_devices() {
+        for hid in hid_devices {
+            let info = read_info_otp(&hid.path)
+                .unwrap_or_else(|_| synthetic_hid_info(&hid));
+            devices.push(YubiKeyDevice {
+                reader_name: None,
+                hid_path: Some(hid.path),
+                info,
+            });
+        }
+    }
+
+    Ok(devices)
+}
+
 // ---------------------------------------------------------------------------
 // read_info
 // ---------------------------------------------------------------------------

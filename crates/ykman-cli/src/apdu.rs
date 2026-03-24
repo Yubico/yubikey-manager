@@ -133,12 +133,17 @@ pub fn run_apdu(
         ));
     }
 
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-
     if !send_apdu.is_empty() {
+        // Raw send-apdu mode is incompatible with SCP
+        if scp_params.is_explicit() {
+            return Err(CliError(
+                "SCP is not compatible with raw send-apdu mode.".into(),
+            ));
+        }
         // Raw send-apdu mode: send full hex APDUs directly
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
         let mut is_first = true;
         for apdu_hex in send_apdu {
             if !is_first {
@@ -156,7 +161,18 @@ pub fn run_apdu(
         return Ok(());
     }
 
+    // Resolve SCP config BEFORE opening the main connection, since
+    // resolve_scp may open a separate connection to the Security Domain.
+    let scp_config = if scp_params.is_explicit() {
+        scp::resolve_scp(dev, scp_params, Capability::OATH)?
+    } else {
+        scp::ScpConfig::None
+    };
+
     // Standard mode with protocol
+    let conn = dev
+        .open_smartcard()
+        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
     let mut protocol = SmartCardProtocol::new(conn);
 
     if short {
@@ -174,11 +190,12 @@ pub fn run_apdu(
             .select(aid)
             .map_err(|e| CliError(format!("Failed to select {app_name}: {e}")))?;
         print_response(&resp, 0x9000, no_pretty);
-        // Apply SCP after selecting the application
-        if scp_params.is_explicit() {
-            let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
-            scp::apply_scp(&mut protocol, &scp_config)?;
-        }
+    }
+
+    // Apply SCP after selecting the application
+    if !matches!(scp_config, scp::ScpConfig::None) {
+        println!("INITIALIZE SCP");
+        scp::apply_scp(&mut protocol, &scp_config)?;
     }
 
     for apdu_str in apdus {
