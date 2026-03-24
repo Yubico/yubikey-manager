@@ -1,9 +1,11 @@
 use pyo3::prelude::*;
 use yubikit_rs::management::{
     DeviceInfo,
+    ManagementFidoSession as RustManagementFidoSession,
     ManagementOtpSession as RustManagementOtpSession,
     ManagementSession as RustManagementSession,
 };
+use yubikit_rs::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
 use yubikit_rs::transport::hid::HidConnection;
 
 use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
@@ -285,4 +287,130 @@ impl ManagementOtpSession {
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
             .map_err(yubiotp_err)
     }
+}
+
+#[pyclass(name = "ManagementFidoSession", unsendable)]
+pub struct ManagementFidoSession {
+    inner: RustManagementFidoSession,
+}
+
+#[pymethods]
+impl ManagementFidoSession {
+    #[new]
+    fn new(path: &str) -> PyResult<Self> {
+        let fido_info = find_fido_device(path)?;
+        let conn = FidoConnection::open(&fido_info)
+            .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+        let inner = RustManagementFidoSession::new(conn).map_err(smartcard_err)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn version(&self) -> (u8, u8, u8) {
+        let v = self.inner.version();
+        (v.0, v.1, v.2)
+    }
+
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner
+            .set_version(yubikit_rs::smartcard::Version(version.0, version.1, version.2));
+    }
+
+    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let info = self.inner.read_device_info().map_err(smartcard_err)?;
+        device_info_to_dict(py, &info)
+    }
+
+    fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let info = self.inner.read_device_info_unchecked().map_err(smartcard_err)?;
+        device_info_to_dict(py, &info)
+    }
+
+    #[pyo3(signature = (enabled_capabilities, reboot, cur_lock_code=None, new_lock_code=None, auto_eject_timeout=None, challenge_response_timeout=None, device_flags=None, nfc_restricted=None))]
+    fn write_device_config(
+        &mut self,
+        enabled_capabilities: &Bound<'_, pyo3::types::PyDict>,
+        reboot: bool,
+        cur_lock_code: Option<&[u8]>,
+        new_lock_code: Option<&[u8]>,
+        auto_eject_timeout: Option<u16>,
+        challenge_response_timeout: Option<u8>,
+        device_flags: Option<u8>,
+        nfc_restricted: Option<bool>,
+    ) -> PyResult<()> {
+        use std::collections::HashMap;
+        use yubikit_rs::smartcard::Transport;
+        use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag};
+
+        let mut caps = HashMap::new();
+        for (key, value) in enabled_capabilities.iter() {
+            let transport_name: String = key.extract()?;
+            let cap_val: u16 = value.extract()?;
+            let transport = match transport_name.as_str() {
+                "Usb" => Transport::Usb,
+                "Nfc" => Transport::Nfc,
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Invalid transport: {}",
+                        transport_name
+                    )));
+                }
+            };
+            caps.insert(transport, Capability(cap_val));
+        }
+
+        let config = DeviceConfig {
+            enabled_capabilities: caps,
+            auto_eject_timeout,
+            challenge_response_timeout,
+            device_flags: device_flags.map(DeviceFlag),
+            nfc_restricted,
+        };
+
+        self.inner
+            .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
+            .map_err(smartcard_err)
+    }
+
+    fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> PyResult<()> {
+        self.inner
+            .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
+            .map_err(smartcard_err)
+    }
+}
+
+fn find_fido_device(path: &str) -> PyResult<FidoDeviceInfo> {
+    let devices = list_fido_devices()
+        .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    devices
+        .into_iter()
+        .find(|d| d.path == path)
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "No FIDO device found at path: {path}"
+            ))
+        })
+}
+
+/// List FIDO HID devices.
+///
+/// Returns a list of dicts with 'path' and 'pid' keys.
+#[pyfunction]
+pub fn py_list_fido_devices(py: Python<'_>) -> PyResult<PyObject> {
+    let devices = list_fido_devices()
+        .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    let list = pyo3::types::PyList::empty(py);
+    for dev in devices {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("path", &dev.path)?;
+        dict.set_item("pid", dev.pid)?;
+        list.append(dict)?;
+    }
+    Ok(list.into())
 }

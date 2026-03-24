@@ -1,7 +1,8 @@
-use yubikit_rs::device::{get_name, list_readers, read_info, read_info_otp};
+use yubikit_rs::device::{get_name, list_readers, read_info, read_info_fido, read_info_otp};
 use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::{Capability, DeviceInfo, ReleaseType};
 use yubikit_rs::transport::hid::{HidConnection, list_otp_devices};
+use yubikit_rs::transport::ctaphid::{FidoConnection, list_fido_devices};
 use yubikit_rs::transport::pcsc::PcscConnection;
 
 use crate::util::CliError;
@@ -392,6 +393,51 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             }
                         }
                         Err(e) => println!("      Error: {e}"),
+                    }
+                }
+            }
+        }
+        Err(e) => println!(" Error: {e}"),
+    }
+
+    // YubiKeys over HID FIDO
+    println!();
+    print!("Detected YubiKeys over HID FIDO:");
+    match list_fido_devices() {
+        Ok(fido_devices) => {
+            if fido_devices.is_empty() {
+                println!(" (none)");
+            } else {
+                println!();
+                for fido in &fido_devices {
+                    println!(
+                        "  CtapYubiKeyDevice(pid={:04x}, path='{}'):",
+                        fido.pid, fido.path
+                    );
+                    match FidoConnection::open(fido) {
+                        Ok(conn) => {
+                            let (v1, v2, v3) = conn.device_version();
+                            let caps = conn.capabilities();
+                            println!(
+                                "    CTAP device version: {v1}.{v2}.{v3}"
+                            );
+                            println!(
+                                "    Capabilities:        {:#04x}",
+                                caps.raw()
+                            );
+
+                            println!("    Management:");
+                            match read_info_fido(fido) {
+                                Ok(info) => {
+                                    let name = get_name(&info);
+                                    print_device_info(&info, "      ");
+                                    println!();
+                                    println!("      Name: {name}");
+                                }
+                                Err(e) => println!("      Error: {e}"),
+                            }
+                        }
+                        Err(e) => println!("    Error: {e}"),
                     }
                 }
             }

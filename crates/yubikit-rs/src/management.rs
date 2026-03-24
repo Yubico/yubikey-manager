@@ -39,6 +39,7 @@ use crate::otp::check_crc;
 use crate::otp::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
 use crate::transport::hid::HidConnection;
+use crate::transport::ctaphid::{CtapHidTransportError, FidoConnection};
 use crate::yubiotp::ConfigSlot;
 
 // ---------------------------------------------------------------------------
@@ -1103,6 +1104,135 @@ fn parse_tlv_dict(data: &[u8]) -> Result<HashMap<u32, Vec<u8>>, SmartCardError> 
         offset = end;
     }
     Ok(map)
+}
+
+// ---------------------------------------------------------------------------
+// ManagementFidoSession (CTAP HID / FIDO)
+// ---------------------------------------------------------------------------
+
+/// Vendor CTAP commands for YubiKey management.
+const CTAP_VENDOR_FIRST: u8 = 0x40;
+const CTAP_YUBIKEY_DEVICE_CONFIG: u8 = CTAP_VENDOR_FIRST;
+const CTAP_READ_CONFIG: u8 = CTAP_VENDOR_FIRST + 2;
+const CTAP_WRITE_CONFIG: u8 = CTAP_VENDOR_FIRST + 3;
+
+/// Management operations over the FIDO (CTAP HID) interface.
+pub struct ManagementFidoSession {
+    connection: FidoConnection,
+    version: Version,
+}
+
+impl ManagementFidoSession {
+    /// Open a management session over FIDO HID.
+    pub fn new(connection: FidoConnection) -> Result<Self, SmartCardError> {
+        log::debug!("Opening ManagementFidoSession");
+        let (v1, v2, v3) = connection.device_version();
+        let mut version = Version(v1, v2, v3);
+        // Prior to YK4 the device_version was not firmware version
+        if v1 < 4 && (v1, v2, v3) != (0, 0, 1) {
+            if !(v1 == 0 && connection.capabilities().has_cbor()) {
+                version = Version(3, 0, 0); // Guess NEO
+            }
+        }
+        version = patch_version(version);
+        Ok(Self {
+            connection,
+            version,
+        })
+    }
+
+    /// The firmware version of the YubiKey.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Override the version (for development devices reporting 0.0.1).
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    /// Read a configuration page via vendor CTAP command.
+    pub fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
+        let data = int2bytes(page as u64);
+        self.connection
+            .call(CTAP_READ_CONFIG, &data)
+            .map_err(fido_to_smartcard_err)
+    }
+
+    /// Write configuration via vendor CTAP command.
+    pub fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
+        self.connection
+            .call(CTAP_WRITE_CONFIG, config)
+            .map_err(fido_to_smartcard_err)?;
+        Ok(())
+    }
+
+    /// Read device info, iterating over config pages.
+    pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        if self.version < Version(4, 1, 0) {
+            return Err(SmartCardError::NotSupported(
+                "DeviceInfo requires YubiKey 4.1.0 or later".into(),
+            ));
+        }
+        self.do_read_device_info()
+    }
+
+    /// Read device info without version check.
+    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        self.do_read_device_info()
+    }
+
+    fn do_read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        read_device_info_from_config(self.version, &mut |page| self.read_config(page))
+    }
+
+    /// Write configuration settings for YubiKey (requires 5.0.0+).
+    pub fn write_device_config(
+        &mut self,
+        config: &DeviceConfig,
+        reboot: bool,
+        cur_lock_code: Option<&[u8]>,
+        new_lock_code: Option<&[u8]>,
+    ) -> Result<(), SmartCardError> {
+        let data = validate_and_serialize_device_config(
+            self.version, config, reboot, cur_lock_code, new_lock_code,
+        )?;
+        self.write_config(&data)
+    }
+
+    /// Set USB mode via vendor CTAP command.
+    pub fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), SmartCardError> {
+        let data = [
+            mode_code,
+            chalresp_timeout,
+            (auto_eject_timeout & 0xFF) as u8,
+            (auto_eject_timeout >> 8) as u8,
+        ];
+        self.connection
+            .call(CTAP_YUBIKEY_DEVICE_CONFIG, &data)
+            .map_err(fido_to_smartcard_err)?;
+        Ok(())
+    }
+
+    /// Get a reference to the underlying FidoConnection.
+    pub fn connection(&self) -> &FidoConnection {
+        &self.connection
+    }
+
+    /// Close the session and return the underlying connection.
+    pub fn into_connection(self) -> FidoConnection {
+        self.connection
+    }
+}
+
+/// Convert a [`CtapHidTransportError`] into a [`SmartCardError`].
+fn fido_to_smartcard_err(e: CtapHidTransportError) -> SmartCardError {
+    SmartCardError::Transport(Box::new(e))
 }
 
 // ---------------------------------------------------------------------------

@@ -66,6 +66,8 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_hsmauth_session::HsmAuthSession>()?;
     m.add_class::<py_management_session::ManagementSession>()?;
     m.add_class::<py_management_session::ManagementOtpSession>()?;
+    m.add_class::<py_management_session::ManagementFidoSession>()?;
+    m.add_function(wrap_pyfunction!(py_management_session::py_list_fido_devices, &m)?)?;
     m.add_class::<py_securitydomain_session::SecurityDomainSession>()?;
     m.add_class::<py_yubiotp_session::PyYubiOtpSession>()?;
     m.add_class::<py_yubiotp_session::PyYubiOtpOtpSession>()?;

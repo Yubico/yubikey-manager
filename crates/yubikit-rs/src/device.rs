@@ -45,8 +45,9 @@ use std::collections::HashSet;
 use std::fmt;
 
 use crate::smartcard::{SmartCardError, Transport, Version};
-use crate::management::{Capability, DeviceInfo, FormFactor, ManagementOtpSession, ManagementSession, UsbInterface};
+use crate::management::{Capability, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession, ManagementSession, UsbInterface};
 use crate::transport::hid::{HidConnection, HidDeviceInfo, HidError, list_otp_devices};
+use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
 use crate::transport::pcsc::{PcscConnection, PcscError};
 pub use crate::transport::pcsc::list_readers;
 
@@ -119,6 +120,7 @@ impl From<HidError> for DeviceError {
 pub struct YubiKeyDevice {
     reader_name: Option<String>,
     hid_path: Option<String>,
+    fido_path: Option<String>,
     info: DeviceInfo,
 }
 
@@ -151,6 +153,11 @@ impl YubiKeyDevice {
     /// Returns the HID device path, if this device was found over HID.
     pub fn hid_path(&self) -> Option<&str> {
         self.hid_path.as_deref()
+    }
+
+    /// Returns the FIDO HID device path, if this device was found over FIDO.
+    pub fn fido_path(&self) -> Option<&str> {
+        self.fido_path.as_deref()
     }
 
     /// Returns detected USB interfaces based on enabled capabilities.
@@ -230,6 +237,7 @@ pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
     Ok(YubiKeyDevice {
         reader_name: Some(reader_name.to_string()),
         hid_path: None,
+        fido_path: None,
         info,
     })
 }
@@ -253,6 +261,7 @@ pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                 devices.push(YubiKeyDevice {
                     reader_name: Some(reader),
                     hid_path: None,
+                    fido_path: None,
                     info,
                 });
             }
@@ -289,6 +298,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                     devices.push(YubiKeyDevice {
                         reader_name: Some(reader),
                         hid_path: None,
+                        fido_path: None,
                         info,
                     });
                 }
@@ -336,6 +346,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                         devices.push(YubiKeyDevice {
                             reader_name: None,
                             hid_path: Some(hid.path),
+                            fido_path: None,
                             info,
                         });
                     }
@@ -343,6 +354,60 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                     devices.push(YubiKeyDevice {
                         reader_name: None,
                         hid_path: Some(hid.path),
+                        fido_path: None,
+                        info,
+                    });
+                }
+            }
+        }
+    }
+
+    // Scan FIDO HID devices, merging with existing entries by serial
+    if let Ok(fido_devs) = list_fido_devices() {
+        for fido in fido_devs {
+            let fido_info = read_info_fido(&fido).ok();
+            let fido_serial = fido_info.as_ref().and_then(|i| i.serial);
+
+            let merged = if let Some(serial) = fido_serial {
+                if let Some(dev) = devices
+                    .iter_mut()
+                    .find(|d| d.serial() == Some(serial) && d.fido_path.is_none())
+                {
+                    dev.fido_path = Some(fido.path.clone());
+                    true
+                } else {
+                    false
+                }
+            } else {
+                let unmatched: Vec<_> = devices
+                    .iter_mut()
+                    .filter(|d| d.fido_path.is_none())
+                    .collect();
+                if unmatched.len() == 1 {
+                    unmatched.into_iter().next().unwrap().fido_path = Some(fido.path.clone());
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if !merged {
+                let info = fido_info.unwrap_or_else(|| synthetic_fido_info(&fido));
+                if let Some(serial) = info.serial {
+                    if !seen_serials.contains(&serial) {
+                        seen_serials.insert(serial);
+                        devices.push(YubiKeyDevice {
+                            reader_name: None,
+                            hid_path: None,
+                            fido_path: Some(fido.path),
+                            info,
+                        });
+                    }
+                } else {
+                    devices.push(YubiKeyDevice {
+                        reader_name: None,
+                        hid_path: None,
+                        fido_path: Some(fido.path),
                         info,
                     });
                 }
@@ -398,6 +463,40 @@ fn pid_to_version(pid: u16) -> Version {
     }
 }
 
+/// Build a minimal synthetic [`DeviceInfo`] for a FIDO-only device.
+fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
+    use std::collections::HashMap;
+
+    let version = pid_to_version(fido.pid);
+    let mut supported = HashMap::new();
+    supported.insert(Transport::Usb, Capability::FIDO2);
+
+    DeviceInfo {
+        config: crate::management::DeviceConfig {
+            enabled_capabilities: HashMap::new(),
+            auto_eject_timeout: None,
+            challenge_response_timeout: None,
+            device_flags: None,
+            nfc_restricted: None,
+        },
+        serial: None,
+        version,
+        form_factor: FormFactor::Unknown,
+        supported_capabilities: supported,
+        is_locked: false,
+        is_fips: false,
+        is_sky: false,
+        part_number: None,
+        fips_capable: Capability::NONE,
+        fips_approved: Capability::NONE,
+        pin_complexity: false,
+        reset_blocked: Capability::NONE,
+        fps_version: None,
+        stm_version: None,
+        version_qualifier: crate::management::VersionQualifier::final_release(version),
+    }
+}
+
 /// Discover YubiKeys using only OTP HID.
 ///
 /// Scans HID devices only (no PC/SC), returning devices that have OTP HID
@@ -414,6 +513,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
             devices.push(YubiKeyDevice {
                 reader_name: None,
                 hid_path: Some(hid.path),
+                fido_path: None,
                 info,
             });
         }
@@ -454,6 +554,42 @@ pub fn read_info_otp(hid_path: &str) -> Result<DeviceInfo, DeviceError> {
         .map_err(DeviceError::SmartCard)?;
     apply_device_info_fixups(&mut info);
     Ok(info)
+}
+
+/// Read device info via FIDO HID (CTAP).
+///
+/// Opens a [`FidoConnection`] and uses [`ManagementFidoSession`] to read
+/// [`DeviceInfo`]. Applies standard fixups for known device quirks.
+pub fn read_info_fido(fido_info: &FidoDeviceInfo) -> Result<DeviceInfo, DeviceError> {
+    let conn = FidoConnection::open(fido_info)
+        .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))?;
+    let mut session = ManagementFidoSession::new(conn)
+        .map_err(DeviceError::SmartCard)?;
+    let mut info = session.read_device_info_unchecked()
+        .map_err(DeviceError::SmartCard)?;
+    apply_device_info_fixups(&mut info);
+    Ok(info)
+}
+
+/// List Yubico FIDO HID devices with device info.
+pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!("Listing YubiKey devices (FIDO HID only)");
+    let mut devices = Vec::new();
+
+    if let Ok(fido_devs) = list_fido_devices() {
+        for fido in fido_devs {
+            let info = read_info_fido(&fido)
+                .unwrap_or_else(|_| synthetic_fido_info(&fido));
+            devices.push(YubiKeyDevice {
+                reader_name: None,
+                hid_path: None,
+                fido_path: Some(fido.path),
+                info,
+            });
+        }
+    }
+
+    Ok(devices)
 }
 
 /// Apply standard fixups for known device quirks.
