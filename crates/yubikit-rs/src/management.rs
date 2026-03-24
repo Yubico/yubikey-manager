@@ -34,9 +34,9 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::core_types::patch_version;
-use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version};
-use crate::otp_codec::check_crc;
-use crate::otp_protocol::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version};
+use crate::otp::check_crc;
+use crate::otp::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
 use crate::transport::hid::HidConnection;
 use crate::yubiotp::ConfigSlot;
@@ -782,16 +782,15 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         Self::init(protocol, &select_bytes)
     }
 
-    /// Create a session from an already-initialized protocol.
-    ///
-    /// The protocol must have had `select(Aid::MANAGEMENT)` called already
-    /// (with the response passed as `select_response`). SCP may have been
-    /// initialized on the protocol before calling this.
-    pub fn from_protocol(
-        protocol: SmartCardProtocol<C>,
-        select_response: &[u8],
+    /// Open a management session with SCP (Secure Channel Protocol).
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
     ) -> Result<Self, SmartCardError> {
-        Self::init(protocol, select_response)
+        let mut protocol = SmartCardProtocol::new(connection);
+        let select_bytes = protocol.select(Aid::MANAGEMENT)?;
+        protocol.init_scp(scp_key_params)?;
+        Self::init(protocol, &select_bytes)
     }
 
     fn init(

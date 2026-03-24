@@ -31,7 +31,7 @@ use sha2::Digest;
 use thiserror::Error;
 
 use crate::core_types::patch_version;
-use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv::{self, TlvError};
 
 // ---------------------------------------------------------------------------
@@ -1305,11 +1305,26 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Self::init(protocol)
     }
 
-    /// Create a session from an already-initialized protocol.
-    ///
-    /// The protocol must have had `select(Aid::OPENPGP)` called already. SCP
-    /// may have been initialized on the protocol before calling this.
-    pub fn from_protocol(protocol: SmartCardProtocol<C>) -> Result<Self, OpenPgpError> {
+    /// Open an OpenPGP session with SCP (Secure Channel Protocol).
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
+    ) -> Result<Self, OpenPgpError> {
+        let mut protocol = SmartCardProtocol::new(connection);
+
+        // SELECT OpenPGP application; auto-activate if needed
+        match protocol.select(Aid::OPENPGP) {
+            Ok(_) => {}
+            Err(SmartCardError::Apdu { sw, .. })
+                if sw == 0x6285 || sw == 0x6985 =>
+            {
+                protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
+                protocol.select(Aid::OPENPGP)?;
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        protocol.init_scp(scp_key_params)?;
         Self::init(protocol)
     }
 

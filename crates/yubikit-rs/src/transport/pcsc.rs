@@ -28,7 +28,7 @@
 use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
 use std::ffi::CString;
 
-use crate::iso7816::{SmartCardConnection, SmartCardError, Transport};
+use crate::smartcard::{SmartCardConnection, SmartCardError, Transport};
 use crate::log_traffic;
 
 #[derive(Debug, thiserror::Error)]

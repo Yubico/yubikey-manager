@@ -1,8 +1,7 @@
 use pyo3::prelude::*;
 use yubikit_rs::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
-use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 
-use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
 
 fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     use pyo3::exceptions::*;
@@ -52,10 +51,8 @@ impl HsmAuthSession {
     fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
-            let mut protocol = SmartCardProtocol::new(conn);
-            let resp = protocol.select(Aid::HSMAUTH).map_err(smartcard_err)?;
-            init_scp_from_py(&mut protocol, params)?;
-            let inner = RustHsmAuthSession::from_protocol(protocol, &resp).map_err(hsmauth_err)?;
+            let scp_params = scp_key_params_from_py(params)?;
+            let inner = RustHsmAuthSession::new_with_scp(conn, &scp_params).map_err(hsmauth_err)?;
             Ok(Self { inner })
         } else {
             let inner = RustHsmAuthSession::new(conn).map_err(hsmauth_err)?;
@@ -71,7 +68,7 @@ impl HsmAuthSession {
 
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner.set_version(yubikit_rs::iso7816::Version(
+        self.inner.set_version(yubikit_rs::smartcard::Version(
             version.0, version.1, version.2,
         ));
     }

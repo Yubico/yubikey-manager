@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use rstest::{fixture, rstest};
 use yubikit_rs::core_types::{set_override_version, Version};
 use yubikit_rs::device::{list_devices, YubiKeyDevice};
-use yubikit_rs::iso7816::{Aid, SmartCardProtocol, Transport};
+use yubikit_rs::smartcard::{Aid, SmartCardProtocol, Transport};
 use yubikit_rs::management::{Capability, DeviceInfo, ManagementSession, ReleaseType};
 use yubikit_rs::securitydomain::SecurityDomainSession;
 use yubikit_rs::transport::pcsc::{list_readers, PcscConnection};
@@ -247,24 +247,13 @@ macro_rules! require_capability {
     };
 }
 
-/// Set up a SmartCardProtocol with SCP11b and select the given AID.
-/// Returns the protocol and the SELECT response bytes.
-fn setup_scp_protocol(
-    conn: PcscConnection,
-    aid: &[u8],
-    kid: u8,
-    kvn: u8,
-    pk: &[u8],
-) -> (SmartCardProtocol<PcscConnection>, Vec<u8>) {
-    let mut protocol = SmartCardProtocol::new(conn);
-    protocol
-        .select(Aid::SECURE_DOMAIN)
-        .expect("select Security Domain for SCP");
-    protocol
-        .init_scp11(kid, kvn, pk, None, &[], None)
-        .expect("init_scp11");
-    let resp = protocol.select(aid).expect("select AID over SCP");
-    (protocol, resp)
+/// Build SCP11b key params for test helper usage.
+fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit_rs::scp::ScpKeyParams {
+    yubikit_rs::scp::ScpKeyParams::Scp11b {
+        kid,
+        kvn,
+        pk_sd_ecka: pk.to_vec(),
+    }
 }
 
 // ───────────────────────── Device / Management ─────────────────────────
@@ -302,9 +291,8 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
         _ => {
             let conn = open_smartcard_connection(&tc);
             let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
-                let (protocol, resp) =
-                    setup_scp_protocol(conn, Aid::MANAGEMENT, *kid, *kvn, pk);
-                ManagementSession::from_protocol(protocol, &resp)
+                let params = make_scp_key_params(*kid, *kvn, pk);
+                ManagementSession::new_with_scp(conn, &params)
                     .expect("ManagementSession with SCP")
             } else {
                 ManagementSession::new(conn).expect("ManagementSession::new")
@@ -344,8 +332,8 @@ mod oath {
     fn open_oath_session(tc: &TestConnection) -> OathSession<PcscConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let (protocol, resp) = setup_scp_protocol(conn, Aid::OATH, *kid, *kvn, pk);
-            OathSession::from_protocol(protocol, &resp).expect("OathSession with SCP")
+            let params = make_scp_key_params(*kid, *kvn, pk);
+            OathSession::new_with_scp(conn, &params).expect("OathSession with SCP")
         } else {
             OathSession::new(conn).expect("OathSession::new")
         }
@@ -465,8 +453,8 @@ mod piv {
     fn open_piv_session(tc: &TestConnection) -> PivSession<PcscConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let (protocol, _) = setup_scp_protocol(conn, Aid::PIV, *kid, *kvn, pk);
-            PivSession::from_protocol(protocol).expect("PivSession with SCP")
+            let params = make_scp_key_params(*kid, *kvn, pk);
+            PivSession::new_with_scp(conn, &params).expect("PivSession with SCP")
         } else {
             PivSession::new(conn).expect("PivSession::new")
         }
@@ -526,8 +514,8 @@ mod openpgp {
     fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let (protocol, _) = setup_scp_protocol(conn, Aid::OPENPGP, *kid, *kvn, pk);
-            OpenPgpSession::from_protocol(protocol).expect("OpenPgpSession with SCP")
+            let params = make_scp_key_params(*kid, *kvn, pk);
+            OpenPgpSession::new_with_scp(conn, &params).expect("OpenPgpSession with SCP")
         } else {
             OpenPgpSession::new(conn).expect("OpenPgpSession::new")
         }
@@ -614,9 +602,8 @@ mod yubiotp {
             _ => {
                 let conn = open_smartcard_connection(&tc);
                 let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
-                    let (protocol, resp) =
-                        setup_scp_protocol(conn, Aid::OTP, *kid, *kvn, pk);
-                    YubiOtpSession::from_protocol(protocol, &resp)
+                    let params = make_scp_key_params(*kid, *kvn, pk);
+                    YubiOtpSession::new_with_scp(conn, &params)
                         .expect("YubiOtpSession with SCP")
                 } else {
                     YubiOtpSession::new(conn).expect("YubiOtpSession::new")
@@ -637,8 +624,8 @@ mod hsmauth {
     fn open_hsmauth_session(tc: &TestConnection) -> HsmAuthSession<PcscConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let (protocol, resp) = setup_scp_protocol(conn, Aid::HSMAUTH, *kid, *kvn, pk);
-            HsmAuthSession::from_protocol(protocol, &resp).expect("HsmAuthSession with SCP")
+            let params = make_scp_key_params(*kid, *kvn, pk);
+            HsmAuthSession::new_with_scp(conn, &params).expect("HsmAuthSession with SCP")
         } else {
             HsmAuthSession::new(conn).expect("HsmAuthSession::new")
         }

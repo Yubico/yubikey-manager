@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 use yubikit_rs::management::{
     DeviceInfo,
     ManagementOtpSession as RustManagementOtpSession,
@@ -7,7 +6,7 @@ use yubikit_rs::management::{
 };
 use yubikit_rs::transport::hid::HidConnection;
 
-use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
 
 pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
     let dict = pyo3::types::PyDict::new(py);
@@ -82,10 +81,8 @@ impl ManagementSession {
     fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
-            let mut protocol = SmartCardProtocol::new(conn);
-            let resp = protocol.select(Aid::MANAGEMENT).map_err(smartcard_err)?;
-            init_scp_from_py(&mut protocol, params)?;
-            let inner = RustManagementSession::from_protocol(protocol, &resp).map_err(smartcard_err)?;
+            let scp_params = scp_key_params_from_py(params)?;
+            let inner = RustManagementSession::new_with_scp(conn, &scp_params).map_err(smartcard_err)?;
             Ok(Self { inner })
         } else {
             let inner = RustManagementSession::new(conn).map_err(smartcard_err)?;
@@ -102,7 +99,7 @@ impl ManagementSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::smartcard::Version(version.0, version.1, version.2));
     }
 
     /// Read device info. Returns a dict with parsed fields.
@@ -133,7 +130,7 @@ impl ManagementSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
-        use yubikit_rs::iso7816::Transport;
+        use yubikit_rs::smartcard::Transport;
         use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag};
 
         let mut caps = HashMap::new();
@@ -182,8 +179,8 @@ impl ManagementSession {
     }
 }
 
-fn yubiotp_err(e: yubikit_rs::otp_protocol::YubiOtpError) -> PyErr {
-    use yubikit_rs::otp_protocol::YubiOtpError;
+fn yubiotp_err(e: yubikit_rs::otp::YubiOtpError) -> PyErr {
+    use yubikit_rs::otp::YubiOtpError;
     match e {
         YubiOtpError::CommandRejected(msg) => {
             pyo3::exceptions::PyValueError::new_err(format!("Command rejected: {msg}"))
@@ -219,7 +216,7 @@ impl ManagementOtpSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::smartcard::Version(version.0, version.1, version.2));
     }
 
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
@@ -245,7 +242,7 @@ impl ManagementOtpSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
-        use yubikit_rs::iso7816::Transport;
+        use yubikit_rs::smartcard::Transport;
         use yubikit_rs::management::{Capability, DeviceConfig, DeviceFlag};
 
         let mut caps = HashMap::new();

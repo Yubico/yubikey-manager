@@ -28,13 +28,12 @@
 pub mod core_types;
 pub mod device;
 pub mod hsmauth;
-pub mod iso7816;
+pub mod smartcard;
 pub mod logging;
 pub mod management;
 pub mod oath;
 pub mod openpgp;
-pub mod otp_codec;
-pub mod otp_protocol;
+pub mod otp;
 pub mod piv;
 pub mod scp;
 pub mod securitydomain;

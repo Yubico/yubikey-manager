@@ -28,7 +28,7 @@
 use thiserror::Error;
 
 use crate::core_types::patch_version;
-use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv::{tlv_encode, tlv_parse};
 
 // ---------------------------------------------------------------------------
@@ -261,16 +261,15 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         Self::init(protocol, &select_response)
     }
 
-    /// Create a session from an already-initialized protocol.
-    ///
-    /// The protocol must have had `select(Aid::HSMAUTH)` called already (with
-    /// the response passed as `select_response`). SCP may have been initialized
-    /// on the protocol before calling this.
-    pub fn from_protocol(
-        protocol: SmartCardProtocol<C>,
-        select_response: &[u8],
+    /// Open an HSM Auth session with SCP (Secure Channel Protocol).
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
     ) -> Result<Self, HsmAuthError> {
-        Self::init(protocol, select_response)
+        let mut protocol = SmartCardProtocol::new(connection);
+        let select_response = protocol.select(Aid::HSMAUTH)?;
+        protocol.init_scp(scp_key_params)?;
+        Self::init(protocol, &select_response)
     }
 
     fn init(

@@ -39,7 +39,7 @@ impl SecurityDomainSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::smartcard::Version(version.0, version.1, version.2));
     }
 
     fn get_data(&mut self, tag: u32, data: &[u8]) -> PyResult<Vec<u8>> {

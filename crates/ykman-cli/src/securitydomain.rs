@@ -8,7 +8,7 @@ use crate::scp::ScpParams;
 
 fn open_session(
     dev: &YubiKeyDevice,
-) -> Result<SecurityDomainSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError>
+) -> Result<SecurityDomainSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'_>>, CliError>
 {
     let conn = dev
         .open_smartcard()

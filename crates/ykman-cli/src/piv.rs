@@ -1,7 +1,6 @@
 use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::iso7816::SmartCardProtocol;
 use yubikit_rs::management::Capability;
 use yubikit_rs::piv::{
     DEFAULT_MANAGEMENT_KEY, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession, Slot,
@@ -14,7 +13,7 @@ use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<PivSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<PivSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::PIV)?;
     match scp_config {
         ScpConfig::None => {
@@ -28,12 +27,9 @@ fn open_session<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let mut protocol = SmartCardProtocol::new(conn);
-            protocol
-                .select(yubikit_rs::iso7816::Aid::PIV)
-                .map_err(|e| CliError(format!("Failed to select PIV: {e}")))?;
-            scp::apply_scp(&mut protocol, config)?;
-            PivSession::from_protocol(protocol)
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            PivSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
         }
     }
@@ -122,7 +118,7 @@ fn parse_management_key(s: &str) -> Result<Vec<u8>, CliError> {
 }
 
 fn authenticate_session(
-    session: &mut PivSession<impl yubikit_rs::iso7816::SmartCardConnection>,
+    session: &mut PivSession<impl yubikit_rs::smartcard::SmartCardConnection>,
     mgmt_key: Option<&str>,
 ) -> Result<(), CliError> {
     let key = match mgmt_key {
@@ -1763,7 +1759,7 @@ fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Ve
 }
 
 fn sign_data(
-    session: &mut PivSession<impl yubikit_rs::iso7816::SmartCardConnection>,
+    session: &mut PivSession<impl yubikit_rs::smartcard::SmartCardConnection>,
     slot: Slot,
     key_type: KeyType,
     hash_alg: HashAlgorithm,

@@ -33,7 +33,7 @@
 
 use pyo3::prelude::*;
 use yubikit_rs::core_types::Version;
-use yubikit_rs::iso7816::SmartCardProtocol as RustSmartCardProtocol;
+use yubikit_rs::smartcard::SmartCardProtocol as RustSmartCardProtocol;
 
 use crate::py_bridge::{init_scp_from_py, smartcard_err, PySmartCardConnection};
 

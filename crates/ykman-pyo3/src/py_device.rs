@@ -60,7 +60,7 @@ pub fn get_name(
     has_nfc: bool,
 ) -> PyResult<String> {
     use std::collections::HashMap;
-    use yubikit_rs::iso7816::{Transport, Version};
+    use yubikit_rs::smartcard::{Transport, Version};
     use yubikit_rs::management::{
         Capability, DeviceConfig, DeviceInfo, FormFactor, VersionQualifier,
     };

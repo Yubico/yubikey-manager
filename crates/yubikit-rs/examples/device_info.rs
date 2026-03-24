@@ -1,7 +1,7 @@
 //! Read detailed device information from the first connected YubiKey.
 
 use yubikit_rs::device::list_devices;
-use yubikit_rs::iso7816::Transport;
+use yubikit_rs::smartcard::Transport;
 
 fn main() {
     let devices = list_devices().expect("Failed to enumerate devices");

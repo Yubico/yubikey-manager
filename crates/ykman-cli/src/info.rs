@@ -1,5 +1,5 @@
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::iso7816::Transport;
+use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::Capability;
 
 use crate::util::CliError;

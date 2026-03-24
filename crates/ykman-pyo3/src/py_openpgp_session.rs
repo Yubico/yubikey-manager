@@ -1,10 +1,9 @@
 use pyo3::prelude::*;
-use yubikit_rs::iso7816::{Aid, SmartCardError, SmartCardProtocol};
 use yubikit_rs::openpgp::{
     self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
 };
 
-use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
 
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;
@@ -168,20 +167,8 @@ impl OpenPgpSession {
     fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
-            let mut protocol = SmartCardProtocol::new(conn);
-            // SELECT with auto-activate on 0x6285 or 0x6985
-            match protocol.select(Aid::OPENPGP) {
-                Ok(_) => {}
-                Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6285 || sw == 0x6985 => {
-                    protocol
-                        .send_apdu(0, 0x44 /* INS_ACTIVATE */, 0, 0, &[])
-                        .map_err(smartcard_err)?;
-                    protocol.select(Aid::OPENPGP).map_err(smartcard_err)?;
-                }
-                Err(e) => return Err(smartcard_err(e)),
-            }
-            init_scp_from_py(&mut protocol, params)?;
-            let inner = RustOpenPgpSession::from_protocol(protocol).map_err(openpgp_err)?;
+            let scp_params = scp_key_params_from_py(params)?;
+            let inner = RustOpenPgpSession::new_with_scp(conn, &scp_params).map_err(openpgp_err)?;
             Ok(Self { inner })
         } else {
             let inner = RustOpenPgpSession::new(conn).map_err(openpgp_err)?;
@@ -198,7 +185,7 @@ impl OpenPgpSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::smartcard::Version(version.0, version.1, version.2));
     }
 
     #[getter]

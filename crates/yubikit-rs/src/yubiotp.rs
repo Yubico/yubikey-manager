@@ -36,12 +36,12 @@ use std::sync::Arc;
 use sha1::{Digest, Sha1};
 
 use crate::core_types::patch_version;
-use crate::iso7816::{Aid, SmartCardConnection, SmartCardProtocol, Version};
-use crate::otp_codec::{calculate_crc, check_crc};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
+use crate::otp::{calculate_crc, check_crc};
 use crate::transport::hid::HidConnection;
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
-pub use crate::otp_protocol::{OtpProtocol, OtpTransport, YubiOtpError};
+pub use crate::otp::{OtpProtocol, OtpTransport, YubiOtpError};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -887,16 +887,15 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         Self::init(protocol, &status)
     }
 
-    /// Create a session from an already-initialized protocol.
-    ///
-    /// The protocol must have had `select(Aid::OTP)` called already (with the
-    /// response passed as `select_response`). SCP may have been initialized on
-    /// the protocol before calling this.
-    pub fn from_protocol(
-        protocol: SmartCardProtocol<C>,
-        select_response: &[u8],
+    /// Open a YubiOTP session with SCP (Secure Channel Protocol).
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
     ) -> Result<Self, YubiOtpError> {
-        Self::init(protocol, select_response)
+        let mut protocol = SmartCardProtocol::new(connection);
+        let status = protocol.select(Aid::OTP)?;
+        protocol.init_scp(scp_key_params)?;
+        Self::init(protocol, &status)
     }
 
     fn init(

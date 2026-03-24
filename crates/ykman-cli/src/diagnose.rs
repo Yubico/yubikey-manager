@@ -1,5 +1,5 @@
 use yubikit_rs::device::{get_name, list_readers, read_info, read_info_otp};
-use yubikit_rs::iso7816::Transport;
+use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::{Capability, DeviceInfo, ReleaseType};
 use yubikit_rs::transport::hid::{HidConnection, list_otp_devices};
 use yubikit_rs::transport::pcsc::PcscConnection;

@@ -249,3 +249,30 @@ pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<
     output.truncate(length);
     output
 }
+
+/// SCP key parameters for establishing a secure channel when opening a session.
+#[derive(Clone, Debug)]
+pub enum ScpKeyParams {
+    /// SCP03 with static keys.
+    Scp03 {
+        kvn: u8,
+        key_enc: Vec<u8>,
+        key_mac: Vec<u8>,
+        key_dek: Option<Vec<u8>>,
+    },
+    /// SCP11b — needs card key reference + public key from SD.
+    Scp11b {
+        kid: u8,
+        kvn: u8,
+        pk_sd_ecka: Vec<u8>,
+    },
+    /// SCP11a or SCP11c — needs OCE private key + cert chain.
+    Scp11ac {
+        kid: u8,
+        kvn: u8,
+        pk_sd_ecka: Vec<u8>,
+        sk_oce_ecka: Vec<u8>,
+        certificates: Vec<Vec<u8>>,
+        oce_ref: Option<(u8, u8)>,
+    },
+}

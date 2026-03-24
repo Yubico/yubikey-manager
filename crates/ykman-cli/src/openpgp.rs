@@ -10,7 +10,7 @@ use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<OpenPgpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OpenPgpSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OPENPGP)?;
     match scp_config {
         ScpConfig::None => {
@@ -24,12 +24,9 @@ fn open_session<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-            protocol
-                .select(yubikit_rs::iso7816::Aid::OPENPGP)
-                .map_err(|e| CliError(format!("Failed to select OpenPGP: {e}")))?;
-            scp::apply_scp(&mut protocol, config)?;
-            OpenPgpSession::from_protocol(protocol)
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            OpenPgpSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
         }
     }

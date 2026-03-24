@@ -44,7 +44,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::iso7816::{SmartCardError, Transport, Version};
+use crate::smartcard::{SmartCardError, Transport, Version};
 use crate::management::{Capability, DeviceInfo, FormFactor, ManagementOtpSession, ManagementSession, UsbInterface};
 use crate::transport::hid::{HidConnection, HidDeviceInfo, HidError, list_otp_devices};
 use crate::transport::pcsc::{PcscConnection, PcscError};

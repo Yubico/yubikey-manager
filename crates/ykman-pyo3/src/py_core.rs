@@ -1,24 +1,24 @@
 use pyo3::prelude::*;
-use yubikit_rs::{core_types, iso7816, otp_codec, tlv};
+use yubikit_rs::{core_types, smartcard, otp, tlv};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {
-    otp_codec::calculate_crc(data)
+    otp::calculate_crc(data)
 }
 
 #[pyfunction]
 fn check_crc(data: &[u8]) -> bool {
-    otp_codec::check_crc(data)
+    otp::check_crc(data)
 }
 
 #[pyfunction]
 fn modhex_encode(data: &[u8]) -> String {
-    otp_codec::modhex_encode(data)
+    otp::modhex_encode(data)
 }
 
 #[pyfunction]
 fn modhex_decode(string: &str) -> PyResult<Vec<u8>> {
-    otp_codec::modhex_decode(string).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    otp::modhex_decode(string).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction]
@@ -61,7 +61,7 @@ fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
 
 #[pyfunction]
 fn format_short_apdu(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u8) -> PyResult<Vec<u8>> {
-    iso7816::format_short_apdu(cla, ins, p1, p2, data, le)
+    smartcard::format_short_apdu(cla, ins, p1, p2, data, le)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
@@ -69,7 +69,7 @@ fn format_short_apdu(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u8) -> P
 fn format_extended_apdu(
     cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u16, max_apdu_size: usize,
 ) -> PyResult<Vec<u8>> {
-    iso7816::format_extended_apdu(cla, ins, p1, p2, data, le, max_apdu_size)
+    smartcard::format_extended_apdu(cla, ins, p1, p2, data, le, max_apdu_size)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 

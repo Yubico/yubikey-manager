@@ -2,7 +2,7 @@
 //! and explicit SCP from CLI flags.
 
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::iso7816::{SmartCardConnection, SmartCardProtocol};
+use yubikit_rs::smartcard::{SmartCardConnection, SmartCardProtocol};
 use yubikit_rs::management::Capability;
 use yubikit_rs::securitydomain::{KeyRef, SecurityDomainSession};
 
@@ -138,33 +138,31 @@ pub fn resolve_scp(
 
 /// Apply SCP configuration to a SmartCardProtocol.
 /// The AID must already be selected before calling this.
-pub fn apply_scp<C: SmartCardConnection>(
-    protocol: &mut SmartCardProtocol<C>,
-    config: &ScpConfig,
-) -> Result<(), CliError> {
+/// Convert an `ScpConfig` into `ScpKeyParams`, returning `None` for
+/// `ScpConfig::None`.
+pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit_rs::scp::ScpKeyParams> {
     match config {
-        ScpConfig::None => Ok(()),
+        ScpConfig::None => None,
         ScpConfig::Scp03 {
             kvn,
             key_enc,
             key_mac,
             key_dek,
-        } => {
-            protocol
-                .init_scp03(*kvn, key_enc, key_mac, key_dek.as_deref())
-                .map_err(|e| CliError(format!("SCP03 initialization failed: {e}")))?;
-            Ok(())
-        }
+        } => Some(yubikit_rs::scp::ScpKeyParams::Scp03 {
+            kvn: *kvn,
+            key_enc: key_enc.clone(),
+            key_mac: key_mac.clone(),
+            key_dek: key_dek.clone(),
+        }),
         ScpConfig::Scp11b {
             kid,
             kvn,
             pk_sd_ecka,
-        } => {
-            protocol
-                .init_scp11(*kid, *kvn, pk_sd_ecka, None, &[], None)
-                .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
-            Ok(())
-        }
+        } => Some(yubikit_rs::scp::ScpKeyParams::Scp11b {
+            kid: *kid,
+            kvn: *kvn,
+            pk_sd_ecka: pk_sd_ecka.clone(),
+        }),
         ScpConfig::Scp11ac {
             kid,
             kvn,
@@ -172,21 +170,27 @@ pub fn apply_scp<C: SmartCardConnection>(
             sk_oce_ecka,
             certificates,
             oce_ref,
-        } => {
-            let cert_refs: Vec<&[u8]> = certificates.iter().map(|c| c.as_slice()).collect();
-            protocol
-                .init_scp11(
-                    *kid,
-                    *kvn,
-                    pk_sd_ecka,
-                    Some(sk_oce_ecka),
-                    &cert_refs,
-                    *oce_ref,
-                )
-                .map_err(|e| CliError(format!("SCP11 initialization failed: {e}")))?;
-            Ok(())
-        }
+        } => Some(yubikit_rs::scp::ScpKeyParams::Scp11ac {
+            kid: *kid,
+            kvn: *kvn,
+            pk_sd_ecka: pk_sd_ecka.clone(),
+            sk_oce_ecka: sk_oce_ecka.clone(),
+            certificates: certificates.clone(),
+            oce_ref: *oce_ref,
+        }),
     }
+}
+
+pub fn apply_scp<C: SmartCardConnection>(
+    protocol: &mut SmartCardProtocol<C>,
+    config: &ScpConfig,
+) -> Result<(), CliError> {
+    if let Some(params) = to_scp_key_params(config) {
+        protocol
+            .init_scp(&params)
+            .map_err(|e| CliError(format!("SCP initialization failed: {e}")))?;
+    }
+    Ok(())
 }
 
 /// Find SCP11b key parameters from the Security Domain on a separate connection.

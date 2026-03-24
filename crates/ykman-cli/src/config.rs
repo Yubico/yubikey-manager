@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::iso7816::Transport;
+use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::{
     Capability, DeviceConfig, DeviceFlag, ManagementOtpSession, ManagementSession,
 };

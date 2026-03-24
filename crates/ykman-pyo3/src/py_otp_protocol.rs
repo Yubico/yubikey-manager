@@ -33,7 +33,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit_rs::otp_protocol::{OtpProtocol as RustOtpProtocol, OtpTransport, YubiOtpError};
+use yubikit_rs::otp::{OtpProtocol as RustOtpProtocol, OtpTransport, YubiOtpError};
 
 /// Bridges a Python OtpConnection object to the Rust OtpTransport trait.
 pub struct PyOtpConnection {

@@ -1,6 +1,6 @@
 use yubikit_rs::core_types::Version;
 use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
+use yubikit_rs::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use yubikit_rs::management::Capability;
 
 use crate::scp::{self, ScpParams};

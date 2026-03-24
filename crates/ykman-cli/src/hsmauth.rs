@@ -12,7 +12,7 @@ const DEFAULT_MANAGEMENT_KEY: &[u8] = &[0u8; 16];
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<HsmAuthSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<HsmAuthSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::HSMAUTH)?;
     match scp_config {
         ScpConfig::None => {
@@ -26,12 +26,9 @@ fn open_session<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-            let resp = protocol
-                .select(yubikit_rs::iso7816::Aid::HSMAUTH)
-                .map_err(|e| CliError(format!("Failed to select HSM Auth: {e}")))?;
-            scp::apply_scp(&mut protocol, config)?;
-            HsmAuthSession::from_protocol(protocol, &resp)
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            HsmAuthSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
         }
     }

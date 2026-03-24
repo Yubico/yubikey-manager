@@ -33,7 +33,7 @@ use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
 
 use crate::core_types::patch_version;
-use crate::iso7816::{
+use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version,
 };
 use crate::tlv::{tlv_encode, tlv_parse, TlvError};
@@ -352,11 +352,14 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         Ok(Self { protocol, version })
     }
 
-    /// Create a session from an already-initialized protocol.
-    ///
-    /// The protocol must have had `select(Aid::SECURE_DOMAIN)` called already.
-    /// SCP may have been initialized on the protocol before calling this.
-    pub fn from_protocol(mut protocol: SmartCardProtocol<C>) -> Result<Self, SmartCardError> {
+    /// Open a Security Domain session with SCP (Secure Channel Protocol).
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
+    ) -> Result<Self, SmartCardError> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        protocol.select(Aid::SECURE_DOMAIN)?;
+        protocol.init_scp(scp_key_params)?;
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
         Ok(Self { protocol, version })

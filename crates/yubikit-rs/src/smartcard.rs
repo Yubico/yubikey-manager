@@ -894,4 +894,32 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
         Ok(())
     }
+
+    /// Initialize SCP using key parameters.
+    pub fn init_scp(&mut self, params: &crate::scp::ScpKeyParams) -> Result<(), SmartCardError> {
+        match params {
+            crate::scp::ScpKeyParams::Scp03 {
+                kvn,
+                key_enc,
+                key_mac,
+                key_dek,
+            } => self.init_scp03(*kvn, key_enc, key_mac, key_dek.as_deref()),
+            crate::scp::ScpKeyParams::Scp11b {
+                kid,
+                kvn,
+                pk_sd_ecka,
+            } => self.init_scp11(*kid, *kvn, pk_sd_ecka, None, &[], None),
+            crate::scp::ScpKeyParams::Scp11ac {
+                kid,
+                kvn,
+                pk_sd_ecka,
+                sk_oce_ecka,
+                certificates,
+                oce_ref,
+            } => {
+                let cert_refs: Vec<&[u8]> = certificates.iter().map(|c| c.as_slice()).collect();
+                self.init_scp11(*kid, *kvn, pk_sd_ecka, Some(sk_oce_ecka), &cert_refs, *oce_ref)
+            }
+        }
+    }
 }

@@ -40,7 +40,7 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 use crate::core_types::patch_version;
-use crate::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
 
 // ---------------------------------------------------------------------------
@@ -872,11 +872,14 @@ impl<C: SmartCardConnection> PivSession<C> {
         Self::init(protocol)
     }
 
-    /// Create a session from an already-initialized protocol.
-    ///
-    /// The protocol must have had `select(Aid::PIV)` called already. SCP may
-    /// have been initialized on the protocol before calling this.
-    pub fn from_protocol(protocol: SmartCardProtocol<C>) -> Result<Self, PivError> {
+    /// Open a PIV session with SCP (Secure Channel Protocol).
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
+    ) -> Result<Self, PivError> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        protocol.select(Aid::PIV)?;
+        protocol.init_scp(scp_key_params)?;
         Self::init(protocol)
     }
 

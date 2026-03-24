@@ -34,7 +34,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit_rs::iso7816::{SmartCardConnection, SmartCardError, SmartCardProtocol, Transport};
+use yubikit_rs::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol, Transport};
 
 /// A Rust `SmartCardConnection` backed by a Python connection object.
 ///
@@ -162,6 +162,117 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
 ///
 /// Inspects the Python object's class name to determine whether to use SCP03
 /// or SCP11, then extracts the necessary fields and calls the Rust init method.
+pub fn scp_key_params_from_py(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<yubikit_rs::scp::ScpKeyParams> {
+    let class_name = params
+        .get_type()
+        .name()?
+        .to_string();
+
+    if class_name.contains("Scp03KeyParams") {
+        scp03_key_params_from_py(params)
+    } else if class_name.contains("Scp11KeyParams") {
+        scp11_key_params_from_py(params)
+    } else {
+        Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Unsupported SCP key params type: {class_name}"
+        )))
+    }
+}
+
+fn scp03_key_params_from_py(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<yubikit_rs::scp::ScpKeyParams> {
+    let key_ref = params.getattr("ref")?;
+    let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
+    let keys = params.getattr("keys")?;
+    let key_enc: Vec<u8> = keys.getattr("key_enc")?.call_method0("__bytes__")?.extract()?;
+    let key_mac: Vec<u8> = keys.getattr("key_mac")?.call_method0("__bytes__")?.extract()?;
+    let key_dek_obj = keys.getattr("key_dek")?;
+    let key_dek: Option<Vec<u8>> = if key_dek_obj.is_none() {
+        None
+    } else {
+        Some(key_dek_obj.call_method0("__bytes__")?.extract()?)
+    };
+
+    Ok(yubikit_rs::scp::ScpKeyParams::Scp03 {
+        kvn,
+        key_enc,
+        key_mac,
+        key_dek,
+    })
+}
+
+fn scp11_key_params_from_py(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<yubikit_rs::scp::ScpKeyParams> {
+    let key_ref = params.getattr("ref")?;
+    let kid: u8 = key_ref.getattr("kid")?.extract()?;
+    let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
+
+    let pk = params.getattr("pk_sd_ecka")?;
+    let serialization = pk
+        .py()
+        .import("cryptography.hazmat.primitives.serialization")?;
+    let encoding_x962 = serialization.getattr("Encoding")?.getattr("X962")?;
+    let format_uncompressed = serialization
+        .getattr("PublicFormat")?
+        .getattr("UncompressedPoint")?;
+    let pk_bytes: Vec<u8> = pk
+        .call_method1("public_bytes", (encoding_x962, format_uncompressed))?
+        .extract()?;
+
+    let sk_oce_obj = params.getattr("sk_oce_ecka")?;
+    let sk_oce: Option<Vec<u8>> = if sk_oce_obj.is_none() {
+        None
+    } else {
+        let numbers = sk_oce_obj.call_method0("private_numbers")?;
+        let private_value = numbers.getattr("private_value")?;
+        let bytes: Vec<u8> = private_value
+            .call_method1("to_bytes", (32usize, "big"))?
+            .extract()?;
+        Some(bytes)
+    };
+
+    let certs_list = params.getattr("certificates")?;
+    let certs_len: usize = certs_list.len()?;
+    let encoding_der = serialization.getattr("Encoding")?.getattr("DER")?;
+    let mut cert_ders: Vec<Vec<u8>> = Vec::with_capacity(certs_len);
+    for i in 0..certs_len {
+        let cert = certs_list.get_item(i)?;
+        let der: Vec<u8> = cert
+            .call_method1("public_bytes", (encoding_der.clone(),))?
+            .extract()?;
+        cert_ders.push(der);
+    }
+
+    let oce_ref_obj = params.getattr("oce_ref")?;
+    let oce_ref: Option<(u8, u8)> = if oce_ref_obj.is_none() {
+        None
+    } else {
+        let oce_kid: u8 = oce_ref_obj.getattr("kid")?.extract()?;
+        let oce_kvn: u8 = oce_ref_obj.getattr("kvn")?.extract()?;
+        Some((oce_kid, oce_kvn))
+    };
+
+    match sk_oce {
+        Some(sk) => Ok(yubikit_rs::scp::ScpKeyParams::Scp11ac {
+            kid,
+            kvn,
+            pk_sd_ecka: pk_bytes,
+            sk_oce_ecka: sk,
+            certificates: cert_ders,
+            oce_ref,
+        }),
+        None => Ok(yubikit_rs::scp::ScpKeyParams::Scp11b {
+            kid,
+            kvn,
+            pk_sd_ecka: pk_bytes,
+        }),
+    }
+}
+
 pub fn init_scp_from_py<C: SmartCardConnection>(
     protocol: &mut SmartCardProtocol<C>,
     params: &Bound<'_, PyAny>,

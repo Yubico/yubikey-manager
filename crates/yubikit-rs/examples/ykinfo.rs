@@ -14,7 +14,7 @@ use std::env;
 use yubikit_rs::core_types::{set_override_version, Version};
 use yubikit_rs::device::{list_devices, list_readers, open_reader, YubiKeyDevice};
 use yubikit_rs::hsmauth::HsmAuthSession;
-use yubikit_rs::iso7816::Transport;
+use yubikit_rs::smartcard::Transport;
 use yubikit_rs::management::{Capability, ReleaseType};
 use yubikit_rs::oath::OathSession;
 use yubikit_rs::openpgp::OpenPgpSession;

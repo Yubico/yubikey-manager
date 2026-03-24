@@ -1,11 +1,10 @@
 use pyo3::prelude::*;
-use yubikit_rs::iso7816::{Aid, SmartCardProtocol};
 use yubikit_rs::piv::{
     self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot,
     TouchPolicy,
 };
 
-use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
 
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;
@@ -104,10 +103,8 @@ impl PivSession {
     fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
-            let mut protocol = SmartCardProtocol::new(conn);
-            protocol.select(Aid::PIV).map_err(smartcard_err)?;
-            init_scp_from_py(&mut protocol, params)?;
-            let inner = RustPivSession::from_protocol(protocol).map_err(piv_err)?;
+            let scp_params = scp_key_params_from_py(params)?;
+            let inner = RustPivSession::new_with_scp(conn, &scp_params).map_err(piv_err)?;
             Ok(Self { inner })
         } else {
             let inner = RustPivSession::new(conn).map_err(piv_err)?;
@@ -124,7 +121,7 @@ impl PivSession {
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
         self.inner
-            .set_version(yubikit_rs::iso7816::Version(version.0, version.1, version.2));
+            .set_version(yubikit_rs::smartcard::Version(version.0, version.1, version.2));
     }
 
     #[getter]

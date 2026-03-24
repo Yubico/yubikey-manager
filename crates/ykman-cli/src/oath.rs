@@ -14,7 +14,7 @@ fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
-) -> Result<OathSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OathSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
     let mut session = match scp_config {
         ScpConfig::None => {
@@ -28,12 +28,9 @@ fn open_session<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-            let resp = protocol
-                .select(yubikit_rs::iso7816::Aid::OATH)
-                .map_err(|e| CliError(format!("Failed to select OATH: {e}")))?;
-            scp::apply_scp(&mut protocol, config)?;
-            OathSession::from_protocol(protocol, &resp)
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            OathSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
         }
     };

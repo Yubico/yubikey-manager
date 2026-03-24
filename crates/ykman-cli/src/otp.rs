@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::management::Capability;
-use yubikit_rs::otp_codec::{modhex_decode, modhex_encode};
+use yubikit_rs::otp::{modhex_decode, modhex_encode};
 use yubikit_rs::yubiotp::{
     ACC_CODE_SIZE, ConfigState, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE,
     YubiOtpError, YubiOtpOtpSession, YubiOtpSession,
@@ -16,7 +16,7 @@ use crate::util::CliError;
 const SHIFT: u8 = 0x80;
 
 /// Unified OTP session that can be either HID or SmartCard backed.
-enum OtpSession<C: yubikit_rs::iso7816::SmartCardConnection> {
+enum OtpSession<C: yubikit_rs::smartcard::SmartCardConnection> {
     Otp(YubiOtpOtpSession),
     Sc(YubiOtpSession<C>),
 }
@@ -30,7 +30,7 @@ macro_rules! delegate {
     };
 }
 
-impl<C: yubikit_rs::iso7816::SmartCardConnection> OtpSession<C> {
+impl<C: yubikit_rs::smartcard::SmartCardConnection> OtpSession<C> {
     fn get_config_state(&self) -> ConfigState {
         delegate!(self, get_config_state)
     }
@@ -94,7 +94,7 @@ impl<C: yubikit_rs::iso7816::SmartCardConnection> OtpSession<C> {
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<OtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OtpSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
 
     // If SCP is needed or NFC, must use SmartCard
@@ -116,7 +116,7 @@ fn open_session<'a>(
 fn open_sc<'a>(
     dev: &'a YubiKeyDevice,
     scp_config: ScpConfig,
-) -> Result<OtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OtpSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
     match scp_config {
         ScpConfig::None => {
             let conn = dev
@@ -130,12 +130,9 @@ fn open_sc<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-            let resp = protocol
-                .select(yubikit_rs::iso7816::Aid::OTP)
-                .map_err(|e| CliError(format!("Failed to select OTP: {e}")))?;
-            scp::apply_scp(&mut protocol, config)?;
-            let session = YubiOtpSession::from_protocol(protocol, &resp)
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            let session = YubiOtpSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
             Ok(OtpSession::Sc(session))
         }
