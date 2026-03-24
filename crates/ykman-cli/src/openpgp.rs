@@ -97,7 +97,7 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     }
 
     if let Ok(kdf) = session.get_kdf() {
-        let enabled = !matches!(kdf, yubikit_rs::openpgp::Kdf::None);
+        let enabled = if matches!(kdf, yubikit_rs::openpgp::Kdf::None) { "False" } else { "True" };
         println!("KDF enabled:                {enabled}");
     } else {
         println!("KDF enabled:                False");

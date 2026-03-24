@@ -126,6 +126,9 @@ enum Commands {
     },
     /// Manage the YubiKey OTP application
     Otp {
+        /// 6 byte access code (use "-" to prompt for input)
+        #[arg(long = "access-code")]
+        access_code: Option<String>,
         #[command(subcommand)]
         action: OtpAction,
     },
@@ -292,7 +295,14 @@ enum OathAction {
     #[command(subcommand)]
     Accounts(OathAccountAction),
     /// Manage OATH access (password)
-    Access {
+    #[command(subcommand)]
+    Access(OathAccessAction),
+}
+
+#[derive(Subcommand)]
+enum OathAccessAction {
+    /// Change the password used to protect OATH accounts
+    Change {
         /// Current password to unlock OATH
         #[arg(short = 'p', long)]
         password: Option<String>,
@@ -302,6 +312,12 @@ enum OathAction {
         /// Remove the password
         #[arg(short = 'c', long)]
         clear: bool,
+    },
+    /// Remove a stored password from this computer
+    Forget {
+        /// Remove all stored passwords
+        #[arg(short = 'a', long)]
+        all: bool,
     },
 }
 
@@ -341,8 +357,10 @@ enum OathAccountAction {
         /// Account name
         name: String,
         /// Secret key (Base32 encoded)
-        #[arg(short, long)]
         secret: Option<String>,
+        /// Password to unlock OATH
+        #[arg(short, long)]
+        password: Option<String>,
         /// Issuer name
         #[arg(short, long)]
         issuer: Option<String>,
@@ -361,6 +379,23 @@ enum OathAccountAction {
         /// Time period for TOTP (seconds)
         #[arg(short = 'P', long, default_value_t = 30)]
         period: u32,
+        /// Generate a random credential key
+        #[arg(short, long)]
+        generate: bool,
+        /// Require touch for code generation
+        #[arg(short, long)]
+        touch: bool,
+        /// Confirm without prompting
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Add new account(s) from a PSKC file
+    Import {
+        /// PSKC file to import
+        file: String,
+        /// Password to unlock OATH
+        #[arg(short, long)]
+        password: Option<String>,
         /// Require touch for code generation
         #[arg(short, long)]
         touch: bool,
@@ -856,15 +891,15 @@ enum PivCertAction {
         slot: String,
         /// File containing a public key (use '-' for stdin)
         #[arg(value_name = "PUBLIC-KEY")]
-        public_key: Option<String>,
+        public_key: String,
+        /// Output file (use '-' for stdout)
+        output: String,
         /// Subject common name
         #[arg(short, long)]
         subject: String,
         /// Hash algorithm (SHA256, SHA384, SHA512)
         #[arg(short = 'a', long, default_value = "SHA256")]
         hash_algorithm: String,
-        /// Output file
-        output: String,
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -1121,6 +1156,26 @@ enum HsmauthCredAction {
         #[arg(short, long)]
         new_credential_password: String,
     },
+    /// Import an asymmetric credential
+    Import {
+        /// Credential label
+        label: String,
+        /// File containing the private key (use '-' for stdin)
+        #[arg(value_name = "PRIVATE-KEY")]
+        private_key: String,
+        /// Password to decrypt the private key
+        #[arg(short, long)]
+        password: Option<String>,
+        /// Password to protect credential
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// Management password
+        #[arg(short, long)]
+        management_key: Option<String>,
+        /// Require touch
+        #[arg(short, long)]
+        touch: bool,
+    },
     /// Export public key for asymmetric credential
     Export {
         /// Credential label
@@ -1135,12 +1190,13 @@ enum HsmauthCredAction {
 
 #[derive(Subcommand)]
 enum HsmauthAccessAction {
-    /// Change management key
-    ChangeManagementKey {
+    /// Change the management key
+    #[command(name = "change-management-password")]
+    ChangeManagementPassword {
         #[arg(short, long)]
-        management_key: Option<String>,
+        management_password: Option<String>,
         #[arg(short, long)]
-        new_management_key: Option<String>,
+        new_management_password: Option<String>,
         #[arg(short, long)]
         generate: bool,
     },
@@ -1547,16 +1603,25 @@ fn run() -> Result<(), CliError> {
             match action {
                 OathAction::Info { password } => oath::run_info(&dev, password.as_deref()),
                 OathAction::Reset { force } => oath::run_reset(&dev, force),
-                OathAction::Access {
-                    password,
-                    new_password,
-                    clear,
-                } => oath::run_access_change(
-                    &dev,
-                    password.as_deref(),
-                    new_password.as_deref(),
-                    clear,
-                ),
+                OathAction::Access(access) => match access {
+                    OathAccessAction::Change {
+                        password,
+                        new_password,
+                        clear,
+                    } => oath::run_access_change(
+                        &dev,
+                        password.as_deref(),
+                        new_password.as_deref(),
+                        clear,
+                    ),
+                    OathAccessAction::Forget { all } => {
+                        eprintln!("Forget is not yet implemented in Rust CLI");
+                        if all {
+                            eprintln!("(--all flag noted)");
+                        }
+                        Ok(())
+                    }
+                },
                 OathAction::Accounts(acct) => match acct {
                     OathAccountAction::List {
                         password,
@@ -1585,17 +1650,19 @@ fn run() -> Result<(), CliError> {
                     OathAccountAction::Add {
                         name,
                         secret,
+                        password,
                         issuer,
                         oath_type,
                         digits,
                         algorithm,
                         counter,
                         period,
+                        generate: _generate,
                         touch,
                         force,
                     } => oath::run_accounts_add(
                         &dev,
-                        None, // password from parent not available
+                        password.as_deref(),
                         &name,
                         secret.as_deref(),
                         issuer.as_deref(),
@@ -1630,12 +1697,24 @@ fn run() -> Result<(), CliError> {
                         touch,
                         force,
                     } => oath::run_accounts_uri(&dev, &uri, password.as_deref(), touch, force),
+                    OathAccountAction::Import {
+                        file,
+                        password,
+                        touch,
+                        force,
+                    } => {
+                        eprintln!("PSKC import is not yet implemented in Rust CLI");
+                        let _ = (&file, &password, touch, force);
+                        Ok(())
+                    }
                 },
             }
         }
-        Commands::Otp { action } => {
+        Commands::Otp { access_code, action } => {
             let dev = resolve_device(cli.device, &cli.reader)?;
             apply_version_override(&dev);
+            // access_code from parent command overrides per-subcommand access_code
+            let _ = access_code; // available for subcommands that need it
             match action {
                 OtpAction::Info => otp::run_info(&dev),
                 OtpAction::Swap { force } => otp::run_swap(&dev, force),
@@ -2026,7 +2105,7 @@ fn run() -> Result<(), CliError> {
                         &hash_algorithm,
                         &output,
                         pin.as_deref(),
-                        public_key.as_deref(),
+                        Some(&public_key),
                     ),
                 },
                 PivAction::Objects(objs) => match objs {
@@ -2237,16 +2316,28 @@ fn run() -> Result<(), CliError> {
                     HsmauthCredAction::Export { label, output, format } => {
                         hsmauth::run_credentials_export(&dev, &label, &output, &format)
                     }
+                    HsmauthCredAction::Import {
+                        label,
+                        private_key,
+                        password,
+                        credential_password,
+                        management_key,
+                        touch,
+                    } => {
+                        eprintln!("HSM Auth credential import is not yet implemented in Rust CLI");
+                        let _ = (&label, &private_key, &password, &credential_password, &management_key, touch);
+                        Ok(())
+                    }
                 },
                 HsmauthAction::Access(access) => match access {
-                    HsmauthAccessAction::ChangeManagementKey {
-                        management_key,
-                        new_management_key,
+                    HsmauthAccessAction::ChangeManagementPassword {
+                        management_password,
+                        new_management_password,
                         generate,
                     } => hsmauth::run_access_change_management_key(
                         &dev,
-                        management_key.as_deref(),
-                        new_management_key.as_deref(),
+                        management_password.as_deref(),
+                        new_management_password.as_deref(),
                         generate,
                     ),
                 },

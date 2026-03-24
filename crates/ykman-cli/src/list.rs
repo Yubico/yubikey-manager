@@ -28,11 +28,27 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
             let info = dev.info();
             let name = get_name(info);
             let version = &info.version_name();
+            let ifaces = dev.usb_interfaces();
+            let ifaces_str = if ifaces.0 != 0 {
+                let mut parts = Vec::new();
+                if ifaces.0 & yubikit_rs::management::UsbInterface::OTP.0 != 0 {
+                    parts.push("OTP");
+                }
+                if ifaces.0 & yubikit_rs::management::UsbInterface::FIDO.0 != 0 {
+                    parts.push("FIDO");
+                }
+                if ifaces.0 & yubikit_rs::management::UsbInterface::CCID.0 != 0 {
+                    parts.push("CCID");
+                }
+                format!(" [{}]", parts.join("+"))
+            } else {
+                String::new()
+            };
             let serial_str = match dev.serial() {
                 Some(s) => format!(" Serial: {s}"),
                 None => String::new(),
             };
-            println!("{name} ({version}){serial_str}");
+            println!("{name} ({version}){ifaces_str}{serial_str}");
         }
     }
 

@@ -45,7 +45,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use crate::iso7816::{SmartCardError, Transport, Version};
-use crate::management::{Capability, DeviceInfo, FormFactor, ManagementSession, UsbInterface};
+use crate::management::{Capability, DeviceInfo, FormFactor, ManagementOtpSession, ManagementSession, UsbInterface};
 use crate::transport::hid::{HidConnection, HidDeviceInfo, HidError, list_otp_devices};
 use crate::transport::pcsc::{PcscConnection, PcscError};
 pub use crate::transport::pcsc::list_readers;
@@ -153,18 +153,39 @@ impl YubiKeyDevice {
         self.hid_path.as_deref()
     }
 
-    /// Returns detected USB interfaces based on which transports were found.
+    /// Returns detected USB interfaces based on enabled capabilities.
     pub fn usb_interfaces(&self) -> UsbInterface {
-        let mut ifaces = UsbInterface(0);
-        if self.reader_name.is_some() {
-            ifaces = ifaces | UsbInterface::CCID;
-            // CCID readers on YubiKey usually also have FIDO
-            ifaces = ifaces | UsbInterface::FIDO;
+        // Derive from enabled USB capabilities in the device info
+        if let Some(&usb_caps) = self.info.config.enabled_capabilities.get(&Transport::Usb) {
+            let mut ifaces = UsbInterface(0);
+            if usb_caps.contains(Capability::OTP) {
+                ifaces = ifaces | UsbInterface::OTP;
+            }
+            if usb_caps.contains(Capability::FIDO2) || usb_caps.contains(Capability::U2F) {
+                ifaces = ifaces | UsbInterface::FIDO;
+            }
+            // CCID: any of PIV, OATH, OpenPGP, HSMAUTH, or Management
+            if usb_caps
+                .contains(Capability::PIV)
+                || usb_caps.contains(Capability::OATH)
+                || usb_caps.contains(Capability::OPENPGP)
+                || usb_caps.contains(Capability::HSMAUTH)
+            {
+                ifaces = ifaces | UsbInterface::CCID;
+            }
+            ifaces
+        } else {
+            // Fallback: infer from which transports were discovered
+            let mut ifaces = UsbInterface(0);
+            if self.reader_name.is_some() {
+                ifaces = ifaces | UsbInterface::CCID;
+                ifaces = ifaces | UsbInterface::FIDO;
+            }
+            if self.hid_path.is_some() {
+                ifaces = ifaces | UsbInterface::OTP;
+            }
+            ifaces
         }
-        if self.hid_path.is_some() {
-            ifaces = ifaces | UsbInterface::OTP;
-        }
-        ifaces
     }
 
     /// Open a SmartCard (PC/SC) connection to this device.
@@ -244,20 +265,56 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
         }
     }
 
-    // Scan HID OTP devices, merging with existing PC/SC entries
+    // Scan HID OTP devices, merging with existing PC/SC entries by serial
     if let Ok(hid_devices) = list_otp_devices() {
         for hid in hid_devices {
-            // If there is exactly one CCID device without a HID path, merge them.
-            let should_merge = devices.len() == 1 && devices[0].hid_path.is_none();
-            if should_merge {
-                devices[0].hid_path = Some(hid.path);
+            // Try to read real device info via OTP management session
+            let hid_info = read_info_otp(&hid.path).ok();
+            let hid_serial = hid_info.as_ref().and_then(|i| i.serial);
+
+            // Try to merge with an existing PCSC entry by serial
+            let merged = if let Some(serial) = hid_serial {
+                if let Some(dev) = devices
+                    .iter_mut()
+                    .find(|d| d.serial() == Some(serial) && d.hid_path.is_none())
+                {
+                    dev.hid_path = Some(hid.path.clone());
+                    true
+                } else {
+                    false
+                }
             } else {
-                let info = synthetic_hid_info(&hid);
-                devices.push(YubiKeyDevice {
-                    reader_name: None,
-                    hid_path: Some(hid.path),
-                    info,
-                });
+                // No serial from HID — merge with the sole unmatched PCSC device
+                let unmatched: Vec<_> = devices
+                    .iter_mut()
+                    .filter(|d| d.hid_path.is_none())
+                    .collect();
+                if unmatched.len() == 1 {
+                    unmatched.into_iter().next().unwrap().hid_path = Some(hid.path.clone());
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if !merged {
+                let info = hid_info.unwrap_or_else(|| synthetic_hid_info(&hid));
+                if let Some(serial) = info.serial {
+                    if !seen_serials.contains(&serial) {
+                        seen_serials.insert(serial);
+                        devices.push(YubiKeyDevice {
+                            reader_name: None,
+                            hid_path: Some(hid.path),
+                            info,
+                        });
+                    }
+                } else {
+                    devices.push(YubiKeyDevice {
+                        reader_name: None,
+                        hid_path: Some(hid.path),
+                        info,
+                    });
+                }
             }
         }
     }
@@ -324,6 +381,22 @@ pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     // Use unchecked variant — dev devices report version 0.0.1 but still
     // support the DeviceInfo protocol.
     let mut info = session.read_device_info_unchecked()?;
+    apply_device_info_fixups(&mut info);
+    Ok(info)
+}
+
+/// Read device info via OTP HID.
+///
+/// Opens an [`HidConnection`] and uses [`ManagementOtpSession`] to read
+/// [`DeviceInfo`]. Applies standard fixups for known device quirks.
+pub fn read_info_otp(hid_path: &str) -> Result<DeviceInfo, DeviceError> {
+    let conn = HidConnection::new(hid_path)?;
+    let mut session = ManagementOtpSession::new(conn)
+        .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
+    // Use unchecked variant — dev devices report version 0.0.1 but still
+    // support the DeviceInfo protocol.
+    let mut info = session.read_device_info_unchecked()
+        .map_err(DeviceError::SmartCard)?;
     apply_device_info_fixups(&mut info);
     Ok(info)
 }

@@ -171,6 +171,8 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     let version = session.version();
     println!("PIV version:              {version}");
 
+    let mut warnings = Vec::new();
+
     // PIN metadata
     match session.get_pin_metadata() {
         Ok(meta) => {
@@ -179,7 +181,7 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
                 meta.attempts_remaining, meta.total_attempts
             );
             if meta.default_value {
-                println!("WARNING: Using default PIN!");
+                warnings.push("WARNING: Using default PIN!");
             }
         }
         Err(_) => match session.get_pin_attempts() {
@@ -195,17 +197,22 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
             meta.attempts_remaining, meta.total_attempts
         );
         if meta.default_value {
-            println!("WARNING: Using default PUK!");
+            warnings.push("WARNING: Using default PUK!");
         }
     }
 
     // Management key metadata
     if let Ok(meta) = session.get_management_key_metadata() {
-        let algo = format!("{:?}", meta.key_type).to_ascii_uppercase();
+        let algo = format!("{}", meta.key_type);
         println!("Management key algorithm: {algo}");
         if meta.default_value {
-            println!("WARNING: Using default Management key!");
+            warnings.push("WARNING: Using default Management key!");
         }
+    }
+
+    // Print collected warnings
+    for w in &warnings {
+        println!("{w}");
     }
 
     // CHUID
@@ -239,7 +246,7 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
         println!("\nSlot {hex_id} ({name}):");
 
         if let Some(ref meta) = has_key {
-            println!("  Private key type: {:?}", meta.key_type);
+            println!("  Private key type: {}", meta.key_type);
         }
 
         if let Some(ref cert_der) = has_cert {
@@ -280,7 +287,7 @@ fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
     let seq = &cert_der[seq_off..seq_off + seq_len];
 
     // TBSCertificate is the first element
-    let (_, tbs_off, tbs_len, tbs_end) = parse_der_tlv(seq, 0).ok()?;
+    let (_, tbs_off, tbs_len, _tbs_end) = parse_der_tlv(seq, 0).ok()?;
     let tbs = &seq[tbs_off..tbs_off + tbs_len];
 
     // Parse TBS fields: version, serialNumber, signature, issuer, validity, subject, spki
