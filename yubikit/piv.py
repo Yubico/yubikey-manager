@@ -529,6 +529,8 @@ def _pad_message(key_type, message, hash_algorithm, padding):
         # Raw (textbook) RSA encrypt
         n = dummy.public_key().public_numbers().n
         return int2bytes(pow(bytes2int(signature), e, n), key_type.bit_len // 8)
+    else:
+        raise ValueError(f"Unsupported algorithm {key_type.algorithm}")
 
 
 def _unpad_message(padded, padding):
@@ -608,17 +610,17 @@ def _parse_device_public_key(key_type, encoded):
         modulus = bytes2int(data[0x81])
         exponent = bytes2int(data[0x82])
         return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
-    elif key_type == KEY_TYPE.ED25519:
+    if key_type == KEY_TYPE.ED25519:
         return ed25519.Ed25519PublicKey.from_public_bytes(data[0x86])
-    elif key_type == KEY_TYPE.X25519:
+    if key_type == KEY_TYPE.X25519:
         return x25519.X25519PublicKey.from_public_bytes(data[0x86])
+    if key_type == KEY_TYPE.ECCP256:
+        curve: type[ec.EllipticCurve] = ec.SECP256R1
+    elif key_type == KEY_TYPE.ECCP384:
+        curve = ec.SECP384R1
     else:
-        if key_type == KEY_TYPE.ECCP256:
-            curve: type[ec.EllipticCurve] = ec.SECP256R1
-        else:
-            curve = ec.SECP384R1
-
-        return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
+        raise ValueError(f"Unsupported key type: {key_type}")
+    return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
 def decompress_certificate(cert_data: bytes) -> bytes:

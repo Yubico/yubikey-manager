@@ -1761,7 +1761,13 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Otp { access_code, action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::OtpPreferred)?;
+            // Use OTP-preferred unless SCP or NFC require CCID
+            let transport = if scp_params.is_explicit() || cli.reader.is_some() {
+                TransportPreference::Any
+            } else {
+                TransportPreference::OtpPreferred
+            };
+            let dev = resolve_device(cli.device, &cli.reader, transport)?;
             apply_version_override(&dev);
             // access_code from parent command overrides per-subcommand access_code
             let _ = access_code; // available for subcommands that need it

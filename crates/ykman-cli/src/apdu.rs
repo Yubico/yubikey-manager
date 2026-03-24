@@ -6,8 +6,19 @@ use yubikit_rs::management::Capability;
 use crate::scp::{self, ScpParams};
 use crate::util::CliError;
 
+/// Format a case-1 or case-3 APDU (no LE byte).
+fn format_apdu_no_le(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(5 + data.len());
+    buf.extend_from_slice(&[cla, ins, p1, p2]);
+    if !data.is_empty() {
+        buf.push(data.len() as u8);
+        buf.extend_from_slice(data);
+    }
+    buf
+}
+
 /// Parsed APDU: (cla, ins, p1, p2, data, le), expected_sw
-type ParsedApdu = ((u8, u8, u8, u8, Vec<u8>, u16), Option<u16>);
+type ParsedApdu = ((u8, u8, u8, u8, Vec<u8>, Option<u16>), Option<u16>);
 
 fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
     // Format: [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]
@@ -33,9 +44,9 @@ fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
             u8::from_str_radix(le_str, 16)
                 .map_err(|_| CliError(format!("Invalid LE: {le_str}")))?,
         );
-        (m, le)
+        (m, Some(le))
     } else {
-        (main_str, 0)
+        (main_str, None)
     };
 
     // Split off DATA
@@ -211,16 +222,27 @@ pub fn run_apdu(
         if !data.is_empty() {
             send_line.push_str(&format!(" -- {}", hex_spaced(&data)));
         }
-        if le > 0 {
+        if let Some(le) = le {
             send_line.push_str(&format!(" (LE={le:02X})"));
         }
         println!("SEND: {send_line}");
 
         // Send APDU and capture both success and error responses
-        let (resp, sw) = match protocol.send_apdu_with_le(cla, ins, p1, p2, &data, le) {
-            Ok(resp) => (resp, 0x9000u16),
-            Err(SmartCardError::Apdu { data, sw }) => (data, sw),
-            Err(e) => return Err(CliError(format!("APDU error: {e}"))),
+        // When LE is None, use send_apdu_no_le to avoid adding an LE byte
+        let (resp, sw) = match le {
+            Some(le) => match protocol.send_apdu_with_le(cla, ins, p1, p2, &data, le) {
+                Ok(resp) => (resp, 0x9000u16),
+                Err(SmartCardError::Apdu { data, sw }) => (data, sw),
+                Err(e) => return Err(CliError(format!("APDU error: {e}"))),
+            },
+            None => {
+                // No LE specified: send without LE byte (case 1 or case 3 APDU)
+                let apdu = format_apdu_no_le(cla, ins, p1, p2, &data);
+                match protocol.send_raw_apdu(&apdu) {
+                    Ok((resp, sw)) => (resp, sw),
+                    Err(e) => return Err(CliError(format!("APDU error: {e}"))),
+                }
+            }
         };
 
         print_response(&resp, sw, no_pretty);

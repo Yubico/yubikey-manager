@@ -393,6 +393,16 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         self.send_apdu_with_le(cla, ins, p1, p2, data, 0)
     }
 
+    /// Send a pre-formatted APDU (raw bytes), handling response chaining only.
+    /// Does NOT apply SCP wrapping or command chaining.
+    pub fn send_raw_apdu(
+        &self,
+        apdu: &[u8],
+    ) -> Result<(Vec<u8>, u16), SmartCardError> {
+        let (resp, sw) = self.connection.send_and_receive(apdu)?;
+        self.read_chained_response(resp, sw)
+    }
+
     /// Send an APDU with an explicit Le (expected response length).
     pub fn send_apdu_with_le(
         &mut self,
@@ -404,7 +414,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         le: u16,
     ) -> Result<Vec<u8>, SmartCardError> {
         let (resp, sw) = if self.scp_state.is_some() {
-            self.send_apdu_scp(cla, ins, p1, p2, data, true)?
+            self.send_apdu_scp(cla, ins, p1, p2, data, le, true)?
         } else {
             self.send_apdu_raw(cla, ins, p1, p2, data, le)?
         };
@@ -546,6 +556,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         p1: u8,
         p2: u8,
         data: &[u8],
+        le: u16,
         encrypt: bool,
     ) -> Result<(Vec<u8>, u16), SmartCardError> {
         let scp = self.scp_state.as_mut().unwrap();
@@ -596,8 +607,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // Append MAC to encrypted data
         let full_data = [&enc_data[..], &mac[..]].concat();
 
-        // Send the APDU
-        let (mut resp, sw) = self.send_apdu_raw(cla, ins, p1, p2, &full_data, 0)?;
+        // Send the APDU with the original LE
+        let (mut resp, sw) = self.send_apdu_raw(cla, ins, p1, p2, &full_data, le)?;
 
         // Un-MAC and decrypt response
         let scp = self.scp_state.as_mut().unwrap();
@@ -620,7 +631,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         p2: u8,
         data: &[u8],
     ) -> Result<(Vec<u8>, u16), SmartCardError> {
-        self.send_apdu_scp(cla, ins, p1, p2, data, false)
+        self.send_apdu_scp(cla, ins, p1, p2, data, 0, false)
     }
 
     // -------------------------------------------------------------------
