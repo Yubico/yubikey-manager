@@ -3,7 +3,8 @@ use std::io::{self, Write};
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::securitydomain::{KeyRef, SecurityDomainSession};
 
-use crate::util::CliError;
+use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
+use crate::scp::ScpParams;
 
 fn open_session(
     dev: &YubiKeyDevice,
@@ -24,7 +25,8 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let _ = scp_params;
     let mut session = open_session(dev)?;
     println!("Security Domain version: {}", session.version());
 
@@ -51,7 +53,8 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+    let _ = scp_params;
     if !force {
         eprintln!("WARNING! This will reset all Security Domain data.");
         if !confirm("Proceed?") {
@@ -68,11 +71,13 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
 
 pub fn run_keys_generate(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
     output: &str,
     replace_kvn: Option<u8>,
 ) -> Result<(), CliError> {
+    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev)?;
     let pub_key = session
@@ -83,14 +88,15 @@ pub fn run_keys_generate(
         )
         .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
 
-    std::fs::write(output, &pub_key).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+    write_file_or_stdout(output, &pub_key)?;
     println!(
         "EC key generated (KID=0x{kid:02X}, KVN=0x{kvn:02X}). Public key written to {output}."
     );
     Ok(())
 }
 
-pub fn run_keys_delete(dev: &YubiKeyDevice, kid: u8, kvn: u8, force: bool) -> Result<(), CliError> {
+pub fn run_keys_delete(dev: &YubiKeyDevice, scp_params: &ScpParams, kid: u8, kvn: u8, force: bool) -> Result<(), CliError> {
+    let _ = scp_params;
     if !force && !confirm(&format!("Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?")) {
         return Err(CliError("Aborted.".into()));
     }
@@ -104,10 +110,12 @@ pub fn run_keys_delete(dev: &YubiKeyDevice, kid: u8, kvn: u8, force: bool) -> Re
 
 pub fn run_keys_export(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
     output: &str,
 ) -> Result<(), CliError> {
+    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev)?;
     let certs = session
@@ -130,19 +138,21 @@ pub fn run_keys_export(
         }
         pem_out.push_str("-----END CERTIFICATE-----\n");
     }
-    std::fs::write(output, &pem_out).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+    write_file_or_stdout(output, pem_out.as_bytes())?;
     println!("Exported {} certificate(s) to {output}.", certs.len());
     Ok(())
 }
 
 pub fn run_keys_import(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
     key_type: &str,
     input: &str,
     replace_kvn: Option<u8>,
 ) -> Result<(), CliError> {
+    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev)?;
 
@@ -172,8 +182,9 @@ pub fn run_keys_import(
         }
         "scp11" => {
             // Input is a PEM file with certificate(s) and/or private key
-            let pem_data = std::fs::read_to_string(input)
-                .map_err(|e| CliError(format!("Failed to read {input}: {e}")))?;
+            let pem_bytes = read_file_or_stdin(input)?;
+            let pem_data = String::from_utf8(pem_bytes)
+                .map_err(|e| CliError(format!("Failed to read {input} as UTF-8: {e}")))?;
 
             let mut certs = Vec::new();
             let mut private_key: Option<Vec<u8>> = None;
@@ -251,10 +262,12 @@ pub fn run_keys_import(
 
 pub fn run_keys_set_allowlist(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
     serials: &[String],
 ) -> Result<(), CliError> {
+    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
     let serial_bytes: Vec<Vec<u8>> = serials
         .iter()

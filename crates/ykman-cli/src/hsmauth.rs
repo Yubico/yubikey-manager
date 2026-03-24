@@ -4,34 +4,36 @@ use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::hsmauth::{HsmAuthSession, credential_password_from_str};
 use yubikit_rs::management::Capability;
 
-use crate::scp;
-use crate::util::CliError;
+use crate::scp::{self, ScpConfig, ScpParams};
+use crate::util::{CliError, write_file_or_stdout};
 
 const DEFAULT_MANAGEMENT_KEY: &[u8] = &[0u8; 16];
 
-fn open_session(
-    dev: &YubiKeyDevice,
-) -> Result<HsmAuthSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    if scp::needs_scp11b(dev, Capability::HSMAUTH) {
-        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-        let resp = protocol
-            .select(yubikit_rs::iso7816::Aid::HSMAUTH)
-            .map_err(|e| CliError(format!("Failed to select HSM Auth: {e}")))?;
-        protocol
-            .init_scp11(kid, kvn, &pk, None, &[], None)
-            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
-        HsmAuthSession::from_protocol(protocol, &resp)
-            .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
-    } else {
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        HsmAuthSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+fn open_session<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<HsmAuthSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::HSMAUTH)?;
+    match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            HsmAuthSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+            let resp = protocol
+                .select(yubikit_rs::iso7816::Aid::HSMAUTH)
+                .map_err(|e| CliError(format!("Failed to select HSM Auth: {e}")))?;
+            scp::apply_scp(&mut protocol, config)?;
+            HsmAuthSession::from_protocol(protocol, &resp)
+                .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+        }
     }
 }
 
@@ -52,8 +54,8 @@ fn parse_mgmt_key(s: Option<&str>) -> Result<Vec<u8>, CliError> {
     }
 }
 
-pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let mut session = open_session(dev, scp_params)?;
     println!("YubiHSM Auth version:             {}", session.version());
     match session.get_management_key_retries() {
         Ok(retries) => println!("Management key retries remaining: {retries}/8"),
@@ -62,14 +64,14 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
     if !force {
         eprintln!("WARNING! This will delete all stored HSM Auth credentials.");
         if !confirm("Proceed?") {
             return Err(CliError("Aborted.".into()));
         }
     }
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset: {e}")))?;
@@ -77,8 +79,8 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn run_credentials_list(dev: &YubiKeyDevice) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+pub fn run_credentials_list(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let mut session = open_session(dev, scp_params)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
@@ -103,6 +105,7 @@ pub fn run_credentials_list(dev: &YubiKeyDevice) -> Result<(), CliError> {
 
 pub fn run_credentials_generate(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
     management_key: Option<&str>,
@@ -113,7 +116,7 @@ pub fn run_credentials_generate(
         .map(credential_password_from_str)
         .unwrap_or_else(|| vec![0u8; 16]);
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .generate_credential_asymmetric(&mgmt, label, &pw, touch)
         .map_err(|e| CliError(format!("Failed to generate credential: {e}")))?;
@@ -123,6 +126,7 @@ pub fn run_credentials_generate(
 
 pub fn run_credentials_delete(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     label: &str,
     management_key: Option<&str>,
     force: bool,
@@ -131,7 +135,7 @@ pub fn run_credentials_delete(
         return Err(CliError("Aborted.".into()));
     }
     let mgmt = parse_mgmt_key(management_key)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .delete_credential(&mgmt, label)
         .map_err(|e| CliError(format!("Failed to delete credential: {e}")))?;
@@ -141,6 +145,7 @@ pub fn run_credentials_delete(
 
 pub fn run_credentials_symmetric(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     label: &str,
     enc_key: Option<&str>,
     mac_key: Option<&str>,
@@ -174,7 +179,7 @@ pub fn run_credentials_symmetric(
         (e, m)
     };
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_symmetric(&mgmt, label, &enc, &mac, &pw, touch)
         .map_err(|e| CliError(format!("Failed to store credential: {e}")))?;
@@ -188,6 +193,7 @@ pub fn run_credentials_symmetric(
 
 pub fn run_credentials_derive(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     label: &str,
     derivation_password: &str,
     credential_password: Option<&str>,
@@ -199,7 +205,7 @@ pub fn run_credentials_derive(
         .map(credential_password_from_str)
         .unwrap_or_else(|| vec![0u8; 16]);
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
         .map_err(|e| CliError(format!("Failed to derive credential: {e}")))?;
@@ -209,6 +215,7 @@ pub fn run_credentials_derive(
 
 pub fn run_credentials_change_password(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
     new_credential_password: &str,
@@ -218,7 +225,7 @@ pub fn run_credentials_change_password(
         .unwrap_or_else(|| vec![0u8; 16]);
     let new_pw = credential_password_from_str(new_credential_password);
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .change_credential_password(label, &old_pw, &new_pw)
         .map_err(|e| CliError(format!("Failed to change password: {e}")))?;
@@ -228,11 +235,12 @@ pub fn run_credentials_change_password(
 
 pub fn run_credentials_export(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     label: &str,
     output: &str,
     format: &str,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let public_key = session
         .get_public_key(label)
         .map_err(|e| CliError(format!("Failed to get public key: {e}")))?;
@@ -274,14 +282,8 @@ pub fn run_credentials_export(
 
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            if output == "-" {
-                use std::io::Write;
-                std::io::stdout()
-                    .write_all(&spki)
-                    .map_err(|e| CliError(format!("Failed to write: {e}")))?;
-            } else {
-                std::fs::write(output, &spki)
-                    .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            write_file_or_stdout(output, &spki)?;
+            if output != "-" {
                 println!("Public key exported to {output}.");
             }
         }
@@ -294,11 +296,8 @@ pub fn run_credentials_export(
             }
             pem.push_str("-----END PUBLIC KEY-----\n");
 
-            if output == "-" {
-                print!("{pem}");
-            } else {
-                std::fs::write(output, &pem)
-                    .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            write_file_or_stdout(output, pem.as_bytes())?;
+            if output != "-" {
                 println!("Public key exported to {output}.");
             }
         }
@@ -308,6 +307,7 @@ pub fn run_credentials_export(
 
 pub fn run_access_change_management_key(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     management_key: Option<&str>,
     new_management_key: Option<&str>,
     generate: bool,
@@ -327,7 +327,7 @@ pub fn run_access_change_management_key(
     };
 
     let old_mgmt = parse_mgmt_key(management_key)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .put_management_key(&old_mgmt, &new_key)
         .map_err(|e| CliError(format!("Failed to change management key: {e}")))?;

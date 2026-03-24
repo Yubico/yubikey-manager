@@ -7,33 +7,35 @@ use yubikit_rs::oath::{
     Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
 
-use crate::scp;
+use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
 ) -> Result<OathSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
-    let mut session = if scp::needs_scp11b(dev, Capability::OATH) {
-        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-        let resp = protocol
-            .select(yubikit_rs::iso7816::Aid::OATH)
-            .map_err(|e| CliError(format!("Failed to select OATH: {e}")))?;
-        protocol
-            .init_scp11(kid, kvn, &pk, None, &[], None)
-            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
-        OathSession::from_protocol(protocol, &resp)
-            .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
-    } else {
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        OathSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+    let mut session = match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            OathSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+            let resp = protocol
+                .select(yubikit_rs::iso7816::Aid::OATH)
+                .map_err(|e| CliError(format!("Failed to select OATH: {e}")))?;
+            scp::apply_scp(&mut protocol, config)?;
+            OathSession::from_protocol(protocol, &resp)
+                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+        }
     };
     if session.locked() {
         let pw = password.ok_or_else(|| {
@@ -73,8 +75,8 @@ fn is_hidden(cred: &Credential) -> bool {
     cred.issuer.as_deref().unwrap_or("").starts_with('_') || cred.name.starts_with('_')
 }
 
-pub fn run_info(dev: &YubiKeyDevice, password: Option<&str>) -> Result<(), CliError> {
-    let session = open_session(dev, password)?;
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams, password: Option<&str>) -> Result<(), CliError> {
+    let session = open_session(dev, scp_params, password)?;
     println!("OATH version: {}", session.version());
     println!(
         "Password protection: {}",
@@ -87,7 +89,8 @@ pub fn run_info(dev: &YubiKeyDevice, password: Option<&str>) -> Result<(), CliEr
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+    let _ = scp_params;
     if !force {
         eprintln!(
             "WARNING! This will delete all stored OATH accounts and restore factory settings of the OATH application."
@@ -110,12 +113,13 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
 
 pub fn run_accounts_list(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
     show_hidden: bool,
     show_oath_type: bool,
     show_period: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
@@ -142,12 +146,13 @@ pub fn run_accounts_list(
 
 pub fn run_accounts_code(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
     query: Option<&str>,
     show_hidden: bool,
     single: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
     let timestamp = now_timestamp();
 
     let entries = session
@@ -222,6 +227,7 @@ pub fn run_accounts_code(
 
 pub fn run_accounts_add(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
     name: &str,
     secret: Option<&str>,
@@ -270,7 +276,7 @@ pub fn run_accounts_add(
         issuer: issuer.map(|s| s.to_string()),
     };
 
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
 
     // Check for existing credential
     if !force {
@@ -304,11 +310,12 @@ pub fn run_accounts_add(
 
 pub fn run_accounts_delete(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
     query: &str,
     force: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list: {e}")))?;
@@ -346,12 +353,13 @@ pub fn run_accounts_delete(
 
 pub fn run_accounts_rename(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
     query: &str,
     new_name: &str,
     force: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list: {e}")))?;
@@ -396,11 +404,12 @@ pub fn run_accounts_rename(
 
 pub fn run_access_change(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     password: Option<&str>,
     new_password: Option<&str>,
     clear: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
 
     if clear {
         session
@@ -420,6 +429,7 @@ pub fn run_access_change(
 
 pub fn run_accounts_uri(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     uri: &str,
     password: Option<&str>,
     touch: bool,
@@ -526,7 +536,7 @@ pub fn run_accounts_uri(
         issuer: issuer_ref.map(|s| s.to_string()),
     };
 
-    let mut session = open_session(dev, password)?;
+    let mut session = open_session(dev, scp_params, password)?;
 
     session
         .put_credential(&cred_data, touch)

@@ -90,10 +90,12 @@ pub struct HidConnection {
 
 impl HidConnection {
     pub fn new(path: &str) -> Result<Self, HidError> {
+        log_traffic!("Opening HID connection to '{}'", path);
         let api = HidApi::new()?;
         let cpath =
             std::ffi::CString::new(path).map_err(|_| HidError::InvalidPath)?;
         let device = api.open_path(&cpath)?;
+        log_traffic!("HID connection opened to '{}'", path);
         Ok(Self {
             device: Some(device),
         })
@@ -124,6 +126,9 @@ impl HidConnection {
     }
 
     pub fn close(&mut self) {
+        if self.device.is_some() {
+            log_traffic!("Closing HID connection");
+        }
         self.device.take();
     }
 }

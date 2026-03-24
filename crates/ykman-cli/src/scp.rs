@@ -1,6 +1,8 @@
-//! SCP (Secure Channel Protocol) utilities for automatic SCP11b negotiation.
+//! SCP (Secure Channel Protocol) utilities for automatic SCP11b negotiation
+//! and explicit SCP from CLI flags.
 
 use yubikit_rs::device::YubiKeyDevice;
+use yubikit_rs::iso7816::{SmartCardConnection, SmartCardProtocol};
 use yubikit_rs::management::Capability;
 use yubikit_rs::securitydomain::{KeyRef, SecurityDomainSession};
 
@@ -8,8 +10,62 @@ use crate::util::CliError;
 
 const YK_READER_PREFIX: &str = "yubico yubikey";
 
-/// Check if a device is connected over NFC (external reader, not the YubiKey's
-/// own CCID interface).
+/// SCP configuration resolved from CLI flags and device state.
+#[derive(Clone)]
+pub enum ScpConfig {
+    /// No SCP — plain connection.
+    None,
+    /// SCP03 with static keys.
+    Scp03 {
+        kvn: u8,
+        key_enc: Vec<u8>,
+        key_mac: Vec<u8>,
+        key_dek: Option<Vec<u8>>,
+    },
+    /// SCP11b — only needs card key reference + public key from SD.
+    Scp11b {
+        kid: u8,
+        kvn: u8,
+        pk_sd_ecka: Vec<u8>,
+    },
+    /// SCP11a or SCP11c — needs OCE private key + cert chain.
+    Scp11ac {
+        kid: u8,
+        kvn: u8,
+        pk_sd_ecka: Vec<u8>,
+        sk_oce_ecka: Vec<u8>,
+        certificates: Vec<Vec<u8>>,
+        oce_ref: Option<(u8, u8)>,
+    },
+}
+
+/// Parsed SCP parameters from CLI flags (before device interaction).
+#[derive(Clone, Default)]
+pub struct ScpParams {
+    /// SCP03 keys: (K-ENC, K-MAC, K-DEK?)
+    pub scp03_keys: Option<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>,
+    /// SCP11 private key (raw 32-byte scalar)
+    pub scp11_private_key: Option<Vec<u8>>,
+    /// SCP11 certificate chain (DER)
+    pub scp11_certificates: Vec<Vec<u8>>,
+    /// Card key reference (kid, kvn)
+    pub sd_ref: Option<(u8, u8)>,
+    /// OCE key reference (kid, kvn)
+    pub oce_ref: Option<(u8, u8)>,
+    /// CA certificate for SCP11 verification (DER)
+    pub ca_cert: Option<Vec<u8>>,
+}
+
+impl ScpParams {
+    /// Returns true if the user specified any SCP flags.
+    pub fn is_explicit(&self) -> bool {
+        self.scp03_keys.is_some()
+            || self.scp11_private_key.is_some()
+            || self.sd_ref.is_some()
+    }
+}
+
+/// Check if a device is connected over NFC (external reader).
 pub fn is_nfc(dev: &YubiKeyDevice) -> bool {
     match dev.reader_name() {
         Some(name) => !name.to_ascii_lowercase().contains(YK_READER_PREFIX),
@@ -22,48 +78,189 @@ pub fn needs_scp11b(dev: &YubiKeyDevice, capability: Capability) -> bool {
     is_nfc(dev) && dev.info().fips_capable.contains(capability)
 }
 
+/// Resolve SCP configuration for a command.
+///
+/// If the user explicitly specified SCP flags, those take priority.
+/// Otherwise, if the device is NFC + FIPS-capable for the given capability,
+/// auto-negotiate SCP11b.
+pub fn resolve_scp(
+    dev: &YubiKeyDevice,
+    params: &ScpParams,
+    capability: Capability,
+) -> Result<ScpConfig, CliError> {
+    // 1. Explicit SCP03
+    if let Some((ref key_enc, ref key_mac, ref key_dek)) = params.scp03_keys {
+        let kvn = params.sd_ref.map(|(_, kvn)| kvn).unwrap_or(0);
+        return Ok(ScpConfig::Scp03 {
+            kvn,
+            key_enc: key_enc.clone(),
+            key_mac: key_mac.clone(),
+            key_dek: key_dek.clone(),
+        });
+    }
+
+    // 2. Explicit SCP11a/c (has private key + certs)
+    if let Some(ref sk) = params.scp11_private_key {
+        let (kid, kvn) = params.sd_ref.unwrap_or((0x11, 0));
+        let pk = find_scp11_pk(dev, kid, kvn, params.ca_cert.as_deref())?;
+        return Ok(ScpConfig::Scp11ac {
+            kid,
+            kvn,
+            pk_sd_ecka: pk,
+            sk_oce_ecka: sk.clone(),
+            certificates: params.scp11_certificates.clone(),
+            oce_ref: params.oce_ref,
+        });
+    }
+
+    // 3. Explicit --scp-sd without --scp (SCP11b with explicit ref)
+    if let Some((kid, kvn)) = params.sd_ref {
+        let pk = find_scp11_pk(dev, kid, kvn, params.ca_cert.as_deref())?;
+        return Ok(ScpConfig::Scp11b {
+            kid,
+            kvn,
+            pk_sd_ecka: pk,
+        });
+    }
+
+    // 4. Auto SCP11b for NFC + FIPS
+    if needs_scp11b(dev, capability) {
+        let (kid, kvn, pk) = find_scp11b_params(dev)?;
+        return Ok(ScpConfig::Scp11b {
+            kid,
+            kvn,
+            pk_sd_ecka: pk,
+        });
+    }
+
+    Ok(ScpConfig::None)
+}
+
+/// Apply SCP configuration to a SmartCardProtocol.
+/// The AID must already be selected before calling this.
+pub fn apply_scp<C: SmartCardConnection>(
+    protocol: &mut SmartCardProtocol<C>,
+    config: &ScpConfig,
+) -> Result<(), CliError> {
+    match config {
+        ScpConfig::None => Ok(()),
+        ScpConfig::Scp03 {
+            kvn,
+            key_enc,
+            key_mac,
+            key_dek,
+        } => {
+            protocol
+                .init_scp03(*kvn, key_enc, key_mac, key_dek.as_deref())
+                .map_err(|e| CliError(format!("SCP03 initialization failed: {e}")))?;
+            Ok(())
+        }
+        ScpConfig::Scp11b {
+            kid,
+            kvn,
+            pk_sd_ecka,
+        } => {
+            protocol
+                .init_scp11(*kid, *kvn, pk_sd_ecka, None, &[], None)
+                .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
+            Ok(())
+        }
+        ScpConfig::Scp11ac {
+            kid,
+            kvn,
+            pk_sd_ecka,
+            sk_oce_ecka,
+            certificates,
+            oce_ref,
+        } => {
+            let cert_refs: Vec<&[u8]> = certificates.iter().map(|c| c.as_slice()).collect();
+            protocol
+                .init_scp11(
+                    *kid,
+                    *kvn,
+                    pk_sd_ecka,
+                    Some(sk_oce_ecka),
+                    &cert_refs,
+                    *oce_ref,
+                )
+                .map_err(|e| CliError(format!("SCP11 initialization failed: {e}")))?;
+            Ok(())
+        }
+    }
+}
+
 /// Find SCP11b key parameters from the Security Domain on a separate connection.
 /// Returns (kid, kvn, pk_sd_ecka_bytes).
 pub fn find_scp11b_params(dev: &YubiKeyDevice) -> Result<(u8, u8, Vec<u8>), CliError> {
+    find_scp11_pk_with_kid(dev, 0x13)
+        .map(|(kvn, pk)| (0x13, kvn, pk))
+}
+
+/// Find public key for a given SCP11 kid/kvn from the Security Domain.
+fn find_scp11_pk(
+    dev: &YubiKeyDevice,
+    kid: u8,
+    kvn: u8,
+    _ca_cert: Option<&[u8]>,
+) -> Result<Vec<u8>, CliError> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;
     let mut sd = SecurityDomainSession::new(conn)
         .map_err(|e| CliError(format!("Failed to open Security Domain: {e}")))?;
 
-    // Find SCP11b key (KID=0x13)
-    let keys = sd
-        .get_key_information()
-        .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
-
-    let mut kvn = None;
-    for (key_ref, _) in &keys {
-        if key_ref.kid == 0x13 {
-            kvn = Some(key_ref.kvn);
-            break;
-        }
-    }
-    let kvn = kvn.ok_or_else(|| {
-        CliError("No SCP11b key (KID=0x13) found on device".into())
-    })?;
-
-    // Get certificate bundle
-    let key_ref = KeyRef::new(0x13, kvn);
+    let key_ref = KeyRef::new(kid, kvn);
     let certs = sd
         .get_certificate_bundle(key_ref)
         .map_err(|e| CliError(format!("Failed to get certificate bundle: {e}")))?;
 
     if certs.is_empty() {
         return Err(CliError(format!(
-            "No certificate chain stored for SCP11b key (KVN=0x{kvn:02X})"
+            "No certificate chain stored for SCP key (KID=0x{kid:02X}, KVN=0x{kvn:02X})"
         )));
     }
 
-    // Extract public key from leaf certificate (last in chain)
+    let leaf_cert = &certs[certs.len() - 1];
+    extract_ec_pubkey_from_cert(leaf_cert)
+}
+
+fn find_scp11_pk_with_kid(dev: &YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>), CliError> {
+    let conn = dev
+        .open_smartcard()
+        .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;
+    let mut sd = SecurityDomainSession::new(conn)
+        .map_err(|e| CliError(format!("Failed to open Security Domain: {e}")))?;
+
+    let keys = sd
+        .get_key_information()
+        .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
+
+    let mut kvn = None;
+    for (key_ref, _) in &keys {
+        if key_ref.kid == kid {
+            kvn = Some(key_ref.kvn);
+            break;
+        }
+    }
+    let kvn = kvn.ok_or_else(|| {
+        CliError(format!("No SCP key (KID=0x{kid:02X}) found on device"))
+    })?;
+
+    let key_ref = KeyRef::new(kid, kvn);
+    let certs = sd
+        .get_certificate_bundle(key_ref)
+        .map_err(|e| CliError(format!("Failed to get certificate bundle: {e}")))?;
+
+    if certs.is_empty() {
+        return Err(CliError(format!(
+            "No certificate chain stored for SCP key (KVN=0x{kvn:02X})"
+        )));
+    }
+
     let leaf_cert = &certs[certs.len() - 1];
     let pk_bytes = extract_ec_pubkey_from_cert(leaf_cert)?;
 
-    Ok((0x13, kvn, pk_bytes))
+    Ok((kvn, pk_bytes))
 }
 
 /// Extract the uncompressed EC public key bytes from a DER-encoded X.509 cert.

@@ -10,7 +10,7 @@ use yubikit_rs::yubiotp::{
     YubiOtpSession,
 };
 
-use crate::scp;
+use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
 const SHIFT: u8 = 0x80;
@@ -169,29 +169,31 @@ fn format_oath_code(response: &[u8], digits: u8) -> String {
 }
 
 // Use SmartCard-based session (works over both USB and NFC)
-fn open_sc_session(
-    dev: &YubiKeyDevice,
-) -> Result<YubiOtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    if scp::needs_scp11b(dev, Capability::OTP) {
-        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-        let resp = protocol
-            .select(yubikit_rs::iso7816::Aid::OTP)
-            .map_err(|e| CliError(format!("Failed to select OTP: {e}")))?;
-        protocol
-            .init_scp11(kid, kvn, &pk, None, &[], None)
-            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
-        YubiOtpSession::from_protocol(protocol, &resp)
-            .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
-    } else {
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        YubiOtpSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+fn open_sc_session<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<YubiOtpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
+    match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            YubiOtpSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+            let resp = protocol
+                .select(yubikit_rs::iso7816::Aid::OTP)
+                .map_err(|e| CliError(format!("Failed to select OTP: {e}")))?;
+            scp::apply_scp(&mut protocol, config)?;
+            YubiOtpSession::from_protocol(protocol, &resp)
+                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
+        }
     }
 }
 
@@ -202,8 +204,8 @@ fn open_otp_session(dev: &YubiKeyDevice) -> Result<YubiOtpOtpSession, CliError> 
     YubiOtpOtpSession::new(conn).map_err(|e| CliError(format!("Failed to open OTP session: {e}")))
 }
 
-pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
-    let session = open_sc_session(dev)?;
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let session = open_sc_session(dev, scp_params)?;
     let state = session.get_config_state();
     for slot in [Slot::One, Slot::Two] {
         let num = slot.map(1, 2);
@@ -219,11 +221,11 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn run_swap(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_swap(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
     if !force && !confirm("Swap the two OTP slot configurations?") {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .swap_slots()
         .map_err(|e| CliError(format!("Failed to swap slots: {e}")))?;
@@ -233,6 +235,7 @@ pub fn run_swap(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
 
 pub fn run_delete(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     access_code: Option<&str>,
     force: bool,
@@ -242,7 +245,7 @@ pub fn run_delete(
     if !force && !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .delete_slot(slot, acc.as_ref().map(|a| a.as_slice()))
         .map_err(|e| CliError(format!("Failed to delete slot: {e}")))?;
@@ -252,6 +255,7 @@ pub fn run_delete(
 
 pub fn run_ndef(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     prefix: Option<&str>,
     ndef_type: &str,
@@ -273,7 +277,7 @@ pub fn run_ndef(
     {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .set_ndef_configuration(slot, prefix, acc.as_ref().map(|a| a.as_slice()), nt)
         .map_err(|e| CliError(format!("Failed to configure NDEF: {e}")))?;
@@ -283,6 +287,7 @@ pub fn run_ndef(
 
 pub fn run_yubiotp(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     public_id: Option<&str>,
     private_id: Option<&str>,
@@ -299,7 +304,7 @@ pub fn run_yubiotp(
 
     // Resolve public ID
     let pub_id_bytes: Vec<u8> = if serial_public_id {
-        let mut session = open_sc_session(dev)?;
+        let mut session = open_sc_session(dev, scp_params)?;
         let serial = session
             .get_serial()
             .map_err(|e| CliError(format!("Failed to get serial: {e}")))?;
@@ -367,7 +372,7 @@ pub fn run_yubiotp(
         config = config.append_cr(cr);
     }
 
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
@@ -382,6 +387,7 @@ pub fn run_yubiotp(
 #[allow(clippy::too_many_arguments)]
 pub fn run_static(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     password: Option<&str>,
     generate: bool,
@@ -419,7 +425,7 @@ pub fn run_static(
         config = config.append_cr(cr);
     }
 
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
@@ -434,6 +440,7 @@ pub fn run_static(
 
 pub fn run_chalresp(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     key: Option<&str>,
     totp: bool,
@@ -473,7 +480,7 @@ pub fn run_chalresp(
         config = config.digits8(true);
     }
 
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
@@ -487,6 +494,7 @@ pub fn run_chalresp(
 
 pub fn run_calculate(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     challenge: Option<&str>,
     totp: bool,
@@ -513,7 +521,7 @@ pub fn run_calculate(
             .calculate_hmac_sha1(slot, &challenge_bytes, None, None)
             .map_err(|e| CliError(format!("Failed to calculate: {e}")))?
     } else {
-        let mut session = open_sc_session(dev)?;
+        let mut session = open_sc_session(dev, scp_params)?;
         session
             .calculate_hmac_sha1(slot, &challenge_bytes)
             .map_err(|e| CliError(format!("Failed to calculate: {e}")))?
@@ -530,6 +538,7 @@ pub fn run_calculate(
 #[allow(clippy::too_many_arguments)]
 pub fn run_hotp(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     key: Option<&str>,
     digits: &str,
@@ -563,7 +572,7 @@ pub fn run_hotp(
         config = config.append_cr(cr);
     }
 
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
@@ -575,6 +584,7 @@ pub fn run_hotp(
 #[allow(clippy::too_many_arguments)]
 pub fn run_settings(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     enter: Option<bool>,
     pacing: Option<u8>,
@@ -611,7 +621,7 @@ pub fn run_settings(
         config = config.serial_usb_visible(v);
     }
 
-    let mut session = open_sc_session(dev)?;
+    let mut session = open_sc_session(dev, scp_params)?;
     session
         .update_configuration(
             slot,

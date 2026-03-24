@@ -234,6 +234,34 @@ pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
     })
 }
 
+/// Discover connected YubiKeys over CCID (PC/SC) only.
+///
+/// Unlike [`list_devices`], this does not scan HID devices.
+/// Use when the command only needs SmartCard connections.
+pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!("Listing YubiKey devices (CCID only)");
+    let mut devices = Vec::new();
+
+    if let Ok(readers) = list_readers() {
+        log::debug!("Found {} PC/SC reader(s)", readers.len());
+        for reader in readers {
+            if !reader.to_ascii_lowercase().contains("yubi") {
+                continue;
+            }
+            log::debug!("Checking PC/SC reader: {reader}");
+            if let Ok(info) = read_info(&reader) {
+                devices.push(YubiKeyDevice {
+                    reader_name: Some(reader),
+                    hid_path: None,
+                    info,
+                });
+            }
+        }
+    }
+
+    Ok(devices)
+}
+
 /// Discover all connected YubiKeys.
 ///
 /// Scans PC/SC readers and HID devices, reads [`DeviceInfo`] from each,

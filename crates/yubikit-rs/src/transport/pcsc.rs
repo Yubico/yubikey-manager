@@ -69,6 +69,7 @@ pub struct PcscConnection {
 impl PcscConnection {
     /// Connect to a reader, optionally using exclusive mode.
     pub fn new(reader_name: &str, exclusive: bool) -> Result<Self, PcscError> {
+        log_traffic!("Opening PCSC connection to '{}'", reader_name);
         let ctx = Context::establish(Scope::User)?;
         let reader =
             CString::new(reader_name).map_err(|_| PcscError::InvalidReaderName)?;
@@ -78,6 +79,7 @@ impl PcscConnection {
             ShareMode::Shared
         };
         let card = ctx.connect(&reader, share_mode, Protocols::ANY)?;
+        log_traffic!("PCSC connection opened to '{}'", reader_name);
         Ok(Self {
             card: Some(card),
             reader_name: reader_name.to_owned(),
@@ -107,6 +109,7 @@ impl PcscConnection {
     /// Disconnect from the card.
     pub fn disconnect(&mut self) -> Result<(), PcscError> {
         if let Some(card) = self.card.take() {
+            log_traffic!("Closing PCSC connection to '{}'", self.reader_name);
             card.disconnect(::pcsc::Disposition::ResetCard)
                 .map_err(|(_, e)| PcscError::Pcsc(e))?;
         }

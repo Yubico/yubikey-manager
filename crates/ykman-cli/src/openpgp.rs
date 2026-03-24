@@ -4,32 +4,34 @@ use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::management::Capability;
 use yubikit_rs::openpgp::{KeyRef, OpenPgpSession, PinPolicy, Uif};
 
-use crate::scp;
-use crate::util::CliError;
+use crate::scp::{self, ScpConfig, ScpParams};
+use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
-fn open_session(
-    dev: &YubiKeyDevice,
-) -> Result<OpenPgpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    if scp::needs_scp11b(dev, Capability::OPENPGP) {
-        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
-        protocol
-            .select(yubikit_rs::iso7816::Aid::OPENPGP)
-            .map_err(|e| CliError(format!("Failed to select OpenPGP: {e}")))?;
-        protocol
-            .init_scp11(kid, kvn, &pk, None, &[], None)
-            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
-        OpenPgpSession::from_protocol(protocol)
-            .map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
-    } else {
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        OpenPgpSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
+fn open_session<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<OpenPgpSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OPENPGP)?;
+    match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            OpenPgpSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let mut protocol = yubikit_rs::iso7816::SmartCardProtocol::new(conn);
+            protocol
+                .select(yubikit_rs::iso7816::Aid::OPENPGP)
+                .map_err(|e| CliError(format!("Failed to select OpenPGP: {e}")))?;
+            scp::apply_scp(&mut protocol, config)?;
+            OpenPgpSession::from_protocol(protocol)
+                .map_err(|e| CliError(format!("Failed to open OpenPGP session: {e}")))
+        }
     }
 }
 
@@ -66,8 +68,8 @@ fn parse_uif(s: &str) -> Result<Uif, CliError> {
     }
 }
 
-pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let mut session = open_session(dev, scp_params)?;
 
     let aid = session.aid().clone();
     let (major, minor) = aid.version();
@@ -106,7 +108,7 @@ pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
     if !force {
         eprintln!(
             "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
@@ -115,7 +117,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
             return Err(CliError("Aborted.".into()));
         }
     }
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
@@ -125,6 +127,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
 
 pub fn run_set_retries(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     pin_retries: u8,
     reset_code_retries: u8,
     admin_pin_retries: u8,
@@ -138,7 +141,7 @@ pub fn run_set_retries(
     {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let ap = admin_pin.unwrap_or("12345678");
     session
         .verify_admin(ap)
@@ -152,12 +155,13 @@ pub fn run_set_retries(
 
 pub fn run_change_pin(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let old = pin.unwrap_or("123456");
     let new = new_pin.ok_or_else(|| CliError("--new-pin is required.".into()))?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .change_pin(old, new)
         .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
@@ -167,12 +171,13 @@ pub fn run_change_pin(
 
 pub fn run_change_admin_pin(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     admin_pin: Option<&str>,
     new_admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let old = admin_pin.unwrap_or("12345678");
     let new = new_admin_pin.ok_or_else(|| CliError("--new-admin-pin is required.".into()))?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .change_admin(old, new)
         .map_err(|e| CliError(format!("Failed to change Admin PIN: {e}")))?;
@@ -182,13 +187,14 @@ pub fn run_change_admin_pin(
 
 pub fn run_change_reset_code(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
 ) -> Result<(), CliError> {
     let rc = reset_code
         .ok_or_else(|| CliError("--reset-code is required.".into()))?;
     let ap = admin_pin.unwrap_or("12345678");
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
@@ -201,12 +207,13 @@ pub fn run_change_reset_code(
 
 pub fn run_unblock_pin(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let new = new_pin.ok_or_else(|| CliError("--new-pin is required.".into()))?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(ap) = admin_pin {
         session
             .verify_admin(ap)
@@ -221,6 +228,7 @@ pub fn run_unblock_pin(
 
 pub fn run_set_signature_policy(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     policy: &str,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -234,7 +242,7 @@ pub fn run_set_signature_policy(
         }
     };
     let ap = admin_pin.unwrap_or("12345678");
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
@@ -245,9 +253,9 @@ pub fn run_set_signature_policy(
     Ok(())
 }
 
-pub fn run_keys_info(dev: &YubiKeyDevice, key: &str) -> Result<(), CliError> {
+pub fn run_keys_info(dev: &YubiKeyDevice, scp_params: &ScpParams, key: &str) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Ok(attrs) = session.get_algorithm_attributes(key_ref) {
         println!("Algorithm: {attrs:?}");
     }
@@ -273,6 +281,7 @@ pub fn run_keys_info(dev: &YubiKeyDevice, key: &str) -> Result<(), CliError> {
 
 pub fn run_keys_set_touch(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     key: &str,
     policy: &str,
     admin_pin: Option<&str>,
@@ -289,7 +298,7 @@ pub fn run_keys_set_touch(
     }
 
     let ap = admin_pin.unwrap_or("12345678");
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
@@ -302,13 +311,13 @@ pub fn run_keys_set_touch(
 
 pub fn run_keys_import(
     _dev: &YubiKeyDevice,
+    _scp_params: &ScpParams,
     key: &str,
     key_file: &str,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let _key_ref = parse_key_ref(key)?;
-    let _data =
-        std::fs::read(key_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let _data = read_file_or_stdin(key_file)?;
 
     let _ap = admin_pin.unwrap_or("12345678");
 
@@ -319,13 +328,14 @@ pub fn run_keys_import(
 
 pub fn run_keys_attest(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     key: &str,
     output: &str,
     format: &str,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(p) = pin {
         session
             .verify_pin(p, false)
@@ -342,12 +352,13 @@ pub fn run_keys_attest(
 
 pub fn run_certificates_export(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     key: &str,
     output: &str,
     format: &str,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .get_certificate(key_ref)
         .map_err(|e| CliError(format!("Failed to get certificate: {e}")))?;
@@ -359,13 +370,13 @@ pub fn run_certificates_export(
 
 pub fn run_certificates_import(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     key: &str,
     cert_file: &str,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
-    let data =
-        std::fs::read(cert_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data = read_file_or_stdin(cert_file)?;
 
     let der = if let Ok(text) = std::str::from_utf8(&data) {
         if text.contains("-----BEGIN") {
@@ -378,7 +389,7 @@ pub fn run_certificates_import(
     };
 
     let ap = admin_pin.unwrap_or("12345678");
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
@@ -391,12 +402,13 @@ pub fn run_certificates_import(
 
 pub fn run_certificates_delete(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     key: &str,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
     let ap = admin_pin.unwrap_or("12345678");
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
@@ -410,11 +422,11 @@ pub fn run_certificates_delete(
 fn write_output(path: &str, der: &[u8], format: &str, label: &str) -> Result<(), CliError> {
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            std::fs::write(path, der).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            write_file_or_stdout(path, der)?;
         }
         _ => {
             let pem = pem_encode(label, der);
-            std::fs::write(path, pem).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            write_file_or_stdout(path, pem.as_bytes())?;
         }
     }
     Ok(())

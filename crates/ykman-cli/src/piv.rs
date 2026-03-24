@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::iso7816::SmartCardProtocol;
@@ -8,33 +8,34 @@ use yubikit_rs::piv::{
     TouchPolicy,
 };
 
-use crate::scp;
-use crate::util::CliError;
+use crate::scp::{self, ScpConfig, ScpParams};
+use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
-fn open_session(
-    dev: &YubiKeyDevice,
-) -> Result<PivSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'_>>, CliError> {
-    if scp::needs_scp11b(dev, Capability::PIV) {
-        let (kid, kvn, pk) = scp::find_scp11b_params(dev)?;
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        let mut protocol = SmartCardProtocol::new(conn);
-        // Select PIV first, then init SCP (matching Python's approach)
-        protocol
-            .select(yubikit_rs::iso7816::Aid::PIV)
-            .map_err(|e| CliError(format!("Failed to select PIV: {e}")))?;
-        protocol
-            .init_scp11(kid, kvn, &pk, None, &[], None)
-            .map_err(|e| CliError(format!("SCP11b initialization failed: {e}")))?;
-        PivSession::from_protocol(protocol)
-            .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
-    } else {
-        let conn = dev
-            .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        PivSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+fn open_session<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<PivSession<impl yubikit_rs::iso7816::SmartCardConnection + use<'a>>, CliError> {
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::PIV)?;
+    match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            PivSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let mut protocol = SmartCardProtocol::new(conn);
+            protocol
+                .select(yubikit_rs::iso7816::Aid::PIV)
+                .map_err(|e| CliError(format!("Failed to select PIV: {e}")))?;
+            scp::apply_scp(&mut protocol, config)?;
+            PivSession::from_protocol(protocol)
+                .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+        }
     }
 }
 
@@ -44,18 +45,6 @@ fn confirm(msg: &str) -> bool {
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok();
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-}
-
-fn read_file_or_stdin(path: &str) -> Result<Vec<u8>, CliError> {
-    if path == "-" {
-        let mut buf = Vec::new();
-        io::stdin()
-            .read_to_end(&mut buf)
-            .map_err(|e| CliError(format!("Failed to read from stdin: {e}")))?;
-        Ok(buf)
-    } else {
-        std::fs::read(path).map_err(|e| CliError(format!("Failed to read file '{path}': {e}")))
-    }
 }
 
 fn parse_slot(s: &str) -> Result<Slot, CliError> {
@@ -166,8 +155,8 @@ fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
     }
 }
 
-pub fn run_info(dev: &YubiKeyDevice) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let mut session = open_session(dev, scp_params)?;
     let version = session.version();
     println!("PIV version:              {version}");
 
@@ -496,14 +485,14 @@ fn format_asn1_time(t: &str) -> String {
     }
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
     if !force {
         eprintln!("WARNING! This will delete all stored PIV data and restore factory settings.");
         if !confirm("Proceed?") {
             return Err(CliError("Aborted.".into()));
         }
     }
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
 
     // Block PIN and PUK first (required by reset)
     for _ in 0..15 {
@@ -520,6 +509,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
 
 pub fn run_change_pin(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -530,7 +520,7 @@ pub fn run_change_pin(
         return Err(CliError("PIN must be 6-8 characters.".into()));
     }
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .change_pin(old, new)
         .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
@@ -540,6 +530,7 @@ pub fn run_change_pin(
 
 pub fn run_change_puk(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     puk: Option<&str>,
     new_puk: Option<&str>,
 ) -> Result<(), CliError> {
@@ -550,7 +541,7 @@ pub fn run_change_puk(
         return Err(CliError("PUK must be 6-8 characters.".into()));
     }
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .change_puk(old, new)
         .map_err(|e| CliError(format!("Failed to change PUK: {e}")))?;
@@ -560,6 +551,7 @@ pub fn run_change_puk(
 
 pub fn run_unblock_pin(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     puk: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -570,7 +562,7 @@ pub fn run_unblock_pin(
         return Err(CliError("New PIN must be 6-8 characters.".into()));
     }
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .unblock_pin(puk, new)
         .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
@@ -580,6 +572,7 @@ pub fn run_unblock_pin(
 
 pub fn run_set_retries(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     pin_retries: u8,
     puk_retries: u8,
     mgmt_key: Option<&str>,
@@ -594,7 +587,7 @@ pub fn run_set_retries(
         return Err(CliError("Aborted.".into()));
     }
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -614,6 +607,7 @@ pub fn run_set_retries(
 
 pub fn run_change_management_key(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     mgmt_key: Option<&str>,
     new_mgmt_key: Option<&str>,
     algorithm: &str,
@@ -648,7 +642,7 @@ pub fn run_change_management_key(
         return Err(CliError("Aborted.".into()));
     }
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(p) = pin {
         session
             .verify_pin(p)
@@ -673,6 +667,7 @@ pub fn run_change_management_key(
 
 pub fn run_keys_generate(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     output: &str,
     algorithm: &str,
@@ -687,7 +682,7 @@ pub fn run_keys_generate(
     let pp = parse_pin_policy(pin_policy)?;
     let tp = parse_touch_policy(touch_policy)?;
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -703,13 +698,11 @@ pub fn run_keys_generate(
 
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            std::fs::write(output, &spki_der)
-                .map_err(|e| CliError(format!("Failed to write file: {e}")))?;
+            write_file_or_stdout(output, &spki_der)?;
         }
         "PEM" | _ => {
             let pem = pem_encode("PUBLIC KEY", &spki_der);
-            std::fs::write(output, pem)
-                .map_err(|e| CliError(format!("Failed to write file: {e}")))?;
+            write_file_or_stdout(output, pem.as_bytes())?;
         }
     }
 
@@ -719,6 +712,7 @@ pub fn run_keys_generate(
 
 pub fn run_keys_import(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     key_file: &str,
     pin_policy: &str,
@@ -730,8 +724,7 @@ pub fn run_keys_import(
     let pp = parse_pin_policy(pin_policy)?;
     let tp = parse_touch_policy(touch_policy)?;
 
-    let data =
-        std::fs::read(key_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data = read_file_or_stdin(key_file)?;
 
     // Try to detect PEM vs DER
     let der = if let Ok(text) = std::str::from_utf8(&data) {
@@ -748,7 +741,7 @@ pub fn run_keys_import(
     let key_type = KeyType::from_public_key_der(&der)
         .map_err(|_| CliError("Could not determine key type from file.".into()))?;
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -764,9 +757,9 @@ pub fn run_keys_import(
     Ok(())
 }
 
-pub fn run_keys_info(dev: &YubiKeyDevice, slot: &str) -> Result<(), CliError> {
+pub fn run_keys_info(dev: &YubiKeyDevice, scp_params: &ScpParams, slot: &str) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let meta = session
         .get_slot_metadata(slot)
         .map_err(|e| CliError(format!("Failed to get slot metadata: {e}")))?;
@@ -788,12 +781,13 @@ pub fn run_keys_info(dev: &YubiKeyDevice, slot: &str) -> Result<(), CliError> {
 
 pub fn run_keys_attest(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     output: &str,
     format: &str,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .attest_key(slot)
         .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;
@@ -805,24 +799,23 @@ pub fn run_keys_attest(
 
 pub fn run_keys_export(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     output: &str,
     format: &str,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
 
     // Try metadata first (5.3.0+)
     if let Ok(meta) = session.get_slot_metadata(slot) {
         if !meta.public_key_der.is_empty() {
             let spki_der = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)?;
             match format.to_ascii_uppercase().as_str() {
-                "DER" => std::fs::write(output, &spki_der)
-                    .map_err(|e| CliError(format!("Failed to write: {e}")))?,
+                "DER" => write_file_or_stdout(output, &spki_der)?,
                 _ => {
                     let pem = pem_encode("PUBLIC KEY", &spki_der);
-                    std::fs::write(output, pem)
-                        .map_err(|e| CliError(format!("Failed to write: {e}")))?;
+                    write_file_or_stdout(output, pem.as_bytes())?;
                 }
             }
             println!("Public key exported to {output}.");
@@ -837,6 +830,7 @@ pub fn run_keys_export(
 
 pub fn run_keys_move(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     source: &str,
     dest: &str,
     mgmt_key: Option<&str>,
@@ -844,7 +838,7 @@ pub fn run_keys_move(
 ) -> Result<(), CliError> {
     let from = parse_slot(source)?;
     let to = parse_slot(dest)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -860,12 +854,13 @@ pub fn run_keys_move(
 
 pub fn run_keys_delete(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -881,12 +876,13 @@ pub fn run_keys_delete(
 
 pub fn run_certificates_export(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     output: &str,
     format: &str,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .get_certificate(slot)
         .map_err(|e| CliError(format!("Failed to get certificate: {e}")))?;
@@ -898,6 +894,7 @@ pub fn run_certificates_export(
 
 pub fn run_certificates_import(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     cert_file: &str,
     mgmt_key: Option<&str>,
@@ -907,8 +904,7 @@ pub fn run_certificates_import(
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
 
-    let data =
-        std::fs::read(cert_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data = read_file_or_stdin(cert_file)?;
 
     let der = if let Ok(text) = std::str::from_utf8(&data) {
         if text.contains("-----BEGIN") {
@@ -920,7 +916,7 @@ pub fn run_certificates_import(
         data
     };
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -934,20 +930,21 @@ pub fn run_certificates_import(
     println!("Certificate imported to slot {slot}.");
 
     if update_chuid {
-        generate_chuid(dev, mgmt_key, pin)?;
+        generate_chuid(dev, scp_params, mgmt_key, pin)?;
     }
     Ok(())
 }
 
 pub fn run_certificates_delete(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
     update_chuid: bool,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -960,19 +957,20 @@ pub fn run_certificates_delete(
     println!("Certificate in slot {slot} deleted.");
 
     if update_chuid {
-        generate_chuid(dev, mgmt_key, pin)?;
+        generate_chuid(dev, scp_params, mgmt_key, pin)?;
     }
     Ok(())
 }
 
 pub fn run_objects_export(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     object: &str,
     output: &str,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let obj_id = parse_object_id(object)?;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(p) = pin {
         session
             .verify_pin(p)
@@ -982,13 +980,8 @@ pub fn run_objects_export(
         .get_object(obj_id)
         .map_err(|e| CliError(format!("Failed to read object: {e}")))?;
 
-    if output == "-" {
-        io::stdout()
-            .write_all(&data)
-            .map_err(|e| CliError(format!("Failed to write: {e}")))?;
-    } else {
-        std::fs::write(output, &data)
-            .map_err(|e| CliError(format!("Failed to write file: {e}")))?;
+    write_file_or_stdout(output, &data)?;
+    if output != "-" {
         println!("Object exported to {output}.");
     }
     Ok(())
@@ -996,16 +989,16 @@ pub fn run_objects_export(
 
 pub fn run_objects_import(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     object: &str,
     data_file: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let obj_id = parse_object_id(object)?;
-    let data =
-        std::fs::read(data_file).map_err(|e| CliError(format!("Failed to read file: {e}")))?;
+    let data = read_file_or_stdin(data_file)?;
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
     if let Some(p) = pin {
         session
@@ -1022,10 +1015,11 @@ pub fn run_objects_import(
 /// Generate a new CHUID and write it to the device.
 fn generate_chuid(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     management_key: Option<&str>,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(p) = pin {
         session
             .verify_pin(p)
@@ -1059,11 +1053,12 @@ fn generate_chuid(
 
 pub fn run_objects_generate(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     object: &str,
     management_key: Option<&str>,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(p) = pin {
         session
             .verify_pin(p)
@@ -1143,6 +1138,7 @@ pub fn run_objects_generate(
 
 pub fn run_certificates_generate(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     subject: &str,
     valid_days: u32,
@@ -1155,7 +1151,7 @@ pub fn run_certificates_generate(
     let slot = parse_slot(slot)?;
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, management_key)?;
     if let Some(p) = pin {
         session
@@ -1203,13 +1199,14 @@ pub fn run_certificates_generate(
     println!("Certificate generated and stored in slot {slot:?}.");
 
     if update_chuid {
-        generate_chuid(dev, management_key, pin)?;
+        generate_chuid(dev, scp_params, management_key, pin)?;
     }
     Ok(())
 }
 
 pub fn run_certificates_request(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     slot: &str,
     subject: &str,
     hash_algorithm: &str,
@@ -1220,7 +1217,7 @@ pub fn run_certificates_request(
     let slot = parse_slot(slot)?;
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     if let Some(p) = pin {
         session
             .verify_pin(p)
@@ -1259,11 +1256,8 @@ pub fn run_certificates_request(
     let csr_der = der_sequence(&[&csr_info, &sig_alg_id, &der_bit_string(&signature)]);
 
     let pem = pem_encode("CERTIFICATE REQUEST", &csr_der);
-    if output == "-" {
-        print!("{pem}");
-    } else {
-        std::fs::write(output, &pem)
-            .map_err(|e| CliError(format!("Failed to write CSR to {output}: {e}")))?;
+    write_file_or_stdout(output, pem.as_bytes())?;
+    if output != "-" {
         println!("CSR written to {output}.");
     }
     Ok(())
@@ -1830,11 +1824,11 @@ fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
 fn write_cert_file(output: &str, der: &[u8], format: &str) -> Result<(), CliError> {
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            std::fs::write(output, der).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            write_file_or_stdout(output, der)?;
         }
         _ => {
             let pem = pem_encode("CERTIFICATE", der);
-            std::fs::write(output, pem).map_err(|e| CliError(format!("Failed to write: {e}")))?;
+            write_file_or_stdout(output, pem.as_bytes())?;
         }
     }
     Ok(())

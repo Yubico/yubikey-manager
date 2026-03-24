@@ -1,7 +1,9 @@
 use yubikit_rs::core_types::Version;
 use yubikit_rs::device::YubiKeyDevice;
 use yubikit_rs::iso7816::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
+use yubikit_rs::management::Capability;
 
+use crate::scp::{self, ScpParams};
 use crate::util::CliError;
 
 /// Parsed APDU: (cla, ins, p1, p2, data, le), expected_sw
@@ -115,6 +117,7 @@ fn print_response(resp: &[u8], sw: u16, no_pretty: bool) {
 
 pub fn run_apdu(
     dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
     apdus: &[String],
     no_pretty: bool,
     app: Option<&str>,
@@ -171,6 +174,11 @@ pub fn run_apdu(
             .select(aid)
             .map_err(|e| CliError(format!("Failed to select {app_name}: {e}")))?;
         print_response(&resp, 0x9000, no_pretty);
+        // Apply SCP after selecting the application
+        if scp_params.is_explicit() {
+            let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+            scp::apply_scp(&mut protocol, &scp_config)?;
+        }
     }
 
     for apdu_str in apdus {

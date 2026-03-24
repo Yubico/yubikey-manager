@@ -20,24 +20,8 @@ mod scp;
 mod securitydomain;
 mod util;
 
-use util::CliError;
-
-/// SCP parameters parsed from global options
-#[derive(Clone, Default)]
-struct ScpParams {
-    /// SCP03 keys: K-ENC:K-MAC[:K-DEK] (hex)
-    scp03_keys: Option<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>,
-    /// SCP11 private key (raw 32-byte scalar)
-    scp11_private_key: Option<Vec<u8>>,
-    /// SCP11 certificate chain (DER, leaf-last)
-    scp11_certificates: Vec<Vec<u8>>,
-    /// Card key reference (kid, kvn)
-    sd_ref: Option<(u8, u8)>,
-    /// OCE key reference (kid, kvn)
-    oce_ref: Option<(u8, u8)>,
-    /// CA certificate for SCP11 verification (DER)
-    ca_cert: Option<Vec<u8>>,
-}
+use scp::ScpParams;
+use util::{CliError, read_file_or_stdin};
 
 #[derive(Parser)]
 #[command(
@@ -1286,8 +1270,20 @@ enum SecurityDomainKeysAction {
     },
 }
 
+/// Which transports to scan when resolving a device.
+enum TransportPreference {
+    /// Scan both CCID and OTP (default for info, config, list)
+    Any,
+    /// Only scan CCID (for PIV, OATH, OpenPGP, HSMAuth, SecurityDomain)
+    CcidOnly,
+}
+
 /// Resolve a YubiKey device based on CLI options.
-fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKeyDevice, CliError> {
+fn resolve_device(
+    serial: Option<u32>,
+    reader: &Option<String>,
+    transport: TransportPreference,
+) -> Result<YubiKeyDevice, CliError> {
     if let Some(reader_name) = reader {
         let readers =
             list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
@@ -1309,8 +1305,16 @@ fn resolve_device(serial: Option<u32>, reader: &Option<String>) -> Result<YubiKe
             ))),
         }
     } else {
-        let devices =
-            list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+        let devices = match transport {
+            TransportPreference::CcidOnly => {
+                yubikit_rs::device::list_devices_ccid()
+                    .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
+            }
+            TransportPreference::Any => {
+                list_devices()
+                    .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
+            }
+        };
         match (serial, devices.len()) {
             (None, 0) => Err(CliError("No YubiKey detected!".into())),
             (None, 1) => Ok(devices.into_iter().next().unwrap()),
@@ -1345,8 +1349,7 @@ fn parse_scp_params(cli: &Cli) -> Result<ScpParams, CliError> {
 
     // Parse --scp-ca
     if let Some(ref ca_path) = cli.scp_ca {
-        let data = std::fs::read(ca_path)
-            .map_err(|e| CliError(format!("Failed to read SCP CA file: {e}")))?;
+        let data = read_file_or_stdin(ca_path)?;
         let der = if let Ok(text) = std::str::from_utf8(&data) {
             if text.contains("-----BEGIN") {
                 pem_decode_first(text)?
@@ -1386,8 +1389,7 @@ fn parse_scp_params(cli: &Cli) -> Result<ScpParams, CliError> {
         } else {
             // SCP11: files (private key + certificates)
             for path in &cli.scp_cred {
-                let data = std::fs::read(path)
-                    .map_err(|e| CliError(format!("Failed to read SCP file '{path}': {e}")))?;
+                let data = read_file_or_stdin(path)?;
                 let pem_text = std::str::from_utf8(&data).ok();
 
                 if let Some(text) = pem_text {
@@ -1520,7 +1522,7 @@ fn run() -> Result<(), CliError> {
     }
 
     // Parse SCP params before consuming command
-    let _scp = parse_scp_params(&cli)?;
+    let scp_params = parse_scp_params(&cli)?;
 
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -1544,12 +1546,12 @@ fn run() -> Result<(), CliError> {
             list::run(serials, readers)
         }
         Commands::Info { check_fips } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::Any)?;
             apply_version_override(&dev);
             info::run(&dev, check_fips)
         }
         Commands::Config { action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::Any)?;
             apply_version_override(&dev);
             match action {
                 ConfigAction::Usb {
@@ -1628,11 +1630,11 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Oath { action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
             apply_version_override(&dev);
             match action {
-                OathAction::Info { password } => oath::run_info(&dev, password.as_deref()),
-                OathAction::Reset { force } => oath::run_reset(&dev, force),
+                OathAction::Info { password } => oath::run_info(&dev, &scp_params, password.as_deref()),
+                OathAction::Reset { force } => oath::run_reset(&dev, &scp_params, force),
                 OathAction::Access(access) => match access {
                     OathAccessAction::Change {
                         password,
@@ -1640,6 +1642,7 @@ fn run() -> Result<(), CliError> {
                         clear,
                     } => oath::run_access_change(
                         &dev,
+                        &scp_params,
                         password.as_deref(),
                         new_password.as_deref(),
                         clear,
@@ -1660,6 +1663,7 @@ fn run() -> Result<(), CliError> {
                         period,
                     } => oath::run_accounts_list(
                         &dev,
+                        &scp_params,
                         password.as_deref(),
                         show_hidden,
                         oath_type,
@@ -1672,6 +1676,7 @@ fn run() -> Result<(), CliError> {
                         single,
                     } => oath::run_accounts_code(
                         &dev,
+                        &scp_params,
                         password.as_deref(),
                         query.as_deref(),
                         show_hidden,
@@ -1692,6 +1697,7 @@ fn run() -> Result<(), CliError> {
                         force,
                     } => oath::run_accounts_add(
                         &dev,
+                        &scp_params,
                         password.as_deref(),
                         &name,
                         secret.as_deref(),
@@ -1708,7 +1714,7 @@ fn run() -> Result<(), CliError> {
                         query,
                         password,
                         force,
-                    } => oath::run_accounts_delete(&dev, password.as_deref(), &query, force),
+                    } => oath::run_accounts_delete(&dev, &scp_params, password.as_deref(), &query, force),
                     OathAccountAction::Rename {
                         query,
                         new_name,
@@ -1716,6 +1722,7 @@ fn run() -> Result<(), CliError> {
                         force,
                     } => oath::run_accounts_rename(
                         &dev,
+                        &scp_params,
                         password.as_deref(),
                         &query,
                         &new_name,
@@ -1726,7 +1733,7 @@ fn run() -> Result<(), CliError> {
                         password,
                         touch,
                         force,
-                    } => oath::run_accounts_uri(&dev, &uri, password.as_deref(), touch, force),
+                    } => oath::run_accounts_uri(&dev, &scp_params, &uri, password.as_deref(), touch, force),
                     OathAccountAction::Import {
                         file,
                         password,
@@ -1741,18 +1748,18 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Otp { access_code, action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::Any)?;
             apply_version_override(&dev);
             // access_code from parent command overrides per-subcommand access_code
             let _ = access_code; // available for subcommands that need it
             match action {
-                OtpAction::Info => otp::run_info(&dev),
-                OtpAction::Swap { force } => otp::run_swap(&dev, force),
+                OtpAction::Info => otp::run_info(&dev, &scp_params),
+                OtpAction::Swap { force } => otp::run_swap(&dev, &scp_params, force),
                 OtpAction::Delete {
                     slot,
                     access_code,
                     force,
-                } => otp::run_delete(&dev, &slot, access_code.as_deref(), force),
+                } => otp::run_delete(&dev, &scp_params, &slot, access_code.as_deref(), force),
                 OtpAction::Ndef {
                     slot,
                     prefix,
@@ -1761,6 +1768,7 @@ fn run() -> Result<(), CliError> {
                     force,
                 } => otp::run_ndef(
                     &dev,
+                        &scp_params,
                     &slot,
                     prefix.as_deref(),
                     &ndef_type,
@@ -1793,6 +1801,7 @@ fn run() -> Result<(), CliError> {
                     };
                     otp::run_yubiotp(
                         &dev,
+                        &scp_params,
                         &slot,
                         public_id.as_deref(),
                         private_id.as_deref(),
@@ -1825,6 +1834,7 @@ fn run() -> Result<(), CliError> {
                     };
                     otp::run_static(
                         &dev,
+                        &scp_params,
                         &slot,
                         password.as_deref(),
                         generate,
@@ -1845,6 +1855,7 @@ fn run() -> Result<(), CliError> {
                     force,
                 } => otp::run_chalresp(
                     &dev,
+                        &scp_params,
                     &slot,
                     key.as_deref(),
                     totp,
@@ -1858,7 +1869,7 @@ fn run() -> Result<(), CliError> {
                     challenge,
                     totp,
                     digits,
-                } => otp::run_calculate(&dev, &slot, challenge.as_deref(), totp, digits),
+                } => otp::run_calculate(&dev, &scp_params, &slot, challenge.as_deref(), totp, digits),
                 OtpAction::Hotp {
                     slot,
                     key,
@@ -1882,6 +1893,7 @@ fn run() -> Result<(), CliError> {
                     };
                     otp::run_hotp(
                         &dev,
+                        &scp_params,
                         &slot,
                         key.as_deref(),
                         &digits,
@@ -1912,6 +1924,7 @@ fn run() -> Result<(), CliError> {
                     };
                     otp::run_settings(
                         &dev,
+                        &scp_params,
                         &slot,
                         enter_flag,
                         pacing,
@@ -1926,20 +1939,20 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Piv { action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
             apply_version_override(&dev);
             match action {
-                PivAction::Info => piv::run_info(&dev),
-                PivAction::Reset { force } => piv::run_reset(&dev, force),
+                PivAction::Info => piv::run_info(&dev, &scp_params),
+                PivAction::Reset { force } => piv::run_reset(&dev, &scp_params, force),
                 PivAction::Access(access) => match access {
                     PivAccessAction::ChangePin { pin, new_pin } => {
-                        piv::run_change_pin(&dev, pin.as_deref(), new_pin.as_deref())
+                        piv::run_change_pin(&dev, &scp_params, pin.as_deref(), new_pin.as_deref())
                     }
                     PivAccessAction::ChangePuk { puk, new_puk } => {
-                        piv::run_change_puk(&dev, puk.as_deref(), new_puk.as_deref())
+                        piv::run_change_puk(&dev, &scp_params, puk.as_deref(), new_puk.as_deref())
                     }
                     PivAccessAction::UnblockPin { puk, new_pin } => {
-                        piv::run_unblock_pin(&dev, puk.as_deref(), new_pin.as_deref())
+                        piv::run_unblock_pin(&dev, &scp_params, puk.as_deref(), new_pin.as_deref())
                     }
                     PivAccessAction::SetRetries {
                         pin_retries,
@@ -1949,6 +1962,7 @@ fn run() -> Result<(), CliError> {
                         force,
                     } => piv::run_set_retries(
                         &dev,
+                        &scp_params,
                         pin_retries,
                         puk_retries,
                         management_key.as_deref(),
@@ -1966,6 +1980,7 @@ fn run() -> Result<(), CliError> {
                         protect,
                     } => piv::run_change_management_key(
                         &dev,
+                        &scp_params,
                         management_key.as_deref(),
                         new_management_key.as_deref(),
                         &algorithm,
@@ -1988,6 +2003,7 @@ fn run() -> Result<(), CliError> {
                         format,
                     } => piv::run_keys_generate(
                         &dev,
+                        &scp_params,
                         &slot,
                         &output,
                         &algorithm,
@@ -2011,6 +2027,7 @@ fn run() -> Result<(), CliError> {
                         }
                         piv::run_keys_import(
                             &dev,
+                        &scp_params,
                             &slot,
                             &key_file,
                             &pin_policy,
@@ -2019,12 +2036,12 @@ fn run() -> Result<(), CliError> {
                             pin.as_deref(),
                         )
                     }
-                    PivKeysAction::Info { slot } => piv::run_keys_info(&dev, &slot),
+                    PivKeysAction::Info { slot } => piv::run_keys_info(&dev, &scp_params, &slot),
                     PivKeysAction::Attest {
                         slot,
                         output,
                         format,
-                    } => piv::run_keys_attest(&dev, &slot, &output, &format),
+                    } => piv::run_keys_attest(&dev, &scp_params, &slot, &output, &format),
                     PivKeysAction::Export {
                         slot,
                         output,
@@ -2035,7 +2052,7 @@ fn run() -> Result<(), CliError> {
                         if verify {
                             eprintln!("NOTE: --verify is not yet implemented for key export.");
                         }
-                        piv::run_keys_export(&dev, &slot, &output, &format)
+                        piv::run_keys_export(&dev, &scp_params, &slot, &output, &format)
                     }
                     PivKeysAction::Move {
                         source,
@@ -2044,6 +2061,7 @@ fn run() -> Result<(), CliError> {
                         pin,
                     } => piv::run_keys_move(
                         &dev,
+                        &scp_params,
                         &source,
                         &dest,
                         management_key.as_deref(),
@@ -2054,7 +2072,7 @@ fn run() -> Result<(), CliError> {
                         management_key,
                         pin,
                     } => {
-                        piv::run_keys_delete(&dev, &slot, management_key.as_deref(), pin.as_deref())
+                        piv::run_keys_delete(&dev, &scp_params, &slot, management_key.as_deref(), pin.as_deref())
                     }
                 },
                 PivAction::Certificates(certs) => match certs {
@@ -2062,7 +2080,7 @@ fn run() -> Result<(), CliError> {
                         slot,
                         output,
                         format,
-                    } => piv::run_certificates_export(&dev, &slot, &output, &format),
+                    } => piv::run_certificates_export(&dev, &scp_params, &slot, &output, &format),
                     PivCertAction::Import {
                         slot,
                         cert_file,
@@ -2081,6 +2099,7 @@ fn run() -> Result<(), CliError> {
                         }
                         piv::run_certificates_import(
                             &dev,
+                        &scp_params,
                             &slot,
                             &cert_file,
                             management_key.as_deref(),
@@ -2096,6 +2115,7 @@ fn run() -> Result<(), CliError> {
                         no_update_chuid,
                     } => piv::run_certificates_delete(
                         &dev,
+                        &scp_params,
                         &slot,
                         management_key.as_deref(),
                         pin.as_deref(),
@@ -2112,6 +2132,7 @@ fn run() -> Result<(), CliError> {
                         no_update_chuid,
                     } => piv::run_certificates_generate(
                         &dev,
+                        &scp_params,
                         &slot,
                         &subject,
                         valid_days,
@@ -2130,6 +2151,7 @@ fn run() -> Result<(), CliError> {
                         pin,
                     } => piv::run_certificates_request(
                         &dev,
+                        &scp_params,
                         &slot,
                         &subject,
                         &hash_algorithm,
@@ -2143,7 +2165,7 @@ fn run() -> Result<(), CliError> {
                         object,
                         output,
                         pin,
-                    } => piv::run_objects_export(&dev, &object, &output, pin.as_deref()),
+                    } => piv::run_objects_export(&dev, &scp_params, &object, &output, pin.as_deref()),
                     PivObjectAction::Import {
                         object,
                         data,
@@ -2151,6 +2173,7 @@ fn run() -> Result<(), CliError> {
                         pin,
                     } => piv::run_objects_import(
                         &dev,
+                        &scp_params,
                         &object,
                         &data,
                         management_key.as_deref(),
@@ -2162,6 +2185,7 @@ fn run() -> Result<(), CliError> {
                         pin,
                     } => piv::run_objects_generate(
                         &dev,
+                        &scp_params,
                         &object,
                         management_key.as_deref(),
                         pin.as_deref(),
@@ -2170,11 +2194,11 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Openpgp { action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
             apply_version_override(&dev);
             match action {
-                OpenpgpAction::Info => openpgp::run_info(&dev),
-                OpenpgpAction::Reset { force } => openpgp::run_reset(&dev, force),
+                OpenpgpAction::Info => openpgp::run_info(&dev, &scp_params),
+                OpenpgpAction::Reset { force } => openpgp::run_reset(&dev, &scp_params, force),
                 OpenpgpAction::Access(access) => match access {
                     OpenpgpAccessAction::SetRetries {
                         pin_retries,
@@ -2184,6 +2208,7 @@ fn run() -> Result<(), CliError> {
                         force,
                     } => openpgp::run_set_retries(
                         &dev,
+                        &scp_params,
                         pin_retries,
                         reset_code_retries,
                         admin_pin_retries,
@@ -2191,13 +2216,14 @@ fn run() -> Result<(), CliError> {
                         force,
                     ),
                     OpenpgpAccessAction::ChangePin { pin, new_pin } => {
-                        openpgp::run_change_pin(&dev, pin.as_deref(), new_pin.as_deref())
+                        openpgp::run_change_pin(&dev, &scp_params, pin.as_deref(), new_pin.as_deref())
                     }
                     OpenpgpAccessAction::ChangeAdminPin {
                         admin_pin,
                         new_admin_pin,
                     } => openpgp::run_change_admin_pin(
                         &dev,
+                        &scp_params,
                         admin_pin.as_deref(),
                         new_admin_pin.as_deref(),
                     ),
@@ -2206,6 +2232,7 @@ fn run() -> Result<(), CliError> {
                         reset_code,
                     } => openpgp::run_change_reset_code(
                         &dev,
+                        &scp_params,
                         admin_pin.as_deref(),
                         reset_code.as_deref(),
                     ),
@@ -2215,16 +2242,17 @@ fn run() -> Result<(), CliError> {
                         new_pin,
                     } => openpgp::run_unblock_pin(
                         &dev,
+                        &scp_params,
                         admin_pin.as_deref(),
                         reset_code.as_deref(),
                         new_pin.as_deref(),
                     ),
                     OpenpgpAccessAction::SetSignaturePolicy { policy, admin_pin } => {
-                        openpgp::run_set_signature_policy(&dev, &policy, admin_pin.as_deref())
+                        openpgp::run_set_signature_policy(&dev, &scp_params, &policy, admin_pin.as_deref())
                     }
                 },
                 OpenpgpAction::Keys(keys) => match keys {
-                    OpenpgpKeysAction::Info { key } => openpgp::run_keys_info(&dev, &key),
+                    OpenpgpKeysAction::Info { key } => openpgp::run_keys_info(&dev, &scp_params, &key),
                     OpenpgpKeysAction::SetTouch {
                         key,
                         policy,
@@ -2232,6 +2260,7 @@ fn run() -> Result<(), CliError> {
                         force,
                     } => openpgp::run_keys_set_touch(
                         &dev,
+                        &scp_params,
                         &key,
                         &policy,
                         admin_pin.as_deref(),
@@ -2241,44 +2270,45 @@ fn run() -> Result<(), CliError> {
                         key,
                         key_file,
                         admin_pin,
-                    } => openpgp::run_keys_import(&dev, &key, &key_file, admin_pin.as_deref()),
+                    } => openpgp::run_keys_import(&dev, &scp_params, &key, &key_file, admin_pin.as_deref()),
                     OpenpgpKeysAction::Attest {
                         key,
                         output,
                         format,
                         pin,
-                    } => openpgp::run_keys_attest(&dev, &key, &output, &format, pin.as_deref()),
+                    } => openpgp::run_keys_attest(&dev, &scp_params, &key, &output, &format, pin.as_deref()),
                 },
                 OpenpgpAction::Certificates(certs) => match certs {
                     OpenpgpCertAction::Export {
                         key,
                         output,
                         format,
-                    } => openpgp::run_certificates_export(&dev, &key, &output, &format),
+                    } => openpgp::run_certificates_export(&dev, &scp_params, &key, &output, &format),
                     OpenpgpCertAction::Import {
                         key,
                         cert_file,
                         admin_pin,
                     } => openpgp::run_certificates_import(
                         &dev,
+                        &scp_params,
                         &key,
                         &cert_file,
                         admin_pin.as_deref(),
                     ),
                     OpenpgpCertAction::Delete { key, admin_pin } => {
-                        openpgp::run_certificates_delete(&dev, &key, admin_pin.as_deref())
+                        openpgp::run_certificates_delete(&dev, &scp_params, &key, admin_pin.as_deref())
                     }
                 },
             }
         }
         Commands::Hsmauth { action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
             apply_version_override(&dev);
             match action {
-                HsmauthAction::Info => hsmauth::run_info(&dev),
-                HsmauthAction::Reset { force } => hsmauth::run_reset(&dev, force),
+                HsmauthAction::Info => hsmauth::run_info(&dev, &scp_params),
+                HsmauthAction::Reset { force } => hsmauth::run_reset(&dev, &scp_params, force),
                 HsmauthAction::Credentials(cred) => match cred {
-                    HsmauthCredAction::List => hsmauth::run_credentials_list(&dev),
+                    HsmauthCredAction::List => hsmauth::run_credentials_list(&dev, &scp_params),
                     HsmauthCredAction::Generate {
                         label,
                         credential_password,
@@ -2286,6 +2316,7 @@ fn run() -> Result<(), CliError> {
                         touch,
                     } => hsmauth::run_credentials_generate(
                         &dev,
+                        &scp_params,
                         &label,
                         credential_password.as_deref(),
                         management_key.as_deref(),
@@ -2301,6 +2332,7 @@ fn run() -> Result<(), CliError> {
                         touch,
                     } => hsmauth::run_credentials_symmetric(
                         &dev,
+                        &scp_params,
                         &label,
                         enc_key.as_deref(),
                         mac_key.as_deref(),
@@ -2317,6 +2349,7 @@ fn run() -> Result<(), CliError> {
                         touch,
                     } => hsmauth::run_credentials_derive(
                         &dev,
+                        &scp_params,
                         &label,
                         &derivation_password,
                         credential_password.as_deref(),
@@ -2329,6 +2362,7 @@ fn run() -> Result<(), CliError> {
                         force,
                     } => hsmauth::run_credentials_delete(
                         &dev,
+                        &scp_params,
                         &label,
                         management_key.as_deref(),
                         force,
@@ -2339,12 +2373,13 @@ fn run() -> Result<(), CliError> {
                         new_credential_password,
                     } => hsmauth::run_credentials_change_password(
                         &dev,
+                        &scp_params,
                         &label,
                         credential_password.as_deref(),
                         &new_credential_password,
                     ),
                     HsmauthCredAction::Export { label, output, format } => {
-                        hsmauth::run_credentials_export(&dev, &label, &output, &format)
+                        hsmauth::run_credentials_export(&dev, &scp_params, &label, &output, &format)
                     }
                     HsmauthCredAction::Import {
                         label,
@@ -2366,6 +2401,7 @@ fn run() -> Result<(), CliError> {
                         generate,
                     } => hsmauth::run_access_change_management_key(
                         &dev,
+                        &scp_params,
                         management_password.as_deref(),
                         new_management_password.as_deref(),
                         generate,
@@ -2374,11 +2410,11 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::SecurityDomain { action } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
             apply_version_override(&dev);
             match action {
-                SecurityDomainAction::Info => securitydomain::run_info(&dev),
-                SecurityDomainAction::Reset { force } => securitydomain::run_reset(&dev, force),
+                SecurityDomainAction::Info => securitydomain::run_info(&dev, &scp_params),
+                SecurityDomainAction::Reset { force } => securitydomain::run_reset(&dev, &scp_params, force),
                 SecurityDomainAction::Keys(keys) => {
                     let parse_hex_u8 = |s: &str| -> Result<u8, CliError> {
                         u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
@@ -2397,17 +2433,17 @@ fn run() -> Result<(), CliError> {
                                 .as_deref()
                                 .map(|s| parse_hex_u8(s))
                                 .transpose()?;
-                            securitydomain::run_keys_generate(&dev, kid, kvn, &output, rkvn)
+                            securitydomain::run_keys_generate(&dev, &scp_params, kid, kvn, &output, rkvn)
                         }
                         SecurityDomainKeysAction::Export { kid, kvn, output } => {
                             let kid = parse_hex_u8(&kid)?;
                             let kvn = parse_hex_u8(&kvn)?;
-                            securitydomain::run_keys_export(&dev, kid, kvn, &output)
+                            securitydomain::run_keys_export(&dev, &scp_params, kid, kvn, &output)
                         }
                         SecurityDomainKeysAction::Delete { kid, kvn, force } => {
                             let kid = parse_hex_u8(&kid)?;
                             let kvn = parse_hex_u8(&kvn)?;
-                            securitydomain::run_keys_delete(&dev, kid, kvn, force)
+                            securitydomain::run_keys_delete(&dev, &scp_params, kid, kvn, force)
                         }
                         SecurityDomainKeysAction::Import {
                             kid,
@@ -2426,12 +2462,12 @@ fn run() -> Result<(), CliError> {
                                 .as_deref()
                                 .map(|s| parse_hex_u8(s))
                                 .transpose()?;
-                            securitydomain::run_keys_import(&dev, kid, kvn, &key_type, &input, rkvn)
+                            securitydomain::run_keys_import(&dev, &scp_params, kid, kvn, &key_type, &input, rkvn)
                         }
                         SecurityDomainKeysAction::SetAllowlist { kid, kvn, serials } => {
                             let kid = parse_hex_u8(&kid)?;
                             let kvn = parse_hex_u8(&kvn)?;
-                            securitydomain::run_keys_set_allowlist(&dev, kid, kvn, &serials)
+                            securitydomain::run_keys_set_allowlist(&dev, &scp_params, kid, kvn, &serials)
                         }
                     }
                 }
@@ -2444,8 +2480,8 @@ fn run() -> Result<(), CliError> {
             short,
             send_apdu,
         } => {
-            let dev = resolve_device(cli.device, &cli.reader)?;
-            apdu::run_apdu(&dev, &apdus, no_pretty, app.as_deref(), short, &send_apdu)
+            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            apdu::run_apdu(&dev, &scp_params, &apdus, no_pretty, app.as_deref(), short, &send_apdu)
         }
     }
 }
