@@ -30,7 +30,7 @@ import logging
 import warnings
 from enum import Enum, IntEnum, unique
 
-from _ykman_native.core import SmartCardProtocol as _NativeSmartCardProtocol
+from _yubikit_native.core import SmartCardProtocol as _NativeSmartCardProtocol
 
 from .. import (
     TRANSPORT,

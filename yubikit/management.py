@@ -33,9 +33,11 @@ from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
 from typing import Any, Mapping
 
-from _ykman_native.sessions import ManagementFidoSession as _NativeManagementFidoSession
-from _ykman_native.sessions import ManagementOtpSession as _NativeManagementOtpSession
-from _ykman_native.sessions import ManagementSession as _NativeManagementSession
+from _yubikit_native.sessions import (
+    ManagementFidoSession as _NativeManagementFidoSession,
+)
+from _yubikit_native.sessions import ManagementOtpSession as _NativeManagementOtpSession
+from _yubikit_native.sessions import ManagementSession as _NativeManagementSession
 
 from .core import (
     TRANSPORT,

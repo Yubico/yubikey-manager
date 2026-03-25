@@ -120,7 +120,7 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
         merged.update(Counter(d.pid for d in devs if d.pid is not None))
         fingerprints.update({d.fingerprint for d in devs})
     if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
-        from _ykman_native.hid import list_all_hid_devices
+        from _yubikit_native.hid import list_all_hid_devices
 
         counter: Counter[PID] = Counter()
         for dev in list_all_hid_devices():

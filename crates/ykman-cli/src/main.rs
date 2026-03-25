@@ -1,9 +1,9 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
-use yubikit_rs::core_types::set_override_version;
-use yubikit_rs::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
-use yubikit_rs::management::ReleaseType;
+use yubikit::core_types::set_override_version;
+use yubikit::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
+use yubikit::management::ReleaseType;
 
 mod apdu;
 mod config;
@@ -25,15 +25,15 @@ use util::{CliError, read_file_or_stdin};
 
 #[derive(Parser)]
 #[command(
-    name = "ykman-rs",
+    name = "ykman",
     about = "Configure your YubiKey via the command line.",
     version,
     after_help = "Examples:\n\
       \n  List connected YubiKeys, only output serial number:\
-      \n  $ ykman-rs list --serials\
+      \n  $ ykman list --serials\
       \n\
       \n  Show information about YubiKey with serial number 123456:\
-      \n  $ ykman-rs --device 123456 info"
+      \n  $ ykman --device 123456 info"
 )]
 struct Cli {
     /// Specify which YubiKey to interact with by serial number
@@ -1309,11 +1309,11 @@ fn resolve_device(
     } else {
         let devices = match transport {
             TransportPreference::CcidOnly => {
-                yubikit_rs::device::list_devices_ccid()
+                yubikit::device::list_devices_ccid()
                     .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
             }
             TransportPreference::OtpPreferred => {
-                let otp_devs = yubikit_rs::device::list_devices_otp()
+                let otp_devs = yubikit::device::list_devices_otp()
                     .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
                 if otp_devs.is_empty() {
                     // Fall back to full scan if no OTP HID devices found
@@ -1518,7 +1518,7 @@ fn run() -> Result<(), CliError> {
         logging::init_logging(level, cli.log_file.as_deref())
             .map_err(|e| CliError(e))?;
         log::info!(
-            "System info:\n  ykman-rs:  {}\n  Platform:  {}\n  Arch:      {}",
+            "System info:\n  ykman:  {}\n  Platform:  {}\n  Arch:      {}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,

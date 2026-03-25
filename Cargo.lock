@@ -1541,22 +1541,11 @@ dependencies = [
  "log",
  "p256",
  "sha2",
- "yubikit-rs",
+ "yubikit",
 ]
 
 [[package]]
-name = "ykman-pyo3"
-version = "0.1.0"
-dependencies = [
- "elliptic-curve",
- "log",
- "p256",
- "pyo3",
- "yubikit-rs",
-]
-
-[[package]]
-name = "yubikit-rs"
+name = "yubikit"
 version = "0.1.0"
 dependencies = [
  "aes",
@@ -1583,6 +1572,17 @@ dependencies = [
  "subtle",
  "thiserror",
  "x25519-dalek",
+]
+
+[[package]]
+name = "yubikit-pyo3"
+version = "0.1.0"
+dependencies = [
+ "elliptic-curve",
+ "log",
+ "p256",
+ "pyo3",
+ "yubikit",
 ]
 
 [[package]]

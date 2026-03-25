@@ -1,9 +1,9 @@
-use yubikit_rs::device::{get_name, list_readers, read_info, read_info_fido, read_info_otp};
-use yubikit_rs::smartcard::Transport;
-use yubikit_rs::management::{Capability, DeviceInfo, ReleaseType};
-use yubikit_rs::transport::otphid::{OtpConnection, list_otp_devices};
-use yubikit_rs::transport::ctaphid::{FidoConnection, list_fido_devices};
-use yubikit_rs::transport::pcsc::PcscConnection;
+use yubikit::device::{get_name, list_readers, read_info, read_info_fido, read_info_otp};
+use yubikit::smartcard::Transport;
+use yubikit::management::{Capability, DeviceInfo, ReleaseType};
+use yubikit::transport::otphid::{OtpConnection, list_otp_devices};
+use yubikit::transport::ctaphid::{FidoConnection, list_fido_devices};
+use yubikit::transport::pcsc::PcscConnection;
 
 use crate::util::CliError;
 
@@ -95,7 +95,7 @@ fn print_device_info(info: &DeviceInfo, indent: &str) {
 }
 
 pub fn run_diagnose() -> Result<(), CliError> {
-    println!("ykman-rs:         {}", env!("CARGO_PKG_VERSION"));
+    println!("ykman:         {}", env!("CARGO_PKG_VERSION"));
     println!("Platform:         {}", std::env::consts::OS);
     println!("Arch:             {}", std::env::consts::ARCH);
 
@@ -149,7 +149,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
         println!();
         println!("    PIV:");
         match PcscConnection::new(reader, false) {
-            Ok(conn) => match yubikit_rs::piv::PivSession::new(conn) {
+            Ok(conn) => match yubikit::piv::PivSession::new(conn) {
                 Ok(mut session) => {
                     println!(
                         "      PIV version:              {}",
@@ -190,7 +190,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                         }
                     }
                     // Show CHUID and CCC
-                    use yubikit_rs::piv::{ObjectId, Slot};
+                    use yubikit::piv::{ObjectId, Slot};
                     match session.get_object(ObjectId::Chuid) {
                         Ok(data) => {
                             let hex: String =
@@ -242,7 +242,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
         println!();
         println!("    OATH:");
         match PcscConnection::new(reader, false) {
-            Ok(conn) => match yubikit_rs::oath::OathSession::new(conn) {
+            Ok(conn) => match yubikit::oath::OathSession::new(conn) {
                 Ok(session) => {
                     println!(
                         "      Oath version:       {}",
@@ -262,7 +262,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
         println!();
         println!("    OpenPGP:");
         match PcscConnection::new(reader, false) {
-            Ok(conn) => match yubikit_rs::openpgp::OpenPgpSession::new(conn) {
+            Ok(conn) => match yubikit::openpgp::OpenPgpSession::new(conn) {
                 Ok(mut session) => {
                     let aid_ver = session.aid().version();
                     println!(
@@ -287,15 +287,15 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             pw_status.attempts_admin
                         );
                         let sig_policy = match pw_status.pin_policy_user {
-                            yubikit_rs::openpgp::PinPolicy::Once => "Once",
-                            yubikit_rs::openpgp::PinPolicy::Always => "Always",
+                            yubikit::openpgp::PinPolicy::Once => "Once",
+                            yubikit::openpgp::PinPolicy::Always => "Always",
                         };
                         println!(
                             "      Require PIN for signature:  {sig_policy}"
                         );
                     }
                     if let Ok(kdf) = session.get_kdf() {
-                        let enabled = !matches!(kdf, yubikit_rs::openpgp::Kdf::None);
+                        let enabled = !matches!(kdf, yubikit::openpgp::Kdf::None);
                         println!(
                             "      KDF enabled:                {}",
                             if enabled { "True" } else { "False" }
@@ -311,7 +311,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
         println!();
         println!("    YubiHSM Auth:");
         match PcscConnection::new(reader, false) {
-            Ok(conn) => match yubikit_rs::hsmauth::HsmAuthSession::new(conn) {
+            Ok(conn) => match yubikit::hsmauth::HsmAuthSession::new(conn) {
                 Ok(mut session) => {
                     println!(
                         "      YubiHSM Auth version:             {}",
@@ -359,26 +359,26 @@ pub fn run_diagnose() -> Result<(), CliError> {
                     println!("    OTP:");
                     match OtpConnection::new(&hid.path) {
                         Ok(conn) => {
-                            match yubikit_rs::yubiotp::YubiOtpOtpSession::new(conn) {
+                            match yubikit::yubiotp::YubiOtpOtpSession::new(conn) {
                                 Ok(session) => {
                                     let state = session.get_config_state();
                                     let s1 = state
-                                        .is_configured(yubikit_rs::yubiotp::Slot::One)
+                                        .is_configured(yubikit::yubiotp::Slot::One)
                                         .map_or("unknown".into(), |b| {
                                             if b { "True" } else { "False" }.to_string()
                                         });
                                     let s2 = state
-                                        .is_configured(yubikit_rs::yubiotp::Slot::Two)
+                                        .is_configured(yubikit::yubiotp::Slot::Two)
                                         .map_or("unknown".into(), |b| {
                                             if b { "True" } else { "False" }.to_string()
                                         });
                                     let t1 = state
-                                        .is_touch_triggered(yubikit_rs::yubiotp::Slot::One)
+                                        .is_touch_triggered(yubikit::yubiotp::Slot::One)
                                         .map_or("unknown".into(), |b| {
                                             if b { "True" } else { "False" }.to_string()
                                         });
                                     let t2 = state
-                                        .is_touch_triggered(yubikit_rs::yubiotp::Slot::Two)
+                                        .is_touch_triggered(yubikit::yubiotp::Slot::Two)
                                         .map_or("unknown".into(), |b| {
                                             if b { "True" } else { "False" }.to_string()
                                         });

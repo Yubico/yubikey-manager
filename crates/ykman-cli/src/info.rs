@@ -1,6 +1,6 @@
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::smartcard::Transport;
-use yubikit_rs::management::Capability;
+use yubikit::device::YubiKeyDevice;
+use yubikit::smartcard::Transport;
+use yubikit::management::Capability;
 
 use crate::util::CliError;
 
@@ -11,12 +11,12 @@ pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     if let Some(serial) = info.serial {
         println!("Serial number: {serial}");
     }
-    if info.version != yubikit_rs::core_types::Version(0, 0, 0) {
+    if info.version != yubikit::core_types::Version(0, 0, 0) {
         println!("Firmware version: {}", info.version_name());
     } else {
         println!("Firmware version: Uncertain, re-run with only one YubiKey connected");
     }
-    if info.form_factor != yubikit_rs::management::FormFactor::Unknown {
+    if info.form_factor != yubikit::management::FormFactor::Unknown {
         println!("Form factor: {}", info.form_factor);
     }
 

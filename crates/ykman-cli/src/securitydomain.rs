@@ -1,14 +1,14 @@
 use std::io::{self, Write};
 
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::securitydomain::{KeyRef, SecurityDomainSession};
+use yubikit::device::YubiKeyDevice;
+use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 use crate::scp::ScpParams;
 
 fn open_session(
     dev: &YubiKeyDevice,
-) -> Result<SecurityDomainSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'_>>, CliError>
+) -> Result<SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection + use<'_>>, CliError>
 {
     let conn = dev
         .open_smartcard()
@@ -83,7 +83,7 @@ pub fn run_keys_generate(
     let pub_key = session
         .generate_ec_key(
             key_ref,
-            yubikit_rs::securitydomain::Curve::Secp256r1,
+            yubikit::securitydomain::Curve::Secp256r1,
             replace_kvn.unwrap_or(0),
         )
         .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
@@ -170,7 +170,7 @@ pub fn run_keys_import(
             } else {
                 None
             };
-            let static_keys = yubikit_rs::securitydomain::StaticKeys {
+            let static_keys = yubikit::securitydomain::StaticKeys {
                 key_enc: enc,
                 key_mac: mac,
                 key_dek: dek,
@@ -226,7 +226,7 @@ pub fn run_keys_import(
                     .put_key_ec_private(
                         key_ref,
                         pk,
-                        yubikit_rs::securitydomain::Curve::Secp256r1,
+                        yubikit::securitydomain::Curve::Secp256r1,
                         &[0u8; 16],
                         replace_kvn.unwrap_or(0),
                     )

@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::hsmauth::{HsmAuthSession, credential_password_from_str};
-use yubikit_rs::management::Capability;
+use yubikit::device::YubiKeyDevice;
+use yubikit::hsmauth::{HsmAuthSession, credential_password_from_str};
+use yubikit::management::Capability;
 
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, write_file_or_stdout};
@@ -12,7 +12,7 @@ const DEFAULT_MANAGEMENT_KEY: &[u8] = &[0u8; 16];
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<HsmAuthSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<HsmAuthSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::HSMAUTH)?;
     match scp_config {
         ScpConfig::None => {

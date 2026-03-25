@@ -33,10 +33,10 @@ from hashlib import sha1
 from threading import Event
 from typing import Any, Callable, TypeVar
 
-from _ykman_native.sessions import (
+from _yubikit_native.sessions import (
     YubiOtpOtpSession as _NativeYubiOtpOtpSession,
 )
-from _ykman_native.sessions import (
+from _yubikit_native.sessions import (
     YubiOtpSession as _NativeYubiOtpSession,
 )
 

@@ -30,8 +30,8 @@ import logging
 from threading import Event
 from typing import Callable
 
-from _ykman_native.core import OtpProtocol as _NativeOtpProtocol
-from _ykman_native.core import (
+from _yubikit_native.core import OtpProtocol as _NativeOtpProtocol
+from _yubikit_native.core import (
     calculate_crc,  # noqa: F401 - re-exported
     check_crc,  # noqa: F401 - re-exported
     modhex_decode,  # noqa: F401 - re-exported

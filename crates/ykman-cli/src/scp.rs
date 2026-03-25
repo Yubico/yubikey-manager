@@ -1,10 +1,10 @@
 //! SCP (Secure Channel Protocol) utilities for automatic SCP11b negotiation
 //! and explicit SCP from CLI flags.
 
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::smartcard::{SmartCardConnection, SmartCardProtocol};
-use yubikit_rs::management::Capability;
-use yubikit_rs::securitydomain::{KeyRef, SecurityDomainSession};
+use yubikit::device::YubiKeyDevice;
+use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
+use yubikit::management::Capability;
+use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 
 use crate::util::CliError;
 
@@ -140,7 +140,7 @@ pub fn resolve_scp(
 /// The AID must already be selected before calling this.
 /// Convert an `ScpConfig` into `ScpKeyParams`, returning `None` for
 /// `ScpConfig::None`.
-pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit_rs::scp::ScpKeyParams> {
+pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParams> {
     match config {
         ScpConfig::None => None,
         ScpConfig::Scp03 {
@@ -148,7 +148,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit_rs::scp::ScpKeyPa
             key_enc,
             key_mac,
             key_dek,
-        } => Some(yubikit_rs::scp::ScpKeyParams::Scp03 {
+        } => Some(yubikit::scp::ScpKeyParams::Scp03 {
             kvn: *kvn,
             key_enc: key_enc.clone(),
             key_mac: key_mac.clone(),
@@ -158,7 +158,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit_rs::scp::ScpKeyPa
             kid,
             kvn,
             pk_sd_ecka,
-        } => Some(yubikit_rs::scp::ScpKeyParams::Scp11b {
+        } => Some(yubikit::scp::ScpKeyParams::Scp11b {
             kid: *kid,
             kvn: *kvn,
             pk_sd_ecka: pk_sd_ecka.clone(),
@@ -170,7 +170,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit_rs::scp::ScpKeyPa
             sk_oce_ecka,
             certificates,
             oce_ref,
-        } => Some(yubikit_rs::scp::ScpKeyParams::Scp11ac {
+        } => Some(yubikit::scp::ScpKeyParams::Scp11ac {
             kid: *kid,
             kvn: *kvn,
             pk_sd_ecka: pk_sd_ecka.clone(),

@@ -34,7 +34,7 @@ from enum import IntEnum, unique
 from functools import total_ordering
 from typing import NamedTuple
 
-from _ykman_native.sessions import HsmAuthSession as _NativeHsmAuthSession
+from _yubikit_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec

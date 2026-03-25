@@ -1,4 +1,4 @@
-use yubikit_rs::device::{get_name, list_devices, list_readers};
+use yubikit::device::{get_name, list_devices, list_readers};
 
 use crate::util::CliError;
 
@@ -31,13 +31,13 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
             let ifaces = dev.usb_interfaces();
             let ifaces_str = if ifaces.0 != 0 {
                 let mut parts = Vec::new();
-                if ifaces.0 & yubikit_rs::management::UsbInterface::OTP.0 != 0 {
+                if ifaces.0 & yubikit::management::UsbInterface::OTP.0 != 0 {
                     parts.push("OTP");
                 }
-                if ifaces.0 & yubikit_rs::management::UsbInterface::FIDO.0 != 0 {
+                if ifaces.0 & yubikit::management::UsbInterface::FIDO.0 != 0 {
                     parts.push("FIDO");
                 }
-                if ifaces.0 & yubikit_rs::management::UsbInterface::CCID.0 != 0 {
+                if ifaces.0 & yubikit::management::UsbInterface::CCID.0 != 0 {
                     parts.push("CCID");
                 }
                 format!(" [{}]", parts.join("+"))

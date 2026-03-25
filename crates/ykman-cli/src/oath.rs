@@ -1,9 +1,9 @@
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::management::Capability;
-use yubikit_rs::oath::{
+use yubikit::device::YubiKeyDevice;
+use yubikit::management::Capability;
+use yubikit::oath::{
     Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
 
@@ -14,7 +14,7 @@ fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
-) -> Result<OathSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
     let mut session = match scp_config {
         ScpConfig::None => {

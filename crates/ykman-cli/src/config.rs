@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::smartcard::Transport;
-use yubikit_rs::management::{
+use yubikit::device::YubiKeyDevice;
+use yubikit::smartcard::Transport;
+use yubikit::management::{
     Capability, DeviceConfig, DeviceFlag, ManagementFidoSession, ManagementOtpSession, ManagementSession,
 };
 

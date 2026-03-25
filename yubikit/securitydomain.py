@@ -4,7 +4,7 @@ import logging
 from enum import IntEnum, unique
 from typing import Mapping, Sequence
 
-from _ykman_native.sessions import (
+from _yubikit_native.sessions import (
     SecurityDomainSession as _NativeSecurityDomainSession,
 )
 from cryptography import x509

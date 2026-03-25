@@ -8,37 +8,37 @@ from time import time
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
-from _ykman_native.oath import (  # noqa: F401
+from _yubikit_native.oath import (  # noqa: F401
     build_put_data as _build_put_data,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     derive_key as _derive_key_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     format_code as _format_code_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     format_cred_id as _format_cred_id_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     get_challenge as _get_challenge_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     get_device_id as _get_device_id_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     hmac_sha1 as _hmac_sha1_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     hmac_shorten_key as _hmac_shorten_key_native,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     parse_b32_key,
 )
-from _ykman_native.oath import (
+from _yubikit_native.oath import (
     parse_cred_id as _parse_cred_id_native,
 )
-from _ykman_native.sessions import OathSession as _NativeOathSession
+from _yubikit_native.sessions import OathSession as _NativeOathSession
 
 from .core import (
     Tlv,

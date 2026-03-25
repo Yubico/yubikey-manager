@@ -4,8 +4,8 @@ import logging
 from threading import Event
 from typing import Callable, Iterator
 
-from _ykman_native.hid import FidoConnection as _NativeFidoConnection
-from _ykman_native.hid import list_fido_devices as _native_list_fido_devices
+from _yubikit_native.hid import FidoConnection as _NativeFidoConnection
+from _yubikit_native.hid import list_fido_devices as _native_list_fido_devices
 from fido2.ctap import STATUS, CtapDevice
 
 from yubikit.core import PID, TRANSPORT, USB_INTERFACE, Connection

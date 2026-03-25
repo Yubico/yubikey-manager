@@ -120,7 +120,7 @@ def ccid_info():
         readers = {}
         for reader_name in list_readers():
             try:
-                from _ykman_native.pcsc import PcscConnection
+                from _yubikit_native.pcsc import PcscConnection
 
                 conn = PcscConnection(reader_name, exclusive=False)
                 conn.disconnect()

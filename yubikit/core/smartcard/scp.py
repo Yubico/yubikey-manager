@@ -34,10 +34,10 @@ from dataclasses import dataclass, field
 from enum import IntEnum, unique
 from typing import Callable, NamedTuple, Sequence
 
-from _ykman_native.scp import (  # noqa: F401
+from _yubikit_native.scp import (  # noqa: F401
     ScpState as _RustScpState,
 )
-from _ykman_native.scp import (
+from _yubikit_native.scp import (
     constant_time_eq,
     scp_calculate_mac,
     scp_derive,

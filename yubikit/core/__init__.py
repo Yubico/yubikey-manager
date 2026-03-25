@@ -41,20 +41,20 @@ from typing import (
     TypeVar,
 )
 
-from _ykman_native.core import (  # noqa: F401
+from _yubikit_native.core import (  # noqa: F401
     bytes2int,
     int2bytes,
 )
-from _ykman_native.core import (
+from _yubikit_native.core import (
     oid_from_string as _oid_from_string,
 )
-from _ykman_native.core import (
+from _yubikit_native.core import (
     oid_to_string as _oid_to_string,
 )
-from _ykman_native.core import (
+from _yubikit_native.core import (
     tlv_encode as _tlv_encode,
 )
-from _ykman_native.core import (
+from _yubikit_native.core import (
     tlv_parse as _tlv_parse,
 )
 
@@ -260,7 +260,7 @@ class _OverrideVersion:
         logger.info(f"Overriding version check for development devices with {value}")
         self._version = value
         try:
-            from _ykman_native.core import set_override_version
+            from _yubikit_native.core import set_override_version
 
             set_override_version(*value)
         except ImportError:

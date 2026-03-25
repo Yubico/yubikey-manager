@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     # This type isn't available on cryptography <40.
     from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 
-from _ykman_native.sessions import PivSession as _NativePivSession
+from _yubikit_native.sessions import PivSession as _NativePivSession
 
 logger = logging.getLogger(__name__)
 

@@ -45,8 +45,8 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [tool.maturin]
-manifest-path = "crates/ykman-pyo3/Cargo.toml"
-module-name = "_ykman_native"
+manifest-path = "crates/yubikit-pyo3/Cargo.toml"
+module-name = "_yubikit_native"
 python-packages = ["ykman", "yubikit"]
 include = [
   "COPYING",
@@ -74,7 +74,7 @@ reportAttributeAccessIssue = "warning"
 exclude = ["docs"]
 
 [tool.ty.rules]
-# _ykman_native is a compiled Rust extension, not visible to ty
+# _yubikit_native is a compiled Rust extension, not visible to ty
 unresolved-import = "warn"
 
 [[tool.ty.overrides]]

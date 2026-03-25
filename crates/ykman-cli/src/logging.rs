@@ -1,4 +1,4 @@
-//! Logging setup for the ykman-rs CLI.
+//! Logging setup for the ykman CLI.
 //!
 //! Provides a custom logger that matches Python ykman's log format:
 //! `LEVEL HH:MM:SS.ms [module.function:line] message`
@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use chrono::Local;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
-use yubikit_rs::logging::TRAFFIC_TARGET_PREFIX;
+use yubikit::logging::TRAFFIC_TARGET_PREFIX;
 
 /// Log levels matching Python's ykman logging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

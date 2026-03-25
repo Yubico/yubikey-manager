@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
-use yubikit_rs::device::YubiKeyDevice;
-use yubikit_rs::management::Capability;
-use yubikit_rs::openpgp::{KeyRef, OpenPgpSession, PinPolicy, Uif};
+use yubikit::device::YubiKeyDevice;
+use yubikit::management::Capability;
+use yubikit::openpgp::{KeyRef, OpenPgpSession, PinPolicy, Uif};
 
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
@@ -10,7 +10,7 @@ use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<OpenPgpSession<impl yubikit_rs::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OpenPgpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OPENPGP)?;
     match scp_config {
         ScpConfig::None => {
@@ -77,15 +77,15 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
     if let Ok(pw_status) = session.get_pin_status() {
         println!(
             "PIN tries remaining:        {}",
-            pw_status.get_attempts(yubikit_rs::openpgp::Pw::User),
+            pw_status.get_attempts(yubikit::openpgp::Pw::User),
         );
         println!(
             "Reset code tries remaining: {}",
-            pw_status.get_attempts(yubikit_rs::openpgp::Pw::Reset),
+            pw_status.get_attempts(yubikit::openpgp::Pw::Reset),
         );
         println!(
             "Admin PIN tries remaining:  {}",
-            pw_status.get_attempts(yubikit_rs::openpgp::Pw::Admin),
+            pw_status.get_attempts(yubikit::openpgp::Pw::Admin),
         );
 
         let pin_policy = match pw_status.pin_policy_user {
@@ -96,7 +96,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
     }
 
     if let Ok(kdf) = session.get_kdf() {
-        let enabled = if matches!(kdf, yubikit_rs::openpgp::Kdf::None) { "False" } else { "True" };
+        let enabled = if matches!(kdf, yubikit::openpgp::Kdf::None) { "False" } else { "True" };
         eprintln!("KDF enabled:                {enabled}");
     } else {
         eprintln!("KDF enabled:                False");

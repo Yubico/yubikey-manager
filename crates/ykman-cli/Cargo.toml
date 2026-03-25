@@ -6,11 +6,11 @@ description = "YubiKey Manager CLI (Rust)"
 license = "BSD-2-Clause"
 
 [[bin]]
-name = "ykman-rs"
+name = "ykman"
 path = "src/main.rs"
 
 [dependencies]
-yubikit-rs = { path = "../yubikit-rs" }
+yubikit = { path = "../yubikit" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 getrandom = "0.3"
