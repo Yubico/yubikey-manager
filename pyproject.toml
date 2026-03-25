@@ -73,9 +73,11 @@ reportAttributeAccessIssue = "warning"
 [tool.ty.src]
 exclude = ["docs"]
 
+[tool.ty.analysis]
+allowed-unresolved-imports = ["_yubikit_native.**"]
+
 [tool.ty.rules]
-# _yubikit_native is a compiled Rust extension, not visible to ty
-unresolved-import = "warn"
+unused-type-ignore-comment = "ignore"
 
 [[tool.ty.overrides]]
 include = ["tests/**", "**/test_*.py"]
