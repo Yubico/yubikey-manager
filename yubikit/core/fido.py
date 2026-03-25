@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 # Make CtapDevice a Connection
 FidoConnection = CtapDevice
-FidoConnection.usb_interface = USB_INTERFACE.FIDO  # type: ignore[attr-defined]
+FidoConnection.usb_interface = USB_INTERFACE.FIDO  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 Connection.register(FidoConnection)
 
 
