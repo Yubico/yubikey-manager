@@ -56,6 +56,20 @@ jobs:
           [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
           pip uninstall -y yubikey-manager
 
+      - name: Build Rust CLI
+        shell: bash
+        run: |
+          cargo build --release -p ykman-cli
+          target/release/ykman.exe --version
+          mkdir -p rust-dist
+          cp target/release/ykman.exe rust-dist/
+
+      - name: Upload Rust build
+        uses: actions/upload-artifact@v6
+        with:
+          name: ykman-rust-windows
+          path: rust-dist
+
       - name: PyInstaller
         shell: bash
         run: |

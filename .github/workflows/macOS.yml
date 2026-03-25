@@ -56,6 +56,23 @@ jobs:
           pip download -r cryptography.txt --platform macosx_10_12_universal2 --only-binary :all: --no-deps --dest .
           uv pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
 
+      - name: Build Rust CLI (universal)
+        run: |
+          cargo build --release -p ykman-cli --target aarch64-apple-darwin
+          cargo build --release -p ykman-cli --target x86_64-apple-darwin
+          mkdir -p rust-dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/ykman \
+            target/x86_64-apple-darwin/release/ykman \
+            -output rust-dist/ykman
+          rust-dist/ykman --version
+
+      - name: Upload Rust build
+        uses: actions/upload-artifact@v6
+        with:
+          name: ykman-rust-macos
+          path: rust-dist
+
       - name: PyInstaller
         run: |
           uv run pyinstaller ykman.spec
