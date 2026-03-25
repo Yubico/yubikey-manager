@@ -22,7 +22,7 @@ class NativeFidoConnection(CtapDevice, Connection):
 
     usb_interface = USB_INTERFACE.FIDO
 
-    def __init__(self, path: str, pid: PID):
+    def __init__(self, path: str, pid: int):
         self._native = _NativeFidoConnection(path, pid)
         self._device_version = self._native.device_version
         self._capabilities = self._native.capabilities
@@ -69,8 +69,8 @@ class NativeFidoConnection(CtapDevice, Connection):
 class CtapYubiKeyDevice(YkmanDevice):
     """YubiKey FIDO USB HID device"""
 
-    def __init__(self, path: str, pid: PID):
-        super().__init__(TRANSPORT.USB, path, pid)
+    def __init__(self, path: str, pid: int):
+        super().__init__(TRANSPORT.USB, path, PID(pid))
         self._path = path
 
     def supports_connection(self, connection_type):
