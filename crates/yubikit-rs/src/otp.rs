@@ -196,7 +196,7 @@ impl<T: OtpTransport> OtpProtocol<T> {
         // NEO (version 3.x): force communication to refresh pgmSeq
         if proto.version.0 == 3 {
             // Write an invalid scan map — expected to be rejected
-            match proto.send_and_receive(SCAN_MAP_SLOT, Some(&[b'c'; 51])) {
+            match proto.send_and_receive(SCAN_MAP_SLOT, Some(&[b'c'; 51]), None) {
                 Err(YubiOtpError::CommandRejected(_)) => {} // expected
                 _ => {}
             }
@@ -213,22 +213,30 @@ impl<T: OtpTransport> OtpProtocol<T> {
     }
 
     /// Send a command and read the response.
+    /// `expected_len >= 0`: verifies CRC and returns exactly that many bytes.
+    /// `expected_len == -1`: returns the raw data response (with CRC/padding).
+    /// `expected_len == None`: expects no data (status-only), returns `None`.
     pub fn send_and_receive(
         &self,
         slot: u8,
         data: Option<&[u8]>,
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        self.send_and_receive_with_cancel(slot, data, None, None)
+        expected_len: Option<i32>,
+    ) -> Result<Option<Vec<u8>>, YubiOtpError> {
+        self.send_and_receive_with_cancel(slot, data, expected_len, None, None)
     }
 
     /// Send a command with optional cancellation and keepalive callback.
+    /// `expected_len >= 0`: verifies CRC and returns exactly that many bytes.
+    /// `expected_len == -1`: returns the raw data response (with CRC/padding).
+    /// `expected_len == None`: expects no data (status-only), returns `None`.
     pub fn send_and_receive_with_cancel(
         &self,
         slot: u8,
         data: Option<&[u8]>,
+        expected_len: Option<i32>,
         cancel: Option<&AtomicBool>,
         on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Vec<u8>, YubiOtpError> {
+    ) -> Result<Option<Vec<u8>>, YubiOtpError> {
         let payload_data = data.unwrap_or(&[]);
         if payload_data.len() > SLOT_DATA_SIZE {
             return Err(YubiOtpError::InvalidParameter(
@@ -240,7 +248,18 @@ impl<T: OtpTransport> OtpProtocol<T> {
 
         let frame = format_frame(slot, &payload);
         let prog_seq = self.send_frame(&frame)?;
-        self.read_frame(prog_seq, cancel, on_keepalive)
+        let response = self.read_frame(prog_seq, cancel, on_keepalive)?;
+
+        match (response, expected_len) {
+            (Some(raw), Some(len)) if len >= 0 => {
+                verify_and_strip_crc(&raw, len as usize).map(Some)
+            }
+            (Some(raw), Some(_)) => Ok(Some(raw)), // -1: raw
+            (Some(_), None) => Err(YubiOtpError::BadResponse(
+                "Unexpected data in status-only response".into(),
+            )),
+            (None, _) => Ok(None),
+        }
     }
 
     fn receive(&self) -> Result<Vec<u8>, YubiOtpError> {
@@ -293,7 +312,7 @@ impl<T: OtpTransport> OtpProtocol<T> {
         prog_seq: u8,
         cancel: Option<&AtomicBool>,
         on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Vec<u8>, YubiOtpError> {
+    ) -> Result<Option<Vec<u8>>, YubiOtpError> {
         let mut response = Vec::new();
         let mut seq: u8 = 0;
         let mut needs_touch = false;
@@ -310,15 +329,14 @@ impl<T: OtpTransport> OtpProtocol<T> {
                 } else if (status_byte & SEQUENCE_MASK) == 0 {
                     // Transmission complete
                     self.reset_state()?;
-                    return Ok(response);
+                    return Ok(Some(response));
                 }
             } else if status_byte == 0 {
                 // Status response
                 if !response.is_empty() {
                     return Err(YubiOtpError::BadResponse("Incomplete transfer".into()));
                 } else if is_sequence_updated(&report, prog_seq) {
-                    // Return updated status bytes (1..7)
-                    return Ok(report[1..FEATURE_RPT_DATA_SIZE].to_vec());
+                    return Ok(None);
                 } else if needs_touch {
                     return Err(YubiOtpError::Timeout(
                         "Timed out waiting for touch".into(),
@@ -355,6 +373,22 @@ impl<T: OtpTransport> OtpProtocol<T> {
         report[FEATURE_RPT_DATA_SIZE] = 0xFF;
         self.connection.otp_send(&report)?;
         Ok(())
+    }
+}
+
+/// Verify and strip CRC from a raw OTP data response, returning `expected_len` bytes.
+pub fn verify_and_strip_crc(response: &[u8], expected_len: usize) -> Result<Vec<u8>, YubiOtpError> {
+    if response.len() < expected_len + 2 {
+        return Err(YubiOtpError::BadResponse(format!(
+            "Response too short: expected at least {}, got {}",
+            expected_len + 2,
+            response.len()
+        )));
+    }
+    if check_crc(&response[..expected_len + 2]) {
+        Ok(response[..expected_len].to_vec())
+    } else {
+        Err(YubiOtpError::BadResponse("Invalid CRC".into()))
     }
 }
 

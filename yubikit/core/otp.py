@@ -83,19 +83,25 @@ class OtpProtocol:
         self,
         slot: int,
         data: bytes | None = None,
+        expected_len: int | None = None,
         event: Event | None = None,
         on_keepalive: Callable[[int], None] | None = None,
-    ) -> bytes:
+    ) -> bytes | None:
         """Sends a command to the YubiKey, and reads the response.
 
         :param slot:  The slot to send to.
         :param data:  The data payload to send.
+        :param expected_len: If >= 0, verify CRC and return exactly this many
+            bytes. If -1, return raw data without CRC validation. If None, no
+            data is expected (status-only).
         :param event: Optional Event for cancelling a command.
         :param on_keepalive: Optional callback for touch status.
-        :return: Response data (including CRC) in the case of data, or an updated
-            status struct.
+        :return: Response data, or None for status-only responses.
         """
-        return bytes(self._native.send_and_receive(slot, data, event, on_keepalive))
+        result = self._native.send_and_receive(
+            slot, data, expected_len, event, on_keepalive
+        )
+        return bytes(result) if result is not None else None
 
     def read_status(self) -> bytes:
         """Receive status bytes from YubiKey.

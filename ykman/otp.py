@@ -31,7 +31,7 @@ import struct
 from datetime import datetime
 from typing import Iterable
 
-from yubikit.core.otp import OtpConnection, OtpProtocol, check_crc, modhex_encode
+from yubikit.core.otp import OtpConnection, OtpProtocol, modhex_encode
 from yubikit.oath import parse_b32_key
 
 from .scancodes import KEYBOARD_LAYOUT
@@ -48,10 +48,8 @@ def is_in_fips_mode(connection: OtpConnection) -> bool:
     """
     try:
         protocol = OtpProtocol(connection)
-        response = protocol.send_and_receive(SLOT_FIPS_MODE_QUERY)
-        if check_crc(response[:3]):
-            return response[0] == 1
-        return False
+        response = protocol.send_and_receive(SLOT_FIPS_MODE_QUERY, expected_len=1)
+        return response == b"\1"
     except Exception:
         return False
 

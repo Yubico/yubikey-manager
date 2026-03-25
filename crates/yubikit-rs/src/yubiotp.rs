@@ -37,7 +37,9 @@ use sha1::{Digest, Sha1};
 
 use crate::core_types::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
-use crate::otp::{calculate_crc, check_crc};
+use crate::otp::calculate_crc;
+#[cfg(test)]
+use crate::otp::check_crc;
 use crate::transport::otphid::OtpConnection;
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
@@ -1158,7 +1160,7 @@ impl YubiOtpOtpSession {
 
     /// Get the serial number of the YubiKey.
     pub fn get_serial(&self) -> Result<u32, YubiOtpError> {
-        let resp = self.send_and_receive_checked(ConfigSlot::DeviceSerial, &[], 4)?;
+        let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
         Ok(u32::from_be_bytes([resp[0], resp[1], resp[2], resp[3]]))
     }
 
@@ -1279,15 +1281,14 @@ impl YubiOtpOtpSession {
         let response = self.protocol.send_and_receive_with_cancel(
             config_slot as u8,
             Some(&padded),
+            Some(HMAC_RESPONSE_SIZE as i32),
             cancel.as_ref().map(|a| a.as_ref()),
             on_keepalive,
         )?;
 
-        if check_crc(&response[..HMAC_RESPONSE_SIZE + 2]) {
-            Ok(response[..HMAC_RESPONSE_SIZE].to_vec())
-        } else {
-            Err(YubiOtpError::BadResponse("Invalid CRC".into()))
-        }
+        response.ok_or_else(|| {
+            YubiOtpError::BadResponse("No data in HMAC response".into())
+        })
     }
 
     // -- internal (pub for PyO3 wrapper) -------------------------------------
@@ -1304,23 +1305,23 @@ impl YubiOtpOtpSession {
             Some(ac) => data.extend_from_slice(ac),
             None => data.extend_from_slice(&[0u8; ACC_CODE_SIZE]),
         }
-        self.status = self.protocol.send_and_receive(slot as u8, Some(&data))?;
+        self.protocol.send_and_receive(slot as u8, Some(&data), None)?;
+        self.status = self.protocol.read_status()?;
         Ok(())
     }
 
-    fn send_and_receive_checked(
+    fn send_and_receive(
         &self,
         slot: ConfigSlot,
         data: &[u8],
         expected_len: usize,
     ) -> Result<Vec<u8>, YubiOtpError> {
         let send_data = if data.is_empty() { None } else { Some(data) };
-        let response = self.protocol.send_and_receive(slot as u8, send_data)?;
-        if check_crc(&response[..expected_len + 2]) {
-            Ok(response[..expected_len].to_vec())
-        } else {
-            Err(YubiOtpError::BadResponse("Invalid CRC".into()))
-        }
+        self.protocol
+            .send_and_receive(slot as u8, send_data, Some(expected_len as i32))?
+            .ok_or_else(|| {
+                YubiOtpError::BadResponse("Expected data response, got status".into())
+            })
     }
 }
 

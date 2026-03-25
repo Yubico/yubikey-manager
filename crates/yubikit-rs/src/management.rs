@@ -35,8 +35,7 @@ use std::fmt;
 
 use crate::core_types::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version};
-use crate::otp::check_crc;
-use crate::otp::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ};
+use crate::otp::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ, verify_and_strip_crc};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
 use crate::transport::otphid::OtpConnection;
 use crate::transport::ctaphid::{CtapHidTransportError, FidoConnection};
@@ -961,20 +960,25 @@ impl ManagementOtpSession {
         let data = int2bytes(page as u64);
         let response = self
             .protocol
-            .send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data))
+            .send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data), Some(-1))
             .map_err(otp_to_smartcard_err)?;
-        let r_len = response[0] as usize;
-        if r_len + 1 + 2 <= response.len() && check_crc(&response[..r_len + 1 + 2]) {
-            Ok(response[..r_len + 1].to_vec())
-        } else {
-            Err(SmartCardError::BadResponse("Invalid checksum".into()))
+        match response {
+            Some(raw) => {
+                let r_len = raw[0] as usize;
+                let checked = verify_and_strip_crc(&raw, r_len + 1)
+                    .map_err(otp_to_smartcard_err)?;
+                Ok(checked)
+            }
+            None => Err(SmartCardError::BadResponse(
+                "Expected data response".into(),
+            )),
         }
     }
 
     /// Write configuration via OTP slot.
     pub fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
         self.protocol
-            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config))
+            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config), None)
             .map_err(otp_to_smartcard_err)?;
         Ok(())
     }
@@ -1028,7 +1032,7 @@ impl ManagementOtpSession {
         let empty = self.protocol.read_status()?[STATUS_OFFSET_PROG_SEQ] == 0;
         match self
             .protocol
-            .send_and_receive(ConfigSlot::DeviceConfig as u8, Some(&data))
+            .send_and_receive(ConfigSlot::DeviceConfig as u8, Some(&data), None)
         {
             Err(YubiOtpError::CommandRejected(_)) if empty => Ok(()),
             other => {

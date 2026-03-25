@@ -111,17 +111,18 @@ impl OtpProtocol {
         )
     }
 
-    #[pyo3(signature = (slot, data=None, event=None, on_keepalive=None))]
+    #[pyo3(signature = (slot, data=None, expected_len=None, event=None, on_keepalive=None))]
     fn send_and_receive(
         &self,
         slot: u8,
         data: Option<&[u8]>,
+        expected_len: Option<i32>,
         event: Option<&Bound<'_, PyAny>>,
         on_keepalive: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Vec<u8>> {
+    ) -> PyResult<Option<Vec<u8>>> {
         let _ = event;
         let _ = on_keepalive;
-        self.inner.send_and_receive(slot, data).map_err(|e| match e {
+        self.inner.send_and_receive(slot, data, expected_len).map_err(|e| match e {
             YubiOtpError::CommandRejected(msg) => Python::with_gil(|py| {
                 match py.import("yubikit.core.otp") {
                     Ok(module) => match module.getattr("CommandRejectedError") {
