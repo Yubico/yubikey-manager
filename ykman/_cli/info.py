@@ -36,7 +36,6 @@ from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import CAPABILITY, USB_INTERFACE
 from yubikit.oath import OathSession
 from yubikit.support import get_name
-from yubikit.yubiotp import YubiOtpSession
 
 from ..fido import is_in_fips_mode as ctap_in_fips_mode
 from ..oath import is_in_fips_mode as oath_in_fips_mode
@@ -106,8 +105,7 @@ def get_overall_fips_status(device, info):
     statuses["OTP"] = False
     if usb_enabled & CAPABILITY.OTP:
         with device.open_connection(OtpConnection) as conn:
-            otp_app = YubiOtpSession(conn)
-            statuses["OTP"] = otp_in_fips_mode(otp_app)
+            statuses["OTP"] = otp_in_fips_mode(conn)
 
     statuses["OATH"] = False
     if usb_enabled & CAPABILITY.OATH:

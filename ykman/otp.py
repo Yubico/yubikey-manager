@@ -31,21 +31,29 @@ import struct
 from datetime import datetime
 from typing import Iterable
 
-from yubikit.core.otp import modhex_encode
+from yubikit.core.otp import OtpConnection, OtpProtocol, check_crc, modhex_encode
 from yubikit.oath import parse_b32_key
-from yubikit.yubiotp import YubiOtpSession
 
 from .scancodes import KEYBOARD_LAYOUT
 
 logger = logging.getLogger(__name__)
 
+SLOT_FIPS_MODE_QUERY = 0x14
 
-def is_in_fips_mode(session: YubiOtpSession) -> bool:
+
+def is_in_fips_mode(connection: OtpConnection) -> bool:
     """Check if the OTP application of a FIPS YubiKey is in FIPS approved mode.
 
-    :param session: The YubiOTP session.
+    :param connection: An OTP connection to the YubiKey.
     """
-    return session._native.is_in_fips_mode()
+    try:
+        protocol = OtpProtocol(connection)
+        response = protocol.send_and_receive(SLOT_FIPS_MODE_QUERY)
+        if check_crc(response[:3]):
+            return response[0] == 1
+        return False
+    except Exception:
+        return False
 
 
 DEFAULT_PW_CHAR_BLOCKLIST = ["\t", "\n", " "]

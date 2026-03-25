@@ -256,7 +256,11 @@ def info(ctx):
     click.echo(f"Slot 2: {slot2 and 'programmed' or 'empty'}")
 
     if is_yk4_fips(ctx.obj["info"]):
-        click.echo(f"FIPS Approved Mode: {'Yes' if is_in_fips_mode(session) else 'No'}")
+        dev = ctx.obj["device"]
+        if dev.supports_connection(OtpConnection):
+            with dev.open_connection(OtpConnection) as conn:
+                fips = is_in_fips_mode(conn)
+            click.echo(f"FIPS Approved Mode: {'Yes' if fips else 'No'}")
 
 
 @otp.command()

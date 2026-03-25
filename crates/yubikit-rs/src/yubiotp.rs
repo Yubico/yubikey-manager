@@ -140,7 +140,6 @@ pub enum ConfigSlot {
     DeviceConfig = 0x11,
     ScanMap = 0x12,
     Yk4Capabilities = 0x13,
-    Yk4FipsModeQuery = 0x14,
     Yk4SetDeviceInfo = 0x15,
     ChalOtp1 = 0x20,
     ChalOtp2 = 0x28,
@@ -1119,14 +1118,6 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
             )))
         }
     }
-
-    /// Check if the OTP application is in FIPS approved mode.
-    pub fn is_in_fips_mode(&mut self) -> Result<bool, YubiOtpError> {
-        match self.send_and_receive(ConfigSlot::Yk4FipsModeQuery, &[], 1) {
-            Ok(resp) => Ok(resp == [1]),
-            Err(_) => Ok(false),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1329,14 +1320,6 @@ impl YubiOtpOtpSession {
             Ok(response[..expected_len].to_vec())
         } else {
             Err(YubiOtpError::BadResponse("Invalid CRC".into()))
-        }
-    }
-
-    /// Check if the OTP application is in FIPS approved mode.
-    pub fn is_in_fips_mode(&self) -> Result<bool, YubiOtpError> {
-        match self.send_and_receive_checked(ConfigSlot::Yk4FipsModeQuery, &[], 1) {
-            Ok(resp) => Ok(resp == [1]),
-            Err(_) => Ok(false),
         }
     }
 }
