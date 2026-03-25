@@ -18,7 +18,6 @@ def old_new_new(old, new):
 
 @pytest.fixture(autouse=True)
 @condition.capability(CAPABILITY.OPENPGP)
-@condition.min_version(4)
 def preconditions(ykman_cli):
     ykman_cli("openpgp", "reset", "-f")
 

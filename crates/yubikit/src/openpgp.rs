@@ -921,8 +921,10 @@ impl ApplicationRelatedData {
             .unwrap_or_default();
 
         // Discretionary data: try tag 0x73, fall back to outer dict
+        // NEO (OpenPGP v2.0) has tag 0x73 with empty content, so check for that
         let disc_data = data
             .get(&TAG_DISCRETIONARY)
+            .filter(|v| !v.is_empty())
             .map(|v| v.as_slice())
             .unwrap_or(&outer);
         let discretionary = DiscretionaryDataObjects::parse(disc_data)?;

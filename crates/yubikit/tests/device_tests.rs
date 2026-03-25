@@ -547,7 +547,6 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
-        require_version!(Version(4, 0, 0)); // NEO's OpenPGP is too old
         skip_if_needed!(tc);
         let session = open_openpgp_session(&tc);
         let _v = session.version();
@@ -561,7 +560,6 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
-        require_version!(Version(4, 0, 0));
         skip_if_needed!(tc);
         let mut session = open_openpgp_session(&tc);
         let app_data = session
@@ -582,7 +580,6 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
-        require_version!(Version(4, 0, 0));
         skip_if_needed!(tc);
         let mut session = open_openpgp_session(&tc);
         match session.get_challenge(8) {
