@@ -196,10 +196,7 @@ impl<T: OtpTransport> OtpProtocol<T> {
         // NEO (version 3.x): force communication to refresh pgmSeq
         if proto.version.0 == 3 {
             // Write an invalid scan map — expected to be rejected
-            match proto.send_and_receive(SCAN_MAP_SLOT, Some(&[b'c'; 51]), None) {
-                Err(YubiOtpError::CommandRejected(_)) => {} // expected
-                _ => {}
-            }
+            let _ = proto.send_and_receive(SCAN_MAP_SLOT, Some(&[b'c'; 51]), None);
         }
 
         Ok(proto)
@@ -255,10 +252,7 @@ impl<T: OtpTransport> OtpProtocol<T> {
                 verify_and_strip_crc(&raw, len as usize).map(Some)
             }
             (Some(raw), Some(_)) => Ok(Some(raw)), // -1: raw
-            (Some(_), None) => Err(YubiOtpError::BadResponse(
-                "Unexpected data in status-only response".into(),
-            )),
-            (None, _) => Ok(None),
+            (Some(_), None) | (None, _) => Ok(None),
         }
     }
 

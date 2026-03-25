@@ -51,8 +51,8 @@ const INS_WRITE_CONFIG: u8 = 0x1C;
 const INS_DEVICE_RESET: u8 = 0x1F;
 const P1_DEVICE_CONFIG: u8 = 0x11;
 
-// OTP slot constant for NEO capabilities read
-const CONFIG_SLOT_YK4_CAPABILITIES: u8 = 0x13;
+// OTP slot constant for NEO mode set
+const CONFIG_SLOT_DEVICE_CONFIG: u8 = 0x11;
 
 // ---------------------------------------------------------------------------
 // TLV Tags
@@ -829,6 +829,11 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         &mut self.protocol
     }
 
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
     /// The firmware version of the YubiKey.
     pub fn version(&self) -> Version {
         self.version
@@ -890,7 +895,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         ];
         if self.version.0 == 3 {
             // NEO: using OTP application, INS=0x01, P1=SLOT_DEVICE_CONFIG
-            self.protocol.send_apdu(0, 0x01, 0x11, 0, &data)?;
+            self.protocol.send_apdu(0, 0x01, CONFIG_SLOT_DEVICE_CONFIG, 0, &data)?;
         } else {
             self.protocol.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, &data)?;
         }
@@ -906,13 +911,10 @@ impl<C: SmartCardConnection> ManagementSession<C> {
     // -- Backend helpers ---
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
-        if self.version.0 == 3 {
-            // YubiKey NEO (v3): read via OTP slot
-            self.protocol.send_apdu(0, 0x01, CONFIG_SLOT_YK4_CAPABILITIES, 0, &int2bytes(page as u64))
-        } else {
-            // YubiKey 4+ and dev devices (version 0.0.1)
-            self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0, &[])
-        }
+        // YubiKey 4+ and dev devices use INS_READ_CONFIG.
+        // YubiKey NEO (v3) also uses INS_READ_CONFIG but against the OTP applet
+        // (selected during init).
+        self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0, &[])
     }
 
     fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {

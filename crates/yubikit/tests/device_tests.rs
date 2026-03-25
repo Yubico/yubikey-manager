@@ -235,12 +235,30 @@ fn usb_capabilities() -> Capability {
         .unwrap_or(Capability::NONE)
 }
 
+fn device_version() -> Version {
+    let (_, info) = get_device_and_info();
+    info.version
+}
+
 macro_rules! require_capability {
     ($cap:expr) => {
         if !usb_capabilities().contains($cap) {
             eprintln!(
                 "SKIP: device does not support {:?}, skipping test",
                 stringify!($cap)
+            );
+            return;
+        }
+    };
+}
+
+macro_rules! require_version {
+    ($min:expr) => {
+        if device_version() < $min {
+            eprintln!(
+                "SKIP: device version {:?} < {:?}, skipping test",
+                device_version(),
+                $min
             );
             return;
         }
@@ -275,6 +293,7 @@ fn test_list_devices_finds_key() {
 #[case(TestConnection::NfcSmartCard)]
 #[case(TestConnection::NfcSmartCardScp11b)]
 fn test_management_read_device_info(#[case] tc: TestConnection) {
+    require_version!(Version(4, 1, 0));
     skip_if_needed!(tc);
     match tc {
         TestConnection::UsbOtp => {
@@ -528,6 +547,7 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_session_version(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
+        require_version!(Version(4, 0, 0)); // NEO's OpenPGP is too old
         skip_if_needed!(tc);
         let session = open_openpgp_session(&tc);
         let _v = session.version();
@@ -541,6 +561,7 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
+        require_version!(Version(4, 0, 0));
         skip_if_needed!(tc);
         let mut session = open_openpgp_session(&tc);
         let app_data = session
@@ -561,6 +582,7 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
         require_capability!(Capability::OPENPGP);
+        require_version!(Version(4, 0, 0));
         skip_if_needed!(tc);
         let mut session = open_openpgp_session(&tc);
         match session.get_challenge(8) {

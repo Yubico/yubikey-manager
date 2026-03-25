@@ -44,8 +44,9 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::smartcard::{SmartCardError, Transport, Version};
-use crate::management::{Capability, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession, ManagementSession, UsbInterface};
+use crate::smartcard::{Aid, SmartCardError, SmartCardProtocol, Transport, Version};
+use crate::management::{Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession, ManagementSession, UsbInterface};
+use crate::yubiotp::YubiOtpSession;
 use crate::transport::otphid::{OtpConnection, HidDeviceInfo, HidError, list_otp_devices};
 use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
 use crate::transport::pcsc::{PcscConnection, PcscError};
@@ -326,7 +327,20 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
     // Scan HID OTP devices, merging with existing PC/SC entries by serial
     if let Ok(hid_devices) = list_otp_devices() {
         for hid in hid_devices {
-            // Try to read real device info via OTP management session
+            // If there's exactly one unmatched CCID device, just merge by path
+            // without opening the OTP connection (avoids NEO CCID lockout)
+            let unmatched_ccid: Vec<_> = devices
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.hid_path.is_none())
+                .collect();
+            if unmatched_ccid.len() == 1 {
+                let idx = unmatched_ccid[0].0;
+                devices[idx].hid_path = Some(hid.path.clone());
+                continue;
+            }
+
+            // Multiple or zero unmatched: need OTP info to match
             let hid_info = read_info_otp(&hid.path).ok();
             let hid_serial = hid_info.as_ref().and_then(|i| i.serial);
 
@@ -342,17 +356,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                     false
                 }
             } else {
-                // No serial from HID — merge with the sole unmatched PCSC device
-                let unmatched: Vec<_> = devices
-                    .iter_mut()
-                    .filter(|d| d.hid_path.is_none())
-                    .collect();
-                if unmatched.len() == 1 {
-                    unmatched.into_iter().next().unwrap().hid_path = Some(hid.path.clone());
-                    true
-                } else {
-                    false
-                }
+                false
             };
 
             if !merged {
@@ -382,6 +386,18 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
     // Scan FIDO HID devices, merging with existing entries by serial
     if let Ok(fido_devs) = list_fido_devices() {
         for fido in fido_devs {
+            // If there's exactly one unmatched device, just merge by path
+            let unmatched: Vec<_> = devices
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.fido_path.is_none())
+                .collect();
+            if unmatched.len() == 1 {
+                let idx = unmatched[0].0;
+                devices[idx].fido_path = Some(fido.path.clone());
+                continue;
+            }
+
             let fido_info = read_info_fido(&fido).ok();
             let fido_serial = fido_info.as_ref().and_then(|i| i.serial);
 
@@ -396,16 +412,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                     false
                 }
             } else {
-                let unmatched: Vec<_> = devices
-                    .iter_mut()
-                    .filter(|d| d.fido_path.is_none())
-                    .collect();
-                if unmatched.len() == 1 {
-                    unmatched.into_iter().next().unwrap().fido_path = Some(fido.path.clone());
-                    true
-                } else {
-                    false
-                }
+                false
             };
 
             if !merged {
@@ -546,15 +553,26 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 /// Read device info from a PC/SC reader.
 ///
 /// Opens a fresh [`PcscConnection`] and uses [`ManagementSession`] to read
-/// [`DeviceInfo`]. Applies standard fixups for known device quirks.
+/// [`DeviceInfo`]. For older devices (NEO, etc.) that don't support the
+/// management protocol, synthesizes DeviceInfo by probing individual applets.
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     let conn = PcscConnection::new(reader_name, false)?;
     let mut session = ManagementSession::new(conn)?;
-    // Use unchecked variant — dev devices report version 0.0.1 but still
-    // support the DeviceInfo protocol.
-    let mut info = session.read_device_info_unchecked()?;
-    apply_device_info_fixups(&mut info);
-    Ok(info)
+    let version = session.version();
+
+    match session.read_device_info_unchecked() {
+        Ok(mut info) => {
+            apply_device_info_fixups(&mut info);
+            Ok(info)
+        }
+        Err(_) if version < Version(4, 1, 0) => {
+            log::debug!("Management read_device_info not supported, synthesizing");
+            // Reclaim the connection from the session
+            let conn = session.into_connection();
+            synthesize_info_ccid(conn, version)
+        }
+        Err(e) => Err(DeviceError::SmartCard(e)),
+    }
 }
 
 /// Read device info via OTP HID.
@@ -607,6 +625,91 @@ pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
     }
 
     Ok(devices)
+}
+
+/// Applets to scan when synthesizing DeviceInfo for older keys.
+const SCAN_APPLETS: &[(&[u8], Capability)] = &[
+    (Aid::FIDO, Capability::U2F),
+    (Aid::PIV, Capability::PIV),
+    (Aid::OPENPGP, Capability::OPENPGP),
+    (Aid::OATH, Capability::OATH),
+];
+
+/// Synthesize DeviceInfo for older YubiKeys (NEO) over CCID by probing applets.
+fn synthesize_info_ccid(
+    conn: PcscConnection,
+    version: Version,
+) -> Result<DeviceInfo, DeviceError> {
+    use std::collections::HashMap;
+
+    let mut capabilities = Capability::NONE;
+
+    // Try to read serial from OTP application
+    let mut serial = None;
+    match YubiOtpSession::new(conn) {
+        Ok(mut otp_session) => {
+            capabilities = capabilities | Capability::OTP;
+            match otp_session.get_serial() {
+                Ok(s) => serial = Some(s),
+                Err(e) => log::debug!("Unable to read serial over OTP: {e}"),
+            }
+            // Reclaim the connection
+            let conn = otp_session.into_connection();
+
+            // Scan remaining applets
+            let mut protocol = SmartCardProtocol::new(conn);
+            for (aid, cap) in SCAN_APPLETS {
+                match protocol.select(aid) {
+                    Ok(_) => {
+                        capabilities = capabilities | *cap;
+                        log::debug!("Found applet: capability {:?}", cap);
+                    }
+                    Err(e) => {
+                        log::debug!("Missing applet: capability {:?}: {e}", cap);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            log::debug!("Couldn't select OTP application: {e}");
+        }
+    }
+
+    // Assume U2F on devices >= 3.3.0
+    if version >= Version(3, 3, 0) {
+        capabilities = capabilities | Capability::U2F;
+    }
+
+    let mut supported = HashMap::new();
+    supported.insert(Transport::Usb, capabilities);
+    supported.insert(Transport::Nfc, capabilities);
+
+    let mut info = DeviceInfo {
+        config: DeviceConfig {
+            enabled_capabilities: HashMap::new(),
+            auto_eject_timeout: None,
+            challenge_response_timeout: None,
+            device_flags: None,
+            nfc_restricted: None,
+        },
+        serial,
+        version,
+        form_factor: FormFactor::Unknown,
+        supported_capabilities: supported,
+        is_locked: false,
+        is_fips: false,
+        is_sky: false,
+        part_number: None,
+        fips_capable: Capability::NONE,
+        fips_approved: Capability::NONE,
+        pin_complexity: false,
+        reset_blocked: Capability::NONE,
+        fps_version: None,
+        stm_version: None,
+        version_qualifier: crate::management::VersionQualifier::final_release(version),
+    };
+    apply_device_info_fixups(&mut info);
+    Ok(info)
 }
 
 /// Apply standard fixups for known device quirks.

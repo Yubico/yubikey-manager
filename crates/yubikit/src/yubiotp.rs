@@ -1056,6 +1056,11 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         &mut self.protocol
     }
 
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
     // -- internal (pub for PyO3 wrapper) -------------------------------------
 
     /// Write raw config bytes to a config slot (SmartCard).
@@ -1166,11 +1171,8 @@ impl YubiOtpOtpSession {
 
     /// Get the current configuration state.
     pub fn get_config_state(&self) -> ConfigState {
-        let touch_level = if self.status.len() >= 5 {
-            u16::from_le_bytes([
-                self.status[3],
-                *self.status.get(4).unwrap_or(&0),
-            ])
+        let touch_level = if self.status.len() >= 6 {
+            u16::from_le_bytes([self.status[4], self.status[5]])
         } else {
             0
         };
