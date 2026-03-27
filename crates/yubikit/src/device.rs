@@ -48,7 +48,9 @@ use crate::management::{
     Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession,
     ManagementSession, UsbInterface,
 };
-use crate::smartcard::{Aid, SmartCardError, SmartCardProtocol, Transport, Version};
+use crate::smartcard::{
+    Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
+};
 use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
 use crate::transport::otphid::{HidDeviceInfo, HidError, OtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
@@ -555,6 +557,15 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 /// management protocol, synthesizes DeviceInfo by probing individual applets.
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     let conn = PcscConnection::new(reader_name, false)?;
+    read_info_ccid(conn)
+}
+
+/// Read device info from an open smart card connection.
+///
+/// Uses [`ManagementSession`] to read [`DeviceInfo`]. For older devices
+/// (NEO, etc.) that don't support the management protocol, synthesizes
+/// DeviceInfo by probing individual applets.
+pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<DeviceInfo, DeviceError> {
     let mut session = ManagementSession::new(conn)?;
     let version = session.version();
 
@@ -565,7 +576,6 @@ pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
         }
         Err(_) if version < Version(4, 1, 0) => {
             log::debug!("Management read_device_info not supported, synthesizing");
-            // Reclaim the connection from the session
             let conn = session.into_connection();
             synthesize_info_ccid(conn, version)
         }
@@ -634,7 +644,10 @@ const SCAN_APPLETS: &[(&[u8], Capability)] = &[
 ];
 
 /// Synthesize DeviceInfo for older YubiKeys (NEO) over CCID by probing applets.
-fn synthesize_info_ccid(conn: PcscConnection, version: Version) -> Result<DeviceInfo, DeviceError> {
+fn synthesize_info_ccid<C: SmartCardConnection>(
+    conn: C,
+    version: Version,
+) -> Result<DeviceInfo, DeviceError> {
     use std::collections::HashMap;
 
     let mut capabilities = Capability::NONE;
@@ -823,8 +836,9 @@ pub fn get_name(info: &DeviceInfo) -> String {
         return "YubiKey Preview".to_string();
     }
 
-    // SKY without FIDO2 (SKY 1)
-    if info.is_sky && !usb_supported.contains(Capability::FIDO2) {
+    // SKY without FIDO2 (SKY 1), only for pre-5.1.0
+    if info.is_sky && !usb_supported.contains(Capability::FIDO2) && info.version < Version(5, 1, 0)
+    {
         return "FIDO U2F Security Key".to_string();
     }
 

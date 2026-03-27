@@ -25,6 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use crate::py_bridge::PySmartCardConnection;
 use crate::py_management::device_info_to_dict;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -40,6 +41,16 @@ fn device_err(e: device::DeviceError) -> PyErr {
 #[pyfunction]
 pub fn read_info(py: Python<'_>, reader_name: &str) -> PyResult<PyObject> {
     let info = device::read_info(reader_name).map_err(device_err)?;
+    device_info_to_dict(py, &info)
+}
+
+/// Read device info from an open SmartCardConnection.
+///
+/// Returns a dict matching the Python DeviceInfo structure.
+#[pyfunction]
+pub fn read_info_ccid(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let conn = PySmartCardConnection::from_py(connection)?;
+    let info = device::read_info_ccid(conn).map_err(device_err)?;
     device_info_to_dict(py, &info)
 }
 
@@ -104,6 +115,7 @@ pub fn get_name(
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "device")?;
     m.add_function(wrap_pyfunction!(read_info, &m)?)?;
+    m.add_function(wrap_pyfunction!(read_info_ccid, &m)?)?;
     m.add_function(wrap_pyfunction!(get_name, &m)?)?;
     parent.add_submodule(&m)?;
 
