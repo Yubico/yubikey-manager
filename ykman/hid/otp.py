@@ -32,7 +32,6 @@ from typing import Callable
 
 from _yubikit_native.hid import OtpConnection as _NativeOtpConnectionImpl
 from _yubikit_native.hid import list_otp_devices as _native_list_otp
-
 from yubikit.core import PID, TRANSPORT, USB_INTERFACE
 from yubikit.core.otp import CommandRejectedError, OtpConnection, OtpProtocol
 from yubikit.logging import LOG_LEVEL

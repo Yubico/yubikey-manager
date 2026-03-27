@@ -4,13 +4,14 @@ import logging
 from enum import IntEnum, unique
 from typing import Mapping, Sequence
 
-from _yubikit_native.sessions import (
-    SecurityDomainSession as _NativeSecurityDomainSession,
-)
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from _yubikit_native.sessions import (
+    SecurityDomainSession as _NativeSecurityDomainSession,
+)
 
 from .core import (
     BadResponseError,

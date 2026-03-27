@@ -34,11 +34,12 @@ from enum import IntEnum, unique
 from functools import total_ordering
 from typing import NamedTuple
 
-from _yubikit_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+from _yubikit_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 
 from .core import (
     InvalidPinError,  # noqa: F401 - re-exported

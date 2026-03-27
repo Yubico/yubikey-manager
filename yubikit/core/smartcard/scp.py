@@ -34,6 +34,12 @@ from dataclasses import dataclass, field
 from enum import IntEnum, unique
 from typing import Callable, NamedTuple, Sequence
 
+from cryptography import x509
+from cryptography.hazmat.primitives import cmac, hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers import algorithms
+from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
+
 from _yubikit_native.scp import (  # noqa: F401
     ScpState as _RustScpState,
 )
@@ -42,11 +48,6 @@ from _yubikit_native.scp import (
     scp_calculate_mac,
     scp_derive,
 )
-from cryptography import x509
-from cryptography.hazmat.primitives import cmac, hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import algorithms
-from cryptography.hazmat.primitives.kdf.x963kdf import X963KDF
 
 from .. import BadResponseError, Tlv
 

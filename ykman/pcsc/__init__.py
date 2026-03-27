@@ -33,7 +33,6 @@ from time import sleep
 
 from _yubikit_native.pcsc import PcscConnection
 from _yubikit_native.pcsc import list_readers as _native_list_readers
-
 from yubikit.core import PID, TRANSPORT, YUBIKEY
 from yubikit.core.fido import SmartCardCtapDevice
 from yubikit.core.smartcard import SmartCardConnection
