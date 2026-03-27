@@ -73,9 +73,6 @@ reportAttributeAccessIssue = "warning"
 [tool.ty.src]
 exclude = ["docs"]
 
-[tool.ty.analysis]
-allowed-unresolved-imports = ["_yubikit_native.**"]
-
 [tool.ty.rules]
 unused-type-ignore-comment = "ignore"
 

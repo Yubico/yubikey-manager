@@ -406,6 +406,7 @@ class OathSession:
         for r in raw:
             cred = Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6])
             if r[7] is not None:
+                assert r[8] is not None and r[9] is not None  # noqa: S101
                 code: Code | None = Code(r[7], r[8], r[9])
             else:
                 code = None

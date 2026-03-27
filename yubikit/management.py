@@ -536,7 +536,11 @@ class ManagementSession:
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            native = _NativeManagementOtpSession(connection._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            native: (
+                _NativeManagementOtpSession
+                | _NativeManagementSession
+                | _NativeManagementFidoSession
+            ) = _NativeManagementOtpSession(connection._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         elif isinstance(connection, SmartCardConnection):
             native = _NativeManagementSession(connection, scp_key_params)
         elif isinstance(connection, FidoConnection):

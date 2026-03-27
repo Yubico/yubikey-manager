@@ -644,7 +644,9 @@ class YubiOtpSession:
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            native = _NativeYubiOtpOtpSession(connection._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            native: _NativeYubiOtpOtpSession | _NativeYubiOtpSession = (
+                _NativeYubiOtpOtpSession(connection._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            )
         elif isinstance(connection, SmartCardConnection):
             native = _NativeYubiOtpSession(connection, scp_key_params)
         else:
