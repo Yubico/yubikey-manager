@@ -26,11 +26,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
+from typing import Any
 
 from _yubikit_native.device import get_name as _get_name_native
-from _yubikit_native.device import read_info_ccid as _read_info_ccid_native
-from _yubikit_native.device import read_info_fido as _read_info_fido_native
-from _yubikit_native.device import read_info_otp as _read_info_otp_native
+from _yubikit_native.device import read_info as _read_info_native
 
 from .core import (
     PID,
@@ -70,15 +69,15 @@ def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
     logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
 
     if isinstance(conn, SmartCardConnection):
-        d = _read_info_ccid_native(conn)
-        return _device_info_from_native(d)
+        native_conn: Any = conn
     elif isinstance(conn, OtpConnection):
-        d = _read_info_otp_native(conn._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        native_conn = conn._conn  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     elif isinstance(conn, FidoConnection):
-        d = _read_info_fido_native(conn._path)  # ty: ignore[unresolved-attribute]
+        native_conn = conn._native  # ty: ignore[unresolved-attribute]
     else:
         raise TypeError("Invalid connection type")
 
+    d = _read_info_native(native_conn)
     return _device_info_from_native(d)
 
 

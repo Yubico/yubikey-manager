@@ -26,8 +26,9 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 use crate::py_bridge::PySmartCardConnection;
+use crate::py_hid;
 use crate::py_management::device_info_to_dict;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use yubikit::device;
 
@@ -35,51 +36,43 @@ fn device_err(e: device::DeviceError) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
 }
 
-/// Read device info from a PC/SC reader name.
+/// Read device info from an open connection.
 ///
+/// Accepts a SmartCardConnection, OtpConnection, or FidoConnection.
 /// Returns a dict matching the Python DeviceInfo structure.
 #[pyfunction]
-pub fn read_info(py: Python<'_>, reader_name: &str) -> PyResult<PyObject> {
-    let info = device::read_info(reader_name).map_err(device_err)?;
-    device_info_to_dict(py, &info)
-}
+pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    // Try OTP connection
+    if let Ok(otp_conn) = connection.downcast::<py_hid::OtpConnection>() {
+        let native = otp_conn.borrow_mut().take_inner()?;
+        let result = device::read_info_otp(native).map_err(device_err);
+        match result {
+            Ok((info, conn)) => {
+                otp_conn.borrow_mut().restore_inner(conn);
+                return device_info_to_dict(py, &info);
+            }
+            Err(e) => return Err(e),
+        }
+    }
 
-/// Read device info from an open SmartCardConnection.
-///
-/// Returns a dict matching the Python DeviceInfo structure.
-#[pyfunction]
-pub fn read_info_ccid(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
-    let conn = PySmartCardConnection::from_py(connection)?;
+    // Try FIDO connection
+    if let Ok(fido_conn) = connection.downcast::<py_hid::FidoConnection>() {
+        let native = fido_conn.borrow_mut().take_inner()?;
+        let result = device::read_info_fido(native).map_err(device_err);
+        match result {
+            Ok((info, conn)) => {
+                fido_conn.borrow_mut().restore_inner(conn);
+                return device_info_to_dict(py, &info);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Try SmartCard connection (duck-typed via send_and_receive)
+    let conn = PySmartCardConnection::from_py(connection).map_err(|_| {
+        PyTypeError::new_err("Expected a SmartCardConnection, OtpConnection, or FidoConnection")
+    })?;
     let (info, _conn) = device::read_info_ccid(conn).map_err(device_err)?;
-    device_info_to_dict(py, &info)
-}
-
-/// Read device info via OTP HID from a device path.
-///
-/// Returns a dict matching the Python DeviceInfo structure.
-#[pyfunction]
-pub fn read_info_otp(py: Python<'_>, path: &str) -> PyResult<PyObject> {
-    use yubikit::transport::otphid::OtpConnection;
-    let conn = OtpConnection::new(path).map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
-    let (info, _conn) = device::read_info_otp(conn).map_err(device_err)?;
-    device_info_to_dict(py, &info)
-}
-
-/// Read device info via FIDO HID from a device path.
-///
-/// Returns a dict matching the Python DeviceInfo structure.
-#[pyfunction]
-pub fn read_info_fido(py: Python<'_>, path: &str) -> PyResult<PyObject> {
-    use yubikit::transport::ctaphid::{FidoConnection, FidoDeviceInfo};
-    let fido_info = FidoDeviceInfo {
-        path: path.to_string(),
-        pid: 0,
-        report_size_in: 64,
-        report_size_out: 64,
-    };
-    let conn =
-        FidoConnection::open(&fido_info).map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
-    let (info, _conn) = device::read_info_fido(conn).map_err(device_err)?;
     device_info_to_dict(py, &info)
 }
 
@@ -144,9 +137,6 @@ pub fn get_name(
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "device")?;
     m.add_function(wrap_pyfunction!(read_info, &m)?)?;
-    m.add_function(wrap_pyfunction!(read_info_ccid, &m)?)?;
-    m.add_function(wrap_pyfunction!(read_info_otp, &m)?)?;
-    m.add_function(wrap_pyfunction!(read_info_fido, &m)?)?;
     m.add_function(wrap_pyfunction!(get_name, &m)?)?;
     parent.add_submodule(&m)?;
 

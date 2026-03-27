@@ -57,6 +57,11 @@ impl OtpConnection {
             .take()
             .ok_or_else(|| PyOSError::new_err("OTP connection already consumed or closed"))
     }
+
+    /// Restore a previously taken inner connection.
+    pub fn restore_inner(&mut self, conn: hid::OtpConnection) {
+        self.inner = Some(conn);
+    }
 }
 
 #[pymethods]
@@ -152,6 +157,11 @@ impl FidoConnection {
         self.inner
             .take()
             .ok_or_else(|| PyOSError::new_err("FIDO connection already consumed or closed"))
+    }
+
+    /// Restore a previously taken inner connection.
+    pub fn restore_inner(&mut self, conn: ctaphid::FidoConnection) {
+        self.inner = Some(conn);
     }
 }
 
