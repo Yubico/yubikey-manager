@@ -3,8 +3,8 @@ use std::io::{self, Write};
 use yubikit::device::YubiKeyDevice;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 
-use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 use crate::scp::ScpParams;
+use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
 fn open_session(
     dev: &YubiKeyDevice,
@@ -95,7 +95,13 @@ pub fn run_keys_generate(
     Ok(())
 }
 
-pub fn run_keys_delete(dev: &YubiKeyDevice, scp_params: &ScpParams, kid: u8, kvn: u8, force: bool) -> Result<(), CliError> {
+pub fn run_keys_delete(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    kid: u8,
+    kvn: u8,
+    force: bool,
+) -> Result<(), CliError> {
     let _ = scp_params;
     if !force && !confirm(&format!("Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?")) {
         return Err(CliError("Aborted.".into()));
@@ -198,26 +204,25 @@ pub fn run_keys_import(
                         let b64 = b64.trim_start_matches("CERTIFICATE-----").trim();
                         use base64::Engine;
                         let der = base64::engine::general_purpose::STANDARD
-                            .decode(b64.replace('\n', "").replace('\r', ""))
+                            .decode(b64.replace(['\n', '\r'], ""))
                             .map_err(|_| CliError("Invalid certificate PEM".into()))?;
                         certs.push(der);
                     }
-                } else if block.starts_with("EC PRIVATE KEY-----")
-                    || block.starts_with("PRIVATE KEY-----")
+                } else if (block.starts_with("EC PRIVATE KEY-----")
+                    || block.starts_with("PRIVATE KEY-----"))
+                    && let Some(b64) = block.split("-----END").next()
                 {
-                    if let Some(b64) = block.split("-----END").next() {
-                        let label = if block.starts_with("EC") {
-                            "EC PRIVATE KEY-----"
-                        } else {
-                            "PRIVATE KEY-----"
-                        };
-                        let b64 = b64.trim_start_matches(label).trim();
-                        use base64::Engine;
-                        let der = base64::engine::general_purpose::STANDARD
-                            .decode(b64.replace('\n', "").replace('\r', ""))
-                            .map_err(|_| CliError("Invalid private key PEM".into()))?;
-                        private_key = Some(der);
-                    }
+                    let label = if block.starts_with("EC") {
+                        "EC PRIVATE KEY-----"
+                    } else {
+                        "PRIVATE KEY-----"
+                    };
+                    let b64 = b64.trim_start_matches(label).trim();
+                    use base64::Engine;
+                    let der = base64::engine::general_purpose::STANDARD
+                        .decode(b64.replace(['\n', '\r'], ""))
+                        .map_err(|_| CliError("Invalid private key PEM".into()))?;
+                    private_key = Some(der);
                 }
             }
 

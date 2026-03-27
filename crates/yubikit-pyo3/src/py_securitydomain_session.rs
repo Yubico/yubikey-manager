@@ -3,7 +3,7 @@ use yubikit::securitydomain::{
     Curve, KeyRef, SecurityDomainSession as RustSecurityDomainSession, StaticKeys,
 };
 
-use crate::py_bridge::{init_scp_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, init_scp_from_py, smartcard_err};
 
 fn parse_curve(v: u8) -> PyResult<Curve> {
     Curve::from_u8(v).ok_or_else(|| {
@@ -123,9 +123,7 @@ impl SecurityDomainSession {
 
     fn store_ca_issuer(&mut self, kid: u8, kvn: u8, ski: &[u8]) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
-        self.inner
-            .store_ca_issuer(key, ski)
-            .map_err(smartcard_err)
+        self.inner.store_ca_issuer(key, ski).map_err(smartcard_err)
     }
 
     fn delete_key(&mut self, kid: u8, kvn: u8, delete_last: bool) -> PyResult<()> {

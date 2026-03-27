@@ -34,11 +34,13 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::core_types::patch_version;
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version};
-use crate::otp::{OtpProtocol, YubiOtpError, STATUS_OFFSET_PROG_SEQ, verify_and_strip_crc};
+use crate::otp::{OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc};
+use crate::smartcard::{
+    Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
+};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
-use crate::transport::otphid::OtpConnection;
 use crate::transport::ctaphid::{CtapHidTransportError, FidoConnection};
+use crate::transport::otphid::OtpConnection;
 use crate::yubiotp::ConfigSlot;
 
 // ---------------------------------------------------------------------------
@@ -358,17 +360,29 @@ pub struct VersionQualifier {
 
 impl VersionQualifier {
     pub fn new(version: Version, release_type: ReleaseType, iteration: u8) -> Self {
-        Self { version, release_type, iteration }
+        Self {
+            version,
+            release_type,
+            iteration,
+        }
     }
 
     pub fn final_release(version: Version) -> Self {
-        Self { version, release_type: ReleaseType::Final, iteration: 0 }
+        Self {
+            version,
+            release_type: ReleaseType::Final,
+            iteration: 0,
+        }
     }
 }
 
 impl fmt::Display for VersionQualifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{}", self.version, self.release_type, self.iteration)
+        write!(
+            f,
+            "{}.{}.{}",
+            self.version, self.release_type, self.iteration
+        )
     }
 }
 
@@ -388,12 +402,16 @@ impl UsbInterface {
 
 impl std::ops::BitOr for UsbInterface {
     type Output = Self;
-    fn bitor(self, rhs: Self) -> Self { Self(self.0 | rhs.0) }
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
 }
 
 impl std::ops::BitAnd for UsbInterface {
     type Output = Self;
-    fn bitand(self, rhs: Self) -> Self { Self(self.0 & rhs.0) }
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
 }
 
 impl fmt::Display for UsbInterface {
@@ -414,13 +432,13 @@ impl fmt::Display for UsbInterface {
 
 /// Predefined USB interface mode combinations.
 const MODES: [UsbInterface; 7] = [
-    UsbInterface::OTP,                                                                     // 0
-    UsbInterface::CCID,                                                                    // 1
-    UsbInterface(UsbInterface::OTP.0 | UsbInterface::CCID.0),                              // 2
-    UsbInterface::FIDO,                                                                    // 3
-    UsbInterface(UsbInterface::OTP.0 | UsbInterface::FIDO.0),                              // 4
-    UsbInterface(UsbInterface::FIDO.0 | UsbInterface::CCID.0),                             // 5
-    UsbInterface(UsbInterface::OTP.0 | UsbInterface::FIDO.0 | UsbInterface::CCID.0),       // 6
+    UsbInterface::OTP,                                         // 0
+    UsbInterface::CCID,                                        // 1
+    UsbInterface(UsbInterface::OTP.0 | UsbInterface::CCID.0),  // 2
+    UsbInterface::FIDO,                                        // 3
+    UsbInterface(UsbInterface::OTP.0 | UsbInterface::FIDO.0),  // 4
+    UsbInterface(UsbInterface::FIDO.0 | UsbInterface::CCID.0), // 5
+    UsbInterface(UsbInterface::OTP.0 | UsbInterface::FIDO.0 | UsbInterface::CCID.0), // 6
 ];
 
 /// YubiKey USB Mode configuration for use with YubiKey NEO and 4.
@@ -432,16 +450,22 @@ pub struct Mode {
 
 impl Mode {
     pub fn new(interfaces: UsbInterface) -> Option<Self> {
-        MODES.iter().position(|m| m.0 == interfaces.0).map(|code| Self {
-            code: code as u8,
-            interfaces,
-        })
+        MODES
+            .iter()
+            .position(|m| m.0 == interfaces.0)
+            .map(|code| Self {
+                code: code as u8,
+                interfaces,
+            })
     }
 
     /// Decode a mode from its code byte (bottom 3 bits).
     pub fn from_code(code: u8) -> Option<Self> {
         let idx = (code & 0x07) as usize;
-        MODES.get(idx).map(|&interfaces| Self { code: idx as u8, interfaces })
+        MODES.get(idx).map(|&interfaces| Self {
+            code: idx as u8,
+            interfaces,
+        })
     }
 }
 
@@ -492,16 +516,25 @@ impl DeviceConfig {
             buf.extend_from_slice(&tlv_encode(TAG_UNLOCK, code));
         }
         if let Some(&usb_enabled) = self.enabled_capabilities.get(&Transport::Usb) {
-            buf.extend_from_slice(&tlv_encode(TAG_USB_ENABLED, &(usb_enabled.0).to_be_bytes()[..2]));
+            buf.extend_from_slice(&tlv_encode(
+                TAG_USB_ENABLED,
+                &(usb_enabled.0).to_be_bytes()[..2],
+            ));
         }
         if let Some(&nfc_enabled) = self.enabled_capabilities.get(&Transport::Nfc) {
-            buf.extend_from_slice(&tlv_encode(TAG_NFC_ENABLED, &(nfc_enabled.0).to_be_bytes()[..2]));
+            buf.extend_from_slice(&tlv_encode(
+                TAG_NFC_ENABLED,
+                &(nfc_enabled.0).to_be_bytes()[..2],
+            ));
         }
         if let Some(timeout) = self.auto_eject_timeout {
             buf.extend_from_slice(&tlv_encode(TAG_AUTO_EJECT_TIMEOUT, &timeout.to_be_bytes()));
         }
         if let Some(timeout) = self.challenge_response_timeout {
-            buf.extend_from_slice(&tlv_encode(TAG_CHALRESP_TIMEOUT, &int2bytes(timeout as u64)));
+            buf.extend_from_slice(&tlv_encode(
+                TAG_CHALRESP_TIMEOUT,
+                &int2bytes(timeout as u64),
+            ));
         }
         if let Some(flags) = self.device_flags {
             buf.extend_from_slice(&tlv_encode(TAG_DEVICE_FLAGS, &int2bytes(flags.0 as u64)));
@@ -569,7 +602,7 @@ impl DeviceInfo {
         data: &HashMap<u32, Vec<u8>>,
         default_version: Version,
     ) -> Result<Self, SmartCardError> {
-        let locked = data.get(&TAG_CONFIG_LOCK).map_or(false, |v| v == &[0x01]);
+        let locked = data.get(&TAG_CONFIG_LOCK).is_some_and(|v| v == &[0x01]);
         let serial = {
             let raw = bytes2int(data.get(&TAG_SERIAL).map_or(&[0u8][..], |v| v));
             if raw == 0 { None } else { Some(raw as u32) }
@@ -586,9 +619,12 @@ impl DeviceInfo {
             default_version
         };
 
-        let auto_eject_to = bytes2int(data.get(&TAG_AUTO_EJECT_TIMEOUT).map_or(&[0u8][..], |v| v)) as u16;
-        let chal_resp_to = bytes2int(data.get(&TAG_CHALRESP_TIMEOUT).map_or(&[0u8][..], |v| v)) as u8;
-        let flags = DeviceFlag(bytes2int(data.get(&TAG_DEVICE_FLAGS).map_or(&[0u8][..], |v| v)) as u8);
+        let auto_eject_to =
+            bytes2int(data.get(&TAG_AUTO_EJECT_TIMEOUT).map_or(&[0u8][..], |v| v)) as u16;
+        let chal_resp_to =
+            bytes2int(data.get(&TAG_CHALRESP_TIMEOUT).map_or(&[0u8][..], |v| v)) as u8;
+        let flags =
+            DeviceFlag(bytes2int(data.get(&TAG_DEVICE_FLAGS).map_or(&[0u8][..], |v| v)) as u8);
 
         let mut supported = HashMap::new();
         let mut enabled = HashMap::new();
@@ -614,35 +650,34 @@ impl DeviceInfo {
             }
         }
 
-        let nfc_restricted = data.get(&TAG_NFC_RESTRICTED).map_or(false, |v| v == &[0x01]);
+        let nfc_restricted = data.get(&TAG_NFC_RESTRICTED).is_some_and(|v| v == &[0x01]);
 
         let part_number = data.get(&TAG_PART_NUMBER).and_then(|v| {
             let s = String::from_utf8(v.clone()).ok()?;
             if s.is_empty() { None } else { Some(s) }
         });
 
-        let fips_capable = Capability::from_fips(
-            bytes2int(data.get(&TAG_FIPS_CAPABLE).map_or(&[0u8][..], |v| v)) as u16,
-        );
-        let fips_approved = Capability::from_fips(
-            bytes2int(data.get(&TAG_FIPS_APPROVED).map_or(&[0u8][..], |v| v)) as u16,
-        );
-        let pin_complexity = data.get(&TAG_PIN_COMPLEXITY).map_or(false, |v| v == &[0x01]);
-        let reset_blocked = Capability(
-            bytes2int(data.get(&TAG_RESET_BLOCKED).map_or(&[0u8][..], |v| v)) as u16,
-        );
+        let fips_capable = Capability::from_fips(bytes2int(
+            data.get(&TAG_FIPS_CAPABLE).map_or(&[0u8][..], |v| v),
+        ) as u16);
+        let fips_approved = Capability::from_fips(bytes2int(
+            data.get(&TAG_FIPS_APPROVED).map_or(&[0u8][..], |v| v),
+        ) as u16);
+        let pin_complexity = data.get(&TAG_PIN_COMPLEXITY).is_some_and(|v| v == &[0x01]);
+        let reset_blocked =
+            Capability(bytes2int(data.get(&TAG_RESET_BLOCKED).map_or(&[0u8][..], |v| v)) as u16);
 
         let version_qualifier = if let Some(vq_data) = data.get(&TAG_VERSION_QUALIFIER) {
             let vq_tlvs = parse_tlv_dict(vq_data)?;
-            let vq_version = vq_tlvs.get(&0x01)
+            let vq_version = vq_tlvs
+                .get(&0x01)
                 .map(|v| Version::from_bytes(v))
                 .unwrap_or(version);
-            let vq_type = vq_tlvs.get(&0x02)
+            let vq_type = vq_tlvs
+                .get(&0x02)
                 .map(|v| ReleaseType::from_value(bytes2int(v) as u8))
                 .unwrap_or(ReleaseType::Final);
-            let vq_iter = vq_tlvs.get(&0x03)
-                .map(|v| bytes2int(v) as u8)
-                .unwrap_or(0);
+            let vq_iter = vq_tlvs.get(&0x03).map(|v| bytes2int(v) as u8).unwrap_or(0);
             let vq = VersionQualifier::new(vq_version, vq_type, vq_iter);
             // Override behavioral version for non-final releases
             if vq.release_type != ReleaseType::Final {
@@ -653,12 +688,14 @@ impl DeviceInfo {
             VersionQualifier::final_release(version)
         };
 
-        let fps_version = data.get(&TAG_FPS_VERSION).map(|v| Version::from_bytes(v)).and_then(|v| {
-            if v == Version(0, 0, 0) { None } else { Some(v) }
-        });
-        let stm_version = data.get(&TAG_STM_VERSION).map(|v| Version::from_bytes(v)).and_then(|v| {
-            if v == Version(0, 0, 0) { None } else { Some(v) }
-        });
+        let fps_version = data
+            .get(&TAG_FPS_VERSION)
+            .map(|v| Version::from_bytes(v))
+            .and_then(|v| if v == Version(0, 0, 0) { None } else { Some(v) });
+        let stm_version = data
+            .get(&TAG_STM_VERSION)
+            .map(|v| Version::from_bytes(v))
+            .and_then(|v| if v == Version(0, 0, 0) { None } else { Some(v) });
 
         let config = DeviceConfig {
             enabled_capabilities: enabled,
@@ -724,7 +761,7 @@ fn read_device_info_from_config(
             return Err(SmartCardError::BadResponse("Invalid length".into()));
         }
         let page_tlvs = parse_tlv_dict(&encoded[1..])?;
-        let more_data = page_tlvs.get(&TAG_MORE_DATA).map_or(false, |v| v == &[0x01]);
+        let more_data = page_tlvs.get(&TAG_MORE_DATA).is_some_and(|v| v == &[0x01]);
         for (tag, value) in page_tlvs {
             if tag != TAG_MORE_DATA {
                 tlvs.insert(tag, value);
@@ -751,15 +788,19 @@ fn validate_and_serialize_device_config(
             "write_device_config requires YubiKey 5.0.0 or later".into(),
         ));
     }
-    if let Some(code) = cur_lock_code {
-        if code.len() != 16 {
-            return Err(SmartCardError::BadResponse("Lock code must be 16 bytes".into()));
-        }
+    if let Some(code) = cur_lock_code
+        && code.len() != 16
+    {
+        return Err(SmartCardError::BadResponse(
+            "Lock code must be 16 bytes".into(),
+        ));
     }
-    if let Some(code) = new_lock_code {
-        if code.len() != 16 {
-            return Err(SmartCardError::BadResponse("Lock code must be 16 bytes".into()));
-        }
+    if let Some(code) = new_lock_code
+        && code.len() != 16
+    {
+        return Err(SmartCardError::BadResponse(
+            "Lock code must be 16 bytes".into(),
+        ));
     }
     config.get_bytes(reboot, cur_lock_code, new_lock_code)
 }
@@ -799,13 +840,12 @@ impl<C: SmartCardConnection> ManagementSession<C> {
     ) -> Result<Self, SmartCardError> {
         log::debug!("Opening ManagementSession");
         // YubiKey Edge incorrectly appends SW twice
-        let select_bytes = if select_bytes.len() >= 2
-            && select_bytes[select_bytes.len() - 2..] == [0x90, 0x00]
-        {
-            &select_bytes[..select_bytes.len() - 2]
-        } else {
-            select_bytes
-        };
+        let select_bytes =
+            if select_bytes.len() >= 2 && select_bytes[select_bytes.len() - 2..] == [0x90, 0x00] {
+                &select_bytes[..select_bytes.len() - 2]
+            } else {
+                select_bytes
+            };
 
         let version_str = std::str::from_utf8(select_bytes)
             .map_err(|_| SmartCardError::BadResponse("Invalid version string".into()))?;
@@ -815,7 +855,9 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         // For YubiKey NEO (v3), switch to OTP applet for further commands
         if version.0 == 3 {
             // Workaround to "de-select" on NEO
-            let _ = protocol.connection().send_and_receive(&[0xa4, 0x04, 0x00, 0x08]);
+            let _ = protocol
+                .connection()
+                .send_and_receive(&[0xa4, 0x04, 0x00, 0x08]);
             protocol.select(Aid::OTP)?;
         }
 
@@ -874,7 +916,11 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         new_lock_code: Option<&[u8]>,
     ) -> Result<(), SmartCardError> {
         let data = validate_and_serialize_device_config(
-            self.version, config, reboot, cur_lock_code, new_lock_code,
+            self.version,
+            config,
+            reboot,
+            cur_lock_code,
+            new_lock_code,
         )?;
         self.write_config(&data)
     }
@@ -895,9 +941,11 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         ];
         if self.version.0 == 3 {
             // NEO: using OTP application, INS=0x01, P1=SLOT_DEVICE_CONFIG
-            self.protocol.send_apdu(0, 0x01, CONFIG_SLOT_DEVICE_CONFIG, 0, &data)?;
+            self.protocol
+                .send_apdu(0, 0x01, CONFIG_SLOT_DEVICE_CONFIG, 0, &data)?;
         } else {
-            self.protocol.send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, &data)?;
+            self.protocol
+                .send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, &data)?;
         }
         Ok(())
     }
@@ -967,13 +1015,11 @@ impl ManagementOtpSession {
         match response {
             Some(raw) => {
                 let r_len = raw[0] as usize;
-                let checked = verify_and_strip_crc(&raw, r_len + 1)
-                    .map_err(otp_to_smartcard_err)?;
+                let checked =
+                    verify_and_strip_crc(&raw, r_len + 1).map_err(otp_to_smartcard_err)?;
                 Ok(checked)
             }
-            None => Err(SmartCardError::BadResponse(
-                "Expected data response".into(),
-            )),
+            None => Err(SmartCardError::BadResponse("Expected data response".into())),
         }
     }
 
@@ -1013,7 +1059,11 @@ impl ManagementOtpSession {
         new_lock_code: Option<&[u8]>,
     ) -> Result<(), SmartCardError> {
         let data = validate_and_serialize_device_config(
-            self.version, config, reboot, cur_lock_code, new_lock_code,
+            self.version,
+            config,
+            reboot,
+            cur_lock_code,
+            new_lock_code,
         )?;
         self.write_config(&data)
     }
@@ -1063,26 +1113,26 @@ fn otp_to_smartcard_err(e: YubiOtpError) -> SmartCardError {
 fn parse_version_string(s: &str) -> Result<Version, SmartCardError> {
     // Try exact "X.Y.Z" first
     let parts: Vec<&str> = s.trim().split('.').collect();
-    if parts.len() == 3 {
-        if let (Ok(a), Ok(b), Ok(c)) = (
+    if parts.len() == 3
+        && let (Ok(a), Ok(b), Ok(c)) = (
             parts[0].parse::<u8>(),
             parts[1].parse::<u8>(),
             parts[2].parse::<u8>(),
-        ) {
-            return Ok(Version(a, b, c));
-        }
+        )
+    {
+        return Ok(Version(a, b, c));
     }
     // Search for N.N.N pattern anywhere in the string
     for window in s.split_whitespace() {
         let segs: Vec<&str> = window.split('.').collect();
-        if segs.len() == 3 {
-            if let (Ok(a), Ok(b), Ok(c)) = (
+        if segs.len() == 3
+            && let (Ok(a), Ok(b), Ok(c)) = (
                 segs[0].parse::<u8>(),
                 segs[1].parse::<u8>(),
                 segs[2].parse::<u8>(),
-            ) {
-                return Ok(Version(a, b, c));
-            }
+            )
+        {
+            return Ok(Version(a, b, c));
         }
     }
     Err(SmartCardError::BadResponse(format!(
@@ -1135,10 +1185,9 @@ impl ManagementFidoSession {
         let (v1, v2, v3) = connection.device_version();
         let mut version = Version(v1, v2, v3);
         // Prior to YK4 the device_version was not firmware version
-        if v1 < 4 && (v1, v2, v3) != (0, 0, 1) {
-            if !(v1 == 0 && connection.capabilities().has_cbor()) {
-                version = Version(3, 0, 0); // Guess NEO
-            }
+        if v1 < 4 && (v1, v2, v3) != (0, 0, 1) && !(v1 == 0 && connection.capabilities().has_cbor())
+        {
+            version = Version(3, 0, 0); // Guess NEO
         }
         version = patch_version(version);
         Ok(Self {
@@ -1201,7 +1250,11 @@ impl ManagementFidoSession {
         new_lock_code: Option<&[u8]>,
     ) -> Result<(), SmartCardError> {
         let data = validate_and_serialize_device_config(
-            self.version, config, reboot, cur_lock_code, new_lock_code,
+            self.version,
+            config,
+            reboot,
+            cur_lock_code,
+            new_lock_code,
         )?;
         self.write_config(&data)
     }
@@ -1312,7 +1365,10 @@ mod tests {
         assert_eq!(m.code, 0);
 
         let m = Mode::from_code(6).unwrap();
-        assert_eq!(m.interfaces.0, UsbInterface::OTP.0 | UsbInterface::FIDO.0 | UsbInterface::CCID.0);
+        assert_eq!(
+            m.interfaces.0,
+            UsbInterface::OTP.0 | UsbInterface::FIDO.0 | UsbInterface::CCID.0
+        );
 
         // Bottom 3 bits only
         let m = Mode::from_code(0x83).unwrap();
@@ -1342,7 +1398,9 @@ mod tests {
     #[test]
     fn test_device_config_get_bytes_with_capabilities() {
         let mut config = DeviceConfig::default();
-        config.enabled_capabilities.insert(Transport::Usb, Capability(0x003F));
+        config
+            .enabled_capabilities
+            .insert(Transport::Usb, Capability(0x003F));
         let bytes = config.get_bytes(false, None, None).unwrap();
         assert_eq!(bytes[0] as usize, bytes.len() - 1);
         // Should contain TAG_USB_ENABLED
@@ -1418,7 +1476,12 @@ mod tests {
             Some(&Capability(0x3F))
         );
         // USB enabled should be skipped for YK4
-        assert!(!info.config.enabled_capabilities.contains_key(&Transport::Usb));
+        assert!(
+            !info
+                .config
+                .enabled_capabilities
+                .contains_key(&Transport::Usb)
+        );
     }
 
     #[test]
@@ -1433,7 +1496,12 @@ mod tests {
         encoded.extend_from_slice(&payload);
 
         let info = DeviceInfo::parse(&encoded, Version(0, 0, 0)).unwrap();
-        assert!(!info.config.enabled_capabilities.contains_key(&Transport::Usb));
+        assert!(
+            !info
+                .config
+                .enabled_capabilities
+                .contains_key(&Transport::Usb)
+        );
     }
 
     #[test]

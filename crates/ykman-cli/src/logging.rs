@@ -72,7 +72,10 @@ fn print_box(lines: &[&str]) -> String {
     let bar = "#".repeat(w + 4);
     let mut out = vec![String::new(), bar.clone()];
     // Empty line, content lines, empty line
-    for line in std::iter::once(&"").chain(lines.iter()).chain(std::iter::once(&"")) {
+    for line in std::iter::once(&"")
+        .chain(lines.iter())
+        .chain(std::iter::once(&""))
+    {
         out.push(format!("# {:<w$} #", line));
     }
     out.push(bar);
@@ -93,8 +96,7 @@ impl Log for YkmanLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
         // For TRAFFIC (Trace), only enable if target starts with "traffic::"
         if metadata.level() == Level::Trace {
-            metadata.target().starts_with(TRAFFIC_TARGET_PREFIX)
-                && self.level == LogLevel::Traffic
+            metadata.target().starts_with(TRAFFIC_TARGET_PREFIX) && self.level == LogLevel::Traffic
         } else {
             metadata.level() <= self.level.to_level_filter()
         }
@@ -140,7 +142,7 @@ impl Log for YkmanLogger {
 
         match &self.output {
             Output::Stderr => {
-                let _ = eprint!("{msg}");
+                eprint!("{msg}");
             }
             Output::File(file) => {
                 if let Ok(mut f) = file.lock() {
@@ -175,13 +177,12 @@ pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), Strin
     };
 
     let logger = YkmanLogger { level, output };
-    log::set_boxed_logger(Box::new(logger))
-        .map_err(|e| format!("Failed to set logger: {e}"))?;
+    log::set_boxed_logger(Box::new(logger)).map_err(|e| format!("Failed to set logger: {e}"))?;
     log::set_max_level(level.to_level_filter());
 
     log::info!("Logging at level: {}", level.name());
-    if log_file.is_some() {
-        log::warn!("Logging to file: {}", log_file.unwrap());
+    if let Some(file) = &log_file {
+        log::warn!("Logging to file: {file}");
     }
     if level == LogLevel::Traffic {
         log::warn!("{}", print_box(TRAFFIC_WARNING));

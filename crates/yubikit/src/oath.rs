@@ -168,11 +168,11 @@ pub fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, St
     let data = String::from_utf8_lossy(cred_id);
     if oath_type == OathType::Totp {
         // Pattern: [<period>/][[issuer]:]name
-        if let Some((prefix, rest)) = data.split_once('/') {
-            if let Ok(period) = prefix.parse::<u32>() {
-                let (issuer, name) = split_issuer_name(rest);
-                return (issuer, name, period);
-            }
+        if let Some((prefix, rest)) = data.split_once('/')
+            && let Ok(period) = prefix.parse::<u32>()
+        {
+            let (issuer, name) = split_issuer_name(rest);
+            return (issuer, name, period);
         }
         let (issuer, name) = split_issuer_name(&data);
         return (issuer, name, DEFAULT_PERIOD);
@@ -182,13 +182,10 @@ pub fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, St
 }
 
 fn split_issuer_name(data: &str) -> (Option<String>, String) {
-    if let Some(idx) = data.find(':') {
-        if idx > 0 {
-            return (
-                Some(data[..idx].to_string()),
-                data[idx + 1..].to_string(),
-            );
-        }
+    if let Some(idx) = data.find(':')
+        && idx > 0
+    {
+        return (Some(data[..idx].to_string()), data[idx + 1..].to_string());
     }
     (None, data.to_string())
 }
@@ -406,7 +403,12 @@ pub struct CredentialData {
 impl CredentialData {
     /// Get the credential ID for this data.
     pub fn get_id(&self) -> Vec<u8> {
-        format_cred_id(self.issuer.as_deref(), &self.name, self.oath_type, self.period)
+        format_cred_id(
+            self.issuer.as_deref(),
+            &self.name,
+            self.oath_type,
+            self.period,
+        )
     }
 }
 
@@ -441,17 +443,19 @@ fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, OathError> {
     Ok(result)
 }
 
-fn tlv_get<'a>(tlvs: &'a [(u32, Vec<u8>)], tag: u32) -> Option<&'a [u8]> {
-    tlvs.iter().find(|(t, _)| *t == tag).map(|(_, v)| v.as_slice())
+fn tlv_get(tlvs: &[(u32, Vec<u8>)], tag: u32) -> Option<&[u8]> {
+    tlvs.iter()
+        .find(|(t, _)| *t == tag)
+        .map(|(_, v)| v.as_slice())
 }
 
 /// Unpack a single TLV and verify the tag matches.
 fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, OathError> {
     let (tag, val_offset, val_len, _) = tlv::tlv_parse(data, 0)?;
     if tag != expected_tag {
-        return Err(OathError::InvalidOathType(
-            format!("Wrong tag, got 0x{tag:02x} expected 0x{expected_tag:02x}"),
-        ));
+        return Err(OathError::InvalidOathType(format!(
+            "Wrong tag, got 0x{tag:02x} expected 0x{expected_tag:02x}"
+        )));
     }
     Ok(data[val_offset..val_offset + val_len].to_vec())
 }
@@ -473,8 +477,8 @@ pub struct OathSession<C: SmartCardConnection> {
 impl<C: SmartCardConnection> OathSession<C> {
     /// Open an OATH session on the given connection.
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
-        let mut protocol = SmartCardProtocol::new(connection)
-            .with_ins_send_remaining(INS_SEND_REMAINING);
+        let mut protocol =
+            SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);
         let resp = protocol.select(Aid::OATH)?;
         Self::init(protocol, &resp)
     }
@@ -484,8 +488,8 @@ impl<C: SmartCardConnection> OathSession<C> {
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
     ) -> Result<Self, SmartCardError> {
-        let mut protocol = SmartCardProtocol::new(connection)
-            .with_ins_send_remaining(INS_SEND_REMAINING);
+        let mut protocol =
+            SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);
         let resp = protocol.select(Aid::OATH)?;
         protocol.init_scp(scp_key_params)?;
         Self::init(protocol, &resp)
@@ -554,8 +558,8 @@ impl<C: SmartCardConnection> OathSession<C> {
     pub fn reset(&mut self) -> Result<(), SmartCardError> {
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
         let resp = self.protocol.select(Aid::OATH)?;
-        let (_, salt, challenge) = parse_select(&resp)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let (_, salt, challenge) =
+            parse_select(&resp).map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
         self.salt = salt;
         self.challenge = challenge;
         self.has_key = false;
@@ -570,7 +574,9 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// Validate (unlock) the session with an access key.
     pub fn validate(&mut self, key: &[u8]) -> Result<(), SmartCardError> {
-        let challenge = self.challenge.as_ref()
+        let challenge = self
+            .challenge
+            .as_ref()
             .ok_or_else(|| SmartCardError::BadResponse("Session is not locked".into()))?;
 
         let host_challenge: [u8; 8] = rand_bytes();
@@ -658,8 +664,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     /// List all credentials.
     pub fn list_credentials(&mut self) -> Result<Vec<Credential>, SmartCardError> {
         let resp = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
-        let tlvs = parse_tlv_list(&resp)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let tlvs = parse_tlv_list(&resp).map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
 
         let mut creds = Vec::new();
         for (tag, value) in &tlvs {
@@ -713,13 +718,12 @@ impl<C: SmartCardConnection> OathSession<C> {
         let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
         let mut data = tlv::tlv_encode(TAG_CHALLENGE, &challenge);
         let _ = &data; // suppress warning
-        let resp = self.protocol.send_apdu(
-            0, INS_CALCULATE_ALL, 0, 0x01, &data,
-        )?;
+        let resp = self
+            .protocol
+            .send_apdu(0, INS_CALCULATE_ALL, 0, 0x01, &data)?;
         data = resp; // reuse variable
 
-        let tlvs = parse_tlv_list(&data)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let tlvs = parse_tlv_list(&data).map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
 
         let mut entries = Vec::new();
         let mut iter = tlvs.into_iter();
@@ -728,7 +732,8 @@ impl<C: SmartCardConnection> OathSession<C> {
                 continue;
             }
             let cred_id = value;
-            let (resp_tag, resp_value) = iter.next()
+            let (resp_tag, resp_value) = iter
+                .next()
                 .ok_or_else(|| SmartCardError::BadResponse("Missing response TLV".into()))?;
 
             let oath_type = if resp_tag == TAG_HOTP {
@@ -752,7 +757,11 @@ impl<C: SmartCardConnection> OathSession<C> {
             let code = if resp_tag == TAG_TRUNCATED {
                 if period == DEFAULT_PERIOD {
                     let (val, vf, vt) = format_code(oath_type, period, timestamp, &resp_value);
-                    Some(Code { value: val, valid_from: vf, valid_to: vt })
+                    Some(Code {
+                        value: val,
+                        valid_from: vf,
+                        valid_to: vt,
+                    })
                 } else {
                     // Non-standard period: recalculate
                     Some(self.calculate_code(&credential, timestamp)?)
@@ -793,9 +802,16 @@ impl<C: SmartCardConnection> OathSession<C> {
             .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
 
         let (val, vf, vt) = format_code(
-            credential.oath_type, credential.period, timestamp, &response,
+            credential.oath_type,
+            credential.period,
+            timestamp,
+            &response,
         );
-        Ok(Code { value: val, valid_from: vf, valid_to: vt })
+        Ok(Code {
+            value: val,
+            valid_from: vf,
+            valid_to: vt,
+        })
     }
 }
 

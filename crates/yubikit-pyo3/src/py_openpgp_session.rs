@@ -3,14 +3,14 @@ use yubikit::openpgp::{
     self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
 };
 
-use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         openpgp::OpenPgpError::SmartCard(sc) => smartcard_err(sc),
-        openpgp::OpenPgpError::InvalidPin(retries) => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
+        openpgp::OpenPgpError::InvalidPin(retries) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((retries,)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -24,14 +24,13 @@ fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
                         retries
                     )),
                 },
-                Err(_) => PyValueError::new_err(format!(
-                    "Invalid PIN, {} attempts remaining",
-                    retries
-                )),
-            }
-        }),
-        openpgp::OpenPgpError::PinBlocked => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
+                Err(_) => {
+                    PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
+                }
+            })
+        }
+        openpgp::OpenPgpError::PinBlocked => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -40,10 +39,10 @@ fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
                     Err(_) => PyRuntimeError::new_err("PIN blocked"),
                 },
                 Err(_) => PyRuntimeError::new_err("PIN blocked"),
-            }
-        }),
-        openpgp::OpenPgpError::NotSupported(msg) => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
+            })
+        }
+        openpgp::OpenPgpError::NotSupported(msg) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -52,8 +51,8 @@ fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
                     Err(_) => PyRuntimeError::new_err(msg.clone()),
                 },
                 Err(_) => PyRuntimeError::new_err(msg.clone()),
-            }
-        }),
+            })
+        }
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }
@@ -164,7 +163,10 @@ pub struct OpenPgpSession {
 impl OpenPgpSession {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
-    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -299,9 +301,7 @@ impl OpenPgpSession {
 
     fn set_signature_pin_policy(&mut self, pin_policy: u8) -> PyResult<()> {
         let pp = openpgp::PinPolicy::from_u8(pin_policy);
-        self.inner
-            .set_signature_pin_policy(pp)
-            .map_err(openpgp_err)
+        self.inner.set_signature_pin_policy(pp).map_err(openpgp_err)
     }
 
     fn set_pin_attempts(
@@ -491,9 +491,7 @@ impl OpenPgpSession {
 
     fn authenticate(&mut self, message: &[u8], hash_algorithm: u8) -> PyResult<Vec<u8>> {
         let ha = parse_hash_algorithm(hash_algorithm)?;
-        self.inner
-            .authenticate(message, ha)
-            .map_err(openpgp_err)
+        self.inner.authenticate(message, ha).map_err(openpgp_err)
     }
 
     /// Get certificate as DER bytes.

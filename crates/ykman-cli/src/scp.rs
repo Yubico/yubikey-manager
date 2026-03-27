@@ -2,9 +2,9 @@
 //! and explicit SCP from CLI flags.
 
 use yubikit::device::YubiKeyDevice;
-use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
 use yubikit::management::Capability;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
+use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
 
 use crate::util::CliError;
 
@@ -59,9 +59,7 @@ pub struct ScpParams {
 impl ScpParams {
     /// Returns true if the user specified any SCP flags.
     pub fn is_explicit(&self) -> bool {
-        self.scp03_keys.is_some()
-            || self.scp11_private_key.is_some()
-            || self.sd_ref.is_some()
+        self.scp03_keys.is_some() || self.scp11_private_key.is_some() || self.sd_ref.is_some()
     }
 }
 
@@ -196,8 +194,7 @@ pub fn apply_scp<C: SmartCardConnection>(
 /// Find SCP11b key parameters from the Security Domain on a separate connection.
 /// Returns (kid, kvn, pk_sd_ecka_bytes).
 pub fn find_scp11b_params(dev: &YubiKeyDevice) -> Result<(u8, u8, Vec<u8>), CliError> {
-    find_scp11_pk_with_kid(dev, 0x13)
-        .map(|(kvn, pk)| (0x13, kvn, pk))
+    find_scp11_pk_with_kid(dev, 0x13).map(|(kvn, pk)| (0x13, kvn, pk))
 }
 
 /// Find public key for a given SCP11 kid/kvn from the Security Domain.
@@ -240,15 +237,14 @@ fn find_scp11_pk_with_kid(dev: &YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>),
         .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
 
     let mut kvn = None;
-    for (key_ref, _) in &keys {
+    for key_ref in keys.keys() {
         if key_ref.kid == kid {
             kvn = Some(key_ref.kvn);
             break;
         }
     }
-    let kvn = kvn.ok_or_else(|| {
-        CliError(format!("No SCP key (KID=0x{kid:02X}) found on device"))
-    })?;
+    let kvn =
+        kvn.ok_or_else(|| CliError(format!("No SCP key (KID=0x{kid:02X}) found on device")))?;
 
     let key_ref = KeyRef::new(kid, kvn);
     let certs = sd

@@ -70,10 +70,7 @@ pub fn set_override_version(version: Version) {
 /// set, return the override; otherwise return `version` unchanged.
 pub fn patch_version(version: Version) -> Version {
     if version == DEV_VERSION {
-        OVERRIDE_VERSION
-            .read()
-            .unwrap()
-            .unwrap_or(version)
+        OVERRIDE_VERSION.read().unwrap().unwrap_or(version)
     } else {
         version
     }

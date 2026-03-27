@@ -30,7 +30,7 @@ use std::time::Instant;
 
 use thiserror::Error;
 
-use crate::scp::{aes_cmac, constant_time_eq, scp03_derive, x963_kdf, ScpState};
+use crate::scp::{ScpState, aes_cmac, constant_time_eq, scp03_derive, x963_kdf};
 
 // Re-export types that were moved to core_types for backwards compatibility.
 pub use crate::core_types::{Transport, Version};
@@ -395,10 +395,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Send a pre-formatted APDU (raw bytes), handling response chaining only.
     /// Does NOT apply SCP wrapping or command chaining.
-    pub fn send_raw_apdu(
-        &self,
-        apdu: &[u8],
-    ) -> Result<(Vec<u8>, u16), SmartCardError> {
+    pub fn send_raw_apdu(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         let (resp, sw) = self.connection.send_and_receive(apdu)?;
         self.read_chained_response(resp, sw)
     }
@@ -437,24 +434,22 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         le: u16,
     ) -> Result<(Vec<u8>, u16), SmartCardError> {
         // Touch workaround
-        if self.touch_workaround {
-            if let Some(last) = self.last_long_resp {
-                if last.elapsed().as_secs_f64() < 2.0 {
-                    // Send dummy APDU
-                    let _ = self.send_single_apdu(0, 0, 0, 0, &[], 0);
-                    self.last_long_resp = None;
-                }
-            }
+        if self.touch_workaround
+            && let Some(last) = self.last_long_resp
+            && last.elapsed().as_secs_f64() < 2.0
+        {
+            // Send dummy APDU
+            let _ = self.send_single_apdu(0, 0, 0, 0, &[], 0);
+            self.last_long_resp = None;
         }
 
         // Command chaining for short APDUs
-        let (resp, sw) = if self.apdu_format == ApduFormat::Short
-            && data.len() > SHORT_APDU_MAX_CHUNK
-        {
-            self.send_chained(cla, ins, p1, p2, data, le as u8)?
-        } else {
-            self.send_single_apdu(cla, ins, p1, p2, data, le)?
-        };
+        let (resp, sw) =
+            if self.apdu_format == ApduFormat::Short && data.len() > SHORT_APDU_MAX_CHUNK {
+                self.send_chained(cla, ins, p1, p2, data, le as u8)?
+            } else {
+                self.send_single_apdu(cla, ins, p1, p2, data, le)?
+            };
 
         // Response chaining
         let (resp, sw) = self.read_chained_response(resp, sw)?;
@@ -485,8 +480,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         while remaining.len() > SHORT_APDU_MAX_CHUNK {
             let (chunk, rest) = remaining.split_at(SHORT_APDU_MAX_CHUNK);
             remaining = rest;
-            let apdu =
-                format_short_apdu(0x10 | cla, ins, p1, p2, chunk, 0)?;
+            let apdu = format_short_apdu(0x10 | cla, ins, p1, p2, chunk, 0)?;
             let (_, sw) = self.connection.send_and_receive(&apdu)?;
             if sw != SW_OK {
                 return Ok((Vec::new(), sw));
@@ -581,14 +575,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             )?
         } else {
             match self.apdu_format {
-                ApduFormat::Short => format_short_apdu(
-                    cla,
-                    ins,
-                    p1,
-                    p2,
-                    &[&enc_data[..], &[0u8; 8]].concat(),
-                    0,
-                )?,
+                ApduFormat::Short => {
+                    format_short_apdu(cla, ins, p1, p2, &[&enc_data[..], &[0u8; 8]].concat(), 0)?
+                }
                 ApduFormat::Extended => format_extended_apdu(
                     cla,
                     ins,
@@ -718,8 +707,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         use crate::tlv::tlv_encode;
         use elliptic_curve::sec1::FromEncodedPoint;
         use p256::{
-            elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
             EncodedPoint, PublicKey, SecretKey,
+            elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
         };
 
         // SCP11 params byte
@@ -742,11 +731,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             })?;
             let n = certificates.len();
             for (i, cert) in certificates.iter().enumerate() {
-                let p2 = if i < n - 1 {
-                    oce_kid | 0x80
-                } else {
-                    oce_kid
-                };
+                let p2 = if i < n - 1 { oce_kid | 0x80 } else { oce_kid };
                 self.send_apdu(0x80, 0x2A, oce_kvn, p2, cert)?;
             }
         }
@@ -788,10 +773,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         {
             let mut offset = 0;
             while offset < resp.len() {
-                let (tag, val_off, val_len, end) =
-                    crate::tlv::tlv_parse(&resp, offset).map_err(|e| {
-                        SmartCardError::BadResponse(format!("TLV parse error: {e}"))
-                    })?;
+                let (tag, val_off, val_len, end) = crate::tlv::tlv_parse(&resp, offset)
+                    .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
                 match tag {
                     0x5F49 => {
                         epk_sd_ecka_bytes = Some(&resp[val_off..val_off + val_len]);
@@ -808,26 +791,20 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         })?;
         let (tlv_start, tlv_end) = epk_sd_ecka_tlv_range.unwrap();
         let receipt = receipt_bytes
-            .ok_or_else(|| {
-                SmartCardError::BadResponse("Missing receipt (86) in response".into())
-            })?
+            .ok_or_else(|| SmartCardError::BadResponse("Missing receipt (86) in response".into()))?
             .to_vec();
 
         // key_agreement_data = request data + card's ephemeral public key TLV
         key_agreement_data.extend_from_slice(&resp[tlv_start..tlv_end]);
 
         // Perform ECDH
-        let card_eph_point = EncodedPoint::from_bytes(epk_sd_ecka_bytes).map_err(|e| {
-            SmartCardError::BadResponse(format!("Invalid card ephemeral key: {e}"))
-        })?;
+        let card_eph_point = EncodedPoint::from_bytes(epk_sd_ecka_bytes)
+            .map_err(|e| SmartCardError::BadResponse(format!("Invalid card ephemeral key: {e}")))?;
         let card_eph_pk = Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_eph_point))
-            .ok_or_else(|| {
-                SmartCardError::BadResponse("Card ephemeral key not on curve".into())
-            })?;
+            .ok_or_else(|| SmartCardError::BadResponse("Card ephemeral key not on curve".into()))?;
 
-        let card_static_point = EncodedPoint::from_bytes(pk_sd_ecka).map_err(|e| {
-            SmartCardError::BadResponse(format!("Invalid card static key: {e}"))
-        })?;
+        let card_static_point = EncodedPoint::from_bytes(pk_sd_ecka)
+            .map_err(|e| SmartCardError::BadResponse(format!("Invalid card static key: {e}")))?;
         let card_static_pk =
             Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_static_point))
                 .ok_or_else(|| {
@@ -835,17 +812,12 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                 })?;
 
         // shared1 = ECDH(eph_sk, card_eph_pk)
-        let shared1 = p256::ecdh::diffie_hellman(
-            eph_sk.to_nonzero_scalar(),
-            card_eph_pk.as_affine(),
-        );
+        let shared1 =
+            p256::ecdh::diffie_hellman(eph_sk.to_nonzero_scalar(), card_eph_pk.as_affine());
 
         // shared2: for SCP11b reuse eph_sk, for 11a/c use the static OCE key
         let shared2 = if is_scp11b {
-            p256::ecdh::diffie_hellman(
-                eph_sk.to_nonzero_scalar(),
-                card_static_pk.as_affine(),
-            )
+            p256::ecdh::diffie_hellman(eph_sk.to_nonzero_scalar(), card_static_pk.as_affine())
         } else {
             let oce_scalar = sk_oce_ecka.ok_or_else(|| {
                 SmartCardError::BadResponse("OCE private key required for SCP11a/c".into())
@@ -853,10 +825,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             let oce_sk = SecretKey::from_slice(oce_scalar).map_err(|e| {
                 SmartCardError::BadResponse(format!("Invalid OCE private key: {e}"))
             })?;
-            p256::ecdh::diffie_hellman(
-                oce_sk.to_nonzero_scalar(),
-                card_static_pk.as_affine(),
-            )
+            p256::ecdh::diffie_hellman(oce_sk.to_nonzero_scalar(), card_static_pk.as_affine())
         };
 
         // Concatenate shared secrets
@@ -883,13 +852,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let key_srmac = keybytes[48..64].to_vec();
 
         // For SCP11 the MAC chain starts with the receipt
-        let state = ScpState::new(
-            key_senc,
-            key_smac,
-            key_srmac,
-            Some(receipt),
-            Some(1),
-        );
+        let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1));
         self.set_scp_state(state);
 
         Ok(())
@@ -918,7 +881,14 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                 oce_ref,
             } => {
                 let cert_refs: Vec<&[u8]> = certificates.iter().map(|c| c.as_slice()).collect();
-                self.init_scp11(*kid, *kvn, pk_sd_ecka, Some(sk_oce_ecka), &cert_refs, *oce_ref)
+                self.init_scp11(
+                    *kid,
+                    *kvn,
+                    pk_sd_ecka,
+                    Some(sk_oce_ecka),
+                    &cert_refs,
+                    *oce_ref,
+                )
             }
         }
     }

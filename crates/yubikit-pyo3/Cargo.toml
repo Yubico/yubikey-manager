@@ -13,3 +13,6 @@ pyo3 = { version = "0.25", features = ["extension-module"] }
 log = "0.4"
 p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
 elliptic-curve = { version = "0.13", features = ["sec1"] }
+
+[lints]
+workspace = true

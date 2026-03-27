@@ -33,9 +33,9 @@ use aes::Aes192;
 use aes::Aes256;
 use cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
 use des::TdesEde3;
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
@@ -819,12 +819,14 @@ pub fn check_key_support(
     }
 
     // ROCA
-    if version >= Version(4, 2, 0) && version < Version(4, 3, 5) {
-        if generate && key_type.algorithm() == Algorithm::Rsa {
-            return Err(PivError::NotSupported(
-                "RSA key generation not supported on this YubiKey".into(),
-            ));
-        }
+    if version >= Version(4, 2, 0)
+        && version < Version(4, 3, 5)
+        && generate
+        && key_type.algorithm() == Algorithm::Rsa
+    {
+        return Err(PivError::NotSupported(
+            "RSA key generation not supported on this YubiKey".into(),
+        ));
     }
 
     // FIPS
@@ -851,7 +853,6 @@ pub fn check_key_support(
 
     Ok(())
 }
-
 
 // ---------------------------------------------------------------------------
 // PivSession
@@ -1091,11 +1092,11 @@ impl<C: SmartCardConnection> PivSession<C> {
                 Ok(())
             }
             Err(e) => {
-                if let SmartCardError::Apdu { sw, .. } = &e {
-                    if let Some(retries) = retries_from_sw(*sw) {
-                        self.current_pin_retries = retries;
-                        return Err(PivError::InvalidPin(retries));
-                    }
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    self.current_pin_retries = retries;
+                    return Err(PivError::InvalidPin(retries));
                 }
                 Err(PivError::SmartCard(e))
             }
@@ -1140,10 +1141,10 @@ impl<C: SmartCardConnection> PivSession<C> {
                 ))
             }
             Err(e) => {
-                if let SmartCardError::Apdu { sw, .. } = &e {
-                    if let Some(retries) = retries_from_sw(*sw) {
-                        return Err(PivError::InvalidPin(retries));
-                    }
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    return Err(PivError::InvalidPin(retries));
                 }
                 Err(PivError::SmartCard(e))
             }
@@ -1170,10 +1171,10 @@ impl<C: SmartCardConnection> PivSession<C> {
                 ))
             }
             Err(e) => {
-                if let SmartCardError::Apdu { sw, .. } = &e {
-                    if let Some(retries) = retries_from_sw(*sw) {
-                        return Err(PivError::InvalidPin(retries));
-                    }
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    return Err(PivError::InvalidPin(retries));
                 }
                 Err(PivError::SmartCard(e))
             }
@@ -1421,7 +1422,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             _ => {
                 return Err(PivError::InvalidValue(
                     "Invalid length of ciphertext".into(),
-                ))
+                ));
             }
         };
         self.use_private_key(slot, key_type, cipher_text, false)
@@ -1699,13 +1700,13 @@ impl<C: SmartCardConnection> PivSession<C> {
         match self.protocol.send_apdu(0, ins, 0, p2, &data) {
             Ok(_) => Ok(()),
             Err(e) => {
-                if let SmartCardError::Apdu { sw, .. } = &e {
-                    if let Some(retries) = retries_from_sw(*sw) {
-                        if p2 == PIN_P2 {
-                            self.current_pin_retries = retries;
-                        }
-                        return Err(PivError::InvalidPin(retries));
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    if p2 == PIN_P2 {
+                        self.current_pin_retries = retries;
                     }
+                    return Err(PivError::InvalidPin(retries));
                 }
                 Err(PivError::SmartCard(e))
             }
@@ -2072,83 +2073,97 @@ mod tests {
     #[test]
     fn test_check_key_support_basic() {
         let v5_7 = Version(5, 7, 0);
-        assert!(check_key_support(
-            v5_7,
-            KeyType::EccP256,
-            PinPolicy::Default,
-            TouchPolicy::Default,
-            false,
-            false
-        )
-        .is_ok());
+        assert!(
+            check_key_support(
+                v5_7,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
 
         // Ed25519 needs 5.7.0
-        assert!(check_key_support(
-            Version(5, 6, 0),
-            KeyType::Ed25519,
-            PinPolicy::Default,
-            TouchPolicy::Default,
-            false,
-            false
-        )
-        .is_err());
+        assert!(
+            check_key_support(
+                Version(5, 6, 0),
+                KeyType::Ed25519,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
 
-        assert!(check_key_support(
-            v5_7,
-            KeyType::Ed25519,
-            PinPolicy::Default,
-            TouchPolicy::Default,
-            false,
-            false
-        )
-        .is_ok());
+        assert!(
+            check_key_support(
+                v5_7,
+                KeyType::Ed25519,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_check_key_support_roca() {
         // ROCA-affected range: 4.2.0 <= v < 4.3.5
-        assert!(check_key_support(
-            Version(4, 2, 0),
-            KeyType::Rsa2048,
-            PinPolicy::Default,
-            TouchPolicy::Default,
-            true, // generate
-            false
-        )
-        .is_err());
+        assert!(
+            check_key_support(
+                Version(4, 2, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                true, // generate
+                false
+            )
+            .is_err()
+        );
 
         // Import should still work
-        assert!(check_key_support(
-            Version(4, 2, 0),
-            KeyType::Rsa2048,
-            PinPolicy::Default,
-            TouchPolicy::Default,
-            false,
-            false
-        )
-        .is_ok());
+        assert!(
+            check_key_support(
+                Version(4, 2, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_check_key_support_fips() {
-        assert!(check_key_support(
-            Version(4, 4, 0),
-            KeyType::Rsa1024,
-            PinPolicy::Default,
-            TouchPolicy::Default,
-            false,
-            false
-        )
-        .is_err());
+        assert!(
+            check_key_support(
+                Version(4, 4, 0),
+                KeyType::Rsa1024,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
 
-        assert!(check_key_support(
-            Version(4, 4, 0),
-            KeyType::Rsa2048,
-            PinPolicy::Never,
-            TouchPolicy::Default,
-            false,
-            false
-        )
-        .is_err());
+        assert!(
+            check_key_support(
+                Version(4, 4, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Never,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
     }
 }

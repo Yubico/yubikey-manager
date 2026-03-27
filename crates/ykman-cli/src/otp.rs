@@ -54,7 +54,14 @@ impl<C: yubikit::smartcard::SmartCardConnection> OtpSession<C> {
         cur_acc_code: Option<&[u8]>,
         ndef_type: NdefType,
     ) -> Result<(), YubiOtpError> {
-        delegate!(self, set_ndef_configuration, slot, uri, cur_acc_code, ndef_type)
+        delegate!(
+            self,
+            set_ndef_configuration,
+            slot,
+            uri,
+            cur_acc_code,
+            ndef_type
+        )
     }
 
     fn put_configuration(
@@ -64,7 +71,14 @@ impl<C: yubikit::smartcard::SmartCardConnection> OtpSession<C> {
         acc_code: Option<&[u8]>,
         cur_acc_code: Option<&[u8]>,
     ) -> Result<(), YubiOtpError> {
-        delegate!(self, put_configuration, slot, config, acc_code, cur_acc_code)
+        delegate!(
+            self,
+            put_configuration,
+            slot,
+            config,
+            acc_code,
+            cur_acc_code
+        )
     }
 
     fn update_configuration(
@@ -74,7 +88,14 @@ impl<C: yubikit::smartcard::SmartCardConnection> OtpSession<C> {
         acc_code: Option<&[u8]>,
         cur_acc_code: Option<&[u8]>,
     ) -> Result<(), YubiOtpError> {
-        delegate!(self, update_configuration, slot, config, acc_code, cur_acc_code)
+        delegate!(
+            self,
+            update_configuration,
+            slot,
+            config,
+            acc_code,
+            cur_acc_code
+        )
     }
 
     fn calculate_hmac_sha1_otp(
@@ -103,10 +124,10 @@ fn open_session<'a>(
     }
 
     // Try OTP HID first
-    if let Ok(conn) = dev.open_otp() {
-        if let Ok(session) = YubiOtpOtpSession::new(conn) {
-            return Ok(OtpSession::Otp(session));
-        }
+    if let Ok(conn) = dev.open_otp()
+        && let Ok(session) = YubiOtpOtpSession::new(conn)
+    {
+        return Ok(OtpSession::Otp(session));
     }
 
     // Fall back to SmartCard
@@ -143,7 +164,7 @@ fn us_scancodes() -> HashMap<char, u8> {
     let mut m = HashMap::new();
     for (i, c) in "abcdefghijklmnopqrstuvwxyz".chars().enumerate() {
         m.insert(c, 0x04 + i as u8);
-        m.insert(c.to_ascii_uppercase(), 0x04 + i as u8 | SHIFT);
+        m.insert(c.to_ascii_uppercase(), (0x04 + i as u8) | SHIFT);
     }
     let digits = [
         ('1', 0x1E),

@@ -79,7 +79,13 @@ fn build_put_data(
     let ha = oath::HashAlgorithm::from_u8(hash_algorithm)
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid hash algorithm"))?;
     Ok(oath::build_put_data(
-        cred_id, ot, ha, digits, secret, touch_required, counter,
+        cred_id,
+        ot,
+        ha,
+        digits,
+        secret,
+        touch_required,
+        counter,
     ))
 }
 
@@ -102,8 +108,7 @@ fn parse_list_entry(data: &[u8]) -> PyResult<(u8, Vec<u8>)> {
 
 #[pyfunction]
 fn parse_b32_key(key: &str) -> PyResult<Vec<u8>> {
-    oath::parse_b32_key(key)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    oath::parse_b32_key(key).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {

@@ -44,13 +44,16 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use crate::management::{
+    Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession,
+    ManagementSession, UsbInterface,
+};
 use crate::smartcard::{Aid, SmartCardError, SmartCardProtocol, Transport, Version};
-use crate::management::{Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession, ManagementSession, UsbInterface};
-use crate::yubiotp::YubiOtpSession;
-use crate::transport::otphid::{OtpConnection, HidDeviceInfo, HidError, list_otp_devices};
 use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
-use crate::transport::pcsc::{PcscConnection, PcscError};
+use crate::transport::otphid::{HidDeviceInfo, HidError, OtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
+use crate::transport::pcsc::{PcscConnection, PcscError};
+use crate::yubiotp::YubiOtpSession;
 
 // ---------------------------------------------------------------------------
 // DeviceError
@@ -173,8 +176,7 @@ impl YubiKeyDevice {
                 ifaces = ifaces | UsbInterface::FIDO;
             }
             // CCID: any of PIV, OATH, OpenPGP, HSMAUTH, or Management
-            if usb_caps
-                .contains(Capability::PIV)
+            if usb_caps.contains(Capability::PIV)
                 || usb_caps.contains(Capability::OATH)
                 || usb_caps.contains(Capability::OPENPGP)
                 || usb_caps.contains(Capability::HSMAUTH)
@@ -207,10 +209,7 @@ impl YubiKeyDevice {
 
     /// Open an OTP HID connection to this device.
     pub fn open_otp(&self) -> Result<OtpConnection, DeviceError> {
-        let path = self
-            .hid_path
-            .as_deref()
-            .ok_or(DeviceError::NoDeviceFound)?;
+        let path = self.hid_path.as_deref().ok_or(DeviceError::NoDeviceFound)?;
         Ok(OtpConnection::new(path)?)
     }
 
@@ -532,8 +531,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(hid_devices) = list_otp_devices() {
         for hid in hid_devices {
-            let info = read_info_otp(&hid.path)
-                .unwrap_or_else(|_| synthetic_hid_info(&hid));
+            let info = read_info_otp(&hid.path).unwrap_or_else(|_| synthetic_hid_info(&hid));
             devices.push(YubiKeyDevice {
                 reader_name: None,
                 hid_path: Some(hid.path),
@@ -585,7 +583,8 @@ pub fn read_info_otp(hid_path: &str) -> Result<DeviceInfo, DeviceError> {
         .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
     // Use unchecked variant — dev devices report version 0.0.1 but still
     // support the DeviceInfo protocol.
-    let mut info = session.read_device_info_unchecked()
+    let mut info = session
+        .read_device_info_unchecked()
         .map_err(DeviceError::SmartCard)?;
     apply_device_info_fixups(&mut info);
     Ok(info)
@@ -598,9 +597,9 @@ pub fn read_info_otp(hid_path: &str) -> Result<DeviceInfo, DeviceError> {
 pub fn read_info_fido(fido_info: &FidoDeviceInfo) -> Result<DeviceInfo, DeviceError> {
     let conn = FidoConnection::open(fido_info)
         .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))?;
-    let mut session = ManagementFidoSession::new(conn)
-        .map_err(DeviceError::SmartCard)?;
-    let mut info = session.read_device_info_unchecked()
+    let mut session = ManagementFidoSession::new(conn).map_err(DeviceError::SmartCard)?;
+    let mut info = session
+        .read_device_info_unchecked()
         .map_err(DeviceError::SmartCard)?;
     apply_device_info_fixups(&mut info);
     Ok(info)
@@ -613,8 +612,7 @@ pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(fido_devs) = list_fido_devices() {
         for fido in fido_devs {
-            let info = read_info_fido(&fido)
-                .unwrap_or_else(|_| synthetic_fido_info(&fido));
+            let info = read_info_fido(&fido).unwrap_or_else(|_| synthetic_fido_info(&fido));
             devices.push(YubiKeyDevice {
                 reader_name: None,
                 hid_path: None,
@@ -636,10 +634,7 @@ const SCAN_APPLETS: &[(&[u8], Capability)] = &[
 ];
 
 /// Synthesize DeviceInfo for older YubiKeys (NEO) over CCID by probing applets.
-fn synthesize_info_ccid(
-    conn: PcscConnection,
-    version: Version,
-) -> Result<DeviceInfo, DeviceError> {
+fn synthesize_info_ccid(conn: PcscConnection, version: Version) -> Result<DeviceInfo, DeviceError> {
     use std::collections::HashMap;
 
     let mut capabilities = Capability::NONE;
@@ -648,7 +643,7 @@ fn synthesize_info_ccid(
     let mut serial = None;
     match YubiOtpSession::new(conn) {
         Ok(mut otp_session) => {
-            capabilities = capabilities | Capability::OTP;
+            capabilities |= Capability::OTP;
             match otp_session.get_serial() {
                 Ok(s) => serial = Some(s),
                 Err(e) => log::debug!("Unable to read serial over OTP: {e}"),
@@ -661,7 +656,7 @@ fn synthesize_info_ccid(
             for (aid, cap) in SCAN_APPLETS {
                 match protocol.select(aid) {
                     Ok(_) => {
-                        capabilities = capabilities | *cap;
+                        capabilities |= *cap;
                         log::debug!("Found applet: capability {:?}", cap);
                     }
                     Err(e) => {
@@ -677,7 +672,7 @@ fn synthesize_info_ccid(
 
     // Assume U2F on devices >= 3.3.0
     if version >= Version(3, 3, 0) {
-        capabilities = capabilities | Capability::U2F;
+        capabilities |= Capability::U2F;
     }
 
     let mut supported = HashMap::new();
@@ -724,12 +719,15 @@ pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
 
     // Fix NFC: set enabled if missing
     if info.has_transport(Transport::Nfc) {
-        if !info.config.enabled_capabilities.contains_key(&Transport::Nfc) {
-            if let Some(&nfc_sup) = info.supported_capabilities.get(&Transport::Nfc) {
-                info.config
-                    .enabled_capabilities
-                    .insert(Transport::Nfc, nfc_sup);
-            }
+        if !info
+            .config
+            .enabled_capabilities
+            .contains_key(&Transport::Nfc)
+            && let Some(&nfc_sup) = info.supported_capabilities.get(&Transport::Nfc)
+        {
+            info.config
+                .enabled_capabilities
+                .insert(Transport::Nfc, nfc_sup);
         }
         // Remove NFC for form factors known to not have NFC
         let remove_nfc = matches!(
@@ -746,13 +744,15 @@ pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
 
     // Fix USB: set enabled if missing (pre-YubiKey 5)
     if info.has_transport(Transport::Usb)
-        && !info.config.enabled_capabilities.contains_key(&Transport::Usb)
+        && !info
+            .config
+            .enabled_capabilities
+            .contains_key(&Transport::Usb)
+        && let Some(&usb_sup) = info.supported_capabilities.get(&Transport::Usb)
     {
-        if let Some(&usb_sup) = info.supported_capabilities.get(&Transport::Usb) {
-            info.config
-                .enabled_capabilities
-                .insert(Transport::Usb, usb_sup);
-        }
+        info.config
+            .enabled_capabilities
+            .insert(Transport::Usb, usb_sup);
     }
 }
 
@@ -898,10 +898,7 @@ fn build_yk5_name(info: &DeviceInfo, usb_supported: Capability) -> String {
         parts.push("- Enhanced PIN");
     }
 
-    parts
-        .join(" ")
-        .replace("5 C", "5C")
-        .replace("5 A", "5A")
+    parts.join(" ").replace("5 C", "5C").replace("5 A", "5A")
 }
 
 #[cfg(test)]
@@ -955,7 +952,10 @@ mod tests {
         let info = make_info(
             Version(3, 5, 0),
             FormFactor::Unknown,
-            false, false, Some(123), true,
+            false,
+            false,
+            Some(123),
+            true,
             Capability(Capability::OTP.0 | Capability::OATH.0),
             false,
         );
@@ -967,7 +967,10 @@ mod tests {
         let info = make_info(
             Version(4, 3, 7),
             FormFactor::UsbAKeychain,
-            false, false, Some(456), false,
+            false,
+            false,
+            Some(456),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0 | Capability::OATH.0),
             false,
         );
@@ -979,7 +982,10 @@ mod tests {
         let info = make_info(
             Version(4, 4, 5),
             FormFactor::UsbAKeychain,
-            false, true, Some(789), false,
+            false,
+            true,
+            Some(789),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0),
             false,
         );
@@ -991,7 +997,10 @@ mod tests {
         let info = make_info(
             Version(5, 2, 4),
             FormFactor::UsbAKeychain,
-            false, false, Some(100), true,
+            false,
+            false,
+            Some(100),
+            true,
             Capability(Capability::OTP.0 | Capability::PIV.0 | Capability::FIDO2.0),
             false,
         );
@@ -1003,7 +1012,10 @@ mod tests {
         let info = make_info(
             Version(5, 4, 3),
             FormFactor::UsbCNano,
-            false, false, Some(200), false,
+            false,
+            false,
+            Some(200),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0),
             false,
         );
@@ -1015,7 +1027,10 @@ mod tests {
         let info = make_info(
             Version(5, 2, 4),
             FormFactor::UsbCLightning,
-            false, false, Some(300), false,
+            false,
+            false,
+            Some(300),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0),
             false,
         );
@@ -1027,7 +1042,10 @@ mod tests {
         let info = make_info(
             Version(5, 2, 8),
             FormFactor::UsbAKeychain,
-            true, false, None, true,
+            true,
+            false,
+            None,
+            true,
             Capability(Capability::U2F.0 | Capability::FIDO2.0),
             false,
         );
@@ -1039,7 +1057,10 @@ mod tests {
         let info = make_info(
             Version(5, 5, 6),
             FormFactor::UsbABio,
-            false, false, Some(400), false,
+            false,
+            false,
+            Some(400),
+            false,
             Capability(Capability::U2F.0 | Capability::FIDO2.0),
             false,
         );
@@ -1051,7 +1072,10 @@ mod tests {
         let info = make_info(
             Version(5, 6, 0),
             FormFactor::UsbCBio,
-            false, false, Some(500), false,
+            false,
+            false,
+            Some(500),
+            false,
             Capability(Capability::PIV.0 | Capability::FIDO2.0),
             false,
         );
@@ -1063,7 +1087,10 @@ mod tests {
         let info = make_info(
             Version(5, 0, 1),
             FormFactor::UsbAKeychain,
-            false, false, Some(600), false,
+            false,
+            false,
+            Some(600),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0),
             false,
         );
@@ -1075,7 +1102,10 @@ mod tests {
         let info = make_info(
             Version(5, 4, 3),
             FormFactor::UsbAKeychain,
-            true, false, Some(700), false,
+            true,
+            false,
+            Some(700),
+            false,
             Capability(Capability::U2F.0 | Capability::FIDO2.0),
             false,
         );
@@ -1087,7 +1117,10 @@ mod tests {
         let info = make_info(
             Version(5, 2, 4),
             FormFactor::UsbAKeychain,
-            false, false, Some(800), false,
+            false,
+            false,
+            Some(800),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0),
             false,
         );
@@ -1096,9 +1129,13 @@ mod tests {
 
     #[test]
     fn test_fido_only() {
-        assert!(fido_only(Capability(Capability::U2F.0 | Capability::FIDO2.0)));
+        assert!(fido_only(Capability(
+            Capability::U2F.0 | Capability::FIDO2.0
+        )));
         assert!(fido_only(Capability::FIDO2));
-        assert!(!fido_only(Capability(Capability::FIDO2.0 | Capability::PIV.0)));
+        assert!(!fido_only(Capability(
+            Capability::FIDO2.0 | Capability::PIV.0
+        )));
         assert!(!fido_only(Capability::NONE));
     }
 
@@ -1121,7 +1158,10 @@ mod tests {
         let info = make_info(
             Version(5, 7, 0),
             FormFactor::UsbCKeychain,
-            false, false, Some(900), false,
+            false,
+            false,
+            Some(900),
+            false,
             Capability(Capability::OTP.0 | Capability::PIV.0),
             true,
         );

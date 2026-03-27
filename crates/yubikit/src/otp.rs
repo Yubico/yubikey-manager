@@ -39,7 +39,6 @@ use crate::core_types::Version;
 use crate::smartcard::SmartCardError;
 use crate::transport::otphid::OtpConnection;
 
-
 // --- OTP Codec ---
 
 const MODHEX_ALPHABET: &[u8; 16] = b"cbdefghijklnrtuv";
@@ -90,7 +89,7 @@ pub fn modhex_encode(data: &[u8]) -> String {
 
 /// Decode modhex string to bytes.
 pub fn modhex_decode(string: &str) -> Result<Vec<u8>, OtpCodecError> {
-    if string.len() % 2 != 0 {
+    if !string.len().is_multiple_of(2) {
         return Err(OtpCodecError::OddLength);
     }
     let bytes = string.as_bytes();
@@ -332,9 +331,7 @@ impl<T: OtpTransport> OtpProtocol<T> {
                 } else if is_sequence_updated(&report, prog_seq) {
                     return Ok(None);
                 } else if needs_touch {
-                    return Err(YubiOtpError::Timeout(
-                        "Timed out waiting for touch".into(),
-                    ));
+                    return Err(YubiOtpError::Timeout("Timed out waiting for touch".into()));
                 } else {
                     return Err(YubiOtpError::CommandRejected("No data".into()));
                 }
@@ -352,11 +349,11 @@ impl<T: OtpTransport> OtpProtocol<T> {
                     }
                     thread::sleep(Duration::from_millis(20));
                 }
-                if let Some(flag) = cancel {
-                    if flag.load(Ordering::Relaxed) {
-                        self.reset_state()?;
-                        return Err(YubiOtpError::Timeout("Command cancelled".into()));
-                    }
+                if let Some(flag) = cancel
+                    && flag.load(Ordering::Relaxed)
+                {
+                    self.reset_state()?;
+                    return Err(YubiOtpError::Timeout("Command cancelled".into()));
                 }
             }
         }

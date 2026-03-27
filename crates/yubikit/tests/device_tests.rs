@@ -14,14 +14,14 @@
 //! **WARNING**: Some tests are destructive (they reset applications).
 //! Only run against a test/development YubiKey.
 
-use std::sync::OnceLock;
 use rstest::{fixture, rstest};
-use yubikit::core_types::{set_override_version, Version};
-use yubikit::device::{list_devices, YubiKeyDevice};
-use yubikit::smartcard::{Aid, SmartCardProtocol, Transport};
+use std::sync::OnceLock;
+use yubikit::core_types::{Version, set_override_version};
+use yubikit::device::{YubiKeyDevice, list_devices};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType};
 use yubikit::securitydomain::SecurityDomainSession;
-use yubikit::transport::pcsc::{list_readers, PcscConnection};
+use yubikit::smartcard::Transport;
+use yubikit::transport::pcsc::{PcscConnection, list_readers};
 
 // ───────────────────────── Connection Parameterization ─────────────────────────
 
@@ -66,9 +66,10 @@ fn required_serial() -> u32 {
 }
 
 fn required_nfc_serial() -> Option<u32> {
-    std::env::var("YUBIKEY_NFC_SERIAL")
-        .ok()
-        .map(|s| s.parse().expect("YUBIKEY_NFC_SERIAL must be a valid integer"))
+    std::env::var("YUBIKEY_NFC_SERIAL").ok().map(|s| {
+        s.parse()
+            .expect("YUBIKEY_NFC_SERIAL must be a valid integer")
+    })
 }
 
 fn get_device_and_info() -> &'static (YubiKeyDevice, DeviceInfo) {
@@ -98,9 +99,10 @@ fn open_usb_smartcard() -> PcscConnection {
 fn nfc_reader() -> Option<String> {
     let filter = std::env::var("YUBIKEY_READER").ok()?;
     let readers = list_readers().ok()?;
-    readers
-        .into_iter()
-        .find(|r| r.to_ascii_lowercase().contains(&filter.to_ascii_lowercase()))
+    readers.into_iter().find(|r| {
+        r.to_ascii_lowercase()
+            .contains(&filter.to_ascii_lowercase())
+    })
 }
 
 fn open_nfc_smartcard() -> Option<PcscConnection> {
@@ -224,7 +226,11 @@ fn device_info() -> &'static DeviceInfo {
 /// Fixture providing USB device capabilities.
 #[fixture]
 fn capabilities(device_info: &DeviceInfo) -> Capability {
-    device_info.supported_capabilities.get(&Transport::Usb).copied().unwrap_or(Capability::NONE)
+    device_info
+        .supported_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE)
 }
 
 fn usb_capabilities() -> Capability {
@@ -300,8 +306,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             use yubikit::management::ManagementOtpSession;
             let (dev, _) = get_device_and_info();
             let conn = dev.open_otp().expect("open OTP");
-            let mut session =
-                ManagementOtpSession::new(conn).expect("ManagementOtpSession::new");
+            let mut session = ManagementOtpSession::new(conn).expect("ManagementOtpSession::new");
             let info = session
                 .read_device_info_unchecked()
                 .expect("read_device_info_unchecked");
@@ -311,8 +316,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             let conn = open_smartcard_connection(&tc);
             let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
                 let params = make_scp_key_params(*kid, *kvn, pk);
-                ManagementSession::new_with_scp(conn, &params)
-                    .expect("ManagementSession with SCP")
+                ManagementSession::new_with_scp(conn, &params).expect("ManagementSession with SCP")
             } else {
                 ManagementSession::new(conn).expect("ManagementSession::new")
             };
@@ -320,8 +324,10 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
                 .read_device_info_unchecked()
                 .expect("read_device_info_unchecked");
             assert!(info.serial.is_some(), "Expected serial number");
-            if matches!(tc, TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b)
-            {
+            if matches!(
+                tc,
+                TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b
+            ) {
                 assert_eq!(info.serial, Some(required_serial()));
             } else if let Some(nfc_serial) = required_nfc_serial() {
                 assert_eq!(info.serial, Some(nfc_serial));
@@ -614,16 +620,14 @@ mod yubiotp {
             TestConnection::UsbOtp => {
                 let (dev, _) = get_device_and_info();
                 let conn = dev.open_otp().expect("open OTP");
-                let session =
-                    YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession::new");
+                let session = YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession::new");
                 let _v = session.version();
             }
             _ => {
                 let conn = open_smartcard_connection(&tc);
                 let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
                     let params = make_scp_key_params(*kid, *kvn, pk);
-                    YubiOtpSession::new_with_scp(conn, &params)
-                        .expect("YubiOtpSession with SCP")
+                    YubiOtpSession::new_with_scp(conn, &params).expect("YubiOtpSession with SCP")
                 } else {
                     YubiOtpSession::new(conn).expect("YubiOtpSession::new")
                 };

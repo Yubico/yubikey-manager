@@ -28,8 +28,8 @@
 use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
 use std::ffi::CString;
 
-use crate::smartcard::{SmartCardConnection, SmartCardError, Transport};
 use crate::log_traffic;
+use crate::smartcard::{SmartCardConnection, SmartCardError, Transport};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PcscError {
@@ -71,8 +71,7 @@ impl PcscConnection {
     pub fn new(reader_name: &str, exclusive: bool) -> Result<Self, PcscError> {
         log_traffic!("Opening PCSC connection to '{}'", reader_name);
         let ctx = Context::establish(Scope::User)?;
-        let reader =
-            CString::new(reader_name).map_err(|_| PcscError::InvalidReaderName)?;
+        let reader = CString::new(reader_name).map_err(|_| PcscError::InvalidReaderName)?;
         let share_mode = if exclusive {
             ShareMode::Exclusive
         } else {

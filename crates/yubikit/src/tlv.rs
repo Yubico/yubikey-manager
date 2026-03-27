@@ -124,7 +124,7 @@ pub fn int2bytes(value: u64) -> Vec<u8> {
     if value == 0 {
         return vec![0];
     }
-    let byte_len = ((64 - value.leading_zeros()) as usize + 7) / 8;
+    let byte_len = ((64 - value.leading_zeros()) as usize).div_ceil(8);
     value.to_be_bytes()[8 - byte_len..].to_vec()
 }
 

@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::oath::{self, OathSession as RustOathSession};
 
-use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
 #[pyclass]
 pub struct OathSession {
@@ -12,7 +12,10 @@ pub struct OathSession {
 impl OathSession {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
-    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -86,7 +89,15 @@ impl OathSession {
         counter: u32,
         issuer: Option<&str>,
         touch_required: bool,
-    ) -> PyResult<(String, Vec<u8>, Option<String>, String, u8, u32, Option<bool>)> {
+    ) -> PyResult<(
+        String,
+        Vec<u8>,
+        Option<String>,
+        String,
+        u8,
+        u32,
+        Option<bool>,
+    )> {
         let ot = oath::OathType::from_u8(oath_type)
             .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid OATH type"))?;
         let ha = oath::HashAlgorithm::from_u8(hash_algorithm)
@@ -136,7 +147,17 @@ impl OathSession {
     /// Returns list of (device_id, id, issuer, name, oath_type, period, touch_required).
     fn list_credentials(
         &mut self,
-    ) -> PyResult<Vec<(String, Vec<u8>, Option<String>, String, u8, u32, Option<bool>)>> {
+    ) -> PyResult<
+        Vec<(
+            String,
+            Vec<u8>,
+            Option<String>,
+            String,
+            u8,
+            u32,
+            Option<bool>,
+        )>,
+    > {
         let creds = self.inner.list_credentials().map_err(smartcard_err)?;
         Ok(creds
             .into_iter()

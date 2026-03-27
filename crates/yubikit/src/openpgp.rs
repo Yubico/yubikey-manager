@@ -412,16 +412,16 @@ const PKCS1_SHA1: &[u8] = &[
     0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A, 0x05, 0x00, 0x04, 0x14,
 ];
 const PKCS1_SHA256: &[u8] = &[
-    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
-    0x05, 0x00, 0x04, 0x20,
+    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
 ];
 const PKCS1_SHA384: &[u8] = &[
-    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02,
-    0x05, 0x00, 0x04, 0x30,
+    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
+    0x00, 0x04, 0x30,
 ];
 const PKCS1_SHA512: &[u8] = &[
-    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
-    0x05, 0x00, 0x04, 0x40,
+    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
+    0x00, 0x04, 0x40,
 ];
 
 // ---------------------------------------------------------------------------
@@ -444,9 +444,10 @@ impl AlgorithmAttributes {
         let algorithm_id = encoded[0];
         match algorithm_id {
             RSA_ALG_ID => Ok(Self::Rsa(RsaAttributes::parse_data(&encoded[1..])?)),
-            EC_ALG_ECDH | EC_ALG_ECDSA | EC_ALG_EDDSA => {
-                Ok(Self::Ec(EcAttributes::parse_data(algorithm_id, &encoded[1..])?))
-            }
+            EC_ALG_ECDH | EC_ALG_ECDSA | EC_ALG_EDDSA => Ok(Self::Ec(EcAttributes::parse_data(
+                algorithm_id,
+                &encoded[1..],
+            )?)),
             _ => Err(OpenPgpError::InvalidResponse(format!(
                 "Unsupported algorithm ID: 0x{algorithm_id:02X}"
             ))),
@@ -584,9 +585,7 @@ pub struct OpenPgpAid {
 
 impl OpenPgpAid {
     pub fn parse(data: &[u8]) -> Self {
-        Self {
-            raw: data.to_vec(),
-        }
+        Self { raw: data.to_vec() }
     }
 
     pub fn version(&self) -> (u8, u8) {
@@ -608,7 +607,10 @@ impl OpenPgpAid {
         if self.raw.len() >= 14 {
             let bytes = &self.raw[10..14];
             // Try BCD decode
-            let hex_str = format!("{:02X}{:02X}{:02X}{:02X}", bytes[0], bytes[1], bytes[2], bytes[3]);
+            let hex_str = format!(
+                "{:02X}{:02X}{:02X}{:02X}",
+                bytes[0], bytes[1], bytes[2], bytes[3]
+            );
             if let Ok(val) = hex_str.parse::<i64>() {
                 val
             } else {
@@ -635,9 +637,7 @@ pub struct PwStatus {
 impl PwStatus {
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.len() < 7 {
-            return Err(OpenPgpError::InvalidResponse(
-                "PwStatus too short".into(),
-            ));
+            return Err(OpenPgpError::InvalidResponse("PwStatus too short".into()));
         }
         Ok(Self {
             pin_policy_user: PinPolicy::from_u8(encoded[0]),
@@ -737,9 +737,10 @@ fn parse_key_information(encoded: &[u8]) -> KeyInformation {
     let mut map = HashMap::new();
     let mut i = 0;
     while i + 1 < encoded.len() {
-        if let (Some(key), Some(status)) =
-            (KeyRef::from_u8(encoded[i]), KeyStatus::from_u8(encoded[i + 1]))
-        {
+        if let (Some(key), Some(status)) = (
+            KeyRef::from_u8(encoded[i]),
+            KeyStatus::from_u8(encoded[i + 1]),
+        ) {
             map.insert(key, status);
         }
         i += 2;
@@ -816,10 +817,9 @@ impl DiscretionaryDataObjects {
         let data = parse_tlv_dict(encoded)?;
         Ok(Self {
             extended_capabilities: ExtendedCapabilities::parse(
-                data.get(&TAG_EXTENDED_CAPABILITIES)
-                    .ok_or_else(|| {
-                        OpenPgpError::InvalidResponse("Missing extended capabilities".into())
-                    })?,
+                data.get(&TAG_EXTENDED_CAPABILITIES).ok_or_else(|| {
+                    OpenPgpError::InvalidResponse("Missing extended capabilities".into())
+                })?,
             )?,
             attributes_sig: AlgorithmAttributes::parse(
                 data.get(&(Do::AlgorithmAttributesSig as u32))
@@ -844,13 +844,14 @@ impl DiscretionaryDataObjects {
                 .map(|v| AlgorithmAttributes::parse(v))
                 .transpose()?,
             pw_status: PwStatus::parse(
-                data.get(&(Do::PwStatusBytes as u32))
-                    .ok_or_else(|| {
-                        OpenPgpError::InvalidResponse("Missing PW status bytes".into())
-                    })?,
+                data.get(&(Do::PwStatusBytes as u32)).ok_or_else(|| {
+                    OpenPgpError::InvalidResponse("Missing PW status bytes".into())
+                })?,
             )?,
             fingerprints: parse_fingerprints(
-                data.get(&TAG_FINGERPRINTS).map(|v| v.as_slice()).unwrap_or(&[]),
+                data.get(&TAG_FINGERPRINTS)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]),
             ),
             ca_fingerprints: parse_fingerprints(
                 data.get(&TAG_CA_FINGERPRINTS)
@@ -867,18 +868,10 @@ impl DiscretionaryDataObjects {
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]),
             ),
-            uif_sig: data
-                .get(&(Do::UifSig as u32))
-                .and_then(|v| Uif::parse(v)),
-            uif_dec: data
-                .get(&(Do::UifDec as u32))
-                .and_then(|v| Uif::parse(v)),
-            uif_aut: data
-                .get(&(Do::UifAut as u32))
-                .and_then(|v| Uif::parse(v)),
-            uif_att: data
-                .get(&(Do::UifAtt as u32))
-                .and_then(|v| Uif::parse(v)),
+            uif_sig: data.get(&(Do::UifSig as u32)).and_then(|v| Uif::parse(v)),
+            uif_dec: data.get(&(Do::UifDec as u32)).and_then(|v| Uif::parse(v)),
+            uif_aut: data.get(&(Do::UifAut as u32)).and_then(|v| Uif::parse(v)),
+            uif_att: data.get(&(Do::UifAtt as u32)).and_then(|v| Uif::parse(v)),
         })
     }
 
@@ -958,23 +951,14 @@ pub enum Kdf {
 impl Kdf {
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         let data = parse_tlv_dict(encoded)?;
-        let algorithm = data
-            .get(&0x81)
-            .map(|v| bytes2int(v) as u8)
-            .unwrap_or(0);
+        let algorithm = data.get(&0x81).map(|v| bytes2int(v) as u8).unwrap_or(0);
 
         if algorithm == 3 {
-            let hash_algorithm = HashAlgorithm::from_u8(
-                data.get(&0x82)
-                    .map(|v| bytes2int(v) as u8)
-                    .unwrap_or(0x08),
-            )
-            .unwrap_or(HashAlgorithm::Sha256);
+            let hash_algorithm =
+                HashAlgorithm::from_u8(data.get(&0x82).map(|v| bytes2int(v) as u8).unwrap_or(0x08))
+                    .unwrap_or(HashAlgorithm::Sha256);
 
-            let iteration_count = data
-                .get(&0x83)
-                .map(|v| bytes2int(v) as u32)
-                .unwrap_or(0);
+            let iteration_count = data.get(&0x83).map(|v| bytes2int(v) as u32).unwrap_or(0);
 
             Ok(Kdf::IterSaltedS2k {
                 hash_algorithm,
@@ -1076,12 +1060,8 @@ impl Kdf {
             } => {
                 let salt = match pw {
                     Pw::User => salt_user.as_slice(),
-                    Pw::Reset => salt_reset
-                        .as_deref()
-                        .unwrap_or(salt_user.as_slice()),
-                    Pw::Admin => salt_admin
-                        .as_deref()
-                        .unwrap_or(salt_user.as_slice()),
+                    Pw::Reset => salt_reset.as_deref().unwrap_or(salt_user.as_slice()),
+                    Pw::Admin => salt_admin.as_deref().unwrap_or(salt_user.as_slice()),
                 };
                 kdf_s2k_hash(*hash_algorithm, *iteration_count, salt, pin)
             }
@@ -1158,7 +1138,11 @@ pub enum OpenPgpPrivateKey {
 fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) -> Vec<u8> {
     let component_tlvs: Vec<(u32, &[u8])> = match private_key {
         OpenPgpPrivateKey::Rsa { e, p, q } => {
-            vec![(0x91, e.as_slice()), (0x92, p.as_slice()), (0x93, q.as_slice())]
+            vec![
+                (0x91, e.as_slice()),
+                (0x92, p.as_slice()),
+                (0x93, q.as_slice()),
+            ]
         }
         OpenPgpPrivateKey::RsaCrt {
             e,
@@ -1268,7 +1252,7 @@ fn pad_message(
                 SignHashAlgorithm::None => {
                     return Err(OpenPgpError::InvalidParameter(
                         "Hash algorithm required for RSA".into(),
-                    ))
+                    ));
                 }
             };
             let mut padded = header.to_vec();
@@ -1295,9 +1279,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         // SELECT OpenPGP application; auto-activate if needed
         match protocol.select(Aid::OPENPGP) {
             Ok(_) => {}
-            Err(SmartCardError::Apdu { sw, .. })
-                if sw == 0x6285 || sw == 0x6985 =>
-            {
+            Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6285 || sw == 0x6985 => {
                 protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
                 protocol.select(Aid::OPENPGP)?;
             }
@@ -1317,9 +1299,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         // SELECT OpenPGP application; auto-activate if needed
         match protocol.select(Aid::OPENPGP) {
             Ok(_) => {}
-            Err(SmartCardError::Apdu { sw, .. })
-                if sw == 0x6285 || sw == 0x6985 =>
-            {
+            Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6285 || sw == 0x6985 => {
                 protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
                 protocol.select(Aid::OPENPGP)?;
             }
@@ -1339,9 +1319,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 bcd(*bcd_bytes.get(1).unwrap_or(&0)),
                 bcd(*bcd_bytes.get(2).unwrap_or(&0)),
             ),
-            Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6985 => {
-                Version(1, 0, 0)
-            }
+            Err(SmartCardError::Apdu { sw: 0x6985, .. }) => Version(1, 0, 0),
             Err(e) => return Err(e.into()),
         };
         let version = patch_version(version);
@@ -1349,8 +1327,13 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         protocol.configure(version);
 
         // Cache application related data
-        let app_data_raw =
-            protocol.send_apdu(0, INS_GET_DATA, Do::ApplicationRelatedData.p1(), Do::ApplicationRelatedData.p2(), &[])?;
+        let app_data_raw = protocol.send_apdu(
+            0,
+            INS_GET_DATA,
+            Do::ApplicationRelatedData.p1(),
+            Do::ApplicationRelatedData.p2(),
+            &[],
+        )?;
         let app_data = ApplicationRelatedData::parse(&app_data_raw)?;
 
         Ok(Self {
@@ -1431,7 +1414,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     pub fn get_key_information(&mut self) -> Result<KeyInformation, OpenPgpError> {
-        Ok(self.get_application_related_data()?.discretionary.key_information)
+        Ok(self
+            .get_application_related_data()?
+            .discretionary
+            .key_information)
     }
 
     pub fn get_generation_times(&mut self) -> Result<GenerationTimes, OpenPgpError> {
@@ -1477,9 +1463,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 let attempts = self.get_pin_status()?.get_attempts(pw) as u32;
                 Err(OpenPgpError::InvalidPin(attempts))
             }
-            Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6983 => {
-                Err(OpenPgpError::PinBlocked)
-            }
+            Err(SmartCardError::Apdu { sw: 0x6983, .. }) => Err(OpenPgpError::PinBlocked),
             Err(e) => Err(e.into()),
         }
     }
@@ -1510,15 +1494,12 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         {
             Ok(_) => Ok(()),
             Err(SmartCardError::Apdu { sw, .. })
-                if sw == 0x6982
-                    || (sw == 0x6985 && self.version < Version(4, 0, 0)) =>
+                if sw == 0x6982 || (sw == 0x6985 && self.version < Version(4, 0, 0)) =>
             {
                 let attempts = self.get_pin_status()?.get_attempts(pw) as u32;
                 Err(OpenPgpError::InvalidPin(attempts))
             }
-            Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6983 => {
-                Err(OpenPgpError::PinBlocked)
-            }
+            Err(SmartCardError::Apdu { sw: 0x6983, .. }) => Err(OpenPgpError::PinBlocked),
             Err(e) => Err(e.into()),
         }
     }
@@ -1527,7 +1508,11 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.change_inner(Pw::User, pin, new_pin)
     }
 
-    pub fn change_admin(&mut self, admin_pin: &str, new_admin_pin: &str) -> Result<(), OpenPgpError> {
+    pub fn change_admin(
+        &mut self,
+        admin_pin: &str,
+        new_admin_pin: &str,
+    ) -> Result<(), OpenPgpError> {
         self.change_inner(Pw::Admin, admin_pin, new_admin_pin)
     }
 
@@ -1726,10 +1711,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
         let mut result: HashMap<KeyRef, Vec<AlgorithmAttributes>> = HashMap::new();
         for (tag, value) in &entries {
-            if let Some(&key) = slot_map.get(tag) {
-                if let Ok(attrs) = AlgorithmAttributes::parse(value) {
-                    result.entry(key).or_default().push(attrs);
-                }
+            if let Some(&key) = slot_map.get(tag)
+                && let Ok(attrs) = AlgorithmAttributes::parse(value)
+            {
+                result.entry(key).or_default().push(attrs);
             }
         }
 
@@ -1749,9 +1734,8 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     pub fn get_uif(&mut self, key_ref: KeyRef) -> Result<Uif, OpenPgpError> {
         if self.version >= Version(4, 2, 0) {
             let data = self.get_data(key_ref.uif_do())?;
-            Uif::parse(&data).ok_or_else(|| {
-                OpenPgpError::InvalidResponse("Invalid UIF value".into())
-            })
+            Uif::parse(&data)
+                .ok_or_else(|| OpenPgpError::InvalidResponse("Invalid UIF value".into()))
         } else {
             Ok(Uif::Off)
         }
@@ -1911,9 +1895,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     ) -> Result<Vec<u8>, OpenPgpError> {
         let attributes = self.get_algorithm_attributes(KeyRef::Sig)?;
         let padded = pad_message(&attributes, message, hash_algorithm)?;
-        let response = self
-            .protocol
-            .send_apdu(0, INS_PSO, 0x9E, 0x9A, &padded)?;
+        let response = self.protocol.send_apdu(0, INS_PSO, 0x9E, 0x9A, &padded)?;
         Ok(response)
     }
 
@@ -1931,9 +1913,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 tlv::tlv_encode(0xA6, &mid)
             }
         };
-        let response = self
-            .protocol
-            .send_apdu(0, INS_PSO, 0x80, 0x86, &data)?;
+        let response = self.protocol.send_apdu(0, INS_PSO, 0x80, 0x86, &data)?;
         Ok(response)
     }
 
@@ -1944,9 +1924,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     ) -> Result<Vec<u8>, OpenPgpError> {
         let attributes = self.get_algorithm_attributes(KeyRef::Aut)?;
         let padded = pad_message(&attributes, message, hash_algorithm)?;
-        let response = self
-            .protocol
-            .send_apdu(0, INS_INTERNAL_AUTHENTICATE, 0x00, 0x00, &padded)?;
+        let response =
+            self.protocol
+                .send_apdu(0, INS_INTERNAL_AUTHENTICATE, 0x00, 0x00, &padded)?;
         Ok(response)
     }
 
@@ -1980,18 +1960,14 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             require_version(self.version, Version(5, 2, 0), "ATT certificate")?;
             let data = self.get_data(Do::AttCertificate)?;
             if data.is_empty() {
-                return Err(OpenPgpError::InvalidResponse(
-                    "No certificate found".into(),
-                ));
+                return Err(OpenPgpError::InvalidResponse("No certificate found".into()));
             }
             return Ok(data);
         }
         self.select_certificate(key_ref)?;
         let data = self.get_data(Do::CardholderCertificate)?;
         if data.is_empty() {
-            return Err(OpenPgpError::InvalidResponse(
-                "No certificate found".into(),
-            ));
+            return Err(OpenPgpError::InvalidResponse("No certificate found".into()));
         }
         Ok(data)
     }
@@ -2054,11 +2030,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn require_version(
-    current: Version,
-    required: Version,
-    feature: &str,
-) -> Result<(), OpenPgpError> {
+fn require_version(current: Version, required: Version, feature: &str) -> Result<(), OpenPgpError> {
     if current < required {
         return Err(OpenPgpError::NotSupported(format!(
             "{feature} requires version {required} or later (current: {current})"
@@ -2335,8 +2307,10 @@ mod tests {
 
     #[test]
     fn test_pad_message_rsa_sha256() {
-        let attrs =
-            AlgorithmAttributes::Rsa(RsaAttributes::create(RsaSize::Rsa2048, RsaImportFormat::Standard));
+        let attrs = AlgorithmAttributes::Rsa(RsaAttributes::create(
+            RsaSize::Rsa2048,
+            RsaImportFormat::Standard,
+        ));
         let msg = b"test message";
         let padded = pad_message(&attrs, msg, SignHashAlgorithm::Sha256).unwrap();
         // PKCS1_SHA256 header (19 bytes) + SHA256 hash (32 bytes) = 51 bytes

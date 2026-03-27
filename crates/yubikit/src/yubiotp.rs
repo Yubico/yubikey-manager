@@ -30,16 +30,16 @@
 //! Provides configuration and challenge-response for the two OTP slots on a
 //! YubiKey, accessible over both SmartCard (CCID) and HID OTP transports.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use sha1::{Digest, Sha1};
 
 use crate::core_types::patch_version;
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
 use crate::otp::calculate_crc;
 #[cfg(test)]
 use crate::otp::check_crc;
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
 use crate::transport::otphid::OtpConnection;
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
@@ -243,15 +243,6 @@ const TKTFLAG_UPDATE_MASK: u8 = TktFlag::TAB_FIRST.0
 
 const CFGFLAG_UPDATE_MASK: u8 = CfgFlag::PACING_10MS.0 | CfgFlag::PACING_20MS.0;
 
-const EXTFLAG_UPDATE_MASK: u8 = ExtFlag::SERIAL_BTN_VISIBLE.0
-    | ExtFlag::SERIAL_USB_VISIBLE.0
-    | ExtFlag::SERIAL_API_VISIBLE.0
-    | ExtFlag::USE_NUMERIC_KEYPAD.0
-    | ExtFlag::FAST_TRIG.0
-    | ExtFlag::ALLOW_UPDATE.0
-    | ExtFlag::DORMANT.0
-    | ExtFlag::LED_INV.0;
-
 // ---------------------------------------------------------------------------
 // NdefType
 // ---------------------------------------------------------------------------
@@ -386,7 +377,7 @@ pub fn build_config(
     buf.extend_from_slice(&[0u8; 2]);
 
     // CRC (2 bytes, little-endian)
-    let crc = 0xFFFFu16 & !calculate_crc(&buf);
+    let crc = !calculate_crc(&buf);
     buf.extend_from_slice(&crc.to_le_bytes());
 
     debug_assert_eq!(buf.len(), CONFIG_SIZE);
@@ -400,11 +391,8 @@ pub fn build_update(
     cfg: u8,
     acc_code: Option<&[u8]>,
 ) -> Result<Vec<u8>, YubiOtpError> {
-    if ext & !EXTFLAG_UPDATE_MASK != 0 {
-        return Err(YubiOtpError::InvalidParameter(
-            "Unsupported ext flags for update".into(),
-        ));
-    }
+    // All ext flags are valid for update (EXTFLAG_UPDATE_MASK == 0xFF)
+    let _ = ext;
     if tkt & !TKTFLAG_UPDATE_MASK != 0 {
         return Err(YubiOtpError::InvalidParameter(
             "Unsupported tkt flags for update".into(),
@@ -437,10 +425,7 @@ pub fn build_ndef_config(
             let (id_code, remainder) = NDEF_URL_PREFIXES
                 .iter()
                 .enumerate()
-                .find_map(|(i, prefix)| {
-                    uri.strip_prefix(prefix)
-                        .map(|rest| ((i + 1) as u8, rest))
-                })
+                .find_map(|(i, prefix)| uri.strip_prefix(prefix).map(|rest| ((i + 1) as u8, rest)))
                 .unwrap_or((0, uri));
             let mut d = vec![id_code];
             d.extend_from_slice(remainder.as_bytes());
@@ -549,7 +534,11 @@ impl SlotConfiguration {
     // -- constructors ------------------------------------------------------
 
     /// Standard Yubico OTP configuration.
-    pub fn yubiotp(fixed: &[u8], uid: &[u8; UID_SIZE], key: &[u8; KEY_SIZE]) -> Result<Self, YubiOtpError> {
+    pub fn yubiotp(
+        fixed: &[u8],
+        uid: &[u8; UID_SIZE],
+        key: &[u8; KEY_SIZE],
+    ) -> Result<Self, YubiOtpError> {
         if fixed.len() > FIXED_SIZE {
             return Err(YubiOtpError::InvalidParameter(format!(
                 "fixed must be <= {FIXED_SIZE} bytes"
@@ -611,7 +600,8 @@ impl SlotConfiguration {
         let mut s = Self::new_keyboard_base();
         s.kind = SlotConfigKind::StaticPassword;
         s.fixed = padded[..FIXED_SIZE].to_vec();
-        s.uid.copy_from_slice(&padded[FIXED_SIZE..FIXED_SIZE + UID_SIZE]);
+        s.uid
+            .copy_from_slice(&padded[FIXED_SIZE..FIXED_SIZE + UID_SIZE]);
         s.key.copy_from_slice(&padded[FIXED_SIZE + UID_SIZE..]);
         s.cfg_flags |= CfgFlag::SHORT_TICKET.0;
         Ok(s)
@@ -791,7 +781,7 @@ impl SlotConfiguration {
 
     /// Set initial moving factor for HOTP.
     pub fn imf(mut self, imf: u32) -> Result<Self, YubiOtpError> {
-        if imf % 16 != 0 || imf > 0xFFFF0 {
+        if !imf.is_multiple_of(16) || imf > 0xFFFF0 {
             return Err(YubiOtpError::InvalidParameter(
                 "imf should be between 0 and 1048560, evenly divisible by 16".into(),
             ));
@@ -900,10 +890,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         Self::init(protocol, &status)
     }
 
-    fn init(
-        mut protocol: SmartCardProtocol<C>,
-        status: &[u8],
-    ) -> Result<Self, YubiOtpError> {
+    fn init(mut protocol: SmartCardProtocol<C>, status: &[u8]) -> Result<Self, YubiOtpError> {
         log::debug!("Opening YubiOtpSession (SmartCard)");
         let version = patch_version(Version::from_bytes(&status[..3]));
         let prog_seq = *status.get(3).unwrap_or(&0);
@@ -1096,7 +1083,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         }
         if self.prog_seq == 0 && prev_prog_seq > 0 {
             let version = Version::from_bytes(&status[..3]);
-            if status.get(4).map_or(true, |&b| b & 0x1F == 0) {
+            if status.get(4).is_none_or(|&b| b & 0x1F == 0) {
                 return Ok(status);
             }
             if version >= Version(5, 0, 0) && version < Version(5, 4, 3) {
@@ -1288,9 +1275,7 @@ impl YubiOtpOtpSession {
             on_keepalive,
         )?;
 
-        response.ok_or_else(|| {
-            YubiOtpError::BadResponse("No data in HMAC response".into())
-        })
+        response.ok_or_else(|| YubiOtpError::BadResponse("No data in HMAC response".into()))
     }
 
     // -- internal (pub for PyO3 wrapper) -------------------------------------
@@ -1307,7 +1292,8 @@ impl YubiOtpOtpSession {
             Some(ac) => data.extend_from_slice(ac),
             None => data.extend_from_slice(&[0u8; ACC_CODE_SIZE]),
         }
-        self.protocol.send_and_receive(slot as u8, Some(&data), None)?;
+        self.protocol
+            .send_and_receive(slot as u8, Some(&data), None)?;
         self.status = self.protocol.read_status()?;
         Ok(())
     }
@@ -1321,9 +1307,7 @@ impl YubiOtpOtpSession {
         let send_data = if data.is_empty() { None } else { Some(data) };
         self.protocol
             .send_and_receive(slot as u8, send_data, Some(expected_len as i32))?
-            .ok_or_else(|| {
-                YubiOtpError::BadResponse("Expected data response, got status".into())
-            })
+            .ok_or_else(|| YubiOtpError::BadResponse("Expected data response, got status".into()))
     }
 }
 
@@ -1337,29 +1321,13 @@ mod tests {
 
     #[test]
     fn test_build_config_size() {
-        let cfg = build_config(
-            b"test",
-            &[0u8; UID_SIZE],
-            &[0u8; KEY_SIZE],
-            0,
-            0,
-            0,
-            None,
-        );
+        let cfg = build_config(b"test", &[0u8; UID_SIZE], &[0u8; KEY_SIZE], 0, 0, 0, None);
         assert_eq!(cfg.len(), CONFIG_SIZE);
     }
 
     #[test]
     fn test_build_config_crc_valid() {
-        let cfg = build_config(
-            b"",
-            &[0u8; UID_SIZE],
-            &[0u8; KEY_SIZE],
-            0,
-            0,
-            0,
-            None,
-        );
+        let cfg = build_config(b"", &[0u8; UID_SIZE], &[0u8; KEY_SIZE], 0, 0, 0, None);
         // The CRC should be valid over the whole buffer
         assert!(check_crc(&cfg));
     }
@@ -1367,15 +1335,7 @@ mod tests {
     #[test]
     fn test_build_config_with_acc_code() {
         let acc = [1u8, 2, 3, 4, 5, 6];
-        let cfg = build_config(
-            b"",
-            &[0u8; UID_SIZE],
-            &[0u8; KEY_SIZE],
-            0,
-            0,
-            0,
-            Some(&acc),
-        );
+        let cfg = build_config(b"", &[0u8; UID_SIZE], &[0u8; KEY_SIZE], 0, 0, 0, Some(&acc));
         assert_eq!(cfg.len(), CONFIG_SIZE);
         assert!(check_crc(&cfg));
         // acc_code is at offset FIXED_SIZE + UID_SIZE + KEY_SIZE = 38
@@ -1407,13 +1367,15 @@ mod tests {
     #[test]
     fn test_build_update_validates_flags() {
         // Valid flags
-        assert!(build_update(
-            ExtFlag::ALLOW_UPDATE.0,
-            TktFlag::APPEND_CR.0,
-            CfgFlag::PACING_10MS.0,
-            None
-        )
-        .is_ok());
+        assert!(
+            build_update(
+                ExtFlag::ALLOW_UPDATE.0,
+                TktFlag::APPEND_CR.0,
+                CfgFlag::PACING_10MS.0,
+                None
+            )
+            .is_ok()
+        );
 
         // All ext flags are valid for update, so test tkt and cfg invalid flags
         assert!(build_update(0, TktFlag::PROTECT_CFG2.0, 0, None).is_err());
@@ -1560,10 +1522,7 @@ mod tests {
     #[test]
     fn test_hotp_imf() {
         let key = [0x42u8; HMAC_KEY_SIZE];
-        let cfg = SlotConfiguration::hotp(&key)
-            .unwrap()
-            .imf(1024)
-            .unwrap();
+        let cfg = SlotConfiguration::hotp(&key).unwrap().imf(1024).unwrap();
         // IMF 1024 → 1024 >> 4 = 64 → big-endian u16 = [0, 64]
         let data = cfg.get_config(None);
         // uid is at FIXED_SIZE..FIXED_SIZE+UID_SIZE, bytes 4 and 5 of uid

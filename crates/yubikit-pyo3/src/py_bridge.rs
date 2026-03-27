@@ -100,60 +100,52 @@ impl SmartCardConnection for PySmartCardConnection {
 pub fn smartcard_err(e: SmartCardError) -> PyErr {
     use pyo3::exceptions::*;
     Python::with_gil(|py| match &e {
-        SmartCardError::Apdu { data, sw } => {
-            match py.import("yubikit.core.smartcard") {
-                Ok(module) => match module.getattr("ApduError") {
-                    Ok(cls) => {
-                        let data_bytes = PyBytes::new(py, data);
-                        match cls.call1((data_bytes, *sw)) {
-                            Ok(exc) => PyErr::from_value(exc),
-                            Err(_) => PyRuntimeError::new_err(e.to_string()),
-                        }
-                    }
-                    Err(_) => PyRuntimeError::new_err(e.to_string()),
-                },
-                Err(_) => PyRuntimeError::new_err(e.to_string()),
-            }
-        }
-        SmartCardError::NotSupported(msg) => {
-            match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("NotSupportedError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
+        SmartCardError::Apdu { data, sw } => match py.import("yubikit.core.smartcard") {
+            Ok(module) => match module.getattr("ApduError") {
+                Ok(cls) => {
+                    let data_bytes = PyBytes::new(py, data);
+                    match cls.call1((data_bytes, *sw)) {
                         Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyValueError::new_err(msg.clone()),
-                    },
+                        Err(_) => PyRuntimeError::new_err(e.to_string()),
+                    }
+                }
+                Err(_) => PyRuntimeError::new_err(e.to_string()),
+            },
+            Err(_) => PyRuntimeError::new_err(e.to_string()),
+        },
+        SmartCardError::NotSupported(msg) => match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("NotSupportedError") {
+                Ok(cls) => match cls.call1((msg.clone(),)) {
+                    Ok(exc) => PyErr::from_value(exc),
                     Err(_) => PyValueError::new_err(msg.clone()),
                 },
                 Err(_) => PyValueError::new_err(msg.clone()),
-            }
-        }
-        SmartCardError::BadResponse(msg) => {
-            match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("BadResponseError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg.clone()),
-                    },
+            },
+            Err(_) => PyValueError::new_err(msg.clone()),
+        },
+        SmartCardError::BadResponse(msg) => match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("BadResponseError") {
+                Ok(cls) => match cls.call1((msg.clone(),)) {
+                    Ok(exc) => PyErr::from_value(exc),
                     Err(_) => PyRuntimeError::new_err(msg.clone()),
                 },
                 Err(_) => PyRuntimeError::new_err(msg.clone()),
-            }
-        }
+            },
+            Err(_) => PyRuntimeError::new_err(msg.clone()),
+        },
         SmartCardError::InvalidPin(retries) => {
             PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
         }
-        SmartCardError::ApplicationNotAvailable => {
-            match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("ApplicationNotAvailableError") {
-                    Ok(cls) => match cls.call0() {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err("Application not available"),
-                    },
+        SmartCardError::ApplicationNotAvailable => match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("ApplicationNotAvailableError") {
+                Ok(cls) => match cls.call0() {
+                    Ok(exc) => PyErr::from_value(exc),
                     Err(_) => PyRuntimeError::new_err("Application not available"),
                 },
                 Err(_) => PyRuntimeError::new_err("Application not available"),
-            }
-        }
+            },
+            Err(_) => PyRuntimeError::new_err("Application not available"),
+        },
         _ => PyRuntimeError::new_err(e.to_string()),
     })
 }
@@ -162,13 +154,8 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
 ///
 /// Inspects the Python object's class name to determine whether to use SCP03
 /// or SCP11, then extracts the necessary fields and calls the Rust init method.
-pub fn scp_key_params_from_py(
-    params: &Bound<'_, PyAny>,
-) -> PyResult<yubikit::scp::ScpKeyParams> {
-    let class_name = params
-        .get_type()
-        .name()?
-        .to_string();
+pub fn scp_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp::ScpKeyParams> {
+    let class_name = params.get_type().name()?.to_string();
 
     if class_name.contains("Scp03KeyParams") {
         scp03_key_params_from_py(params)
@@ -181,14 +168,18 @@ pub fn scp_key_params_from_py(
     }
 }
 
-fn scp03_key_params_from_py(
-    params: &Bound<'_, PyAny>,
-) -> PyResult<yubikit::scp::ScpKeyParams> {
+fn scp03_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp::ScpKeyParams> {
     let key_ref = params.getattr("ref")?;
     let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
     let keys = params.getattr("keys")?;
-    let key_enc: Vec<u8> = keys.getattr("key_enc")?.call_method0("__bytes__")?.extract()?;
-    let key_mac: Vec<u8> = keys.getattr("key_mac")?.call_method0("__bytes__")?.extract()?;
+    let key_enc: Vec<u8> = keys
+        .getattr("key_enc")?
+        .call_method0("__bytes__")?
+        .extract()?;
+    let key_mac: Vec<u8> = keys
+        .getattr("key_mac")?
+        .call_method0("__bytes__")?
+        .extract()?;
     let key_dek_obj = keys.getattr("key_dek")?;
     let key_dek: Option<Vec<u8>> = if key_dek_obj.is_none() {
         None
@@ -204,9 +195,7 @@ fn scp03_key_params_from_py(
     })
 }
 
-fn scp11_key_params_from_py(
-    params: &Bound<'_, PyAny>,
-) -> PyResult<yubikit::scp::ScpKeyParams> {
+fn scp11_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp::ScpKeyParams> {
     let key_ref = params.getattr("ref")?;
     let kid: u8 = key_ref.getattr("kid")?.extract()?;
     let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
@@ -277,10 +266,7 @@ pub fn init_scp_from_py<C: SmartCardConnection>(
     protocol: &mut SmartCardProtocol<C>,
     params: &Bound<'_, PyAny>,
 ) -> PyResult<()> {
-    let class_name = params
-        .get_type()
-        .name()?
-        .to_string();
+    let class_name = params.get_type().name()?.to_string();
 
     if class_name.contains("Scp03KeyParams") {
         init_scp03_from_py(protocol, params)
@@ -300,8 +286,14 @@ fn init_scp03_from_py<C: SmartCardConnection>(
     let key_ref = params.getattr("ref")?;
     let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
     let keys = params.getattr("keys")?;
-    let key_enc: Vec<u8> = keys.getattr("key_enc")?.call_method0("__bytes__")?.extract()?;
-    let key_mac: Vec<u8> = keys.getattr("key_mac")?.call_method0("__bytes__")?.extract()?;
+    let key_enc: Vec<u8> = keys
+        .getattr("key_enc")?
+        .call_method0("__bytes__")?
+        .extract()?;
+    let key_mac: Vec<u8> = keys
+        .getattr("key_mac")?
+        .call_method0("__bytes__")?
+        .extract()?;
     let key_dek_obj = keys.getattr("key_dek")?;
     let key_dek: Option<Vec<u8>> = if key_dek_obj.is_none() {
         None

@@ -1,10 +1,11 @@
 use std::io::{self, Write};
 
 use yubikit::device::YubiKeyDevice;
-use yubikit::smartcard::Transport;
 use yubikit::management::{
-    Capability, DeviceConfig, DeviceFlag, ManagementFidoSession, ManagementOtpSession, ManagementSession,
+    Capability, DeviceConfig, DeviceFlag, ManagementFidoSession, ManagementOtpSession,
+    ManagementSession,
 };
+use yubikit::smartcard::Transport;
 
 use crate::util::CliError;
 
@@ -246,8 +247,10 @@ pub fn run_nfc(
     }
 
     if restrict {
-        let mut config = DeviceConfig::default();
-        config.nfc_restricted = Some(true);
+        let config = DeviceConfig {
+            nfc_restricted: Some(true),
+            ..Default::default()
+        };
         let lc = lock_code.map(parse_lock_code).transpose()?;
         if !force {
             eprintln!("NFC configuration changes:");

@@ -96,7 +96,11 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
     }
 
     if let Ok(kdf) = session.get_kdf() {
-        let enabled = if matches!(kdf, yubikit::openpgp::Kdf::None) { "False" } else { "True" };
+        let enabled = if matches!(kdf, yubikit::openpgp::Kdf::None) {
+            "False"
+        } else {
+            "True"
+        };
         eprintln!("KDF enabled:                {enabled}");
     } else {
         eprintln!("KDF enabled:                False");
@@ -188,8 +192,7 @@ pub fn run_change_reset_code(
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
 ) -> Result<(), CliError> {
-    let rc = reset_code
-        .ok_or_else(|| CliError("--reset-code is required.".into()))?;
+    let rc = reset_code.ok_or_else(|| CliError("--reset-code is required.".into()))?;
     let ap = admin_pin.unwrap_or("12345678");
     let mut session = open_session(dev, scp_params)?;
     session
@@ -250,7 +253,11 @@ pub fn run_set_signature_policy(
     Ok(())
 }
 
-pub fn run_keys_info(dev: &YubiKeyDevice, scp_params: &ScpParams, key: &str) -> Result<(), CliError> {
+pub fn run_keys_info(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: &str,
+) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
     let mut session = open_session(dev, scp_params)?;
     if let Ok(attrs) = session.get_algorithm_attributes(key_ref) {
@@ -259,19 +266,17 @@ pub fn run_keys_info(dev: &YubiKeyDevice, scp_params: &ScpParams, key: &str) -> 
     if let Ok(uif) = session.get_uif(key_ref) {
         println!("Touch policy: {uif:?}");
     }
-    if let Ok(times) = session.get_generation_times() {
-        if let Some(t) = times.get(&key_ref) {
-            if *t > 0 {
-                println!("Generated: timestamp {t}");
-            }
-        }
+    if let Ok(times) = session.get_generation_times()
+        && let Some(t) = times.get(&key_ref)
+        && *t > 0
+    {
+        println!("Generated: timestamp {t}");
     }
-    if let Ok(fps) = session.get_fingerprints() {
-        if let Some(fp) = fps.get(&key_ref) {
-            if fp.iter().any(|&b| b != 0) {
-                println!("Fingerprint: {}", hex::encode(fp));
-            }
-        }
+    if let Ok(fps) = session.get_fingerprints()
+        && let Some(fp) = fps.get(&key_ref)
+        && fp.iter().any(|&b| b != 0)
+    {
+        println!("Fingerprint: {}", hex::encode(fp));
     }
     Ok(())
 }

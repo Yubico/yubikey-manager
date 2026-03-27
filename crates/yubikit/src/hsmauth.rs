@@ -224,10 +224,10 @@ fn validate_management_key(key: &[u8]) -> Result<(), HsmAuthError> {
 
 /// Map APDU errors to InvalidPin where applicable, otherwise propagate.
 fn map_pin_error(e: SmartCardError) -> HsmAuthError {
-    if let Some(sw) = e.sw() {
-        if let Some(retries) = retries_from_sw(sw) {
-            return HsmAuthError::InvalidPin(retries);
-        }
+    if let Some(sw) = e.sw()
+        && let Some(retries) = retries_from_sw(sw)
+    {
+        return HsmAuthError::InvalidPin(retries);
     }
     HsmAuthError::SmartCard(e)
 }
@@ -666,16 +666,14 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
 
         let mut data = tlv_encode(TAG_LABEL, &parse_label(label)?);
 
-        if let Some(pw) = credential_password {
-            if self.version >= Version(5, 7, 1) || self.version.0 == 0 {
-                let parsed_pw = parse_credential_password(pw)?;
-                data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_pw));
-            }
+        if let Some(pw) = credential_password
+            && (self.version >= Version(5, 7, 1) || self.version.0 == 0)
+        {
+            let parsed_pw = parse_credential_password(pw)?;
+            data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_pw));
         }
 
-        let response = self
-            .protocol
-            .send_apdu(0, INS_GET_CHALLENGE, 0, 0, &data)?;
+        let response = self.protocol.send_apdu(0, INS_GET_CHALLENGE, 0, 0, &data)?;
         Ok(response)
     }
 }

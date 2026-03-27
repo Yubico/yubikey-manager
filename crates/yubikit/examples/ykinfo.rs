@@ -11,15 +11,15 @@
 //!   cargo run -p yubikit --example ykinfo -- --reader ACR122
 
 use std::env;
-use yubikit::core_types::{set_override_version, Version};
-use yubikit::device::{list_devices, list_readers, open_reader, YubiKeyDevice};
+use yubikit::core_types::{Version, set_override_version};
+use yubikit::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
 use yubikit::hsmauth::HsmAuthSession;
-use yubikit::smartcard::Transport;
 use yubikit::management::{Capability, ReleaseType};
 use yubikit::oath::OathSession;
 use yubikit::openpgp::OpenPgpSession;
 use yubikit::piv::PivSession;
 use yubikit::securitydomain::SecurityDomainSession;
+use yubikit::smartcard::Transport;
 use yubikit::yubiotp::YubiOtpSession;
 
 fn main() {
@@ -98,10 +98,10 @@ fn main() {
     println!("Found {} YubiKey(s):\n", devices.len());
 
     for dev in &devices {
-        if let Some(s) = serial_filter {
-            if dev.serial() != Some(s) {
-                continue;
-            }
+        if let Some(s) = serial_filter
+            && dev.serial() != Some(s)
+        {
+            continue;
         }
 
         print_device_info(dev);
@@ -118,16 +118,25 @@ fn print_device_info(dev: &YubiKeyDevice) {
     let info = dev.info();
 
     println!("── {} ──", dev.name());
-    println!("  Serial:      {}", info.serial.map_or("N/A".into(), |s| s.to_string()));
+    println!(
+        "  Serial:      {}",
+        info.serial.map_or("N/A".into(), |s| s.to_string())
+    );
     println!("  Version:     {}", info.version);
     println!("  Form factor: {}", info.form_factor);
 
     if info.version == Version(0, 0, 1) {
         let real_version = info.version_qualifier.version;
-        println!("  Development device, overriding version to {}", real_version);
+        println!(
+            "  Development device, overriding version to {}",
+            real_version
+        );
         set_override_version(real_version);
     } else if info.version_qualifier.release_type != ReleaseType::Final {
-        println!("  Pre-release device, overriding version to {}", info.version);
+        println!(
+            "  Pre-release device, overriding version to {}",
+            info.version
+        );
         set_override_version(info.version);
     }
 
@@ -143,10 +152,10 @@ fn print_device_info(dev: &YubiKeyDevice) {
 
     // Capabilities
     for transport in [Transport::Usb, Transport::Nfc] {
-        if let Some(cap) = info.supported_capabilities.get(&transport) {
-            if !cap.is_empty() {
-                println!("  {transport:?} capabilities: {cap}");
-            }
+        if let Some(cap) = info.supported_capabilities.get(&transport)
+            && !cap.is_empty()
+        {
+            println!("  {transport:?} capabilities: {cap}");
         }
     }
 }

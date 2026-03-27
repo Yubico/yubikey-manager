@@ -20,8 +20,7 @@ fn open_session<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            PivSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+            PivSession::new(conn).map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
         }
         ref config => {
             let conn = dev
@@ -169,10 +168,11 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
                 warnings.push("WARNING: Using default PIN!");
             }
         }
-        Err(_) => match session.get_pin_attempts() {
-            Ok(n) => println!("PIN tries remaining:      {n}"),
-            Err(_) => {}
-        },
+        Err(_) => {
+            if let Ok(n) = session.get_pin_attempts() {
+                println!("PIN tries remaining:      {n}")
+            }
+        }
     }
 
     // PUK metadata
@@ -388,8 +388,8 @@ fn parse_dn_from_der(dn_content: &[u8]) -> String {
                 if let Ok((_, oid_off, oid_len, oid_end)) = parse_der_tlv(seq_data, 0) {
                     let oid = &seq_data[oid_off..oid_off + oid_len];
                     if let Ok((_, val_off, val_len, _)) = parse_der_tlv(seq_data, oid_end) {
-                        let value =
-                            std::str::from_utf8(&seq_data[val_off..val_off + val_len]).unwrap_or("?");
+                        let value = std::str::from_utf8(&seq_data[val_off..val_off + val_len])
+                            .unwrap_or("?");
                         let attr_name = oid_to_attr_name(oid);
                         parts.push(format!("{attr_name}={value}"));
                     }
@@ -696,7 +696,7 @@ pub fn run_keys_generate(
         "DER" => {
             write_file_or_stdout(output, &spki_der)?;
         }
-        "PEM" | _ => {
+        _ => {
             let pem = pem_encode("PUBLIC KEY", &spki_der);
             write_file_or_stdout(output, pem.as_bytes())?;
         }
@@ -753,7 +753,11 @@ pub fn run_keys_import(
     Ok(())
 }
 
-pub fn run_keys_info(dev: &YubiKeyDevice, scp_params: &ScpParams, slot: &str) -> Result<(), CliError> {
+pub fn run_keys_info(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    slot: &str,
+) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     let meta = session
@@ -804,19 +808,19 @@ pub fn run_keys_export(
     let mut session = open_session(dev, scp_params)?;
 
     // Try metadata first (5.3.0+)
-    if let Ok(meta) = session.get_slot_metadata(slot) {
-        if !meta.public_key_der.is_empty() {
-            let spki_der = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)?;
-            match format.to_ascii_uppercase().as_str() {
-                "DER" => write_file_or_stdout(output, &spki_der)?,
-                _ => {
-                    let pem = pem_encode("PUBLIC KEY", &spki_der);
-                    write_file_or_stdout(output, pem.as_bytes())?;
-                }
+    if let Ok(meta) = session.get_slot_metadata(slot)
+        && !meta.public_key_der.is_empty()
+    {
+        let spki_der = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)?;
+        match format.to_ascii_uppercase().as_str() {
+            "DER" => write_file_or_stdout(output, &spki_der)?,
+            _ => {
+                let pem = pem_encode("PUBLIC KEY", &spki_der);
+                write_file_or_stdout(output, pem.as_bytes())?;
             }
-            eprintln!("Public key exported to {output}.");
-            return Ok(());
         }
+        eprintln!("Public key exported to {output}.");
+        return Ok(());
     }
 
     Err(CliError(
@@ -1170,9 +1174,11 @@ pub fn run_certificates_generate(
             .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
         (kt, der)
     } else {
-        let metadata = session
-            .get_slot_metadata(slot)
-            .map_err(|e| CliError(format!("Failed to get slot metadata (is a key present?): {e}")))?;
+        let metadata = session.get_slot_metadata(slot).map_err(|e| {
+            CliError(format!(
+                "Failed to get slot metadata (is a key present?): {e}"
+            ))
+        })?;
         let kt = metadata.key_type;
         let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)?;
         (kt, spki)
@@ -1183,7 +1189,14 @@ pub fn run_certificates_generate(
     let serial = random_serial_number();
     let (not_before, not_after) = validity_dates(valid_days);
 
-    let tbs = build_tbs_certificate(&serial, &sig_alg_id, &subject_dn, &not_before, &not_after, &spki_der);
+    let tbs = build_tbs_certificate(
+        &serial,
+        &sig_alg_id,
+        &subject_dn,
+        &not_before,
+        &not_after,
+        &spki_der,
+    );
     let signature = sign_data(&mut session, slot, key_type, hash_alg, &tbs)?;
 
     let cert_der = der_sequence(&[&tbs, &sig_alg_id, &der_bit_string(&signature)]);
@@ -1235,9 +1248,11 @@ pub fn run_certificates_request(
             .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
         (kt, der)
     } else {
-        let metadata = session
-            .get_slot_metadata(slot)
-            .map_err(|e| CliError(format!("Failed to get slot metadata (is a key present?): {e}")))?;
+        let metadata = session.get_slot_metadata(slot).map_err(|e| {
+            CliError(format!(
+                "Failed to get slot metadata (is a key present?): {e}"
+            ))
+        })?;
         let kt = metadata.key_type;
         let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)?;
         (kt, spki)
@@ -1411,7 +1426,9 @@ fn signature_algorithm_id(key_type: KeyType, hash_alg: HashAlgorithm) -> Result<
             Ok(der_sequence(&[&der_oid(oid), &der_null()]))
         }
         KeyType::Ed25519 => Ok(der_sequence(&[&der_oid(OID_ED25519)])),
-        _ => Err(CliError(format!("Unsupported key type for signing: {key_type:?}"))),
+        _ => Err(CliError(format!(
+            "Unsupported key type for signing: {key_type:?}"
+        ))),
     }
 }
 
@@ -1568,7 +1585,9 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
             // Parse tag 0x86 containing the EC point
             let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
-                return Err(CliError(format!("Expected tag 0x86 for EC point, got 0x{tag:02X}")));
+                return Err(CliError(format!(
+                    "Expected tag 0x86 for EC point, got 0x{tag:02X}"
+                )));
             }
             let curve_oid = if key_type == KeyType::EccP256 {
                 OID_CURVE_P256
@@ -1584,11 +1603,15 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
             // Parse tag 0x81 (modulus) and 0x82 (exponent)
             let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
             if tag1 != 0x81 {
-                return Err(CliError(format!("Expected tag 0x81 for RSA modulus, got 0x{tag1:02X}")));
+                return Err(CliError(format!(
+                    "Expected tag 0x81 for RSA modulus, got 0x{tag1:02X}"
+                )));
             }
             let (tag2, exponent, _) = parse_device_tlv(device_bytes, end1)?;
             if tag2 != 0x82 {
-                return Err(CliError(format!("Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}")));
+                return Err(CliError(format!(
+                    "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
+                )));
             }
             // RSAPublicKey: SEQUENCE { INTEGER modulus, INTEGER exponent }
             let rsa_pub_key = der_sequence(&[&der_integer(&modulus), &der_integer(&exponent)]);
@@ -1599,7 +1622,9 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
         KeyType::Ed25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
-                return Err(CliError(format!("Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}")));
+                return Err(CliError(format!(
+                    "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
+                )));
             }
             let algo_id = der_sequence(&[&der_oid(OID_ED25519_KEY)]);
             Ok(der_sequence(&[&algo_id, &der_bit_string(&raw_key)]))
@@ -1607,7 +1632,9 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
         KeyType::X25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
-                return Err(CliError(format!("Expected tag 0x86 for X25519 key, got 0x{tag:02X}")));
+                return Err(CliError(format!(
+                    "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
+                )));
             }
             let algo_id = der_sequence(&[&der_oid(OID_X25519_KEY)]);
             Ok(der_sequence(&[&algo_id, &der_bit_string(&raw_key)]))
@@ -1718,16 +1745,16 @@ fn build_certification_request_info(subject_dn: &[u8], spki_der: &[u8]) -> Vec<u
 // ---------------------------------------------------------------------------
 
 const DIGEST_INFO_SHA256: &[u8] = &[
-    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
-    0x05, 0x00, 0x04, 0x20,
+    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
 ];
 const DIGEST_INFO_SHA384: &[u8] = &[
-    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02,
-    0x05, 0x00, 0x04, 0x30,
+    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
+    0x00, 0x04, 0x30,
 ];
 const DIGEST_INFO_SHA512: &[u8] = &[
-    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
-    0x05, 0x00, 0x04, 0x40,
+    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
+    0x00, 0x04, 0x40,
 ];
 
 fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {

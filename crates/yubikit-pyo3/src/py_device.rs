@@ -25,10 +25,10 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use pyo3::prelude::*;
-use pyo3::exceptions::PyRuntimeError;
-use yubikit::device;
 use crate::py_management_session::device_info_to_dict;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
+use yubikit::device;
 
 fn device_err(e: device::DeviceError) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
@@ -60,10 +60,8 @@ pub fn get_name(
     has_nfc: bool,
 ) -> PyResult<String> {
     use std::collections::HashMap;
+    use yubikit::management::{Capability, DeviceConfig, DeviceInfo, FormFactor, VersionQualifier};
     use yubikit::smartcard::{Transport, Version};
-    use yubikit::management::{
-        Capability, DeviceConfig, DeviceInfo, FormFactor, VersionQualifier,
-    };
 
     let ver = Version(version.0, version.1, version.2);
     let ff = FormFactor::from_code(form_factor);

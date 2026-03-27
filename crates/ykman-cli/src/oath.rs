@@ -72,7 +72,11 @@ fn is_hidden(cred: &Credential) -> bool {
     cred.issuer.as_deref().unwrap_or("").starts_with('_') || cred.name.starts_with('_')
 }
 
-pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams, password: Option<&str>) -> Result<(), CliError> {
+pub fn run_info(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    password: Option<&str>,
+) -> Result<(), CliError> {
     let session = open_session(dev, scp_params, password)?;
     println!("OATH version: {}", session.version());
     println!(
@@ -284,12 +288,12 @@ pub fn run_accounts_add(
             Some(i) => format!("{i}:{name}"),
             None => name.to_string(),
         };
-        if existing.iter().any(|c| format_cred_name(c) == display_name) {
-            if !confirm(&format!(
+        if existing.iter().any(|c| format_cred_name(c) == display_name)
+            && !confirm(&format!(
                 "A credential called {display_name} already exists, overwrite?"
-            )) {
-                return Err(CliError("Aborted by user.".into()));
-            }
+            ))
+        {
+            return Err(CliError("Aborted by user.".into()));
         }
     }
 

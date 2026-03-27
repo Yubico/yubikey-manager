@@ -54,9 +54,8 @@ fn parse_mgmt_key(s: Option<&str>) -> Result<Vec<u8>, CliError> {
 pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
     println!("YubiHSM Auth version:             {}", session.version());
-    match session.get_management_key_retries() {
-        Ok(retries) => println!("Management key retries remaining: {retries}/8"),
-        Err(_) => {}
+    if let Ok(retries) = session.get_management_key_retries() {
+        println!("Management key retries remaining: {retries}/8")
     }
     Ok(())
 }

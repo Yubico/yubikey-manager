@@ -37,3 +37,6 @@ hidapi = { version = "2" }
 
 [dev-dependencies]
 rstest = "0.25"
+
+[lints]
+workspace = true

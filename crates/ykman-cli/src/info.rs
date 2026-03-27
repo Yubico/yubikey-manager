@@ -1,6 +1,6 @@
 use yubikit::device::YubiKeyDevice;
-use yubikit::smartcard::Transport;
 use yubikit::management::Capability;
+use yubikit::smartcard::Transport;
 
 use crate::util::CliError;
 
@@ -21,7 +21,8 @@ pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     }
 
     // Show USB interfaces only when connected via USB (YubiKey reader, not NFC)
-    let is_usb = dev.reader_name()
+    let is_usb = dev
+        .reader_name()
         .map(|r| r.to_ascii_lowercase().contains("yubi"))
         .unwrap_or(false)
         || dev.hid_path().is_some();

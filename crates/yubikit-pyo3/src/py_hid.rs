@@ -1,8 +1,8 @@
 use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit::transport::otphid as hid;
 use yubikit::transport::ctaphid;
+use yubikit::transport::otphid as hid;
 
 fn hid_err(e: hid::HidError) -> PyErr {
     PyOSError::new_err(e.to_string())
@@ -150,9 +150,10 @@ impl FidoConnection {
 
     /// Send a CTAP HID command and receive the response.
     fn call<'py>(&self, py: Python<'py>, cmd: u8, data: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
-        let conn = self.inner.as_ref().ok_or_else(|| {
-            PyOSError::new_err("Connection is closed")
-        })?;
+        let conn = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
         let response = conn.call(cmd, data).map_err(ctap_err)?;
         Ok(PyBytes::new(py, &response))
     }

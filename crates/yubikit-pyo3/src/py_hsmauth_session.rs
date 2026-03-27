@@ -1,14 +1,14 @@
 use pyo3::prelude::*;
 use yubikit::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
 
-use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
 fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         hsmauth::HsmAuthError::SmartCard(sc) => smartcard_err(sc),
-        hsmauth::HsmAuthError::InvalidPin(retries) => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
+        hsmauth::HsmAuthError::InvalidPin(retries) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((retries,)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -22,12 +22,11 @@ fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
                         retries
                     )),
                 },
-                Err(_) => PyValueError::new_err(format!(
-                    "Invalid PIN, {} attempts remaining",
-                    retries
-                )),
-            }
-        }),
+                Err(_) => {
+                    PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
+                }
+            })
+        }
         hsmauth::HsmAuthError::NotSupported(msg) => PyRuntimeError::new_err(msg),
         hsmauth::HsmAuthError::InvalidParameter(msg) => PyValueError::new_err(msg),
         other => PyRuntimeError::new_err(other.to_string()),
@@ -48,7 +47,10 @@ pub struct HsmAuthSession {
 impl HsmAuthSession {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
-    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -68,9 +70,8 @@ impl HsmAuthSession {
 
     #[setter]
     fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner.set_version(yubikit::smartcard::Version(
-            version.0, version.1, version.2,
-        ));
+        self.inner
+            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
     }
 
     fn reset(&mut self) -> PyResult<()> {
@@ -226,9 +227,7 @@ impl HsmAuthSession {
     }
 
     fn get_management_key_retries(&mut self) -> PyResult<u32> {
-        self.inner
-            .get_management_key_retries()
-            .map_err(hsmauth_err)
+        self.inner.get_management_key_retries().map_err(hsmauth_err)
     }
 
     /// Calculate symmetric session keys.
@@ -262,9 +261,8 @@ impl HsmAuthSession {
         use elliptic_curve::sec1::FromEncodedPoint;
         let point = p256::EncodedPoint::from_bytes(peer_public_key)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let pk = Option::from(p256::PublicKey::from_encoded_point(&point)).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err("Invalid P-256 public key")
-        })?;
+        let pk = Option::from(p256::PublicKey::from_encoded_point(&point))
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid P-256 public key"))?;
         let keys = self
             .inner
             .calculate_session_keys_asymmetric(

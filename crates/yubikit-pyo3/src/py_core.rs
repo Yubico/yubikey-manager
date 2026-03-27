@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikit::{core_types, smartcard, otp, tlv};
+use yubikit::{core_types, otp, smartcard, tlv};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {
@@ -37,7 +37,7 @@ fn tlv_encode(tag: u32, value: &[u8]) -> Vec<u8> {
 #[pyo3(signature = (value, min_len=1))]
 fn int2bytes<'py>(value: &Bound<'py, PyAny>, min_len: usize) -> PyResult<Bound<'py, PyAny>> {
     let bit_length: usize = value.call_method0("bit_length")?.extract()?;
-    let byte_len = std::cmp::max(min_len, (bit_length + 7) / 8);
+    let byte_len = std::cmp::max(min_len, bit_length.div_ceil(8));
     value.call_method1("to_bytes", (byte_len, "big"))
 }
 
@@ -49,14 +49,12 @@ fn bytes2int<'py>(py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyAny>> {
 
 #[pyfunction]
 fn oid_to_string(data: &[u8]) -> PyResult<String> {
-    tlv::oid_to_string(data)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    tlv::oid_to_string(data).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction]
 fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
-    tlv::oid_from_string(data)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    tlv::oid_from_string(data).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction]
@@ -67,7 +65,13 @@ fn format_short_apdu(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u8) -> P
 
 #[pyfunction]
 fn format_extended_apdu(
-    cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u16, max_apdu_size: usize,
+    cla: u8,
+    ins: u8,
+    p1: u8,
+    p2: u8,
+    data: &[u8],
+    le: u16,
+    max_apdu_size: usize,
 ) -> PyResult<Vec<u8>> {
     smartcard::format_extended_apdu(cla, ins, p1, p2, data, le, max_apdu_size)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))

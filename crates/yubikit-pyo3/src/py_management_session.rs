@@ -1,14 +1,12 @@
 use pyo3::prelude::*;
 use yubikit::management::{
-    DeviceInfo,
-    ManagementFidoSession as RustManagementFidoSession,
-    ManagementOtpSession as RustManagementOtpSession,
-    ManagementSession as RustManagementSession,
+    DeviceInfo, ManagementFidoSession as RustManagementFidoSession,
+    ManagementOtpSession as RustManagementOtpSession, ManagementSession as RustManagementSession,
 };
 use yubikit::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
 use yubikit::transport::otphid::OtpConnection;
 
-use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
 pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
     let dict = pyo3::types::PyDict::new(py);
@@ -47,10 +45,7 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
         "challenge_response_timeout",
         info.config.challenge_response_timeout,
     )?;
-    dict.set_item(
-        "device_flags",
-        info.config.device_flags.map(|f| f.0),
-    )?;
+    dict.set_item("device_flags", info.config.device_flags.map(|f| f.0))?;
     dict.set_item("nfc_restricted", info.config.nfc_restricted)?;
 
     if let Some(v) = info.fps_version {
@@ -80,11 +75,15 @@ pub struct ManagementSession {
 impl ManagementSession {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
-    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = RustManagementSession::new_with_scp(conn, &scp_params).map_err(smartcard_err)?;
+            let inner =
+                RustManagementSession::new_with_scp(conn, &scp_params).map_err(smartcard_err)?;
             Ok(Self { inner })
         } else {
             let inner = RustManagementSession::new(conn).map_err(smartcard_err)?;
@@ -112,7 +111,10 @@ impl ManagementSession {
 
     /// Read device info without version check (for dev device version override).
     fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info_unchecked().map_err(smartcard_err)?;
+        let info = self
+            .inner
+            .read_device_info_unchecked()
+            .map_err(smartcard_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -132,8 +134,8 @@ impl ManagementSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
-        use yubikit::smartcard::Transport;
         use yubikit::management::{Capability, DeviceConfig, DeviceFlag};
+        use yubikit::smartcard::Transport;
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {
@@ -227,7 +229,10 @@ impl ManagementOtpSession {
     }
 
     fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info_unchecked().map_err(smartcard_err)?;
+        let info = self
+            .inner
+            .read_device_info_unchecked()
+            .map_err(smartcard_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -244,8 +249,8 @@ impl ManagementOtpSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
-        use yubikit::smartcard::Transport;
         use yubikit::management::{Capability, DeviceConfig, DeviceFlag};
+        use yubikit::smartcard::Transport;
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {
@@ -323,7 +328,10 @@ impl ManagementFidoSession {
     }
 
     fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info_unchecked().map_err(smartcard_err)?;
+        let info = self
+            .inner
+            .read_device_info_unchecked()
+            .map_err(smartcard_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -340,8 +348,8 @@ impl ManagementFidoSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
-        use yubikit::smartcard::Transport;
         use yubikit::management::{Capability, DeviceConfig, DeviceFlag};
+        use yubikit::smartcard::Transport;
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {
@@ -386,16 +394,11 @@ impl ManagementFidoSession {
 }
 
 fn find_fido_device(path: &str) -> PyResult<FidoDeviceInfo> {
-    let devices = list_fido_devices()
-        .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
-    devices
-        .into_iter()
-        .find(|d| d.path == path)
-        .ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(format!(
-                "No FIDO device found at path: {path}"
-            ))
-        })
+    let devices =
+        list_fido_devices().map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    devices.into_iter().find(|d| d.path == path).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("No FIDO device found at path: {path}"))
+    })
 }
 
 /// List FIDO HID devices.
@@ -403,8 +406,8 @@ fn find_fido_device(path: &str) -> PyResult<FidoDeviceInfo> {
 /// Returns a list of dicts with 'path' and 'pid' keys.
 #[pyfunction]
 pub fn py_list_fido_devices(py: Python<'_>) -> PyResult<PyObject> {
-    let devices = list_fido_devices()
-        .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    let devices =
+        list_fido_devices().map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
     let list = pyo3::types::PyList::empty(py);
     for dev in devices {
         let dict = pyo3::types::PyDict::new(py);

@@ -122,33 +122,35 @@ impl OtpProtocol {
     ) -> PyResult<Option<Vec<u8>>> {
         let _ = event;
         let _ = on_keepalive;
-        self.inner.send_and_receive(slot, data, expected_len).map_err(|e| match e {
-            YubiOtpError::CommandRejected(msg) => Python::with_gil(|py| {
-                match py.import("yubikit.core.otp") {
-                    Ok(module) => match module.getattr("CommandRejectedError") {
-                        Ok(cls) => match cls.call1((msg.clone(),)) {
-                            Ok(exc) => PyErr::from_value(exc),
+        self.inner
+            .send_and_receive(slot, data, expected_len)
+            .map_err(|e| match e {
+                YubiOtpError::CommandRejected(msg) => {
+                    Python::with_gil(|py| match py.import("yubikit.core.otp") {
+                        Ok(module) => match module.getattr("CommandRejectedError") {
+                            Ok(cls) => match cls.call1((msg.clone(),)) {
+                                Ok(exc) => PyErr::from_value(exc),
+                                Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+                            },
                             Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
                         },
                         Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+                    })
                 }
-            }),
-            YubiOtpError::Timeout(msg) => Python::with_gil(|py| {
-                match py.import("yubikit.core") {
-                    Ok(module) => match module.getattr("TimeoutError") {
-                        Ok(cls) => match cls.call1((msg.clone(),)) {
-                            Ok(exc) => PyErr::from_value(exc),
+                YubiOtpError::Timeout(msg) => {
+                    Python::with_gil(|py| match py.import("yubikit.core") {
+                        Ok(module) => match module.getattr("TimeoutError") {
+                            Ok(cls) => match cls.call1((msg.clone(),)) {
+                                Ok(exc) => PyErr::from_value(exc),
+                                Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+                            },
                             Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
                         },
                         Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+                    })
                 }
-            }),
-            _ => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
-        })
+                _ => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
+            })
     }
 
     fn read_status(&self) -> PyResult<Vec<u8>> {

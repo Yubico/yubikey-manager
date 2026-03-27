@@ -1,17 +1,16 @@
 use pyo3::prelude::*;
 use yubikit::piv::{
-    self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot,
-    TouchPolicy,
+    self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot, TouchPolicy,
 };
 
-use crate::py_bridge::{scp_key_params_from_py, PySmartCardConnection, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         piv::PivError::SmartCard(sc) => smartcard_err(sc),
-        piv::PivError::InvalidPin(retries) => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
+        piv::PivError::InvalidPin(retries) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((retries,)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -25,14 +24,13 @@ fn piv_err(e: piv::PivError) -> PyErr {
                         retries
                     )),
                 },
-                Err(_) => PyValueError::new_err(format!(
-                    "Invalid PIN, {} attempts remaining",
-                    retries
-                )),
-            }
-        }),
-        piv::PivError::NotSupported(msg) => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
+                Err(_) => {
+                    PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
+                }
+            })
+        }
+        piv::PivError::NotSupported(msg) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -41,27 +39,26 @@ fn piv_err(e: piv::PivError) -> PyErr {
                     Err(_) => PyRuntimeError::new_err(msg),
                 },
                 Err(_) => PyRuntimeError::new_err(msg),
-            }
-        }),
-        piv::PivError::BadResponse(msg) => Python::with_gil(|py| {
-            match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("BadResponseError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
+            })
+        }
+        piv::PivError::BadResponse(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("BadResponseError") {
+                Ok(cls) => match cls.call1((msg.clone(),)) {
+                    Ok(exc) => PyErr::from_value(exc),
                     Err(_) => PyRuntimeError::new_err(msg),
                 },
                 Err(_) => PyRuntimeError::new_err(msg),
-            }
+            },
+            Err(_) => PyRuntimeError::new_err(msg),
         }),
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }
 
 fn parse_slot(v: u8) -> PyResult<Slot> {
-    Slot::from_u8(v)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("Invalid slot: 0x{:02X}", v)))
+    Slot::from_u8(v).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid slot: 0x{:02X}", v))
+    })
 }
 
 fn parse_key_type(v: u8) -> PyResult<KeyType> {
@@ -72,10 +69,7 @@ fn parse_key_type(v: u8) -> PyResult<KeyType> {
 
 fn parse_mgmt_key_type(v: u8) -> PyResult<ManagementKeyType> {
     ManagementKeyType::from_u8(v).ok_or_else(|| {
-        pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid management key type: 0x{:02X}",
-            v
-        ))
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid management key type: 0x{:02X}", v))
     })
 }
 
@@ -100,7 +94,10 @@ pub struct PivSession {
 impl PivSession {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
-    fn new(connection: &Bound<'_, PyAny>, scp_key_params: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -158,11 +155,7 @@ impl PivSession {
     }
 
     #[pyo3(signature = (temporary_pin=false, check_only=false))]
-    fn verify_uv(
-        &mut self,
-        temporary_pin: bool,
-        check_only: bool,
-    ) -> PyResult<Option<Vec<u8>>> {
+    fn verify_uv(&mut self, temporary_pin: bool, check_only: bool) -> PyResult<Option<Vec<u8>>> {
         self.inner
             .verify_uv(temporary_pin, check_only)
             .map_err(piv_err)
@@ -296,9 +289,7 @@ impl PivSession {
         let kt = parse_key_type(key_type)?;
         let pp = parse_pin_policy(pin_policy)?;
         let tp = parse_touch_policy(touch_policy)?;
-        self.inner
-            .put_key(s, kt, key_der, pp, tp)
-            .map_err(piv_err)
+        self.inner.put_key(s, kt, key_der, pp, tp).map_err(piv_err)
     }
 
     /// Generate a key pair. Returns public key bytes.
@@ -313,9 +304,7 @@ impl PivSession {
         let kt = parse_key_type(key_type)?;
         let pp = parse_pin_policy(pin_policy)?;
         let tp = parse_touch_policy(touch_policy)?;
-        self.inner
-            .generate_key(s, kt, pp, tp)
-            .map_err(piv_err)
+        self.inner.generate_key(s, kt, pp, tp).map_err(piv_err)
     }
 
     /// Attest a key in a slot. Returns DER certificate.

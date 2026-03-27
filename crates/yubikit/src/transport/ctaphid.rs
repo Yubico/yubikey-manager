@@ -206,8 +206,7 @@ impl FidoConnection {
 
         // Perform INIT to allocate a channel
         let mut nonce = [0u8; 8];
-        getrandom::fill(&mut nonce)
-            .map_err(|_| CtapHidTransportError::InvalidResponse)?;
+        getrandom::fill(&mut nonce).map_err(|_| CtapHidTransportError::InvalidResponse)?;
         let response = conn.call_raw(CtapHidCommand::Init as u8, &nonce)?;
 
         if response.len() < 17 {
@@ -217,12 +216,7 @@ impl FidoConnection {
             return Err(CtapHidTransportError::WrongNonce);
         }
 
-        let channel_id = u32::from_be_bytes([
-            response[8],
-            response[9],
-            response[10],
-            response[11],
-        ]);
+        let channel_id = u32::from_be_bytes([response[8], response[9], response[10], response[11]]);
         let _u2fhid_version = response[12];
         let v1 = response[13];
         let v2 = response[14];
@@ -303,8 +297,7 @@ impl FidoConnection {
                 // Continuation packet: CID(4) + SEQ(1) + DATA
                 packet.extend_from_slice(&self.channel_id.to_be_bytes());
                 packet.push(seq & 0x7F);
-                let payload_size =
-                    (self.packet_size - CONT_HEADER_SIZE).min(remaining.len());
+                let payload_size = (self.packet_size - CONT_HEADER_SIZE).min(remaining.len());
                 packet.extend_from_slice(&remaining[..payload_size]);
                 remaining = &remaining[payload_size..];
                 seq += 1;
@@ -354,8 +347,7 @@ impl FidoConnection {
                     return Err(CtapHidTransportError::InvalidResponse);
                 }
                 let r_cmd = payload[0];
-                r_len =
-                    u16::from_be_bytes([payload[1], payload[2]]) as usize;
+                r_len = u16::from_be_bytes([payload[1], payload[2]]) as usize;
                 let data = &payload[3..];
 
                 if r_cmd == TYPE_INIT | CtapHidCommand::Keepalive as u8 {

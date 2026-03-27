@@ -1,7 +1,7 @@
 use yubikit::core_types::Version;
 use yubikit::device::YubiKeyDevice;
-use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use yubikit::management::Capability;
+use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 use crate::scp::{self, ScpParams};
 use crate::util::CliError;
@@ -97,7 +97,10 @@ fn app_to_aid(app: &str) -> Result<&'static [u8], CliError> {
 }
 
 fn hex_spaced(data: &[u8]) -> String {
-    data.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+    data.iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Print response in the same format as Python ykman.
@@ -247,12 +250,12 @@ pub fn run_apdu(
 
         print_response(&resp, sw, no_pretty);
 
-        if let Some(expected) = expected_sw {
-            if sw != expected {
-                return Err(CliError(format!(
-                    "Aborted due to error (expected SW={expected:04X})."
-                )));
-            }
+        if let Some(expected) = expected_sw
+            && sw != expected
+        {
+            return Err(CliError(format!(
+                "Aborted due to error (expected SW={expected:04X})."
+            )));
         }
     }
     Ok(())

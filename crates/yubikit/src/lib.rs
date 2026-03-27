@@ -28,7 +28,6 @@
 pub mod core_types;
 pub mod device;
 pub mod hsmauth;
-pub mod smartcard;
 pub mod logging;
 pub mod management;
 pub mod oath;
@@ -37,6 +36,7 @@ pub mod otp;
 pub mod piv;
 pub mod scp;
 pub mod securitydomain;
+pub mod smartcard;
 pub mod tlv;
 pub mod transport;
 pub mod yubiotp;

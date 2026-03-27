@@ -59,8 +59,8 @@ pub enum ScpError {
 
 /// Compute AES-CMAC over data.
 pub fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
-    let mut mac =
-        <Cmac<Aes128> as Mac>::new_from_slice(key).map_err(|e| ScpError::CmacInit(e.to_string()))?;
+    let mut mac = <Cmac<Aes128> as Mac>::new_from_slice(key)
+        .map_err(|e| ScpError::CmacInit(e.to_string()))?;
     mac.update(data);
     Ok(mac.finalize().into_bytes().into())
 }
@@ -71,8 +71,8 @@ fn calculate_mac_inner(
     chain: &[u8],
     message: &[u8],
 ) -> Result<([u8; 16], [u8; 8]), ScpError> {
-    let mut mac =
-        <Cmac<Aes128> as Mac>::new_from_slice(key).map_err(|e| ScpError::CmacInit(e.to_string()))?;
+    let mut mac = <Cmac<Aes128> as Mac>::new_from_slice(key)
+        .map_err(|e| ScpError::CmacInit(e.to_string()))?;
     mac.update(chain);
     mac.update(message);
     let result = mac.finalize().into_bytes();
@@ -114,8 +114,7 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 fn derive_iv(key: &[u8], counter: u32, response: bool) -> Result<[u8; 16], ScpError> {
-    let mut cipher =
-        Aes128::new_from_slice(key).map_err(|e| ScpError::AesInit(e.to_string()))?;
+    let mut cipher = Aes128::new_from_slice(key).map_err(|e| ScpError::AesInit(e.to_string()))?;
     let mut iv_input = [0u8; 16];
     iv_input[0] = if response { 0x80 } else { 0x00 };
     iv_input[12..16].copy_from_slice(&counter.to_be_bytes());
@@ -131,8 +130,8 @@ fn aes_cbc_encrypt(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, ScpError> {
     let iv = derive_iv(key, counter, response)?;
-    let encryptor = Aes128CbcEnc::new_from_slices(key, &iv)
-        .map_err(|e| ScpError::CbcInit(e.to_string()))?;
+    let encryptor =
+        Aes128CbcEnc::new_from_slices(key, &iv).map_err(|e| ScpError::CbcInit(e.to_string()))?;
     Ok(encryptor.encrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(plaintext))
 }
 
@@ -143,8 +142,8 @@ fn aes_cbc_decrypt(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, ScpError> {
     let iv = derive_iv(key, counter, response)?;
-    let decryptor = Aes128CbcDec::new_from_slices(key, &iv)
-        .map_err(|e| ScpError::CbcInit(e.to_string()))?;
+    let decryptor =
+        Aes128CbcDec::new_from_slices(key, &iv).map_err(|e| ScpError::CbcInit(e.to_string()))?;
     decryptor
         .decrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(ciphertext)
         .map_err(|e| ScpError::CbcDecrypt(e.to_string()))
@@ -209,8 +208,7 @@ impl ScpState {
         let mut rmac_input = msg.to_vec();
         rmac_input.extend_from_slice(&sw_bytes);
 
-        let (_, expected_mac) =
-            calculate_mac_inner(&self.key_srmac, &self.mac_chain, &rmac_input)?;
+        let (_, expected_mac) = calculate_mac_inner(&self.key_srmac, &self.mac_chain, &rmac_input)?;
 
         if !bool::from(mac.ct_eq(&expected_mac)) {
             return Err(ScpError::WrongMac);
@@ -220,8 +218,7 @@ impl ScpState {
 
     /// Decrypt response data and remove padding.
     pub fn decrypt(&self, encrypted: &[u8]) -> Result<Vec<u8>, ScpError> {
-        let decrypted =
-            aes_cbc_decrypt(&self.key_senc, self.enc_counter - 1, true, encrypted)?;
+        let decrypted = aes_cbc_decrypt(&self.key_senc, self.enc_counter - 1, true, encrypted)?;
 
         let unpadded = decrypted
             .iter()
