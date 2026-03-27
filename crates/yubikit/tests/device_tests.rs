@@ -185,6 +185,10 @@ fn scp_params(tc: &TestConnection) -> Option<&'static (u8, u8, Vec<u8>)> {
 }
 
 fn should_skip(tc: &TestConnection) -> Option<String> {
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        return Some("YUBIKEY_SERIAL not set".into());
+    }
+
     match tc {
         TestConnection::UsbSmartCard | TestConnection::UsbOtp => None,
         TestConnection::UsbSmartCardScp11b => {
@@ -284,6 +288,10 @@ fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::scp::ScpKeyParam
 
 #[test]
 fn test_list_devices_finds_key() {
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        eprintln!("  SKIP: YUBIKEY_SERIAL not set");
+        return;
+    }
     let serial = required_serial();
     let devices = list_devices().expect("list_devices");
     assert!(
@@ -299,8 +307,8 @@ fn test_list_devices_finds_key() {
 #[case(TestConnection::NfcSmartCard)]
 #[case(TestConnection::NfcSmartCardScp11b)]
 fn test_management_read_device_info(#[case] tc: TestConnection) {
-    require_version!(Version(4, 1, 0));
     skip_if_needed!(tc);
+    require_version!(Version(4, 1, 0));
     match tc {
         TestConnection::UsbOtp => {
             use yubikit::management::ManagementOtpSession;
@@ -339,6 +347,10 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
 
 #[test]
 fn test_management_device_info_capabilities() {
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        eprintln!("  SKIP: YUBIKEY_SERIAL not set");
+        return;
+    }
     let (_, info) = get_device_and_info();
     let caps = info
         .supported_capabilities
@@ -370,8 +382,8 @@ mod oath {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_oath_session_version(#[case] tc: TestConnection) {
-        require_capability!(Capability::OATH);
         skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
         let session = open_oath_session(&tc);
         let _v = session.version();
         eprintln!("  PASS {tc:?}");
@@ -383,8 +395,8 @@ mod oath {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_oath_reset_and_list(#[case] tc: TestConnection) {
-        require_capability!(Capability::OATH);
         skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
         let mut session = open_oath_session(&tc);
         session.reset().expect("reset");
 
@@ -399,8 +411,8 @@ mod oath {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_oath_put_list_delete(#[case] tc: TestConnection) {
-        require_capability!(Capability::OATH);
         skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
         let mut session = open_oath_session(&tc);
         session.reset().expect("reset");
 
@@ -438,8 +450,8 @@ mod oath {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_oath_calculate_all(#[case] tc: TestConnection) {
-        require_capability!(Capability::OATH);
         skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
         let mut session = open_oath_session(&tc);
         session.reset().expect("reset");
 
@@ -491,8 +503,8 @@ mod piv {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_piv_session_version(#[case] tc: TestConnection) {
-        require_capability!(Capability::PIV);
         skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
         let session = open_piv_session(&tc);
         let _v = session.version();
         eprintln!("  PASS {tc:?}");
@@ -504,8 +516,8 @@ mod piv {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_piv_verify_default_pin(#[case] tc: TestConnection) {
-        require_capability!(Capability::PIV);
         skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
 
@@ -519,8 +531,8 @@ mod piv {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_piv_pin_attempts(#[case] tc: TestConnection) {
-        require_capability!(Capability::PIV);
         skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
 
@@ -552,8 +564,8 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_session_version(#[case] tc: TestConnection) {
-        require_capability!(Capability::OPENPGP);
         skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
         let session = open_openpgp_session(&tc);
         let _v = session.version();
         eprintln!("  PASS {tc:?}");
@@ -565,8 +577,8 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
-        require_capability!(Capability::OPENPGP);
         skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
         let mut session = open_openpgp_session(&tc);
         let app_data = session
             .get_application_related_data()
@@ -585,8 +597,8 @@ mod openpgp {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
-        require_capability!(Capability::OPENPGP);
         skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
         let mut session = open_openpgp_session(&tc);
         match session.get_challenge(8) {
             Ok(challenge) => {
@@ -614,8 +626,8 @@ mod yubiotp {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_yubiotp_session_version(#[case] tc: TestConnection) {
-        require_capability!(Capability::OTP);
         skip_if_needed!(tc);
+        require_capability!(Capability::OTP);
         match tc {
             TestConnection::UsbOtp => {
                 let (dev, _) = get_device_and_info();
@@ -660,8 +672,8 @@ mod hsmauth {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_hsmauth_session_version(#[case] tc: TestConnection) {
-        require_capability!(Capability::HSMAUTH);
         skip_if_needed!(tc);
+        require_capability!(Capability::HSMAUTH);
         let session = open_hsmauth_session(&tc);
         let _v = session.version();
         eprintln!("  PASS {tc:?}");
@@ -673,8 +685,8 @@ mod hsmauth {
     #[case(TestConnection::NfcSmartCard)]
     #[case(TestConnection::NfcSmartCardScp11b)]
     fn test_hsmauth_reset_and_list(#[case] tc: TestConnection) {
-        require_capability!(Capability::HSMAUTH);
         skip_if_needed!(tc);
+        require_capability!(Capability::HSMAUTH);
         let mut session = open_hsmauth_session(&tc);
         session.reset().expect("reset");
 
