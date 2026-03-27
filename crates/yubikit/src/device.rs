@@ -33,15 +33,15 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikit::device::list_devices;
+//! use yubikit::device::{list_devices, list_devices_ccid, list_devices_otp, list_devices_fido};
 //!
-//! let devices = list_devices().unwrap();
+//! let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido]).unwrap();
 //! for dev in &devices {
 //!     println!("{} (serial: {:?})", dev.name(), dev.serial());
 //! }
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
@@ -239,6 +239,23 @@ impl YubiKeyDevice {
         FidoConnection::open(&info)
             .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))
     }
+
+    /// Absorb transport paths from another `YubiKeyDevice` representing the
+    /// same physical key. Fills in any `None` fields from `other`.
+    fn merge_from(&mut self, other: YubiKeyDevice) {
+        if self.reader_name.is_none() {
+            self.reader_name = other.reader_name;
+        }
+        if self.hid_path.is_none() {
+            self.hid_path = other.hid_path;
+        }
+        if self.fido_path.is_none() {
+            self.fido_path = other.fido_path;
+        }
+        if self.pid.is_none() {
+            self.pid = other.pid;
+        }
+    }
 }
 
 impl fmt::Display for YubiKeyDevice {
@@ -408,169 +425,98 @@ pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
     Ok(devices)
 }
 
-/// Discover all connected YubiKeys.
+/// Type alias for device enumeration functions.
+pub type EnumerateFn = fn() -> Result<Vec<YubiKeyDevice>, DeviceError>;
+
+/// Discover connected YubiKeys using the provided enumeration functions.
 ///
-/// Scans PC/SC readers and HID devices, reads [`DeviceInfo`] from each,
-/// and returns a unified list of discovered YubiKeys. Devices visible over
-/// both PC/SC and HID (matched by serial number) are merged into a single
-/// entry.
-pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    log::debug!("Listing YubiKey devices");
-    let mut devices = Vec::new();
-    let mut seen_serials = HashSet::new();
+/// Each function typically enumerates a single transport (CCID, OTP HID, or
+/// FIDO HID) and returns partial [`YubiKeyDevice`] objects. This function
+/// calls each enumerator, then merges results so that a single physical
+/// YubiKey is represented by exactly one `YubiKeyDevice` with all of its
+/// transport paths populated.
+///
+/// Merging uses two strategies:
+/// 1. **PID uniqueness** – if only one device exists for a given USB PID,
+///    all partial devices with that PID must be the same physical key.
+/// 2. **Identity match** – devices sharing the same firmware version *and*
+///    serial number (or both lacking a serial) are the same key.
+pub fn list_devices(enumerators: &[EnumerateFn]) -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!(
+        "Listing YubiKey devices with {} enumerator(s)",
+        enumerators.len()
+    );
 
-    // Scan PC/SC readers
-    if let Ok(readers) = list_readers() {
-        log::debug!("Found {} PC/SC reader(s)", readers.len());
-        for reader in readers {
-            if !reader.to_ascii_lowercase().contains("yubi") {
-                continue;
+    // Collect partial device lists from each enumerator.
+    // Each enumerator may fail (e.g. permission issues); we silently skip
+    // failures since the user told us a transport either works for all
+    // devices or not at all.
+    let mut groups: Vec<Vec<YubiKeyDevice>> = Vec::new();
+    for enumerate in enumerators {
+        match enumerate() {
+            Ok(devs) => {
+                log::debug!("Enumerator returned {} device(s)", devs.len());
+                groups.push(devs);
             }
-            log::debug!("Checking PC/SC reader: {reader}");
-            {
-                if let Ok(info) = read_info(&reader) {
-                    if let Some(serial) = info.serial {
-                        seen_serials.insert(serial);
-                    }
-                    let pid = pid_from_reader_name(&reader);
-                    devices.push(YubiKeyDevice {
-                        reader_name: Some(reader),
-                        hid_path: None,
-                        fido_path: None,
-                        pid,
-                        info,
-                    });
-                }
-            }
-        }
-    }
-
-    // Scan HID OTP devices, merging with existing PC/SC entries by serial
-    if let Ok(hid_devices) = list_otp_devices() {
-        for hid in hid_devices {
-            // If there's exactly one unmatched CCID device, just merge by path
-            // without opening the OTP connection (avoids NEO CCID lockout)
-            let unmatched_ccid: Vec<_> = devices
-                .iter()
-                .enumerate()
-                .filter(|(_, d)| d.hid_path.is_none())
-                .collect();
-            if unmatched_ccid.len() == 1 {
-                let idx = unmatched_ccid[0].0;
-                devices[idx].hid_path = Some(hid.path.clone());
-                continue;
-            }
-
-            // Multiple or zero unmatched: need OTP info to match
-            let hid_info = OtpConnection::new(&hid.path)
-                .ok()
-                .and_then(|conn| read_info_otp(conn).ok())
-                .map(|(info, _conn)| info);
-            let hid_serial = hid_info.as_ref().and_then(|i| i.serial);
-
-            // Try to merge with an existing PCSC entry by serial
-            let merged = if let Some(serial) = hid_serial {
-                if let Some(dev) = devices
-                    .iter_mut()
-                    .find(|d| d.serial() == Some(serial) && d.hid_path.is_none())
-                {
-                    dev.hid_path = Some(hid.path.clone());
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if !merged {
-                let info = hid_info.unwrap_or_else(|| synthetic_hid_info(&hid));
-                if let Some(serial) = info.serial {
-                    if !seen_serials.contains(&serial) {
-                        seen_serials.insert(serial);
-                        devices.push(YubiKeyDevice {
-                            reader_name: None,
-                            hid_path: Some(hid.path),
-                            fido_path: None,
-                            pid: Some(hid.pid),
-                            info,
-                        });
-                    }
-                } else {
-                    devices.push(YubiKeyDevice {
-                        reader_name: None,
-                        hid_path: Some(hid.path),
-                        fido_path: None,
-                        pid: Some(hid.pid),
-                        info,
-                    });
-                }
+            Err(e) => {
+                log::debug!("Enumerator failed: {e}");
             }
         }
     }
 
-    // Scan FIDO HID devices, merging with existing entries by serial
-    if let Ok(fido_devs) = list_fido_devices() {
-        for fido in fido_devs {
-            // If there's exactly one unmatched device, just merge by path
-            let unmatched: Vec<_> = devices
-                .iter()
-                .enumerate()
-                .filter(|(_, d)| d.fido_path.is_none())
-                .collect();
-            if unmatched.len() == 1 {
-                let idx = unmatched[0].0;
-                devices[idx].fido_path = Some(fido.path.clone());
-                continue;
-            }
+    if groups.is_empty() {
+        return Ok(Vec::new());
+    }
 
-            let fido_info = FidoConnection::open(&fido)
-                .ok()
-                .and_then(|conn| read_info_fido(conn).ok())
-                .map(|(info, _conn)| info);
-            let fido_serial = fido_info.as_ref().and_then(|i| i.serial);
+    // Start with the first group as the base set.
+    let mut merged = groups.remove(0);
 
-            let merged = if let Some(serial) = fido_serial {
-                if let Some(dev) = devices
-                    .iter_mut()
-                    .find(|d| d.serial() == Some(serial) && d.fido_path.is_none())
-                {
-                    dev.fido_path = Some(fido.path.clone());
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+    // Merge each subsequent group into the base set.
+    for group in groups {
+        merge_devices(&mut merged, group);
+    }
 
-            if !merged {
-                let info = fido_info.unwrap_or_else(|| synthetic_fido_info(&fido));
-                if let Some(serial) = info.serial {
-                    if !seen_serials.contains(&serial) {
-                        seen_serials.insert(serial);
-                        devices.push(YubiKeyDevice {
-                            reader_name: None,
-                            hid_path: None,
-                            fido_path: Some(fido.path),
-                            pid: Some(fido.pid),
-                            info,
-                        });
-                    }
-                } else {
-                    devices.push(YubiKeyDevice {
-                        reader_name: None,
-                        hid_path: None,
-                        fido_path: Some(fido.path),
-                        pid: Some(fido.pid),
-                        info,
-                    });
-                }
-            }
+    Ok(merged)
+}
+
+/// Merge `incoming` partial devices into `base`, combining entries that
+/// represent the same physical YubiKey.
+fn merge_devices(base: &mut Vec<YubiKeyDevice>, incoming: Vec<YubiKeyDevice>) {
+    // Count how many devices per PID across both sets.
+    let mut pid_counts: HashMap<u16, usize> = HashMap::new();
+    for dev in base.iter().chain(incoming.iter()) {
+        if let Some(pid) = dev.pid {
+            *pid_counts.entry(pid).or_insert(0) += 1;
         }
     }
 
-    Ok(devices)
+    for inc in incoming {
+        // Strategy 1: PID uniqueness – if only one device of this PID
+        // exists in total, find the matching base entry and merge.
+        if let Some(pid) = inc.pid
+            && pid_counts.get(&pid) == Some(&2)
+        {
+            // Exactly 2 means one in base + one incoming = same device.
+            if let Some(target) = base.iter_mut().find(|d| d.pid == Some(pid)) {
+                target.merge_from(inc);
+                continue;
+            }
+        }
+
+        // Strategy 2: Match by (version, serial).
+        let identity = (inc.info.version, inc.info.serial);
+        if let Some(target) = base
+            .iter_mut()
+            .find(|d| (d.info.version, d.info.serial) == identity)
+        {
+            target.merge_from(inc);
+            continue;
+        }
+
+        // No match found – this is a new device only visible over
+        // this transport.
+        base.push(inc);
+    }
 }
 
 /// Build a minimal synthetic [`DeviceInfo`] for an HID-only device.
@@ -1119,6 +1065,158 @@ mod tests {
             stm_version: None,
             version_qualifier: crate::management::VersionQualifier::final_release(version),
         }
+    }
+
+    fn make_device(
+        reader_name: Option<&str>,
+        hid_path: Option<&str>,
+        fido_path: Option<&str>,
+        pid: Option<u16>,
+        version: Version,
+        serial: Option<u32>,
+    ) -> YubiKeyDevice {
+        let info = make_info(
+            version,
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            serial,
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        );
+        YubiKeyDevice {
+            reader_name: reader_name.map(String::from),
+            hid_path: hid_path.map(String::from),
+            fido_path: fido_path.map(String::from),
+            pid,
+            info,
+        }
+    }
+
+    #[test]
+    fn test_merge_by_pid_uniqueness() {
+        // Three enumerators each find one device with the same PID → merge.
+        fn enum_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Ok(vec![make_device(
+                Some("Yubico YubiKey OTP+FIDO+CCID 00"),
+                None,
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(12345),
+            )])
+        }
+        fn enum_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Ok(vec![make_device(
+                None,
+                Some("/dev/hidraw0"),
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(12345),
+            )])
+        }
+        fn enum_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Ok(vec![make_device(
+                None,
+                None,
+                Some("/dev/hidraw1"),
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(12345),
+            )])
+        }
+
+        let result = list_devices(&[enum_ccid, enum_otp, enum_fido]).unwrap();
+        assert_eq!(result.len(), 1, "Should merge into a single device");
+        let dev = &result[0];
+        assert_eq!(dev.reader_name(), Some("Yubico YubiKey OTP+FIDO+CCID 00"));
+        assert_eq!(dev.hid_path(), Some("/dev/hidraw0"));
+        assert_eq!(dev.fido_path(), Some("/dev/hidraw1"));
+        assert_eq!(dev.pid(), Some(0x0407));
+    }
+
+    #[test]
+    fn test_merge_by_identity() {
+        // Two devices with same PID but different serials are NOT merged.
+        fn enum_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Ok(vec![
+                make_device(
+                    Some("reader0"),
+                    None,
+                    None,
+                    Some(0x0407),
+                    Version(5, 4, 3),
+                    Some(111),
+                ),
+                make_device(
+                    Some("reader1"),
+                    None,
+                    None,
+                    Some(0x0407),
+                    Version(5, 4, 3),
+                    Some(222),
+                ),
+            ])
+        }
+        fn enum_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Ok(vec![
+                make_device(
+                    None,
+                    Some("/dev/h0"),
+                    None,
+                    Some(0x0407),
+                    Version(5, 4, 3),
+                    Some(111),
+                ),
+                make_device(
+                    None,
+                    Some("/dev/h1"),
+                    None,
+                    Some(0x0407),
+                    Version(5, 4, 3),
+                    Some(222),
+                ),
+            ])
+        }
+
+        let result = list_devices(&[enum_ccid, enum_otp]).unwrap();
+        assert_eq!(result.len(), 2, "Should remain as two devices");
+        // Each should have merged with its identity match
+        let d1 = result.iter().find(|d| d.serial() == Some(111)).unwrap();
+        assert!(d1.reader_name().is_some());
+        assert!(d1.hid_path().is_some());
+        let d2 = result.iter().find(|d| d.serial() == Some(222)).unwrap();
+        assert!(d2.reader_name().is_some());
+        assert!(d2.hid_path().is_some());
+    }
+
+    #[test]
+    fn test_merge_failed_enumerator() {
+        // A failing enumerator is silently skipped.
+        fn enum_ok() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Ok(vec![make_device(
+                Some("reader"),
+                None,
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(100),
+            )])
+        }
+        fn enum_fail() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+            Err(DeviceError::NoDeviceFound)
+        }
+
+        let result = list_devices(&[enum_ok, enum_fail]).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_merge_no_enumerators() {
+        let result = list_devices(&[]).unwrap();
+        assert!(result.is_empty());
     }
 
     #[test]

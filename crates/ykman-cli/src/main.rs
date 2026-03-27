@@ -2,7 +2,10 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::set_override_version;
-use yubikit::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
+use yubikit::device::{
+    YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
+    list_readers, open_reader,
+};
 use yubikit::management::ReleaseType;
 
 mod apdu;
@@ -1309,10 +1312,11 @@ fn resolve_device(
         }
     } else {
         let devices = match transport {
-            TransportPreference::CcidOnly => yubikit::device::list_devices_ccid()
+            TransportPreference::CcidOnly => list_devices(&[list_devices_ccid])
                 .map_err(|e| CliError(format!("Failed to list devices: {e}")))?,
             TransportPreference::OtpPreferred | TransportPreference::Any => {
-                list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?
+                list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
+                    .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
             }
         };
         match (serial, devices.len()) {

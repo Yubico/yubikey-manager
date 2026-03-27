@@ -17,7 +17,9 @@
 use rstest::{fixture, rstest};
 use std::sync::OnceLock;
 use yubikit::core::{Version, set_override_version};
-use yubikit::device::{YubiKeyDevice, list_devices};
+use yubikit::device::{
+    YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
+};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType};
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::smartcard::Transport;
@@ -75,7 +77,8 @@ fn required_nfc_serial() -> Option<u32> {
 fn get_device_and_info() -> &'static (YubiKeyDevice, DeviceInfo) {
     DEVICE_INFO.get_or_init(|| {
         let serial = required_serial();
-        let devices = list_devices().expect("Failed to enumerate YubiKeys");
+        let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
+            .expect("Failed to enumerate YubiKeys");
         let dev = devices
             .into_iter()
             .find(|d| d.serial() == Some(serial))
@@ -293,7 +296,8 @@ fn test_list_devices_finds_key() {
         return;
     }
     let serial = required_serial();
-    let devices = list_devices().expect("list_devices");
+    let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
+        .expect("list_devices");
     assert!(
         devices.iter().any(|d| d.serial() == Some(serial)),
         "Expected YubiKey with serial {serial} in device list"

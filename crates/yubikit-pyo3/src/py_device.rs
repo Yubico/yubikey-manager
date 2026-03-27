@@ -207,11 +207,16 @@ impl NativeYubiKeyDevice {
 
 /// List all connected YubiKeys with device info.
 ///
-/// Scans PC/SC, OTP HID, and FIDO HID, merges by serial number.
+/// Scans PC/SC, OTP HID, and FIDO HID, merges by PID and serial.
 /// Returns a list of NativeYubiKeyDevice.
 #[pyfunction]
 pub fn list_devices() -> PyResult<Vec<NativeYubiKeyDevice>> {
-    let devices = device::list_devices().map_err(device_err)?;
+    let devices = device::list_devices(&[
+        device::list_devices_ccid,
+        device::list_devices_otp,
+        device::list_devices_fido,
+    ])
+    .map_err(device_err)?;
     Ok(devices
         .into_iter()
         .map(|d| NativeYubiKeyDevice { inner: d })

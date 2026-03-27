@@ -1,10 +1,11 @@
 //! Read detailed device information from the first connected YubiKey.
 
-use yubikit::device::list_devices;
+use yubikit::device::{list_devices, list_devices_ccid, list_devices_fido, list_devices_otp};
 use yubikit::smartcard::Transport;
 
 fn main() {
-    let devices = list_devices().expect("Failed to enumerate devices");
+    let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
+        .expect("Failed to enumerate devices");
     let dev = devices.first().expect("No YubiKey found");
     let info = dev.info();
 
