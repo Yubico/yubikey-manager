@@ -62,6 +62,9 @@ testpaths = ["tests"]
 [tool.ruff.lint]
 extend-select = ["E", "I", "S"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["_yubikit_native"]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
@@ -69,6 +72,9 @@ exclude = ["tests/", "docs/"]
 reportPrivateImportUsage = false
 reportMissingImports = "warning"
 reportAttributeAccessIssue = "warning"
+
+[tool.ty.environment]
+extra-paths = ["typings"]
 
 [tool.ty.src]
 exclude = ["docs"]

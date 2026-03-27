@@ -20,4 +20,4 @@ lib/
 
 # Rust
 /target/
-/_yubikit_native/*.so
+/_yubikit_native/
