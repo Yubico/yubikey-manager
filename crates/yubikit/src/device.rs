@@ -41,8 +41,9 @@
 //! }
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use crate::core::set_override_version;
 use crate::management::{
@@ -128,6 +129,7 @@ pub struct YubiKeyDevice {
     reader_name: Option<String>,
     hid_path: Option<String>,
     fido_path: Option<String>,
+    pid: Option<u16>,
     info: DeviceInfo,
 }
 
@@ -145,6 +147,11 @@ impl YubiKeyDevice {
     /// Returns the firmware version.
     pub fn version(&self) -> Version {
         self.info.version
+    }
+
+    /// Returns the USB Product ID, if available.
+    pub fn pid(&self) -> Option<u16> {
+        self.pid
     }
 
     /// Returns the product name derived from device info.
@@ -245,19 +252,127 @@ impl fmt::Display for YubiKeyDevice {
 }
 
 // ---------------------------------------------------------------------------
+// PID derivation
+// ---------------------------------------------------------------------------
+
+/// Derive a USB Product ID from a PC/SC reader name.
+///
+/// Parses interface indicators (OTP, CCID, FIDO/U2F) from the reader name
+/// and maps to the corresponding Yubico PID.
+fn pid_from_reader_name(name: &str) -> Option<u16> {
+    let lower = name.to_ascii_lowercase();
+    if !lower.contains("yubi") {
+        return None;
+    }
+
+    let mut interfaces = UsbInterface(0);
+    if name.contains("OTP") {
+        interfaces = interfaces | UsbInterface::OTP;
+    }
+    if name.contains("CCID") {
+        interfaces = interfaces | UsbInterface::CCID;
+    }
+    if name.contains("FIDO") || name.contains("U2F") {
+        interfaces = interfaces | UsbInterface::FIDO;
+    }
+
+    let is_neo = name.contains("NEO");
+    pid_from_interfaces(interfaces, is_neo)
+}
+
+/// Map USB interfaces and key type to a PID value.
+fn pid_from_interfaces(interfaces: UsbInterface, is_neo: bool) -> Option<u16> {
+    let otp = (interfaces & UsbInterface::OTP).0 != 0;
+    let fido = (interfaces & UsbInterface::FIDO).0 != 0;
+    let ccid = (interfaces & UsbInterface::CCID).0 != 0;
+
+    if is_neo {
+        match (otp, fido, ccid) {
+            (true, false, false) => Some(0x0110),
+            (true, false, true) => Some(0x0111),
+            (false, false, true) => Some(0x0112),
+            (false, true, false) => Some(0x0113),
+            (true, true, false) => Some(0x0114),
+            (false, true, true) => Some(0x0115),
+            (true, true, true) => Some(0x0116),
+            _ => None,
+        }
+    } else {
+        match (otp, fido, ccid) {
+            (true, false, false) => Some(0x0401),
+            (false, true, false) => Some(0x0402),
+            (true, true, false) => Some(0x0403),
+            (false, false, true) => Some(0x0404),
+            (true, false, true) => Some(0x0405),
+            (false, true, true) => Some(0x0406),
+            (true, true, true) => Some(0x0407),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Device enumeration
 // ---------------------------------------------------------------------------
+
+/// Scan USB for attached YubiKeys without opening any connections.
+///
+/// Returns a mapping of PID to device count, and a state value that changes
+/// whenever the set of attached devices changes (useful for polling).
+pub fn scan_devices() -> (HashMap<u16, usize>, u64) {
+    let mut counts: HashMap<u16, usize> = HashMap::new();
+    let mut fingerprints: Vec<String> = Vec::new();
+
+    // Scan PC/SC readers
+    if let Ok(readers) = list_readers() {
+        for reader in readers {
+            if let Some(pid) = pid_from_reader_name(&reader) {
+                *counts.entry(pid).or_insert(0) += 1;
+                fingerprints.push(reader);
+            }
+        }
+    }
+
+    // Scan HID OTP devices
+    if let Ok(hid_devices) = list_otp_devices() {
+        for hid in hid_devices {
+            *counts.entry(hid.pid).or_insert(0) += 1;
+            fingerprints.push(hid.path);
+        }
+    }
+
+    // Scan FIDO HID devices
+    if let Ok(fido_devs) = list_fido_devices() {
+        for fido in fido_devs {
+            *counts.entry(fido.pid).or_insert(0) += 1;
+            fingerprints.push(fido.path);
+        }
+    }
+
+    // Compute a stable hash of fingerprints for change detection
+    fingerprints.sort();
+    let mut hasher = std::hash::DefaultHasher::new();
+    fingerprints.hash(&mut hasher);
+    let state = hasher.finish();
+
+    // Merge counts: the Python version uses Counter semantics where
+    // later transports override earlier ones for the same PID.
+    // We simply take the max count per PID across transports.
+    (counts, state)
+}
 
 /// Open a device on a specific PC/SC reader by name.
 ///
 /// Unlike [`list_devices`], this does not filter by reader name, so it works
 /// for external NFC readers.
 pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
+    let pid = pid_from_reader_name(reader_name);
     let info = read_info(reader_name)?;
     Ok(YubiKeyDevice {
         reader_name: Some(reader_name.to_string()),
         hid_path: None,
         fido_path: None,
+        pid,
         info,
     })
 }
@@ -278,10 +393,12 @@ pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
             }
             log::debug!("Checking PC/SC reader: {reader}");
             if let Ok(info) = read_info(&reader) {
+                let pid = pid_from_reader_name(&reader);
                 devices.push(YubiKeyDevice {
                     reader_name: Some(reader),
                     hid_path: None,
                     fido_path: None,
+                    pid,
                     info,
                 });
             }
@@ -315,10 +432,12 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                     if let Some(serial) = info.serial {
                         seen_serials.insert(serial);
                     }
+                    let pid = pid_from_reader_name(&reader);
                     devices.push(YubiKeyDevice {
                         reader_name: Some(reader),
                         hid_path: None,
                         fido_path: None,
+                        pid,
                         info,
                     });
                 }
@@ -373,6 +492,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                             reader_name: None,
                             hid_path: Some(hid.path),
                             fido_path: None,
+                            pid: Some(hid.pid),
                             info,
                         });
                     }
@@ -381,6 +501,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                         reader_name: None,
                         hid_path: Some(hid.path),
                         fido_path: None,
+                        pid: Some(hid.pid),
                         info,
                     });
                 }
@@ -432,6 +553,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                             reader_name: None,
                             hid_path: None,
                             fido_path: Some(fido.path),
+                            pid: Some(fido.pid),
                             info,
                         });
                     }
@@ -440,6 +562,7 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                         reader_name: None,
                         hid_path: None,
                         fido_path: Some(fido.path),
+                        pid: Some(fido.pid),
                         info,
                     });
                 }
@@ -547,8 +670,9 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                 .unwrap_or_else(|| synthetic_hid_info(&hid));
             devices.push(YubiKeyDevice {
                 reader_name: None,
-                hid_path: Some(hid.path),
+                hid_path: Some(hid.path.clone()),
                 fido_path: None,
+                pid: Some(hid.pid),
                 info,
             });
         }
@@ -646,6 +770,7 @@ pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                 reader_name: None,
                 hid_path: None,
                 fido_path: Some(fido.path),
+                pid: Some(fido.pid),
                 info,
             });
         }

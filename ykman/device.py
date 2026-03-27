@@ -29,18 +29,20 @@ import ctypes
 import logging
 import sys
 from collections import Counter
-from time import sleep, time
-from typing import Callable, Hashable, Iterable, Mapping, TypeAlias
+from threading import Event
+from typing import Callable, Iterable, Mapping, TypeAlias
 
-from yubikit.core import PID, TRANSPORT, YUBIKEY, Connection
+from _yubikit_native.device import NativeYubiKeyDevice
+from _yubikit_native.device import list_devices as _native_list_devices
+from _yubikit_native.device import scan_devices as _native_scan_devices
+from yubikit.core import PID, TRANSPORT, Connection
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import (
-    USB_INTERFACE,
     DeviceInfo,
 )
-from yubikit.support import read_info
+from yubikit.support import read_info  # noqa: F401 - re-exported
 
 from .base import REINSERT_STATUS, CancelledException, YkmanDevice
 from .hid import (
@@ -49,57 +51,20 @@ from .hid import (
 from .hid import (
     list_otp_devices as _list_otp_devices,
 )
+from .hid.fido import NativeFidoConnection
+from .hid.otp import _NativeOtpConnection
+from .pcsc import ScardSmartCardConnection, SmartCardCtapDevice
 from .pcsc import list_devices as _list_ccid_devices
 
 logger = logging.getLogger(__name__)
 
 
-def _warn_once(message, e_type=Exception):
-    warned: list[bool] = []
-
-    def outer(f):
-        def inner():
-            try:
-                return f()
-            except e_type:
-                if not warned:
-                    logger.warning(message)
-                    warned.append(True)
-                raise
-
-        return inner
-
-    return outer
-
-
-@_warn_once(
-    "PC/SC not available. Smart card (CCID) protocols will not function.",
-    OSError,
-)
-def list_ccid_devices():
-    """List CCID devices."""
-    return _list_ccid_devices()
-
-
-@_warn_once("No CTAP HID backend available. FIDO protocols will not function.")
-def list_ctap_devices():
-    """List CTAP devices."""
-    return _list_ctap_devices()
-
-
-@_warn_once("No OTP HID backend available. OTP protocols will not function.")
-def list_otp_devices():
-    """List OTP devices."""
-    return _list_otp_devices()
-
-
 _T_CONNECTION: TypeAlias = type[Connection] | type[FidoConnection]
 
-
 _CONNECTION_LIST_MAPPING: dict[_T_CONNECTION, Callable[[], Iterable[YkmanDevice]]] = {
-    SmartCardConnection: list_ccid_devices,
-    OtpConnection: list_otp_devices,
-    FidoConnection: list_ctap_devices,
+    SmartCardConnection: _list_ccid_devices,
+    OtpConnection: _list_otp_devices,
+    FidoConnection: _list_ctap_devices,
 }
 
 
@@ -109,16 +74,16 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
     :return: A dict mapping PID to device count, and a state object which can be used to
         detect changes in attached devices.
     """
-    fingerprints = set()
+    raw_counts, state = _native_scan_devices()
+
+    # Convert raw PID ints to PID enum values
     merged: dict[PID, int] = {}
-    for list_devs in _CONNECTION_LIST_MAPPING.values():
+    for pid_int, count in raw_counts.items():
         try:
-            devs = list_devs()
-        except Exception:
-            logger.debug("Device listing error", exc_info=True)
-            devs = []
-        merged.update(Counter(d.pid for d in devs if d.pid is not None))
-        fingerprints.update({d.fingerprint for d in devs})
+            merged[PID(pid_int)] = count
+        except ValueError:
+            logger.debug(f"Unsupported PID: {pid_int:#04x}")
+
     if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
         from _yubikit_native.hid import list_all_hid_devices
 
@@ -128,145 +93,63 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
             if pid_int not in merged:
                 try:
                     counter[PID(pid_int)] += 1
-                    fingerprints.add(dev.path)
-                except ValueError:  # Unsupported PID
+                except ValueError:
                     logger.debug(f"Unsupported Yubico device with PID: {pid_int:02x}")
         merged.update(counter)
-    return merged, hash(tuple(fingerprints))
+
+    return merged, state
 
 
-class _PidGroup:
-    def __init__(self, pid):
-        self._pid = pid
-        self._infos: dict[Hashable, DeviceInfo] = {}
-        self._resolved: dict[Hashable, dict[USB_INTERFACE, YkmanDevice]] = {}
-        self._unresolved: dict[USB_INTERFACE, list[YkmanDevice]] = {}
-        self._devcount: dict[USB_INTERFACE, int] = Counter()
-        self._fingerprints: set[Hashable] = set()
-        self._ctime = time()
+class _NativeCompositeDevice(YkmanDevice):
+    """YubiKey device backed by native Rust enumeration."""
 
-    def _key(self, info):
-        return (
-            info.serial,
-            info.version,
-            info.form_factor,
-            str(info.supported_capabilities),
-            str(info.config.enabled_capabilities),
-            info.is_locked,
-            info.is_fips,
-            info.is_sky,
+    def __init__(self, native_dev: NativeYubiKeyDevice, info: DeviceInfo):
+        pid = PID(native_dev.pid) if native_dev.pid else None
+        fingerprint = (
+            native_dev.reader_name or native_dev.hid_path or native_dev.fido_path or ""
         )
-
-    def add(self, conn_type, dev, force_resolve=False, silent=False):
-        logger.debug(f"Add device for {conn_type}: {dev}")
-        iface = conn_type.usb_interface
-        self._fingerprints.add(dev.fingerprint)
-        self._devcount[iface] += 1
-        if force_resolve or len(self._resolved) < max(self._devcount.values()):
-            try:
-                with dev.open_connection(conn_type) as conn:
-                    info = read_info(conn, dev.pid)
-                key = self._key(info)
-                self._infos[key] = info
-                self._resolved.setdefault(key, {})[iface] = dev
-                logger.debug(f"Resolved device {info.serial}")
-                return
-            except Exception:
-                if not silent:
-                    logger.warning("Failed opening device", exc_info=True)
-        self._unresolved.setdefault(iface, []).append(dev)
-
-    def supports_connection(self, conn_type):
-        return conn_type.usb_interface in self._devcount
-
-    def connect(self, key, conn_type):
-        iface = conn_type.usb_interface
-
-        resolved = self._resolved[key].get(iface)
-        if resolved:
-            try:
-                return resolved.open_connection(conn_type)
-            except Exception:
-                logger.debug("Failed to open resolved device, will re-resolve")
-                del self._resolved[key][iface]
-                self._unresolved.setdefault(iface, []).append(resolved)
-
-        devs = self._unresolved.get(iface, [])
-        failed = []
-        try:
-            while devs:
-                dev = devs.pop()
-                try:
-                    conn = dev.open_connection(conn_type)
-                    info = read_info(conn, dev.pid)
-                    dev_key = self._key(info)
-                    if dev_key in self._infos:
-                        self._resolved.setdefault(dev_key, {})[iface] = dev
-                        logger.debug(f"Resolved device {info.serial}")
-                        if dev_key == key:
-                            return conn
-                    elif self._pid.yubikey_type == YUBIKEY.NEO and not devs:
-                        self._resolved.setdefault(key, {})[iface] = dev
-                        logger.debug("Resolved last NEO device without serial")
-                        return conn
-                    conn.close()
-                except Exception:
-                    logger.warning("Failed opening device", exc_info=True)
-                    failed.append(dev)
-        finally:
-            devs.extend(failed)
-
-        if self._devcount[iface] < len(self._infos):
-            logger.debug(f"Checking for more devices over {iface!s}")
-            for dev in _CONNECTION_LIST_MAPPING[conn_type]():
-                if self._pid == dev.pid and dev.fingerprint not in self._fingerprints:
-                    self.add(conn_type, dev, True)
-
-            resolved = self._resolved[key].get(iface)
-            if resolved:
-                return resolved.open_connection(conn_type)
-
-        # Retry if we are within a 5 second period after creation,
-        # as not all USB interface become usable at the exact same time.
-        if time() < self._ctime + 5:
-            logger.debug("Device not found, retry in 1s")
-            sleep(1.0)
-            return self.connect(key, conn_type)
-
-        raise ValueError("Failed to connect to the device")
-
-    def get_devices(self):
-        results = []
-        for key, info in self._infos.items():
-            dev = next(iter(self._resolved[key].values()))
-            results.append(
-                (_UsbCompositeDevice(self, key, dev.fingerprint, dev.pid, info), info)
-            )
-        return results
-
-
-class _UsbCompositeDevice(YkmanDevice):
-    def __init__(self, group, key, fingerprint, pid, info):
-        super().__init__(TRANSPORT.USB, fingerprint, pid)
-        self._group = group
-        self._key = key
+        transport = TRANSPORT.USB
+        super().__init__(transport, fingerprint, pid)
+        self._native = native_dev
         self._info = info
 
-    def supports_connection(self, connection_type):
-        return self._group.supports_connection(connection_type)
+    def supports_connection(self, connection_type: type) -> bool:
+        if issubclass(connection_type, SmartCardConnection):
+            return self._native.reader_name is not None
+        if issubclass(connection_type, OtpConnection):
+            return self._native.hid_path is not None
+        if issubclass(connection_type, FidoConnection):
+            return self._native.fido_path is not None
+        return False
 
-    def open_connection(self, connection_type):
+    def open_connection(self, connection_type):  # type: ignore[override]
         assert isinstance(connection_type, type)  # noqa: S101
-        if not self.supports_connection(connection_type):
-            raise ValueError("Unsupported Connection type")
-        return self._group.connect(self._key, connection_type)
+        if issubclass(connection_type, SmartCardConnection):
+            reader = self._native.reader_name
+            if reader is not None:
+                return ScardSmartCardConnection(reader)
+        if issubclass(connection_type, FidoConnection):
+            fido_path = self._native.fido_path
+            if fido_path is not None and self.pid is not None:
+                if issubclass(connection_type, SmartCardCtapDevice):
+                    reader = self._native.reader_name
+                    if reader is not None:
+                        return SmartCardCtapDevice(ScardSmartCardConnection(reader))
+                return NativeFidoConnection(fido_path, self.pid)
+        if issubclass(connection_type, OtpConnection):
+            hid_path = self._native.hid_path
+            if hid_path is not None:
+                return _NativeOtpConnection(hid_path)
+        raise ValueError(f"Unsupported connection type: {connection_type}")
 
-    def _do_reinsert(self, reinsert_cb, event):
+    def _do_reinsert(
+        self, reinsert_cb: Callable[[REINSERT_STATUS], None], event: Event
+    ) -> None:
         pids, state = scan_devices()
         removed = False
         n_devs = sum(pids.values())
 
-        def is_match(info):
+        def is_match(info: DeviceInfo) -> bool:
             return (
                 self._info.serial == info.serial and self._info.version == info.version
             )
@@ -276,15 +159,13 @@ class _UsbCompositeDevice(YkmanDevice):
         while not event.wait(0.5):
             new_pids, new_state = scan_devices()
             if new_state == state:
-                # No change in devices, continue waiting
                 continue
 
             state = new_state
-            devs = _list_all_devices(silent=True)
+            devs = list_all_devices()
 
             if not removed:
                 if new_pids == pids:
-                    # No change in PIDs, continue waiting
                     continue
 
                 if n_devs != sum(new_pids.values()) + 1 or any(
@@ -294,56 +175,35 @@ class _UsbCompositeDevice(YkmanDevice):
                 removed = True
                 reinsert_cb(REINSERT_STATUS.REINSERT)
             else:
-                # Expect number of devices to be back to starting value
                 if n_devs != sum(new_pids.values()):
                     raise ValueError("A different YubiKey was inserted/removed")
                 for dev, info in devs:
                     if is_match(info):
-                        # Device is reinserted, update properties
-                        self._group = dev._group  # type: ignore
-                        self._key = dev._key  # type: ignore
+                        assert isinstance(dev, _NativeCompositeDevice)  # noqa: S101
+                        self._native = dev._native
                         self._info = info
                         return
 
         raise CancelledException()
 
 
-def _list_all_devices(
-    connection_types: Iterable[_T_CONNECTION] = _CONNECTION_LIST_MAPPING.keys(),
-    silent: bool = False,
-) -> list[tuple[YkmanDevice, DeviceInfo]]:
-    groups: dict[PID, _PidGroup] = {}
-    for connection_type in connection_types:
-        for base_type in _CONNECTION_LIST_MAPPING:
-            if issubclass(connection_type, base_type):
-                connection_type = base_type
-                break
-        else:
-            raise ValueError("Invalid connection type")
-        try:
-            for dev in _CONNECTION_LIST_MAPPING[connection_type]():
-                assert dev.pid is not None  # noqa: S101
-                group = groups.setdefault(dev.pid, _PidGroup(dev.pid))
-                group.add(
-                    connection_type,
-                    dev,
-                    silent=silent,
-                )
-        except Exception:
-            if not silent:
-                logger.exception("Unable to list devices for connection")
-    devices = []
-    for group in groups.values():
-        devices.extend(group.get_devices())
-    return devices
+def _device_info_from_native_dev(native_dev: NativeYubiKeyDevice) -> DeviceInfo:
+    """Convert a NativeYubiKeyDevice's info dict to a DeviceInfo."""
+    from yubikit.management import _device_info_from_native
+
+    return _device_info_from_native(native_dev.info())
 
 
 def list_all_devices(
-    connection_types: Iterable[_T_CONNECTION] = _CONNECTION_LIST_MAPPING.keys(),
+    connection_types: Iterable[_T_CONNECTION] = _CONNECTION_LIST_MAPPING.keys(),  # noqa: ARG001
 ) -> list[tuple[YkmanDevice, DeviceInfo]]:
     """Connect to all attached YubiKeys and read device info from them.
 
     :param connection_types: An iterable of YubiKey connection types.
     :return: A list of (device, info) tuples for each connected device.
     """
-    return _list_all_devices(connection_types)
+    results: list[tuple[YkmanDevice, DeviceInfo]] = []
+    for native_dev in _native_list_devices():
+        info = _device_info_from_native_dev(native_dev)
+        results.append((_NativeCompositeDevice(native_dev, info), info))
+    return results

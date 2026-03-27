@@ -30,6 +30,7 @@ use crate::py_hid;
 use crate::py_management::device_info_to_dict;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use yubikit::device;
 
 fn device_err(e: device::DeviceError) -> PyErr {
@@ -134,10 +135,96 @@ pub fn get_name(
     Ok(device::get_name(&info))
 }
 
+/// Scan USB for attached YubiKeys without opening connections.
+///
+/// Returns (pid_counts, state) where pid_counts maps PID to count
+/// and state is a hash that changes when attached devices change.
+#[pyfunction]
+pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
+    let (counts, state) = device::scan_devices();
+    let dict = PyDict::new(py);
+    for (pid, count) in counts {
+        dict.set_item(pid, count)?;
+    }
+    Ok((dict.into_any(), state).into_pyobject(py)?.into())
+}
+
+/// A YubiKey device discovered via native enumeration.
+#[pyclass(unsendable)]
+pub struct NativeYubiKeyDevice {
+    inner: device::YubiKeyDevice,
+}
+
+#[pymethods]
+impl NativeYubiKeyDevice {
+    /// Get the device info as a dict.
+    fn info(&self, py: Python<'_>) -> PyResult<PyObject> {
+        device_info_to_dict(py, self.inner.info())
+    }
+
+    /// Get the serial number.
+    #[getter]
+    fn serial(&self) -> Option<u32> {
+        self.inner.serial()
+    }
+
+    /// Get the USB PID.
+    #[getter]
+    fn pid(&self) -> Option<u16> {
+        self.inner.pid()
+    }
+
+    /// Get the product name.
+    #[getter]
+    fn name(&self) -> String {
+        self.inner.name()
+    }
+
+    /// Get the PC/SC reader name.
+    #[getter]
+    fn reader_name(&self) -> Option<String> {
+        self.inner.reader_name().map(|s| s.to_string())
+    }
+
+    /// Get the HID OTP device path.
+    #[getter]
+    fn hid_path(&self) -> Option<String> {
+        self.inner.hid_path().map(|s| s.to_string())
+    }
+
+    /// Get the FIDO HID device path.
+    #[getter]
+    fn fido_path(&self) -> Option<String> {
+        self.inner.fido_path().map(|s| s.to_string())
+    }
+
+    /// Get the USB interfaces bitmask.
+    #[getter]
+    fn usb_interfaces(&self) -> u8 {
+        self.inner.usb_interfaces().0
+    }
+}
+
+/// List all connected YubiKeys with device info.
+///
+/// Scans PC/SC, OTP HID, and FIDO HID, merges by serial number.
+/// Returns a list of NativeYubiKeyDevice.
+#[pyfunction]
+pub fn list_devices() -> PyResult<Vec<NativeYubiKeyDevice>> {
+    let devices = device::list_devices().map_err(device_err)?;
+    Ok(devices
+        .into_iter()
+        .map(|d| NativeYubiKeyDevice { inner: d })
+        .collect())
+}
+
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "device")?;
     m.add_function(wrap_pyfunction!(read_info, &m)?)?;
     m.add_function(wrap_pyfunction!(get_name, &m)?)?;
+    m.add_function(wrap_pyfunction!(scan_devices, &m)?)?;
+    m.add_function(wrap_pyfunction!(list_devices, &m)?)?;
+    m.add_class::<NativeYubiKeyDevice>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

@@ -62,6 +62,11 @@ impl OtpConnection {
     pub fn restore_inner(&mut self, conn: hid::OtpConnection) {
         self.inner = Some(conn);
     }
+
+    /// Create from an already-open native connection.
+    pub fn from_native(conn: hid::OtpConnection) -> Self {
+        Self { inner: Some(conn) }
+    }
 }
 
 #[pymethods]
@@ -162,6 +167,18 @@ impl FidoConnection {
     /// Restore a previously taken inner connection.
     pub fn restore_inner(&mut self, conn: ctaphid::FidoConnection) {
         self.inner = Some(conn);
+    }
+
+    /// Create from an already-open native connection.
+    pub fn from_native(conn: ctaphid::FidoConnection) -> Self {
+        let device_version = conn.device_version();
+        let capabilities = conn.capabilities().raw();
+        Self {
+            inner: Some(conn),
+            path: String::new(),
+            device_version,
+            capabilities,
+        }
     }
 }
 
