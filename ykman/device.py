@@ -151,7 +151,7 @@ class _PidGroup:
             info.version,
             info.form_factor,
             str(info.supported_capabilities),
-            info.config.get_bytes(False),
+            str(info.config.enabled_capabilities),
             info.is_locked,
             info.is_fips,
             info.is_sky,
