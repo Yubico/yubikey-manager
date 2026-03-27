@@ -20,9 +20,4 @@ lib/
 
 # Rust
 /target/
-
-# Libraries unpacked by Windows VM
-/libjson-c*.dll
-/libusb-*.dll
-/libykpers-*.dll
-/libyubikey-*.dll
+/_yubikit_native/*.so

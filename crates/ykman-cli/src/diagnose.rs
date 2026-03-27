@@ -1,5 +1,5 @@
-use yubikit::device::{get_name, list_readers, read_info, read_info_fido, read_info_otp};
-use yubikit::management::{Capability, DeviceInfo, ReleaseType};
+use yubikit::device::{get_name, list_readers, read_info, read_info_otp};
+use yubikit::management::{Capability, DeviceInfo, ManagementFidoSession, ReleaseType};
 use yubikit::smartcard::Transport;
 use yubikit::transport::ctaphid::{FidoConnection, list_fido_devices};
 use yubikit::transport::otphid::{OtpConnection, list_otp_devices};
@@ -434,13 +434,16 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             println!("    Capabilities:        {:#04x}", caps.raw());
 
                             println!("    Management:");
-                            match read_info_fido(fido) {
-                                Ok(info) => {
-                                    let name = get_name(&info);
-                                    print_device_info(&info, "      ");
-                                    println!();
-                                    println!("      Name: {name}");
-                                }
+                            match ManagementFidoSession::new(conn) {
+                                Ok(mut session) => match session.read_device_info_unchecked() {
+                                    Ok(info) => {
+                                        let name = get_name(&info);
+                                        print_device_info(&info, "      ");
+                                        println!();
+                                        println!("      Name: {name}");
+                                    }
+                                    Err(e) => println!("      Error: {e}"),
+                                },
                                 Err(e) => println!("      Error: {e}"),
                             }
                         }
