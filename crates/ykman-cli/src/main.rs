@@ -1311,17 +1311,7 @@ fn resolve_device(
         let devices = match transport {
             TransportPreference::CcidOnly => yubikit::device::list_devices_ccid()
                 .map_err(|e| CliError(format!("Failed to list devices: {e}")))?,
-            TransportPreference::OtpPreferred => {
-                let otp_devs = yubikit::device::list_devices_otp()
-                    .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
-                if otp_devs.is_empty() {
-                    // Fall back to full scan if no OTP HID devices found
-                    list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?
-                } else {
-                    otp_devs
-                }
-            }
-            TransportPreference::Any => {
+            TransportPreference::OtpPreferred | TransportPreference::Any => {
                 list_devices().map_err(|e| CliError(format!("Failed to list devices: {e}")))?
             }
         };
