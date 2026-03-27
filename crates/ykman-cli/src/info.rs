@@ -11,7 +11,7 @@ pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     if let Some(serial) = info.serial {
         println!("Serial number: {serial}");
     }
-    if info.version != yubikit::core_types::Version(0, 0, 0) {
+    if info.version != yubikit::core::Version(0, 0, 0) {
         println!("Firmware version: {}", info.version_name());
     } else {
         println!("Firmware version: Uncertain, re-run with only one YubiKey connected");

@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikit::{core_types, otp, tlv};
+use yubikit::{core, otp, tlv};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {
@@ -59,7 +59,7 @@ fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
 
 #[pyfunction]
 fn set_override_version(major: u8, minor: u8, patch: u8) {
-    core_types::set_override_version(core_types::Version(major, minor, patch));
+    core::set_override_version(core::Version(major, minor, patch));
 }
 
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -75,8 +75,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(oid_to_string, &m)?)?;
     m.add_function(wrap_pyfunction!(oid_from_string, &m)?)?;
     m.add_function(wrap_pyfunction!(set_override_version, &m)?)?;
-    m.add_class::<crate::py_smartcard_protocol::SmartCardProtocol>()?;
-    m.add_class::<crate::py_otp_protocol::OtpProtocol>()?;
+    m.add_class::<crate::py_smartcard::SmartCardProtocol>()?;
+    m.add_class::<crate::py_otp::OtpProtocol>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

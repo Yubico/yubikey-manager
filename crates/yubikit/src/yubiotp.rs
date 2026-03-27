@@ -35,7 +35,7 @@ use std::sync::atomic::AtomicBool;
 
 use sha1::{Digest, Sha1};
 
-use crate::core_types::patch_version;
+use crate::core::patch_version;
 use crate::otp::calculate_crc;
 #[cfg(test)]
 use crate::otp::check_crc;

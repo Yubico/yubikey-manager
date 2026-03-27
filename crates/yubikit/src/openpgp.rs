@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use sha2::Digest;
 use thiserror::Error;
 
-use crate::core_types::patch_version;
+use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
 use crate::tlv::{self, TlvError};
 

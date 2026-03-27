@@ -1,7 +1,7 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
-use yubikit::core_types::set_override_version;
+use yubikit::core::set_override_version;
 use yubikit::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
 use yubikit::management::ReleaseType;
 

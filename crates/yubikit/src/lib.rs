@@ -25,7 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-pub mod core_types;
+pub mod core;
 pub mod device;
 pub mod hsmauth;
 pub mod logging;

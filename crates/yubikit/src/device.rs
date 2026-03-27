@@ -44,6 +44,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use crate::core::set_override_version;
 use crate::management::{
     Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession,
     ManagementSession, ReleaseType, UsbInterface,
@@ -756,6 +757,7 @@ pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
             info.version_qualifier.version
         );
         info.version = info.version_qualifier.version;
+        set_override_version(info.version);
     }
 
     // YK4-based FIPS (4.4.x)

@@ -32,7 +32,7 @@ use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
 
-use crate::core_types::patch_version;
+use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
 use crate::tlv::{TlvError, tlv_encode, tlv_parse};
 

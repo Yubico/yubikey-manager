@@ -32,7 +32,7 @@
 //! `init_scp()`, and `close()` to native code.
 
 use pyo3::prelude::*;
-use yubikit::core_types::Version;
+use yubikit::core::Version;
 use yubikit::smartcard::SmartCardProtocol as RustSmartCardProtocol;
 
 use crate::py_bridge::{PySmartCardConnection, init_scp_from_py, smartcard_err};

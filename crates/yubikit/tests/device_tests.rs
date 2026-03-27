@@ -16,7 +16,7 @@
 
 use rstest::{fixture, rstest};
 use std::sync::OnceLock;
-use yubikit::core_types::{Version, set_override_version};
+use yubikit::core::{Version, set_override_version};
 use yubikit::device::{YubiKeyDevice, list_devices};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType};
 use yubikit::securitydomain::SecurityDomainSession;

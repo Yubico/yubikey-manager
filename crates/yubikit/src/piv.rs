@@ -39,7 +39,7 @@ use flate2::write::GzEncoder;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
-use crate::core_types::patch_version;
+use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
 use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
 

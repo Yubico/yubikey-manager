@@ -11,7 +11,7 @@
 //!   cargo run -p yubikit --example ykinfo -- --reader ACR122
 
 use std::env;
-use yubikit::core_types::{Version, set_override_version};
+use yubikit::core::{Version, set_override_version};
 use yubikit::device::{YubiKeyDevice, list_devices, list_readers, open_reader};
 use yubikit::hsmauth::HsmAuthSession;
 use yubikit::management::{Capability, ReleaseType};

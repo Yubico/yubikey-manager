@@ -1,4 +1,4 @@
-use yubikit::core_types::Version;
+use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};

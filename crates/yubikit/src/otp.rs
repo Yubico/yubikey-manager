@@ -35,7 +35,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::core_types::Version;
+use crate::core::Version;
 use crate::smartcard::SmartCardError;
 use crate::transport::otphid::OtpConnection;
 

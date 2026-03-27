@@ -34,12 +34,12 @@ mod py_logging;
 mod py_management;
 mod py_oath;
 mod py_openpgp;
-mod py_otp_protocol;
+mod py_otp;
 mod py_pcsc;
 mod py_piv;
 mod py_scp;
 mod py_securitydomain;
-mod py_smartcard_protocol;
+mod py_smartcard;
 mod py_yubiotp;
 
 use pyo3::prelude::*;

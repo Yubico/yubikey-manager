@@ -33,7 +33,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::core_types::patch_version;
+use crate::core::patch_version;
 use crate::otp::{OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc};
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
