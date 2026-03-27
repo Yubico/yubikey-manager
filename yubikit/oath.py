@@ -12,51 +12,15 @@ from _yubikit_native.oath import format_cred_id as _format_cred_id_native
 from _yubikit_native.oath import parse_b32_key
 from _yubikit_native.sessions import OathSession as _NativeOathSession
 
-from .core import (
-    Tlv,
-    Version,
-    _override_version,
-)
+from .core import Version, _override_version
 from .core.smartcard import ScpKeyParams, SmartCardConnection
 
 logger = logging.getLogger(__name__)
 
 
-# TLV tags for credential data
-TAG_NAME = 0x71
-TAG_NAME_LIST = 0x72
-TAG_KEY = 0x73
-TAG_CHALLENGE = 0x74
-TAG_RESPONSE = 0x75
-TAG_TRUNCATED = 0x76
-TAG_HOTP = 0x77
-TAG_PROPERTY = 0x78
-TAG_VERSION = 0x79
-TAG_IMF = 0x7A
-TAG_TOUCH = 0x7C
-
-# Instruction bytes for commands
-INS_LIST = 0xA1
-INS_PUT = 0x01
-INS_DELETE = 0x02
-INS_SET_CODE = 0x03
-INS_RESET = 0x04
-INS_RENAME = 0x05
-INS_CALCULATE = 0xA2
-INS_VALIDATE = 0xA3
-INS_CALCULATE_ALL = 0xA4
-INS_SEND_REMAINING = 0xA5
-
-TOTP_ID_PATTERN = None  # No longer used, parsing is in Rust
-
-MASK_ALGO = 0x0F
-MASK_TYPE = 0xF0
-
 DEFAULT_PERIOD = 30
 DEFAULT_DIGITS = 6
 DEFAULT_IMF = 0
-CHALLENGE_LEN = 8
-HMAC_MINIMUM_KEY_SIZE = 14
 
 
 @unique
@@ -73,15 +37,6 @@ class OATH_TYPE(IntEnum):
 
 
 PROP_REQUIRE_TOUCH = 0x02
-
-
-def _parse_select(response):
-    data = Tlv.parse_dict(response)
-    return (
-        _override_version.patch(Version.from_bytes(data[TAG_VERSION])),
-        data.get(TAG_NAME),
-        data.get(TAG_CHALLENGE),
-    )
 
 
 @dataclass

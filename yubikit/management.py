@@ -39,17 +39,7 @@ from _yubikit_native.sessions import (
 from _yubikit_native.sessions import ManagementOtpSession as _NativeManagementOtpSession
 from _yubikit_native.sessions import ManagementSession as _NativeManagementSession
 
-from .core import (
-    TRANSPORT,
-    USB_INTERFACE,
-    BadResponseError,
-    NotSupportedError,
-    Tlv,
-    Version,
-    bytes2int,
-    int2bytes,
-    require_version,
-)
+from .core import TRANSPORT, USB_INTERFACE, Version, require_version
 from .core.fido import FidoConnection
 from .core.otp import (
     OtpConnection,
@@ -202,35 +192,6 @@ class RELEASE_TYPE(IntEnum):
         return self.name.lower()
 
 
-TAG_USB_SUPPORTED = 0x01
-TAG_SERIAL = 0x02
-TAG_USB_ENABLED = 0x03
-TAG_FORM_FACTOR = 0x04
-TAG_VERSION = 0x05
-TAG_AUTO_EJECT_TIMEOUT = 0x06
-TAG_CHALRESP_TIMEOUT = 0x07
-TAG_DEVICE_FLAGS = 0x08
-TAG_APP_VERSIONS = 0x09
-TAG_CONFIG_LOCK = 0x0A
-TAG_UNLOCK = 0x0B
-TAG_REBOOT = 0x0C
-TAG_NFC_SUPPORTED = 0x0D
-TAG_NFC_ENABLED = 0x0E
-TAG_IAP_DETECTION = 0x0F
-TAG_MORE_DATA = 0x10
-TAG_FREE_FORM = 0x11
-TAG_HID_INIT_DELAY = 0x12
-TAG_PART_NUMBER = 0x13
-TAG_FIPS_CAPABLE = 0x14
-TAG_FIPS_APPROVED = 0x15
-TAG_PIN_COMPLEXITY = 0x16
-TAG_NFC_RESTRICTED = 0x17
-TAG_RESET_BLOCKED = 0x18
-TAG_VERSION_QUALIFIER = 0x19
-TAG_FPS_VERSION = 0x20
-TAG_STM_VERSION = 0x21
-
-
 @dataclass
 class DeviceConfig:
     """Management settings for YubiKey which can be configured by the user."""
@@ -240,37 +201,6 @@ class DeviceConfig:
     challenge_response_timeout: int | None = None
     device_flags: DEVICE_FLAG | None = None
     nfc_restricted: bool | None = None
-
-    def get_bytes(
-        self,
-        reboot: bool,
-        cur_lock_code: bytes | None = None,
-        new_lock_code: bytes | None = None,
-    ) -> bytes:
-        buf = b""
-        if reboot:
-            buf += Tlv(TAG_REBOOT)
-        if cur_lock_code:
-            buf += Tlv(TAG_UNLOCK, cur_lock_code)
-        usb_enabled = self.enabled_capabilities.get(TRANSPORT.USB)
-        if usb_enabled is not None:
-            buf += Tlv(TAG_USB_ENABLED, int2bytes(usb_enabled, 2))
-        nfc_enabled = self.enabled_capabilities.get(TRANSPORT.NFC)
-        if nfc_enabled is not None:
-            buf += Tlv(TAG_NFC_ENABLED, int2bytes(nfc_enabled, 2))
-        if self.auto_eject_timeout is not None:
-            buf += Tlv(TAG_AUTO_EJECT_TIMEOUT, int2bytes(self.auto_eject_timeout, 2))
-        if self.challenge_response_timeout is not None:
-            buf += Tlv(TAG_CHALRESP_TIMEOUT, int2bytes(self.challenge_response_timeout))
-        if self.device_flags is not None:
-            buf += Tlv(TAG_DEVICE_FLAGS, int2bytes(self.device_flags))
-        if new_lock_code:
-            buf += Tlv(TAG_CONFIG_LOCK, new_lock_code)
-        if self.nfc_restricted:
-            buf += Tlv(TAG_NFC_RESTRICTED, b"\1")
-        if len(buf) > 0xFF:
-            raise NotSupportedError("DeviceConfiguration too large")
-        return int2bytes(len(buf)) + buf
 
 
 @dataclass(frozen=True)
@@ -325,93 +255,6 @@ class DeviceInfo:
             else str(self.version)
             if self.version
             else "unknown"
-        )
-
-    @classmethod
-    def parse(cls, encoded: bytes, default_version: Version) -> DeviceInfo:
-        if len(encoded) - 1 != encoded[0]:
-            raise BadResponseError("Invalid length")
-        return cls.parse_tlvs(Tlv.parse_dict(encoded[1:]), default_version)
-
-    @classmethod
-    def parse_tlvs(
-        cls, data: Mapping[int, bytes], default_version: Version
-    ) -> DeviceInfo:
-        locked = data.get(TAG_CONFIG_LOCK) == b"\1"
-        serial = bytes2int(data.get(TAG_SERIAL, b"\0")) or None
-        ff_value = bytes2int(data.get(TAG_FORM_FACTOR, b"\0"))
-        form_factor = FORM_FACTOR.from_code(ff_value)
-        fips = bool(ff_value & 0x80)
-        sky = bool(ff_value & 0x40)
-        if TAG_VERSION in data:
-            version = Version.from_bytes(data[TAG_VERSION])
-        else:
-            version = default_version
-        auto_eject_to = bytes2int(data.get(TAG_AUTO_EJECT_TIMEOUT, b"\0"))
-        chal_resp_to = bytes2int(data.get(TAG_CHALRESP_TIMEOUT, b"\0"))
-        flags = DEVICE_FLAG(bytes2int(data.get(TAG_DEVICE_FLAGS, b"\0")))
-
-        supported = {}
-        enabled = {}
-
-        if version == (4, 2, 4):  # Doesn't report correctly
-            supported[TRANSPORT.USB] = CAPABILITY(0x3F)
-        else:
-            supported[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_SUPPORTED]))
-        if TAG_USB_ENABLED in data:  # From YK 5.0.0
-            if not ((4, 0, 0) <= version < (5, 0, 0)):  # Broken on YK4
-                enabled[TRANSPORT.USB] = CAPABILITY(bytes2int(data[TAG_USB_ENABLED]))
-        if TAG_NFC_SUPPORTED in data:  # YK with NFC
-            supported[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_SUPPORTED]))
-            enabled[TRANSPORT.NFC] = CAPABILITY(bytes2int(data[TAG_NFC_ENABLED]))
-        nfc_restricted = data.get(TAG_NFC_RESTRICTED, b"\0") == b"\1"
-        try:
-            part_number = data.get(TAG_PART_NUMBER, b"").decode() or None
-        except UnicodeDecodeError:
-            part_number = None
-        fips_capable = CAPABILITY._from_fips(
-            bytes2int(data.get(TAG_FIPS_CAPABLE, b"\0"))
-        )
-        fips_approved = CAPABILITY._from_fips(
-            bytes2int(data.get(TAG_FIPS_APPROVED, b"\0"))
-        )
-        pin_complexity = data.get(TAG_PIN_COMPLEXITY, b"\0") == b"\1"
-        reset_blocked = CAPABILITY(bytes2int(data.get(TAG_RESET_BLOCKED, b"\0")))
-        vq = data.get(TAG_VERSION_QUALIFIER)
-        if vq:
-            vq_data = Tlv.parse_dict(vq)
-            version_qualifier = VersionQualifier(
-                Version.from_bytes(vq_data[0x01]),
-                RELEASE_TYPE(bytes2int(vq_data[0x02])),
-                bytes2int(vq_data[0x03]),
-            )
-            if version_qualifier.type != RELEASE_TYPE.FINAL:
-                logger.info(
-                    f"Overriding behavioral version with {version_qualifier.version}"
-                )
-                version = version_qualifier.version
-        else:
-            version_qualifier = VersionQualifier(version, RELEASE_TYPE.FINAL, 0)
-        fps_version = Version.from_bytes(data.get(TAG_FPS_VERSION, b"\0\0\0"))
-        stm_version = Version.from_bytes(data.get(TAG_STM_VERSION, b"\0\0\0"))
-
-        return cls(
-            DeviceConfig(enabled, auto_eject_to, chal_resp_to, flags, nfc_restricted),
-            serial,
-            version,
-            form_factor,
-            supported,
-            locked,
-            fips,
-            sky,
-            part_number,
-            fips_capable,
-            fips_approved,
-            pin_complexity,
-            reset_blocked,
-            fps_version or None,
-            stm_version or None,
-            version_qualifier,
         )
 
 

@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikit::{core_types, otp, smartcard, tlv};
+use yubikit::{core_types, otp, tlv};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {
@@ -58,26 +58,6 @@ fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
 }
 
 #[pyfunction]
-fn format_short_apdu(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8], le: u8) -> PyResult<Vec<u8>> {
-    smartcard::format_short_apdu(cla, ins, p1, p2, data, le)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-}
-
-#[pyfunction]
-fn format_extended_apdu(
-    cla: u8,
-    ins: u8,
-    p1: u8,
-    p2: u8,
-    data: &[u8],
-    le: u16,
-    max_apdu_size: usize,
-) -> PyResult<Vec<u8>> {
-    smartcard::format_extended_apdu(cla, ins, p1, p2, data, le, max_apdu_size)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-}
-
-#[pyfunction]
 fn set_override_version(major: u8, minor: u8, patch: u8) {
     core_types::set_override_version(core_types::Version(major, minor, patch));
 }
@@ -94,8 +74,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bytes2int, &m)?)?;
     m.add_function(wrap_pyfunction!(oid_to_string, &m)?)?;
     m.add_function(wrap_pyfunction!(oid_from_string, &m)?)?;
-    m.add_function(wrap_pyfunction!(format_short_apdu, &m)?)?;
-    m.add_function(wrap_pyfunction!(format_extended_apdu, &m)?)?;
     m.add_function(wrap_pyfunction!(set_override_version, &m)?)?;
     m.add_class::<crate::py_smartcard_protocol::SmartCardProtocol>()?;
     m.add_class::<crate::py_otp_protocol::OtpProtocol>()?;

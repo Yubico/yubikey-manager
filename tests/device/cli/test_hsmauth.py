@@ -11,16 +11,18 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from yubikit.core import TRANSPORT, Tlv
 from yubikit.hsmauth import (
-    INS_CALCULATE,
-    TAG_CONTEXT,
-    TAG_CREDENTIAL_PASSWORD,
-    TAG_LABEL,
     _parse_credential_password,
     _parse_label,
 )
 from yubikit.management import CAPABILITY
 
 from .. import condition
+
+# Constants for raw APDU construction in tests
+INS_CALCULATE = 0x03
+TAG_LABEL = 0x71
+TAG_CONTEXT = 0x77
+TAG_CREDENTIAL_PASSWORD = 0x73
 
 DEFAULT_MANAGEMENT_KEY = "00000000000000000000000000000000"
 NON_DEFAULT_MANAGEMENT_KEY = "11111111111111111111111111111112"
