@@ -1,5 +1,7 @@
 use pyo3::prelude::*;
-use yubikit::oath;
+use yubikit::oath::{self, OathSession as RustOathSession};
+
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
 #[pyfunction]
 fn format_cred_id(
@@ -14,118 +16,277 @@ fn format_cred_id(
 }
 
 #[pyfunction]
-fn parse_cred_id(cred_id: &[u8], oath_type: u8) -> PyResult<(Option<String>, String, u32)> {
-    let ot = oath::OathType::from_u8(oath_type)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid OATH type"))?;
-    Ok(oath::parse_cred_id(cred_id, ot))
-}
-
-#[pyfunction]
-fn get_device_id(salt: &[u8]) -> String {
-    oath::get_device_id(salt)
-}
-
-#[pyfunction]
-fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
-    oath::hmac_sha1(key, message)
-}
-
-#[pyfunction]
-fn hmac_verify(key: &[u8], message: &[u8], expected: &[u8]) -> bool {
-    oath::hmac_verify(key, message, expected)
-}
-
-#[pyfunction]
-fn derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
-    oath::derive_key(salt, passphrase)
-}
-
-#[pyfunction]
-fn hmac_shorten_key(key: &[u8], algo: u8) -> PyResult<Vec<u8>> {
-    let ha = oath::HashAlgorithm::from_u8(algo)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid hash algorithm"))?;
-    Ok(oath::hmac_shorten_key(key, ha))
-}
-
-#[pyfunction]
-fn get_challenge(timestamp: u64, period: u32) -> [u8; 8] {
-    oath::get_challenge(timestamp, period)
-}
-
-#[pyfunction]
-fn format_code(
-    oath_type: u8,
-    period: u32,
-    timestamp: u64,
-    truncated: &[u8],
-) -> PyResult<(String, u64, u64)> {
-    let ot = oath::OathType::from_u8(oath_type)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid OATH type"))?;
-    Ok(oath::format_code(ot, period, timestamp, truncated))
-}
-
-#[pyfunction]
-fn build_put_data(
-    cred_id: &[u8],
-    oath_type: u8,
-    hash_algorithm: u8,
-    digits: u8,
-    secret: &[u8],
-    touch_required: bool,
-    counter: u32,
-) -> PyResult<Vec<u8>> {
-    let ot = oath::OathType::from_u8(oath_type)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid OATH type"))?;
-    let ha = oath::HashAlgorithm::from_u8(hash_algorithm)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid hash algorithm"))?;
-    Ok(oath::build_put_data(
-        cred_id,
-        ot,
-        ha,
-        digits,
-        secret,
-        touch_required,
-        counter,
-    ))
-}
-
-#[pyfunction]
-fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Vec<u8> {
-    oath::build_set_key_data(key, challenge)
-}
-
-#[pyfunction]
-fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: &[u8]) -> Vec<u8> {
-    oath::build_validate_data(key, device_challenge, host_challenge)
-}
-
-#[pyfunction]
-fn parse_list_entry(data: &[u8]) -> PyResult<(u8, Vec<u8>)> {
-    let (oath_type, cred_id) = oath::parse_list_entry(data)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    Ok((oath_type as u8, cred_id))
-}
-
-#[pyfunction]
 fn parse_b32_key(key: &str) -> PyResult<Vec<u8>> {
     oath::parse_b32_key(key).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+#[pyclass]
+pub struct OathSession {
+    inner: RustOathSession<PySmartCardConnection>,
+}
+
+#[pymethods]
+impl OathSession {
+    #[new]
+    #[pyo3(signature = (connection, scp_key_params=None))]
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let conn = PySmartCardConnection::from_py(connection)?;
+        if let Some(params) = scp_key_params {
+            let scp_params = scp_key_params_from_py(params)?;
+            let inner = RustOathSession::new_with_scp(conn, &scp_params).map_err(smartcard_err)?;
+            Ok(Self { inner })
+        } else {
+            let inner = RustOathSession::new(conn).map_err(smartcard_err)?;
+            Ok(Self { inner })
+        }
+    }
+
+    #[getter]
+    fn version(&self) -> (u8, u8, u8) {
+        let v = self.inner.version();
+        (v.0, v.1, v.2)
+    }
+
+    #[setter]
+    fn set_version(&mut self, version: (u8, u8, u8)) {
+        self.inner
+            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
+    }
+
+    #[getter]
+    fn device_id(&self) -> &str {
+        self.inner.device_id()
+    }
+
+    #[getter]
+    fn has_key(&self) -> bool {
+        self.inner.has_key()
+    }
+
+    #[getter]
+    fn locked(&self) -> bool {
+        self.inner.locked()
+    }
+
+    fn reset(&mut self) -> PyResult<()> {
+        self.inner.reset().map_err(smartcard_err)
+    }
+
+    fn derive_key(&self, password: &str) -> Vec<u8> {
+        self.inner.derive_key(password)
+    }
+
+    fn validate(&mut self, key: &[u8]) -> PyResult<()> {
+        self.inner.validate(key).map_err(smartcard_err)
+    }
+
+    fn set_key(&mut self, key: &[u8]) -> PyResult<()> {
+        self.inner.set_key(key).map_err(smartcard_err)
+    }
+
+    fn unset_key(&mut self) -> PyResult<()> {
+        self.inner.unset_key().map_err(smartcard_err)
+    }
+
+    /// Put a credential on the device.
+    ///
+    /// Returns (device_id, id, issuer, name, oath_type, period, touch_required).
+    #[pyo3(signature = (name, oath_type, hash_algorithm, secret, digits, period, counter, issuer=None, touch_required=false))]
+    fn put_credential(
+        &mut self,
+        name: &str,
+        oath_type: u8,
+        hash_algorithm: u8,
+        secret: &[u8],
+        digits: u8,
+        period: u32,
+        counter: u32,
+        issuer: Option<&str>,
+        touch_required: bool,
+    ) -> PyResult<(
+        String,
+        Vec<u8>,
+        Option<String>,
+        String,
+        u8,
+        u32,
+        Option<bool>,
+    )> {
+        let ot = oath::OathType::from_u8(oath_type)
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid OATH type"))?;
+        let ha = oath::HashAlgorithm::from_u8(hash_algorithm)
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid hash algorithm"))?;
+
+        let cred_data = oath::CredentialData {
+            name: name.to_string(),
+            oath_type: ot,
+            hash_algorithm: ha,
+            secret: secret.to_vec(),
+            digits,
+            period,
+            counter,
+            issuer: issuer.map(|s| s.to_string()),
+        };
+
+        let cred = self
+            .inner
+            .put_credential(&cred_data, touch_required)
+            .map_err(smartcard_err)?;
+
+        Ok((
+            cred.device_id,
+            cred.id,
+            cred.issuer,
+            cred.name,
+            cred.oath_type as u8,
+            cred.period,
+            cred.touch_required,
+        ))
+    }
+
+    /// Rename a credential. Returns the new credential ID.
+    fn rename_credential(
+        &mut self,
+        credential_id: &[u8],
+        name: &str,
+        issuer: Option<&str>,
+    ) -> PyResult<Vec<u8>> {
+        self.inner
+            .rename_credential(credential_id, name, issuer)
+            .map_err(smartcard_err)
+    }
+
+    /// List credentials.
+    ///
+    /// Returns list of (device_id, id, issuer, name, oath_type, period, touch_required).
+    fn list_credentials(
+        &mut self,
+    ) -> PyResult<
+        Vec<(
+            String,
+            Vec<u8>,
+            Option<String>,
+            String,
+            u8,
+            u32,
+            Option<bool>,
+        )>,
+    > {
+        let creds = self.inner.list_credentials().map_err(smartcard_err)?;
+        Ok(creds
+            .into_iter()
+            .map(|c| {
+                (
+                    c.device_id,
+                    c.id,
+                    c.issuer,
+                    c.name,
+                    c.oath_type as u8,
+                    c.period,
+                    c.touch_required,
+                )
+            })
+            .collect())
+    }
+
+    fn calculate(&mut self, credential_id: &[u8], challenge: &[u8]) -> PyResult<Vec<u8>> {
+        self.inner
+            .calculate(credential_id, challenge)
+            .map_err(smartcard_err)
+    }
+
+    fn delete_credential(&mut self, credential_id: &[u8]) -> PyResult<()> {
+        self.inner
+            .delete_credential(credential_id)
+            .map_err(smartcard_err)
+    }
+
+    /// Calculate all credentials.
+    ///
+    /// Returns list of (device_id, id, issuer, name, oath_type, period, touch_required,
+    ///   code_value, code_valid_from, code_valid_to) for credentials with codes,
+    /// or (device_id, id, issuer, name, oath_type, period, touch_required,
+    ///   None, None, None) for those without.
+    fn calculate_all(
+        &mut self,
+        timestamp: u64,
+    ) -> PyResult<
+        Vec<(
+            String,
+            Vec<u8>,
+            Option<String>,
+            String,
+            u8,
+            u32,
+            Option<bool>,
+            Option<String>,
+            Option<u64>,
+            Option<u64>,
+        )>,
+    > {
+        let results = self.inner.calculate_all(timestamp).map_err(smartcard_err)?;
+        Ok(results
+            .into_iter()
+            .map(|(cred, code)| {
+                let (value, valid_from, valid_to) = match code {
+                    Some(c) => (Some(c.value), Some(c.valid_from), Some(c.valid_to)),
+                    None => (None, None, None),
+                };
+                (
+                    cred.device_id,
+                    cred.id,
+                    cred.issuer,
+                    cred.name,
+                    cred.oath_type as u8,
+                    cred.period,
+                    cred.touch_required,
+                    value,
+                    valid_from,
+                    valid_to,
+                )
+            })
+            .collect())
+    }
+
+    /// Calculate a code for a single credential.
+    ///
+    /// Returns (value, valid_from, valid_to).
+    fn calculate_code(
+        &mut self,
+        device_id: &str,
+        cred_id: &[u8],
+        issuer: Option<&str>,
+        name: &str,
+        oath_type: u8,
+        period: u32,
+        touch_required: Option<bool>,
+        timestamp: u64,
+    ) -> PyResult<(String, u64, u64)> {
+        let ot = oath::OathType::from_u8(oath_type)
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid OATH type"))?;
+        let credential = oath::Credential {
+            device_id: device_id.to_string(),
+            id: cred_id.to_vec(),
+            issuer: issuer.map(|s| s.to_string()),
+            name: name.to_string(),
+            oath_type: ot,
+            period,
+            touch_required,
+        };
+        let code = self
+            .inner
+            .calculate_code(&credential, timestamp)
+            .map_err(smartcard_err)?;
+        Ok((code.value, code.valid_from, code.valid_to))
+    }
 }
 
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "oath")?;
     m.add_function(wrap_pyfunction!(format_cred_id, &m)?)?;
-    m.add_function(wrap_pyfunction!(parse_cred_id, &m)?)?;
-    m.add_function(wrap_pyfunction!(get_device_id, &m)?)?;
-    m.add_function(wrap_pyfunction!(hmac_sha1, &m)?)?;
-    m.add_function(wrap_pyfunction!(hmac_verify, &m)?)?;
-    m.add_function(wrap_pyfunction!(derive_key, &m)?)?;
-    m.add_function(wrap_pyfunction!(hmac_shorten_key, &m)?)?;
-    m.add_function(wrap_pyfunction!(get_challenge, &m)?)?;
-    m.add_function(wrap_pyfunction!(format_code, &m)?)?;
-    m.add_function(wrap_pyfunction!(build_put_data, &m)?)?;
-    m.add_function(wrap_pyfunction!(build_set_key_data, &m)?)?;
-    m.add_function(wrap_pyfunction!(build_validate_data, &m)?)?;
-    m.add_function(wrap_pyfunction!(parse_list_entry, &m)?)?;
     m.add_function(wrap_pyfunction!(parse_b32_key, &m)?)?;
     parent.add_submodule(&m)?;
 

@@ -8,36 +8,8 @@ from time import time
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
-from _yubikit_native.oath import (  # noqa: F401
-    build_put_data as _build_put_data,
-)
-from _yubikit_native.oath import (
-    derive_key as _derive_key_native,
-)
-from _yubikit_native.oath import (
-    format_code as _format_code_native,
-)
-from _yubikit_native.oath import (
-    format_cred_id as _format_cred_id_native,
-)
-from _yubikit_native.oath import (
-    get_challenge as _get_challenge_native,
-)
-from _yubikit_native.oath import (
-    get_device_id as _get_device_id_native,
-)
-from _yubikit_native.oath import (
-    hmac_sha1 as _hmac_sha1_native,
-)
-from _yubikit_native.oath import (
-    hmac_shorten_key as _hmac_shorten_key_native,
-)
-from _yubikit_native.oath import (
-    parse_b32_key,
-)
-from _yubikit_native.oath import (
-    parse_cred_id as _parse_cred_id_native,
-)
+from _yubikit_native.oath import format_cred_id as _format_cred_id_native
+from _yubikit_native.oath import parse_b32_key
 from _yubikit_native.sessions import OathSession as _NativeOathSession
 
 from .core import (
@@ -202,37 +174,6 @@ class Credential:
 
 def _format_cred_id(issuer, name, oath_type, period=DEFAULT_PERIOD):
     return bytes(_format_cred_id_native(issuer, name, int(oath_type), period))
-
-
-def _parse_cred_id(cred_id, oath_type):
-    return _parse_cred_id_native(cred_id, int(oath_type))
-
-
-def _get_device_id(salt):
-    return _get_device_id_native(salt)
-
-
-def _hmac_sha1(key, message):
-    return bytes(_hmac_sha1_native(key, message))
-
-
-def _derive_key(salt, passphrase):
-    return bytes(_derive_key_native(salt, passphrase))
-
-
-def _hmac_shorten_key(key, algo):
-    return bytes(_hmac_shorten_key_native(key, int(algo)))
-
-
-def _get_challenge(timestamp, period):
-    return bytes(_get_challenge_native(timestamp, period))
-
-
-def _format_code(credential, timestamp, truncated):
-    code_str, valid_from, valid_to = _format_code_native(
-        int(credential.oath_type), credential.period, timestamp, bytes(truncated)
-    )
-    return Code(code_str, valid_from, valid_to)
 
 
 class OathSession:

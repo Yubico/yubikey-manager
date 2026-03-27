@@ -25,7 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use crate::py_management_session::device_info_to_dict;
+use crate::py_management::device_info_to_dict;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use yubikit::device;

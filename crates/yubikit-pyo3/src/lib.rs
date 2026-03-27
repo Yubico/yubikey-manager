@@ -29,19 +29,18 @@ mod py_bridge;
 mod py_core;
 mod py_device;
 mod py_hid;
-mod py_hsmauth_session;
+mod py_hsmauth;
 mod py_logging;
-mod py_management_session;
+mod py_management;
 mod py_oath;
-mod py_oath_session;
-mod py_openpgp_session;
+mod py_openpgp;
 mod py_otp_protocol;
 mod py_pcsc;
-mod py_piv_session;
+mod py_piv;
 mod py_scp;
-mod py_securitydomain_session;
+mod py_securitydomain;
 mod py_smartcard_protocol;
-mod py_yubiotp_session;
+mod py_yubiotp;
 
 use pyo3::prelude::*;
 
@@ -60,20 +59,17 @@ fn _yubikit_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "sessions")?;
-    m.add_class::<py_oath_session::OathSession>()?;
-    m.add_class::<py_piv_session::PivSession>()?;
-    m.add_class::<py_openpgp_session::OpenPgpSession>()?;
-    m.add_class::<py_hsmauth_session::HsmAuthSession>()?;
-    m.add_class::<py_management_session::ManagementSession>()?;
-    m.add_class::<py_management_session::ManagementOtpSession>()?;
-    m.add_class::<py_management_session::ManagementFidoSession>()?;
-    m.add_function(wrap_pyfunction!(
-        py_management_session::py_list_fido_devices,
-        &m
-    )?)?;
-    m.add_class::<py_securitydomain_session::SecurityDomainSession>()?;
-    m.add_class::<py_yubiotp_session::PyYubiOtpSession>()?;
-    m.add_class::<py_yubiotp_session::PyYubiOtpOtpSession>()?;
+    m.add_class::<py_oath::OathSession>()?;
+    m.add_class::<py_piv::PivSession>()?;
+    m.add_class::<py_openpgp::OpenPgpSession>()?;
+    m.add_class::<py_hsmauth::HsmAuthSession>()?;
+    m.add_class::<py_management::ManagementSession>()?;
+    m.add_class::<py_management::ManagementOtpSession>()?;
+    m.add_class::<py_management::ManagementFidoSession>()?;
+    m.add_function(wrap_pyfunction!(py_management::py_list_fido_devices, &m)?)?;
+    m.add_class::<py_securitydomain::SecurityDomainSession>()?;
+    m.add_class::<py_yubiotp::PyYubiOtpSession>()?;
+    m.add_class::<py_yubiotp::PyYubiOtpOtpSession>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;
