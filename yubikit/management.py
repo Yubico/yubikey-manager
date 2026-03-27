@@ -383,16 +383,13 @@ class ManagementSession:
                 _NativeManagementOtpSession
                 | _NativeManagementSession
                 | _NativeManagementFidoSession
-            ) = _NativeManagementOtpSession(connection._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            ) = _NativeManagementOtpSession(connection._conn)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         elif isinstance(connection, SmartCardConnection):
             native = _NativeManagementSession(connection, scp_key_params)
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            path = connection._path  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
-            if isinstance(path, bytes):
-                path = path.decode()
-            native = _NativeManagementFidoSession(path)
+            native = _NativeManagementFidoSession(connection._native)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         else:
             raise TypeError("Unsupported connection type")
 

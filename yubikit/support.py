@@ -26,124 +26,31 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
-from dataclasses import replace
 
 from _yubikit_native.device import get_name as _get_name_native
 from _yubikit_native.device import read_info_ccid as _read_info_ccid_native
+from _yubikit_native.device import read_info_fido as _read_info_fido_native
+from _yubikit_native.device import read_info_otp as _read_info_otp_native
 
 from .core import (
     PID,
     TRANSPORT,
     YUBIKEY,
-    ApplicationNotAvailableError,
-    CommandError,
     Connection,
-    NotSupportedError,
-    Version,
 )
 from .core.fido import FidoConnection
 from .core.otp import OtpConnection
 from .core.smartcard import SmartCardConnection
 from .management import (
     CAPABILITY,
-    DEVICE_FLAG,
-    FORM_FACTOR,
-    USB_INTERFACE,
-    DeviceConfig,
     DeviceInfo,
-    ManagementSession,
-    VersionQualifier,
     _device_info_from_native,
 )
-from .yubiotp import YubiOtpSession
 
 logger = logging.getLogger(__name__)
 
 
 _BASE_NEO_APPS = CAPABILITY.OTP | CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
-
-
-def _read_info_otp(conn, key_type, interfaces):
-    try:
-        mgmt = ManagementSession(conn)
-        return mgmt.read_device_info()
-    except (ApplicationNotAvailableError, NotSupportedError):
-        logger.debug("Unable to get info via Management application, use fallback")
-
-    # Synthesize info
-    otp = YubiOtpSession(conn)
-    try:
-        serial = otp.get_serial()
-    except CommandError:
-        logger.debug("Unable to read serial over OTP, no serial", exc_info=True)
-        serial = None
-    version = otp.version
-
-    if key_type == YUBIKEY.NEO:
-        usb_supported = _BASE_NEO_APPS
-        if USB_INTERFACE.FIDO in interfaces or version >= (3, 3, 0):
-            usb_supported |= CAPABILITY.U2F
-        capabilities = {
-            TRANSPORT.USB: usb_supported,
-            TRANSPORT.NFC: usb_supported,
-        }
-    elif key_type == YUBIKEY.YKP:
-        capabilities = {
-            TRANSPORT.USB: CAPABILITY.OTP | CAPABILITY.U2F,
-        }
-    else:
-        capabilities = {
-            TRANSPORT.USB: CAPABILITY.OTP,
-        }
-
-    return DeviceInfo(
-        config=DeviceConfig(
-            enabled_capabilities={},  # Populated later
-            auto_eject_timeout=0,
-            challenge_response_timeout=0,
-            device_flags=DEVICE_FLAG(0),
-        ),
-        serial=serial,
-        version=version,
-        form_factor=FORM_FACTOR.UNKNOWN,
-        supported_capabilities=capabilities.copy(),
-        is_locked=False,
-        version_qualifier=VersionQualifier(version),
-    )
-
-
-def _read_info_ctap(conn, key_type, interfaces):
-    try:
-        mgmt = ManagementSession(conn)
-        return mgmt.read_device_info()
-    except Exception:  # SKY 1, NEO, or YKP
-        logger.debug("Unable to get info via Management application, use fallback")
-
-        # Best guess version
-        if key_type == YUBIKEY.YKP:
-            version = Version(4, 0, 0)
-        else:
-            version = Version(3, 0, 0)
-
-        supported_apps = {TRANSPORT.USB: CAPABILITY.U2F}
-        if key_type == YUBIKEY.NEO:
-            supported_apps[TRANSPORT.USB] |= _BASE_NEO_APPS
-            supported_apps[TRANSPORT.NFC] = supported_apps[TRANSPORT.USB]
-
-        return DeviceInfo(
-            config=DeviceConfig(
-                enabled_capabilities={},  # Populated later
-                auto_eject_timeout=0,
-                challenge_response_timeout=0,
-                device_flags=DEVICE_FLAG(0),
-            ),
-            serial=None,
-            version=version,
-            form_factor=FORM_FACTOR.USB_A_KEYCHAIN,
-            supported_capabilities=supported_apps,
-            is_locked=False,
-            version_qualifier=VersionQualifier(version),
-        )
 
 
 def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
@@ -163,83 +70,16 @@ def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
     logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
 
     if isinstance(conn, SmartCardConnection):
-        # CCID path fully handled by native Rust implementation
         d = _read_info_ccid_native(conn)
         return _device_info_from_native(d)
-
-    # For OTP/FIDO, keep existing Python paths
-    if pid:
-        key_type: YUBIKEY | None = pid.yubikey_type
-        interfaces = pid.usb_interfaces
-    else:
-        raise ValueError("PID must be provided for non-NFC connections")
-
-    if isinstance(conn, OtpConnection):
-        info = _read_info_otp(conn, key_type, interfaces)
+    elif isinstance(conn, OtpConnection):
+        d = _read_info_otp_native(conn._path)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     elif isinstance(conn, FidoConnection):
-        info = _read_info_ctap(conn, key_type, interfaces)
+        d = _read_info_fido_native(conn._path)  # ty: ignore[unresolved-attribute]
     else:
         raise TypeError("Invalid connection type")
 
-    logger.debug("Read info: %s", info)
-
-    # Set usb_enabled if missing (pre YubiKey 5)
-    if (
-        info.has_transport(TRANSPORT.USB)
-        and TRANSPORT.USB not in info.config.enabled_capabilities
-    ):
-        usb_enabled = info.supported_capabilities[TRANSPORT.USB]
-        if usb_enabled == (CAPABILITY.OTP | CAPABILITY.U2F | USB_INTERFACE.CCID):
-            # YubiKey Edge, hide unusable CCID interface from supported
-            info.supported_capabilities = {
-                TRANSPORT.USB: CAPABILITY.OTP | CAPABILITY.U2F
-            }
-
-        if USB_INTERFACE.OTP not in interfaces:
-            usb_enabled &= ~CAPABILITY.OTP
-        if USB_INTERFACE.FIDO not in interfaces:
-            usb_enabled &= ~(CAPABILITY.U2F | CAPABILITY.FIDO2)
-        if USB_INTERFACE.CCID not in interfaces:
-            usb_enabled &= ~(
-                USB_INTERFACE.CCID
-                | CAPABILITY.OATH
-                | CAPABILITY.OPENPGP
-                | CAPABILITY.PIV
-            )
-
-        info.config.enabled_capabilities[TRANSPORT.USB] = usb_enabled
-
-    # SKY identified by PID
-    if key_type == YUBIKEY.SKY:
-        info.is_sky = True
-
-    # YK4-based FIPS version
-    if (4, 4, 0) <= info.version < (4, 5, 0):
-        info.is_fips = True
-
-    # Fix NFC if needed
-    if info.has_transport(TRANSPORT.NFC):
-        # Set nfc_enabled if missing (pre YubiKey 5)
-        if TRANSPORT.NFC not in info.config.enabled_capabilities:
-            info.config.enabled_capabilities[TRANSPORT.NFC] = (
-                info.supported_capabilities[TRANSPORT.NFC]
-            )
-        # Workaround for invalid configurations
-        if info.form_factor in (
-            FORM_FACTOR.USB_A_NANO,
-            FORM_FACTOR.USB_C_NANO,
-            FORM_FACTOR.USB_C_LIGHTNING,
-        ) or (
-            info.form_factor is FORM_FACTOR.USB_C_KEYCHAIN and info.version < (5, 2, 4)
-        ):
-            # Known to not have NFC, remove capabilities
-            supported = dict(info.supported_capabilities)
-            del supported[TRANSPORT.NFC]
-            replace(info, supported_capabilities=supported)
-            del info.config.enabled_capabilities[TRANSPORT.NFC]
-
-    logger.debug("Device info, after tweaks: %s", info)
-    return info
+    return _device_info_from_native(d)
 
 
 def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
