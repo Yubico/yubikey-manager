@@ -931,6 +931,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         self.protocol
     }
 
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
     /// Get a mutable reference to the underlying protocol.
     pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
         &mut self.protocol

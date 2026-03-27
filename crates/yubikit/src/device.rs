@@ -46,7 +46,7 @@ use std::fmt;
 
 use crate::management::{
     Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession,
-    ManagementSession, UsbInterface,
+    ManagementSession, ReleaseType, UsbInterface,
 };
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
@@ -342,7 +342,10 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
             }
 
             // Multiple or zero unmatched: need OTP info to match
-            let hid_info = read_info_otp(&hid.path).ok();
+            let hid_info = OtpConnection::new(&hid.path)
+                .ok()
+                .and_then(|conn| read_info_otp(conn).ok())
+                .map(|(info, _conn)| info);
             let hid_serial = hid_info.as_ref().and_then(|i| i.serial);
 
             // Try to merge with an existing PCSC entry by serial
@@ -399,7 +402,10 @@ pub fn list_devices() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                 continue;
             }
 
-            let fido_info = read_info_fido(&fido).ok();
+            let fido_info = FidoConnection::open(&fido)
+                .ok()
+                .and_then(|conn| read_info_fido(conn).ok())
+                .map(|(info, _conn)| info);
             let fido_serial = fido_info.as_ref().and_then(|i| i.serial);
 
             let merged = if let Some(serial) = fido_serial {
@@ -533,7 +539,11 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(hid_devices) = list_otp_devices() {
         for hid in hid_devices {
-            let info = read_info_otp(&hid.path).unwrap_or_else(|_| synthetic_hid_info(&hid));
+            let info = OtpConnection::new(&hid.path)
+                .ok()
+                .and_then(|conn| read_info_otp(conn).ok())
+                .map(|(info, _conn)| info)
+                .unwrap_or_else(|| synthetic_hid_info(&hid));
             devices.push(YubiKeyDevice {
                 reader_name: None,
                 hid_path: Some(hid.path),
@@ -557,7 +567,8 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 /// management protocol, synthesizes DeviceInfo by probing individual applets.
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     let conn = PcscConnection::new(reader_name, false)?;
-    read_info_ccid(conn)
+    let (info, _conn) = read_info_ccid(conn)?;
+    Ok(info)
 }
 
 /// Read device info from an open smart card connection.
@@ -565,54 +576,57 @@ pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
 /// Uses [`ManagementSession`] to read [`DeviceInfo`]. For older devices
 /// (NEO, etc.) that don't support the management protocol, synthesizes
 /// DeviceInfo by probing individual applets.
-pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<DeviceInfo, DeviceError> {
+///
+/// Returns the info and the connection so it can be reused.
+pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
     let mut session = ManagementSession::new(conn)?;
     let version = session.version();
 
     match session.read_device_info_unchecked() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
-            Ok(info)
+            let conn = session.into_connection();
+            Ok((info, conn))
         }
         Err(_) if version < Version(4, 1, 0) => {
             log::debug!("Management read_device_info not supported, synthesizing");
             let conn = session.into_connection();
-            synthesize_info_ccid(conn, version)
+            let (info, conn) = synthesize_info_ccid(conn, version)?;
+            Ok((info, conn))
         }
         Err(e) => Err(DeviceError::SmartCard(e)),
     }
 }
 
-/// Read device info via OTP HID.
+/// Read device info via OTP HID from an open connection.
 ///
-/// Opens an [`OtpConnection`] and uses [`ManagementOtpSession`] to read
-/// [`DeviceInfo`]. Applies standard fixups for known device quirks.
-pub fn read_info_otp(hid_path: &str) -> Result<DeviceInfo, DeviceError> {
-    let conn = OtpConnection::new(hid_path)?;
+/// Uses [`ManagementOtpSession`] to read [`DeviceInfo`].
+/// Applies standard fixups for known device quirks.
+/// Returns the info and the connection for reuse.
+pub fn read_info_otp(conn: OtpConnection) -> Result<(DeviceInfo, OtpConnection), DeviceError> {
     let mut session = ManagementOtpSession::new(conn)
         .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
-    // Use unchecked variant — dev devices report version 0.0.1 but still
-    // support the DeviceInfo protocol.
     let mut info = session
         .read_device_info_unchecked()
         .map_err(DeviceError::SmartCard)?;
     apply_device_info_fixups(&mut info);
-    Ok(info)
+    let conn = session.into_connection();
+    Ok((info, conn))
 }
 
-/// Read device info via FIDO HID (CTAP).
+/// Read device info via FIDO HID (CTAP) from an open connection.
 ///
-/// Opens a [`FidoConnection`] and uses [`ManagementFidoSession`] to read
-/// [`DeviceInfo`]. Applies standard fixups for known device quirks.
-pub fn read_info_fido(fido_info: &FidoDeviceInfo) -> Result<DeviceInfo, DeviceError> {
-    let conn = FidoConnection::open(fido_info)
-        .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))?;
+/// Uses [`ManagementFidoSession`] to read [`DeviceInfo`].
+/// Applies standard fixups for known device quirks.
+/// Returns the info and the connection for reuse.
+pub fn read_info_fido(conn: FidoConnection) -> Result<(DeviceInfo, FidoConnection), DeviceError> {
     let mut session = ManagementFidoSession::new(conn).map_err(DeviceError::SmartCard)?;
     let mut info = session
         .read_device_info_unchecked()
         .map_err(DeviceError::SmartCard)?;
     apply_device_info_fixups(&mut info);
-    Ok(info)
+    let conn = session.into_connection();
+    Ok((info, conn))
 }
 
 /// List Yubico FIDO HID devices with device info.
@@ -622,7 +636,11 @@ pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(fido_devs) = list_fido_devices() {
         for fido in fido_devs {
-            let info = read_info_fido(&fido).unwrap_or_else(|_| synthetic_fido_info(&fido));
+            let info = FidoConnection::open(&fido)
+                .ok()
+                .and_then(|conn| read_info_fido(conn).ok())
+                .map(|(info, _conn)| info)
+                .unwrap_or_else(|| synthetic_fido_info(&fido));
             devices.push(YubiKeyDevice {
                 reader_name: None,
                 hid_path: None,
@@ -647,41 +665,46 @@ const SCAN_APPLETS: &[(&[u8], Capability)] = &[
 fn synthesize_info_ccid<C: SmartCardConnection>(
     conn: C,
     version: Version,
-) -> Result<DeviceInfo, DeviceError> {
+) -> Result<(DeviceInfo, C), DeviceError> {
     use std::collections::HashMap;
 
     let mut capabilities = Capability::NONE;
 
     // Try to read serial from OTP application
     let mut serial = None;
-    match YubiOtpSession::new(conn) {
+    let conn = match YubiOtpSession::new(conn) {
         Ok(mut otp_session) => {
             capabilities |= Capability::OTP;
             match otp_session.get_serial() {
                 Ok(s) => serial = Some(s),
                 Err(e) => log::debug!("Unable to read serial over OTP: {e}"),
             }
-            // Reclaim the connection
-            let conn = otp_session.into_connection();
-
-            // Scan remaining applets
-            let mut protocol = SmartCardProtocol::new(conn);
-            for (aid, cap) in SCAN_APPLETS {
-                match protocol.select(aid) {
-                    Ok(_) => {
-                        capabilities |= *cap;
-                        log::debug!("Found applet: capability {:?}", cap);
-                    }
-                    Err(e) => {
-                        log::debug!("Missing applet: capability {:?}: {e}", cap);
-                    }
-                }
-            }
+            otp_session.into_connection()
         }
         Err(e) => {
             log::debug!("Couldn't select OTP application: {e}");
+            // Connection lost — this is an older device fallback path,
+            // re-opening would need the reader name which we don't have.
+            return Err(DeviceError::SmartCard(SmartCardError::BadResponse(
+                format!("Failed to open OTP session for synthesis: {e}"),
+            )));
+        }
+    };
+
+    // Scan remaining applets
+    let mut protocol = SmartCardProtocol::new(conn);
+    for (aid, cap) in SCAN_APPLETS {
+        match protocol.select(aid) {
+            Ok(_) => {
+                capabilities |= *cap;
+                log::debug!("Found applet: capability {:?}", cap);
+            }
+            Err(e) => {
+                log::debug!("Missing applet: capability {:?}: {e}", cap);
+            }
         }
     }
+    let conn = protocol.into_connection();
 
     // Assume U2F on devices >= 3.3.0
     if version >= Version(3, 3, 0) {
@@ -717,7 +740,7 @@ fn synthesize_info_ccid<C: SmartCardConnection>(
         version_qualifier: crate::management::VersionQualifier::final_release(version),
     };
     apply_device_info_fixups(&mut info);
-    Ok(info)
+    Ok((info, conn))
 }
 
 /// Apply standard fixups for known device quirks.
@@ -725,6 +748,16 @@ fn synthesize_info_ccid<C: SmartCardConnection>(
 /// This corrects issues with certain YubiKey firmware versions that
 /// report incorrect or incomplete information.
 pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
+    // Override version from version qualifier for non-final (dev) firmware
+    if info.version_qualifier.release_type != ReleaseType::Final {
+        log::debug!(
+            "Overriding version {} with qualifier version {}",
+            info.version,
+            info.version_qualifier.version
+        );
+        info.version = info.version_qualifier.version;
+    }
+
     // YK4-based FIPS (4.4.x)
     if info.version >= Version(4, 4, 0) && info.version < Version(4, 5, 0) {
         info.is_fips = true;

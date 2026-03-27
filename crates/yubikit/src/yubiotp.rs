@@ -1309,6 +1309,11 @@ impl YubiOtpOtpSession {
             .send_and_receive(slot as u8, send_data, Some(expected_len as i32))?
             .ok_or_else(|| YubiOtpError::BadResponse("Expected data response, got status".into()))
     }
+
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> OtpConnection {
+        self.protocol.into_connection()
+    }
 }
 
 // ---------------------------------------------------------------------------

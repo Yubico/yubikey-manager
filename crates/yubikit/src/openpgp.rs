@@ -1370,6 +1370,11 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         &mut self.protocol
     }
 
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
     // -- Data Object I/O --
 
     pub fn get_data(&mut self, data_object: Do) -> Result<Vec<u8>, OpenPgpError> {

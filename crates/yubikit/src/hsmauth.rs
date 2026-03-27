@@ -306,6 +306,11 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         &mut self.protocol
     }
 
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
     pub fn reset(&mut self) -> Result<(), HsmAuthError> {
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
         Ok(())

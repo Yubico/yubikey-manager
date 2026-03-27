@@ -1,7 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::smartcard::Version;
-use yubikit::transport::otphid::OtpConnection;
 use yubikit::yubiotp::{
     self, ConfigSlot, NdefType, Slot, YubiOtpOtpSession as RustYubiOtpOtpSession,
     YubiOtpSession as RustYubiOtpSession,
@@ -220,9 +219,11 @@ pub struct PyYubiOtpOtpSession {
 #[pymethods]
 impl PyYubiOtpOtpSession {
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        let conn = OtpConnection::new(path)
-            .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let mut conn_wrapper = connection
+            .downcast::<crate::py_hid::OtpConnection>()?
+            .borrow_mut();
+        let conn = conn_wrapper.take_inner()?;
         let session = RustYubiOtpOtpSession::new(conn).map_err(yubiotp_err)?;
         Ok(Self { session })
     }

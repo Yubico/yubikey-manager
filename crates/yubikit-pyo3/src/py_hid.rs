@@ -46,8 +46,17 @@ fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
 }
 
 #[pyclass(unsendable)]
-struct OtpConnection {
-    inner: hid::OtpConnection,
+pub struct OtpConnection {
+    inner: Option<hid::OtpConnection>,
+}
+
+impl OtpConnection {
+    /// Take the inner native connection, leaving None behind.
+    pub fn take_inner(&mut self) -> PyResult<hid::OtpConnection> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyOSError::new_err("OTP connection already consumed or closed"))
+    }
 }
 
 #[pymethods]
@@ -55,21 +64,31 @@ impl OtpConnection {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: hid::OtpConnection::new(path).map_err(hid_err)?,
+            inner: Some(hid::OtpConnection::new(path).map_err(hid_err)?),
         })
     }
 
     fn get_feature_report<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let data = self.inner.get_feature_report().map_err(hid_err)?;
+        let conn = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        let data = conn.get_feature_report().map_err(hid_err)?;
         Ok(PyBytes::new(py, &data))
     }
 
     fn set_feature_report(&self, data: &[u8]) -> PyResult<()> {
-        self.inner.set_feature_report(data).map_err(hid_err)
+        let conn = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        conn.set_feature_report(data).map_err(hid_err)
     }
 
     fn close(&mut self) -> PyResult<()> {
-        self.inner.close();
+        if let Some(mut conn) = self.inner.take() {
+            conn.close();
+        }
         Ok(())
     }
 
@@ -125,6 +144,15 @@ pub struct FidoConnection {
     path: String,
     device_version: (u8, u8, u8),
     capabilities: u8,
+}
+
+impl FidoConnection {
+    /// Take the inner native connection, leaving None behind.
+    pub fn take_inner(&mut self) -> PyResult<ctaphid::FidoConnection> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyOSError::new_err("FIDO connection already consumed or closed"))
+    }
 }
 
 #[pymethods]

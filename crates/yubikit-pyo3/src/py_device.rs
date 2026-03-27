@@ -50,7 +50,36 @@ pub fn read_info(py: Python<'_>, reader_name: &str) -> PyResult<PyObject> {
 #[pyfunction]
 pub fn read_info_ccid(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let conn = PySmartCardConnection::from_py(connection)?;
-    let info = device::read_info_ccid(conn).map_err(device_err)?;
+    let (info, _conn) = device::read_info_ccid(conn).map_err(device_err)?;
+    device_info_to_dict(py, &info)
+}
+
+/// Read device info via OTP HID from a device path.
+///
+/// Returns a dict matching the Python DeviceInfo structure.
+#[pyfunction]
+pub fn read_info_otp(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+    use yubikit::transport::otphid::OtpConnection;
+    let conn = OtpConnection::new(path).map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
+    let (info, _conn) = device::read_info_otp(conn).map_err(device_err)?;
+    device_info_to_dict(py, &info)
+}
+
+/// Read device info via FIDO HID from a device path.
+///
+/// Returns a dict matching the Python DeviceInfo structure.
+#[pyfunction]
+pub fn read_info_fido(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+    use yubikit::transport::ctaphid::{FidoConnection, FidoDeviceInfo};
+    let fido_info = FidoDeviceInfo {
+        path: path.to_string(),
+        pid: 0,
+        report_size_in: 64,
+        report_size_out: 64,
+    };
+    let conn =
+        FidoConnection::open(&fido_info).map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
+    let (info, _conn) = device::read_info_fido(conn).map_err(device_err)?;
     device_info_to_dict(py, &info)
 }
 
@@ -116,6 +145,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "device")?;
     m.add_function(wrap_pyfunction!(read_info, &m)?)?;
     m.add_function(wrap_pyfunction!(read_info_ccid, &m)?)?;
+    m.add_function(wrap_pyfunction!(read_info_otp, &m)?)?;
+    m.add_function(wrap_pyfunction!(read_info_fido, &m)?)?;
     m.add_function(wrap_pyfunction!(get_name, &m)?)?;
     parent.add_submodule(&m)?;
 

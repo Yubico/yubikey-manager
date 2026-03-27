@@ -365,6 +365,11 @@ impl<T: OtpTransport> OtpProtocol<T> {
         self.connection.otp_send(&report)?;
         Ok(())
     }
+
+    /// Consume the protocol, returning the underlying connection.
+    pub fn into_connection(self) -> T {
+        self.connection
+    }
 }
 
 /// Verify and strip CRC from a raw OTP data response, returning `expected_len` bytes.

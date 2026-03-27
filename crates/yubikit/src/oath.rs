@@ -554,6 +554,11 @@ impl<C: SmartCardConnection> OathSession<C> {
         &mut self.protocol
     }
 
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
     /// Factory reset the OATH application.
     pub fn reset(&mut self) -> Result<(), SmartCardError> {
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;

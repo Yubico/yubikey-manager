@@ -3,8 +3,7 @@ use yubikit::management::{
     DeviceInfo, ManagementFidoSession as RustManagementFidoSession,
     ManagementOtpSession as RustManagementOtpSession, ManagementSession as RustManagementSession,
 };
-use yubikit::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
-use yubikit::transport::otphid::OtpConnection;
+use yubikit::transport::ctaphid::list_fido_devices;
 
 use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
@@ -204,9 +203,11 @@ pub struct ManagementOtpSession {
 #[pymethods]
 impl ManagementOtpSession {
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        let hid_conn = OtpConnection::new(path)
-            .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let mut conn_wrapper = connection
+            .downcast::<crate::py_hid::OtpConnection>()?
+            .borrow_mut();
+        let hid_conn = conn_wrapper.take_inner()?;
         let inner = RustManagementOtpSession::new(hid_conn).map_err(yubiotp_err)?;
         Ok(Self { inner })
     }
@@ -302,10 +303,11 @@ pub struct ManagementFidoSession {
 #[pymethods]
 impl ManagementFidoSession {
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        let fido_info = find_fido_device(path)?;
-        let conn = FidoConnection::open(&fido_info)
-            .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
+    fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let mut conn_wrapper = connection
+            .downcast::<crate::py_hid::FidoConnection>()?
+            .borrow_mut();
+        let conn = conn_wrapper.take_inner()?;
         let inner = RustManagementFidoSession::new(conn).map_err(smartcard_err)?;
         Ok(Self { inner })
     }
@@ -391,14 +393,6 @@ impl ManagementFidoSession {
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
             .map_err(smartcard_err)
     }
-}
-
-fn find_fido_device(path: &str) -> PyResult<FidoDeviceInfo> {
-    let devices =
-        list_fido_devices().map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
-    devices.into_iter().find(|d| d.path == path).ok_or_else(|| {
-        pyo3::exceptions::PyValueError::new_err(format!("No FIDO device found at path: {path}"))
-    })
 }
 
 /// List FIDO HID devices.

@@ -1093,6 +1093,11 @@ impl ManagementOtpSession {
             }
         }
     }
+
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> OtpConnection {
+        self.protocol.into_connection()
+    }
 }
 
 /// Convert a [`YubiOtpError`] into a [`SmartCardError`].
