@@ -136,12 +136,8 @@ fn authenticate_session(
             if session.authenticate(DEFAULT_MANAGEMENT_KEY).is_ok() {
                 return Ok(());
             }
-            let input = crate::util::prompt_secret("Enter management key [blank to use default]")?;
-            if input.is_empty() {
-                DEFAULT_MANAGEMENT_KEY.to_vec()
-            } else {
-                parse_management_key(&input)?
-            }
+            let input = crate::util::prompt_secret("Enter management key")?;
+            parse_management_key(&input)?
         }
     };
     session
@@ -393,7 +389,7 @@ pub fn run_change_pin(
     };
     let new = match new_pin {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new PIN")?,
+        None => crate::util::prompt_new_secret("New PIN")?,
     };
 
     if new.len() < 6 || new.len() > 8 {
@@ -420,7 +416,7 @@ pub fn run_change_puk(
     };
     let new = match new_puk {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new PUK")?,
+        None => crate::util::prompt_new_secret("New PUK")?,
     };
 
     if new.len() < 6 || new.len() > 8 {
@@ -447,7 +443,7 @@ pub fn run_unblock_pin(
     };
     let new = match new_pin {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new PIN")?,
+        None => crate::util::prompt_new_secret("New PIN")?,
     };
 
     if new.len() < 6 || new.len() > 8 {
@@ -517,9 +513,14 @@ pub fn run_change_management_key(
         }
         bytes
     } else {
-        return Err(CliError(
-            "Provide --new-management-key or --generate.".into(),
-        ));
+        let input = crate::util::prompt_new_secret("New management key (hex)")?;
+        let bytes = parse_management_key(&input)?;
+        if bytes.len() != key_len {
+            return Err(CliError(format!(
+                "Management key must be {key_len} bytes for {algorithm}."
+            )));
+        }
+        bytes
     };
 
     if !force && !confirm("Change management key?") {
@@ -806,7 +807,7 @@ pub fn run_certificates_import(
     eprintln!("Certificate imported to slot {slot}.");
 
     if update_chuid {
-        generate_chuid(dev, scp_params, mgmt_key, pin)?;
+        generate_chuid(&mut session)?;
     }
     Ok(())
 }
@@ -829,7 +830,7 @@ pub fn run_certificates_delete(
     eprintln!("Certificate in slot {slot} deleted.");
 
     if update_chuid {
-        generate_chuid(dev, scp_params, mgmt_key, pin)?;
+        generate_chuid(&mut session)?;
     }
     Ok(())
 }
@@ -875,15 +876,8 @@ pub fn run_objects_import(
 
 /// Generate a new CHUID and write it to the device.
 fn generate_chuid(
-    dev: &YubiKeyDevice,
-    scp_params: &ScpParams,
-    management_key: Option<&str>,
-    pin: Option<&str>,
+    session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, scp_params)?;
-    ensure_pin(&mut session, pin)?;
-    authenticate_session(&mut session, management_key)?;
-
     let mut chuid = Vec::new();
     chuid.extend_from_slice(&[0x30, 0x19]);
     chuid.extend_from_slice(&[0x9E; 25]);
@@ -1040,7 +1034,7 @@ pub fn run_certificates_generate(
     eprintln!("Certificate generated and stored in slot {slot:?}.");
 
     if update_chuid {
-        generate_chuid(dev, scp_params, management_key, pin)?;
+        generate_chuid(&mut session)?;
     }
     Ok(())
 }

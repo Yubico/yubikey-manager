@@ -177,7 +177,7 @@ pub fn run_change_pin(
     let old = ensure_pin(pin)?;
     let new = match new_pin {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new PIN")?,
+        None => crate::util::prompt_new_secret("New PIN")?,
     };
     let mut session = open_session(dev, scp_params)?;
     session
@@ -196,7 +196,7 @@ pub fn run_change_admin_pin(
     let old = ensure_admin_pin(admin_pin)?;
     let new = match new_admin_pin {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new Admin PIN")?,
+        None => crate::util::prompt_new_secret("New Admin PIN")?,
     };
     let mut session = open_session(dev, scp_params)?;
     session
@@ -214,7 +214,7 @@ pub fn run_change_reset_code(
 ) -> Result<(), CliError> {
     let rc = match reset_code {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new reset code")?,
+        None => crate::util::prompt_new_secret("New reset code")?,
     };
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
@@ -237,7 +237,7 @@ pub fn run_unblock_pin(
 ) -> Result<(), CliError> {
     let new = match new_pin {
         Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the new PIN")?,
+        None => crate::util::prompt_new_secret("New PIN")?,
     };
     let mut session = open_session(dev, scp_params)?;
     if let Some(ap) = admin_pin {

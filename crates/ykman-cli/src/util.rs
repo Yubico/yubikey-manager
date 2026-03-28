@@ -9,19 +9,16 @@ pub fn prompt_secret(prompt: &str) -> Result<String, CliError> {
         .map_err(|e| CliError(format!("Failed to read input: {e}")))
 }
 
-/// Prompt for a non-secret value (visible input).
-#[expect(dead_code)]
-pub fn prompt_line(prompt: &str) -> Result<String, CliError> {
-    eprint!("{prompt}: ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .map_err(|e| CliError(format!("Failed to read input: {e}")))?;
-    Ok(input
-        .trim_end_matches('\n')
-        .trim_end_matches('\r')
-        .to_string())
+/// Prompt for a new secret value with confirmation. Re-prompts on mismatch.
+pub fn prompt_new_secret(prompt: &str) -> Result<String, CliError> {
+    loop {
+        let first = prompt_secret(prompt)?;
+        let confirm = prompt_secret(&format!("Confirm {}", prompt.to_ascii_lowercase()))?;
+        if first == confirm {
+            return Ok(first);
+        }
+        eprintln!("Values do not match, try again.");
+    }
 }
 
 /// Read from a file, or from stdin if path is "-".
