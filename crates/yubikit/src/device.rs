@@ -295,6 +295,14 @@ impl YubiKeyDevice {
         if self.pid.is_none() {
             self.pid = other.pid;
         }
+        // Prefer the info with a serial number, or with a higher firmware
+        // version (synthesized info from OTP may report 3.0.0 instead of the
+        // real version).
+        if self.info.serial.is_none() && other.info.serial.is_some()
+            || self.info.serial == other.info.serial && other.info.version > self.info.version
+        {
+            self.info = other.info;
+        }
     }
 
     /// Wait for the user to remove and reinsert this YubiKey.
