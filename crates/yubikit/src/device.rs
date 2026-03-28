@@ -334,17 +334,22 @@ impl YubiKeyDevice {
                 if new_n != n_devs {
                     return Err(DeviceError::WrongDevice);
                 }
-                if let Some(found) = devs
+                match devs
                     .into_iter()
                     .find(|d| d.info.serial == my_serial && d.info.version == my_version)
                 {
-                    log::debug!("Device reinserted");
-                    self.reader_name = found.reader_name;
-                    self.hid_path = found.hid_path;
-                    self.fido_path = found.fido_path;
-                    self.pid = found.pid;
-                    self.info = found.info;
-                    return Ok(());
+                    Some(found) => {
+                        log::debug!("Device reinserted");
+                        self.reader_name = found.reader_name;
+                        self.hid_path = found.hid_path;
+                        self.fido_path = found.fido_path;
+                        self.pid = found.pid;
+                        self.info = found.info;
+                        return Ok(());
+                    }
+                    None => {
+                        return Err(DeviceError::WrongDevice);
+                    }
                 }
             }
         }
