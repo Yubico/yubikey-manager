@@ -434,29 +434,44 @@ pub fn scan_devices() -> (HashMap<u16, usize>, u64) {
     let mut fingerprints: Vec<String> = Vec::new();
 
     // Scan PC/SC readers
+    let mut transport_counts: HashMap<u16, usize> = HashMap::new();
     if let Ok(readers) = list_readers() {
         for reader in readers {
             if let Some(pid) = pid_from_reader_name(&reader) {
-                *counts.entry(pid).or_insert(0) += 1;
+                *transport_counts.entry(pid).or_insert(0) += 1;
                 fingerprints.push(reader);
             }
         }
     }
+    for (pid, count) in &transport_counts {
+        let entry = counts.entry(*pid).or_insert(0);
+        *entry = (*entry).max(*count);
+    }
 
     // Scan HID OTP devices
+    transport_counts.clear();
     if let Ok(hid_devices) = list_otp_devices() {
         for hid in hid_devices {
-            *counts.entry(hid.pid).or_insert(0) += 1;
+            *transport_counts.entry(hid.pid).or_insert(0) += 1;
             fingerprints.push(hid.path);
         }
     }
+    for (pid, count) in &transport_counts {
+        let entry = counts.entry(*pid).or_insert(0);
+        *entry = (*entry).max(*count);
+    }
 
     // Scan FIDO HID devices
+    transport_counts.clear();
     if let Ok(fido_devs) = list_fido_devices() {
         for fido in fido_devs {
-            *counts.entry(fido.pid).or_insert(0) += 1;
+            *transport_counts.entry(fido.pid).or_insert(0) += 1;
             fingerprints.push(fido.path);
         }
+    }
+    for (pid, count) in &transport_counts {
+        let entry = counts.entry(*pid).or_insert(0);
+        *entry = (*entry).max(*count);
     }
 
     // Compute a stable hash of fingerprints for change detection
@@ -465,9 +480,6 @@ pub fn scan_devices() -> (HashMap<u16, usize>, u64) {
     fingerprints.hash(&mut hasher);
     let state = hasher.finish();
 
-    // Merge counts: the Python version uses Counter semantics where
-    // later transports override earlier ones for the same PID.
-    // We simply take the max count per PID across transports.
     (counts, state)
 }
 
