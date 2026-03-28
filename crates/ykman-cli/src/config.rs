@@ -380,6 +380,16 @@ pub fn run_mode(
     chalresp_timeout: Option<u8>,
     force: bool,
 ) -> Result<(), CliError> {
+    let info = dev.info();
+    if info.version >= yubikit::core::Version(5, 0, 0) && !force {
+        return Err(CliError(
+            "Mode switching is not supported on YubiKey 5 and later.\n\
+             Use \"ykman config usb\" for more granular control.\n\
+             Use --force to attempt to set it anyway."
+                .into(),
+        ));
+    }
+
     // Parse mode string (e.g., "OTP+FIDO+CCID" or number 0-6)
     let mode_code: u8 = if let Ok(n) = mode_str.parse::<u8>() {
         if n > 6 {

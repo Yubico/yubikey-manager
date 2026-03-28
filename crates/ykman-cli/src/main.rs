@@ -224,6 +224,22 @@ enum Commands {
         action: SecurityDomainAction,
     },
     /// Send raw APDUs to the YubiKey
+    #[command(after_help = "Examples:\n\
+      \n  Select the OATH application, send a LIST instruction (0xA1),\
+      \n  and make sure we get sw=9000 (these are equivalent):\
+      \n  $ ykman apdu a40400:a000000527210101=9000 a1=9000\
+      \n    or\
+      \n  $ ykman apdu -a oath a1=\
+      \n\
+      \n  Factory reset the OATH application:\
+      \n  $ ykman apdu -a oath 04dead\
+      \n    or\
+      \n  $ ykman apdu a40400:a000000527210101 04dead\
+      \n    or (using full-apdu mode)\
+      \n  $ ykman apdu -s 00a4040008a000000527210101 -s 0004dead\
+      \n\
+      \n  Get 8 random bytes from the OpenPGP application:\
+      \n  $ ykman apdu -a openpgp 84/08=")]
     Apdu {
         /// APDUs to send (format: [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW])
         apdus: Vec<String>,
@@ -322,7 +338,13 @@ enum ConfigAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Set connection mode (for older YubiKeys)
+    /// Manage connection modes (USB Interfaces).
+    ///
+    /// This command is generally used with YubiKeys prior to the 5 series.
+    /// Use "ykman config usb" for more granular control on YubiKey 5 and later.
+    ///
+    /// MODE can be a string, such as "OTP+FIDO+CCID", or a shortened form: "o+f+c".
+    /// It can also be a mode number.
     #[command(after_help = "Examples:\n\
       \n  Set the OTP and FIDO mode:\
       \n  $ ykman config mode OTP+FIDO\
