@@ -7,13 +7,40 @@ use yubikit::oath::{
     Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
 
+use crate::appdata::AppData;
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
+fn oath_keys() -> AppData {
+    AppData::new("oath_keys")
+}
+
+/// Validate the key against the session, optionally remembering it.
+fn validate_and_remember(
+    session: &mut OathSession<impl yubikit::smartcard::SmartCardConnection>,
+    key: &[u8],
+    remember: bool,
+    keys: &mut AppData,
+) -> Result<(), CliError> {
+    session
+        .validate(key)
+        .map_err(|_| CliError("Invalid password.".into()))?;
+    if remember {
+        keys.put_secret(session.device_id(), &hex::encode(key))
+            .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
+        eprintln!("Password remembered.");
+    }
+    Ok(())
+}
+
+/// Open an OATH session, unlocking it if needed.
+///
+/// Tries (in order): explicit password, stored key, interactive prompt.
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
+    remember: bool,
 ) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
     let mut session = match scp_config {
@@ -34,14 +61,48 @@ fn open_session<'a>(
                 .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
         }
     };
+
     if session.locked() {
-        let pw = password.ok_or_else(|| {
-            CliError("OATH is password-protected. Use --password to unlock.".into())
-        })?;
-        let key = session.derive_key(pw);
-        session
-            .validate(&key)
-            .map_err(|_| CliError("Invalid password.".into()))?;
+        let mut keys = oath_keys();
+
+        // 1. Explicit password from CLI
+        if let Some(pw) = password {
+            let key = session.derive_key(pw);
+            validate_and_remember(&mut session, &key, remember, &mut keys)?;
+            return Ok(session);
+        }
+
+        // 2. Try stored key
+        let device_id = session.device_id().to_string();
+        if keys.contains(&device_id) {
+            match keys.get_secret(&device_id) {
+                Ok(hex_key) => match hex::decode(&hex_key) {
+                    Ok(key) => match session.validate(&key) {
+                        Ok(()) => return Ok(session),
+                        Err(_) => {
+                            log::debug!("Remembered key incorrect, removing");
+                            let _ = keys.remove(&device_id);
+                        }
+                    },
+                    Err(_) => {
+                        log::warn!("Corrupt stored key, removing");
+                        let _ = keys.remove(&device_id);
+                    }
+                },
+                Err(e) => {
+                    log::warn!("Failed to decrypt stored key: {e}");
+                }
+            }
+        }
+
+        // 3. Prompt interactively
+        let pw = crate::util::prompt_secret("Enter OATH password")?;
+        let key = session.derive_key(&pw);
+        validate_and_remember(&mut session, &key, remember, &mut keys)?;
+    } else if password.is_some() {
+        return Err(CliError(
+            "Password provided, but no password is set.".into(),
+        ));
     }
     Ok(session)
 }
@@ -77,7 +138,28 @@ pub fn run_info(
     scp_params: &ScpParams,
     password: Option<&str>,
 ) -> Result<(), CliError> {
-    let session = open_session(dev, scp_params, password)?;
+    // Open a raw session without unlocking — info doesn't require authentication
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+    let session = match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            OathSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            OathSession::new_with_scp(conn, &params)
+                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+        }
+    };
+    let _ = password; // Not needed for info
+    let keys = oath_keys();
     println!("OATH version: {}", session.version());
     println!(
         "Password protection: {}",
@@ -87,6 +169,9 @@ pub fn run_info(
             "disabled"
         }
     );
+    if session.has_key() && keys.contains(session.device_id()) {
+        println!("The password for this YubiKey is remembered by ykman.");
+    }
     Ok(())
 }
 
@@ -105,9 +190,16 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
     let mut session = OathSession::new(conn)
         .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?;
+    let device_id = session.device_id().to_string();
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset OATH: {e}")))?;
+
+    // Clean up any stored password for this device
+    let mut keys = oath_keys();
+    if keys.contains(&device_id) {
+        let _ = keys.remove(&device_id);
+    }
     eprintln!("OATH application has been reset.");
     Ok(())
 }
@@ -116,11 +208,12 @@ pub fn run_accounts_list(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
+    remember: bool,
     show_hidden: bool,
     show_oath_type: bool,
     show_period: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, remember)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
@@ -149,11 +242,12 @@ pub fn run_accounts_code(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
+    remember: bool,
     query: Option<&str>,
     show_hidden: bool,
     single: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, remember)?;
     let timestamp = now_timestamp();
 
     let entries = session
@@ -230,6 +324,7 @@ pub fn run_accounts_add(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
+    remember: bool,
     name: &str,
     secret: Option<&str>,
     issuer: Option<&str>,
@@ -277,7 +372,7 @@ pub fn run_accounts_add(
         issuer: issuer.map(|s| s.to_string()),
     };
 
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, remember)?;
 
     // Check for existing credential
     if !force {
@@ -313,10 +408,11 @@ pub fn run_accounts_delete(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
+    remember: bool,
     query: &str,
     force: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, remember)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list: {e}")))?;
@@ -356,11 +452,12 @@ pub fn run_accounts_rename(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
+    remember: bool,
     query: &str,
     new_name: &str,
     force: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, remember)?;
     let creds = session
         .list_credentials()
         .map_err(|e| CliError(format!("Failed to list: {e}")))?;
@@ -409,21 +506,118 @@ pub fn run_access_change(
     password: Option<&str>,
     new_password: Option<&str>,
     clear: bool,
+    remember: bool,
 ) -> Result<(), CliError> {
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, false)?;
 
     if clear {
         session
             .unset_key()
             .map_err(|e| CliError(format!("Failed to clear password: {e}")))?;
+        // Remove stored password
+        let mut keys = oath_keys();
+        let _ = keys.remove(session.device_id());
         println!("Password cleared.");
     } else {
-        let new_pw = new_password.ok_or_else(|| CliError("--new-password is required.".into()))?;
-        let key = session.derive_key(new_pw);
+        let new_pw = match new_password {
+            Some(pw) => pw.to_string(),
+            None => crate::util::prompt_new_secret("New OATH password")?,
+        };
+        let key = session.derive_key(&new_pw);
         session
             .set_key(&key)
             .map_err(|e| CliError(format!("Failed to set password: {e}")))?;
         eprintln!("Password set.");
+        if remember {
+            let mut keys = oath_keys();
+            keys.put_secret(session.device_id(), &hex::encode(&key))
+                .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
+            eprintln!("Password remembered.");
+        }
+    }
+    Ok(())
+}
+
+pub fn run_access_remember(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    password: Option<&str>,
+) -> Result<(), CliError> {
+    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+    let mut session = match scp_config {
+        ScpConfig::None => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            OathSession::new(conn)
+                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+        }
+        ref config => {
+            let conn = dev
+                .open_smartcard()
+                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            OathSession::new_with_scp(conn, &params)
+                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+        }
+    };
+
+    if !session.locked() {
+        return Err(CliError(
+            "No password is set on this YubiKey's OATH application.".into(),
+        ));
+    }
+
+    let pw = match password {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter OATH password")?,
+    };
+    let key = session.derive_key(&pw);
+    let mut keys = oath_keys();
+    validate_and_remember(&mut session, &key, true, &mut keys)?;
+    Ok(())
+}
+
+pub fn run_access_forget(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    all: bool,
+) -> Result<(), CliError> {
+    let mut keys = oath_keys();
+    if all {
+        keys.clear()
+            .map_err(|e| CliError(format!("Failed to clear stored passwords: {e}")))?;
+        eprintln!("All stored OATH passwords have been removed.");
+    } else {
+        // Need to open session to get device_id (without unlocking)
+        let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+        let session = match scp_config {
+            ScpConfig::None => {
+                let conn = dev
+                    .open_smartcard()
+                    .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                OathSession::new(conn)
+                    .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+            }
+            ref config => {
+                let conn = dev
+                    .open_smartcard()
+                    .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                let params = scp::to_scp_key_params(config)
+                    .expect("non-None ScpConfig must convert to ScpKeyParams");
+                OathSession::new_with_scp(conn, &params)
+                    .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+            }
+        };
+        let device_id = session.device_id();
+        if keys.contains(device_id) {
+            keys.remove(device_id)
+                .map_err(|e| CliError(format!("Failed to remove stored password: {e}")))?;
+            eprintln!("Stored OATH password removed.");
+        } else {
+            eprintln!("No stored password for this YubiKey.");
+        }
     }
     Ok(())
 }
@@ -433,6 +627,7 @@ pub fn run_accounts_uri(
     scp_params: &ScpParams,
     uri: &str,
     password: Option<&str>,
+    remember: bool,
     touch: bool,
     force: bool,
 ) -> Result<(), CliError> {
@@ -537,7 +732,7 @@ pub fn run_accounts_uri(
         issuer: issuer_ref.map(|s| s.to_string()),
     };
 
-    let mut session = open_session(dev, scp_params, password)?;
+    let mut session = open_session(dev, scp_params, password, remember)?;
 
     session
         .put_credential(&cred_data, touch)

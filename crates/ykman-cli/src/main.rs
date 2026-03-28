@@ -9,6 +9,7 @@ use yubikit::device::{
 use yubikit::management::ReleaseType;
 
 mod apdu;
+mod appdata;
 mod config;
 mod diagnose;
 mod hsmauth;
@@ -314,6 +315,15 @@ enum OathAccessAction {
         /// Remove the password
         #[arg(short = 'c', long)]
         clear: bool,
+        /// Remember the new password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
+    },
+    /// Remember the password for the current YubiKey on this computer
+    Remember {
+        /// Password to store
+        #[arg(short, long)]
+        password: Option<String>,
     },
     /// Remove a stored password from this computer
     Forget {
@@ -330,6 +340,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Show hidden accounts
         #[arg(short = 'H', long)]
         show_hidden: bool,
@@ -345,6 +358,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Search filter
         query: Option<String>,
         /// Show hidden accounts
@@ -363,6 +379,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Issuer name
         #[arg(short, long)]
         issuer: Option<String>,
@@ -398,6 +417,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Require touch for code generation
         #[arg(short, long)]
         touch: bool,
@@ -412,6 +434,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Confirm without prompting
         #[arg(short, long)]
         force: bool,
@@ -425,6 +450,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Confirm without prompting
         #[arg(short, long)]
         force: bool,
@@ -436,6 +464,9 @@ enum OathAccountAction {
         /// Password to unlock OATH
         #[arg(short, long)]
         password: Option<String>,
+        /// Remember the password on this computer
+        #[arg(short = 'r', long)]
+        remember: bool,
         /// Require touch for code generation
         #[arg(short, long)]
         touch: bool,
@@ -1645,24 +1676,26 @@ fn run() -> Result<(), CliError> {
                         password,
                         new_password,
                         clear,
+                        remember,
                     } => oath::run_access_change(
                         &dev,
                         &scp_params,
                         password.as_deref(),
                         new_password.as_deref(),
                         clear,
+                        remember,
                     ),
+                    OathAccessAction::Remember { password } => {
+                        oath::run_access_remember(&dev, &scp_params, password.as_deref())
+                    }
                     OathAccessAction::Forget { all } => {
-                        eprintln!("Forget is not yet implemented in Rust CLI");
-                        if all {
-                            eprintln!("(--all flag noted)");
-                        }
-                        Ok(())
+                        oath::run_access_forget(&dev, &scp_params, all)
                     }
                 },
                 OathAction::Accounts(acct) => match acct {
                     OathAccountAction::List {
                         password,
+                        remember,
                         show_hidden,
                         oath_type,
                         period,
@@ -1670,12 +1703,14 @@ fn run() -> Result<(), CliError> {
                         &dev,
                         &scp_params,
                         password.as_deref(),
+                        remember,
                         show_hidden,
                         oath_type,
                         period,
                     ),
                     OathAccountAction::Code {
                         password,
+                        remember,
                         query,
                         show_hidden,
                         single,
@@ -1683,6 +1718,7 @@ fn run() -> Result<(), CliError> {
                         &dev,
                         &scp_params,
                         password.as_deref(),
+                        remember,
                         query.as_deref(),
                         show_hidden,
                         single,
@@ -1691,6 +1727,7 @@ fn run() -> Result<(), CliError> {
                         name,
                         secret,
                         password,
+                        remember,
                         issuer,
                         oath_type,
                         digits,
@@ -1704,6 +1741,7 @@ fn run() -> Result<(), CliError> {
                         &dev,
                         &scp_params,
                         password.as_deref(),
+                        remember,
                         &name,
                         secret.as_deref(),
                         issuer.as_deref(),
@@ -1718,11 +1756,13 @@ fn run() -> Result<(), CliError> {
                     OathAccountAction::Delete {
                         query,
                         password,
+                        remember,
                         force,
                     } => oath::run_accounts_delete(
                         &dev,
                         &scp_params,
                         password.as_deref(),
+                        remember,
                         &query,
                         force,
                     ),
@@ -1730,11 +1770,13 @@ fn run() -> Result<(), CliError> {
                         query,
                         new_name,
                         password,
+                        remember,
                         force,
                     } => oath::run_accounts_rename(
                         &dev,
                         &scp_params,
                         password.as_deref(),
+                        remember,
                         &query,
                         &new_name,
                         force,
@@ -1742,6 +1784,7 @@ fn run() -> Result<(), CliError> {
                     OathAccountAction::Uri {
                         uri,
                         password,
+                        remember,
                         touch,
                         force,
                     } => oath::run_accounts_uri(
@@ -1749,17 +1792,19 @@ fn run() -> Result<(), CliError> {
                         &scp_params,
                         &uri,
                         password.as_deref(),
+                        remember,
                         touch,
                         force,
                     ),
                     OathAccountAction::Import {
                         file,
                         password,
+                        remember,
                         touch,
                         force,
                     } => {
                         eprintln!("PSKC import is not yet implemented in Rust CLI");
-                        let _ = (&file, &password, touch, force);
+                        let _ = (&file, &password, remember, touch, force);
                         Ok(())
                     }
                 },
