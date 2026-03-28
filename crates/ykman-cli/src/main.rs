@@ -1,3 +1,4 @@
+#![windows_subsystem = "console"]
 use std::process;
 
 use clap::{Parser, Subcommand};
