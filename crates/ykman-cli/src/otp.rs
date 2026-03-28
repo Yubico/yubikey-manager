@@ -10,6 +10,7 @@ use yubikit::yubiotp::{
     YubiOtpError, YubiOtpOtpSession, YubiOtpSession,
 };
 
+use crate::cli_enums::{CliHotpDigits, CliKeyboardLayout, CliOtpSlot};
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
@@ -272,14 +273,6 @@ fn generate_static_pw(length: usize, layout: &str) -> Result<String, CliError> {
     Ok(pw)
 }
 
-fn parse_slot(s: &str) -> Result<Slot, CliError> {
-    match s {
-        "1" => Ok(Slot::One),
-        "2" => Ok(Slot::Two),
-        _ => Err(CliError("Slot must be 1 or 2.".into())),
-    }
-}
-
 fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE], CliError> {
     let bytes = hex::decode(s).map_err(|_| CliError("Access code must be hex-encoded.".into()))?;
     if bytes.len() != ACC_CODE_SIZE {
@@ -345,11 +338,11 @@ pub fn run_swap(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Res
 pub fn run_delete(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
     if !force && !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
@@ -365,22 +358,18 @@ pub fn run_delete(
 pub fn run_ndef(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     prefix: Option<&str>,
-    ndef_type: &str,
+    ndef_type: NdefType,
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
-    let nt = match ndef_type.to_ascii_uppercase().as_str() {
-        "URI" => NdefType::Uri,
-        "TEXT" => NdefType::Text,
-        _ => return Err(CliError("NDEF type must be URI or TEXT.".into())),
-    };
+    let nt = ndef_type;
     if !force
         && !confirm(&format!(
-            "Configure slot {} for NDEF ({ndef_type})?",
+            "Configure slot {} for NDEF ({ndef_type:?})?",
             slot.map(1, 2)
         ))
     {
@@ -397,7 +386,7 @@ pub fn run_ndef(
 pub fn run_yubiotp(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     public_id: Option<&str>,
     private_id: Option<&str>,
     key: Option<&str>,
@@ -408,7 +397,7 @@ pub fn run_yubiotp(
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
     // Resolve public ID
@@ -497,27 +486,31 @@ pub fn run_yubiotp(
 pub fn run_static(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     password: Option<&str>,
     generate: bool,
     length: usize,
-    keyboard_layout: &str,
+    keyboard_layout: CliKeyboardLayout,
     enter: Option<bool>,
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
+    let layout = match keyboard_layout {
+        CliKeyboardLayout::Us => "US",
+        CliKeyboardLayout::Modhex => "MODHEX",
+    };
 
     let pw = if generate {
-        generate_static_pw(length, keyboard_layout)?
+        generate_static_pw(length, layout)?
     } else if let Some(p) = password {
         p.to_string()
     } else {
         return Err(CliError("Provide a password or use --generate.".into()));
     };
 
-    let scan_codes = encode_password(&pw, keyboard_layout)?;
+    let scan_codes = encode_password(&pw, layout)?;
 
     if !force
         && !confirm(&format!(
@@ -550,7 +543,7 @@ pub fn run_static(
 pub fn run_chalresp(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     key: Option<&str>,
     totp: bool,
     touch: bool,
@@ -558,7 +551,7 @@ pub fn run_chalresp(
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes: Vec<u8> = if generate {
@@ -604,12 +597,12 @@ pub fn run_chalresp(
 pub fn run_calculate(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     challenge: Option<&str>,
     totp: bool,
     digits: u8,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
 
     let challenge_bytes: Vec<u8> = if totp {
         let now = SystemTime::now()
@@ -642,15 +635,15 @@ pub fn run_calculate(
 pub fn run_hotp(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     key: Option<&str>,
-    digits: &str,
+    digits: CliHotpDigits,
     counter: u32,
     enter: Option<bool>,
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes = key
@@ -663,7 +656,7 @@ pub fn run_hotp(
 
     let mut config =
         SlotConfiguration::hotp(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
-    if digits == "8" {
+    if matches!(digits, CliHotpDigits::Eight) {
         config = config.digits8(true);
     }
     if counter > 0 {
@@ -688,7 +681,7 @@ pub fn run_hotp(
 pub fn run_settings(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: &str,
+    slot: CliOtpSlot,
     enter: Option<bool>,
     pacing: Option<u8>,
     use_numeric: Option<bool>,
@@ -698,7 +691,7 @@ pub fn run_settings(
     access_code: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let slot = parse_slot(slot)?;
+    let slot: Slot = slot.into();
     let cur_acc = access_code.map(parse_access_code).transpose()?;
     let new_acc = if delete_access_code {
         Some([0u8; ACC_CODE_SIZE])

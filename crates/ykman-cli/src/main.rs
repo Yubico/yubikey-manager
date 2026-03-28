@@ -11,6 +11,7 @@ use yubikit::management::ReleaseType;
 
 mod apdu;
 mod appdata;
+mod cli_enums;
 mod config;
 mod diagnose;
 mod hsmauth;
@@ -24,6 +25,8 @@ mod piv;
 mod scp;
 mod securitydomain;
 mod util;
+
+use cli_enums::*;
 
 use scp::ScpParams;
 use util::{CliError, read_file_or_stdin};
@@ -317,7 +320,7 @@ enum OathAccessAction {
         #[arg(short = 'c', long)]
         clear: bool,
         /// Remember the new password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
     },
     /// Remember the password for the current YubiKey on this computer
@@ -342,7 +345,7 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Show hidden accounts
         #[arg(short = 'H', long)]
@@ -360,7 +363,7 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Search filter
         query: Option<String>,
@@ -381,20 +384,20 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Issuer name
         #[arg(short, long)]
         issuer: Option<String>,
         /// Credential type
-        #[arg(short = 'o', long, default_value = "TOTP")]
-        oath_type: String,
+        #[arg(short = 'o', long, default_value = "totp")]
+        oath_type: CliOathType,
         /// Number of digits
         #[arg(long, default_value_t = 6)]
         digits: u8,
         /// Hash algorithm
-        #[arg(short, long, default_value = "SHA1")]
-        algorithm: String,
+        #[arg(short, long, default_value = "sha1")]
+        algorithm: CliOathAlgorithm,
         /// Initial counter value for HOTP
         #[arg(short, long, default_value_t = 0)]
         counter: u32,
@@ -419,7 +422,7 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Require touch for code generation
         #[arg(short, long)]
@@ -436,7 +439,7 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Confirm without prompting
         #[arg(short, long)]
@@ -452,7 +455,7 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Confirm without prompting
         #[arg(short, long)]
@@ -466,7 +469,7 @@ enum OathAccountAction {
         #[arg(short, long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(short = 'r', long)]
+        #[arg(long)]
         remember: bool,
         /// Require touch for code generation
         #[arg(short, long)]
@@ -490,7 +493,7 @@ enum OtpAction {
     /// Delete an OTP slot configuration
     Delete {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// Access code (hex)
         #[arg(short = 'A', long)]
         access_code: Option<String>,
@@ -501,13 +504,13 @@ enum OtpAction {
     /// Configure an NDEF slot
     Ndef {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// URI or text prefix
         #[arg(short = 'p', long)]
         prefix: Option<String>,
         /// NDEF type
-        #[arg(short = 't', long, default_value = "URI")]
-        ndef_type: String,
+        #[arg(short = 't', long, default_value = "uri")]
+        ndef_type: CliNdefType,
         /// Access code (hex)
         #[arg(short = 'A', long)]
         access_code: Option<String>,
@@ -518,7 +521,7 @@ enum OtpAction {
     /// Program a Yubico OTP credential
     Yubiotp {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// Public ID (modhex)
         #[arg(short = 'P', long)]
         public_id: Option<String>,
@@ -556,7 +559,7 @@ enum OtpAction {
     /// Program a static password
     Static {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// Password to store
         password: Option<String>,
         /// Generate a random password
@@ -566,8 +569,8 @@ enum OtpAction {
         #[arg(short, long, default_value_t = 38)]
         length: usize,
         /// Keyboard layout
-        #[arg(short, long, default_value = "MODHEX")]
-        keyboard_layout: String,
+        #[arg(short, long, default_value = "modhex")]
+        keyboard_layout: CliKeyboardLayout,
         /// Append Enter after password
         #[arg(long)]
         enter: bool,
@@ -584,7 +587,7 @@ enum OtpAction {
     /// Program challenge-response (HMAC-SHA1)
     Chalresp {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// HMAC-SHA1 key (hex)
         key: Option<String>,
         /// Use TOTP mode
@@ -606,7 +609,7 @@ enum OtpAction {
     /// Perform a challenge-response calculation
     Calculate {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// Challenge (hex)
         challenge: Option<String>,
         /// Use TOTP mode (time-based challenge)
@@ -619,12 +622,12 @@ enum OtpAction {
     /// Program OATH-HOTP credential
     Hotp {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// HMAC key (hex)
         key: Option<String>,
         /// Number of digits (6 or 8)
-        #[arg(short = 'd', long, default_value = "6")]
-        digits: String,
+        #[arg(long, default_value = "6")]
+        digits: CliHotpDigits,
         /// Initial counter value
         #[arg(short = 'c', long, default_value_t = 0)]
         counter: u32,
@@ -647,7 +650,7 @@ enum OtpAction {
     /// Update slot settings
     Settings {
         /// Slot number (1 or 2)
-        slot: String,
+        slot: CliOtpSlot,
         /// Append Enter after output
         #[arg(long)]
         enter: bool,
@@ -743,8 +746,8 @@ enum PivAccessAction {
         management_key: Option<String>,
         #[arg(short, long)]
         new_management_key: Option<String>,
-        #[arg(short, long, default_value = "TDES")]
-        algorithm: String,
+        #[arg(short, long, default_value = "tdes")]
+        algorithm: CliMgmtKeyType,
         #[arg(short, long)]
         touch: bool,
         #[arg(short, long)]
@@ -768,18 +771,18 @@ enum PivKeysAction {
         slot: String,
         /// Output file for public key
         output: String,
-        #[arg(short, long, default_value = "ECCP256")]
-        algorithm: String,
-        #[arg(long, default_value = "DEFAULT")]
-        pin_policy: String,
-        #[arg(long, default_value = "DEFAULT")]
-        touch_policy: String,
+        #[arg(short, long, default_value = "eccp256")]
+        algorithm: CliKeyType,
+        #[arg(long, default_value = "default")]
+        pin_policy: CliPinPolicy,
+        #[arg(long, default_value = "default")]
+        touch_policy: CliTouchPolicy,
         #[arg(short, long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
     },
     /// Import a private key
     Import {
@@ -787,10 +790,10 @@ enum PivKeysAction {
         slot: String,
         /// Private key file
         key_file: String,
-        #[arg(long, default_value = "DEFAULT")]
-        pin_policy: String,
-        #[arg(long, default_value = "DEFAULT")]
-        touch_policy: String,
+        #[arg(long, default_value = "default")]
+        pin_policy: CliPinPolicy,
+        #[arg(long, default_value = "default")]
+        touch_policy: CliTouchPolicy,
         #[arg(short, long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
@@ -810,8 +813,8 @@ enum PivKeysAction {
         slot: String,
         /// Output certificate file
         output: String,
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
     },
     /// Export public key
     Export {
@@ -819,8 +822,8 @@ enum PivKeysAction {
         slot: String,
         /// Output file
         output: String,
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
         /// Verify public key against slot certificate
         #[arg(short = 'v', long)]
         verify: bool,
@@ -858,8 +861,8 @@ enum PivCertAction {
         slot: String,
         /// Output file
         output: String,
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
     },
     /// Import certificate to slot
     Import {
@@ -908,9 +911,9 @@ enum PivCertAction {
         /// Validity period in days
         #[arg(long, default_value_t = 365)]
         valid_days: u32,
-        /// Hash algorithm (SHA256, SHA384, SHA512)
-        #[arg(short = 'a', long, default_value = "SHA256")]
-        hash_algorithm: String,
+        /// Hash algorithm
+        #[arg(short = 'a', long, default_value = "sha256")]
+        hash_algorithm: CliHashAlgorithm,
         #[arg(short, long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
@@ -931,9 +934,9 @@ enum PivCertAction {
         /// Subject common name
         #[arg(short, long)]
         subject: String,
-        /// Hash algorithm (SHA256, SHA384, SHA512)
-        #[arg(short = 'a', long, default_value = "SHA256")]
-        hash_algorithm: String,
+        /// Hash algorithm
+        #[arg(short = 'a', long, default_value = "sha256")]
+        hash_algorithm: CliHashAlgorithm,
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -1037,8 +1040,8 @@ enum OpenpgpAccessAction {
     },
     /// Set signature PIN policy
     SetSignaturePolicy {
-        /// Policy (once or always)
-        policy: String,
+        /// Policy
+        policy: CliOpenpgpPinPolicy,
         #[arg(short, long)]
         admin_pin: Option<String>,
     },
@@ -1048,15 +1051,15 @@ enum OpenpgpAccessAction {
 enum OpenpgpKeysAction {
     /// Show key metadata
     Info {
-        /// Key reference (sig, dec, aut, att)
-        key: String,
+        /// Key reference
+        key: CliKeyRef,
     },
     /// Set touch policy for a key
     SetTouch {
         /// Key reference
-        key: String,
-        /// Policy (off, on, fixed, cached, cached-fixed)
-        policy: String,
+        key: CliKeyRef,
+        /// Touch policy
+        policy: CliUif,
         #[arg(short, long)]
         admin_pin: Option<String>,
         #[arg(short = 'f', long)]
@@ -1065,7 +1068,7 @@ enum OpenpgpKeysAction {
     /// Import attestation key
     Import {
         /// Key reference
-        key: String,
+        key: CliKeyRef,
         /// Key file
         key_file: String,
         #[arg(short, long)]
@@ -1074,11 +1077,11 @@ enum OpenpgpKeysAction {
     /// Generate attestation certificate
     Attest {
         /// Key reference
-        key: String,
+        key: CliKeyRef,
         /// Output file
         output: String,
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
         /// PIN for attestation
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -1090,16 +1093,16 @@ enum OpenpgpCertAction {
     /// Export certificate
     Export {
         /// Key reference
-        key: String,
+        key: CliKeyRef,
         /// Output file
         output: String,
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
     },
     /// Import certificate
     Import {
         /// Key reference
-        key: String,
+        key: CliKeyRef,
         /// Certificate file
         cert_file: String,
         #[arg(short, long)]
@@ -1108,7 +1111,7 @@ enum OpenpgpCertAction {
     /// Delete certificate
     Delete {
         /// Key reference
-        key: String,
+        key: CliKeyRef,
         #[arg(short, long)]
         admin_pin: Option<String>,
     },
@@ -1216,9 +1219,9 @@ enum HsmauthCredAction {
         label: String,
         /// Output file (- for stdout)
         output: String,
-        /// Output format (PEM or DER)
-        #[arg(short = 'F', long, default_value = "PEM")]
-        format: String,
+        /// Output format
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
     },
 }
 
@@ -1283,9 +1286,9 @@ enum SecurityDomainKeysAction {
         kid: String,
         /// Key Version Number (hex)
         kvn: String,
-        /// Key type: scp03 or scp11
+        /// Key type
         #[arg(short = 't', long, default_value = "scp11")]
-        key_type: String,
+        key_type: CliSdKeyType,
         /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM file with certificate(s) and/or private key
         input: String,
         /// Replace existing KVN
@@ -1746,9 +1749,9 @@ fn run() -> Result<(), CliError> {
                         &name,
                         secret.as_deref(),
                         issuer.as_deref(),
-                        &oath_type,
+                        oath_type,
                         digits,
-                        &algorithm,
+                        algorithm,
                         counter,
                         period,
                         touch,
@@ -1832,7 +1835,7 @@ fn run() -> Result<(), CliError> {
                     slot,
                     access_code,
                     force,
-                } => otp::run_delete(&dev, &scp_params, &slot, access_code.as_deref(), force),
+                } => otp::run_delete(&dev, &scp_params, slot, access_code.as_deref(), force),
                 OtpAction::Ndef {
                     slot,
                     prefix,
@@ -1842,9 +1845,9 @@ fn run() -> Result<(), CliError> {
                 } => otp::run_ndef(
                     &dev,
                     &scp_params,
-                    &slot,
+                    slot,
                     prefix.as_deref(),
-                    &ndef_type,
+                    ndef_type.into(),
                     access_code.as_deref(),
                     force,
                 ),
@@ -1875,7 +1878,7 @@ fn run() -> Result<(), CliError> {
                     otp::run_yubiotp(
                         &dev,
                         &scp_params,
-                        &slot,
+                        slot,
                         public_id.as_deref(),
                         private_id.as_deref(),
                         key.as_deref(),
@@ -1908,11 +1911,11 @@ fn run() -> Result<(), CliError> {
                     otp::run_static(
                         &dev,
                         &scp_params,
-                        &slot,
+                        slot,
                         password.as_deref(),
                         generate,
                         length,
-                        &keyboard_layout,
+                        keyboard_layout,
                         enter_flag,
                         access_code.as_deref(),
                         force,
@@ -1929,7 +1932,7 @@ fn run() -> Result<(), CliError> {
                 } => otp::run_chalresp(
                     &dev,
                     &scp_params,
-                    &slot,
+                    slot,
                     key.as_deref(),
                     totp,
                     touch,
@@ -1943,7 +1946,7 @@ fn run() -> Result<(), CliError> {
                     totp,
                     digits,
                 } => {
-                    otp::run_calculate(&dev, &scp_params, &slot, challenge.as_deref(), totp, digits)
+                    otp::run_calculate(&dev, &scp_params, slot, challenge.as_deref(), totp, digits)
                 }
                 OtpAction::Hotp {
                     slot,
@@ -1969,9 +1972,9 @@ fn run() -> Result<(), CliError> {
                     otp::run_hotp(
                         &dev,
                         &scp_params,
-                        &slot,
+                        slot,
                         key.as_deref(),
-                        &digits,
+                        digits,
                         counter,
                         enter_flag,
                         access_code.as_deref(),
@@ -2000,7 +2003,7 @@ fn run() -> Result<(), CliError> {
                     otp::run_settings(
                         &dev,
                         &scp_params,
-                        &slot,
+                        slot,
                         enter_flag,
                         pacing,
                         if use_numeric_keypad { Some(true) } else { None },
@@ -2058,7 +2061,7 @@ fn run() -> Result<(), CliError> {
                         &scp_params,
                         management_key.as_deref(),
                         new_management_key.as_deref(),
-                        &algorithm,
+                        algorithm,
                         touch,
                         generate,
                         force,
@@ -2081,12 +2084,12 @@ fn run() -> Result<(), CliError> {
                         &scp_params,
                         &slot,
                         &output,
-                        &algorithm,
-                        &pin_policy,
-                        &touch_policy,
+                        algorithm,
+                        pin_policy,
+                        touch_policy,
                         management_key.as_deref(),
                         pin.as_deref(),
-                        &format,
+                        format,
                     ),
                     PivKeysAction::Import {
                         slot,
@@ -2105,8 +2108,8 @@ fn run() -> Result<(), CliError> {
                             &scp_params,
                             &slot,
                             &key_file,
-                            &pin_policy,
-                            &touch_policy,
+                            pin_policy,
+                            touch_policy,
                             management_key.as_deref(),
                             pin.as_deref(),
                         )
@@ -2116,7 +2119,7 @@ fn run() -> Result<(), CliError> {
                         slot,
                         output,
                         format,
-                    } => piv::run_keys_attest(&dev, &scp_params, &slot, &output, &format),
+                    } => piv::run_keys_attest(&dev, &scp_params, &slot, &output, format),
                     PivKeysAction::Export {
                         slot,
                         output,
@@ -2127,7 +2130,7 @@ fn run() -> Result<(), CliError> {
                         if verify {
                             eprintln!("NOTE: --verify is not yet implemented for key export.");
                         }
-                        piv::run_keys_export(&dev, &scp_params, &slot, &output, &format)
+                        piv::run_keys_export(&dev, &scp_params, &slot, &output, format)
                     }
                     PivKeysAction::Move {
                         source,
@@ -2159,7 +2162,7 @@ fn run() -> Result<(), CliError> {
                         slot,
                         output,
                         format,
-                    } => piv::run_certificates_export(&dev, &scp_params, &slot, &output, &format),
+                    } => piv::run_certificates_export(&dev, &scp_params, &slot, &output, format),
                     PivCertAction::Import {
                         slot,
                         cert_file,
@@ -2219,7 +2222,7 @@ fn run() -> Result<(), CliError> {
                         &slot,
                         &subject,
                         valid_days,
-                        &hash_algorithm,
+                        hash_algorithm,
                         management_key.as_deref(),
                         pin.as_deref(),
                         public_key.as_deref(),
@@ -2237,7 +2240,7 @@ fn run() -> Result<(), CliError> {
                         &scp_params,
                         &slot,
                         &subject,
-                        &hash_algorithm,
+                        hash_algorithm,
                         &output,
                         pin.as_deref(),
                         Some(&public_key),
@@ -2339,14 +2342,14 @@ fn run() -> Result<(), CliError> {
                         openpgp::run_set_signature_policy(
                             &dev,
                             &scp_params,
-                            &policy,
+                            policy,
                             admin_pin.as_deref(),
                         )
                     }
                 },
                 OpenpgpAction::Keys(keys) => match keys {
                     OpenpgpKeysAction::Info { key } => {
-                        openpgp::run_keys_info(&dev, &scp_params, &key)
+                        openpgp::run_keys_info(&dev, &scp_params, key)
                     }
                     OpenpgpKeysAction::SetTouch {
                         key,
@@ -2356,8 +2359,8 @@ fn run() -> Result<(), CliError> {
                     } => openpgp::run_keys_set_touch(
                         &dev,
                         &scp_params,
-                        &key,
-                        &policy,
+                        key,
+                        policy,
                         admin_pin.as_deref(),
                         force,
                     ),
@@ -2368,7 +2371,7 @@ fn run() -> Result<(), CliError> {
                     } => openpgp::run_keys_import(
                         &dev,
                         &scp_params,
-                        &key,
+                        key,
                         &key_file,
                         admin_pin.as_deref(),
                     ),
@@ -2380,9 +2383,9 @@ fn run() -> Result<(), CliError> {
                     } => openpgp::run_keys_attest(
                         &dev,
                         &scp_params,
-                        &key,
+                        key,
                         &output,
-                        &format,
+                        format,
                         pin.as_deref(),
                     ),
                 },
@@ -2391,9 +2394,7 @@ fn run() -> Result<(), CliError> {
                         key,
                         output,
                         format,
-                    } => {
-                        openpgp::run_certificates_export(&dev, &scp_params, &key, &output, &format)
-                    }
+                    } => openpgp::run_certificates_export(&dev, &scp_params, key, &output, format),
                     OpenpgpCertAction::Import {
                         key,
                         cert_file,
@@ -2401,7 +2402,7 @@ fn run() -> Result<(), CliError> {
                     } => openpgp::run_certificates_import(
                         &dev,
                         &scp_params,
-                        &key,
+                        key,
                         &cert_file,
                         admin_pin.as_deref(),
                     ),
@@ -2409,7 +2410,7 @@ fn run() -> Result<(), CliError> {
                         openpgp::run_certificates_delete(
                             &dev,
                             &scp_params,
-                            &key,
+                            key,
                             admin_pin.as_deref(),
                         )
                     }
@@ -2498,7 +2499,7 @@ fn run() -> Result<(), CliError> {
                         output,
                         format,
                     } => {
-                        hsmauth::run_credentials_export(&dev, &scp_params, &label, &output, &format)
+                        hsmauth::run_credentials_export(&dev, &scp_params, &label, &output, format)
                     }
                     HsmauthCredAction::Import {
                         label,
@@ -2598,7 +2599,7 @@ fn run() -> Result<(), CliError> {
                                 &scp_params,
                                 kid,
                                 kvn,
-                                &key_type,
+                                key_type,
                                 &input,
                                 rkvn,
                             )

@@ -8,6 +8,7 @@ use yubikit::oath::{
 };
 
 use crate::appdata::AppData;
+use crate::cli_enums::{CliOathAlgorithm, CliOathType};
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
@@ -328,25 +329,16 @@ pub fn run_accounts_add(
     name: &str,
     secret: Option<&str>,
     issuer: Option<&str>,
-    oath_type: &str,
+    oath_type: CliOathType,
     digits: u8,
-    algorithm: &str,
+    algorithm: CliOathAlgorithm,
     counter: u32,
     period: u32,
     touch: bool,
     force: bool,
 ) -> Result<(), CliError> {
-    let oath_type = match oath_type.to_ascii_uppercase().as_str() {
-        "TOTP" => OathType::Totp,
-        "HOTP" => OathType::Hotp,
-        _ => return Err(CliError(format!("Invalid OATH type: {oath_type}"))),
-    };
-    let hash_algorithm = match algorithm.to_ascii_uppercase().as_str() {
-        "SHA1" => HashAlgorithm::Sha1,
-        "SHA256" => HashAlgorithm::Sha256,
-        "SHA512" => HashAlgorithm::Sha512,
-        _ => return Err(CliError(format!("Invalid algorithm: {algorithm}"))),
-    };
+    let oath_type: OathType = oath_type.into();
+    let hash_algorithm: HashAlgorithm = algorithm.into();
 
     let secret_bytes = match secret {
         Some(s) => {

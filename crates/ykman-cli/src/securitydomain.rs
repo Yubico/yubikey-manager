@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use yubikit::device::YubiKeyDevice;
 use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 
+use crate::cli_enums::CliSdKeyType;
 use crate::scp::ScpParams;
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
@@ -211,7 +212,7 @@ pub fn run_keys_import(
     scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
-    key_type: &str,
+    key_type: CliSdKeyType,
     input: &str,
     replace_kvn: Option<u8>,
 ) -> Result<(), CliError> {
@@ -220,7 +221,7 @@ pub fn run_keys_import(
     let mut session = open_session(dev)?;
 
     match key_type {
-        "scp03" => {
+        CliSdKeyType::Scp03 => {
             // Input is K-ENC:K-MAC[:K-DEK] hex
             let parts: Vec<&str> = input.split(':').collect();
             if parts.len() < 2 || parts.len() > 3 {
@@ -243,7 +244,7 @@ pub fn run_keys_import(
                 .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;
             eprintln!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
         }
-        "scp11" => {
+        CliSdKeyType::Scp11 => {
             // Input is a PEM file with certificate(s) and/or private key
             let pem_bytes = read_file_or_stdin(input)?;
             let pem_data = String::from_utf8(pem_bytes)
@@ -312,11 +313,6 @@ pub fn run_keys_import(
                     "No certificate or private key found in PEM file.".into(),
                 ));
             }
-        }
-        other => {
-            return Err(CliError(format!(
-                "Unknown key type: {other}. Use 'scp03' or 'scp11'."
-            )));
         }
     }
     Ok(())

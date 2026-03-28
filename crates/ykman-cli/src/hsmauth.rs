@@ -4,6 +4,7 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::hsmauth::{HsmAuthSession, credential_password_from_str};
 use yubikit::management::Capability;
 
+use crate::cli_enums::CliFormat;
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, write_file_or_stdout};
 
@@ -234,7 +235,7 @@ pub fn run_credentials_export(
     scp_params: &ScpParams,
     label: &str,
     output: &str,
-    format: &str,
+    format: CliFormat,
 ) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
     let public_key = session
@@ -276,14 +277,14 @@ pub fn run_credentials_export(
     spki.push(0x00); // unused bits
     spki.extend_from_slice(pk_bytes);
 
-    match format.to_ascii_uppercase().as_str() {
-        "DER" => {
+    match format {
+        CliFormat::Der => {
             write_file_or_stdout(output, &spki)?;
             if output != "-" {
                 eprintln!("Public key exported to {output}.");
             }
         }
-        _ => {
+        CliFormat::Pem => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&spki);
             let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
             for chunk in b64.as_bytes().chunks(64) {

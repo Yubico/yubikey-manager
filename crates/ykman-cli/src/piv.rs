@@ -19,6 +19,9 @@ use yubikit::piv::{
 use yubikit::smartcard::SmartCardConnection;
 use yubikit::tlv::{parse_tlv_list, tlv_encode};
 
+use crate::cli_enums::{
+    CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
+};
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
@@ -75,52 +78,6 @@ fn parse_slot(s: &str) -> Result<Slot, CliError> {
                 )))
             }
         }
-    }
-}
-
-fn parse_key_type(s: &str) -> Result<KeyType, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "RSA1024" => Ok(KeyType::Rsa1024),
-        "RSA2048" => Ok(KeyType::Rsa2048),
-        "RSA3072" => Ok(KeyType::Rsa3072),
-        "RSA4096" => Ok(KeyType::Rsa4096),
-        "ECCP256" | "ECC-P256" | "P256" => Ok(KeyType::EccP256),
-        "ECCP384" | "ECC-P384" | "P384" => Ok(KeyType::EccP384),
-        "ED25519" => Ok(KeyType::Ed25519),
-        "X25519" => Ok(KeyType::X25519),
-        _ => Err(CliError(format!("Invalid key type: {s}"))),
-    }
-}
-
-fn parse_mgmt_key_type(s: &str) -> Result<ManagementKeyType, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "TDES" | "3DES" => Ok(ManagementKeyType::Tdes),
-        "AES128" => Ok(ManagementKeyType::Aes128),
-        "AES192" => Ok(ManagementKeyType::Aes192),
-        "AES256" => Ok(ManagementKeyType::Aes256),
-        _ => Err(CliError(format!("Invalid management key type: {s}"))),
-    }
-}
-
-fn parse_pin_policy(s: &str) -> Result<PinPolicy, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "DEFAULT" => Ok(PinPolicy::Default),
-        "NEVER" => Ok(PinPolicy::Never),
-        "ONCE" => Ok(PinPolicy::Once),
-        "ALWAYS" => Ok(PinPolicy::Always),
-        "MATCH-ONCE" | "MATCH_ONCE" => Ok(PinPolicy::MatchOnce),
-        "MATCH-ALWAYS" | "MATCH_ALWAYS" => Ok(PinPolicy::MatchAlways),
-        _ => Err(CliError(format!("Invalid PIN policy: {s}"))),
-    }
-}
-
-fn parse_touch_policy(s: &str) -> Result<TouchPolicy, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "DEFAULT" => Ok(TouchPolicy::Default),
-        "NEVER" => Ok(TouchPolicy::Never),
-        "ALWAYS" => Ok(TouchPolicy::Always),
-        "CACHED" => Ok(TouchPolicy::Cached),
-        _ => Err(CliError(format!("Invalid touch policy: {s}"))),
     }
 }
 
@@ -671,14 +628,14 @@ pub fn run_change_management_key(
     scp_params: &ScpParams,
     mgmt_key: Option<&str>,
     new_mgmt_key: Option<&str>,
-    algorithm: &str,
+    algorithm: CliMgmtKeyType,
     touch: bool,
     generate: bool,
     force: bool,
     pin: Option<&str>,
     protect: bool,
 ) -> Result<(), CliError> {
-    let key_type = parse_mgmt_key_type(algorithm)?;
+    let key_type: ManagementKeyType = algorithm.into();
     let key_len = key_type.key_len();
 
     let new_key = if generate {
@@ -689,7 +646,7 @@ pub fn run_change_management_key(
         let bytes = parse_management_key(k)?;
         if bytes.len() != key_len {
             return Err(CliError(format!(
-                "Management key must be {key_len} bytes for {algorithm}."
+                "Management key must be {key_len} bytes for {key_type}."
             )));
         }
         bytes
@@ -698,7 +655,7 @@ pub fn run_change_management_key(
         let bytes = parse_management_key(&input)?;
         if bytes.len() != key_len {
             return Err(CliError(format!(
-                "Management key must be {key_len} bytes for {algorithm}."
+                "Management key must be {key_len} bytes for {key_type}."
             )));
         }
         bytes
@@ -728,17 +685,17 @@ pub fn run_keys_generate(
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
-    algorithm: &str,
-    pin_policy: &str,
-    touch_policy: &str,
+    algorithm: CliKeyType,
+    pin_policy: CliPinPolicy,
+    touch_policy: CliTouchPolicy,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
-    format: &str,
+    format: CliFormat,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let key_type = parse_key_type(algorithm)?;
-    let pp = parse_pin_policy(pin_policy)?;
-    let tp = parse_touch_policy(touch_policy)?;
+    let key_type: KeyType = algorithm.into();
+    let pp: PinPolicy = pin_policy.into();
+    let tp: TouchPolicy = touch_policy.into();
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -753,11 +710,11 @@ pub fn run_keys_generate(
     let spki_der = device_pubkey_to_spki(key_type, &pub_key_device)
         .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
 
-    match format.to_ascii_uppercase().as_str() {
-        "DER" => {
+    match format {
+        CliFormat::Der => {
             write_file_or_stdout(output, &spki_der)?;
         }
-        _ => {
+        CliFormat::Pem => {
             let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
                 .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
             let pem = spki
@@ -767,7 +724,7 @@ pub fn run_keys_generate(
         }
     }
 
-    eprintln!("Generated {algorithm} key in slot {slot}. Public key written to {output}.");
+    eprintln!("Generated {key_type} key in slot {slot}. Public key written to {output}.");
     Ok(())
 }
 
@@ -776,14 +733,14 @@ pub fn run_keys_import(
     scp_params: &ScpParams,
     slot: &str,
     key_file: &str,
-    pin_policy: &str,
-    touch_policy: &str,
+    pin_policy: CliPinPolicy,
+    touch_policy: CliTouchPolicy,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let pp = parse_pin_policy(pin_policy)?;
-    let tp = parse_touch_policy(touch_policy)?;
+    let pp: PinPolicy = pin_policy.into();
+    let tp: TouchPolicy = touch_policy.into();
 
     let data = read_file_or_stdin(key_file)?;
 
@@ -847,7 +804,7 @@ pub fn run_keys_attest(
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
-    format: &str,
+    format: CliFormat,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
@@ -865,7 +822,7 @@ pub fn run_keys_export(
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
-    format: &str,
+    format: CliFormat,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
@@ -876,9 +833,9 @@ pub fn run_keys_export(
     {
         let spki_der = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)
             .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
-        match format.to_ascii_uppercase().as_str() {
-            "DER" => write_file_or_stdout(output, &spki_der)?,
-            _ => {
+        match format {
+            CliFormat::Der => write_file_or_stdout(output, &spki_der)?,
+            CliFormat::Pem => {
                 let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
                     .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
                 let pem = spki
@@ -943,7 +900,7 @@ pub fn run_certificates_export(
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
-    format: &str,
+    format: CliFormat,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
@@ -1180,14 +1137,14 @@ pub fn run_certificates_generate(
     slot: &str,
     subject: &str,
     valid_days: u32,
-    hash_algorithm: &str,
+    hash_algorithm: CliHashAlgorithm,
     management_key: Option<&str>,
     pin: Option<&str>,
     public_key_file: Option<&str>,
     update_chuid: bool,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let hash_alg = parse_hash_algorithm(hash_algorithm)?;
+    let hash_alg: HashAlgorithm = hash_algorithm.into();
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, management_key, pin)?;
@@ -1237,13 +1194,13 @@ pub fn run_certificates_request(
     scp_params: &ScpParams,
     slot: &str,
     subject: &str,
-    hash_algorithm: &str,
+    hash_algorithm: CliHashAlgorithm,
     output: &str,
     pin: Option<&str>,
     public_key_file: Option<&str>,
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
-    let hash_alg = parse_hash_algorithm(hash_algorithm)?;
+    let hash_alg: HashAlgorithm = hash_algorithm.into();
 
     let mut session = open_session(dev, scp_params)?;
     ensure_pin(&mut session, pin)?;
@@ -1274,17 +1231,6 @@ pub fn run_certificates_request(
 // ---------------------------------------------------------------------------
 // Hash algorithm selection
 // ---------------------------------------------------------------------------
-
-fn parse_hash_algorithm(s: &str) -> Result<HashAlgorithm, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
-        "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
-        "SHA512" | "SHA-512" => Ok(HashAlgorithm::Sha512),
-        other => Err(CliError(format!(
-            "Unsupported hash algorithm: {other}. Use SHA256, SHA384, or SHA512."
-        ))),
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Helpers for cert/CSR generation
@@ -1345,12 +1291,12 @@ fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
     Ok(doc.as_bytes().to_vec())
 }
 
-fn write_cert_file(output: &str, cert_der: &[u8], format: &str) -> Result<(), CliError> {
-    match format.to_ascii_uppercase().as_str() {
-        "DER" => {
+fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(), CliError> {
+    match format {
+        CliFormat::Der => {
             write_file_or_stdout(output, cert_der)?;
         }
-        _ => {
+        CliFormat::Pem => {
             let cert = Certificate::from_der(cert_der)
                 .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
             let pem = cert

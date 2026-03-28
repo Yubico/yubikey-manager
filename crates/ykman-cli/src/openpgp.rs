@@ -4,6 +4,7 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpSession, PinPolicy, Uif};
 
+use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
@@ -51,31 +52,6 @@ fn ensure_pin(pin: Option<&str>) -> Result<String, CliError> {
     match pin {
         Some(p) => Ok(p.to_string()),
         None => crate::util::prompt_secret("Enter PIN"),
-    }
-}
-
-fn parse_key_ref(s: &str) -> Result<KeyRef, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "SIG" | "SIGNATURE" => Ok(KeyRef::Sig),
-        "DEC" | "DECRYPTION" => Ok(KeyRef::Dec),
-        "AUT" | "AUTHENTICATION" => Ok(KeyRef::Aut),
-        "ATT" | "ATTESTATION" => Ok(KeyRef::Att),
-        _ => Err(CliError(format!(
-            "Invalid key reference: {s}. Use sig, dec, aut, or att."
-        ))),
-    }
-}
-
-fn parse_uif(s: &str) -> Result<Uif, CliError> {
-    match s.to_ascii_uppercase().as_str() {
-        "OFF" | "DISABLED" => Ok(Uif::Off),
-        "ON" | "ENABLED" => Ok(Uif::On),
-        "FIXED" => Ok(Uif::Fixed),
-        "CACHED" => Ok(Uif::Cached),
-        "CACHED-FIXED" | "CACHED_FIXED" => Ok(Uif::CachedFixed),
-        _ => Err(CliError(format!(
-            "Invalid touch policy: {s}. Use off, on, fixed, cached, or cached-fixed."
-        ))),
     }
 }
 
@@ -321,18 +297,10 @@ pub fn run_unblock_pin(
 pub fn run_set_signature_policy(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    policy: &str,
+    policy: CliOpenpgpPinPolicy,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let pp = match policy.to_ascii_uppercase().as_str() {
-        "ONCE" => PinPolicy::Once,
-        "ALWAYS" => PinPolicy::Always,
-        _ => {
-            return Err(CliError(format!(
-                "Invalid policy: {policy}. Use once or always."
-            )));
-        }
-    };
+    let pp: PinPolicy = policy.into();
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
@@ -341,16 +309,16 @@ pub fn run_set_signature_policy(
     session
         .set_signature_pin_policy(pp)
         .map_err(|e| CliError(format!("Failed to set policy: {e}")))?;
-    eprintln!("Signature PIN policy set to {policy}.");
+    eprintln!("Signature PIN policy set to {pp:?}.");
     Ok(())
 }
 
 pub fn run_keys_info(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    key: &str,
+    key: CliKeyRef,
 ) -> Result<(), CliError> {
-    let key_ref = parse_key_ref(key)?;
+    let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
 
     let data = session
@@ -370,7 +338,7 @@ pub fn run_keys_info(
     if !has_key {
         return Err(CliError(format!(
             "No key stored in slot {}.",
-            key.to_ascii_uppercase()
+            format_key_ref(key_ref)
         )));
     }
 
@@ -439,13 +407,13 @@ fn format_timestamp(t: u32) -> String {
 pub fn run_keys_set_touch(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    key: &str,
-    policy: &str,
+    key: CliKeyRef,
+    policy: CliUif,
     admin_pin: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let key_ref = parse_key_ref(key)?;
-    let uif = parse_uif(policy)?;
+    let key_ref: KeyRef = key.into();
+    let uif: Uif = policy.into();
 
     if uif.is_fixed() && !force {
         eprintln!("WARNING: Setting a FIXED touch policy cannot be undone without a full reset!");
@@ -462,18 +430,22 @@ pub fn run_keys_set_touch(
     session
         .set_uif(key_ref, uif)
         .map_err(|e| CliError(format!("Failed to set touch policy: {e}")))?;
-    eprintln!("Touch policy for {key} set to {policy}.");
+    eprintln!(
+        "Touch policy for {} set to {}.",
+        format_key_ref(key_ref),
+        format_uif(uif)
+    );
     Ok(())
 }
 
 pub fn run_keys_import(
     _dev: &YubiKeyDevice,
     _scp_params: &ScpParams,
-    key: &str,
+    key: CliKeyRef,
     key_file: &str,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let _key_ref = parse_key_ref(key)?;
+    let _key_ref: KeyRef = key.into();
     let _data = read_file_or_stdin(key_file)?;
 
     let _ap = ensure_admin_pin(admin_pin)?;
@@ -486,12 +458,12 @@ pub fn run_keys_import(
 pub fn run_keys_attest(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    key: &str,
+    key: CliKeyRef,
     output: &str,
-    format: &str,
+    format: CliFormat,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let key_ref = parse_key_ref(key)?;
+    let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
     let p = ensure_pin(pin)?;
     session
@@ -509,11 +481,11 @@ pub fn run_keys_attest(
 pub fn run_certificates_export(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    key: &str,
+    key: CliKeyRef,
     output: &str,
-    format: &str,
+    format: CliFormat,
 ) -> Result<(), CliError> {
-    let key_ref = parse_key_ref(key)?;
+    let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .get_certificate(key_ref)
@@ -527,11 +499,11 @@ pub fn run_certificates_export(
 pub fn run_certificates_import(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    key: &str,
+    key: CliKeyRef,
     cert_file: &str,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let key_ref = parse_key_ref(key)?;
+    let key_ref: KeyRef = key.into();
     let data = read_file_or_stdin(cert_file)?;
 
     let der = if let Ok(text) = std::str::from_utf8(&data) {
@@ -559,10 +531,10 @@ pub fn run_certificates_import(
 pub fn run_certificates_delete(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-    key: &str,
+    key: CliKeyRef,
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let key_ref = parse_key_ref(key)?;
+    let key_ref: KeyRef = key.into();
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
@@ -575,12 +547,12 @@ pub fn run_certificates_delete(
     Ok(())
 }
 
-fn write_output(path: &str, der: &[u8], format: &str, label: &str) -> Result<(), CliError> {
-    match format.to_ascii_uppercase().as_str() {
-        "DER" => {
+fn write_output(path: &str, der: &[u8], format: CliFormat, label: &str) -> Result<(), CliError> {
+    match format {
+        CliFormat::Der => {
             write_file_or_stdout(path, der)?;
         }
-        _ => {
+        CliFormat::Pem => {
             let pem = pem_encode(label, der);
             write_file_or_stdout(path, pem.as_bytes())?;
         }
