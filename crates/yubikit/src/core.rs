@@ -76,6 +76,27 @@ pub fn patch_version(version: Version) -> Version {
     }
 }
 
+/// Check that a firmware version meets a minimum requirement.
+/// Returns `Err` with a descriptive message if the version is too low.
+pub fn require_version(version: Version, required: Version, feature: &str) -> Result<(), String> {
+    if version < required {
+        Err(format!(
+            "{feature} requires version {required} or later (device has {version})"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Decode big-endian bytes into an integer.
+pub fn bytes2int(data: &[u8]) -> u64 {
+    let mut v: u64 = 0;
+    for &b in data {
+        v = (v << 8) | b as u64;
+    }
+    v
+}
+
 // ---------------------------------------------------------------------------
 // Transport
 // ---------------------------------------------------------------------------

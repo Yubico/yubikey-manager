@@ -29,7 +29,7 @@ use thiserror::Error;
 
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
-use crate::tlv::{tlv_encode, tlv_parse};
+use crate::tlv::{parse_tlv_list, tlv_encode};
 
 // ---------------------------------------------------------------------------
 // TLV tags
@@ -159,6 +159,8 @@ pub enum HsmAuthError {
     NotSupported(String),
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
+    #[error("TLV error: {0}")]
+    Tlv(#[from] crate::tlv::TlvError),
 }
 
 // ---------------------------------------------------------------------------
@@ -204,13 +206,8 @@ fn retries_from_sw(sw: u16) -> Option<u32> {
     }
 }
 
-fn require_version(version: Version, required: Version) -> Result<(), HsmAuthError> {
-    if version < required {
-        return Err(HsmAuthError::NotSupported(format!(
-            "This operation requires version {required} or later (device has {version})"
-        )));
-    }
-    Ok(())
+fn require_version(version: Version, required: Version, feature: &str) -> Result<(), HsmAuthError> {
+    crate::core::require_version(version, required, feature).map_err(HsmAuthError::NotSupported)
 }
 
 fn validate_management_key(key: &[u8]) -> Result<(), HsmAuthError> {
@@ -230,19 +227,6 @@ fn map_pin_error(e: SmartCardError) -> HsmAuthError {
         return HsmAuthError::InvalidPin(retries);
     }
     HsmAuthError::SmartCard(e)
-}
-
-/// Parse TLV list entries from raw response bytes.
-fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, HsmAuthError> {
-    let mut entries = Vec::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_offset, val_len, end_offset) =
-            tlv_parse(data, offset).map_err(|e| HsmAuthError::InvalidResponse(e.to_string()))?;
-        entries.push((tag, data[val_offset..val_offset + val_len].to_vec()));
-        offset = end_offset;
-    }
-    Ok(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +436,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
-        require_version(self.version, Version(5, 6, 0))?;
+        require_version(self.version, Version(5, 6, 0), "put_credential_asymmetric")?;
         let key_bytes = private_key.to_bytes();
         self.put_credential(
             management_key,
@@ -471,7 +455,11 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
-        require_version(self.version, Version(5, 6, 0))?;
+        require_version(
+            self.version,
+            Version(5, 6, 0),
+            "generate_credential_asymmetric",
+        )?;
         self.put_credential(
             management_key,
             label,
@@ -483,7 +471,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     }
 
     pub fn get_public_key(&mut self, label: &str) -> Result<p256::PublicKey, HsmAuthError> {
-        require_version(self.version, Version(5, 6, 0))?;
+        require_version(self.version, Version(5, 6, 0), "get_public_key")?;
         let data = tlv_encode(TAG_LABEL, &parse_label(label)?);
         let response = self
             .protocol
@@ -513,7 +501,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         data: &[u8],
         use_management_key: bool,
     ) -> Result<(), HsmAuthError> {
-        require_version(self.version, Version(5, 8, 0))?;
+        require_version(self.version, Version(5, 8, 0), "change_credential_password")?;
         let p1 = if use_management_key { 1 } else { 0 };
         self.protocol
             .send_apdu(0, INS_CHANGE_CREDENTIAL_PASSWORD, p1, 0, data)
@@ -646,7 +634,11 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         card_crypto: &[u8],
     ) -> Result<SessionKeys, HsmAuthError> {
-        require_version(self.version, Version(5, 6, 0))?;
+        require_version(
+            self.version,
+            Version(5, 6, 0),
+            "calculate_session_keys_asymmetric",
+        )?;
 
         // Encode as SEC1 uncompressed point (0x04 || x || y)
         let encoded = p256::EncodedPoint::from(peer_public_key);
@@ -667,7 +659,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         label: &str,
         credential_password: Option<&[u8]>,
     ) -> Result<Vec<u8>, HsmAuthError> {
-        require_version(self.version, Version(5, 6, 0))?;
+        require_version(self.version, Version(5, 6, 0), "get_challenge")?;
 
         let mut data = tlv_encode(TAG_LABEL, &parse_label(label)?);
 

@@ -32,7 +32,7 @@ use thiserror::Error;
 
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
-use crate::tlv;
+use crate::tlv::{TlvError, parse_tlv_list, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags
 pub const TAG_NAME: u32 = 0x71;
@@ -137,7 +137,7 @@ pub enum OathError {
     #[error("Invalid hash algorithm: {0}")]
     InvalidHashAlgorithm(String),
     #[error("TLV error: {0}")]
-    Tlv(#[from] tlv::TlvError),
+    Tlv(#[from] TlvError),
     #[error("Wrong response MAC")]
     WrongMac,
     #[error("Credential does not belong to this YubiKey")]
@@ -307,15 +307,15 @@ pub fn build_put_data(
     let mut key_val = vec![oath_type as u8 | hash_algorithm as u8, digits];
     key_val.extend_from_slice(&padded_secret);
 
-    let mut data = tlv::tlv_encode(TAG_NAME, cred_id);
-    data.extend_from_slice(&tlv::tlv_encode(TAG_KEY, &key_val));
+    let mut data = tlv_encode(TAG_NAME, cred_id);
+    data.extend_from_slice(&tlv_encode(TAG_KEY, &key_val));
 
     if touch_required {
         data.extend_from_slice(&[TAG_PROPERTY as u8, PROP_REQUIRE_TOUCH]);
     }
 
     if counter > 0 {
-        data.extend_from_slice(&tlv::tlv_encode(TAG_IMF, &counter.to_be_bytes()));
+        data.extend_from_slice(&tlv_encode(TAG_IMF, &counter.to_be_bytes()));
     }
 
     data
@@ -327,17 +327,17 @@ pub fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Vec<u8> {
     let mut key_val = vec![OathType::Totp as u8 | HashAlgorithm::Sha1 as u8];
     key_val.extend_from_slice(key);
 
-    let mut data = tlv::tlv_encode(TAG_KEY, &key_val);
-    data.extend_from_slice(&tlv::tlv_encode(TAG_CHALLENGE, challenge));
-    data.extend_from_slice(&tlv::tlv_encode(TAG_RESPONSE, &response));
+    let mut data = tlv_encode(TAG_KEY, &key_val);
+    data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
+    data.extend_from_slice(&tlv_encode(TAG_RESPONSE, &response));
     data
 }
 
 /// Build APDU data for validate command.
 pub fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: &[u8]) -> Vec<u8> {
     let response = hmac_sha1(key, device_challenge);
-    let mut data = tlv::tlv_encode(TAG_RESPONSE, &response);
-    data.extend_from_slice(&tlv::tlv_encode(TAG_CHALLENGE, host_challenge));
+    let mut data = tlv_encode(TAG_RESPONSE, &response);
+    data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, host_challenge));
     data
 }
 
@@ -429,35 +429,6 @@ fn parse_select(response: &[u8]) -> Result<(Version, Vec<u8>, Option<Vec<u8>>), 
     let challenge = tlv_get(&tlvs, TAG_CHALLENGE).map(|c| c.to_vec());
 
     Ok((version, salt, challenge))
-}
-
-/// Simple TLV list parser (tag, value) pairs.
-fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, OathError> {
-    let mut result = Vec::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_offset, val_len, end) = tlv::tlv_parse(data, offset)?;
-        result.push((tag, data[val_offset..val_offset + val_len].to_vec()));
-        offset = end;
-    }
-    Ok(result)
-}
-
-fn tlv_get(tlvs: &[(u32, Vec<u8>)], tag: u32) -> Option<&[u8]> {
-    tlvs.iter()
-        .find(|(t, _)| *t == tag)
-        .map(|(_, v)| v.as_slice())
-}
-
-/// Unpack a single TLV and verify the tag matches.
-fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, OathError> {
-    let (tag, val_offset, val_len, _) = tlv::tlv_parse(data, 0)?;
-    if tag != expected_tag {
-        return Err(OathError::InvalidOathType(format!(
-            "Wrong tag, got 0x{tag:02x} expected 0x{expected_tag:02x}"
-        )));
-    }
-    Ok(data[val_offset..val_offset + val_len].to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -588,8 +559,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         let data = build_validate_data(key, challenge, &host_challenge);
         let resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, &data)?;
 
-        let resp_value = tlv_unpack(TAG_RESPONSE, &resp)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let resp_value = tlv_unpack(TAG_RESPONSE, &resp)?;
         if !hmac_verify(key, &host_challenge, &resp_value) {
             return Err(SmartCardError::BadResponse(
                 "Response from validation does not match verification".into(),
@@ -611,7 +581,7 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// Remove the access key.
     pub fn unset_key(&mut self) -> Result<(), SmartCardError> {
-        let data = tlv::tlv_encode(TAG_KEY, &[]);
+        let data = tlv_encode(TAG_KEY, &[]);
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
         self.has_key = false;
         Ok(())
@@ -660,8 +630,8 @@ impl<C: SmartCardConnection> OathSession<C> {
         }
         let (_, _, period) = parse_cred_id(credential_id, OathType::Totp);
         let new_id = format_cred_id(issuer, name, OathType::Totp, period);
-        let mut data = tlv::tlv_encode(TAG_NAME, credential_id);
-        data.extend_from_slice(&tlv::tlv_encode(TAG_NAME, &new_id));
+        let mut data = tlv_encode(TAG_NAME, credential_id);
+        data.extend_from_slice(&tlv_encode(TAG_NAME, &new_id));
         self.protocol.send_apdu(0, INS_RENAME, 0, 0, &data)?;
         Ok(new_id)
     }
@@ -669,7 +639,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     /// List all credentials.
     pub fn list_credentials(&mut self) -> Result<Vec<Credential>, SmartCardError> {
         let resp = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
-        let tlvs = parse_tlv_list(&resp).map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let tlvs = parse_tlv_list(&resp)?;
 
         let mut creds = Vec::new();
         for (tag, value) in &tlvs {
@@ -699,18 +669,17 @@ impl<C: SmartCardConnection> OathSession<C> {
         credential_id: &[u8],
         challenge: &[u8],
     ) -> Result<Vec<u8>, SmartCardError> {
-        let mut data = tlv::tlv_encode(TAG_NAME, credential_id);
-        data.extend_from_slice(&tlv::tlv_encode(TAG_CHALLENGE, challenge));
+        let mut data = tlv_encode(TAG_NAME, credential_id);
+        data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
         let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, &data)?;
-        let value = tlv_unpack(TAG_RESPONSE, &resp)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let value = tlv_unpack(TAG_RESPONSE, &resp)?;
         // Skip the first byte (digits indicator)
         Ok(value[1..].to_vec())
     }
 
     /// Delete a credential.
     pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), SmartCardError> {
-        let data = tlv::tlv_encode(TAG_NAME, credential_id);
+        let data = tlv_encode(TAG_NAME, credential_id);
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, &data)?;
         Ok(())
     }
@@ -721,14 +690,14 @@ impl<C: SmartCardConnection> OathSession<C> {
         timestamp: u64,
     ) -> Result<Vec<(Credential, Option<Code>)>, SmartCardError> {
         let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
-        let mut data = tlv::tlv_encode(TAG_CHALLENGE, &challenge);
+        let mut data = tlv_encode(TAG_CHALLENGE, &challenge);
         let _ = &data; // suppress warning
         let resp = self
             .protocol
             .send_apdu(0, INS_CALCULATE_ALL, 0, 0x01, &data)?;
         data = resp; // reuse variable
 
-        let tlvs = parse_tlv_list(&data).map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let tlvs = parse_tlv_list(&data)?;
 
         let mut entries = Vec::new();
         let mut iter = tlvs.into_iter();
@@ -799,12 +768,11 @@ impl<C: SmartCardConnection> OathSession<C> {
             Vec::new()
         };
 
-        let mut data = tlv::tlv_encode(TAG_NAME, &credential.id);
-        data.extend_from_slice(&tlv::tlv_encode(TAG_CHALLENGE, &challenge));
+        let mut data = tlv_encode(TAG_NAME, &credential.id);
+        data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, &challenge));
         let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0x01, &data)?;
 
-        let response = tlv_unpack(TAG_TRUNCATED, &resp)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let response = tlv_unpack(TAG_TRUNCATED, &resp)?;
 
         let (val, vf, vt) = format_code(
             credential.oath_type,

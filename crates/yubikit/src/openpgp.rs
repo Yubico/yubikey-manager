@@ -30,9 +30,12 @@ use std::collections::HashMap;
 use sha2::Digest;
 use thiserror::Error;
 
-use crate::core::patch_version;
+use crate::core::{bytes2int, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
-use crate::tlv::{self, TlvError};
+use crate::tlv::{
+    TlvError, int2bytes, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list,
+    tlv_encode, tlv_unpack,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -281,12 +284,12 @@ impl KeyRef {
     /// Control Reference Template bytes for this key slot.
     pub fn crt(self) -> Vec<u8> {
         match self {
-            Self::Sig => tlv::tlv_encode(0xB6, &[]),
-            Self::Dec => tlv::tlv_encode(0xB8, &[]),
-            Self::Aut => tlv::tlv_encode(0xA4, &[]),
+            Self::Sig => tlv_encode(0xB6, &[]),
+            Self::Dec => tlv_encode(0xB8, &[]),
+            Self::Aut => tlv_encode(0xA4, &[]),
             Self::Att => {
-                let inner = tlv::tlv_encode(0x84, &[0x81]);
-                tlv::tlv_encode(0xB6, &inner)
+                let inner = tlv_encode(0x84, &[0x81]);
+                tlv_encode(0xB6, &inner)
             }
         }
     }
@@ -521,7 +524,7 @@ pub struct EcAttributes {
 
 impl EcAttributes {
     pub fn create(key_ref: KeyRef, oid_str: &str) -> Result<Self, OpenPgpError> {
-        let oid_bytes = tlv::oid_from_string(oid_str)
+        let oid_bytes = oid_from_string(oid_str)
             .map_err(|e| OpenPgpError::InvalidParameter(format!("Invalid OID: {e}")))?;
         let algorithm_id = if oid_str == curve_oid::ED25519 {
             EC_ALG_EDDSA
@@ -565,7 +568,7 @@ impl EcAttributes {
     }
 
     pub fn oid_string(&self) -> Result<String, TlvError> {
-        tlv::oid_to_string(&self.oid)
+        oid_to_string(&self.oid)
     }
 }
 
@@ -746,48 +749,6 @@ fn parse_key_information(encoded: &[u8]) -> KeyInformation {
         i += 2;
     }
     map
-}
-
-/// Parse TLV data into a tag→value map.
-fn parse_tlv_dict(data: &[u8]) -> Result<HashMap<u32, Vec<u8>>, TlvError> {
-    let mut map = HashMap::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_offset, val_len, end) = tlv::tlv_parse(data, offset)?;
-        map.insert(tag, data[val_offset..val_offset + val_len].to_vec());
-        offset = end;
-    }
-    Ok(map)
-}
-
-/// Parse TLV data into a list of (tag, value) tuples.
-fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, TlvError> {
-    let mut list = Vec::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_offset, val_len, end) = tlv::tlv_parse(data, offset)?;
-        list.push((tag, data[val_offset..val_offset + val_len].to_vec()));
-        offset = end;
-    }
-    Ok(list)
-}
-
-fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, OpenPgpError> {
-    let (tag, val_offset, val_len, _) = tlv::tlv_parse(data, 0)?;
-    if tag != expected_tag {
-        return Err(OpenPgpError::InvalidResponse(format!(
-            "Expected tag 0x{expected_tag:04X}, got 0x{tag:04X}"
-        )));
-    }
-    Ok(data[val_offset..val_offset + val_len].to_vec())
-}
-
-fn bytes2int(data: &[u8]) -> u64 {
-    let mut val: u64 = 0;
-    for &b in data {
-        val = (val << 8) | b as u64;
-    }
-    val
 }
 
 // ---------------------------------------------------------------------------
@@ -976,7 +937,7 @@ impl Kdf {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            Kdf::None => tlv::tlv_encode(0x81, &[0x00]),
+            Kdf::None => tlv_encode(0x81, &[0x00]),
             Kdf::IterSaltedS2k {
                 hash_algorithm,
                 iteration_count,
@@ -987,21 +948,21 @@ impl Kdf {
                 initial_hash_admin,
             } => {
                 let mut buf = Vec::new();
-                buf.extend_from_slice(&tlv::tlv_encode(0x81, &[0x03]));
-                buf.extend_from_slice(&tlv::tlv_encode(0x82, &[*hash_algorithm as u8]));
-                buf.extend_from_slice(&tlv::tlv_encode(0x83, &iteration_count.to_be_bytes()));
-                buf.extend_from_slice(&tlv::tlv_encode(0x84, salt_user));
+                buf.extend_from_slice(&tlv_encode(0x81, &[0x03]));
+                buf.extend_from_slice(&tlv_encode(0x82, &[*hash_algorithm as u8]));
+                buf.extend_from_slice(&tlv_encode(0x83, &iteration_count.to_be_bytes()));
+                buf.extend_from_slice(&tlv_encode(0x84, salt_user));
                 if let Some(sr) = salt_reset {
-                    buf.extend_from_slice(&tlv::tlv_encode(0x85, sr));
+                    buf.extend_from_slice(&tlv_encode(0x85, sr));
                 }
                 if let Some(sa) = salt_admin {
-                    buf.extend_from_slice(&tlv::tlv_encode(0x86, sa));
+                    buf.extend_from_slice(&tlv_encode(0x86, sa));
                 }
                 if let Some(ih) = initial_hash_user {
-                    buf.extend_from_slice(&tlv::tlv_encode(0x87, ih));
+                    buf.extend_from_slice(&tlv_encode(0x87, ih));
                 }
                 if let Some(ia) = initial_hash_admin {
-                    buf.extend_from_slice(&tlv::tlv_encode(0x88, ia));
+                    buf.extend_from_slice(&tlv_encode(0x88, ia));
                 }
                 buf
             }
@@ -1175,7 +1136,7 @@ fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) 
     // 0x5F48: concatenated values
     let mut values = Vec::new();
     for (tag, value) in &component_tlvs {
-        let encoded = tlv::tlv_encode(*tag, value);
+        let encoded = tlv_encode(*tag, value);
         // Header = everything before the value = tag + length bytes
         let header_len = encoded.len() - value.len();
         headers.extend_from_slice(&encoded[..header_len]);
@@ -1183,10 +1144,10 @@ fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) 
     }
 
     let mut inner = key_ref.crt();
-    inner.extend_from_slice(&tlv::tlv_encode(0x7F48, &headers));
-    inner.extend_from_slice(&tlv::tlv_encode(0x5F48, &values));
+    inner.extend_from_slice(&tlv_encode(0x7F48, &headers));
+    inner.extend_from_slice(&tlv_encode(0x5F48, &values));
 
-    tlv::tlv_encode(0x4D, &inner)
+    tlv_encode(0x4D, &inner)
 }
 
 // ---------------------------------------------------------------------------
@@ -1913,9 +1874,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 d
             }
             AlgorithmAttributes::Ec(_) => {
-                let inner = tlv::tlv_encode(0x86, value);
-                let mid = tlv::tlv_encode(0x7F49, &inner);
-                tlv::tlv_encode(0xA6, &mid)
+                let inner = tlv_encode(0x86, value);
+                let mid = tlv_encode(0x7F49, &inner);
+                tlv_encode(0xA6, &mid)
             }
         };
         let response = self.protocol.send_apdu(0, INS_PSO, 0x80, 0x86, &data)?;
@@ -1939,9 +1900,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     fn select_certificate(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
         if self.version >= Version(5, 2, 0) {
-            let do_bytes = tlv::int2bytes(Do::CardholderCertificate as u64);
-            let inner = tlv::tlv_encode(0x5C, &do_bytes);
-            let mut outer = tlv::tlv_encode(0x60, &inner);
+            let do_bytes = int2bytes(Do::CardholderCertificate as u64);
+            let inner = tlv_encode(0x5C, &do_bytes);
+            let mut outer = tlv_encode(0x60, &inner);
             if self.version <= Version(5, 4, 3) {
                 // Non-standard leading byte
                 let mut patched = vec![0x06];
@@ -2036,12 +1997,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 // ---------------------------------------------------------------------------
 
 fn require_version(current: Version, required: Version, feature: &str) -> Result<(), OpenPgpError> {
-    if current < required {
-        return Err(OpenPgpError::NotSupported(format!(
-            "{feature} requires version {required} or later (current: {current})"
-        )));
-    }
-    Ok(())
+    crate::core::require_version(current, required, feature).map_err(OpenPgpError::NotSupported)
 }
 
 // ---------------------------------------------------------------------------
@@ -2051,6 +2007,7 @@ fn require_version(current: Version, required: Version, feature: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tlv::tlv_parse;
 
     #[test]
     fn test_uif_properties() {
@@ -2291,7 +2248,7 @@ mod tests {
         let template = build_private_key_template(KeyRef::Sig, &key);
         assert_eq!(template[0], 0x4D);
         // Parse outer TLV to verify structure
-        let (tag, val_off, val_len, _) = tlv::tlv_parse(&template, 0).unwrap();
+        let (tag, val_off, val_len, _) = tlv_parse(&template, 0).unwrap();
         assert_eq!(tag, 0x4D);
         let inner = &template[val_off..val_off + val_len];
         // Inner starts with CRT (B6 00)
@@ -2302,7 +2259,7 @@ mod tests {
     fn test_pad_message_eddsa_no_hash() {
         let attrs = AlgorithmAttributes::Ec(EcAttributes {
             algorithm_id: EC_ALG_EDDSA,
-            oid: tlv::oid_from_string(curve_oid::ED25519).unwrap(),
+            oid: oid_from_string(curve_oid::ED25519).unwrap(),
             import_format: EcImportFormat::Standard,
         });
         let msg = b"hello world";
@@ -2327,7 +2284,7 @@ mod tests {
     fn test_pad_message_ec_sha256() {
         let attrs = AlgorithmAttributes::Ec(EcAttributes {
             algorithm_id: EC_ALG_ECDSA,
-            oid: tlv::oid_from_string(curve_oid::SECP256R1).unwrap(),
+            oid: oid_from_string(curve_oid::SECP256R1).unwrap(),
             import_format: EcImportFormat::Standard,
         });
         let msg = b"test message";

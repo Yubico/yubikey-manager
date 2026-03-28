@@ -34,7 +34,7 @@ use cipher::{BlockEncryptMut, KeyIvInit};
 
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
-use crate::tlv::{TlvError, tlv_encode, tlv_parse};
+use crate::tlv::{parse_tlv_list, tlv_encode, tlv_parse, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // APDU instruction constants
@@ -299,30 +299,6 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
     encrypt_cbc(key, data, &[0u8; 16])
 }
 
-/// Parse a list of TLV entries from data, returning (tag, value) pairs.
-fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, TlvError> {
-    let mut result = Vec::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_offset, val_len, end) = tlv_parse(data, offset)?;
-        result.push((tag, data[val_offset..val_offset + val_len].to_vec()));
-        offset = end;
-    }
-    Ok(result)
-}
-
-/// Unpack a TLV with the expected tag, returning the value bytes.
-fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, SmartCardError> {
-    let (tag, val_offset, val_len, _) = tlv_parse(data, 0)
-        .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
-    if tag != expected_tag {
-        return Err(SmartCardError::BadResponse(format!(
-            "Expected tag 0x{expected_tag:02X}, got 0x{tag:02X}"
-        )));
-    }
-    Ok(data[val_offset..val_offset + val_len].to_vec())
-}
-
 // ---------------------------------------------------------------------------
 // SecurityDomainSession
 // ---------------------------------------------------------------------------
@@ -390,8 +366,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         &mut self,
     ) -> Result<HashMap<KeyRef, HashMap<u8, u8>>, SmartCardError> {
         let resp = self.get_data(TAG_KEY_INFORMATION, &[])?;
-        let entries = parse_tlv_list(&resp)
-            .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
+        let entries = parse_tlv_list(&resp)?;
 
         let mut keys = HashMap::new();
         for (tag, entry_data) in entries {
@@ -420,7 +395,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Get card recognition data.
     pub fn get_card_recognition_data(&mut self) -> Result<Vec<u8>, SmartCardError> {
         let resp = self.get_data(TAG_CARD_RECOGNITION_DATA, &[])?;
-        tlv_unpack(0x73, &resp)
+        Ok(tlv_unpack(0x73, &resp)?)
     }
 
     /// Get supported CA identifiers (Subject Key Identifiers).
@@ -456,8 +431,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             }
         }
 
-        let tlvs = parse_tlv_list(&data)
-            .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
+        let tlvs = parse_tlv_list(&data)?;
 
         let mut result = HashMap::new();
         // Entries come in pairs: (tag, ski_value), (tag, key_ref_value)
@@ -676,7 +650,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             .protocol
             .send_apdu(0x80, INS_GENERATE_KEY, replace_kvn, key.kid, &data)?;
 
-        tlv_unpack(KeyType::EccPublicKey as u32, &resp)
+        Ok(tlv_unpack(KeyType::EccPublicKey as u32, &resp)?)
     }
 
     /// Import an SCP03 static key set.

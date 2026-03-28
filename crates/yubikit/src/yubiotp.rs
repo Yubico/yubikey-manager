@@ -290,14 +290,14 @@ impl ConfigState {
 
     /// Check if the given slot is programmed.
     pub fn is_configured(&self, slot: Slot) -> Result<bool, YubiOtpError> {
-        require_version(self.version, Version(2, 1, 0))?;
+        require_version(self.version, Version(2, 1, 0), "is_configured")?;
         let flag = slot.map(CfgState::SLOT1_VALID.0, CfgState::SLOT2_VALID.0);
         Ok(self.flags & flag != 0)
     }
 
     /// Check if the given slot is triggered by touch (requires YubiKey 3+).
     pub fn is_touch_triggered(&self, slot: Slot) -> Result<bool, YubiOtpError> {
-        require_version(self.version, Version(3, 0, 0))?;
+        require_version(self.version, Version(3, 0, 0), "is_touch_triggered")?;
         let flag = slot.map(CfgState::SLOT1_TOUCH.0, CfgState::SLOT2_TOUCH.0);
         Ok(self.flags & flag != 0)
     }
@@ -308,13 +308,8 @@ impl ConfigState {
     }
 }
 
-fn require_version(version: Version, required: Version) -> Result<(), YubiOtpError> {
-    if version < required {
-        return Err(YubiOtpError::NotSupported(format!(
-            "This operation requires version {required} or later (device has {version})"
-        )));
-    }
-    Ok(())
+fn require_version(version: Version, required: Version, feature: &str) -> Result<(), YubiOtpError> {
+    crate::core::require_version(version, required, feature).map_err(YubiOtpError::NotSupported)
 }
 
 // ---------------------------------------------------------------------------
@@ -1017,7 +1012,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         slot: Slot,
         challenge: &[u8],
     ) -> Result<Vec<u8>, YubiOtpError> {
-        require_version(self.version, Version(2, 2, 0))?;
+        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
         let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
 
         // Pad challenge to HMAC_CHALLENGE_SIZE with a byte different from the last
@@ -1255,7 +1250,7 @@ impl YubiOtpOtpSession {
         cancel: Option<Arc<AtomicBool>>,
         on_keepalive: Option<&dyn Fn(u8)>,
     ) -> Result<Vec<u8>, YubiOtpError> {
-        require_version(self.version, Version(2, 2, 0))?;
+        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
         let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
 
         let pad_byte = if challenge.last() == Some(&0) {

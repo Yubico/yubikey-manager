@@ -33,12 +33,13 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::core::bytes2int;
 use crate::core::patch_version;
 use crate::otp::{OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc};
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
 };
-use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
+use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode};
 use crate::transport::ctaphid::{CtapHidTransportError, FidoConnection};
 use crate::transport::otphid::OtpConnection;
 use crate::yubiotp::ConfigSlot;
@@ -1143,28 +1144,6 @@ fn parse_version_string(s: &str) -> Result<Version, SmartCardError> {
     Err(SmartCardError::BadResponse(format!(
         "Invalid version string: {s:?}"
     )))
-}
-
-/// Decode big-endian bytes to a u64 value.
-fn bytes2int(data: &[u8]) -> u64 {
-    let mut v: u64 = 0;
-    for &b in data {
-        v = (v << 8) | b as u64;
-    }
-    v
-}
-
-/// Parse a TLV byte sequence into a tag→value map.
-fn parse_tlv_dict(data: &[u8]) -> Result<HashMap<u32, Vec<u8>>, SmartCardError> {
-    let mut map = HashMap::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_offset, val_len, end) = tlv_parse(data, offset)
-            .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
-        map.insert(tag, data[val_offset..val_offset + val_len].to_vec());
-        offset = end;
-    }
-    Ok(map)
 }
 
 // ---------------------------------------------------------------------------

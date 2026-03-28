@@ -41,7 +41,7 @@ use thiserror::Error;
 
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
-use crate::tlv::{int2bytes, tlv_encode, tlv_parse};
+use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode, tlv_parse, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -647,42 +647,8 @@ fn u32_to_bytes(value: u32) -> Vec<u8> {
     int2bytes(value as u64)
 }
 
-fn require_version(version: Version, required: Version) -> Result<(), PivError> {
-    if version < required {
-        return Err(PivError::NotSupported(format!(
-            "This operation requires version {required} or later (device has {version})"
-        )));
-    }
-    Ok(())
-}
-
-/// Parse TLV list into a Vec of (tag, value) pairs.
-fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, PivError> {
-    let mut entries = Vec::new();
-    let mut offset = 0;
-    while offset < data.len() {
-        let (tag, val_off, val_len, end) = tlv_parse(data, offset)?;
-        entries.push((tag, data[val_off..val_off + val_len].to_vec()));
-        offset = end;
-    }
-    Ok(entries)
-}
-
-/// Parse TLV list into a map (last value for duplicate tags wins).
-fn parse_tlv_map(data: &[u8]) -> Result<std::collections::HashMap<u32, Vec<u8>>, PivError> {
-    let entries = parse_tlv_list(data)?;
-    Ok(entries.into_iter().collect())
-}
-
-/// Unpack TLV: expect a specific tag, return its value.
-fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, PivError> {
-    let (tag, val_off, val_len, _) = tlv_parse(data, 0)?;
-    if tag != expected_tag {
-        return Err(PivError::BadResponse(format!(
-            "Expected tag 0x{expected_tag:02X}, got 0x{tag:02X}"
-        )));
-    }
-    Ok(data[val_off..val_off + val_len].to_vec())
+fn require_version(version: Version, required: Version, feature: &str) -> Result<(), PivError> {
+    crate::core::require_version(version, required, feature).map_err(PivError::NotSupported)
 }
 
 /// Encrypt a single block using management key (ECB mode).
@@ -809,13 +775,13 @@ pub fn check_key_support(
     fips_restrictions: bool,
 ) -> Result<(), PivError> {
     if key_type == KeyType::EccP384 {
-        require_version(version, Version(4, 0, 0))?;
+        require_version(version, Version(4, 0, 0), "ECC P-384")?;
     }
     if touch_policy != TouchPolicy::Default || pin_policy != PinPolicy::Default {
-        require_version(version, Version(4, 0, 0))?;
+        require_version(version, Version(4, 0, 0), "PIN/touch policy")?;
     }
     if touch_policy == TouchPolicy::Cached {
-        require_version(version, Version(4, 3, 0))?;
+        require_version(version, Version(4, 3, 0), "cached touch policy")?;
     }
 
     // ROCA
@@ -848,7 +814,7 @@ pub fn check_key_support(
         key_type,
         KeyType::Rsa3072 | KeyType::Rsa4096 | KeyType::Ed25519 | KeyType::X25519
     ) {
-        require_version(version, Version(5, 7, 0))?;
+        require_version(version, Version(5, 7, 0), &format!("{key_type:?}"))?;
     }
 
     Ok(())
@@ -998,7 +964,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // -----------------------------------------------------------------------
 
     pub fn get_serial(&mut self) -> Result<u32, PivError> {
-        require_version(self.version, Version(5, 0, 3))?;
+        require_version(self.version, Version(5, 0, 3), "get_serial")?;
         let response = self.protocol.send_apdu(0, INS_GET_SERIAL, 0, 0, &[])?;
         Ok(bytes_to_u32(&response))
     }
@@ -1066,7 +1032,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         require_touch: bool,
     ) -> Result<(), PivError> {
         if key_type != ManagementKeyType::Tdes {
-            require_version(self.version, Version(5, 4, 0))?;
+            require_version(self.version, Version(5, 4, 0), "AES management key")?;
         }
         if management_key.len() != key_type.key_len() {
             return Err(PivError::InvalidValue(format!(
@@ -1279,11 +1245,15 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     pub fn get_management_key_metadata(&mut self) -> Result<ManagementKeyMetadata, PivError> {
-        require_version(self.version, Version(5, 3, 0))?;
+        require_version(
+            self.version,
+            Version(5, 3, 0),
+            "get_management_key_metadata",
+        )?;
         let response =
             self.protocol
                 .send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT, &[])?;
-        let data = parse_tlv_map(&response)?;
+        let data = parse_tlv_dict(&response)?;
 
         let algo_byte = data
             .get(&TAG_METADATA_ALGO)
@@ -1316,11 +1286,11 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     pub fn get_slot_metadata(&mut self, slot: Slot) -> Result<SlotMetadata, PivError> {
-        require_version(self.version, Version(5, 3, 0))?;
+        require_version(self.version, Version(5, 3, 0), "get_slot_metadata")?;
         let response = self
             .protocol
             .send_apdu(0, INS_GET_METADATA, 0, slot as u8, &[])?;
-        let data = parse_tlv_map(&response)?;
+        let data = parse_tlv_dict(&response)?;
 
         let algo_byte = data
             .get(&TAG_METADATA_ALGO)
@@ -1375,7 +1345,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             Err(e) => return Err(PivError::SmartCard(e)),
         };
 
-        let data = parse_tlv_map(&response)?;
+        let data = parse_tlv_dict(&response)?;
 
         let configured = data
             .get(&TAG_METADATA_BIO_CONFIGURED)
@@ -1493,7 +1463,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     /// Get certificate from slot as DER bytes.
     pub fn get_certificate(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
         let obj_data = self.get_object(ObjectId::from_slot(slot))?;
-        let entries = parse_tlv_map(&obj_data)
+        let entries = parse_tlv_dict(&obj_data)
             .map_err(|_| PivError::BadResponse("Malformed certificate data object".into()))?;
 
         let cert_data = entries
@@ -1635,19 +1605,19 @@ impl<C: SmartCardConnection> PivSession<C> {
                 .send_apdu(0, INS_GENERATE_ASYMMETRIC, 0, slot as u8, &request)?;
 
         // Return the 0x7F49 container contents (device public key encoding)
-        tlv_unpack(0x7F49, &response)
+        Ok(tlv_unpack(0x7F49, &response)?)
     }
 
     /// Attest key in slot. Returns DER-encoded X.509 certificate.
     pub fn attest_key(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
-        require_version(self.version, Version(4, 3, 0))?;
+        require_version(self.version, Version(4, 3, 0), "attest_key")?;
         let response = self.protocol.send_apdu(0, INS_ATTEST, slot as u8, 0, &[])?;
         Ok(response)
     }
 
     /// Move key from one slot to another. Requires firmware >= 5.7.0.
     pub fn move_key(&mut self, from_slot: Slot, to_slot: Slot) -> Result<(), PivError> {
-        require_version(self.version, Version(5, 7, 0))?;
+        require_version(self.version, Version(5, 7, 0), "move_key")?;
         self.protocol
             .send_apdu(0, INS_MOVE_KEY, to_slot as u8, from_slot as u8, &[])?;
         Ok(())
@@ -1655,7 +1625,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Delete a key in a slot. Requires firmware >= 5.7.0.
     pub fn delete_key(&mut self, slot: Slot) -> Result<(), PivError> {
-        require_version(self.version, Version(5, 7, 0))?;
+        require_version(self.version, Version(5, 7, 0), "delete_key")?;
         self.protocol
             .send_apdu(0, INS_MOVE_KEY, 0xFF, slot as u8, &[])?;
         Ok(())
@@ -1719,9 +1689,9 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     fn get_pin_puk_metadata(&mut self, p2: u8) -> Result<PinMetadata, PivError> {
-        require_version(self.version, Version(5, 3, 0))?;
+        require_version(self.version, Version(5, 3, 0), "get_pin_puk_metadata")?;
         let response = self.protocol.send_apdu(0, INS_GET_METADATA, 0, p2, &[])?;
-        let data = parse_tlv_map(&response)?;
+        let data = parse_tlv_dict(&response)?;
 
         let default_value = data
             .get(&TAG_METADATA_IS_DEFAULT)
@@ -1762,7 +1732,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         {
             Ok(response) => {
                 let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
-                tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth)
+                tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth).map_err(PivError::from)
             }
             Err(SmartCardError::Apdu { sw, .. })
                 if Sw::from_u16(sw) == Some(Sw::IncorrectParameters) =>

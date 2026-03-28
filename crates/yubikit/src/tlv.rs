@@ -25,6 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -87,6 +88,43 @@ fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize,
     }
 
     Ok((tag, offset, ln, end))
+}
+
+/// Parse a byte slice into a list of (tag, value) pairs.
+pub fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, TlvError> {
+    let mut result = Vec::new();
+    let mut offset = 0;
+    while offset < data.len() {
+        let (tag, val_offset, val_len, end) = tlv_parse(data, offset)?;
+        result.push((tag, data[val_offset..val_offset + val_len].to_vec()));
+        offset = end;
+    }
+    Ok(result)
+}
+
+/// Parse a byte slice into a tag→value map (last value for duplicate tags wins).
+pub fn parse_tlv_dict(data: &[u8]) -> Result<HashMap<u32, Vec<u8>>, TlvError> {
+    let entries = parse_tlv_list(data)?;
+    Ok(entries.into_iter().collect())
+}
+
+/// Unpack a single TLV and verify the tag matches the expected value.
+pub fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, TlvError> {
+    let (tag, val_offset, val_len, _) = tlv_parse(data, 0)?;
+    if tag != expected_tag {
+        return Err(TlvError::WrongTag {
+            got: tag,
+            expected: expected_tag,
+        });
+    }
+    Ok(data[val_offset..val_offset + val_len].to_vec())
+}
+
+/// Find the first entry with the given tag in a TLV list.
+pub fn tlv_get(tlvs: &[(u32, Vec<u8>)], tag: u32) -> Option<&[u8]> {
+    tlvs.iter()
+        .find(|(t, _)| *t == tag)
+        .map(|(_, v)| v.as_slice())
 }
 
 /// Encode a tag and value into BER-TLV format.

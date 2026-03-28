@@ -68,7 +68,26 @@ def _pid_from_name(name):
 
 class ScardSmartCardConnection(SmartCardConnection):
     def __init__(self, reader_name, exclusive=True):
-        self.connection = PcscConnection(reader_name, exclusive)
+        # On YubiKey NEO, the virtual smartcard may be temporarily ejected
+        # after an OTP or FIDO connection. Retry for up to 4 seconds.
+        last_err: OSError | None = None
+        for attempt in range(9):
+            try:
+                self.connection = PcscConnection(reader_name, exclusive)
+                break
+            except OSError as e:
+                if attempt < 8 and "no smart card" in str(e).lower():
+                    logger.debug(
+                        "SmartCard not ready (attempt %d), retrying...", attempt + 1
+                    )
+                    sleep(0.5)
+                    last_err = e
+                else:
+                    raise
+        else:
+            if last_err is not None:
+                raise last_err
+            raise OSError("Failed to connect to smart card")
 
         atr = self.connection.get_atr()
         self._transport = (

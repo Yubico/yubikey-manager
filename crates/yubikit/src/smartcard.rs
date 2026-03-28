@@ -151,6 +151,8 @@ pub enum SmartCardError {
     NotSupported(String),
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
+    #[error("TLV error: {0}")]
+    Tlv(#[from] crate::tlv::TlvError),
 }
 
 impl SmartCardError {
