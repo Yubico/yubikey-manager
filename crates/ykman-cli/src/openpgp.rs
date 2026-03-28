@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
-use yubikit::openpgp::{KeyRef, OpenPgpSession, PinPolicy, Uif};
+use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpSession, PinPolicy, Uif};
 
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
@@ -115,12 +115,77 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
         } else {
             "True"
         };
-        eprintln!("KDF enabled:                {enabled}");
+        println!("KDF enabled:                {enabled}");
     } else {
-        eprintln!("KDF enabled:                False");
+        println!("KDF enabled:                False");
+    }
+
+    // Show key information
+    if let Ok(data) = session.get_application_related_data() {
+        let disc = &data.discretionary;
+        let ver = session.version();
+
+        for key_ref in &[KeyRef::Sig, KeyRef::Dec, KeyRef::Aut] {
+            let fp = disc.fingerprints.get(key_ref);
+            let status = disc.key_information.get(key_ref);
+
+            // Decide whether to show this key
+            let show = if ver >= yubikit::core::Version(5, 2, 0) {
+                // For 5.2+, show if key_information has a non-None status
+                matches!(status, Some(s) if *s != KeyStatus::None)
+            } else {
+                // For older, show if fingerprint is non-zero
+                fp.is_some_and(|f| f.iter().any(|&b| b != 0))
+            };
+
+            if !show {
+                continue;
+            }
+
+            let name = match key_ref {
+                KeyRef::Sig => "Signature key",
+                KeyRef::Dec => "Decryption key",
+                KeyRef::Aut => "Authentication key",
+                KeyRef::Att => "Attestation key",
+            };
+
+            let fp_str = format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[]));
+            let touch = disc.get_uif(*key_ref).map_or("N/A".to_string(), format_uif);
+
+            println!("{name}:");
+            println!("  Fingerprint:  {fp_str}");
+            println!("  Touch policy: {touch}");
+        }
     }
 
     Ok(())
+}
+
+fn format_fingerprint(fp: &[u8]) -> String {
+    if fp.is_empty() {
+        return "N/A".to_string();
+    }
+    let hex: Vec<String> = fp.iter().map(|b| format!("{b:02X}")).collect();
+    // Format as groups of 4 hex chars (2 bytes), with extra space in the middle
+    let mut parts = Vec::new();
+    for chunk in hex.chunks(2) {
+        parts.push(chunk.join(""));
+    }
+    let mid = parts.len() / 2;
+    let left = parts[..mid].join(" ");
+    let right = parts[mid..].join(" ");
+    format!("{left}  {right}")
+}
+
+fn format_uif(uif: Uif) -> String {
+    match uif {
+        Uif::Off => "Off",
+        Uif::On => "On",
+        Uif::Fixed => "Fixed",
+        Uif::Cached => "Cached",
+        Uif::CachedFixed => "Cached Fixed",
+    }
+    .to_string()
 }
 
 pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
