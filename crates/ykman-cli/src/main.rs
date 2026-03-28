@@ -77,7 +77,7 @@ struct Cli {
     diagnose: bool,
 
     /// Enable logging at given verbosity level
-    #[arg(short = 'l', long = "log-level", value_parser = parse_log_level)]
+    #[arg(short = 'l', long = "log-level")]
     log_level: Option<logging::LogLevel>,
 
     /// Write log to FILE instead of printing to stderr (requires --log-level)
@@ -88,19 +88,31 @@ struct Cli {
     command: Option<Commands>,
 }
 
-fn parse_log_level(s: &str) -> Result<logging::LogLevel, String> {
-    logging::LogLevel::from_str_insensitive(s).ok_or_else(|| {
-        format!("Invalid log level: '{s}'. Use ERROR, WARNING, INFO, DEBUG, or TRAFFIC")
-    })
+#[derive(Clone, clap::ValueEnum)]
+enum CliAppName {
+    Otp,
+    Management,
+    Openpgp,
+    Oath,
+    Piv,
+    Fido,
+    Hsmauth,
+    #[value(name = "secure-domain")]
+    SecureDomain,
 }
 
-fn parse_app_name(s: &str) -> Result<String, String> {
-    match s.to_lowercase().as_str() {
-        "otp" | "management" | "openpgp" | "oath" | "piv" | "fido" | "hsmauth"
-        | "secure-domain" => Ok(s.to_lowercase()),
-        _ => Err(format!(
-            "Unknown app: {s}. Must be one of: otp, management, openpgp, oath, piv, fido, hsmauth, secure-domain"
-        )),
+impl CliAppName {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Otp => "otp",
+            Self::Management => "management",
+            Self::Openpgp => "openpgp",
+            Self::Oath => "oath",
+            Self::Piv => "piv",
+            Self::Fido => "fido",
+            Self::Hsmauth => "hsmauth",
+            Self::SecureDomain => "secure-domain",
+        }
     }
 }
 
@@ -168,8 +180,8 @@ enum Commands {
         #[arg(short = 'x', long)]
         no_pretty: bool,
         /// Select application before sending APDUs
-        #[arg(short = 'a', long, value_parser = parse_app_name)]
-        app: Option<String>,
+        #[arg(short = 'a', long)]
+        app: Option<CliAppName>,
         /// Force short APDUs
         #[arg(long)]
         short: bool,
@@ -2632,7 +2644,7 @@ fn run() -> Result<(), CliError> {
                 &scp_params,
                 &apdus,
                 no_pretty,
-                app.as_deref(),
+                app.map(|a| a.as_str()),
                 short,
                 &send_apdu,
             )

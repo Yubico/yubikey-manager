@@ -15,7 +15,7 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use yubikit::logging::TRAFFIC_TARGET_PREFIX;
 
 /// Log levels matching Python's ykman logging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum LogLevel {
     Error,
     Warning,
@@ -25,17 +25,6 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    pub fn from_str_insensitive(s: &str) -> Option<Self> {
-        match s.to_ascii_uppercase().as_str() {
-            "ERROR" => Some(Self::Error),
-            "WARNING" => Some(Self::Warning),
-            "INFO" => Some(Self::Info),
-            "DEBUG" => Some(Self::Debug),
-            "TRAFFIC" => Some(Self::Traffic),
-            _ => None,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Self::Error => "ERROR",
