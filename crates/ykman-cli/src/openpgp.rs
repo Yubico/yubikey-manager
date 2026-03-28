@@ -352,25 +352,88 @@ pub fn run_keys_info(
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
     let mut session = open_session(dev, scp_params)?;
+
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| CliError(format!("Failed to get application data: {e}")))?;
+    let disc = &data.discretionary;
+
+    let status = disc.key_information.get(&key_ref);
+    let has_key = if session.version() >= yubikit::core::Version(5, 2, 0) {
+        matches!(status, Some(s) if *s != KeyStatus::None)
+    } else {
+        disc.fingerprints
+            .get(&key_ref)
+            .is_some_and(|f| f.iter().any(|&b| b != 0))
+    };
+
+    if !has_key {
+        return Err(CliError(format!(
+            "No key stored in slot {}.",
+            key.to_ascii_uppercase()
+        )));
+    }
+
+    let name = format_key_ref(key_ref);
+    println!("Key slot:     {name}");
+
+    let fp = disc.fingerprints.get(&key_ref);
+    println!(
+        "Fingerprint:  {}",
+        format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[]))
+    );
+
     if let Ok(attrs) = session.get_algorithm_attributes(key_ref) {
-        println!("Algorithm: {attrs:?}");
+        println!("Algorithm:    {}", format_algorithm(&attrs));
     }
+
+    if let Some(s) = status {
+        println!("Origin:       {}", format_key_status(*s));
+    }
+
+    if let Some(t) = disc.generation_times.get(&key_ref) {
+        println!("Created:      {}", format_timestamp(*t));
+    }
+
     if let Ok(uif) = session.get_uif(key_ref) {
-        println!("Touch policy: {uif:?}");
+        println!("Touch policy: {}", format_uif(uif));
     }
-    if let Ok(times) = session.get_generation_times()
-        && let Some(t) = times.get(&key_ref)
-        && *t > 0
-    {
-        println!("Generated: timestamp {t}");
-    }
-    if let Ok(fps) = session.get_fingerprints()
-        && let Some(fp) = fps.get(&key_ref)
-        && fp.iter().any(|&b| b != 0)
-    {
-        println!("Fingerprint: {}", hex::encode(fp));
-    }
+
     Ok(())
+}
+
+fn format_key_ref(key_ref: KeyRef) -> &'static str {
+    match key_ref {
+        KeyRef::Sig => "Signature key",
+        KeyRef::Dec => "Decryption key",
+        KeyRef::Aut => "Authentication key",
+        KeyRef::Att => "Attestation key",
+    }
+}
+
+fn format_algorithm(attrs: &yubikit::openpgp::AlgorithmAttributes) -> String {
+    match attrs {
+        yubikit::openpgp::AlgorithmAttributes::Rsa(rsa) => format!("RSA{}", rsa.n_len),
+        yubikit::openpgp::AlgorithmAttributes::Ec(ec) => {
+            ec.oid_string().unwrap_or_else(|_| "Unknown EC".to_string())
+        }
+    }
+}
+
+fn format_key_status(s: KeyStatus) -> &'static str {
+    match s {
+        KeyStatus::None => "NONE",
+        KeyStatus::Generated => "GENERATED",
+        KeyStatus::Imported => "IMPORTED",
+    }
+}
+
+fn format_timestamp(t: u32) -> String {
+    use chrono::{TimeZone, Utc};
+    Utc.timestamp_opt(t as i64, 0)
+        .single()
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| format!("{t}"))
 }
 
 pub fn run_keys_set_touch(
