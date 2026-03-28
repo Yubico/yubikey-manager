@@ -131,11 +131,64 @@ fn authenticate_session(
 ) -> Result<(), CliError> {
     let key = match mgmt_key {
         Some(k) => parse_management_key(k)?,
-        None => DEFAULT_MANAGEMENT_KEY.to_vec(),
+        None => {
+            // Try default key first, prompt if it fails
+            if session.authenticate(DEFAULT_MANAGEMENT_KEY).is_ok() {
+                return Ok(());
+            }
+            let input = crate::util::prompt_secret("Enter management key [blank to use default]")?;
+            if input.is_empty() {
+                DEFAULT_MANAGEMENT_KEY.to_vec()
+            } else {
+                parse_management_key(&input)?
+            }
+        }
     };
     session
         .authenticate(&key)
         .map_err(|e| CliError(format!("Authentication failed: {e}")))
+}
+
+/// Ensure PIN is verified. If pin is Some, verifies it. If None, prompts.
+fn ensure_pin(
+    session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let pin_value = match pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter PIN")?,
+    };
+    session.verify_pin(&pin_value).map_err(|e| match &e {
+        yubikit::piv::PivError::InvalidPin(0) => CliError("PIN is blocked.".into()),
+        yubikit::piv::PivError::InvalidPin(attempts) => {
+            CliError(format!("PIN verification failed, {attempts} tries left."))
+        }
+        _ => CliError(format!("PIN verification failed: {e}")),
+    })
+}
+
+/// Try to run an operation, and if it fails with a security condition error,
+/// prompt for PIN and retry.
+fn verify_pin_if_needed<C, F, T>(
+    session: &mut PivSession<C>,
+    pin: Option<&str>,
+    mut f: F,
+) -> Result<T, CliError>
+where
+    C: yubikit::smartcard::SmartCardConnection,
+    F: FnMut(&mut PivSession<C>) -> Result<T, yubikit::piv::PivError>,
+{
+    match f(session) {
+        Ok(val) => Ok(val),
+        Err(yubikit::piv::PivError::SmartCard(yubikit::smartcard::SmartCardError::Apdu {
+            sw,
+            ..
+        })) if sw == yubikit::smartcard::Sw::SecurityConditionNotSatisfied as u16 => {
+            ensure_pin(session, pin)?;
+            f(session).map_err(|e| CliError(format!("{e}")))
+        }
+        Err(e) => Err(CliError(format!("{e}"))),
+    }
 }
 
 fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
@@ -334,8 +387,14 @@ pub fn run_change_pin(
     pin: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let old = pin.unwrap_or("123456");
-    let new = new_pin.ok_or_else(|| CliError("--new-pin is required.".into()))?;
+    let old = match pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the current PIN")?,
+    };
+    let new = match new_pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new PIN")?,
+    };
 
     if new.len() < 6 || new.len() > 8 {
         return Err(CliError("PIN must be 6-8 characters.".into()));
@@ -343,7 +402,7 @@ pub fn run_change_pin(
 
     let mut session = open_session(dev, scp_params)?;
     session
-        .change_pin(old, new)
+        .change_pin(&old, &new)
         .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
     eprintln!("PIN changed.");
     Ok(())
@@ -355,8 +414,14 @@ pub fn run_change_puk(
     puk: Option<&str>,
     new_puk: Option<&str>,
 ) -> Result<(), CliError> {
-    let old = puk.unwrap_or("12345678");
-    let new = new_puk.ok_or_else(|| CliError("--new-puk is required.".into()))?;
+    let old = match puk {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the current PUK")?,
+    };
+    let new = match new_puk {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new PUK")?,
+    };
 
     if new.len() < 6 || new.len() > 8 {
         return Err(CliError("PUK must be 6-8 characters.".into()));
@@ -364,7 +429,7 @@ pub fn run_change_puk(
 
     let mut session = open_session(dev, scp_params)?;
     session
-        .change_puk(old, new)
+        .change_puk(&old, &new)
         .map_err(|e| CliError(format!("Failed to change PUK: {e}")))?;
     eprintln!("PUK changed.");
     Ok(())
@@ -376,8 +441,14 @@ pub fn run_unblock_pin(
     puk: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let puk = puk.unwrap_or("12345678");
-    let new = new_pin.ok_or_else(|| CliError("--new-pin is required.".into()))?;
+    let puk = match puk {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the PUK")?,
+    };
+    let new = match new_pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new PIN")?,
+    };
 
     if new.len() < 6 || new.len() > 8 {
         return Err(CliError("New PIN must be 6-8 characters.".into()));
@@ -385,7 +456,7 @@ pub fn run_unblock_pin(
 
     let mut session = open_session(dev, scp_params)?;
     session
-        .unblock_pin(puk, new)
+        .unblock_pin(&puk, &new)
         .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
     eprintln!("PIN unblocked.");
     Ok(())
@@ -410,15 +481,7 @@ pub fn run_set_retries(
 
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    } else {
-        session
-            .verify_pin("123456")
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     session
         .set_pin_attempts(pin_retries, puk_retries)
         .map_err(|e| CliError(format!("Failed to set retries: {e}")))?;
@@ -464,10 +527,8 @@ pub fn run_change_management_key(
     }
 
     let mut session = open_session(dev, scp_params)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+    if pin.is_some() || protect {
+        ensure_pin(&mut session, pin)?;
     }
     authenticate_session(&mut session, mgmt_key)?;
     session
@@ -505,11 +566,7 @@ pub fn run_keys_generate(
 
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
 
     let pub_key_device = session
         .generate_key(slot, key_type, pp, tp)
@@ -569,11 +626,7 @@ pub fn run_keys_import(
 
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
 
     session
         .put_key(slot, key_type, &der, pp, tp)
@@ -675,11 +728,7 @@ pub fn run_keys_move(
     let to = parse_slot(dest)?;
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     session
         .move_key(from, to)
         .map_err(|e| CliError(format!("Failed to move key: {e}")))?;
@@ -697,11 +746,7 @@ pub fn run_keys_delete(
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     session
         .delete_key(slot)
         .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
@@ -753,11 +798,7 @@ pub fn run_certificates_import(
 
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
 
     session
         .put_certificate(slot, &der, compress)
@@ -781,11 +822,7 @@ pub fn run_certificates_delete(
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     session
         .delete_certificate(slot)
         .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
@@ -806,14 +843,7 @@ pub fn run_objects_export(
 ) -> Result<(), CliError> {
     let obj_id = parse_object_id(object)?;
     let mut session = open_session(dev, scp_params)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
-    let data = session
-        .get_object(obj_id)
-        .map_err(|e| CliError(format!("Failed to read object: {e}")))?;
+    let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object(obj_id))?;
 
     write_file_or_stdout(output, &data)?;
     if output != "-" {
@@ -835,11 +865,7 @@ pub fn run_objects_import(
 
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, mgmt_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     session
         .put_object(obj_id, Some(&data))
         .map_err(|e| CliError(format!("Failed to write object: {e}")))?;
@@ -855,11 +881,7 @@ fn generate_chuid(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     authenticate_session(&mut session, management_key)?;
 
     let mut chuid = Vec::new();
@@ -894,11 +916,7 @@ pub fn run_objects_generate(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
     authenticate_session(&mut session, management_key)?;
 
     match object.to_uppercase().as_str() {
@@ -988,11 +1006,7 @@ pub fn run_certificates_generate(
 
     let mut session = open_session(dev, scp_params)?;
     authenticate_session(&mut session, management_key)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
 
     let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
 
@@ -1045,11 +1059,7 @@ pub fn run_certificates_request(
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
 
     let mut session = open_session(dev, scp_params)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    ensure_pin(&mut session, pin)?;
 
     let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
 

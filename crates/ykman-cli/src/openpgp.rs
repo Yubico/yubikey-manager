@@ -40,6 +40,20 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<String, CliError> {
+    match admin_pin {
+        Some(p) => Ok(p.to_string()),
+        None => crate::util::prompt_secret("Enter Admin PIN"),
+    }
+}
+
+fn ensure_pin(pin: Option<&str>) -> Result<String, CliError> {
+    match pin {
+        Some(p) => Ok(p.to_string()),
+        None => crate::util::prompt_secret("Enter PIN"),
+    }
+}
+
 fn parse_key_ref(s: &str) -> Result<KeyRef, CliError> {
     match s.to_ascii_uppercase().as_str() {
         "SIG" | "SIGNATURE" => Ok(KeyRef::Sig),
@@ -143,9 +157,9 @@ pub fn run_set_retries(
         return Err(CliError("Aborted.".into()));
     }
     let mut session = open_session(dev, scp_params)?;
-    let ap = admin_pin.unwrap_or("12345678");
+    let ap = ensure_admin_pin(admin_pin)?;
     session
-        .verify_admin(ap)
+        .verify_admin(&ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
         .set_pin_attempts(pin_retries, reset_code_retries, admin_pin_retries)
@@ -160,11 +174,14 @@ pub fn run_change_pin(
     pin: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let old = pin.unwrap_or("123456");
-    let new = new_pin.ok_or_else(|| CliError("--new-pin is required.".into()))?;
+    let old = ensure_pin(pin)?;
+    let new = match new_pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new PIN")?,
+    };
     let mut session = open_session(dev, scp_params)?;
     session
-        .change_pin(old, new)
+        .change_pin(&old, &new)
         .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
     eprintln!("PIN changed.");
     Ok(())
@@ -176,11 +193,14 @@ pub fn run_change_admin_pin(
     admin_pin: Option<&str>,
     new_admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let old = admin_pin.unwrap_or("12345678");
-    let new = new_admin_pin.ok_or_else(|| CliError("--new-admin-pin is required.".into()))?;
+    let old = ensure_admin_pin(admin_pin)?;
+    let new = match new_admin_pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new Admin PIN")?,
+    };
     let mut session = open_session(dev, scp_params)?;
     session
-        .change_admin(old, new)
+        .change_admin(&old, &new)
         .map_err(|e| CliError(format!("Failed to change Admin PIN: {e}")))?;
     eprintln!("Admin PIN changed.");
     Ok(())
@@ -192,14 +212,17 @@ pub fn run_change_reset_code(
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
 ) -> Result<(), CliError> {
-    let rc = reset_code.ok_or_else(|| CliError("--reset-code is required.".into()))?;
-    let ap = admin_pin.unwrap_or("12345678");
+    let rc = match reset_code {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new reset code")?,
+    };
+    let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
-        .verify_admin(ap)
+        .verify_admin(&ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
-        .set_reset_code(rc)
+        .set_reset_code(&rc)
         .map_err(|e| CliError(format!("Failed to set reset code: {e}")))?;
     eprintln!("Reset code set.");
     Ok(())
@@ -212,15 +235,19 @@ pub fn run_unblock_pin(
     reset_code: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let new = new_pin.ok_or_else(|| CliError("--new-pin is required.".into()))?;
+    let new = match new_pin {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the new PIN")?,
+    };
     let mut session = open_session(dev, scp_params)?;
     if let Some(ap) = admin_pin {
+        let ap = ap.to_string();
         session
-            .verify_admin(ap)
+            .verify_admin(&ap)
             .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     }
     session
-        .reset_pin(new, reset_code)
+        .reset_pin(&new, reset_code)
         .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
     eprintln!("PIN unblocked.");
     Ok(())
@@ -241,10 +268,10 @@ pub fn run_set_signature_policy(
             )));
         }
     };
-    let ap = admin_pin.unwrap_or("12345678");
+    let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
-        .verify_admin(ap)
+        .verify_admin(&ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
         .set_signature_pin_policy(pp)
@@ -299,10 +326,10 @@ pub fn run_keys_set_touch(
         }
     }
 
-    let ap = admin_pin.unwrap_or("12345678");
+    let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
-        .verify_admin(ap)
+        .verify_admin(&ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
         .set_uif(key_ref, uif)
@@ -321,7 +348,7 @@ pub fn run_keys_import(
     let _key_ref = parse_key_ref(key)?;
     let _data = read_file_or_stdin(key_file)?;
 
-    let _ap = admin_pin.unwrap_or("12345678");
+    let _ap = ensure_admin_pin(admin_pin)?;
 
     Err(CliError(
         "Key import requires parsing private key format. Not yet implemented.".into(),
@@ -338,11 +365,10 @@ pub fn run_keys_attest(
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
     let mut session = open_session(dev, scp_params)?;
-    if let Some(p) = pin {
-        session
-            .verify_pin(p, false)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
-    }
+    let p = ensure_pin(pin)?;
+    session
+        .verify_pin(&p, false)
+        .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
     let cert_der = session
         .attest_key(key_ref)
         .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;
@@ -390,10 +416,10 @@ pub fn run_certificates_import(
         data
     };
 
-    let ap = admin_pin.unwrap_or("12345678");
+    let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
-        .verify_admin(ap)
+        .verify_admin(&ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
         .put_certificate(key_ref, &der)
@@ -409,10 +435,10 @@ pub fn run_certificates_delete(
     admin_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = parse_key_ref(key)?;
-    let ap = admin_pin.unwrap_or("12345678");
+    let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
-        .verify_admin(ap)
+        .verify_admin(&ap)
         .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     session
         .delete_certificate(key_ref)
