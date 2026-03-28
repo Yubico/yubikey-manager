@@ -45,27 +45,23 @@ from yubikit.management import (
 from yubikit.support import read_info  # noqa: F401 - re-exported
 
 from .base import REINSERT_STATUS, CancelledException, YkmanDevice
-from .hid import (
-    list_ctap_devices as _list_ctap_devices,
-)
-from .hid import (
-    list_otp_devices as _list_otp_devices,
-)
 from .hid.fido import NativeFidoConnection
 from .hid.otp import _NativeOtpConnection
 from .pcsc import ScardSmartCardConnection, SmartCardCtapDevice
-from .pcsc import list_devices as _list_ccid_devices
 
 logger = logging.getLogger(__name__)
 
 
 _T_CONNECTION: TypeAlias = type[Connection] | type[FidoConnection]
 
-_CONNECTION_LIST_MAPPING: dict[_T_CONNECTION, Callable[[], Iterable[YkmanDevice]]] = {
-    SmartCardConnection: _list_ccid_devices,
-    OtpConnection: _list_otp_devices,
-    FidoConnection: _list_ctap_devices,
+# Map connection types to native transport names for list_devices
+_CONNECTION_TRANSPORT_MAP: dict[_T_CONNECTION, str] = {
+    SmartCardConnection: "ccid",
+    OtpConnection: "otp",
+    FidoConnection: "fido",
 }
+
+_DEFAULT_CONNECTION_TYPES: list[_T_CONNECTION] = list(_CONNECTION_TRANSPORT_MAP.keys())
 
 
 def scan_devices() -> tuple[Mapping[PID, int], int]:
@@ -145,46 +141,22 @@ class _NativeCompositeDevice(YkmanDevice):
     def _do_reinsert(
         self, reinsert_cb: Callable[[REINSERT_STATUS], None], event: Event
     ) -> None:
-        pids, state = scan_devices()
-        removed = False
-        n_devs = sum(pids.values())
-
-        def is_match(info: DeviceInfo) -> bool:
-            return (
-                self._info.serial == info.serial and self._info.version == info.version
+        status_map = {
+            "remove": REINSERT_STATUS.REMOVE,
+            "reinsert": REINSERT_STATUS.REINSERT,
+        }
+        try:
+            self._native.reinsert(
+                lambda s: reinsert_cb(status_map[s]),
+                lambda: event.is_set(),
             )
-
-        logger.debug(f"Waiting for removal of device serial={self._info.serial}")
-        reinsert_cb(REINSERT_STATUS.REMOVE)
-        while not event.wait(0.5):
-            new_pids, new_state = scan_devices()
-            if new_state == state:
-                continue
-
-            state = new_state
-            devs = list_all_devices()
-
-            if not removed:
-                if new_pids == pids:
-                    continue
-
-                if n_devs != sum(new_pids.values()) + 1 or any(
-                    is_match(info) for _, info in devs
-                ):
-                    raise ValueError("A different YubiKey was inserted/removed")
-                removed = True
-                reinsert_cb(REINSERT_STATUS.REINSERT)
-            else:
-                if n_devs != sum(new_pids.values()):
-                    raise ValueError("A different YubiKey was inserted/removed")
-                for dev, info in devs:
-                    if is_match(info):
-                        assert isinstance(dev, _NativeCompositeDevice)  # noqa: S101
-                        self._native = dev._native
-                        self._info = info
-                        return
-
-        raise CancelledException()
+        except RuntimeError as e:
+            msg = str(e)
+            if "cancelled" in msg.lower():
+                raise CancelledException() from e
+            if "different" in msg.lower():
+                raise ValueError(msg) from e
+            raise
 
 
 def _device_info_from_native_dev(native_dev: NativeYubiKeyDevice) -> DeviceInfo:
@@ -195,15 +167,23 @@ def _device_info_from_native_dev(native_dev: NativeYubiKeyDevice) -> DeviceInfo:
 
 
 def list_all_devices(
-    connection_types: Iterable[_T_CONNECTION] = _CONNECTION_LIST_MAPPING.keys(),  # noqa: ARG001
+    connection_types: Iterable[_T_CONNECTION] = _DEFAULT_CONNECTION_TYPES,
 ) -> list[tuple[YkmanDevice, DeviceInfo]]:
     """Connect to all attached YubiKeys and read device info from them.
 
     :param connection_types: An iterable of YubiKey connection types.
     :return: A list of (device, info) tuples for each connected device.
     """
+    transports = [
+        _CONNECTION_TRANSPORT_MAP[ct]
+        for ct in connection_types
+        if ct in _CONNECTION_TRANSPORT_MAP
+    ]
+    if not transports:
+        return []
+
     results: list[tuple[YkmanDevice, DeviceInfo]] = []
-    for native_dev in _native_list_devices():
+    for native_dev in _native_list_devices(transports):
         info = _device_info_from_native_dev(native_dev)
         results.append((_NativeCompositeDevice(native_dev, info), info))
     return results

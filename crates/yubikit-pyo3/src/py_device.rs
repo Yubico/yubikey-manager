@@ -149,10 +149,28 @@ pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
     Ok((dict.into_any(), state).into_pyobject(py)?.into())
 }
 
+/// Map a list of transport name strings to Rust enumerator functions.
+fn resolve_enumerators(transports: &[String]) -> PyResult<Vec<device::EnumerateFn>> {
+    let mut fns = Vec::new();
+    for t in transports {
+        match t.as_str() {
+            "ccid" => fns.push(device::list_devices_ccid as device::EnumerateFn),
+            "otp" => fns.push(device::list_devices_otp as device::EnumerateFn),
+            "fido" => fns.push(device::list_devices_fido as device::EnumerateFn),
+            _ => {
+                return Err(PyRuntimeError::new_err(format!("Unknown transport: {t}")));
+            }
+        }
+    }
+    Ok(fns)
+}
+
 /// A YubiKey device discovered via native enumeration.
 #[pyclass(unsendable)]
 pub struct NativeYubiKeyDevice {
     inner: device::YubiKeyDevice,
+    /// Which enumerators were used to discover this device (for reinsert).
+    enumerators: Vec<device::EnumerateFn>,
 }
 
 #[pymethods]
@@ -203,23 +221,61 @@ impl NativeYubiKeyDevice {
     fn usb_interfaces(&self) -> u8 {
         self.inner.usb_interfaces().0
     }
+
+    /// Wait for the user to remove and reinsert this YubiKey.
+    ///
+    /// `status_cb` is called with "remove" and then "reinsert".
+    /// `cancelled_cb` is called periodically; return True to cancel.
+    fn reinsert(
+        &mut self,
+        py: Python<'_>,
+        status_cb: PyObject,
+        cancelled_cb: PyObject,
+    ) -> PyResult<()> {
+        self.inner
+            .reinsert(
+                &self.enumerators.clone(),
+                &|status| {
+                    let status_str = match status {
+                        device::ReinsertStatus::Remove => "remove",
+                        device::ReinsertStatus::Reinsert => "reinsert",
+                    };
+                    Python::with_gil(|py| {
+                        let _ = status_cb.call1(py, (status_str,));
+                    });
+                },
+                &|| {
+                    // Release the GIL while sleeping in Rust, but acquire
+                    // it briefly to call the Python cancellation check.
+                    Python::with_gil(|py| {
+                        cancelled_cb
+                            .call0(py)
+                            .and_then(|r| r.extract::<bool>(py))
+                            .unwrap_or(false)
+                    })
+                },
+            )
+            .map_err(device_err)?;
+        let _ = py;
+        Ok(())
+    }
 }
 
 /// List all connected YubiKeys with device info.
 ///
-/// Scans PC/SC, OTP HID, and FIDO HID, merges by PID and serial.
+/// `transports` is a list of transport names: "ccid", "otp", "fido".
+/// Scans the requested transports, merges by PID and identity.
 /// Returns a list of NativeYubiKeyDevice.
 #[pyfunction]
-pub fn list_devices() -> PyResult<Vec<NativeYubiKeyDevice>> {
-    let devices = device::list_devices(&[
-        device::list_devices_ccid,
-        device::list_devices_otp,
-        device::list_devices_fido,
-    ])
-    .map_err(device_err)?;
+pub fn list_devices(transports: Vec<String>) -> PyResult<Vec<NativeYubiKeyDevice>> {
+    let enumerators = resolve_enumerators(&transports)?;
+    let devices = device::list_devices(&enumerators).map_err(device_err)?;
     Ok(devices
         .into_iter()
-        .map(|d| NativeYubiKeyDevice { inner: d })
+        .map(|d| NativeYubiKeyDevice {
+            inner: d,
+            enumerators: enumerators.clone(),
+        })
         .collect())
 }
 

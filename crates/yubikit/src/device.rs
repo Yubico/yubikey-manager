@@ -44,6 +44,8 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::thread;
+use std::time::Duration;
 
 use crate::core::set_override_version;
 use crate::management::{
@@ -74,6 +76,19 @@ pub enum DeviceError {
     Hid(HidError),
     /// No YubiKey device was found.
     NoDeviceFound,
+    /// The operation was cancelled by the caller.
+    Cancelled,
+    /// A different YubiKey was inserted or removed during reinsert.
+    WrongDevice,
+}
+
+/// Status updates during a device reinsert operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReinsertStatus {
+    /// The device should be removed.
+    Remove,
+    /// The device has been removed and should be reinserted.
+    Reinsert,
 }
 
 impl fmt::Display for DeviceError {
@@ -83,6 +98,8 @@ impl fmt::Display for DeviceError {
             Self::Pcsc(e) => write!(f, "PC/SC error: {e}"),
             Self::Hid(e) => write!(f, "HID error: {e}"),
             Self::NoDeviceFound => write!(f, "No YubiKey device found"),
+            Self::Cancelled => write!(f, "Operation cancelled"),
+            Self::WrongDevice => write!(f, "A different YubiKey was inserted/removed"),
         }
     }
 }
@@ -93,7 +110,7 @@ impl std::error::Error for DeviceError {
             Self::SmartCard(e) => Some(e),
             Self::Pcsc(e) => Some(e),
             Self::Hid(e) => Some(e),
-            Self::NoDeviceFound => None,
+            Self::NoDeviceFound | Self::Cancelled | Self::WrongDevice => None,
         }
     }
 }
@@ -254,6 +271,82 @@ impl YubiKeyDevice {
         }
         if self.pid.is_none() {
             self.pid = other.pid;
+        }
+    }
+
+    /// Wait for the user to remove and reinsert this YubiKey.
+    ///
+    /// Polls `scan_devices` to detect removal, then `list_devices` to find
+    /// the device again after reinsertion. On success, updates this device's
+    /// transport paths to reflect the new enumeration.
+    ///
+    /// * `enumerators` – the same set of [`EnumerateFn`]s used to discover
+    ///   this device (passed through to [`list_devices`]).
+    /// * `status_cb` – called with [`ReinsertStatus::Remove`] immediately,
+    ///   then [`ReinsertStatus::Reinsert`] once the device is removed.
+    /// * `cancelled` – checked every 500 ms; return `true` to cancel.
+    pub fn reinsert(
+        &mut self,
+        enumerators: &[EnumerateFn],
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError> {
+        let (pids, mut state) = scan_devices();
+        let n_devs: usize = pids.values().sum();
+        let my_serial = self.info.serial;
+        let my_version = self.info.version;
+        let mut removed = false;
+
+        log::debug!("Waiting for removal of device serial={my_serial:?}");
+        status_cb(ReinsertStatus::Remove);
+
+        loop {
+            thread::sleep(Duration::from_millis(500));
+            if cancelled() {
+                return Err(DeviceError::Cancelled);
+            }
+
+            let (new_pids, new_state) = scan_devices();
+            if new_state == state {
+                continue;
+            }
+            state = new_state;
+
+            let devs = list_devices(enumerators)?;
+
+            if !removed {
+                if new_pids == pids {
+                    continue;
+                }
+                let new_n: usize = new_pids.values().sum();
+                if new_n + 1 != n_devs
+                    || devs
+                        .iter()
+                        .any(|d| d.info.serial == my_serial && d.info.version == my_version)
+                {
+                    return Err(DeviceError::WrongDevice);
+                }
+                removed = true;
+                log::debug!("Device removed, waiting for reinsertion");
+                status_cb(ReinsertStatus::Reinsert);
+            } else {
+                let new_n: usize = new_pids.values().sum();
+                if new_n != n_devs {
+                    return Err(DeviceError::WrongDevice);
+                }
+                if let Some(found) = devs
+                    .into_iter()
+                    .find(|d| d.info.serial == my_serial && d.info.version == my_version)
+                {
+                    log::debug!("Device reinserted");
+                    self.reader_name = found.reader_name;
+                    self.hid_path = found.hid_path;
+                    self.fido_path = found.fido_path;
+                    self.pid = found.pid;
+                    self.info = found.info;
+                    return Ok(());
+                }
+            }
         }
     }
 }
