@@ -134,16 +134,50 @@ enum Commands {
         check_fips: bool,
     },
     /// Enable or disable applications and settings
+    #[command(after_help = "Examples:\n\
+      \n  Disable PIV over NFC:\
+      \n  $ ykman config nfc --disable piv\
+      \n\
+      \n  Enable all applications over USB:\
+      \n  $ ykman config usb --enable-all\
+      \n\
+      \n  Generate and set a random application lock code:\
+      \n  $ ykman config set-lock-code --generate")]
     Config {
         #[command(subcommand)]
         action: ConfigAction,
     },
     /// Manage the OATH application
+    #[command(after_help = "Examples:\n\
+      \n  Generate codes for accounts starting with 'yubi':\
+      \n  $ ykman oath accounts code yubi\
+      \n\
+      \n  Add an account with the secret key f5up4ub3dw and the name yubico,\
+      \n  which requires touch:\
+      \n  $ ykman oath accounts add yubico f5up4ub3dw --touch\
+      \n\
+      \n  Set a password for the OATH application:\
+      \n  $ ykman oath access change")]
     Oath {
         #[command(subcommand)]
         action: OathAction,
     },
     /// Manage the YubiKey OTP application
+    #[command(after_help = "Examples:\n\
+      \n  Swap the configurations between the two slots:\
+      \n  $ ykman otp swap\
+      \n\
+      \n  Program a random challenge-response credential to slot 2:\
+      \n  $ ykman otp chalresp --generate 2\
+      \n\
+      \n  Program a Yubico OTP credential to slot 1, using the serial as public id:\
+      \n  $ ykman otp yubiotp 1 --serial-public-id\
+      \n\
+      \n  Program a random 38 characters long static password to slot 2:\
+      \n  $ ykman otp static --generate 2 --length 38\
+      \n\
+      \n  Remove a currently set access code from slot 2:\
+      \n  $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code")]
     Otp {
         /// 6 byte access code (use "-" to prompt for input)
         #[arg(long = "access-code")]
@@ -152,11 +186,28 @@ enum Commands {
         action: OtpAction,
     },
     /// Manage the PIV application
+    #[command(after_help = "Examples:\n\
+      \n  Generate an ECC P-256 private key and a self-signed certificate in\
+      \n  slot 9a:\
+      \n  $ ykman piv keys generate --algorithm eccp256 9a pubkey.pem\
+      \n  $ ykman piv certificates generate --subject \"CN=yubico\" 9a pubkey.pem\
+      \n\
+      \n  Change the PIN from 123456 to 654321:\
+      \n  $ ykman piv access change-pin --pin 123456 --new-pin 654321\
+      \n\
+      \n  Reset all PIV data and restore default settings:\
+      \n  $ ykman piv reset")]
     Piv {
         #[command(subcommand)]
         action: PivAction,
     },
     /// Manage the OpenPGP application
+    #[command(after_help = "Examples:\n\
+      \n  Set the retries for PIN, Reset Code and Admin PIN to 10:\
+      \n  $ ykman openpgp access set-retries 10 10 10\
+      \n\
+      \n  Require touch to use the authentication key:\
+      \n  $ ykman openpgp keys set-touch aut on")]
     Openpgp {
         #[command(subcommand)]
         action: OpenpgpAction,
@@ -272,6 +323,12 @@ enum ConfigAction {
         force: bool,
     },
     /// Set connection mode (for older YubiKeys)
+    #[command(after_help = "Examples:\n\
+      \n  Set the OTP and FIDO mode:\
+      \n  $ ykman config mode OTP+FIDO\
+      \n\
+      \n  Set the CCID only mode and use touch to eject the smart card:\
+      \n  $ ykman config mode CCID --touch-eject")]
     Mode {
         /// Mode string (e.g., OTP+FIDO+CCID) or number (0-6)
         mode: String,
@@ -712,7 +769,18 @@ enum PivAction {
     #[command(subcommand)]
     Certificates(PivCertAction),
     /// Manage PIV data objects
-    #[command(subcommand)]
+    #[command(
+        subcommand,
+        after_help = "Examples:\n\
+      \n  Write the contents of a file to data object with ID abc123:\
+      \n  $ ykman piv objects import abc123 myfile.txt\
+      \n\
+      \n  Read the contents of the data object with ID abc123 into a file:\
+      \n  $ ykman piv objects export abc123 myfile.txt\
+      \n\
+      \n  Generate a random value for CHUID:\
+      \n  $ ykman piv objects generate chuid"
+    )]
     Objects(PivObjectAction),
 }
 
