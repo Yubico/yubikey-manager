@@ -489,7 +489,11 @@ mod oath {
 
 mod piv {
     use super::*;
-    use yubikit::piv::PivSession;
+    use x509_cert::der::{Decode, Encode};
+    use yubikit::piv::{
+        DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, PinPolicy, PivSession, PivSignature,
+        PivSigner, Slot, TouchPolicy, device_pubkey_to_spki, hash_data,
+    };
 
     fn open_piv_session(tc: &TestConnection) -> PivSession<PcscConnection> {
         let conn = open_smartcard_connection(tc);
@@ -542,6 +546,249 @@ mod piv {
 
         let attempts = session.get_pin_attempts().expect("get_pin_attempts");
         assert!(attempts > 0, "Expected positive PIN attempts");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_generate_key_ec_p256(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        assert!(!pub_key.is_empty());
+
+        let spki = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
+        assert!(spki.len() > 50, "SPKI should be substantial");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        assert!(!pub_key.is_empty());
+
+        let spki = device_pubkey_to_spki(KeyType::Rsa2048, &pub_key).expect("to_spki");
+        assert!(spki.len() > 256, "RSA SPKI should be large");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_sign_ec_p256(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+        session.verify_pin("123456").expect("verify PIN");
+
+        session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+
+        let hash = hash_data(HashAlgorithm::Sha256, b"test data to sign");
+        let sig = session
+            .sign(Slot::Retired1, KeyType::EccP256, &hash)
+            .expect("sign");
+        assert!(!sig.is_empty(), "Signature should not be empty");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_self_signed_cert_ec(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+        session.verify_pin("123456").expect("verify PIN");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
+
+        use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+        use x509_cert::name::Name;
+        use x509_cert::serial_number::SerialNumber;
+        use x509_cert::time::Validity;
+
+        let subject: Name = "CN=YubiKey Test".parse().unwrap();
+        let serial = SerialNumber::new(&[0x01]).unwrap();
+        let validity = Validity::from_now(core::time::Duration::new(365 * 86400, 0)).unwrap();
+        let spki = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der).unwrap();
+
+        let signer = PivSigner::new(
+            &mut session,
+            Slot::Retired1,
+            KeyType::EccP256,
+            HashAlgorithm::Sha256,
+            &spki_der,
+        );
+        let cert = CertificateBuilder::new(Profile::Root, serial, validity, subject, spki, &signer)
+            .unwrap()
+            .build::<PivSignature>()
+            .expect("build cert");
+
+        let cert_der = cert.to_der().expect("encode cert");
+        assert!(
+            cert_der.len() > 100,
+            "Certificate DER should be substantial"
+        );
+
+        // Parse it back to verify
+        let parsed = x509_cert::Certificate::from_der(&cert_der).expect("parse cert");
+        assert_eq!(
+            parsed.tbs_certificate.subject.to_string(),
+            "CN=YubiKey Test"
+        );
+
+        // Store and retrieve - drop signer first to regain session access
+        drop(signer);
+        session
+            .put_certificate(Slot::Retired1, &cert_der, false)
+            .expect("put_certificate");
+        let retrieved = session
+            .get_certificate(Slot::Retired1)
+            .expect("get_certificate");
+        assert_eq!(cert_der, retrieved, "Certificate round-trip should match");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_generate_csr(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+        session.verify_pin("123456").expect("verify PIN");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
+
+        use x509_cert::builder::{Builder, RequestBuilder};
+        use x509_cert::name::Name;
+
+        let subject: Name = "CN=CSR Test,O=Yubico".parse().unwrap();
+        let signer = PivSigner::new(
+            &mut session,
+            Slot::Retired1,
+            KeyType::EccP256,
+            HashAlgorithm::Sha256,
+            &spki_der,
+        );
+        let csr = RequestBuilder::new(subject, &signer)
+            .unwrap()
+            .build::<PivSignature>()
+            .expect("build CSR");
+
+        let csr_der = csr.to_der().expect("encode CSR");
+        assert!(csr_der.len() > 50, "CSR DER should be substantial");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+        session.verify_pin("123456").expect("verify PIN");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        let spki_der = device_pubkey_to_spki(KeyType::Rsa2048, &pub_key).expect("to_spki");
+
+        use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+        use x509_cert::name::Name;
+        use x509_cert::serial_number::SerialNumber;
+        use x509_cert::time::Validity;
+
+        let subject: Name = "CN=RSA Test".parse().unwrap();
+        let serial = SerialNumber::new(&[0x42]).unwrap();
+        let validity = Validity::from_now(core::time::Duration::new(30 * 86400, 0)).unwrap();
+        let spki = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der).unwrap();
+
+        let signer = PivSigner::new(
+            &mut session,
+            Slot::Retired1,
+            KeyType::Rsa2048,
+            HashAlgorithm::Sha256,
+            &spki_der,
+        );
+        let cert = CertificateBuilder::new(Profile::Root, serial, validity, subject, spki, &signer)
+            .unwrap()
+            .build::<PivSignature>()
+            .expect("build RSA cert");
+
+        let cert_der = cert.to_der().expect("encode cert");
+        let parsed = x509_cert::Certificate::from_der(&cert_der).expect("parse cert back");
+        assert_eq!(parsed.tbs_certificate.subject.to_string(), "CN=RSA Test");
         eprintln!("  PASS {tc:?}");
     }
 }

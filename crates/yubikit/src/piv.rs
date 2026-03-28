@@ -2163,56 +2163,6 @@ const OID_RSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.1
 const OID_RSA_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.13");
 const OID_ED25519_SIG: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
-/// Encode raw EC signature (r || s) as DER-encoded ECDSA signature.
-fn ec_raw_to_der(raw: &[u8]) -> Result<Vec<u8>, PivError> {
-    let half = raw.len() / 2;
-    if !raw.len().is_multiple_of(2) || half == 0 {
-        return Err(PivError::BadResponse("Invalid EC signature length".into()));
-    }
-    let r = &raw[..half];
-    let s = &raw[half..];
-
-    // Encode each as a DER INTEGER (positive, with leading zero if high bit set)
-    fn encode_int(val: &[u8]) -> Vec<u8> {
-        // Strip leading zeros but keep at least one byte
-        let stripped = match val.iter().position(|&b| b != 0) {
-            Some(pos) => &val[pos..],
-            None => &[0u8],
-        };
-        let needs_pad = stripped[0] & 0x80 != 0;
-        let len = stripped.len() + if needs_pad { 1 } else { 0 };
-        let mut out = vec![0x02]; // INTEGER tag
-        // Length
-        if len < 0x80 {
-            out.push(len as u8);
-        } else {
-            out.push(0x81);
-            out.push(len as u8);
-        }
-        if needs_pad {
-            out.push(0x00);
-        }
-        out.extend_from_slice(stripped);
-        out
-    }
-
-    let r_der = encode_int(r);
-    let s_der = encode_int(s);
-    let body_len = r_der.len() + s_der.len();
-
-    let mut sig = vec![0x30]; // SEQUENCE tag
-    if body_len < 0x80 {
-        sig.push(body_len as u8);
-    } else {
-        sig.push(0x81);
-        sig.push(body_len as u8);
-    }
-    sig.extend_from_slice(&r_der);
-    sig.extend_from_slice(&s_der);
-
-    Ok(sig)
-}
-
 /// A signer that delegates to a PIV session's on-device signing.
 ///
 /// Uses `RefCell` for interior mutability since `Signer::try_sign` takes `&self`
@@ -2298,13 +2248,9 @@ impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C
             .sign(self.slot, self.key_type, &message)
             .map_err(|_| signature::Error::new())?;
 
-        // EC signatures from the device are raw r||s and need DER encoding
-        let sig_bytes = match self.key_type {
-            KeyType::EccP256 | KeyType::EccP384 => {
-                ec_raw_to_der(&raw_sig).map_err(|_| signature::Error::new())?
-            }
-            _ => raw_sig,
-        };
+        // EC signatures from the device are DER-encoded (SEQUENCE { INTEGER r, INTEGER s }).
+        // Pass them through directly.
+        let sig_bytes = raw_sig;
 
         Ok(PivSignature(sig_bytes))
     }
