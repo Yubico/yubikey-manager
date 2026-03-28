@@ -25,6 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use std::cell::RefCell;
 use std::fmt;
 use std::io::{Read, Write};
 
@@ -36,8 +37,16 @@ use des::TdesEde3;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use sha2::Digest;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
+use x509_cert::der;
+use x509_cert::der::asn1::BitString;
+use x509_cert::der::{Decode, Encode};
+use x509_cert::spki::{
+    self, AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey,
+    ObjectIdentifier, SignatureBitStringEncoding, SubjectPublicKeyInfoOwned,
+};
 
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
@@ -1864,6 +1873,441 @@ fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivEr
     // fields[1] is the privateKey OCTET STRING value
     let scalar = bigint_to_bytes(fields[1], scalar_len);
     Ok(tlv_encode(0x06, &scalar))
+}
+
+// ---------------------------------------------------------------------------
+// Hash algorithm
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashAlgorithm {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+// ---------------------------------------------------------------------------
+// Hashing & PKCS#1 v1.5 padding
+// ---------------------------------------------------------------------------
+
+const DIGEST_INFO_SHA256: &[u8] = &[
+    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
+];
+const DIGEST_INFO_SHA384: &[u8] = &[
+    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
+    0x00, 0x04, 0x30,
+];
+const DIGEST_INFO_SHA512: &[u8] = &[
+    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
+    0x00, 0x04, 0x40,
+];
+
+pub fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
+    match hash_alg {
+        HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
+        HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
+        HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
+    }
+}
+
+pub fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
+    let digest_info_prefix = match hash_alg {
+        HashAlgorithm::Sha256 => DIGEST_INFO_SHA256,
+        HashAlgorithm::Sha384 => DIGEST_INFO_SHA384,
+        HashAlgorithm::Sha512 => DIGEST_INFO_SHA512,
+    };
+    let t_len = digest_info_prefix.len() + hash.len();
+    let pad_len = key_byte_len - 3 - t_len;
+    let mut padded = Vec::with_capacity(key_byte_len);
+    padded.push(0x00);
+    padded.push(0x01);
+    padded.extend(std::iter::repeat_n(0xFF, pad_len));
+    padded.push(0x00);
+    padded.extend_from_slice(digest_info_prefix);
+    padded.extend_from_slice(hash);
+    padded
+}
+
+// ---------------------------------------------------------------------------
+// Device public key → SPKI conversion
+// ---------------------------------------------------------------------------
+
+// Well-known OIDs
+const OID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+const OID_CURVE_P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+const OID_CURVE_P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
+const OID_RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
+const OID_ED25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
+const OID_X25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
+
+/// Parse a single TLV from PIV device-encoded public key data.
+fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), PivError> {
+    if offset >= data.len() {
+        return Err(PivError::InvalidValue(
+            "Unexpected end of device public key data".into(),
+        ));
+    }
+    let tag = data[offset];
+    let mut pos = offset + 1;
+    if pos >= data.len() {
+        return Err(PivError::InvalidValue("Truncated TLV length".into()));
+    }
+    let len = if data[pos] < 0x80 {
+        let l = data[pos] as usize;
+        pos += 1;
+        l
+    } else if data[pos] == 0x81 {
+        pos += 1;
+        let l = data[pos] as usize;
+        pos += 1;
+        l
+    } else if data[pos] == 0x82 {
+        pos += 1;
+        let l = ((data[pos] as usize) << 8) | (data[pos + 1] as usize);
+        pos += 2;
+        l
+    } else {
+        return Err(PivError::InvalidValue(
+            "Unsupported TLV length encoding".into(),
+        ));
+    };
+    if pos + len > data.len() {
+        return Err(PivError::InvalidValue("TLV value extends past data".into()));
+    }
+    Ok((tag, data[pos..pos + len].to_vec(), pos + len))
+}
+
+/// Convert PIV device-encoded public key bytes to SubjectPublicKeyInfo DER.
+///
+/// PIV device encoding (from `generate_key`/`get_slot_metadata`):
+/// - EC keys: `86 <len> <uncompressed_point>`
+/// - RSA keys: `81 <len> <modulus> 82 <len> <exponent>`
+/// - Ed25519/X25519: `86 <len> <32_bytes>`
+pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u8>, PivError> {
+    let spki = match key_type {
+        KeyType::EccP256 | KeyType::EccP384 => {
+            let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x86 {
+                return Err(PivError::InvalidValue(format!(
+                    "Expected tag 0x86 for EC point, got 0x{tag:02X}"
+                )));
+            }
+            let curve_oid = if key_type == KeyType::EccP256 {
+                OID_CURVE_P256
+            } else {
+                OID_CURVE_P384
+            };
+            let algo = AlgorithmIdentifierOwned {
+                oid: OID_EC_PUBLIC_KEY,
+                parameters: Some(der::Any::from(&curve_oid)),
+            };
+            SubjectPublicKeyInfoOwned {
+                algorithm: algo,
+                subject_public_key: BitString::from_bytes(&ec_point).map_err(|e| {
+                    PivError::InvalidValue(format!("Failed to encode EC point: {e}"))
+                })?,
+            }
+        }
+        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
+            let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
+            if tag1 != 0x81 {
+                return Err(PivError::InvalidValue(format!(
+                    "Expected tag 0x81 for RSA modulus, got 0x{tag1:02X}"
+                )));
+            }
+            let (tag2, exponent, _) = parse_device_tlv(device_bytes, end1)?;
+            if tag2 != 0x82 {
+                return Err(PivError::InvalidValue(format!(
+                    "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
+                )));
+            }
+            // Build RSAPublicKey DER: SEQUENCE { INTEGER modulus, INTEGER exponent }
+            let mod_int = der::asn1::UintRef::new(&modulus)
+                .map_err(|e| PivError::InvalidValue(format!("Invalid RSA modulus: {e}")))?;
+            let exp_int = der::asn1::UintRef::new(&exponent)
+                .map_err(|e| PivError::InvalidValue(format!("Invalid RSA exponent: {e}")))?;
+            let mut rsa_body = Vec::new();
+            mod_int
+                .encode_to_vec(&mut rsa_body)
+                .map_err(|e| PivError::InvalidValue(format!("Failed to encode modulus: {e}")))?;
+            exp_int
+                .encode_to_vec(&mut rsa_body)
+                .map_err(|e| PivError::InvalidValue(format!("Failed to encode exponent: {e}")))?;
+            // Wrap in SEQUENCE
+            let mut rsa_pub_key = Vec::new();
+            // Tag 0x30 = SEQUENCE
+            rsa_pub_key.push(0x30);
+            let len_bytes = der::Length::new(rsa_body.len() as u16);
+            len_bytes
+                .encode_to_vec(&mut rsa_pub_key)
+                .map_err(|e| PivError::InvalidValue(format!("Failed to encode length: {e}")))?;
+            rsa_pub_key.extend_from_slice(&rsa_body);
+
+            let algo = AlgorithmIdentifierOwned {
+                oid: OID_RSA_ENCRYPTION,
+                parameters: Some(der::Any::from(der::asn1::Null)),
+            };
+            SubjectPublicKeyInfoOwned {
+                algorithm: algo,
+                subject_public_key: BitString::from_bytes(&rsa_pub_key).map_err(|e| {
+                    PivError::InvalidValue(format!("Failed to encode RSA key: {e}"))
+                })?,
+            }
+        }
+        KeyType::Ed25519 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x86 {
+                return Err(PivError::InvalidValue(format!(
+                    "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
+                )));
+            }
+            let algo = AlgorithmIdentifierOwned {
+                oid: OID_ED25519_KEY,
+                parameters: None,
+            };
+            SubjectPublicKeyInfoOwned {
+                algorithm: algo,
+                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
+                    PivError::InvalidValue(format!("Failed to encode Ed25519 key: {e}"))
+                })?,
+            }
+        }
+        KeyType::X25519 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x86 {
+                return Err(PivError::InvalidValue(format!(
+                    "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
+                )));
+            }
+            let algo = AlgorithmIdentifierOwned {
+                oid: OID_X25519_KEY,
+                parameters: None,
+            };
+            SubjectPublicKeyInfoOwned {
+                algorithm: algo,
+                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
+                    PivError::InvalidValue(format!("Failed to encode X25519 key: {e}"))
+                })?,
+            }
+        }
+    };
+
+    spki.to_der()
+        .map_err(|e| PivError::InvalidValue(format!("Failed to encode SPKI: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// PivSignature
+// ---------------------------------------------------------------------------
+
+/// Signature output from the PIV device, suitable for use with `x509-cert` builders.
+#[derive(Clone, Debug)]
+pub struct PivSignature(Vec<u8>);
+
+impl AsRef<[u8]> for PivSignature {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for PivSignature {
+    type Error = signature::Error;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(PivSignature(bytes.to_vec()))
+    }
+}
+
+impl TryInto<Box<[u8]>> for PivSignature {
+    type Error = signature::Error;
+
+    fn try_into(self) -> Result<Box<[u8]>, Self::Error> {
+        Ok(self.0.into_boxed_slice())
+    }
+}
+
+impl signature::SignatureEncoding for PivSignature {
+    type Repr = Box<[u8]>;
+}
+
+impl SignatureBitStringEncoding for PivSignature {
+    fn to_bitstring(&self) -> der::Result<BitString> {
+        BitString::from_bytes(&self.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PivVerifyingKey — wraps SPKI DER bytes for EncodePublicKey
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct PivVerifyingKey(Vec<u8>);
+
+impl EncodePublicKey for PivVerifyingKey {
+    fn to_public_key_der(&self) -> spki::Result<der::Document> {
+        der::Document::from_der(&self.0).map_err(|_| spki::Error::KeyMalformed)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PivSigner
+// ---------------------------------------------------------------------------
+
+// Signature algorithm OIDs
+const OID_ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+const OID_ECDSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+const OID_ECDSA_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.4");
+const OID_RSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
+const OID_RSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.12");
+const OID_RSA_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.13");
+const OID_ED25519_SIG: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
+
+/// Encode raw EC signature (r || s) as DER-encoded ECDSA signature.
+fn ec_raw_to_der(raw: &[u8]) -> Result<Vec<u8>, PivError> {
+    let half = raw.len() / 2;
+    if !raw.len().is_multiple_of(2) || half == 0 {
+        return Err(PivError::BadResponse("Invalid EC signature length".into()));
+    }
+    let r = &raw[..half];
+    let s = &raw[half..];
+
+    // Encode each as a DER INTEGER (positive, with leading zero if high bit set)
+    fn encode_int(val: &[u8]) -> Vec<u8> {
+        // Strip leading zeros but keep at least one byte
+        let stripped = match val.iter().position(|&b| b != 0) {
+            Some(pos) => &val[pos..],
+            None => &[0u8],
+        };
+        let needs_pad = stripped[0] & 0x80 != 0;
+        let len = stripped.len() + if needs_pad { 1 } else { 0 };
+        let mut out = vec![0x02]; // INTEGER tag
+        // Length
+        if len < 0x80 {
+            out.push(len as u8);
+        } else {
+            out.push(0x81);
+            out.push(len as u8);
+        }
+        if needs_pad {
+            out.push(0x00);
+        }
+        out.extend_from_slice(stripped);
+        out
+    }
+
+    let r_der = encode_int(r);
+    let s_der = encode_int(s);
+    let body_len = r_der.len() + s_der.len();
+
+    let mut sig = vec![0x30]; // SEQUENCE tag
+    if body_len < 0x80 {
+        sig.push(body_len as u8);
+    } else {
+        sig.push(0x81);
+        sig.push(body_len as u8);
+    }
+    sig.extend_from_slice(&r_der);
+    sig.extend_from_slice(&s_der);
+
+    Ok(sig)
+}
+
+/// A signer that delegates to a PIV session's on-device signing.
+///
+/// Uses `RefCell` for interior mutability since `Signer::try_sign` takes `&self`
+/// but `PivSession::sign` needs `&mut self`.
+pub struct PivSigner<'a, C: SmartCardConnection> {
+    session: RefCell<&'a mut PivSession<C>>,
+    slot: Slot,
+    key_type: KeyType,
+    hash_alg: HashAlgorithm,
+    spki_der: Vec<u8>,
+}
+
+impl<'a, C: SmartCardConnection> PivSigner<'a, C> {
+    pub fn new(
+        session: &'a mut PivSession<C>,
+        slot: Slot,
+        key_type: KeyType,
+        hash_alg: HashAlgorithm,
+        spki_der: &[u8],
+    ) -> Self {
+        Self {
+            session: RefCell::new(session),
+            slot,
+            key_type,
+            hash_alg,
+            spki_der: spki_der.to_vec(),
+        }
+    }
+}
+
+impl<C: SmartCardConnection> signature::Keypair for PivSigner<'_, C> {
+    type VerifyingKey = PivVerifyingKey;
+
+    fn verifying_key(&self) -> Self::VerifyingKey {
+        PivVerifyingKey(self.spki_der.clone())
+    }
+}
+
+impl<C: SmartCardConnection> DynSignatureAlgorithmIdentifier for PivSigner<'_, C> {
+    fn signature_algorithm_identifier(&self) -> spki::Result<AlgorithmIdentifierOwned> {
+        let (oid, params) = match self.key_type {
+            KeyType::EccP256 | KeyType::EccP384 => {
+                let oid = match self.hash_alg {
+                    HashAlgorithm::Sha256 => OID_ECDSA_SHA256,
+                    HashAlgorithm::Sha384 => OID_ECDSA_SHA384,
+                    HashAlgorithm::Sha512 => OID_ECDSA_SHA512,
+                };
+                (oid, None)
+            }
+            KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
+                let oid = match self.hash_alg {
+                    HashAlgorithm::Sha256 => OID_RSA_SHA256,
+                    HashAlgorithm::Sha384 => OID_RSA_SHA384,
+                    HashAlgorithm::Sha512 => OID_RSA_SHA512,
+                };
+                (oid, Some(der::Any::from(der::asn1::Null)))
+            }
+            KeyType::Ed25519 => (OID_ED25519_SIG, None),
+            KeyType::X25519 => return Err(spki::Error::KeyMalformed),
+        };
+        Ok(AlgorithmIdentifierOwned {
+            oid,
+            parameters: params,
+        })
+    }
+}
+
+impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C> {
+    fn try_sign(&self, msg: &[u8]) -> Result<PivSignature, signature::Error> {
+        let message = match self.key_type {
+            KeyType::EccP256 | KeyType::EccP384 => hash_data(self.hash_alg, msg),
+            KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
+                let hash = hash_data(self.hash_alg, msg);
+                let key_byte_len = (self.key_type.bit_len() / 8) as usize;
+                pkcs1v15_pad(self.hash_alg, &hash, key_byte_len)
+            }
+            KeyType::Ed25519 => msg.to_vec(),
+            KeyType::X25519 => return Err(signature::Error::new()),
+        };
+
+        let mut session = self.session.borrow_mut();
+        let raw_sig = session
+            .sign(self.slot, self.key_type, &message)
+            .map_err(|_| signature::Error::new())?;
+
+        // EC signatures from the device are raw r||s and need DER encoding
+        let sig_bytes = match self.key_type {
+            KeyType::EccP256 | KeyType::EccP384 => {
+                ec_raw_to_der(&raw_sig).map_err(|_| signature::Error::new())?
+            }
+            _ => raw_sig,
+        };
+
+        Ok(PivSignature(sig_bytes))
+    }
 }
 
 // ---------------------------------------------------------------------------

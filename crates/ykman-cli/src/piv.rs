@@ -1,10 +1,19 @@
 use std::io::{self, Write};
+use std::str::FromStr;
+use std::time::Duration;
 
+use x509_cert::Certificate;
+use x509_cert::builder::{Builder, CertificateBuilder, Profile, RequestBuilder};
+use x509_cert::der::{self, Decode, Encode, EncodePem, pem::LineEnding};
+use x509_cert::name::Name;
+use x509_cert::serial_number::SerialNumber;
+use x509_cert::spki::SubjectPublicKeyInfoOwned;
+use x509_cert::time::Validity;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::piv::{
-    DEFAULT_MANAGEMENT_KEY, KeyType, ManagementKeyType, ObjectId, PinPolicy, PivSession, Slot,
-    TouchPolicy,
+    DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKeyType, ObjectId, PinPolicy,
+    PivSession, PivSignature, PivSigner, Slot, TouchPolicy, device_pubkey_to_spki,
 };
 
 use crate::scp::{self, ScpConfig, ScpParams};
@@ -267,68 +276,24 @@ fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
     use sha2::Digest;
     let fingerprint = hex::encode(sha2::Sha256::digest(cert_der));
 
-    // Parse the outer SEQUENCE
-    let (_, seq_off, seq_len, _) = parse_der_tlv(cert_der, 0).ok()?;
-    let seq = &cert_der[seq_off..seq_off + seq_len];
+    let cert = Certificate::from_der(cert_der).ok()?;
+    let tbs = &cert.tbs_certificate;
 
-    // TBSCertificate is the first element
-    let (_, tbs_off, tbs_len, _tbs_end) = parse_der_tlv(seq, 0).ok()?;
-    let tbs = &seq[tbs_off..tbs_off + tbs_len];
-
-    // Parse TBS fields: version, serialNumber, signature, issuer, validity, subject, spki
-    let mut pos = 0;
-
-    // version [0] EXPLICIT - optional
-    let (tag, _, _, next) = parse_der_tlv(tbs, pos).ok()?;
-    if tag == 0xA0 {
-        pos = next;
-    }
-
-    // serialNumber INTEGER
-    let (_, sn_off, sn_len, next) = parse_der_tlv(tbs, pos).ok()?;
-    let serial_bytes = &tbs[sn_off..sn_off + sn_len];
-    let serial = serial_bytes
-        .iter()
-        .map(|b| format!("{b:02x}"))
+    let subject = tbs.subject.to_string();
+    let issuer = tbs.issuer.to_string();
+    let serial = hex::encode(tbs.serial_number.as_bytes())
+        .as_bytes()
+        .chunks(2)
+        .map(|c| std::str::from_utf8(c).unwrap_or("??"))
         .collect::<Vec<_>>()
         .join(":");
-    pos = next;
+    let not_before = tbs.validity.not_before.to_string();
+    let not_after = tbs.validity.not_after.to_string();
 
-    // signature AlgorithmIdentifier
-    let (_, _, _, next) = parse_der_tlv(tbs, pos).ok()?;
-    pos = next;
-
-    // issuer Name
-    let (_, iss_off, iss_len, next) = parse_der_tlv(tbs, pos).ok()?;
-    let issuer = parse_dn_from_der(&tbs[iss_off..iss_off + iss_len]);
-    pos = next;
-
-    // validity Sequence { notBefore, notAfter }
-    let (_, val_off, val_len, next) = parse_der_tlv(tbs, pos).ok()?;
-    let validity = &tbs[val_off..val_off + val_len];
-    let (_, nb_off, nb_len, nb_end) = parse_der_tlv(validity, 0).ok()?;
-    let not_before = std::str::from_utf8(&validity[nb_off..nb_off + nb_len])
-        .unwrap_or("?")
-        .to_string();
-    let (_, na_off, na_len, _) = parse_der_tlv(validity, nb_end).ok()?;
-    let not_after = std::str::from_utf8(&validity[na_off..na_off + na_len])
-        .unwrap_or("?")
-        .to_string();
-    pos = next;
-
-    // subject Name
-    let (_, sub_off, sub_len, next) = parse_der_tlv(tbs, pos).ok()?;
-    let subject = parse_dn_from_der(&tbs[sub_off..sub_off + sub_len]);
-    pos = next;
-
-    // subjectPublicKeyInfo
-    let (_, spki_off, spki_len, _) = parse_der_tlv(tbs, pos).ok()?;
-    let spki = &tbs[spki_off..spki_off + spki_len];
-    let key_type = identify_key_type_from_spki(spki);
-
-    // Format times with ISO 8601-ish format
-    let not_before = format_asn1_time(&not_before);
-    let not_after = format_asn1_time(&not_after);
+    let key_type =
+        KeyType::from_public_key_der(&tbs.subject_public_key_info.to_der().unwrap_or_default())
+            .map(|kt| format!("{kt}"))
+            .unwrap_or_else(|_| "Unknown".to_string());
 
     Some(CertInfo {
         key_type,
@@ -339,146 +304,6 @@ fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
         not_before,
         not_after,
     })
-}
-
-fn parse_der_tlv(data: &[u8], offset: usize) -> Result<(u32, usize, usize, usize), ()> {
-    if offset >= data.len() {
-        return Err(());
-    }
-    let tag = data[offset] as u32;
-    let mut pos = offset + 1;
-    if pos >= data.len() {
-        return Err(());
-    }
-    let len = if data[pos] < 0x80 {
-        let l = data[pos] as usize;
-        pos += 1;
-        l
-    } else if data[pos] == 0x81 {
-        pos += 1;
-        if pos >= data.len() {
-            return Err(());
-        }
-        let l = data[pos] as usize;
-        pos += 1;
-        l
-    } else if data[pos] == 0x82 {
-        pos += 1;
-        if pos + 1 >= data.len() {
-            return Err(());
-        }
-        let l = ((data[pos] as usize) << 8) | data[pos + 1] as usize;
-        pos += 2;
-        l
-    } else {
-        return Err(());
-    };
-    Ok((tag, pos, len, pos + len))
-}
-
-fn parse_dn_from_der(dn_content: &[u8]) -> String {
-    // Parse SEQUENCE of SETs of SEQUENCE { OID, value }
-    let mut parts = Vec::new();
-    let mut pos = 0;
-    while pos < dn_content.len() {
-        if let Ok((_, set_off, set_len, set_end)) = parse_der_tlv(dn_content, pos) {
-            let set_data = &dn_content[set_off..set_off + set_len];
-            if let Ok((_, seq_off, seq_len, _)) = parse_der_tlv(set_data, 0) {
-                let seq_data = &set_data[seq_off..seq_off + seq_len];
-                if let Ok((_, oid_off, oid_len, oid_end)) = parse_der_tlv(seq_data, 0) {
-                    let oid = &seq_data[oid_off..oid_off + oid_len];
-                    if let Ok((_, val_off, val_len, _)) = parse_der_tlv(seq_data, oid_end) {
-                        let value = std::str::from_utf8(&seq_data[val_off..val_off + val_len])
-                            .unwrap_or("?");
-                        let attr_name = oid_to_attr_name(oid);
-                        parts.push(format!("{attr_name}={value}"));
-                    }
-                }
-            }
-            pos = set_end;
-        } else {
-            break;
-        }
-    }
-    parts.join(", ")
-}
-
-fn oid_to_attr_name(oid: &[u8]) -> &'static str {
-    match oid {
-        [0x55, 0x04, 0x03] => "CN",
-        [0x55, 0x04, 0x06] => "C",
-        [0x55, 0x04, 0x07] => "L",
-        [0x55, 0x04, 0x08] => "ST",
-        [0x55, 0x04, 0x0A] => "O",
-        [0x55, 0x04, 0x0B] => "OU",
-        _ => "OID",
-    }
-}
-
-fn identify_key_type_from_spki(spki_content: &[u8]) -> String {
-    // Parse AlgorithmIdentifier to determine key type
-    if let Ok((_, algo_off, algo_len, _)) = parse_der_tlv(spki_content, 0) {
-        let algo = &spki_content[algo_off..algo_off + algo_len];
-        if let Ok((_, oid_off, oid_len, _)) = parse_der_tlv(algo, 0) {
-            let oid = &algo[oid_off..oid_off + oid_len];
-            return match oid {
-                // EC public key OID
-                [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01] => {
-                    // Check curve parameter OID
-                    if let Ok((_, p_off, p_len, _)) = parse_der_tlv(algo, oid_off + oid_len) {
-                        match &algo[p_off..p_off + p_len] {
-                            [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07] => {
-                                "ECCP256".to_string()
-                            }
-                            [0x2B, 0x81, 0x04, 0x00, 0x22] => "ECCP384".to_string(),
-                            _ => "EC".to_string(),
-                        }
-                    } else {
-                        "EC".to_string()
-                    }
-                }
-                // RSA OID
-                [0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01] => "RSA".to_string(),
-                // Ed25519 OID
-                [0x2B, 0x65, 0x70] => "ED25519".to_string(),
-                // X25519 OID
-                [0x2B, 0x65, 0x6E] => "X25519".to_string(),
-                _ => "Unknown".to_string(),
-            };
-        }
-    }
-    "Unknown".to_string()
-}
-
-fn format_asn1_time(t: &str) -> String {
-    // Parse UTCTime (YYMMDDHHmmSSZ) or GeneralizedTime (YYYYMMDDHHmmSSZ)
-    let t = t.trim_end_matches('Z');
-    if t.len() == 12 {
-        // UTCTime: YYMMDDHHMMSS
-        let yy: u16 = t[0..2].parse().unwrap_or(0);
-        let year = if yy >= 50 { 1900 + yy } else { 2000 + yy };
-        format!(
-            "{year}-{}-{}T{}:{}:{}+00:00",
-            &t[2..4],
-            &t[4..6],
-            &t[6..8],
-            &t[8..10],
-            &t[10..12]
-        )
-    } else if t.len() == 14 {
-        // GeneralizedTime: YYYYMMDDHHMMSS
-        format!(
-            "{}-{}-{}T{}:{}:{}+00:00",
-            &t[0..4],
-            &t[4..6],
-            &t[6..8],
-            &t[8..10],
-            &t[10..12],
-            &t[12..14]
-        )
-    } else {
-        t.to_string()
-    }
 }
 
 pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
@@ -690,14 +515,19 @@ pub fn run_keys_generate(
         .generate_key(slot, key_type, pp, tp)
         .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
 
-    let spki_der = device_pubkey_to_spki(key_type, &pub_key_device)?;
+    let spki_der = device_pubkey_to_spki(key_type, &pub_key_device)
+        .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
 
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
             write_file_or_stdout(output, &spki_der)?;
         }
         _ => {
-            let pem = pem_encode("PUBLIC KEY", &spki_der);
+            let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
+                .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
+            let pem = spki
+                .to_pem(LineEnding::LF)
+                .map_err(|e| CliError(format!("Failed to encode PEM: {e}")))?;
             write_file_or_stdout(output, pem.as_bytes())?;
         }
     }
@@ -811,11 +641,16 @@ pub fn run_keys_export(
     if let Ok(meta) = session.get_slot_metadata(slot)
         && !meta.public_key_der.is_empty()
     {
-        let spki_der = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)?;
+        let spki_der = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)
+            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
         match format.to_ascii_uppercase().as_str() {
             "DER" => write_file_or_stdout(output, &spki_der)?,
             _ => {
-                let pem = pem_encode("PUBLIC KEY", &spki_der);
+                let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
+                    .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
+                let pem = spki
+                    .to_pem(LineEnding::LF)
+                    .map_err(|e| CliError(format!("Failed to encode PEM: {e}")))?;
                 write_file_or_stdout(output, pem.as_bytes())?;
             }
         }
@@ -1159,47 +994,30 @@ pub fn run_certificates_generate(
             .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
     }
 
-    let (key_type, spki_der) = if let Some(pk_file) = public_key_file {
-        let data = read_file_or_stdin(pk_file)?;
-        let der = if let Ok(text) = std::str::from_utf8(&data) {
-            if text.contains("-----BEGIN") {
-                pem_decode(text)?
-            } else {
-                data
-            }
-        } else {
-            data
-        };
-        let kt = KeyType::from_public_key_der(&der)
-            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
-        (kt, der)
-    } else {
-        let metadata = session.get_slot_metadata(slot).map_err(|e| {
-            CliError(format!(
-                "Failed to get slot metadata (is a key present?): {e}"
-            ))
-        })?;
-        let kt = metadata.key_type;
-        let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)?;
-        (kt, spki)
+    let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
+
+    let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
+        .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
+    let subject_name =
+        Name::from_str(subject).map_err(|e| CliError(format!("Invalid subject DN: {e}")))?;
+
+    let serial = random_serial_number()?;
+    let validity = Validity::from_now(Duration::from_secs(u64::from(valid_days) * 86400))
+        .map_err(|e| CliError(format!("Invalid validity period: {e}")))?;
+
+    let cert_der = {
+        let signer = PivSigner::new(&mut session, slot, key_type, hash_alg, &spki_der);
+        let builder =
+            CertificateBuilder::new(Profile::Root, serial, validity, subject_name, spki, &signer)
+                .map_err(|e| CliError(format!("Failed to create certificate builder: {e}")))?;
+
+        let cert = builder
+            .build::<PivSignature>()
+            .map_err(|e| CliError(format!("Failed to build certificate: {e}")))?;
+
+        cert.to_der()
+            .map_err(|e| CliError(format!("Failed to encode certificate: {e}")))?
     };
-
-    let sig_alg_id = signature_algorithm_id(key_type, hash_alg)?;
-    let subject_dn = encode_distinguished_name(subject)?;
-    let serial = random_serial_number();
-    let (not_before, not_after) = validity_dates(valid_days);
-
-    let tbs = build_tbs_certificate(
-        &serial,
-        &sig_alg_id,
-        &subject_dn,
-        &not_before,
-        &not_after,
-        &spki_der,
-    );
-    let signature = sign_data(&mut session, slot, key_type, hash_alg, &tbs)?;
-
-    let cert_der = der_sequence(&[&tbs, &sig_alg_id, &der_bit_string(&signature)]);
 
     session
         .put_certificate(slot, &cert_der, false)
@@ -1233,40 +1051,22 @@ pub fn run_certificates_request(
             .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
     }
 
-    let (key_type, spki_der) = if let Some(pk_file) = public_key_file {
-        let data = read_file_or_stdin(pk_file)?;
-        let der = if let Ok(text) = std::str::from_utf8(&data) {
-            if text.contains("-----BEGIN") {
-                pem_decode(text)?
-            } else {
-                data
-            }
-        } else {
-            data
-        };
-        let kt = KeyType::from_public_key_der(&der)
-            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
-        (kt, der)
-    } else {
-        let metadata = session.get_slot_metadata(slot).map_err(|e| {
-            CliError(format!(
-                "Failed to get slot metadata (is a key present?): {e}"
-            ))
-        })?;
-        let kt = metadata.key_type;
-        let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)?;
-        (kt, spki)
-    };
+    let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
 
-    let sig_alg_id = signature_algorithm_id(key_type, hash_alg)?;
-    let subject_dn = encode_distinguished_name(subject)?;
+    let subject_name =
+        Name::from_str(subject).map_err(|e| CliError(format!("Invalid subject DN: {e}")))?;
 
-    let csr_info = build_certification_request_info(&subject_dn, &spki_der);
-    let signature = sign_data(&mut session, slot, key_type, hash_alg, &csr_info)?;
+    let signer = PivSigner::new(&mut session, slot, key_type, hash_alg, &spki_der);
+    let builder = RequestBuilder::new(subject_name, &signer)
+        .map_err(|e| CliError(format!("Failed to create CSR builder: {e}")))?;
 
-    let csr_der = der_sequence(&[&csr_info, &sig_alg_id, &der_bit_string(&signature)]);
+    let csr = builder
+        .build::<PivSignature>()
+        .map_err(|e| CliError(format!("Failed to build CSR: {e}")))?;
 
-    let pem = pem_encode("CERTIFICATE REQUEST", &csr_der);
+    let pem = csr
+        .to_pem(LineEnding::LF)
+        .map_err(|e| CliError(format!("Failed to encode CSR PEM: {e}")))?;
     write_file_or_stdout(output, pem.as_bytes())?;
     if output != "-" {
         eprintln!("CSR written to {output}.");
@@ -1277,13 +1077,6 @@ pub fn run_certificates_request(
 // ---------------------------------------------------------------------------
 // Hash algorithm selection
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy)]
-enum HashAlgorithm {
-    Sha256,
-    Sha384,
-    Sha512,
-}
 
 fn parse_hash_algorithm(s: &str) -> Result<HashAlgorithm, CliError> {
     match s.to_ascii_uppercase().as_str() {
@@ -1297,560 +1090,75 @@ fn parse_hash_algorithm(s: &str) -> Result<HashAlgorithm, CliError> {
 }
 
 // ---------------------------------------------------------------------------
-// DER encoding helpers
+// Helpers for cert/CSR generation
 // ---------------------------------------------------------------------------
 
-fn der_encode_length(len: usize) -> Vec<u8> {
-    if len < 0x80 {
-        vec![len as u8]
-    } else if len <= 0xFF {
-        vec![0x81, len as u8]
-    } else {
-        vec![0x82, (len >> 8) as u8, len as u8]
-    }
-}
-
-fn der_tag_length_value(tag: u8, data: &[u8]) -> Vec<u8> {
-    let mut out = vec![tag];
-    out.extend_from_slice(&der_encode_length(data.len()));
-    out.extend_from_slice(data);
-    out
-}
-
-fn der_sequence(items: &[&[u8]]) -> Vec<u8> {
-    let mut body = Vec::new();
-    for item in items {
-        body.extend_from_slice(item);
-    }
-    der_tag_length_value(0x30, &body)
-}
-
-fn der_set(items: &[&[u8]]) -> Vec<u8> {
-    let mut body = Vec::new();
-    for item in items {
-        body.extend_from_slice(item);
-    }
-    der_tag_length_value(0x31, &body)
-}
-
-fn der_integer(bytes: &[u8]) -> Vec<u8> {
-    // Ensure positive by prepending 0x00 if high bit is set
-    if !bytes.is_empty() && bytes[0] & 0x80 != 0 {
-        let mut padded = vec![0x00];
-        padded.extend_from_slice(bytes);
-        der_tag_length_value(0x02, &padded)
-    } else {
-        der_tag_length_value(0x02, bytes)
-    }
-}
-
-fn der_oid(oid_bytes: &[u8]) -> Vec<u8> {
-    der_tag_length_value(0x06, oid_bytes)
-}
-
-fn der_utf8string(s: &str) -> Vec<u8> {
-    der_tag_length_value(0x0C, s.as_bytes())
-}
-
-fn der_printable_string(s: &str) -> Vec<u8> {
-    der_tag_length_value(0x13, s.as_bytes())
-}
-
-fn der_bit_string(data: &[u8]) -> Vec<u8> {
-    // BIT STRING: unused-bits byte (0x00) + data
-    let mut body = vec![0x00];
-    body.extend_from_slice(data);
-    der_tag_length_value(0x03, &body)
-}
-
-fn der_explicit_context(tag_num: u8, data: &[u8]) -> Vec<u8> {
-    der_tag_length_value(0xA0 | tag_num, data)
-}
-
-fn der_utc_time(year: u16, month: u8, day: u8, hour: u8, min: u8, sec: u8) -> Vec<u8> {
-    let s = format!(
-        "{:02}{:02}{:02}{:02}{:02}{:02}Z",
-        year % 100,
-        month,
-        day,
-        hour,
-        min,
-        sec
-    );
-    der_tag_length_value(0x17, s.as_bytes())
-}
-
-fn der_generalized_time(year: u16, month: u8, day: u8, hour: u8, min: u8, sec: u8) -> Vec<u8> {
-    let s = format!(
-        "{:04}{:02}{:02}{:02}{:02}{:02}Z",
-        year, month, day, hour, min, sec
-    );
-    der_tag_length_value(0x18, s.as_bytes())
-}
-
-fn der_null() -> Vec<u8> {
-    vec![0x05, 0x00]
-}
-
-// ---------------------------------------------------------------------------
-// Signature algorithm identifiers (AlgorithmIdentifier SEQUENCE)
-// ---------------------------------------------------------------------------
-
-// OID bytes (encoded value, without tag+length)
-const OID_ECDSA_SHA256: &[u8] = &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02];
-const OID_ECDSA_SHA384: &[u8] = &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x03];
-const OID_ECDSA_SHA512: &[u8] = &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x04];
-const OID_RSA_SHA256: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B];
-const OID_RSA_SHA384: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0C];
-const OID_RSA_SHA512: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0D];
-const OID_ED25519: &[u8] = &[0x2B, 0x65, 0x70];
-
-fn signature_algorithm_id(key_type: KeyType, hash_alg: HashAlgorithm) -> Result<Vec<u8>, CliError> {
-    match key_type {
-        KeyType::EccP256 => match hash_alg {
-            HashAlgorithm::Sha256 => Ok(der_sequence(&[&der_oid(OID_ECDSA_SHA256)])),
-            HashAlgorithm::Sha384 => Ok(der_sequence(&[&der_oid(OID_ECDSA_SHA384)])),
-            HashAlgorithm::Sha512 => Ok(der_sequence(&[&der_oid(OID_ECDSA_SHA512)])),
-        },
-        KeyType::EccP384 => match hash_alg {
-            HashAlgorithm::Sha256 => Ok(der_sequence(&[&der_oid(OID_ECDSA_SHA256)])),
-            HashAlgorithm::Sha384 => Ok(der_sequence(&[&der_oid(OID_ECDSA_SHA384)])),
-            HashAlgorithm::Sha512 => Ok(der_sequence(&[&der_oid(OID_ECDSA_SHA512)])),
-        },
-        KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            let oid = match hash_alg {
-                HashAlgorithm::Sha256 => OID_RSA_SHA256,
-                HashAlgorithm::Sha384 => OID_RSA_SHA384,
-                HashAlgorithm::Sha512 => OID_RSA_SHA512,
-            };
-            Ok(der_sequence(&[&der_oid(oid), &der_null()]))
-        }
-        KeyType::Ed25519 => Ok(der_sequence(&[&der_oid(OID_ED25519)])),
-        _ => Err(CliError(format!(
-            "Unsupported key type for signing: {key_type:?}"
-        ))),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Distinguished Name encoding
-// ---------------------------------------------------------------------------
-
-const OID_CN: &[u8] = &[0x55, 0x04, 0x03];
-const OID_O: &[u8] = &[0x55, 0x04, 0x0A];
-const OID_OU: &[u8] = &[0x55, 0x04, 0x0B];
-const OID_C: &[u8] = &[0x55, 0x04, 0x06];
-const OID_ST: &[u8] = &[0x55, 0x04, 0x08];
-const OID_L: &[u8] = &[0x55, 0x04, 0x07];
-
-fn attr_type_to_oid(attr: &str) -> Result<&'static [u8], CliError> {
-    match attr.to_ascii_uppercase().as_str() {
-        "CN" => Ok(OID_CN),
-        "O" => Ok(OID_O),
-        "OU" => Ok(OID_OU),
-        "C" => Ok(OID_C),
-        "ST" | "S" => Ok(OID_ST),
-        "L" => Ok(OID_L),
-        other => Err(CliError(format!(
-            "Unknown DN attribute: {other}. Supported: CN, O, OU, C, ST, L."
-        ))),
-    }
-}
-
-fn encode_rdn_attribute(oid: &[u8], value: &str) -> Vec<u8> {
-    // Country uses PrintableString, everything else uses UTF8String
-    let val_der = if std::ptr::eq(oid, OID_C) {
-        der_printable_string(value)
-    } else {
-        der_utf8string(value)
-    };
-    let attr_tv = der_sequence(&[&der_oid(oid), &val_der]);
-    der_set(&[&attr_tv])
-}
-
-fn encode_distinguished_name(subject: &str) -> Result<Vec<u8>, CliError> {
-    let subject = subject.trim();
-    if subject.is_empty() {
-        return Err(CliError("Subject must not be empty.".into()));
-    }
-
-    // If no '=' present, treat entire string as CN value (Python ykman compatibility)
-    if !subject.contains('=') {
-        let rdn = encode_rdn_attribute(OID_CN, subject);
-        return Ok(der_sequence(&[&rdn]));
-    }
-
-    // Split on ',' but respect escaped commas (\,) and quoted values
-    let parts = split_dn_components(subject);
-    let mut rdns = Vec::new();
-    for part in &parts {
-        let part = part.trim();
-        let eq_pos = part
-            .find('=')
-            .ok_or_else(|| CliError(format!("Invalid DN component (no '='): {part}")))?;
-        let attr = part[..eq_pos].trim();
-        let value = part[eq_pos + 1..].trim();
-        let oid = attr_type_to_oid(attr)?;
-        rdns.push(encode_rdn_attribute(oid, value));
-    }
-    let rdn_refs: Vec<&[u8]> = rdns.iter().map(|r| r.as_slice()).collect();
-    Ok(der_sequence(&rdn_refs))
-}
-
-fn split_dn_components(s: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => {
-                current.push(c);
-                if let Some(&next) = chars.peek() {
-                    current.push(next);
-                    chars.next();
-                }
-            }
-            ',' | '/' => {
-                let trimmed = current.trim().to_string();
-                if !trimmed.is_empty() {
-                    parts.push(trimmed);
-                }
-                current.clear();
-            }
-            _ => current.push(c),
-        }
-    }
-    let trimmed = current.trim().to_string();
-    if !trimmed.is_empty() {
-        parts.push(trimmed);
-    }
-    parts
-}
-
-// ---------------------------------------------------------------------------
-// PIV device public key encoding → SubjectPublicKeyInfo (SPKI) DER
-// ---------------------------------------------------------------------------
-
-// OIDs for public key algorithms (for SPKI AlgorithmIdentifier, NOT signature)
-const OID_EC_PUBLIC_KEY: &[u8] = &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01]; // 1.2.840.10045.2.1
-const OID_CURVE_P256: &[u8] = &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07]; // 1.2.840.10045.3.1.7
-const OID_CURVE_P384: &[u8] = &[0x2B, 0x81, 0x04, 0x00, 0x22]; // 1.3.132.0.34
-const OID_RSA_ENCRYPTION: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]; // 1.2.840.113549.1.1.1
-const OID_ED25519_KEY: &[u8] = &[0x2B, 0x65, 0x70]; // 1.3.101.112
-const OID_X25519_KEY: &[u8] = &[0x2B, 0x65, 0x6E]; // 1.3.101.110
-
-/// Parse a single TLV from PIV device-encoded public key data.
-/// Returns (tag, value_bytes, end_offset).
-fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), CliError> {
-    if offset >= data.len() {
-        return Err(CliError("Unexpected end of device public key data".into()));
-    }
-    let tag = data[offset];
-    let mut pos = offset + 1;
-    if pos >= data.len() {
-        return Err(CliError("Truncated TLV length".into()));
-    }
-    let len = if data[pos] < 0x80 {
-        let l = data[pos] as usize;
-        pos += 1;
-        l
-    } else if data[pos] == 0x81 {
-        pos += 1;
-        let l = data[pos] as usize;
-        pos += 1;
-        l
-    } else if data[pos] == 0x82 {
-        pos += 1;
-        let l = ((data[pos] as usize) << 8) | (data[pos + 1] as usize);
-        pos += 2;
-        l
-    } else {
-        return Err(CliError("Unsupported TLV length encoding".into()));
-    };
-    if pos + len > data.len() {
-        return Err(CliError("TLV value extends past data".into()));
-    }
-    Ok((tag, data[pos..pos + len].to_vec(), pos + len))
-}
-
-/// Convert PIV device-encoded public key bytes to SubjectPublicKeyInfo (SPKI) DER.
-///
-/// PIV device encoding (from generate_key/get_slot_metadata):
-/// - EC keys: `86 <len> <uncompressed_point>`
-/// - RSA keys: `81 <len> <modulus> 82 <len> <exponent>`
-/// - Ed25519/X25519: `86 <len> <32_bytes>`
-fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u8>, CliError> {
-    match key_type {
-        KeyType::EccP256 | KeyType::EccP384 => {
-            // Parse tag 0x86 containing the EC point
-            let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
-            if tag != 0x86 {
-                return Err(CliError(format!(
-                    "Expected tag 0x86 for EC point, got 0x{tag:02X}"
-                )));
-            }
-            let curve_oid = if key_type == KeyType::EccP256 {
-                OID_CURVE_P256
+fn resolve_public_key(
+    session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
+    slot: Slot,
+    public_key_file: Option<&str>,
+) -> Result<(KeyType, Vec<u8>), CliError> {
+    if let Some(pk_file) = public_key_file {
+        let data = read_file_or_stdin(pk_file)?;
+        let der = if let Ok(text) = std::str::from_utf8(&data) {
+            if text.contains("-----BEGIN") {
+                pem_decode(text)?
             } else {
-                OID_CURVE_P384
-            };
-            // AlgorithmIdentifier: SEQUENCE { OID ecPublicKey, OID namedCurve }
-            let algo_id = der_sequence(&[&der_oid(OID_EC_PUBLIC_KEY), &der_oid(curve_oid)]);
-            // SubjectPublicKeyInfo: SEQUENCE { AlgorithmIdentifier, BIT STRING(point) }
-            Ok(der_sequence(&[&algo_id, &der_bit_string(&ec_point)]))
-        }
-        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            // Parse tag 0x81 (modulus) and 0x82 (exponent)
-            let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
-            if tag1 != 0x81 {
-                return Err(CliError(format!(
-                    "Expected tag 0x81 for RSA modulus, got 0x{tag1:02X}"
-                )));
+                data
             }
-            let (tag2, exponent, _) = parse_device_tlv(device_bytes, end1)?;
-            if tag2 != 0x82 {
-                return Err(CliError(format!(
-                    "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
-                )));
-            }
-            // RSAPublicKey: SEQUENCE { INTEGER modulus, INTEGER exponent }
-            let rsa_pub_key = der_sequence(&[&der_integer(&modulus), &der_integer(&exponent)]);
-            // AlgorithmIdentifier: SEQUENCE { OID rsaEncryption, NULL }
-            let algo_id = der_sequence(&[&der_oid(OID_RSA_ENCRYPTION), &der_null()]);
-            Ok(der_sequence(&[&algo_id, &der_bit_string(&rsa_pub_key)]))
-        }
-        KeyType::Ed25519 => {
-            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
-            if tag != 0x86 {
-                return Err(CliError(format!(
-                    "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
-                )));
-            }
-            let algo_id = der_sequence(&[&der_oid(OID_ED25519_KEY)]);
-            Ok(der_sequence(&[&algo_id, &der_bit_string(&raw_key)]))
-        }
-        KeyType::X25519 => {
-            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
-            if tag != 0x86 {
-                return Err(CliError(format!(
-                    "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
-                )));
-            }
-            let algo_id = der_sequence(&[&der_oid(OID_X25519_KEY)]);
-            Ok(der_sequence(&[&algo_id, &der_bit_string(&raw_key)]))
-        }
+        } else {
+            data
+        };
+        let kt = KeyType::from_public_key_der(&der)
+            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
+        Ok((kt, der))
+    } else {
+        let metadata = session.get_slot_metadata(slot).map_err(|e| {
+            CliError(format!(
+                "Failed to get slot metadata (is a key present?): {e}"
+            ))
+        })?;
+        let kt = metadata.key_type;
+        let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)
+            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
+        Ok((kt, spki))
     }
 }
 
-// ---------------------------------------------------------------------------
-// Certificate / CSR structure building
-// ---------------------------------------------------------------------------
-
-fn random_serial_number() -> Vec<u8> {
+fn random_serial_number() -> Result<SerialNumber, CliError> {
     let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).expect("failed to generate random serial number");
+    getrandom::fill(&mut buf).map_err(|e| CliError(format!("RNG error: {e}")))?;
     // Ensure positive (clear high bit)
     buf[0] &= 0x7F;
-    // Ensure non-zero leading byte
     if buf[0] == 0 {
         buf[0] = 0x01;
     }
-    buf.to_vec()
-}
-
-fn validity_dates(valid_days: u32) -> (Vec<u8>, Vec<u8>) {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before UNIX epoch");
-    let not_after_ts = now + Duration::from_secs(u64::from(valid_days) * 86400);
-
-    fn timestamp_to_fields(d: Duration) -> (u16, u8, u8, u8, u8, u8) {
-        // Simple civil date calculation from Unix timestamp
-        let secs = d.as_secs();
-        let days_since_epoch = (secs / 86400) as i64;
-        let time_of_day = secs % 86400;
-        let hour = (time_of_day / 3600) as u8;
-        let min = ((time_of_day % 3600) / 60) as u8;
-        let sec = (time_of_day % 60) as u8;
-
-        // Days to Y/M/D (algorithm from Howard Hinnant)
-        let z = days_since_epoch + 719468;
-        let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-        let doe = (z - era * 146097) as u64;
-        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        let y = (yoe as i64) + era * 400;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let d = (doy - (153 * mp + 2) / 5 + 1) as u8;
-        let m = if mp < 10 { mp + 3 } else { mp - 9 } as u8;
-        let y = if m <= 2 { y + 1 } else { y } as u16;
-        (y, m, d, hour, min, sec)
-    }
-
-    let (y1, m1, d1, h1, mn1, s1) = timestamp_to_fields(now);
-    let (y2, m2, d2, h2, mn2, s2) = timestamp_to_fields(not_after_ts);
-
-    fn encode_time(y: u16, m: u8, d: u8, h: u8, mn: u8, s: u8) -> Vec<u8> {
-        if y >= 2050 {
-            der_generalized_time(y, m, d, h, mn, s)
-        } else {
-            der_utc_time(y, m, d, h, mn, s)
-        }
-    }
-
-    (
-        encode_time(y1, m1, d1, h1, mn1, s1),
-        encode_time(y2, m2, d2, h2, mn2, s2),
-    )
-}
-
-fn build_tbs_certificate(
-    serial: &[u8],
-    sig_alg_id: &[u8],
-    subject_dn: &[u8],
-    not_before: &[u8],
-    not_after: &[u8],
-    spki_der: &[u8],
-) -> Vec<u8> {
-    // version [0] EXPLICIT INTEGER { v3(2) }
-    let version = der_explicit_context(0, &der_integer(&[2]));
-    let serial_num = der_integer(serial);
-    let validity = der_sequence(&[not_before, not_after]);
-    // Self-signed: issuer == subject
-    let issuer = subject_dn;
-
-    der_sequence(&[
-        &version,
-        &serial_num,
-        sig_alg_id,
-        issuer,
-        &validity,
-        subject_dn,
-        spki_der,
-    ])
-}
-
-fn build_certification_request_info(subject_dn: &[u8], spki_der: &[u8]) -> Vec<u8> {
-    let version = der_integer(&[0]); // v1(0)
-    // attributes [0] IMPLICIT SET OF Attribute (empty)
-    let attributes = der_explicit_context(0, &[]);
-
-    der_sequence(&[&version, subject_dn, spki_der, &attributes])
+    SerialNumber::new(&buf).map_err(|e| CliError(format!("Invalid serial number: {e}")))
 }
 
 // ---------------------------------------------------------------------------
-// Signing
+// PEM encoding / decoding
 // ---------------------------------------------------------------------------
-
-const DIGEST_INFO_SHA256: &[u8] = &[
-    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
-    0x00, 0x04, 0x20,
-];
-const DIGEST_INFO_SHA384: &[u8] = &[
-    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
-    0x00, 0x04, 0x30,
-];
-const DIGEST_INFO_SHA512: &[u8] = &[
-    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
-    0x00, 0x04, 0x40,
-];
-
-fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
-    use sha2::Digest;
-    match hash_alg {
-        HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
-        HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
-        HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
-    }
-}
-
-fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
-    let digest_info_prefix = match hash_alg {
-        HashAlgorithm::Sha256 => DIGEST_INFO_SHA256,
-        HashAlgorithm::Sha384 => DIGEST_INFO_SHA384,
-        HashAlgorithm::Sha512 => DIGEST_INFO_SHA512,
-    };
-    let t_len = digest_info_prefix.len() + hash.len();
-    // 0x00 0x01 [0xFF padding] 0x00 [DigestInfo]
-    let pad_len = key_byte_len - 3 - t_len;
-    let mut padded = Vec::with_capacity(key_byte_len);
-    padded.push(0x00);
-    padded.push(0x01);
-    padded.extend(std::iter::repeat_n(0xFF, pad_len));
-    padded.push(0x00);
-    padded.extend_from_slice(digest_info_prefix);
-    padded.extend_from_slice(hash);
-    padded
-}
-
-fn sign_data(
-    session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
-    slot: Slot,
-    key_type: KeyType,
-    hash_alg: HashAlgorithm,
-    data: &[u8],
-) -> Result<Vec<u8>, CliError> {
-    let message = match key_type {
-        KeyType::EccP256 | KeyType::EccP384 => hash_data(hash_alg, data),
-        KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            let hash = hash_data(hash_alg, data);
-            let key_byte_len = (key_type.bit_len() / 8) as usize;
-            pkcs1v15_pad(hash_alg, &hash, key_byte_len)
-        }
-        KeyType::Ed25519 => data.to_vec(),
-        _ => {
-            return Err(CliError(format!(
-                "Unsupported key type for signing: {key_type:?}"
-            )));
-        }
-    };
-
-    session
-        .sign(slot, key_type, &message)
-        .map_err(|e| CliError(format!("Signing failed: {e}")))
-}
-fn pem_encode(label: &str, der: &[u8]) -> String {
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
-    let mut pem = format!("-----BEGIN {label}-----\n");
-    for chunk in b64.as_bytes().chunks(64) {
-        pem.push_str(std::str::from_utf8(chunk).unwrap());
-        pem.push('\n');
-    }
-    pem.push_str(&format!("-----END {label}-----\n"));
-    pem
-}
 
 fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
-    use base64::Engine;
-    let mut in_block = false;
-    let mut b64 = String::new();
-    for line in text.lines() {
-        if line.starts_with("-----BEGIN") {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("-----END") {
-            break;
-        }
-        if in_block {
-            b64.push_str(line.trim());
-        }
-    }
-    base64::engine::general_purpose::STANDARD
-        .decode(&b64)
-        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))
+    // Generic PEM decode: extract first PEM block regardless of label
+    let doc = der::Document::from_pem(text)
+        .map(|(_, doc)| doc)
+        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))?;
+    Ok(doc.as_bytes().to_vec())
 }
 
-fn write_cert_file(output: &str, der: &[u8], format: &str) -> Result<(), CliError> {
+fn write_cert_file(output: &str, cert_der: &[u8], format: &str) -> Result<(), CliError> {
     match format.to_ascii_uppercase().as_str() {
         "DER" => {
-            write_file_or_stdout(output, der)?;
+            write_file_or_stdout(output, cert_der)?;
         }
         _ => {
-            let pem = pem_encode("CERTIFICATE", der);
+            let cert = Certificate::from_der(cert_der)
+                .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
+            let pem = cert
+                .to_pem(LineEnding::LF)
+                .map_err(|e| CliError(format!("Failed to encode PEM: {e}")))?;
             write_file_or_stdout(output, pem.as_bytes())?;
         }
     }
