@@ -16,6 +16,9 @@ use yubikit::piv::{
     PivSession, PivSignature, PivSigner, Slot, TouchPolicy, device_pubkey_to_spki,
 };
 
+use yubikit::smartcard::SmartCardConnection;
+use yubikit::tlv::{parse_tlv_list, tlv_encode};
+
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
@@ -125,21 +128,192 @@ fn parse_management_key(s: &str) -> Result<Vec<u8>, CliError> {
     hex::decode(s).map_err(|_| CliError("Management key must be hex-encoded.".into()))
 }
 
-fn authenticate_session(
-    session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
-    mgmt_key: Option<&str>,
+// ---------------------------------------------------------------------------
+// Pivman data: management key storage on device
+// ---------------------------------------------------------------------------
+
+const PIVMAN_OBJ_ID: u32 = 0x5FFF00;
+const PIVMAN_PROTECTED_OBJ_ID: u32 = ObjectId::Printed as u32;
+
+const TAG_PIVMAN_DATA: u32 = 0x80;
+const TAG_PIVMAN_FLAGS: u32 = 0x81;
+const TAG_PIVMAN_PROTECTED: u32 = 0x88;
+const TAG_PIVMAN_KEY: u32 = 0x89;
+
+const PIVMAN_FLAG_KEY_PROTECTED: u8 = 0x02;
+
+/// Read the pivman public data object. Returns the inner TLV list.
+fn get_pivman_data(session: &mut PivSession<impl SmartCardConnection>) -> Vec<(u32, Vec<u8>)> {
+    session
+        .get_object_raw(PIVMAN_OBJ_ID)
+        .ok()
+        .and_then(|raw| {
+            let inner = yubikit::tlv::tlv_unpack(TAG_PIVMAN_DATA, &raw).ok()?;
+            parse_tlv_list(&inner).ok()
+        })
+        .unwrap_or_default()
+}
+
+/// Check if the management key is stored on device.
+fn has_stored_key(pivman: &[(u32, Vec<u8>)]) -> bool {
+    pivman
+        .iter()
+        .find(|(t, _)| *t == TAG_PIVMAN_FLAGS)
+        .is_some_and(|(_, v)| !v.is_empty() && (v[0] & PIVMAN_FLAG_KEY_PROTECTED) != 0)
+}
+
+/// Write pivman public data. Encodes the TLV list back into the outer tag.
+fn put_pivman_data(
+    session: &mut PivSession<impl SmartCardConnection>,
+    entries: &[(u32, Vec<u8>)],
 ) -> Result<(), CliError> {
-    let key = match mgmt_key {
-        Some(k) => parse_management_key(k)?,
-        None => {
-            // Try default key first, prompt if it fails
-            if session.authenticate(DEFAULT_MANAGEMENT_KEY).is_ok() {
-                return Ok(());
-            }
-            let input = crate::util::prompt_secret("Enter management key")?;
-            parse_management_key(&input)?
-        }
+    let mut inner = Vec::new();
+    for (tag, val) in entries {
+        inner.extend_from_slice(&tlv_encode(*tag, val));
+    }
+    let outer = if inner.is_empty() {
+        vec![]
+    } else {
+        tlv_encode(TAG_PIVMAN_DATA, &inner)
     };
+    session
+        .put_object_raw(PIVMAN_OBJ_ID, Some(&outer))
+        .map_err(|e| CliError(format!("Failed to write pivman data: {e}")))
+}
+
+/// Read the pivman protected data. Requires PIN to have been verified.
+fn get_pivman_protected_data(
+    session: &mut PivSession<impl SmartCardConnection>,
+) -> Vec<(u32, Vec<u8>)> {
+    session
+        .get_object_raw(PIVMAN_PROTECTED_OBJ_ID)
+        .ok()
+        .and_then(|raw| {
+            let inner = yubikit::tlv::tlv_unpack(TAG_PIVMAN_PROTECTED, &raw).ok()?;
+            parse_tlv_list(&inner).ok()
+        })
+        .unwrap_or_default()
+}
+
+/// Write pivman protected data. Encodes the TLV list back into the outer tag.
+fn put_pivman_protected_data(
+    session: &mut PivSession<impl SmartCardConnection>,
+    entries: &[(u32, Vec<u8>)],
+) -> Result<(), CliError> {
+    let mut inner = Vec::new();
+    for (tag, val) in entries {
+        inner.extend_from_slice(&tlv_encode(*tag, val));
+    }
+    let outer = if inner.is_empty() {
+        vec![]
+    } else {
+        tlv_encode(TAG_PIVMAN_PROTECTED, &inner)
+    };
+    session
+        .put_object_raw(PIVMAN_PROTECTED_OBJ_ID, Some(&outer))
+        .map_err(|e| CliError(format!("Failed to write pivman protected data: {e}")))
+}
+
+/// Update or remove a TLV entry in a list, preserving all other entries.
+fn set_tlv_entry(entries: &mut Vec<(u32, Vec<u8>)>, tag: u32, value: Option<Vec<u8>>) {
+    entries.retain(|(t, _)| *t != tag);
+    if let Some(v) = value {
+        entries.push((tag, v));
+    }
+}
+
+/// Set the management key and keep pivman data in sync.
+fn pivman_set_mgm_key(
+    session: &mut PivSession<impl SmartCardConnection>,
+    key_type: ManagementKeyType,
+    new_key: &[u8],
+    touch: bool,
+    store_on_device: bool,
+) -> Result<(), CliError> {
+    let mut pivman = get_pivman_data(session);
+    let was_stored = has_stored_key(&pivman);
+
+    // If we need to read/clear protected data, get it now (while PIN is still verified)
+    let mut prot = if store_on_device || was_stored {
+        Some(get_pivman_protected_data(session))
+    } else {
+        None
+    };
+
+    // Set the actual management key on the device
+    session
+        .set_management_key(key_type, new_key, touch)
+        .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
+
+    // Update the stored-key flag
+    let current_flags = pivman
+        .iter()
+        .find(|(t, _)| *t == TAG_PIVMAN_FLAGS)
+        .map(|(_, v)| if v.is_empty() { 0u8 } else { v[0] })
+        .unwrap_or(0);
+
+    let new_flags = if store_on_device {
+        current_flags | PIVMAN_FLAG_KEY_PROTECTED
+    } else {
+        current_flags & !PIVMAN_FLAG_KEY_PROTECTED
+    };
+
+    if new_flags != 0 {
+        set_tlv_entry(&mut pivman, TAG_PIVMAN_FLAGS, Some(vec![new_flags]));
+    } else {
+        set_tlv_entry(&mut pivman, TAG_PIVMAN_FLAGS, None);
+    }
+
+    put_pivman_data(session, &pivman)?;
+
+    // Update protected data
+    if let Some(ref mut prot_entries) = prot {
+        if store_on_device {
+            set_tlv_entry(prot_entries, TAG_PIVMAN_KEY, Some(new_key.to_vec()));
+        } else {
+            set_tlv_entry(prot_entries, TAG_PIVMAN_KEY, None);
+        }
+        put_pivman_protected_data(session, prot_entries)?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+
+fn authenticate_session(
+    session: &mut PivSession<impl SmartCardConnection>,
+    mgmt_key: Option<&str>,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    if let Some(k) = mgmt_key {
+        let key = parse_management_key(k)?;
+        return session
+            .authenticate(&key)
+            .map_err(|e| CliError(format!("Authentication failed: {e}")));
+    }
+
+    // Check if the key is stored on device (protected by PIN)
+    let pivman = get_pivman_data(session);
+    if has_stored_key(&pivman) {
+        ensure_pin(session, pin)?;
+        let prot = get_pivman_protected_data(session);
+        if let Some((_, key)) = prot.iter().find(|(t, _)| *t == TAG_PIVMAN_KEY) {
+            return session
+                .authenticate(key)
+                .map_err(|e| CliError(format!("Authentication with stored key failed: {e}")));
+        }
+        return Err(CliError(
+            "Management key is marked as stored on device but could not be read.".into(),
+        ));
+    }
+
+    // Try default key first, prompt if it fails
+    if session.authenticate(DEFAULT_MANAGEMENT_KEY).is_ok() {
+        return Ok(());
+    }
+    let input = crate::util::prompt_secret("Enter management key")?;
+    let key = parse_management_key(&input)?;
     session
         .authenticate(&key)
         .map_err(|e| CliError(format!("Authentication failed: {e}")))
@@ -476,7 +650,7 @@ pub fn run_set_retries(
     }
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
     session
         .set_pin_attempts(pin_retries, puk_retries)
@@ -528,17 +702,11 @@ pub fn run_change_management_key(
     }
 
     let mut session = open_session(dev, scp_params)?;
-    if pin.is_some() || protect {
+    authenticate_session(&mut session, mgmt_key, pin)?;
+    if protect {
         ensure_pin(&mut session, pin)?;
     }
-    authenticate_session(&mut session, mgmt_key)?;
-    session
-        .set_management_key(key_type, &new_key, touch)
-        .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
-
-    if protect {
-        eprintln!("WARNING: --protect (storing management key on device) is not yet supported.");
-    }
+    pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)?;
 
     if generate {
         eprintln!("Management key set: {}", hex::encode(&new_key));
@@ -566,7 +734,7 @@ pub fn run_keys_generate(
     let tp = parse_touch_policy(touch_policy)?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
 
     let pub_key_device = session
@@ -626,7 +794,7 @@ pub fn run_keys_import(
         .map_err(|_| CliError("Could not determine key type from file.".into()))?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
 
     session
@@ -728,7 +896,7 @@ pub fn run_keys_move(
     let from = parse_slot(source)?;
     let to = parse_slot(dest)?;
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
     session
         .move_key(from, to)
@@ -746,7 +914,7 @@ pub fn run_keys_delete(
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
     session
         .delete_key(slot)
@@ -798,7 +966,7 @@ pub fn run_certificates_import(
     };
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
 
     session
@@ -822,7 +990,7 @@ pub fn run_certificates_delete(
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
     session
         .delete_certificate(slot)
@@ -865,7 +1033,7 @@ pub fn run_objects_import(
     let data = read_file_or_stdin(data_file)?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key)?;
+    authenticate_session(&mut session, mgmt_key, pin)?;
     ensure_pin(&mut session, pin)?;
     session
         .put_object(obj_id, Some(&data))
@@ -911,7 +1079,7 @@ pub fn run_objects_generate(
 ) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
     ensure_pin(&mut session, pin)?;
-    authenticate_session(&mut session, management_key)?;
+    authenticate_session(&mut session, management_key, pin)?;
 
     match object.to_uppercase().as_str() {
         "CHUID" => {
@@ -999,7 +1167,7 @@ pub fn run_certificates_generate(
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, management_key)?;
+    authenticate_session(&mut session, management_key, pin)?;
     ensure_pin(&mut session, pin)?;
 
     let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
