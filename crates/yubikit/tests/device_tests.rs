@@ -613,7 +613,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        session
+        let pub_key = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::EccP256,
@@ -621,12 +621,28 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
+        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
 
-        let hash = hash_data(HashAlgorithm::Sha256, b"test data to sign");
+        let message = b"test data to sign";
+        let hash = hash_data(HashAlgorithm::Sha256, message);
         let sig = session
             .sign(Slot::Retired1, KeyType::EccP256, &hash)
             .expect("sign");
         assert!(!sig.is_empty(), "Signature should not be empty");
+
+        // Verify the signature using the public key
+        use ecdsa::signature::Verifier;
+        use p256::ecdsa::{Signature, VerifyingKey};
+        let vk = VerifyingKey::from_sec1_bytes(
+            x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der)
+                .unwrap()
+                .subject_public_key
+                .as_bytes()
+                .unwrap(),
+        )
+        .expect("parse verifying key");
+        let sig = Signature::from_der(&sig).expect("parse DER signature");
+        vk.verify(message, &sig).expect("signature verification");
         eprintln!("  PASS {tc:?}");
     }
 
@@ -680,12 +696,30 @@ mod piv {
             "Certificate DER should be substantial"
         );
 
-        // Parse it back to verify
+        // Parse it back and verify the signature
         let parsed = x509_cert::Certificate::from_der(&cert_der).expect("parse cert");
         assert_eq!(
             parsed.tbs_certificate.subject.to_string(),
             "CN=YubiKey Test"
         );
+
+        // Verify the certificate signature using the embedded public key
+        use ecdsa::signature::Verifier;
+        use p256::ecdsa::{Signature, VerifyingKey};
+        let vk = VerifyingKey::from_sec1_bytes(
+            parsed
+                .tbs_certificate
+                .subject_public_key_info
+                .subject_public_key
+                .as_bytes()
+                .unwrap(),
+        )
+        .expect("parse verifying key from cert");
+        let tbs_der = parsed.tbs_certificate.to_der().expect("encode TBS");
+        let cert_sig =
+            Signature::from_der(parsed.signature.raw_bytes()).expect("parse cert signature");
+        vk.verify(&tbs_der, &cert_sig)
+            .expect("certificate signature verification");
 
         // Store and retrieve - drop signer first to regain session access
         drop(signer);
@@ -739,6 +773,25 @@ mod piv {
 
         let csr_der = csr.to_der().expect("encode CSR");
         assert!(csr_der.len() > 50, "CSR DER should be substantial");
+
+        // Verify the CSR signature
+        use ecdsa::signature::Verifier;
+        use p256::ecdsa::{Signature, VerifyingKey};
+        let parsed_csr = x509_cert::request::CertReq::from_der(&csr_der).expect("parse CSR back");
+        let vk = VerifyingKey::from_sec1_bytes(
+            parsed_csr
+                .info
+                .public_key
+                .subject_public_key
+                .as_bytes()
+                .unwrap(),
+        )
+        .expect("parse verifying key from CSR");
+        let info_der = parsed_csr.info.to_der().expect("encode CSR info");
+        let csr_sig =
+            Signature::from_der(parsed_csr.signature.raw_bytes()).expect("parse CSR signature");
+        vk.verify(&info_der, &csr_sig)
+            .expect("CSR signature verification");
         eprintln!("  PASS {tc:?}");
     }
 
@@ -789,6 +842,18 @@ mod piv {
         let cert_der = cert.to_der().expect("encode cert");
         let parsed = x509_cert::Certificate::from_der(&cert_der).expect("parse cert back");
         assert_eq!(parsed.tbs_certificate.subject.to_string(), "CN=RSA Test");
+
+        // Verify the RSA certificate signature
+        use rsa::pkcs1v15::{Signature, VerifyingKey};
+        use rsa::pkcs8::DecodePublicKey;
+        use rsa::signature::Verifier;
+        let rsa_pub =
+            rsa::RsaPublicKey::from_public_key_der(&spki_der).expect("parse RSA public key");
+        let vk = VerifyingKey::<sha2::Sha256>::new(rsa_pub);
+        let tbs_der = parsed.tbs_certificate.to_der().expect("encode TBS");
+        let sig = Signature::try_from(parsed.signature.raw_bytes()).expect("parse RSA signature");
+        vk.verify(&tbs_der, &sig)
+            .expect("RSA certificate signature verification");
         eprintln!("  PASS {tc:?}");
     }
 }

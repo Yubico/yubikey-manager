@@ -38,7 +38,11 @@ hidapi = { version = "2", default-features = false, features = ["linux-static-hi
 hidapi = { version = "2" }
 
 [dev-dependencies]
+ecdsa = { version = "0.16", features = ["verifying"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+rsa = "0.9"
 rstest = "0.25"
+sha2 = { version = "0.10", features = ["oid"] }
 
 [lints]
 workspace = true

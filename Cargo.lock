@@ -1609,6 +1609,7 @@ dependencies = [
  "cipher",
  "cmac",
  "des",
+ "ecdsa",
  "ed25519-dalek",
  "elliptic-curve",
  "flate2",
