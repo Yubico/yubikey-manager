@@ -856,6 +856,109 @@ mod piv {
             .expect("RSA certificate signature verification");
         eprintln!("  PASS {tc:?}");
     }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_decrypt_rsa(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+        session.verify_pin("123456").expect("verify PIN");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        let spki_der = device_pubkey_to_spki(KeyType::Rsa2048, &pub_key).expect("to_spki");
+
+        // Encrypt a message with the public key
+        use rsa::pkcs8::DecodePublicKey;
+        let rsa_pub =
+            rsa::RsaPublicKey::from_public_key_der(&spki_der).expect("parse RSA public key");
+        let plaintext = b"Hello from PIV decrypt test!";
+        let ciphertext = rsa_pub
+            .encrypt(&mut rsa::rand_core::OsRng, rsa::Pkcs1v15Encrypt, plaintext)
+            .expect("encrypt");
+
+        // Decrypt with the YubiKey
+        let decrypted = session
+            .decrypt(Slot::Retired1, &ciphertext)
+            .expect("decrypt");
+        // RSA PKCS#1 v1.5 decrypt returns padded data; strip padding
+        // The PIV decrypt returns the raw unpadded result after PKCS#1 processing
+        assert_eq!(
+            &decrypted[decrypted.len() - plaintext.len()..],
+            plaintext,
+            "Decrypted plaintext should match"
+        );
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+        session.verify_pin("123456").expect("verify PIN");
+
+        let pub_key = session
+            .generate_key(
+                Slot::Retired1,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
+
+        // Generate an ephemeral key pair on the host
+        use p256::PublicKey;
+        use p256::ecdh::EphemeralSecret;
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        let host_secret = EphemeralSecret::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let host_public = p256::PublicKey::from(&host_secret);
+        let host_public_bytes = host_public.to_encoded_point(false);
+
+        // Derive shared secret on the YubiKey using ECDH
+        let device_shared = session
+            .calculate_secret(
+                Slot::Retired1,
+                KeyType::EccP256,
+                host_public_bytes.as_bytes(),
+            )
+            .expect("calculate_secret");
+
+        // Derive shared secret on the host
+        let device_pk = PublicKey::from_sec1_bytes(
+            x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der)
+                .unwrap()
+                .subject_public_key
+                .as_bytes()
+                .unwrap(),
+        )
+        .expect("parse device public key");
+        let host_shared = host_secret.diffie_hellman(&device_pk);
+
+        assert_eq!(
+            device_shared,
+            host_shared.raw_secret_bytes().as_slice(),
+            "ECDH shared secrets should match"
+        );
+        eprintln!("  PASS {tc:?}");
+    }
 }
 
 // ───────────────────────── OpenPGP ─────────────────────────
@@ -925,6 +1028,211 @@ mod openpgp {
                 eprintln!("  NOTE: get_challenge not supported on this device");
             }
         }
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_openpgp_generate_ec_key_and_sign(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
+        require_version!(Version(5, 2, 0));
+        let mut session = open_openpgp_session(&tc);
+        session.reset().expect("reset");
+        session
+            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .expect("verify admin");
+        session
+            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, false)
+            .expect("verify PIN");
+
+        // Generate EC P-256 signing key
+        let pk_data = session
+            .generate_ec_key(
+                yubikit::openpgp::KeyRef::Sig,
+                yubikit::openpgp::curve_oid::SECP256R1,
+            )
+            .expect("generate_ec_key");
+        assert!(!pk_data.is_empty(), "Public key data should not be empty");
+
+        // Extract EC point from TLV (tag 0x86)
+        let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
+        let ec_point = pk_dict.get(&0x86).expect("EC point tag 0x86");
+        assert_eq!(
+            ec_point.len(),
+            65,
+            "Uncompressed P-256 point should be 65 bytes"
+        );
+
+        // Sign a message
+        let message = b"OpenPGP EC sign test";
+        let signature = session
+            .sign(message, yubikit::openpgp::SignHashAlgorithm::Sha256)
+            .expect("sign");
+        assert!(!signature.is_empty(), "Signature should not be empty");
+
+        // Verify: OpenPGP EC sign returns raw r||s (64 bytes for P-256)
+        use p256::ecdsa::{Signature, VerifyingKey};
+        let vk = VerifyingKey::from_sec1_bytes(ec_point).expect("parse verifying key");
+        // OpenPGP sign() hashes the message internally with SHA-256 and returns raw r||s
+        // We need to verify against the pre-hashed digest using DigestVerifier
+        use ecdsa::signature::DigestVerifier;
+        use sha2::Digest;
+        let digest = sha2::Sha256::new_with_prefix(message);
+        let sig = Signature::from_bytes((&signature[..]).into()).expect("parse signature");
+        vk.verify_digest(digest, &sig)
+            .expect("EC signature verification");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
+        let mut session = open_openpgp_session(&tc);
+        session.reset().expect("reset");
+        session
+            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .expect("verify admin");
+        session
+            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, false)
+            .expect("verify PIN");
+
+        // Generate RSA 2048 signing key
+        let pk_data = session
+            .generate_rsa_key(
+                yubikit::openpgp::KeyRef::Sig,
+                yubikit::openpgp::RsaSize::Rsa2048,
+            )
+            .expect("generate_rsa_key");
+        assert!(!pk_data.is_empty(), "Public key data should not be empty");
+
+        // Extract modulus (0x81) and exponent (0x82) from TLV
+        let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
+        let modulus_bytes = pk_dict.get(&0x81).expect("modulus tag 0x81");
+        let exponent_bytes = pk_dict.get(&0x82).expect("exponent tag 0x82");
+
+        // Reconstruct RSA public key
+        use rsa::BigUint;
+        let n = BigUint::from_bytes_be(modulus_bytes);
+        let e = BigUint::from_bytes_be(exponent_bytes);
+        let rsa_pub = rsa::RsaPublicKey::new(n, e).expect("construct RSA public key");
+
+        // Sign a message
+        let message = b"OpenPGP RSA sign test";
+        let signature = session
+            .sign(message, yubikit::openpgp::SignHashAlgorithm::Sha256)
+            .expect("sign");
+        assert!(!signature.is_empty(), "Signature should not be empty");
+
+        // Verify the signature
+        use rsa::pkcs1v15::{Signature, VerifyingKey};
+        use rsa::signature::Verifier;
+        let vk = VerifyingKey::<sha2::Sha256>::new(rsa_pub);
+        let sig = Signature::try_from(signature.as_slice()).expect("parse RSA signature");
+        vk.verify(message, &sig)
+            .expect("RSA signature verification");
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
+        let mut session = open_openpgp_session(&tc);
+        session.reset().expect("reset");
+        session
+            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .expect("verify admin");
+        session
+            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, true)
+            .expect("verify PIN for decrypt");
+
+        // Generate RSA 2048 decryption key
+        let pk_data = session
+            .generate_rsa_key(
+                yubikit::openpgp::KeyRef::Dec,
+                yubikit::openpgp::RsaSize::Rsa2048,
+            )
+            .expect("generate_rsa_key");
+
+        // Extract modulus and exponent
+        let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
+        let modulus_bytes = pk_dict.get(&0x81).expect("modulus");
+        let exponent_bytes = pk_dict.get(&0x82).expect("exponent");
+        use rsa::BigUint;
+        let n = BigUint::from_bytes_be(modulus_bytes);
+        let e = BigUint::from_bytes_be(exponent_bytes);
+        let rsa_pub = rsa::RsaPublicKey::new(n, e).expect("construct RSA public key");
+
+        // Encrypt a message with the public key
+        let plaintext = b"OpenPGP RSA decrypt test!";
+        let ciphertext = rsa_pub
+            .encrypt(&mut rsa::rand_core::OsRng, rsa::Pkcs1v15Encrypt, plaintext)
+            .expect("encrypt");
+
+        // Decrypt with the YubiKey
+        let decrypted = session.decrypt(&ciphertext).expect("decrypt");
+        // OpenPGP RSA decrypt returns raw PKCS#1 decrypted data
+        assert_eq!(
+            &decrypted[decrypted.len() - plaintext.len()..],
+            plaintext,
+            "Decrypted plaintext should match"
+        );
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_openpgp_ec_ecdh(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
+        require_version!(Version(5, 2, 0));
+        let mut session = open_openpgp_session(&tc);
+        session.reset().expect("reset");
+        session
+            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .expect("verify admin");
+        session
+            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, true)
+            .expect("verify PIN for decrypt");
+
+        // Generate EC P-256 decryption key
+        let pk_data = session
+            .generate_ec_key(
+                yubikit::openpgp::KeyRef::Dec,
+                yubikit::openpgp::curve_oid::SECP256R1,
+            )
+            .expect("generate_ec_key");
+
+        // Extract EC point
+        let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
+        let ec_point = pk_dict.get(&0x86).expect("EC point tag 0x86");
+
+        // Generate ephemeral key on host
+        use p256::PublicKey;
+        use p256::ecdh::EphemeralSecret;
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        let host_secret = EphemeralSecret::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let host_public = PublicKey::from(&host_secret);
+        let host_public_bytes = host_public.to_encoded_point(false);
+
+        // Derive shared secret on YubiKey (OpenPGP decrypt with EC = ECDH)
+        let device_shared = session
+            .decrypt(host_public_bytes.as_bytes())
+            .expect("ECDH via decrypt");
+
+        // Derive shared secret on host
+        let device_pk = PublicKey::from_sec1_bytes(ec_point).expect("parse device EC public key");
+        let host_shared = host_secret.diffie_hellman(&device_pk);
+
+        assert_eq!(
+            device_shared,
+            host_shared.raw_secret_bytes().as_slice(),
+            "ECDH shared secrets should match"
+        );
         eprintln!("  PASS {tc:?}");
     }
 }
