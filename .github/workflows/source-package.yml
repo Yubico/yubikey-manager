@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev libudev-dev
+          sudo apt-get install -qq swig libpcsclite-dev libudev-dev libdbus-1-dev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -75,7 +75,7 @@ jobs:
       - name: Install python dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev libudev-dev
+          sudo apt-get install -qq swig libpcsclite-dev libudev-dev libdbus-1-dev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
