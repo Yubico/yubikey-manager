@@ -185,10 +185,10 @@ enum ConfigAction {
     Usb {
         /// Enable an application (can be repeated)
         #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
-        enable: Vec<String>,
+        enable: Vec<CliCapability>,
         /// Disable an application (can be repeated)
         #[arg(long = "disable", action = clap::ArgAction::Append)]
-        disable: Vec<String>,
+        disable: Vec<CliCapability>,
         /// Enable all supported applications
         #[arg(short = 'a', long)]
         enable_all: bool,
@@ -218,10 +218,10 @@ enum ConfigAction {
     Nfc {
         /// Enable an application (can be repeated)
         #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
-        enable: Vec<String>,
+        enable: Vec<CliCapability>,
         /// Disable an application (can be repeated)
         #[arg(long = "disable", action = clap::ArgAction::Append)]
-        disable: Vec<String>,
+        disable: Vec<CliCapability>,
         /// Enable all supported applications
         #[arg(short = 'a', long)]
         enable_all: bool,
@@ -393,8 +393,8 @@ enum OathAccountAction {
         #[arg(short = 'o', long, default_value = "totp")]
         oath_type: CliOathType,
         /// Number of digits
-        #[arg(long, default_value_t = 6)]
-        digits: u8,
+        #[arg(long, default_value = "6")]
+        digits: CliOathDigits,
         /// Hash algorithm
         #[arg(short, long, default_value = "sha1")]
         algorithm: CliOathAlgorithm,
@@ -616,8 +616,8 @@ enum OtpAction {
         #[arg(short, long)]
         totp: bool,
         /// Number of digits for TOTP
-        #[arg(long, default_value_t = 6)]
-        digits: u8,
+        #[arg(long, default_value = "6")]
+        digits: CliCalcDigits,
     },
     /// Program OATH-HOTP credential
     Hotp {
@@ -657,9 +657,9 @@ enum OtpAction {
         /// Do not append Enter
         #[arg(long, conflicts_with = "enter")]
         no_enter: bool,
-        /// Keystroke pacing (0, 20, 40, or 60 ms)
+        /// Keystroke pacing in ms
         #[arg(short = 'p', long)]
-        pacing: Option<u8>,
+        pacing: Option<CliPacing>,
         /// Use numeric keypad for digits
         #[arg(long)]
         use_numeric_keypad: bool,

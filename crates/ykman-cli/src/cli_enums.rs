@@ -223,6 +223,26 @@ impl From<CliOathAlgorithm> for yubikit::oath::HashAlgorithm {
     }
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CliOathDigits {
+    #[value(name = "6")]
+    Six,
+    #[value(name = "7")]
+    Seven,
+    #[value(name = "8")]
+    Eight,
+}
+
+impl CliOathDigits {
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::Six => 6,
+            Self::Seven => 7,
+            Self::Eight => 8,
+        }
+    }
+}
+
 // ── OTP ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -260,6 +280,12 @@ impl From<CliNdefType> for yubikit::yubiotp::NdefType {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum CliKeyboardLayout {
     Us,
+    Uk,
+    De,
+    Fr,
+    It,
+    Bepo,
+    Norman,
     Modhex,
 }
 
@@ -269,6 +295,74 @@ pub enum CliHotpDigits {
     Six,
     #[value(name = "8")]
     Eight,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CliCalcDigits {
+    #[value(name = "6")]
+    Six,
+    #[value(name = "8")]
+    Eight,
+}
+
+impl CliCalcDigits {
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::Six => 6,
+            Self::Eight => 8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CliPacing {
+    #[value(name = "0")]
+    Zero,
+    #[value(name = "20")]
+    Twenty,
+    #[value(name = "40")]
+    Forty,
+    #[value(name = "60")]
+    Sixty,
+}
+
+impl CliPacing {
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::Zero => 0,
+            Self::Twenty => 20,
+            Self::Forty => 40,
+            Self::Sixty => 60,
+        }
+    }
+}
+
+// ── Config ────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CliCapability {
+    Otp,
+    #[value(alias = "fido_u2f")]
+    U2f,
+    Fido2,
+    Oath,
+    Piv,
+    Openpgp,
+    Hsmauth,
+}
+
+impl From<CliCapability> for yubikit::management::Capability {
+    fn from(v: CliCapability) -> Self {
+        match v {
+            CliCapability::Otp => Self::OTP,
+            CliCapability::U2f => Self::U2F,
+            CliCapability::Fido2 => Self::FIDO2,
+            CliCapability::Oath => Self::OATH,
+            CliCapability::Piv => Self::PIV,
+            CliCapability::Openpgp => Self::OPENPGP,
+            CliCapability::Hsmauth => Self::HSMAUTH,
+        }
+    }
 }
 
 // ── Security Domain ──────────────────────────────────────────────────────

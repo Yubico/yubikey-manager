@@ -7,6 +7,7 @@ use yubikit::management::{
 };
 use yubikit::smartcard::Transport;
 
+use crate::cli_enums::CliCapability;
 use crate::util::CliError;
 
 /// Open a management session, trying SmartCard first, then OTP HID, then FIDO HID.
@@ -43,20 +44,6 @@ fn write_config(
     Ok(())
 }
 
-/// Parse a capability name (case-insensitive) to a Capability value.
-fn parse_capability(name: &str) -> Result<Capability, CliError> {
-    match name.to_ascii_uppercase().as_str() {
-        "OTP" => Ok(Capability::OTP),
-        "U2F" | "FIDO_U2F" => Ok(Capability::U2F),
-        "FIDO2" => Ok(Capability::FIDO2),
-        "OATH" => Ok(Capability::OATH),
-        "PIV" => Ok(Capability::PIV),
-        "OPENPGP" => Ok(Capability::OPENPGP),
-        "HSMAUTH" => Ok(Capability::HSMAUTH),
-        _ => Err(CliError(format!("Unknown capability: {name}"))),
-    }
-}
-
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
     let bytes: Result<Vec<u8>, _> = (0..hex.len())
         .step_by(2)
@@ -81,8 +68,8 @@ fn confirm(msg: &str) -> bool {
 
 pub fn run_usb(
     dev: &YubiKeyDevice,
-    enable: &[String],
-    disable: &[String],
+    enable: &[CliCapability],
+    disable: &[CliCapability],
     enable_all: bool,
     list: bool,
     lock_code: Option<&str>,
@@ -132,7 +119,7 @@ pub fn run_usb(
     }
 
     for name in enable {
-        let cap = parse_capability(name)?;
+        let cap: Capability = (*name).into();
         if !usb_supported.contains(cap) {
             return Err(CliError(format!(
                 "{} is not supported on USB.",
@@ -146,7 +133,7 @@ pub fn run_usb(
     }
 
     for name in disable {
-        let cap = parse_capability(name)?;
+        let cap: Capability = (*name).into();
         if usb_enabled.contains(cap) {
             new_enabled = Capability(new_enabled.0 & !cap.0);
             changes.push(format!("Disable {}", cap.display_name()));
@@ -210,8 +197,8 @@ pub fn run_usb(
 
 pub fn run_nfc(
     dev: &YubiKeyDevice,
-    enable: &[String],
-    disable: &[String],
+    enable: &[CliCapability],
+    disable: &[CliCapability],
     enable_all: bool,
     disable_all: bool,
     list: bool,
@@ -287,7 +274,7 @@ pub fn run_nfc(
     }
 
     for name in enable {
-        let cap = parse_capability(name)?;
+        let cap: Capability = (*name).into();
         if !nfc_supported.contains(cap) {
             return Err(CliError(format!(
                 "{} is not supported on NFC.",
@@ -300,7 +287,7 @@ pub fn run_nfc(
         }
     }
     for name in disable {
-        let cap = parse_capability(name)?;
+        let cap: Capability = (*name).into();
         if nfc_enabled.contains(cap) {
             new_enabled = Capability(new_enabled.0 & !cap.0);
             changes.push(format!("Disable {}", cap.display_name()));
