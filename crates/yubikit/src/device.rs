@@ -226,12 +226,35 @@ impl YubiKeyDevice {
     }
 
     /// Open a SmartCard (PC/SC) connection to this device.
+    ///
+    /// On YubiKey NEO, opening an OTP or FIDO connection ejects the virtual
+    /// smartcard. It reappears after a few seconds. This method retries for
+    /// up to 4 seconds if the card is temporarily absent.
     pub fn open_smartcard(&self) -> Result<PcscConnection, DeviceError> {
         let reader = self
             .reader_name
             .as_deref()
             .ok_or(DeviceError::NoDeviceFound)?;
-        Ok(PcscConnection::new(reader, false)?)
+
+        let mut last_err = None;
+        for attempt in 0..9 {
+            match PcscConnection::new(reader, false) {
+                Ok(conn) => return Ok(conn),
+                Err(e) => {
+                    if attempt < 8 && e.is_no_card() {
+                        log::debug!(
+                            "SmartCard not ready (attempt {}), retrying in 500ms...",
+                            attempt + 1
+                        );
+                        thread::sleep(Duration::from_millis(500));
+                        last_err = Some(e);
+                    } else {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap().into())
     }
 
     /// Open an OTP HID connection to this device.
@@ -301,7 +324,7 @@ impl YubiKeyDevice {
         status_cb(ReinsertStatus::Remove);
 
         loop {
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(250));
             if cancelled() {
                 return Err(DeviceError::Cancelled);
             }
@@ -746,10 +769,29 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 /// Opens a fresh [`PcscConnection`] and uses [`ManagementSession`] to read
 /// [`DeviceInfo`]. For older devices (NEO, etc.) that don't support the
 /// management protocol, synthesizes DeviceInfo by probing individual applets.
+///
+/// On YubiKey NEO, the virtual smartcard may be temporarily ejected after
+/// an OTP or FIDO connection. This function retries for up to 4 seconds.
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
-    let conn = PcscConnection::new(reader_name, false)?;
-    let (info, _conn) = read_info_ccid(conn)?;
-    Ok(info)
+    let mut last_err = None;
+    for attempt in 0..9 {
+        match PcscConnection::new(reader_name, false) {
+            Ok(conn) => {
+                let (info, _conn) = read_info_ccid(conn)?;
+                return Ok(info);
+            }
+            Err(e) if e.is_no_card() && attempt < 8 => {
+                log::debug!(
+                    "SmartCard not ready for read_info (attempt {}), retrying in 500ms...",
+                    attempt + 1
+                );
+                thread::sleep(Duration::from_millis(500));
+                last_err = Some(e);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(last_err.unwrap().into())
 }
 
 /// Read device info from an open smart card connection.

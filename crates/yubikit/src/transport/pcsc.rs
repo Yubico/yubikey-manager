@@ -41,6 +41,16 @@ pub enum PcscError {
     ConnectionClosed,
 }
 
+impl PcscError {
+    /// Returns true if this error indicates the card is temporarily absent.
+    pub fn is_no_card(&self) -> bool {
+        matches!(
+            self,
+            PcscError::Pcsc(::pcsc::Error::NoSmartcard | ::pcsc::Error::RemovedCard)
+        )
+    }
+}
+
 impl From<PcscError> for SmartCardError {
     fn from(e: PcscError) -> Self {
         SmartCardError::Transport(Box::new(e))
