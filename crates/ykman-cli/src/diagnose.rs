@@ -1,9 +1,12 @@
 use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_otp};
-use yubikit::management::{Capability, DeviceInfo, ManagementFidoSession, ReleaseType};
+use yubikit::management::{
+    Capability, DeviceInfo, ManagementFidoSession, ManagementSession, ReleaseType,
+};
 use yubikit::smartcard::Transport;
 use yubikit::transport::ctaphid::{FidoConnection, list_fido_devices};
 use yubikit::transport::otphid::{OtpConnection, list_otp_devices};
 use yubikit::transport::pcsc::PcscConnection;
+use yubikit::yubiotp::YubiOtpSession;
 
 use crate::util::CliError;
 

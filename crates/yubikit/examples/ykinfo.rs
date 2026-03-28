@@ -23,7 +23,7 @@ use yubikit::openpgp::OpenPgpSession;
 use yubikit::piv::PivSession;
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::smartcard::Transport;
-use yubikit::yubiotp::YubiOtpSession;
+use yubikit::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -257,7 +257,7 @@ fn print_yubiotp_info(dev: &YubiKeyDevice) {
         Ok(c) => c,
         Err(_) => return,
     };
-    match YubiOtpSession::new(conn) {
+    match YubiOtpCcidSession::new(conn) {
         Ok(session) => {
             println!("\n  [YubiOTP] version {}", session.version());
         }

@@ -63,7 +63,7 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_piv::PivSession>()?;
     m.add_class::<py_openpgp::OpenPgpSession>()?;
     m.add_class::<py_hsmauth::HsmAuthSession>()?;
-    m.add_class::<py_management::ManagementSession>()?;
+    m.add_class::<py_management::ManagementCcidSession>()?;
     m.add_class::<py_management::ManagementOtpSession>()?;
     m.add_class::<py_management::ManagementFidoSession>()?;
     m.add_function(wrap_pyfunction!(py_management::py_list_fido_devices, &m)?)?;

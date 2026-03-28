@@ -2,8 +2,8 @@ use std::io::{self, Write};
 
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{
-    Capability, DeviceConfig, DeviceFlag, ManagementFidoSession, ManagementOtpSession,
-    ManagementSession,
+    Capability, DeviceConfig, DeviceFlag, ManagementCcidSession, ManagementFidoSession,
+    ManagementOtpSession, ManagementSession,
 };
 use yubikit::smartcard::Transport;
 
@@ -19,7 +19,7 @@ fn write_config(
     new_lock_code: Option<&[u8]>,
 ) -> Result<(), CliError> {
     if let Ok(conn) = dev.open_smartcard() {
-        let mut session = ManagementSession::new(conn)
+        let mut session = ManagementCcidSession::new(conn)
             .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
         session
             .write_device_config(config, reboot, lock_code, new_lock_code)
@@ -362,7 +362,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementSession::new(conn)
+    let mut session = ManagementCcidSession::new(conn)
         .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
     session
         .device_reset()
@@ -384,8 +384,7 @@ pub fn run_mode(
     if info.version >= yubikit::core::Version(5, 0, 0) && !force {
         return Err(CliError(
             "Mode switching is not supported on YubiKey 5 and later.\n\
-             Use \"ykman config usb\" for more granular control.\n\
-             Use --force to attempt to set it anyway."
+             Use \"ykman config usb\" for more granular control."
                 .into(),
         ));
     }
@@ -431,8 +430,18 @@ pub fn run_mode(
     }
 
     if let Ok(conn) = dev.open_smartcard() {
-        let mut session = ManagementSession::new(conn)
+        let mut session = ManagementCcidSession::new(conn)
             .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+        session
+            .set_mode(
+                code,
+                chalresp_timeout.unwrap_or(0),
+                autoeject_timeout.unwrap_or(0),
+            )
+            .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
+    } else if let Ok(conn) = dev.open_otp() {
+        let mut session = ManagementOtpSession::new(conn)
+            .map_err(|e| CliError(format!("Failed to open OTP management session: {e}")))?;
         session
             .set_mode(
                 code,
@@ -452,7 +461,7 @@ pub fn run_mode(
             .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
     } else {
         return Err(CliError(
-            "Failed to open connection: No SmartCard or FIDO connection available.".into(),
+            "Failed to open connection: No SmartCard, OTP, or FIDO connection available.".into(),
         ));
     }
 

@@ -807,16 +807,69 @@ fn validate_and_serialize_device_config(
 }
 
 // ---------------------------------------------------------------------------
-// ManagementSession (SmartCard)
+// ManagementSession trait
+// ---------------------------------------------------------------------------
+
+/// Common management session operations shared across transports.
+pub trait ManagementSession {
+    /// The firmware version of the YubiKey.
+    fn version(&self) -> Version;
+
+    /// Override the version (for development devices reporting 0.0.1).
+    fn set_version(&mut self, version: Version);
+
+    /// Read a configuration page from the device.
+    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError>;
+
+    /// Write configuration data to the device.
+    fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError>;
+
+    /// Get detailed information about the YubiKey.
+    fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        log::debug!("Reading device info");
+        if self.version() < Version(4, 1, 0) {
+            return Err(SmartCardError::NotSupported(
+                "DeviceInfo requires YubiKey 4.1.0 or later".into(),
+            ));
+        }
+        self.read_device_info_unchecked()
+    }
+
+    /// Read device info without version check (for dev device version override).
+    fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
+        read_device_info_from_config(self.version(), &mut |page| self.read_config(page))
+    }
+
+    /// Write configuration settings for YubiKey (requires 5.0.0+).
+    fn write_device_config(
+        &mut self,
+        config: &DeviceConfig,
+        reboot: bool,
+        cur_lock_code: Option<&[u8]>,
+        new_lock_code: Option<&[u8]>,
+    ) -> Result<(), SmartCardError> {
+        let data = validate_and_serialize_device_config(
+            self.version(),
+            config,
+            reboot,
+            cur_lock_code,
+            new_lock_code,
+        )?;
+        self.write_config(&data)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ManagementCcidSession (SmartCard)
 // ---------------------------------------------------------------------------
 
 /// Management application session over SmartCard (CCID).
-pub struct ManagementSession<C: SmartCardConnection> {
+pub struct ManagementCcidSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
 }
 
-impl<C: SmartCardConnection> ManagementSession<C> {
+impl<C: SmartCardConnection> ManagementCcidSession<C> {
     /// Open a management session, selecting the management AID.
     pub fn new(connection: C) -> Result<Self, SmartCardError> {
         let mut protocol = SmartCardProtocol::new(connection);
@@ -839,7 +892,7 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         mut protocol: SmartCardProtocol<C>,
         select_bytes: &[u8],
     ) -> Result<Self, SmartCardError> {
-        log::debug!("Opening ManagementSession");
+        log::debug!("Opening ManagementCcidSession");
         // YubiKey Edge incorrectly appends SW twice
         let select_bytes =
             if select_bytes.len() >= 2 && select_bytes[select_bytes.len() - 2..] == [0x90, 0x00] {
@@ -877,55 +930,6 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         self.protocol.into_connection()
     }
 
-    /// The firmware version of the YubiKey.
-    pub fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Override the version (for development devices reporting 0.0.1).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-        self.protocol.configure(version);
-    }
-
-    /// Get detailed information about the YubiKey.
-    pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        log::debug!("Reading device info");
-        if self.version < Version(4, 1, 0) {
-            return Err(SmartCardError::NotSupported(
-                "DeviceInfo requires YubiKey 4.1.0 or later".into(),
-            ));
-        }
-        self.do_read_device_info()
-    }
-
-    /// Read device info without version check (for dev device version override).
-    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        self.do_read_device_info()
-    }
-
-    fn do_read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        read_device_info_from_config(self.version, &mut |page| self.read_config(page))
-    }
-
-    /// Write configuration settings for YubiKey (requires 5.0.0+).
-    pub fn write_device_config(
-        &mut self,
-        config: &DeviceConfig,
-        reboot: bool,
-        cur_lock_code: Option<&[u8]>,
-        new_lock_code: Option<&[u8]>,
-    ) -> Result<(), SmartCardError> {
-        let data = validate_and_serialize_device_config(
-            self.version,
-            config,
-            reboot,
-            cur_lock_code,
-            new_lock_code,
-        )?;
-        self.write_config(&data)
-    }
-
     /// Write USB mode configuration (YubiKey NEO/4 style).
     pub fn set_mode(
         &mut self,
@@ -956,8 +960,17 @@ impl<C: SmartCardConnection> ManagementSession<C> {
         self.protocol.send_apdu(0, INS_DEVICE_RESET, 0, 0, &[])?;
         Ok(())
     }
+}
 
-    // -- Backend helpers ---
+impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+        self.protocol.configure(version);
+    }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
         // YubiKey 4+ and dev devices use INS_READ_CONFIG.
@@ -996,79 +1009,6 @@ impl ManagementOtpSession {
         Ok(Self { protocol, version })
     }
 
-    /// The firmware version of the YubiKey.
-    pub fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Override the version (for development devices reporting 0.0.1).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-    }
-
-    /// Read a configuration page via OTP slot, with CRC validation.
-    pub fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
-        let data = int2bytes(page as u64);
-        let response = self
-            .protocol
-            .send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data), Some(-1))
-            .map_err(otp_to_smartcard_err)?;
-        match response {
-            Some(raw) => {
-                let r_len = raw[0] as usize;
-                let checked =
-                    verify_and_strip_crc(&raw, r_len + 1).map_err(otp_to_smartcard_err)?;
-                Ok(checked)
-            }
-            None => Err(SmartCardError::BadResponse("Expected data response".into())),
-        }
-    }
-
-    /// Write configuration via OTP slot.
-    pub fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
-        self.protocol
-            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config), None)
-            .map_err(otp_to_smartcard_err)?;
-        Ok(())
-    }
-
-    /// Read device info, iterating over config pages.
-    pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        if self.version < Version(4, 1, 0) {
-            return Err(SmartCardError::NotSupported(
-                "DeviceInfo requires YubiKey 4.1.0 or later".into(),
-            ));
-        }
-        self.do_read_device_info()
-    }
-
-    /// Read device info without version check (for dev device version override).
-    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        self.do_read_device_info()
-    }
-
-    fn do_read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        read_device_info_from_config(self.version, &mut |page| self.read_config(page))
-    }
-
-    /// Write configuration settings for YubiKey (requires 5.0.0+).
-    pub fn write_device_config(
-        &mut self,
-        config: &DeviceConfig,
-        reboot: bool,
-        cur_lock_code: Option<&[u8]>,
-        new_lock_code: Option<&[u8]>,
-    ) -> Result<(), SmartCardError> {
-        let data = validate_and_serialize_device_config(
-            self.version,
-            config,
-            reboot,
-            cur_lock_code,
-            new_lock_code,
-        )?;
-        self.write_config(&data)
-    }
-
     /// Set USB mode via OTP slot.
     pub fn set_mode(
         &mut self,
@@ -1098,6 +1038,40 @@ impl ManagementOtpSession {
     /// Consume the session, returning the underlying connection.
     pub fn into_connection(self) -> OtpConnection {
         self.protocol.into_connection()
+    }
+}
+
+impl ManagementSession for ManagementOtpSession {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
+        let data = int2bytes(page as u64);
+        let response = self
+            .protocol
+            .send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data), Some(-1))
+            .map_err(otp_to_smartcard_err)?;
+        match response {
+            Some(raw) => {
+                let r_len = raw[0] as usize;
+                let checked =
+                    verify_and_strip_crc(&raw, r_len + 1).map_err(otp_to_smartcard_err)?;
+                Ok(checked)
+            }
+            None => Err(SmartCardError::BadResponse("Expected data response".into())),
+        }
+    }
+
+    fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
+        self.protocol
+            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config), None)
+            .map_err(otp_to_smartcard_err)?;
+        Ok(())
     }
 }
 
@@ -1180,69 +1154,6 @@ impl ManagementFidoSession {
         })
     }
 
-    /// The firmware version of the YubiKey.
-    pub fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Override the version (for development devices reporting 0.0.1).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-    }
-
-    /// Read a configuration page via vendor CTAP command.
-    pub fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
-        let data = int2bytes(page as u64);
-        self.connection
-            .call(CTAP_READ_CONFIG, &data)
-            .map_err(fido_to_smartcard_err)
-    }
-
-    /// Write configuration via vendor CTAP command.
-    pub fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
-        self.connection
-            .call(CTAP_WRITE_CONFIG, config)
-            .map_err(fido_to_smartcard_err)?;
-        Ok(())
-    }
-
-    /// Read device info, iterating over config pages.
-    pub fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        if self.version < Version(4, 1, 0) {
-            return Err(SmartCardError::NotSupported(
-                "DeviceInfo requires YubiKey 4.1.0 or later".into(),
-            ));
-        }
-        self.do_read_device_info()
-    }
-
-    /// Read device info without version check.
-    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        self.do_read_device_info()
-    }
-
-    fn do_read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        read_device_info_from_config(self.version, &mut |page| self.read_config(page))
-    }
-
-    /// Write configuration settings for YubiKey (requires 5.0.0+).
-    pub fn write_device_config(
-        &mut self,
-        config: &DeviceConfig,
-        reboot: bool,
-        cur_lock_code: Option<&[u8]>,
-        new_lock_code: Option<&[u8]>,
-    ) -> Result<(), SmartCardError> {
-        let data = validate_and_serialize_device_config(
-            self.version,
-            config,
-            reboot,
-            cur_lock_code,
-            new_lock_code,
-        )?;
-        self.write_config(&data)
-    }
-
     /// Set USB mode via vendor CTAP command.
     pub fn set_mode(
         &mut self,
@@ -1270,6 +1181,30 @@ impl ManagementFidoSession {
     /// Close the session and return the underlying connection.
     pub fn into_connection(self) -> FidoConnection {
         self.connection
+    }
+}
+
+impl ManagementSession for ManagementFidoSession {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
+        let data = int2bytes(page as u64);
+        self.connection
+            .call(CTAP_READ_CONFIG, &data)
+            .map_err(fido_to_smartcard_err)
+    }
+
+    fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
+        self.connection
+            .call(CTAP_WRITE_CONFIG, config)
+            .map_err(fido_to_smartcard_err)?;
+        Ok(())
     }
 }
 

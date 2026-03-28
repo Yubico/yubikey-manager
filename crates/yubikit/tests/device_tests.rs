@@ -20,7 +20,9 @@ use yubikit::core::{Version, set_override_version};
 use yubikit::device::{
     YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
 };
-use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType};
+use yubikit::management::{
+    Capability, DeviceInfo, ManagementCcidSession, ManagementSession, ReleaseType,
+};
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::smartcard::Transport;
 use yubikit::transport::pcsc::{PcscConnection, list_readers};
@@ -152,7 +154,7 @@ fn get_scp11b_params() -> &'static Option<(u8, u8, Vec<u8>)> {
 fn get_nfc_device_version() -> &'static Option<Version> {
     NFC_DEVICE_VERSION.get_or_init(|| {
         let conn = open_nfc_smartcard()?;
-        let mut session = ManagementSession::new(conn).ok()?;
+        let mut session = ManagementCcidSession::new(conn).ok()?;
         let info = session.read_device_info_unchecked().ok()?;
         Some(info.version)
     })
@@ -328,9 +330,10 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             let conn = open_smartcard_connection(&tc);
             let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
                 let params = make_scp_key_params(*kid, *kvn, pk);
-                ManagementSession::new_with_scp(conn, &params).expect("ManagementSession with SCP")
+                ManagementCcidSession::new_with_scp(conn, &params)
+                    .expect("ManagementCcidSession with SCP")
             } else {
-                ManagementSession::new(conn).expect("ManagementSession::new")
+                ManagementCcidSession::new(conn).expect("ManagementCcidSession::new")
             };
             let info = session
                 .read_device_info_unchecked()
@@ -1241,7 +1244,7 @@ mod openpgp {
 
 mod yubiotp {
     use super::*;
-    use yubikit::yubiotp::{YubiOtpOtpSession, YubiOtpSession};
+    use yubikit::yubiotp::{YubiOtpCcidSession, YubiOtpOtpSession, YubiOtpSession};
 
     #[rstest]
     #[case(TestConnection::UsbSmartCard)]
@@ -1263,9 +1266,10 @@ mod yubiotp {
                 let conn = open_smartcard_connection(&tc);
                 let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
                     let params = make_scp_key_params(*kid, *kvn, pk);
-                    YubiOtpSession::new_with_scp(conn, &params).expect("YubiOtpSession with SCP")
+                    YubiOtpCcidSession::new_with_scp(conn, &params)
+                        .expect("YubiOtpCcidSession with SCP")
                 } else {
-                    YubiOtpSession::new(conn).expect("YubiOtpSession::new")
+                    YubiOtpCcidSession::new(conn).expect("YubiOtpCcidSession::new")
                 };
                 let _v = session.version();
             }

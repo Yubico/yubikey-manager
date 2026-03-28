@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
 use yubikit::management::{
-    DeviceInfo, ManagementFidoSession as RustManagementFidoSession,
-    ManagementOtpSession as RustManagementOtpSession, ManagementSession as RustManagementSession,
+    DeviceInfo, ManagementCcidSession as RustManagementCcidSession,
+    ManagementFidoSession as RustManagementFidoSession,
+    ManagementOtpSession as RustManagementOtpSession, ManagementSession,
 };
 use yubikit::transport::ctaphid::list_fido_devices;
 
@@ -65,13 +66,13 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
     Ok(dict.into())
 }
 
-#[pyclass]
-pub struct ManagementSession {
-    inner: RustManagementSession<PySmartCardConnection>,
+#[pyclass(name = "ManagementSession")]
+pub struct ManagementCcidSession {
+    inner: RustManagementCcidSession<PySmartCardConnection>,
 }
 
 #[pymethods]
-impl ManagementSession {
+impl ManagementCcidSession {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
     fn new(
@@ -81,11 +82,11 @@ impl ManagementSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner =
-                RustManagementSession::new_with_scp(conn, &scp_params).map_err(smartcard_err)?;
+            let inner = RustManagementCcidSession::new_with_scp(conn, &scp_params)
+                .map_err(smartcard_err)?;
             Ok(Self { inner })
         } else {
-            let inner = RustManagementSession::new(conn).map_err(smartcard_err)?;
+            let inner = RustManagementCcidSession::new(conn).map_err(smartcard_err)?;
             Ok(Self { inner })
         }
     }

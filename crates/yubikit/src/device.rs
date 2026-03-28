@@ -49,8 +49,8 @@ use std::time::Duration;
 
 use crate::core::set_override_version;
 use crate::management::{
-    Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementFidoSession, ManagementOtpSession,
-    ManagementSession, ReleaseType, UsbInterface,
+    Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementCcidSession, ManagementFidoSession,
+    ManagementOtpSession, ManagementSession, ReleaseType, UsbInterface,
 };
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
@@ -59,7 +59,7 @@ use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_device
 use crate::transport::otphid::{HidDeviceInfo, HidError, OtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
 use crate::transport::pcsc::{PcscConnection, PcscError};
-use crate::yubiotp::YubiOtpSession;
+use crate::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
 
 // ---------------------------------------------------------------------------
 // DeviceError
@@ -774,7 +774,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
 /// Read device info from a PC/SC reader.
 ///
-/// Opens a fresh [`PcscConnection`] and uses [`ManagementSession`] to read
+/// Opens a fresh [`PcscConnection`] and uses [`ManagementCcidSession`] to read
 /// [`DeviceInfo`]. For older devices (NEO, etc.) that don't support the
 /// management protocol, synthesizes DeviceInfo by probing individual applets.
 ///
@@ -804,13 +804,13 @@ pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
 
 /// Read device info from an open smart card connection.
 ///
-/// Uses [`ManagementSession`] to read [`DeviceInfo`]. For older devices
+/// Uses [`ManagementCcidSession`] to read [`DeviceInfo`]. For older devices
 /// (NEO, etc.) that don't support the management protocol, synthesizes
 /// DeviceInfo by probing individual applets.
 ///
 /// Returns the info and the connection so it can be reused.
 pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
-    let mut session = ManagementSession::new(conn)?;
+    let mut session = ManagementCcidSession::new(conn)?;
     let version = session.version();
 
     match session.read_device_info_unchecked() {
@@ -904,7 +904,7 @@ fn synthesize_info_ccid<C: SmartCardConnection>(
 
     // Try to read serial from OTP application
     let mut serial = None;
-    let conn = match YubiOtpSession::new(conn) {
+    let conn = match YubiOtpCcidSession::new(conn) {
         Ok(mut otp_session) => {
             capabilities |= Capability::OTP;
             match otp_session.get_serial() {

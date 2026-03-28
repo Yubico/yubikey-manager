@@ -7,7 +7,7 @@ use yubikit::management::Capability;
 use yubikit::otp::{modhex_decode, modhex_encode};
 use yubikit::yubiotp::{
     ACC_CODE_SIZE, ConfigState, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE,
-    YubiOtpError, YubiOtpOtpSession, YubiOtpSession,
+    YubiOtpCcidSession, YubiOtpError, YubiOtpOtpSession, YubiOtpSession,
 };
 
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
@@ -19,7 +19,7 @@ const SHIFT: u8 = 0x80;
 /// Unified OTP session that can be either HID or SmartCard backed.
 enum OtpSession<C: yubikit::smartcard::SmartCardConnection> {
     Otp(YubiOtpOtpSession),
-    Sc(YubiOtpSession<C>),
+    Sc(YubiOtpCcidSession<C>),
 }
 
 macro_rules! delegate {
@@ -144,7 +144,7 @@ fn open_sc<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let session = YubiOtpSession::new(conn)
+            let session = YubiOtpCcidSession::new(conn)
                 .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
             Ok(OtpSession::Sc(session))
         }
@@ -154,7 +154,7 @@ fn open_sc<'a>(
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
-            let session = YubiOtpSession::new_with_scp(conn, &params)
+            let session = YubiOtpCcidSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
             Ok(OtpSession::Sc(session))
         }

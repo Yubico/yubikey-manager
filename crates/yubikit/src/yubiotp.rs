@@ -855,18 +855,143 @@ impl SlotConfiguration {
 }
 
 // ---------------------------------------------------------------------------
-// YubiOtpSession — SmartCard backend
+// YubiOtpSession trait — shared operations across transports
+// ---------------------------------------------------------------------------
+
+/// Common YubiOTP session operations shared across transports.
+pub trait YubiOtpSession {
+    /// The firmware version of the YubiKey.
+    fn version(&self) -> Version;
+
+    /// Override the firmware version (used for dev devices).
+    fn set_version(&mut self, version: Version);
+
+    /// Access the raw status bytes.
+    fn status(&self) -> &[u8];
+
+    /// Write raw config bytes to a config slot.
+    fn write_config(
+        &mut self,
+        slot: ConfigSlot,
+        config: &[u8],
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError>;
+
+    /// Send a command and receive a response of expected length.
+    fn send_and_receive(
+        &mut self,
+        slot: ConfigSlot,
+        data: &[u8],
+        expected_len: usize,
+    ) -> Result<Vec<u8>, YubiOtpError>;
+
+    /// Get the serial number of the YubiKey.
+    fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
+        let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
+        Ok(u32::from_be_bytes([resp[0], resp[1], resp[2], resp[3]]))
+    }
+
+    /// Get the current configuration state.
+    fn get_config_state(&self) -> ConfigState {
+        let touch_level = if self.status().len() >= 6 {
+            u16::from_le_bytes([self.status()[4], self.status()[5]])
+        } else {
+            0
+        };
+        ConfigState::new(self.version(), touch_level)
+    }
+
+    /// Write a configuration to a slot.
+    fn put_configuration(
+        &mut self,
+        slot: Slot,
+        config: &SlotConfiguration,
+        acc_code: Option<&[u8]>,
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError> {
+        if !config.is_supported_by(self.version()) {
+            return Err(YubiOtpError::NotSupported(
+                "This configuration is not supported on this YubiKey version".into(),
+            ));
+        }
+        let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
+        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
+    }
+
+    /// Update an existing configuration in a slot.
+    fn update_configuration(
+        &mut self,
+        slot: Slot,
+        config: &SlotConfiguration,
+        acc_code: Option<&[u8]>,
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError> {
+        if !config.is_supported_by(self.version()) {
+            return Err(YubiOtpError::NotSupported(
+                "This configuration is not supported on this YubiKey version".into(),
+            ));
+        }
+        if acc_code != cur_acc_code
+            && self.version() >= Version(4, 3, 2)
+            && self.version() < Version(4, 3, 6)
+        {
+            return Err(YubiOtpError::NotSupported(
+                "The access code cannot be updated on this YubiKey. \
+                 Instead, delete the slot and configure it anew."
+                    .into(),
+            ));
+        }
+        let config_slot = slot.map(ConfigSlot::Update1, ConfigSlot::Update2);
+        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
+    }
+
+    /// Swap the two slot configurations.
+    fn swap_slots(&mut self) -> Result<(), YubiOtpError> {
+        self.write_config(ConfigSlot::Swap, &[], None)
+    }
+
+    /// Delete the configuration stored in a slot.
+    fn delete_slot(&mut self, slot: Slot, cur_acc_code: Option<&[u8]>) -> Result<(), YubiOtpError> {
+        let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
+        self.write_config(config_slot, &[0u8; CONFIG_SIZE], cur_acc_code)
+    }
+
+    /// Update scan-code map on the YubiKey.
+    fn set_scan_map(
+        &mut self,
+        scan_map: &[u8],
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError> {
+        self.write_config(ConfigSlot::ScanMap, scan_map, cur_acc_code)
+    }
+
+    /// Configure a slot to be used over NDEF (NFC).
+    fn set_ndef_configuration(
+        &mut self,
+        slot: Slot,
+        uri: Option<&str>,
+        cur_acc_code: Option<&[u8]>,
+        ndef_type: NdefType,
+    ) -> Result<(), YubiOtpError> {
+        let config_slot = slot.map(ConfigSlot::Ndef1, ConfigSlot::Ndef2);
+        let ndef_data = build_ndef_config(uri, ndef_type)?;
+        self.write_config(config_slot, &ndef_data, cur_acc_code)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// YubiOtpCcidSession — SmartCard backend
 // ---------------------------------------------------------------------------
 
 /// A session with the YubiOTP application over a SmartCard connection.
-pub struct YubiOtpSession<C: SmartCardConnection> {
+pub struct YubiOtpCcidSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
     status: Vec<u8>,
     prog_seq: u8,
 }
 
-impl<C: SmartCardConnection> YubiOtpSession<C> {
+impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
     /// Open a YubiOTP session on the given SmartCard connection.
     pub fn new(connection: C) -> Result<Self, YubiOtpError> {
         let mut protocol = SmartCardProtocol::new(connection);
@@ -886,7 +1011,7 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
     }
 
     fn init(mut protocol: SmartCardProtocol<C>, status: &[u8]) -> Result<Self, YubiOtpError> {
-        log::debug!("Opening YubiOtpSession (SmartCard)");
+        log::debug!("Opening YubiOtpCcidSession (SmartCard)");
         let version = patch_version(Version::from_bytes(&status[..3]));
         let prog_seq = *status.get(3).unwrap_or(&0);
         protocol.configure(version);
@@ -897,113 +1022,6 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
             status: status.to_vec(),
             prog_seq,
         })
-    }
-
-    /// The firmware version of the YubiKey.
-    pub fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Override the firmware version (used for dev devices).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-    }
-
-    /// Get the serial number of the YubiKey.
-    pub fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
-        let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
-        Ok(u32::from_be_bytes([resp[0], resp[1], resp[2], resp[3]]))
-    }
-
-    /// Get the current configuration state.
-    pub fn get_config_state(&self) -> ConfigState {
-        let touch_level = if self.status.len() >= 6 {
-            u16::from_le_bytes([self.status[4], self.status[5]])
-        } else {
-            0
-        };
-        ConfigState::new(self.version, touch_level)
-    }
-
-    /// Write a configuration to a slot.
-    pub fn put_configuration(
-        &mut self,
-        slot: Slot,
-        config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        if !config.is_supported_by(self.version) {
-            return Err(YubiOtpError::NotSupported(
-                "This configuration is not supported on this YubiKey version".into(),
-            ));
-        }
-        let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
-    }
-
-    /// Update an existing configuration in a slot.
-    pub fn update_configuration(
-        &mut self,
-        slot: Slot,
-        config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        if !config.is_supported_by(self.version) {
-            return Err(YubiOtpError::NotSupported(
-                "This configuration is not supported on this YubiKey version".into(),
-            ));
-        }
-        if acc_code != cur_acc_code
-            && self.version >= Version(4, 3, 2)
-            && self.version < Version(4, 3, 6)
-        {
-            return Err(YubiOtpError::NotSupported(
-                "The access code cannot be updated on this YubiKey. \
-                 Instead, delete the slot and configure it anew."
-                    .into(),
-            ));
-        }
-        let config_slot = slot.map(ConfigSlot::Update1, ConfigSlot::Update2);
-        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
-    }
-
-    /// Swap the two slot configurations.
-    pub fn swap_slots(&mut self) -> Result<(), YubiOtpError> {
-        self.write_config(ConfigSlot::Swap, &[], None)
-    }
-
-    /// Delete the configuration stored in a slot.
-    pub fn delete_slot(
-        &mut self,
-        slot: Slot,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.write_config(config_slot, &[0u8; CONFIG_SIZE], cur_acc_code)
-    }
-
-    /// Update scan-code map on the YubiKey.
-    pub fn set_scan_map(
-        &mut self,
-        scan_map: &[u8],
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        self.write_config(ConfigSlot::ScanMap, scan_map, cur_acc_code)
-    }
-
-    /// Configure a slot to be used over NDEF (NFC).
-    pub fn set_ndef_configuration(
-        &mut self,
-        slot: Slot,
-        uri: Option<&str>,
-        cur_acc_code: Option<&[u8]>,
-        ndef_type: NdefType,
-    ) -> Result<(), YubiOtpError> {
-        let config_slot = slot.map(ConfigSlot::Ndef1, ConfigSlot::Ndef2);
-        let ndef_data = build_ndef_config(uri, ndef_type)?;
-        self.write_config(config_slot, &ndef_data, cur_acc_code)
     }
 
     /// Perform an HMAC-SHA1 challenge-response operation.
@@ -1043,24 +1061,6 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         self.protocol.into_connection()
     }
 
-    // -- internal (pub for PyO3 wrapper) -------------------------------------
-
-    /// Write raw config bytes to a config slot (SmartCard).
-    pub fn write_config(
-        &mut self,
-        slot: ConfigSlot,
-        config: &[u8],
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        let mut data = config.to_vec();
-        match cur_acc_code {
-            Some(ac) => data.extend_from_slice(ac),
-            None => data.extend_from_slice(&[0u8; ACC_CODE_SIZE]),
-        }
-        self.write_update(slot, &data)?;
-        Ok(())
-    }
-
     fn write_update(&mut self, slot: ConfigSlot, data: &[u8]) -> Result<Vec<u8>, YubiOtpError> {
         let mut status = self
             .protocol
@@ -1087,9 +1087,37 @@ impl<C: SmartCardConnection> YubiOtpSession<C> {
         }
         Err(YubiOtpError::CommandRejected("Not updated".into()))
     }
+}
 
-    /// Send a command and receive a response of expected length.
-    pub fn send_and_receive(
+impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    fn status(&self) -> &[u8] {
+        &self.status
+    }
+
+    fn write_config(
+        &mut self,
+        slot: ConfigSlot,
+        config: &[u8],
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError> {
+        let mut data = config.to_vec();
+        match cur_acc_code {
+            Some(ac) => data.extend_from_slice(ac),
+            None => data.extend_from_slice(&[0u8; ACC_CODE_SIZE]),
+        }
+        self.write_update(slot, &data)?;
+        Ok(())
+    }
+
+    fn send_and_receive(
         &mut self,
         slot: ConfigSlot,
         data: &[u8],
@@ -1135,113 +1163,6 @@ impl YubiOtpOtpSession {
         })
     }
 
-    /// The firmware version of the YubiKey.
-    pub fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Override the firmware version (used for dev devices).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-    }
-
-    /// Get the serial number of the YubiKey.
-    pub fn get_serial(&self) -> Result<u32, YubiOtpError> {
-        let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
-        Ok(u32::from_be_bytes([resp[0], resp[1], resp[2], resp[3]]))
-    }
-
-    /// Get the current configuration state.
-    pub fn get_config_state(&self) -> ConfigState {
-        let touch_level = if self.status.len() >= 6 {
-            u16::from_le_bytes([self.status[4], self.status[5]])
-        } else {
-            0
-        };
-        ConfigState::new(self.version, touch_level)
-    }
-
-    /// Write a configuration to a slot.
-    pub fn put_configuration(
-        &mut self,
-        slot: Slot,
-        config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        if !config.is_supported_by(self.version) {
-            return Err(YubiOtpError::NotSupported(
-                "This configuration is not supported on this YubiKey version".into(),
-            ));
-        }
-        let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
-    }
-
-    /// Update an existing configuration in a slot.
-    pub fn update_configuration(
-        &mut self,
-        slot: Slot,
-        config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        if !config.is_supported_by(self.version) {
-            return Err(YubiOtpError::NotSupported(
-                "This configuration is not supported on this YubiKey version".into(),
-            ));
-        }
-        if acc_code != cur_acc_code
-            && self.version >= Version(4, 3, 2)
-            && self.version < Version(4, 3, 6)
-        {
-            return Err(YubiOtpError::NotSupported(
-                "The access code cannot be updated on this YubiKey. \
-                 Instead, delete the slot and configure it anew."
-                    .into(),
-            ));
-        }
-        let config_slot = slot.map(ConfigSlot::Update1, ConfigSlot::Update2);
-        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
-    }
-
-    /// Swap the two slot configurations.
-    pub fn swap_slots(&mut self) -> Result<(), YubiOtpError> {
-        self.write_config(ConfigSlot::Swap, &[], None)
-    }
-
-    /// Delete the configuration stored in a slot.
-    pub fn delete_slot(
-        &mut self,
-        slot: Slot,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.write_config(config_slot, &[0u8; CONFIG_SIZE], cur_acc_code)
-    }
-
-    /// Update scan-code map on the YubiKey.
-    pub fn set_scan_map(
-        &mut self,
-        scan_map: &[u8],
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        self.write_config(ConfigSlot::ScanMap, scan_map, cur_acc_code)
-    }
-
-    /// Configure a slot to be used over NDEF (NFC).
-    pub fn set_ndef_configuration(
-        &mut self,
-        slot: Slot,
-        uri: Option<&str>,
-        cur_acc_code: Option<&[u8]>,
-        ndef_type: NdefType,
-    ) -> Result<(), YubiOtpError> {
-        let config_slot = slot.map(ConfigSlot::Ndef1, ConfigSlot::Ndef2);
-        let ndef_data = build_ndef_config(uri, ndef_type)?;
-        self.write_config(config_slot, &ndef_data, cur_acc_code)
-    }
-
     /// Perform an HMAC-SHA1 challenge-response operation.
     pub fn calculate_hmac_sha1(
         &mut self,
@@ -1273,10 +1194,26 @@ impl YubiOtpOtpSession {
         response.ok_or_else(|| YubiOtpError::BadResponse("No data in HMAC response".into()))
     }
 
-    // -- internal (pub for PyO3 wrapper) -------------------------------------
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> OtpConnection {
+        self.protocol.into_connection()
+    }
+}
 
-    /// Write raw config bytes to a config slot (HID/OTP).
-    pub fn write_config(
+impl YubiOtpSession for YubiOtpOtpSession {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    fn status(&self) -> &[u8] {
+        &self.status
+    }
+
+    fn write_config(
         &mut self,
         slot: ConfigSlot,
         config: &[u8],
@@ -1294,7 +1231,7 @@ impl YubiOtpOtpSession {
     }
 
     fn send_and_receive(
-        &self,
+        &mut self,
         slot: ConfigSlot,
         data: &[u8],
         expected_len: usize,
@@ -1303,11 +1240,6 @@ impl YubiOtpOtpSession {
         self.protocol
             .send_and_receive(slot as u8, send_data, Some(expected_len as i32))?
             .ok_or_else(|| YubiOtpError::BadResponse("Expected data response, got status".into()))
-    }
-
-    /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> OtpConnection {
-        self.protocol.into_connection()
     }
 }
 

@@ -2,8 +2,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::smartcard::Version;
 use yubikit::yubiotp::{
-    self, ConfigSlot, NdefType, Slot, YubiOtpOtpSession as RustYubiOtpOtpSession,
-    YubiOtpSession as RustYubiOtpSession,
+    self, ConfigSlot, NdefType, Slot, YubiOtpCcidSession as RustYubiOtpCcidSession,
+    YubiOtpOtpSession as RustYubiOtpOtpSession, YubiOtpSession as _,
 };
 
 use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
@@ -80,7 +80,7 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
 
 #[pyclass(name = "YubiOtpSession")]
 pub struct PyYubiOtpSession {
-    session: RustYubiOtpSession<PySmartCardConnection>,
+    session: RustYubiOtpCcidSession<PySmartCardConnection>,
 }
 
 #[pymethods]
@@ -95,10 +95,10 @@ impl PyYubiOtpSession {
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let session =
-                RustYubiOtpSession::new_with_scp(conn, &scp_params).map_err(yubiotp_err)?;
+                RustYubiOtpCcidSession::new_with_scp(conn, &scp_params).map_err(yubiotp_err)?;
             Ok(Self { session })
         } else {
-            let session = RustYubiOtpSession::new(conn).map_err(yubiotp_err)?;
+            let session = RustYubiOtpCcidSession::new(conn).map_err(yubiotp_err)?;
             Ok(Self { session })
         }
     }
@@ -240,7 +240,7 @@ impl PyYubiOtpOtpSession {
             .set_version(Version(version.0, version.1, version.2));
     }
 
-    fn get_serial(&self) -> PyResult<u32> {
+    fn get_serial(&mut self) -> PyResult<u32> {
         self.session.get_serial().map_err(yubiotp_err)
     }
 
