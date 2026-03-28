@@ -281,16 +281,19 @@ fn pivman_set_mgm_key(
 
 // ---------------------------------------------------------------------------
 
+/// Authenticate the management key. Returns true if PIN was verified as a
+/// side effect (i.e. when using a PIN-protected management key).
 fn authenticate_session(
     session: &mut PivSession<impl SmartCardConnection>,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<bool, CliError> {
     if let Some(k) = mgmt_key {
         let key = parse_management_key(k)?;
-        return session
+        session
             .authenticate(&key)
-            .map_err(|e| CliError(format!("Authentication failed: {e}")));
+            .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
+        return Ok(false);
     }
 
     // Check if the key is stored on device (protected by PIN)
@@ -299,9 +302,10 @@ fn authenticate_session(
         ensure_pin(session, pin)?;
         let prot = get_pivman_protected_data(session);
         if let Some((_, key)) = prot.iter().find(|(t, _)| *t == TAG_PIVMAN_KEY) {
-            return session
+            session
                 .authenticate(key)
-                .map_err(|e| CliError(format!("Authentication with stored key failed: {e}")));
+                .map_err(|e| CliError(format!("Authentication with stored key failed: {e}")))?;
+            return Ok(true);
         }
         return Err(CliError(
             "Management key is marked as stored on device but could not be read.".into(),
@@ -310,13 +314,14 @@ fn authenticate_session(
 
     // Try default key first, prompt if it fails
     if session.authenticate(DEFAULT_MANAGEMENT_KEY).is_ok() {
-        return Ok(());
+        return Ok(false);
     }
     let input = crate::util::prompt_secret("Enter management key")?;
     let key = parse_management_key(&input)?;
     session
         .authenticate(&key)
-        .map_err(|e| CliError(format!("Authentication failed: {e}")))
+        .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
+    Ok(false)
 }
 
 /// Ensure PIN is verified. If pin is Some, verifies it. If None, prompts.
@@ -650,8 +655,10 @@ pub fn run_set_retries(
     }
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
     session
         .set_pin_attempts(pin_retries, puk_retries)
         .map_err(|e| CliError(format!("Failed to set retries: {e}")))?;
@@ -702,8 +709,8 @@ pub fn run_change_management_key(
     }
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    if protect {
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if protect && !pin_verified {
         ensure_pin(&mut session, pin)?;
     }
     pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)?;
@@ -734,8 +741,10 @@ pub fn run_keys_generate(
     let tp = parse_touch_policy(touch_policy)?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
 
     let pub_key_device = session
         .generate_key(slot, key_type, pp, tp)
@@ -794,8 +803,10 @@ pub fn run_keys_import(
         .map_err(|_| CliError("Could not determine key type from file.".into()))?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
 
     session
         .put_key(slot, key_type, &der, pp, tp)
@@ -896,8 +907,10 @@ pub fn run_keys_move(
     let from = parse_slot(source)?;
     let to = parse_slot(dest)?;
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
     session
         .move_key(from, to)
         .map_err(|e| CliError(format!("Failed to move key: {e}")))?;
@@ -914,8 +927,10 @@ pub fn run_keys_delete(
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
     session
         .delete_key(slot)
         .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
@@ -966,8 +981,10 @@ pub fn run_certificates_import(
     };
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
 
     session
         .put_certificate(slot, &der, compress)
@@ -990,8 +1007,10 @@ pub fn run_certificates_delete(
 ) -> Result<(), CliError> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
     session
         .delete_certificate(slot)
         .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
@@ -1033,8 +1052,10 @@ pub fn run_objects_import(
     let data = read_file_or_stdin(data_file)?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, mgmt_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
     session
         .put_object(obj_id, Some(&data))
         .map_err(|e| CliError(format!("Failed to write object: {e}")))?;
@@ -1078,8 +1099,10 @@ pub fn run_objects_generate(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
-    ensure_pin(&mut session, pin)?;
-    authenticate_session(&mut session, management_key, pin)?;
+    let pin_verified = authenticate_session(&mut session, management_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
 
     match object.to_uppercase().as_str() {
         "CHUID" => {
@@ -1167,8 +1190,10 @@ pub fn run_certificates_generate(
     let hash_alg = parse_hash_algorithm(hash_algorithm)?;
 
     let mut session = open_session(dev, scp_params)?;
-    authenticate_session(&mut session, management_key, pin)?;
-    ensure_pin(&mut session, pin)?;
+    let pin_verified = authenticate_session(&mut session, management_key, pin)?;
+    if !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
 
     let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
 
