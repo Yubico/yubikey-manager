@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use yubikit::device::YubiKeyDevice;
-use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
+use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 
 use crate::scp::ScpParams;
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
@@ -28,29 +28,86 @@ fn confirm(msg: &str) -> bool {
 pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let _ = scp_params;
     let mut session = open_session(dev)?;
-    println!("Security Domain version: {}", session.version());
 
     let keys = session
         .get_key_information()
         .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
 
-    if keys.is_empty() {
-        eprintln!("No keys stored.");
-    } else {
-        for (key_ref, components) in &keys {
-            let comps: Vec<String> = components
-                .iter()
-                .map(|(comp_id, key_type)| format!("0x{comp_id:02X}=0x{key_type:02X}"))
-                .collect();
+    let cas = session
+        .get_supported_ca_identifiers(true, true)
+        .unwrap_or_default();
+
+    // Collect and sort keys: SCP03 (KID 1-3) first, then SCP11 by KID/KVN
+    let mut key_refs: Vec<&KeyRef> = keys.keys().collect();
+    key_refs.sort_by(|a, b| a.kid.cmp(&b.kid).then_with(|| a.kvn.cmp(&b.kvn)));
+
+    println!("SCP keys:");
+
+    let mut first = true;
+    for key_ref in key_refs {
+        // SCP03 key sets: KID 0x01-0x03 are always a group, skip 0x02/0x03
+        if key_ref.kid == 0x02 || key_ref.kid == 0x03 {
+            continue;
+        }
+
+        if !first {
+            println!();
+        }
+        first = false;
+
+        if key_ref.kid == 0x01 {
+            // SCP03 key set
+            let label = if key_ref.kvn == 0xFF {
+                "Default key set"
+            } else {
+                "Imported key set"
+            };
+            println!("  SCP03 (KID=0x01-0x03, KVN=0x{:02X}):", key_ref.kvn);
+            println!("    {label}");
+        } else {
+            // SCP11 variant
+            let name = match ScpKid::from_u8(key_ref.kid) {
+                Some(ScpKid::Scp11a) => "SCP11a",
+                Some(ScpKid::Scp11b) => "SCP11b",
+                Some(ScpKid::Scp11c) => "SCP11c",
+                _ => "SCP11 OCE CA",
+            };
             println!(
-                "Key 0x{:02X} (KVN 0x{:02X}): {}",
-                key_ref.kid,
-                key_ref.kvn,
-                comps.join(", ")
+                "  {name} (KID=0x{:02X}, KVN=0x{:02X}):",
+                key_ref.kid, key_ref.kvn
             );
+
+            // Show CA Key Identifier if available
+            if let Some(ca_id) = cas.get(key_ref) {
+                let hex_str: Vec<String> = ca_id.iter().map(|b| format!("{b:02X}")).collect();
+                println!("    CA Key Identifier: {}", hex_str.join(":"));
+            }
+
+            // Show certificate chain subjects
+            match session.get_certificate_bundle(*key_ref) {
+                Ok(certs) if !certs.is_empty() => {
+                    println!("    Certificate chain:");
+                    for cert_der in &certs {
+                        let subject = extract_cert_subject(cert_der);
+                        println!("      {subject}");
+                    }
+                }
+                _ => {}
+            }
         }
     }
+    println!();
     Ok(())
+}
+
+/// Extract the subject CN from a DER-encoded certificate.
+fn extract_cert_subject(der: &[u8]) -> String {
+    use x509_cert::Certificate;
+    use x509_cert::der::Decode;
+    match Certificate::from_der(der) {
+        Ok(cert) => cert.tbs_certificate.subject.to_string(),
+        Err(_) => "(unable to parse certificate)".to_string(),
+    }
 }
 
 pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
