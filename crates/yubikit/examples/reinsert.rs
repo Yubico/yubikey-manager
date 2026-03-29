@@ -36,6 +36,12 @@ fn main() {
             ReinsertStatus::Reinsert => {
                 println!("Now reinsert the YubiKey...");
             }
+            ReinsertStatus::RemoveFromReader => {
+                println!("Remove the YubiKey from the NFC reader...");
+            }
+            ReinsertStatus::PlaceOnReader => {
+                println!("Place the YubiKey on the NFC reader again...");
+            }
         },
         &|| false,
     ) {

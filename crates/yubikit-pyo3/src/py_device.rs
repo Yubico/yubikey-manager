@@ -200,6 +200,15 @@ impl NativeYubiKeyDevice {
         self.inner.pid()
     }
 
+    /// Get the transport type ("usb" or "nfc").
+    #[getter]
+    fn transport(&self) -> &'static str {
+        match self.inner.transport() {
+            yubikit::core::Transport::Usb => "usb",
+            yubikit::core::Transport::Nfc => "nfc",
+        }
+    }
+
     /// Get the product name.
     #[getter]
     fn name(&self) -> String {
@@ -247,6 +256,8 @@ impl NativeYubiKeyDevice {
                     let status_str = match status {
                         device::ReinsertStatus::Remove => "remove",
                         device::ReinsertStatus::Reinsert => "reinsert",
+                        device::ReinsertStatus::RemoveFromReader => "remove_from_reader",
+                        device::ReinsertStatus::PlaceOnReader => "place_on_reader",
                     };
                     Python::with_gil(|py| {
                         let _ = status_cb.call1(py, (status_str,));

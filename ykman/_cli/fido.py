@@ -277,6 +277,10 @@ def reset(ctx, force):
                     click.echo(remove_msg)
                 case REINSERT_STATUS.REINSERT:
                     click.echo(insert_msg)
+                case REINSERT_STATUS.REMOVE_FROM_READER:
+                    click.echo(remove_msg)
+                case REINSERT_STATUS.PLACE_ON_READER:
+                    click.echo(insert_msg)
 
         dev.reinsert(reinsert_cb=prompt_reinsert)
 

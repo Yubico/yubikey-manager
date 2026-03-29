@@ -36,6 +36,8 @@ from yubikit.core import PID, TRANSPORT, YubiKeyDevice
 class REINSERT_STATUS(Enum):
     REMOVE = 1
     REINSERT = 2
+    REMOVE_FROM_READER = 3
+    PLACE_ON_READER = 4
 
 
 class CancelledException(Exception):

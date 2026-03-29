@@ -89,10 +89,14 @@ pub enum DeviceError {
 /// Status updates during a device reinsert operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReinsertStatus {
-    /// The device should be removed.
+    /// The USB device should be removed.
     Remove,
-    /// The device has been removed and should be reinserted.
+    /// The USB device has been removed and should be reinserted.
     Reinsert,
+    /// The NFC card should be removed from the reader.
+    RemoveFromReader,
+    /// The NFC card has been removed and should be placed on the reader again.
+    PlaceOnReader,
 }
 
 impl fmt::Display for DeviceError {
@@ -151,6 +155,7 @@ pub struct YubiKeyDevice {
     hid_path: Option<String>,
     fido_path: Option<String>,
     pid: Option<u16>,
+    transport: Transport,
     info: DeviceInfo,
 }
 
@@ -173,6 +178,11 @@ impl YubiKeyDevice {
     /// Returns the USB Product ID, if available.
     pub fn pid(&self) -> Option<u16> {
         self.pid
+    }
+
+    /// Returns the transport type (USB or NFC).
+    pub fn transport(&self) -> Transport {
+        self.transport
     }
 
     /// Returns the product name derived from device info.
@@ -315,16 +325,33 @@ impl YubiKeyDevice {
 
     /// Wait for the user to remove and reinsert this YubiKey.
     ///
-    /// Polls `scan_devices` to detect removal, then `list_devices` to find
-    /// the device again after reinsertion. On success, updates this device's
-    /// transport paths to reflect the new enumeration.
+    /// For USB devices, polls `scan_devices` to detect removal, then
+    /// `list_devices` to find the device again after reinsertion.
+    ///
+    /// For NFC devices, the reader stays connected — polls the reader for
+    /// card absence then presence by attempting to read device info.
+    ///
+    /// On success, updates this device's transport paths and info.
     ///
     /// * `enumerators` – the same set of [`EnumerateFn`]s used to discover
     ///   this device (passed through to [`list_devices`]).
-    /// * `status_cb` – called with [`ReinsertStatus::Remove`] immediately,
-    ///   then [`ReinsertStatus::Reinsert`] once the device is removed.
-    /// * `cancelled` – checked every 500 ms; return `true` to cancel.
+    /// * `status_cb` – called with [`ReinsertStatus`] variants to indicate
+    ///   what the user should do.
+    /// * `cancelled` – checked every 250 ms; return `true` to cancel.
     pub fn reinsert(
+        &mut self,
+        enumerators: &[EnumerateFn],
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError> {
+        if self.transport == Transport::Nfc {
+            self.reinsert_nfc(status_cb, cancelled)
+        } else {
+            self.reinsert_usb(enumerators, status_cb, cancelled)
+        }
+    }
+
+    fn reinsert_usb(
         &mut self,
         enumerators: &[EnumerateFn],
         status_cb: &dyn Fn(ReinsertStatus),
@@ -389,6 +416,58 @@ impl YubiKeyDevice {
                     None => {
                         return Err(DeviceError::WrongDevice);
                     }
+                }
+            }
+        }
+    }
+
+    fn reinsert_nfc(
+        &mut self,
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError> {
+        let reader = self
+            .reader_name
+            .as_deref()
+            .ok_or(DeviceError::NoDeviceFound)?;
+        let my_serial = self.info.serial;
+        let my_version = self.info.version;
+        let mut removed = false;
+
+        log::debug!("NFC reinsert: waiting for card removal from reader {reader}");
+        status_cb(ReinsertStatus::RemoveFromReader);
+
+        loop {
+            thread::sleep(Duration::from_millis(500));
+            if cancelled() {
+                return Err(DeviceError::Cancelled);
+            }
+
+            if !removed {
+                // Try to connect — if it fails with "no card", the card was removed
+                match PcscSmartCardConnection::open(reader) {
+                    Ok(_conn) => continue, // Card still present
+                    Err(e) if e.is_no_card() => {
+                        removed = true;
+                        log::debug!("NFC card removed, waiting for tap");
+                        status_cb(ReinsertStatus::PlaceOnReader);
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            } else {
+                // Wait for card to reappear and verify it's the same device
+                match read_info(reader) {
+                    Ok((info, _transport)) => {
+                        if info.serial == my_serial && info.version == my_version {
+                            log::debug!("NFC card reinserted successfully");
+                            self.info = info;
+                            // Give the card a moment to settle
+                            thread::sleep(Duration::from_secs(1));
+                            return Ok(());
+                        }
+                        return Err(DeviceError::WrongDevice);
+                    }
+                    Err(_) => continue, // Card not ready yet
                 }
             }
         }
@@ -548,12 +627,13 @@ pub fn scan_devices() -> (HashMap<u16, usize>, u64) {
 /// for external NFC readers.
 pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
     let pid = pid_from_reader_name(reader_name);
-    let info = read_info(reader_name)?;
+    let (info, transport) = read_info(reader_name)?;
     Ok(YubiKeyDevice {
         reader_name: Some(reader_name.to_string()),
         hid_path: None,
         fido_path: None,
         pid,
+        transport,
         info,
     })
 }
@@ -571,13 +651,14 @@ pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
         for reader in &readers {
             log::debug!("Checking PC/SC reader: {reader}");
             match read_info(reader) {
-                Ok(info) => {
+                Ok((info, transport)) => {
                     let pid = pid_from_reader_name(reader);
                     devices.push(YubiKeyDevice {
                         reader_name: Some(reader.clone()),
                         hid_path: None,
                         fido_path: None,
                         pid,
+                        transport,
                         info,
                     });
                 }
@@ -785,6 +866,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                 hid_path: Some(hid.path.clone()),
                 fido_path: None,
                 pid: Some(hid.pid),
+                transport: Transport::Usb,
                 info,
             });
         }
@@ -799,19 +881,22 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
 /// Read device info from a PC/SC reader.
 ///
+/// Read device info from a PC/SC reader, returning the info and detected transport.
+///
 /// Opens a fresh [`PcscSmartCardConnection`] and uses [`ManagementCcidSession`] to read
 /// [`DeviceInfo`]. For older devices (NEO, etc.) that don't support the
 /// management protocol, synthesizes DeviceInfo by probing individual applets.
 ///
 /// On YubiKey NEO, the virtual smartcard may be temporarily ejected after
 /// an OTP or FIDO connection. This function retries for up to 4 seconds.
-pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
+pub fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
     let mut last_err = None;
     for attempt in 0..9 {
         match PcscSmartCardConnection::open(reader_name) {
             Ok(conn) => {
+                let transport = conn.transport();
                 let (info, _conn) = read_info_ccid(conn)?;
-                return Ok(info);
+                return Ok((info, transport));
             }
             Err(e) if e.is_no_card() && attempt < 8 => {
                 log::debug!(
@@ -915,6 +1000,7 @@ pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
                 hid_path: None,
                 fido_path: Some(fido.path),
                 pid: Some(fido.pid),
+                transport: Transport::Usb,
                 info,
             });
         }
@@ -1284,6 +1370,7 @@ mod tests {
             hid_path: hid_path.map(String::from),
             fido_path: fido_path.map(String::from),
             pid,
+            transport: Transport::Usb,
             info,
         }
     }

@@ -183,10 +183,17 @@ impl PcscSmartCardConnection {
         };
         let card = ctx.connect(&reader, share_mode, Protocols::ANY)?;
         log_traffic!("PCSC connection opened to '{}'", reader_name);
+
+        // Detect transport from ATR: USB YubiKeys have 0xFx as the second byte
+        let transport = match card.get_attribute_owned(::pcsc::Attribute::AtrString) {
+            Ok(atr) if atr.len() > 1 && atr[1] & 0xF0 == 0xF0 => Transport::Usb,
+            _ => Transport::Nfc,
+        };
+
         Ok(Self {
             card: Some(card),
             reader_name: reader_name.to_owned(),
-            transport: Transport::Usb,
+            transport,
         })
     }
 

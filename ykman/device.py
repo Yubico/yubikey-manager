@@ -90,12 +90,7 @@ class _NativeCompositeDevice(YkmanDevice):
         fingerprint = (
             native_dev.reader_name or native_dev.hid_path or native_dev.fido_path or ""
         )
-        # Determine transport: NFC if only a reader with no HID paths,
-        # and the reader name doesn't match the Yubico USB pattern.
-        if native_dev.reader_name and not native_dev.hid_path and pid is None:
-            transport = TRANSPORT.NFC
-        else:
-            transport = TRANSPORT.USB
+        transport = TRANSPORT.NFC if native_dev.transport == "nfc" else TRANSPORT.USB
         super().__init__(transport, fingerprint, pid)
         self._native = native_dev
         self._info = info
@@ -135,6 +130,8 @@ class _NativeCompositeDevice(YkmanDevice):
         status_map = {
             "remove": REINSERT_STATUS.REMOVE,
             "reinsert": REINSERT_STATUS.REINSERT,
+            "remove_from_reader": REINSERT_STATUS.REMOVE_FROM_READER,
+            "place_on_reader": REINSERT_STATUS.PLACE_ON_READER,
         }
         try:
             self._native.reinsert(

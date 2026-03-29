@@ -36,7 +36,7 @@ import click
 import click.shell_completion
 from cryptography.exceptions import InvalidSignature
 
-from yubikit.core import ApplicationNotAvailableError, _override_version
+from yubikit.core import TRANSPORT, ApplicationNotAvailableError, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -577,10 +577,12 @@ def list_keys(ctx, serials, readers):
             if dev_info.serial:
                 click.echo(dev_info.serial)
         else:
-            click.echo(
-                _describe_device(dev, dev_info)
-                + (f" Serial: {dev_info.serial}" if dev_info.serial else "")
-            )
+            line = _describe_device(dev, dev_info)
+            if dev_info.serial:
+                line += f" Serial: {dev_info.serial}"
+            if dev.transport == TRANSPORT.NFC:
+                line += f" [{str(dev.fingerprint)}]"
+            click.echo(line)
         pids.add(dev.pid)
 
     # Look for FIDO devices that we can't access
