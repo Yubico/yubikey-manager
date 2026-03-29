@@ -58,6 +58,8 @@ use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
 };
 use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
+#[cfg(windows)]
+use crate::transport::otphid::list_all_hid_devices;
 use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
 use crate::transport::pcsc::{PcscError, PcscSmartCardConnection};
@@ -516,6 +518,21 @@ pub fn scan_devices() -> (HashMap<u16, usize>, u64) {
         *entry = (*entry).max(*count);
     }
 
+    // On Windows, non-admin users cannot open FIDO devices. Supplement
+    // the scan with a raw HID enumeration so those devices still show up.
+    #[cfg(windows)]
+    {
+        if let Ok(all_hid) = list_all_hid_devices() {
+            for dev in all_hid {
+                // Only add PIDs not already found via normal enumeration
+                if !counts.contains_key(&dev.pid) {
+                    *counts.entry(dev.pid).or_insert(0) += 1;
+                    fingerprints.push(dev.path);
+                }
+            }
+        }
+    }
+
     // Compute a stable hash of fingerprints for change detection
     fingerprints.sort();
     let mut hasher = std::hash::DefaultHasher::new();
@@ -551,20 +568,22 @@ pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(readers) = list_readers() {
         log::debug!("Found {} PC/SC reader(s)", readers.len());
-        for reader in readers {
-            if !reader.to_ascii_lowercase().contains("yubi") {
-                continue;
-            }
+        for reader in &readers {
             log::debug!("Checking PC/SC reader: {reader}");
-            if let Ok(info) = read_info(&reader) {
-                let pid = pid_from_reader_name(&reader);
-                devices.push(YubiKeyDevice {
-                    reader_name: Some(reader),
-                    hid_path: None,
-                    fido_path: None,
-                    pid,
-                    info,
-                });
+            match read_info(reader) {
+                Ok(info) => {
+                    let pid = pid_from_reader_name(reader);
+                    devices.push(YubiKeyDevice {
+                        reader_name: Some(reader.clone()),
+                        hid_path: None,
+                        fido_path: None,
+                        pid,
+                        info,
+                    });
+                }
+                Err(e) => {
+                    log::debug!("Skipping reader {reader}: {e}");
+                }
             }
         }
     }

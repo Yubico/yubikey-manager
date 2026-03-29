@@ -55,7 +55,6 @@ from ..device import list_all_devices as _list_all_devices
 from ..device import scan_devices
 from ..diagnostics import get_diagnostics, sys_info
 from ..logging import init_logging
-from ..pcsc import list_devices as list_ccid
 from ..pcsc import list_readers
 from ..settings import AppData
 from ..util import (
@@ -126,9 +125,15 @@ def print_diagnostics(ctx, param, value):
 
 def require_reader(connection_types, reader):
     if SmartCardConnection in connection_types or FidoConnection in connection_types:
-        readers = list_ccid(reader)
+        devices = _list_all_devices([SmartCardConnection])
+        # Filter by reader name
+        readers = [
+            (dev, info)
+            for dev, info in devices
+            if reader.lower() in str(dev.fingerprint).lower()
+        ]
         if len(readers) == 1:
-            dev = readers[0]
+            dev, info = readers[0]
             nfc_restricted = False
             try:
                 with dev.open_connection(SmartCardConnection) as conn:
@@ -590,11 +595,9 @@ def list_keys(ctx, serials, readers):
 
 
 def _describe_device(dev, dev_info, include_mode=True):
-    if dev.pid is None:  # Devices from list_all_devices should always have PID.
-        raise AssertionError("PID is None")
-    name = get_name(dev_info, dev.pid.yubikey_type)
+    name = get_name(dev_info, dev.pid.yubikey_type if dev.pid else None)
     description = f"{name} ({dev_info.version_name})"
-    if include_mode:
+    if include_mode and dev.pid:
         mode = dev.pid.name.split("_", 1)[1].replace("_", "+")
         description += f" [{mode}]"
     return description

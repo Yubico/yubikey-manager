@@ -25,10 +25,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import ctypes
 import logging
-import sys
-from collections import Counter
 from threading import Event
 from typing import Callable, Iterable, Mapping, TypeAlias
 
@@ -36,7 +33,7 @@ from _yubikit_native.device import NativeYubiKeyDevice
 from _yubikit_native.device import list_devices as _native_list_devices
 from _yubikit_native.device import scan_devices as _native_scan_devices
 from yubikit.core import PID, TRANSPORT, Connection
-from yubikit.core.fido import FidoConnection
+from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import (
@@ -47,7 +44,7 @@ from yubikit.support import read_info  # noqa: F401 - re-exported
 from .base import REINSERT_STATUS, CancelledException, YkmanDevice
 from .hid.fido import NativeFidoConnection
 from .hid.otp import _NativeOtpConnection
-from .pcsc import ScardSmartCardConnection, SmartCardCtapDevice
+from .pcsc import ScardSmartCardConnection
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +64,10 @@ _DEFAULT_CONNECTION_TYPES: list[_T_CONNECTION] = list(_CONNECTION_TRANSPORT_MAP.
 def scan_devices() -> tuple[Mapping[PID, int], int]:
     """Scan USB for attached YubiKeys, without opening any connections.
 
-    :return: A dict mapping PID to device count, and a state object which can be used to
-        detect changes in attached devices.
+    The native implementation handles Windows non-admin FIDO fallback.
+
+    :return: A dict mapping PID to device count, and a state object which can be
+        used to detect changes in attached devices.
     """
     raw_counts, state = _native_scan_devices()
 
@@ -79,19 +78,6 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
             merged[PID(pid_int)] = count
         except ValueError:
             logger.debug(f"Unsupported PID: {pid_int:#04x}")
-
-    if sys.platform == "win32" and not bool(ctypes.windll.shell32.IsUserAnAdmin()):
-        from _yubikit_native.hid import list_all_hid_devices
-
-        counter: Counter[PID] = Counter()
-        for dev in list_all_hid_devices():
-            pid_int = dev.pid
-            if pid_int not in merged:
-                try:
-                    counter[PID(pid_int)] += 1
-                except ValueError:
-                    logger.debug(f"Unsupported Yubico device with PID: {pid_int:02x}")
-        merged.update(counter)
 
     return merged, state
 
@@ -104,7 +90,12 @@ class _NativeCompositeDevice(YkmanDevice):
         fingerprint = (
             native_dev.reader_name or native_dev.hid_path or native_dev.fido_path or ""
         )
-        transport = TRANSPORT.USB
+        # Determine transport: NFC if only a reader with no HID paths,
+        # and the reader name doesn't match the Yubico USB pattern.
+        if native_dev.reader_name and not native_dev.hid_path and pid is None:
+            transport = TRANSPORT.NFC
+        else:
+            transport = TRANSPORT.USB
         super().__init__(transport, fingerprint, pid)
         self._native = native_dev
         self._info = info

@@ -22,10 +22,9 @@ from yubikit.support import get_name, read_info
 from yubikit.yubiotp import YubiOtpSession
 
 from . import __version__ as ykman_version
-from .hid import list_ctap_devices, list_otp_devices
+from .device import list_all_devices
 from .hsmauth import get_hsmauth_info
 from .openpgp import get_openpgp_info
-from .pcsc import list_devices as list_ccid_devices
 from .pcsc import list_readers
 from .piv import get_piv_info
 from .util import get_windows_version
@@ -71,7 +70,7 @@ def mgmt_info(pid, conn):
         data.append(
             {
                 "DeviceInfo": asdict(info),
-                "Name": get_name(info, pid.yubikey_type),
+                "Name": get_name(info, pid.yubikey_type if pid else None),
             }
         )
     except Exception as e:
@@ -130,7 +129,7 @@ def ccid_info():
             readers[reader_name] = result
 
         yubikeys: dict[str, Any] = {}
-        for dev in list_ccid_devices():
+        for dev, _info in list_all_devices([SmartCardConnection]):
             try:
                 with dev.open_connection(SmartCardConnection) as conn:
                     yubikeys[f"{dev!r}"] = {
@@ -154,7 +153,7 @@ def ccid_info():
 def otp_info():
     try:
         yubikeys: dict[str, Any] = {}
-        for dev in list_otp_devices():
+        for dev, _info in list_all_devices([OtpConnection]):
             try:
                 dev_info = []
                 with dev.open_connection(OtpConnection) as conn:
@@ -183,10 +182,10 @@ def otp_info():
 def fido_info():
     try:
         yubikeys: dict[str, Any] = {}
-        for dev in list_ctap_devices():
+        for dev, _info in list_all_devices([FidoConnection]):
             try:
                 dev_info: list[Any] = []
-                with dev.open_connection(FidoConnection) as conn:
+                with dev.open_connection(FidoConnection) as conn:  # type: ignore[type-var]  # ty: ignore[invalid-argument-type]
                     dev_info.append(
                         {
                             "CTAP device version": "%d.%d.%d" % conn.device_version,

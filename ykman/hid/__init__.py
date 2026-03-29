@@ -25,10 +25,10 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .fido import list_ctap_devices
-from .otp import list_otp_devices
+from .fido import NativeFidoConnection
+from .otp import _NativeOtpConnection
 
 __all__ = [
-    "list_otp_devices",
-    "list_ctap_devices",
+    "_NativeOtpConnection",
+    "NativeFidoConnection",
 ]

@@ -31,20 +31,6 @@ fn list_otp_devices() -> PyResult<Vec<HidDeviceInfo>> {
         .map_err(hid_err)
 }
 
-#[pyfunction]
-fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
-    hid::list_all_hid_devices()
-        .map(|devs| {
-            devs.into_iter()
-                .map(|d| HidDeviceInfo {
-                    path: d.path,
-                    pid: d.pid,
-                })
-                .collect()
-        })
-        .map_err(hid_err)
-}
-
 #[pyclass(unsendable)]
 pub struct OtpConnection {
     inner: Option<hid::HidOtpConnection>,
@@ -252,7 +238,6 @@ impl FidoConnection {
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "hid")?;
     sub.add_function(wrap_pyfunction!(list_otp_devices, &sub)?)?;
-    sub.add_function(wrap_pyfunction!(list_all_hid_devices, &sub)?)?;
     sub.add_function(wrap_pyfunction!(list_fido_devices, &sub)?)?;
     sub.add_class::<HidDeviceInfo>()?;
     sub.add_class::<OtpConnection>()?;

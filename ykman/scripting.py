@@ -38,7 +38,6 @@ from yubikit.support import get_name, read_info
 
 from .base import YkmanDevice
 from .device import list_all_devices, scan_devices
-from .pcsc import list_devices as list_ccid
 
 """
 Various helpers intended to simplify scripting.
@@ -170,7 +169,13 @@ def multi(
 
 
 def _get_reader(reader) -> YkmanDevice:
-    readers = [d for d in list_ccid(reader) if d.transport == TRANSPORT.NFC]
+    readers = [
+        d
+        for d, _info in list_all_devices([SmartCardConnection])
+        if d.transport == TRANSPORT.NFC
+    ]
+    if reader:
+        readers = [d for d in readers if reader.lower() in str(d.fingerprint).lower()]
     if not readers:
         raise ValueError(f"No NFC reader found matching filter: '{reader}'")
     elif len(readers) > 1:

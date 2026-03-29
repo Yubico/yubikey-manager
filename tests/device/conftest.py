@@ -5,8 +5,7 @@ from functools import partial
 import pytest
 
 from ykman._cli.util import find_scp11_params
-from ykman.device import list_all_devices, read_info
-from ykman.pcsc import list_devices
+from ykman.device import list_all_devices
 from yubikit.core import TRANSPORT, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
@@ -29,12 +28,14 @@ def _device(pytestconfig):
 
     reader = pytestconfig.getoption("reader")
     if reader:
-        readers = list_devices(reader)
-        if len(readers) != 1:
+        devices = [
+            (d, i)
+            for d, i in list_all_devices([SmartCardConnection])
+            if reader.lower() in d.fingerprint.lower()
+        ]
+        if len(devices) != 1:
             pytest.exit("No/Multiple readers matched")
-        dev = readers[0]
-        with dev.open_connection(SmartCardConnection) as conn:
-            info = read_info(conn)
+        dev, info = devices[0]
     else:
         devices = list_all_devices()
         if len(devices) != 1:

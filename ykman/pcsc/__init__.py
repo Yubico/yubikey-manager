@@ -26,40 +26,17 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
-from time import sleep
 
 from _yubikit_native.pcsc import PcscConnection
 from _yubikit_native.pcsc import list_readers as _native_list_readers
-from yubikit.core import PID, TRANSPORT, YUBIKEY
-from yubikit.core.fido import SmartCardCtapDevice
+from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.logging import LOG_LEVEL
-from yubikit.management import USB_INTERFACE
-from yubikit.support import read_info
-
-from ..base import REINSERT_STATUS, CancelledException, YkmanDevice
 
 logger = logging.getLogger(__name__)
 
 
 YK_READER_NAME = "yubico yubikey"
-
-
-# Figure out what the PID should be based on the reader name
-def _pid_from_name(name):
-    if YK_READER_NAME not in name.lower():
-        return None
-
-    interfaces = USB_INTERFACE(0)
-    for iface in USB_INTERFACE:
-        if iface.name in name:
-            interfaces |= iface
-
-    if "U2F" in name:
-        interfaces |= USB_INTERFACE.FIDO
-
-    key_type = YUBIKEY.NEO if "NEO" in name else YUBIKEY.YK4
-    return PID.of(key_type, interfaces)
 
 
 class ScardSmartCardConnection(SmartCardConnection):
@@ -90,96 +67,8 @@ class ScardSmartCardConnection(SmartCardConnection):
         return bytes(data), sw
 
 
-class ScardYubiKeyDevice(YkmanDevice):
-    """YubiKey Smart card device"""
-
-    def __init__(self, reader_name):
-        # Base transport on reader name: NFC readers will have a different name
-        if YK_READER_NAME in reader_name.lower():
-            transport = TRANSPORT.USB
-        else:
-            transport = TRANSPORT.NFC
-        super().__init__(transport, reader_name, _pid_from_name(reader_name))
-        self.reader_name = reader_name
-
-    def supports_connection(self, connection_type):
-        if issubclass(SmartCardCtapDevice, connection_type):
-            return self.transport == TRANSPORT.NFC
-        return issubclass(ScardSmartCardConnection, connection_type)
-
-    def open_connection(self, connection_type):
-        assert isinstance(connection_type, type)  # noqa: S101
-        if issubclass(ScardSmartCardConnection, connection_type):
-            return self._open_smartcard_connection()
-        elif issubclass(SmartCardCtapDevice, connection_type):
-            return SmartCardCtapDevice(self._open_smartcard_connection())
-        return super().open_connection(connection_type)
-
-    def _open_smartcard_connection(self) -> SmartCardConnection:
-        return ScardSmartCardConnection(self.reader_name)
-
-    def _do_reinsert(self, reinsert_cb, event):
-        removed = False
-        with self.open_connection(SmartCardConnection) as conn:
-            info = read_info(conn, self.pid)
-        reinsert_cb(REINSERT_STATUS.REMOVE)
-
-        if self.transport == TRANSPORT.NFC:
-            while not event.wait(0.5):
-                try:
-                    conn = self.open_connection(SmartCardConnection)
-                    if removed:
-                        info2 = read_info(conn, self.pid)
-                        conn.close()
-                        if info.serial != info2.serial or info.version != info2.version:
-                            raise ValueError(
-                                "Reinserted YubiKey does not match the original"
-                            )
-                        sleep(1.0)  # Wait for the device to settle
-                        return
-                    conn.close()
-                except OSError:
-                    if not removed:
-                        reinsert_cb(REINSERT_STATUS.REINSERT)
-                        removed = True
-
-            raise CancelledException()
-        else:
-            while not event.wait(0.5):
-                if not removed:
-                    # Wait for the reader to be removed
-                    if self.reader_name not in list_readers():
-                        reinsert_cb(REINSERT_STATUS.REINSERT)
-                        removed = True
-                else:
-                    # Wait for the reader to be reinserted
-                    for reader_name in list_readers():
-                        if reader_name == self.reader_name:
-                            with self.open_connection(SmartCardConnection) as conn:
-                                info2 = read_info(conn, self.pid)
-                            if (
-                                info.serial != info2.serial
-                                or info.version != info2.version
-                            ):
-                                raise ValueError(
-                                    "Reinserted YubiKey does not match the original"
-                                )
-                            sleep(1.0)  # Wait for the device to settle
-                            return
-            raise CancelledException()
-
-
 def list_readers():
     try:
         return _native_list_readers()
     except OSError:
         return []
-
-
-def list_devices(name_filter=None):
-    name_filter = YK_READER_NAME if name_filter is None else name_filter
-    devices = []
-    for reader_name in list_readers():
-        if name_filter.lower() in reader_name.lower():
-            devices.append(ScardYubiKeyDevice(reader_name))
-    return devices
