@@ -177,7 +177,7 @@ pub fn list_fido_devices() -> Result<Vec<FidoDeviceInfo>, CtapHidTransportError>
 ///
 /// Implements the CTAP HID framing protocol including channel allocation,
 /// packet fragmentation, and keepalive handling.
-pub struct FidoConnection {
+pub struct HidFidoConnection {
     device: Option<hidapi::HidDevice>,
     channel_id: u32,
     packet_size: usize,
@@ -185,7 +185,7 @@ pub struct FidoConnection {
     capabilities: CtapHidCapability,
 }
 
-impl FidoConnection {
+impl HidFidoConnection {
     /// Open a FIDO connection to the device at the given path.
     ///
     /// Performs CTAP HID INIT to allocate a channel.
@@ -390,7 +390,25 @@ impl FidoConnection {
     }
 }
 
-impl Drop for FidoConnection {
+impl crate::fido::FidoConnection for HidFidoConnection {
+    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
+        self.call(cmd, data)
+    }
+
+    fn device_version(&self) -> (u8, u8, u8) {
+        self.device_version()
+    }
+
+    fn capabilities(&self) -> CtapHidCapability {
+        self.capabilities()
+    }
+
+    fn close(&mut self) {
+        self.close()
+    }
+}
+
+impl Drop for HidFidoConnection {
     fn drop(&mut self) {
         self.close();
     }

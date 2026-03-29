@@ -37,7 +37,7 @@ use thiserror::Error;
 
 use crate::core::Version;
 use crate::smartcard::SmartCardError;
-use crate::transport::otphid::OtpConnection;
+use crate::transport::otphid::HidOtpConnection;
 
 // --- OTP Codec ---
 
@@ -159,17 +159,21 @@ pub enum YubiOtpError {
 // ---------------------------------------------------------------------------
 
 /// Trait for low-level OTP HID transport (feature report read/write).
-pub trait OtpTransport {
+pub trait OtpConnection {
     fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError>;
     fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError>;
+    fn close(&mut self) {}
 }
 
-impl OtpTransport for OtpConnection {
+impl OtpConnection for HidOtpConnection {
     fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError> {
         self.get_feature_report().map_err(YubiOtpError::from)
     }
     fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError> {
         self.set_feature_report(data).map_err(YubiOtpError::from)
+    }
+    fn close(&mut self) {
+        HidOtpConnection::close(self);
     }
 }
 
@@ -178,12 +182,12 @@ impl OtpTransport for OtpConnection {
 // ---------------------------------------------------------------------------
 
 /// Low-level OTP frame protocol over HID feature reports.
-pub struct OtpProtocol<T: OtpTransport> {
+pub struct OtpProtocol<T: OtpConnection> {
     connection: T,
     pub version: Version,
 }
 
-impl<T: OtpTransport> OtpProtocol<T> {
+impl<T: OtpConnection> OtpProtocol<T> {
     pub fn new(connection: T) -> Result<Self, YubiOtpError> {
         let mut proto = Self {
             connection,

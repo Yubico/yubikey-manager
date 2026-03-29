@@ -47,24 +47,24 @@ fn list_all_hid_devices() -> PyResult<Vec<HidDeviceInfo>> {
 
 #[pyclass(unsendable)]
 pub struct OtpConnection {
-    inner: Option<hid::OtpConnection>,
+    inner: Option<hid::HidOtpConnection>,
 }
 
 impl OtpConnection {
     /// Take the inner native connection, leaving None behind.
-    pub fn take_inner(&mut self) -> PyResult<hid::OtpConnection> {
+    pub fn take_inner(&mut self) -> PyResult<hid::HidOtpConnection> {
         self.inner
             .take()
             .ok_or_else(|| PyOSError::new_err("OTP connection already consumed or closed"))
     }
 
     /// Restore a previously taken inner connection.
-    pub fn restore_inner(&mut self, conn: hid::OtpConnection) {
+    pub fn restore_inner(&mut self, conn: hid::HidOtpConnection) {
         self.inner = Some(conn);
     }
 
     /// Create from an already-open native connection.
-    pub fn from_native(conn: hid::OtpConnection) -> Self {
+    pub fn from_native(conn: hid::HidOtpConnection) -> Self {
         Self { inner: Some(conn) }
     }
 }
@@ -74,7 +74,7 @@ impl OtpConnection {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: Some(hid::OtpConnection::new(path).map_err(hid_err)?),
+            inner: Some(hid::HidOtpConnection::new(path).map_err(hid_err)?),
         })
     }
 
@@ -150,7 +150,7 @@ fn list_fido_devices() -> PyResult<Vec<FidoDeviceInfo>> {
 /// Native FIDO HID connection wrapping the Rust CTAP HID transport.
 #[pyclass(unsendable)]
 pub struct FidoConnection {
-    inner: Option<ctaphid::FidoConnection>,
+    inner: Option<ctaphid::HidFidoConnection>,
     path: String,
     device_version: (u8, u8, u8),
     capabilities: u8,
@@ -158,19 +158,19 @@ pub struct FidoConnection {
 
 impl FidoConnection {
     /// Take the inner native connection, leaving None behind.
-    pub fn take_inner(&mut self) -> PyResult<ctaphid::FidoConnection> {
+    pub fn take_inner(&mut self) -> PyResult<ctaphid::HidFidoConnection> {
         self.inner
             .take()
             .ok_or_else(|| PyOSError::new_err("FIDO connection already consumed or closed"))
     }
 
     /// Restore a previously taken inner connection.
-    pub fn restore_inner(&mut self, conn: ctaphid::FidoConnection) {
+    pub fn restore_inner(&mut self, conn: ctaphid::HidFidoConnection) {
         self.inner = Some(conn);
     }
 
     /// Create from an already-open native connection.
-    pub fn from_native(conn: ctaphid::FidoConnection) -> Self {
+    pub fn from_native(conn: ctaphid::HidFidoConnection) -> Self {
         let device_version = conn.device_version();
         let capabilities = conn.capabilities().raw();
         Self {
@@ -192,7 +192,7 @@ impl FidoConnection {
             report_size_in: 64,
             report_size_out: 64,
         };
-        let conn = ctaphid::FidoConnection::open(&info).map_err(ctap_err)?;
+        let conn = ctaphid::HidFidoConnection::open(&info).map_err(ctap_err)?;
         let device_version = conn.device_version();
         let capabilities = conn.capabilities().raw();
         Ok(Self {

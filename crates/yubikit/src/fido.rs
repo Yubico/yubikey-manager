@@ -25,19 +25,14 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-pub mod core;
-pub mod device;
-pub mod fido;
-pub mod hsmauth;
-pub mod logging;
-pub mod management;
-pub mod oath;
-pub mod openpgp;
-pub mod otp;
-pub mod piv;
-pub mod scp;
-pub mod securitydomain;
-pub mod smartcard;
-pub mod tlv;
-pub mod transport;
-pub mod yubiotp;
+//! FIDO connection trait.
+
+use crate::transport::ctaphid::CtapHidTransportError;
+
+/// Abstract FIDO connection — send CTAP HID commands.
+pub trait FidoConnection {
+    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError>;
+    fn device_version(&self) -> (u8, u8, u8);
+    fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability;
+    fn close(&mut self);
+}

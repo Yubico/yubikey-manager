@@ -173,6 +173,7 @@ impl SmartCardError {
 pub trait SmartCardConnection {
     fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError>;
     fn transport(&self) -> Transport;
+    fn close(&mut self) {}
 }
 
 // ---------------------------------------------------------------------------

@@ -55,10 +55,10 @@ use crate::management::{
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
 };
-use crate::transport::ctaphid::{FidoConnection, FidoDeviceInfo, list_fido_devices};
-use crate::transport::otphid::{HidDeviceInfo, HidError, OtpConnection, list_otp_devices};
+use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
+use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
-use crate::transport::pcsc::{PcscConnection, PcscError};
+use crate::transport::pcsc::{PcscError, PcscSmartCardConnection};
 use crate::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
 
 // ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ impl YubiKeyDevice {
     /// On YubiKey NEO, opening an OTP or FIDO connection ejects the virtual
     /// smartcard. It reappears after a few seconds. This method retries for
     /// up to 4 seconds if the card is temporarily absent.
-    pub fn open_smartcard(&self) -> Result<PcscConnection, DeviceError> {
+    pub fn open_smartcard(&self) -> Result<PcscSmartCardConnection, DeviceError> {
         let reader = self
             .reader_name
             .as_deref()
@@ -238,7 +238,7 @@ impl YubiKeyDevice {
 
         let mut last_err = None;
         for attempt in 0..9 {
-            match PcscConnection::new(reader, false) {
+            match PcscSmartCardConnection::new(reader, false) {
                 Ok(conn) => return Ok(conn),
                 Err(e) => {
                     if attempt < 8 && e.is_no_card() {
@@ -258,13 +258,13 @@ impl YubiKeyDevice {
     }
 
     /// Open an OTP HID connection to this device.
-    pub fn open_otp(&self) -> Result<OtpConnection, DeviceError> {
+    pub fn open_otp(&self) -> Result<HidOtpConnection, DeviceError> {
         let path = self.hid_path.as_deref().ok_or(DeviceError::NoDeviceFound)?;
-        Ok(OtpConnection::new(path)?)
+        Ok(HidOtpConnection::new(path)?)
     }
 
     /// Open a FIDO HID (CTAP) connection to this device.
-    pub fn open_fido(&self) -> Result<FidoConnection, DeviceError> {
+    pub fn open_fido(&self) -> Result<HidFidoConnection, DeviceError> {
         let path = self
             .fido_path
             .as_deref()
@@ -276,7 +276,7 @@ impl YubiKeyDevice {
             .into_iter()
             .find(|d| d.path == path)
             .ok_or(DeviceError::NoDeviceFound)?;
-        FidoConnection::open(&info)
+        HidFidoConnection::open(&info)
             .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))
     }
 
@@ -750,7 +750,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(hid_devices) = list_otp_devices() {
         for hid in hid_devices {
-            let info = OtpConnection::new(&hid.path)
+            let info = HidOtpConnection::new(&hid.path)
                 .ok()
                 .and_then(|conn| read_info_otp(conn).ok())
                 .map(|(info, _conn)| info)
@@ -774,7 +774,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
 /// Read device info from a PC/SC reader.
 ///
-/// Opens a fresh [`PcscConnection`] and uses [`ManagementCcidSession`] to read
+/// Opens a fresh [`PcscSmartCardConnection`] and uses [`ManagementCcidSession`] to read
 /// [`DeviceInfo`]. For older devices (NEO, etc.) that don't support the
 /// management protocol, synthesizes DeviceInfo by probing individual applets.
 ///
@@ -783,7 +783,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     let mut last_err = None;
     for attempt in 0..9 {
-        match PcscConnection::new(reader_name, false) {
+        match PcscSmartCardConnection::new(reader_name, false) {
             Ok(conn) => {
                 let (info, _conn) = read_info_ccid(conn)?;
                 return Ok(info);
@@ -834,7 +834,9 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
 /// Uses [`ManagementOtpSession`] to read [`DeviceInfo`].
 /// Applies standard fixups for known device quirks.
 /// Returns the info and the connection for reuse.
-pub fn read_info_otp(conn: OtpConnection) -> Result<(DeviceInfo, OtpConnection), DeviceError> {
+pub fn read_info_otp(
+    conn: HidOtpConnection,
+) -> Result<(DeviceInfo, HidOtpConnection), DeviceError> {
     let mut session = ManagementOtpSession::new(conn)
         .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
     let mut info = session
@@ -850,7 +852,9 @@ pub fn read_info_otp(conn: OtpConnection) -> Result<(DeviceInfo, OtpConnection),
 /// Uses [`ManagementFidoSession`] to read [`DeviceInfo`].
 /// Applies standard fixups for known device quirks.
 /// Returns the info and the connection for reuse.
-pub fn read_info_fido(conn: FidoConnection) -> Result<(DeviceInfo, FidoConnection), DeviceError> {
+pub fn read_info_fido(
+    conn: HidFidoConnection,
+) -> Result<(DeviceInfo, HidFidoConnection), DeviceError> {
     let mut session = ManagementFidoSession::new(conn).map_err(DeviceError::SmartCard)?;
     let mut info = session
         .read_device_info_unchecked()
@@ -867,7 +871,7 @@ pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 
     if let Ok(fido_devs) = list_fido_devices() {
         for fido in fido_devs {
-            let info = FidoConnection::open(&fido)
+            let info = HidFidoConnection::open(&fido)
                 .ok()
                 .and_then(|conn| read_info_fido(conn).ok())
                 .map(|(info, _conn)| info)

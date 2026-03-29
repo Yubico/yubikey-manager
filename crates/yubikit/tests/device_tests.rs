@@ -25,7 +25,7 @@ use yubikit::management::{
 };
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::smartcard::Transport;
-use yubikit::transport::pcsc::{PcscConnection, list_readers};
+use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
 
 // ───────────────────────── Connection Parameterization ─────────────────────────
 
@@ -96,7 +96,7 @@ fn get_device_and_info() -> &'static (YubiKeyDevice, DeviceInfo) {
     })
 }
 
-fn open_usb_smartcard() -> PcscConnection {
+fn open_usb_smartcard() -> PcscSmartCardConnection {
     let (dev, _) = get_device_and_info();
     dev.open_smartcard().expect("Failed to open USB smartcard")
 }
@@ -110,9 +110,9 @@ fn nfc_reader() -> Option<String> {
     })
 }
 
-fn open_nfc_smartcard() -> Option<PcscConnection> {
+fn open_nfc_smartcard() -> Option<PcscSmartCardConnection> {
     let reader = nfc_reader()?;
-    PcscConnection::new(&reader, false).ok()
+    PcscSmartCardConnection::new(&reader, false).ok()
 }
 
 /// Extract an uncompressed P-256 public key (65 bytes) from a DER-encoded certificate.
@@ -130,7 +130,7 @@ fn extract_ec_p256_pubkey(cert_der: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-fn detect_scp11b_params(conn: PcscConnection) -> Option<(u8, u8, Vec<u8>)> {
+fn detect_scp11b_params(conn: PcscSmartCardConnection) -> Option<(u8, u8, Vec<u8>)> {
     let mut sd = SecurityDomainSession::new(conn).ok()?;
     let key_info = sd.get_key_information().ok()?;
     let key_ref = *key_info.keys().find(|kr| kr.kid == 0x13)?;
@@ -171,7 +171,7 @@ fn get_nfc_scp11b_params() -> &'static Option<(u8, u8, Vec<u8>)> {
     })
 }
 
-fn open_smartcard_connection(tc: &TestConnection) -> PcscConnection {
+fn open_smartcard_connection(tc: &TestConnection) -> PcscSmartCardConnection {
     match tc {
         TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b => open_usb_smartcard(),
         TestConnection::NfcSmartCard | TestConnection::NfcSmartCardScp11b => {
@@ -373,7 +373,7 @@ mod oath {
     use super::*;
     use yubikit::oath::{CredentialData, HashAlgorithm, OathSession, OathType};
 
-    fn open_oath_session(tc: &TestConnection) -> OathSession<PcscConnection> {
+    fn open_oath_session(tc: &TestConnection) -> OathSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
             let params = make_scp_key_params(*kid, *kvn, pk);
@@ -498,7 +498,7 @@ mod piv {
         PivSigner, Slot, TouchPolicy, device_pubkey_to_spki, hash_data,
     };
 
-    fn open_piv_session(tc: &TestConnection) -> PivSession<PcscConnection> {
+    fn open_piv_session(tc: &TestConnection) -> PivSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
             let params = make_scp_key_params(*kid, *kvn, pk);
@@ -970,7 +970,7 @@ mod openpgp {
     use super::*;
     use yubikit::openpgp::OpenPgpSession;
 
-    fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscConnection> {
+    fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
             let params = make_scp_key_params(*kid, *kvn, pk);
@@ -1284,7 +1284,7 @@ mod hsmauth {
     use super::*;
     use yubikit::hsmauth::HsmAuthSession;
 
-    fn open_hsmauth_session(tc: &TestConnection) -> HsmAuthSession<PcscConnection> {
+    fn open_hsmauth_session(tc: &TestConnection) -> HsmAuthSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
             let params = make_scp_key_params(*kid, *kvn, pk);

@@ -40,8 +40,8 @@ use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
 };
 use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode};
-use crate::transport::ctaphid::{CtapHidTransportError, FidoConnection};
-use crate::transport::otphid::OtpConnection;
+use crate::transport::ctaphid::{CtapHidTransportError, HidFidoConnection};
+use crate::transport::otphid::HidOtpConnection;
 use crate::yubiotp::ConfigSlot;
 
 // ---------------------------------------------------------------------------
@@ -997,13 +997,13 @@ impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
 
 /// Management operations over the OTP (HID) interface.
 pub struct ManagementOtpSession {
-    protocol: OtpProtocol<OtpConnection>,
+    protocol: OtpProtocol<HidOtpConnection>,
     version: Version,
 }
 
 impl ManagementOtpSession {
     /// Open a management session over OTP HID.
-    pub fn new(connection: OtpConnection) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: HidOtpConnection) -> Result<Self, YubiOtpError> {
         log::debug!("Opening ManagementOtpSession");
         let protocol = OtpProtocol::new(connection)?;
         let version = patch_version(protocol.version);
@@ -1016,7 +1016,7 @@ impl ManagementOtpSession {
     }
 
     /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> OtpConnection {
+    pub fn into_connection(self) -> HidOtpConnection {
         self.protocol.into_connection()
     }
 }
@@ -1136,13 +1136,13 @@ const CTAP_WRITE_CONFIG: u8 = CTAP_VENDOR_FIRST + 3;
 
 /// Management operations over the FIDO (CTAP HID) interface.
 pub struct ManagementFidoSession {
-    connection: FidoConnection,
+    connection: HidFidoConnection,
     version: Version,
 }
 
 impl ManagementFidoSession {
     /// Open a management session over FIDO HID.
-    pub fn new(connection: FidoConnection) -> Result<Self, SmartCardError> {
+    pub fn new(connection: HidFidoConnection) -> Result<Self, SmartCardError> {
         log::debug!("Opening ManagementFidoSession");
         let (v1, v2, v3) = connection.device_version();
         let mut version = Version(v1, v2, v3);
@@ -1158,13 +1158,13 @@ impl ManagementFidoSession {
         })
     }
 
-    /// Get a reference to the underlying FidoConnection.
-    pub fn connection(&self) -> &FidoConnection {
+    /// Get a reference to the underlying HidFidoConnection.
+    pub fn connection(&self) -> &HidFidoConnection {
         &self.connection
     }
 
     /// Close the session and return the underlying connection.
-    pub fn into_connection(self) -> FidoConnection {
+    pub fn into_connection(self) -> HidFidoConnection {
         self.connection
     }
 }

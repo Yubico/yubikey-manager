@@ -14,7 +14,7 @@ fn list_readers() -> PyResult<Vec<String>> {
 
 #[pyclass]
 struct PcscConnection {
-    inner: pcsc::PcscConnection,
+    inner: pcsc::PcscSmartCardConnection,
 }
 
 #[pymethods]
@@ -23,7 +23,7 @@ impl PcscConnection {
     #[pyo3(signature = (reader_name, exclusive=true))]
     fn new(reader_name: &str, exclusive: bool) -> PyResult<Self> {
         Ok(Self {
-            inner: pcsc::PcscConnection::new(reader_name, exclusive).map_err(pcsc_err)?,
+            inner: pcsc::PcscSmartCardConnection::new(reader_name, exclusive).map_err(pcsc_err)?,
         })
     }
 

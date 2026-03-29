@@ -70,13 +70,13 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
 }
 
 /// A connection to a smart card via PC/SC.
-pub struct PcscConnection {
+pub struct PcscSmartCardConnection {
     card: Option<Card>,
     reader_name: String,
     transport: Transport,
 }
 
-impl PcscConnection {
+impl PcscSmartCardConnection {
     /// Connect to a reader, optionally using exclusive mode.
     pub fn new(reader_name: &str, exclusive: bool) -> Result<Self, PcscError> {
         log_traffic!("Opening PCSC connection to '{}'", reader_name);
@@ -157,7 +157,7 @@ impl PcscConnection {
     }
 }
 
-impl SmartCardConnection for PcscConnection {
+impl SmartCardConnection for PcscSmartCardConnection {
     fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         use crate::logging::hex_encode;
         log_traffic!("SEND: {}", hex_encode(apdu));
@@ -176,9 +176,13 @@ impl SmartCardConnection for PcscConnection {
     fn transport(&self) -> Transport {
         self.transport
     }
+
+    fn close(&mut self) {
+        let _ = self.disconnect();
+    }
 }
 
-impl Drop for PcscConnection {
+impl Drop for PcscSmartCardConnection {
     fn drop(&mut self) {
         let _ = self.disconnect();
     }

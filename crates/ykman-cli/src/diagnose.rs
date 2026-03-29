@@ -3,9 +3,9 @@ use yubikit::management::{
     Capability, DeviceInfo, ManagementFidoSession, ManagementSession, ReleaseType,
 };
 use yubikit::smartcard::Transport;
-use yubikit::transport::ctaphid::{FidoConnection, list_fido_devices};
-use yubikit::transport::otphid::{OtpConnection, list_otp_devices};
-use yubikit::transport::pcsc::PcscConnection;
+use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
+use yubikit::transport::pcsc::PcscSmartCardConnection;
 use yubikit::yubiotp::YubiOtpSession;
 
 use crate::util::CliError;
@@ -142,7 +142,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
             } else {
                 println!();
                 for r in &readers {
-                    let status = match PcscConnection::new(r, false) {
+                    let status = match PcscSmartCardConnection::new(r, false) {
                         Ok(_) => "Success".to_string(),
                         Err(e) => format!("Error: {e}"),
                     };
@@ -171,7 +171,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
         // Open a single connection and reuse it across all sessions.
         // Each session consumes the connection; we reclaim it via into_connection().
         // If a session fails to open, the connection is lost and we must re-open.
-        let conn = match PcscConnection::new(reader, false) {
+        let conn = match PcscSmartCardConnection::new(reader, false) {
             Ok(c) => c,
             Err(e) => {
                 println!("    Error opening connection: {e}");
@@ -191,7 +191,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
             }
             Err(e) => {
                 println!("      Error: {e}");
-                match PcscConnection::new(reader, false) {
+                match PcscSmartCardConnection::new(reader, false) {
                     Ok(c) => c,
                     Err(_) => continue,
                 }
@@ -271,7 +271,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
             }
             Err(e) => {
                 println!("      Error: {e}");
-                match PcscConnection::new(reader, false) {
+                match PcscSmartCardConnection::new(reader, false) {
                     Ok(c) => c,
                     Err(_) => continue,
                 }
@@ -292,7 +292,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
             }
             Err(e) => {
                 println!("      Error: {e}");
-                match PcscConnection::new(reader, false) {
+                match PcscSmartCardConnection::new(reader, false) {
                     Ok(c) => c,
                     Err(_) => continue,
                 }
@@ -340,7 +340,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
             }
             Err(e) => {
                 println!("      Error: {e}");
-                match PcscConnection::new(reader, false) {
+                match PcscSmartCardConnection::new(reader, false) {
                     Ok(c) => c,
                     Err(_) => continue,
                 }
@@ -383,7 +383,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                     );
 
                     // Open one connection and reuse for both Management and OTP sessions
-                    let conn = match OtpConnection::new(&hid.path) {
+                    let conn = match HidOtpConnection::new(&hid.path) {
                         Ok(c) => c,
                         Err(e) => {
                             println!("    Error opening connection: {e}");
@@ -402,7 +402,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                         }
                         Err(e) => {
                             println!("      Error: {e}");
-                            match OtpConnection::new(&hid.path) {
+                            match HidOtpConnection::new(&hid.path) {
                                 Ok(c) => c,
                                 Err(_) => continue,
                             }
@@ -467,7 +467,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                         "  CtapYubiKeyDevice(pid={:04x}, path='{}'):",
                         fido.pid, fido.path
                     );
-                    match FidoConnection::open(fido) {
+                    match HidFidoConnection::open(fido) {
                         Ok(conn) => {
                             let (v1, v2, v3) = conn.device_version();
                             let caps = conn.capabilities();

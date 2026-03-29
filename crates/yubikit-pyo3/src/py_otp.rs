@@ -33,7 +33,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit::otp::{OtpProtocol as RustOtpProtocol, OtpTransport, YubiOtpError};
+use yubikit::otp::{OtpConnection, OtpProtocol as RustOtpProtocol, YubiOtpError};
 
 /// Bridges a Python OtpConnection object to the Rust OtpTransport trait.
 pub struct PyOtpConnection {
@@ -52,7 +52,7 @@ impl PyOtpConnection {
     }
 }
 
-impl OtpTransport for PyOtpConnection {
+impl OtpConnection for PyOtpConnection {
     fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError> {
         Python::with_gil(|py| {
             let result = self

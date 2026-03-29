@@ -84,11 +84,11 @@ pub fn list_all_hid_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
 }
 
 /// An open connection to an OTP HID device for feature report I/O.
-pub struct OtpConnection {
+pub struct HidOtpConnection {
     device: Option<hidapi::HidDevice>,
 }
 
-impl OtpConnection {
+impl HidOtpConnection {
     pub fn new(path: &str) -> Result<Self, HidError> {
         log_traffic!("Opening HID connection to '{}'", path);
         let api = HidApi::new()?;
