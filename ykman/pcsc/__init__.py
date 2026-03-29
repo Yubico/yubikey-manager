@@ -26,9 +26,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
-import os
-import subprocess  # nosec
-import sys
 from time import sleep
 
 from _yubikit_native.pcsc import PcscConnection
@@ -46,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 
 YK_READER_NAME = "yubico yubikey"
-_YKMAN_NO_EXCLUSIVE = "YKMAN_NO_EXLUSIVE"
 
 
 # Figure out what the PID should be based on the reader name
@@ -67,27 +63,10 @@ def _pid_from_name(name):
 
 
 class ScardSmartCardConnection(SmartCardConnection):
-    def __init__(self, reader_name, exclusive=True):
-        # On YubiKey NEO, the virtual smartcard may be temporarily ejected
-        # after an OTP or FIDO connection. Retry for up to 4 seconds.
-        last_err: OSError | None = None
-        for attempt in range(9):
-            try:
-                self.connection = PcscConnection(reader_name, exclusive)
-                break
-            except OSError as e:
-                if attempt < 8 and "no smart card" in str(e).lower():
-                    logger.debug(
-                        "SmartCard not ready (attempt %d), retrying...", attempt + 1
-                    )
-                    sleep(0.5)
-                    last_err = e
-                else:
-                    raise
-        else:
-            if last_err is not None:
-                raise last_err
-            raise OSError("Failed to connect to smart card")
+    def __init__(self, reader_name):
+        # PcscConnection.open() handles exclusive→shared fallback and
+        # killing scdaemon/yubikey-agent if they block access.
+        self.connection = PcscConnection.open(reader_name)
 
         atr = self.connection.get_atr()
         self._transport = (
@@ -136,26 +115,8 @@ class ScardYubiKeyDevice(YkmanDevice):
             return SmartCardCtapDevice(self._open_smartcard_connection())
         return super().open_connection(connection_type)
 
-    def _open_smartcard_connection(self, retry=True) -> SmartCardConnection:
-        try:
-            # Try an exclusive connection, unless disabled
-            if os.environ.get(_YKMAN_NO_EXCLUSIVE) is None:
-                try:
-                    scard_conn = ScardSmartCardConnection(
-                        self.reader_name, exclusive=True
-                    )
-                    logger.debug("Using exclusive CCID connection")
-                    return scard_conn
-                except OSError:
-                    logger.info("Failed to get exclusive CCID access")
-
-            # Try a shared connection
-            return ScardSmartCardConnection(self.reader_name, exclusive=False)
-        except OSError:
-            # Neither connection worked, maybe we need to kill stuff
-            if retry and (kill_scdaemon() or kill_yubikey_agent()):
-                return self._open_smartcard_connection(False)
-            raise
+    def _open_smartcard_connection(self) -> SmartCardConnection:
+        return ScardSmartCardConnection(self.reader_name)
 
     def _do_reinsert(self, reinsert_cb, event):
         removed = False
@@ -206,49 +167,6 @@ class ScardYubiKeyDevice(YkmanDevice):
                             sleep(1.0)  # Wait for the device to settle
                             return
             raise CancelledException()
-
-
-def kill_scdaemon():
-    killed = False
-    if sys.platform == "win32":
-        # Works for Windows.
-
-        # TODO: Type checking is currently failing on Github Actions
-        from typing import TYPE_CHECKING
-
-        if not TYPE_CHECKING:
-            from win32api import CloseHandle, OpenProcess, TerminateProcess
-            from win32com.client import GetObject
-
-            wmi = GetObject("winmgmts:")
-            ps = wmi.InstancesOf("Win32_Process")
-            for p in ps:
-                if p.Properties_("Name").Value == "scdaemon.exe":
-                    pid = p.Properties_("ProcessID").Value
-                    handle = OpenProcess(1, False, pid)
-                    TerminateProcess(handle, -1)
-                    CloseHandle(handle)
-                    killed = True
-    else:
-        # Works for Linux and OS X.
-        return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # noqa: S603, S607
-        if return_code == 0:
-            killed = True
-    if killed:
-        sleep(0.1)
-    return killed
-
-
-def kill_yubikey_agent():
-    killed = False
-    if sys.platform != "win32":
-        return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # noqa: S603, S607
-        if return_code == 0:
-            killed = True
-    if killed:
-        sleep(0.1)
-
-    return killed
 
 
 def list_readers():

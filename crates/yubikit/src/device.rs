@@ -229,6 +229,10 @@ impl YubiKeyDevice {
 
     /// Open a SmartCard (PC/SC) connection to this device.
     ///
+    /// Tries exclusive access first, falling back to shared. If another process
+    /// (such as `scdaemon` or `yubikey-agent`) holds a lock, attempts to kill
+    /// it and retry.
+    ///
     /// On YubiKey NEO, opening an OTP or FIDO connection ejects the virtual
     /// smartcard. It reappears after a few seconds. This method retries for
     /// up to 4 seconds if the card is temporarily absent.
@@ -240,7 +244,7 @@ impl YubiKeyDevice {
 
         let mut last_err = None;
         for attempt in 0..9 {
-            match PcscSmartCardConnection::new(reader, false) {
+            match PcscSmartCardConnection::open(reader) {
                 Ok(conn) => return Ok(conn),
                 Err(e) => {
                     if attempt < 8 && e.is_no_card() {
@@ -785,7 +789,7 @@ pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
 pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
     let mut last_err = None;
     for attempt in 0..9 {
-        match PcscSmartCardConnection::new(reader_name, false) {
+        match PcscSmartCardConnection::open(reader_name) {
             Ok(conn) => {
                 let (info, _conn) = read_info_ccid(conn)?;
                 return Ok(info);

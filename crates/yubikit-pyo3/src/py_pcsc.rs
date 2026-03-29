@@ -27,6 +27,15 @@ impl PcscConnection {
         })
     }
 
+    /// Open a connection with automatic exclusive→shared fallback and
+    /// scdaemon/yubikey-agent kill-retry logic.
+    #[staticmethod]
+    fn open(reader_name: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: pcsc::PcscSmartCardConnection::open(reader_name).map_err(pcsc_err)?,
+        })
+    }
+
     fn get_atr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let atr = self.inner.get_atr().map_err(pcsc_err)?;
         Ok(PyBytes::new(py, &atr))

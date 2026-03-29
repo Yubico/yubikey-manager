@@ -27,6 +27,8 @@
 
 use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
 use std::ffi::CString;
+use std::thread;
+use std::time::Duration;
 
 use crate::log_traffic;
 use crate::smartcard::{SmartCardConnection, SmartCardError, Transport};
@@ -49,6 +51,12 @@ impl PcscError {
             PcscError::Pcsc(::pcsc::Error::NoSmartcard | ::pcsc::Error::RemovedCard)
         )
     }
+
+    /// Returns true if this error indicates another process holds an exclusive
+    /// lock on the card (e.g. scdaemon, yubikey-agent).
+    pub fn is_sharing_violation(&self) -> bool {
+        matches!(self, PcscError::Pcsc(::pcsc::Error::SharingViolation))
+    }
 }
 
 impl From<PcscError> for SmartCardError {
@@ -68,6 +76,84 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
         .collect();
     Ok(names)
 }
+
+/// Try to kill `scdaemon` (GPG smart card daemon) which may hold an exclusive
+/// lock on PC/SC readers.
+///
+/// On Windows, uses WMI to find and terminate `scdaemon.exe`.
+/// On Unix, uses `pkill -9 scdaemon`.
+/// Returns `true` if a process was killed.
+pub fn kill_scdaemon() -> bool {
+    #[cfg(windows)]
+    {
+        kill_scdaemon_windows()
+    }
+    #[cfg(not(windows))]
+    {
+        kill_process_unix("scdaemon", Some(9))
+    }
+}
+
+/// Try to kill `yubikey-agent` which may hold an exclusive lock on PC/SC
+/// readers.
+///
+/// Sends SIGHUP on Unix (graceful restart). Not applicable on Windows.
+/// Returns `true` if a process was signalled.
+pub fn kill_yubikey_agent() -> bool {
+    #[cfg(windows)]
+    {
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        kill_process_unix("yubikey-agent", Some(1)) // SIGHUP
+    }
+}
+
+#[cfg(not(windows))]
+fn kill_process_unix(name: &str, signal: Option<i32>) -> bool {
+    use std::process::Command;
+    let mut cmd = Command::new("pkill");
+    if let Some(sig) = signal {
+        cmd.arg(format!("-{sig}"));
+    }
+    cmd.arg(name);
+    let killed = cmd.status().is_ok_and(|s| s.success());
+    if killed {
+        log::debug!("Killed {name}");
+        thread::sleep(Duration::from_millis(100));
+    }
+    killed
+}
+
+#[cfg(windows)]
+fn kill_scdaemon_windows() -> bool {
+    use std::process::Command;
+    // Use taskkill on Windows to terminate scdaemon.exe.
+    // /F = force, /IM = image name.
+    let killed = Command::new("taskkill")
+        .args(["/F", "/IM", "scdaemon.exe"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if killed {
+        log::debug!("Killed scdaemon.exe");
+        thread::sleep(Duration::from_millis(100));
+    }
+    killed
+}
+
+/// Try to kill processes that may hold exclusive locks on PC/SC readers.
+///
+/// Tries scdaemon first, then yubikey-agent. Returns `true` if any process
+/// was killed.
+fn kill_pcsc_blockers() -> bool {
+    kill_scdaemon() || kill_yubikey_agent()
+}
+
+/// Name of the env var that disables exclusive PC/SC access attempts.
+const YKMAN_NO_EXCLUSIVE: &str = "YKMAN_NO_EXLUSIVE"; // Intentional typo for compat
 
 /// A connection to a smart card via PC/SC.
 pub struct PcscSmartCardConnection {
@@ -102,6 +188,42 @@ impl PcscSmartCardConnection {
             reader_name: reader_name.to_owned(),
             transport: Transport::Usb,
         })
+    }
+
+    /// Open a connection with automatic fallback and retry logic.
+    ///
+    /// 1. Try exclusive access (unless `YKMAN_NO_EXLUSIVE` env var is set).
+    /// 2. Fall back to shared access.
+    /// 3. If both fail, try killing `scdaemon` or `yubikey-agent` and retry.
+    pub fn open(reader_name: &str) -> Result<Self, PcscError> {
+        Self::open_inner(reader_name, true)
+    }
+
+    fn open_inner(reader_name: &str, retry: bool) -> Result<Self, PcscError> {
+        // Try exclusive unless disabled
+        if std::env::var_os(YKMAN_NO_EXCLUSIVE).is_none() {
+            match Self::new(reader_name, true) {
+                Ok(conn) => {
+                    log::debug!("Using exclusive CCID connection");
+                    return Ok(conn);
+                }
+                Err(e) => {
+                    log::info!("Failed to get exclusive CCID access: {e}");
+                }
+            }
+        }
+
+        // Try shared
+        match Self::new(reader_name, false) {
+            Ok(conn) => Ok(conn),
+            Err(e) => {
+                if retry && kill_pcsc_blockers() {
+                    Self::open_inner(reader_name, false)
+                } else {
+                    Err(e)
+                }
+            }
+        }
     }
 
     /// Set the transport type (USB or NFC).
