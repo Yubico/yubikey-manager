@@ -30,7 +30,6 @@ fn main() {
     println!();
 
     if let Err(e) = dev.reinsert(
-        ENUMERATORS,
         &|status| match (status, transport) {
             (ReinsertStatus::Remove, Transport::Nfc) => {
                 println!("Remove the YubiKey from the NFC reader...");

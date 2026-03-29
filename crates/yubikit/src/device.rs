@@ -329,30 +329,38 @@ impl YubiKeyDevice {
     ///
     /// On success, updates this device's transport paths and info.
     ///
-    /// * `enumerators` – the same set of [`EnumerateFn`]s used to discover
-    ///   this device (passed through to [`list_devices`]).
     /// * `status_cb` – called with [`ReinsertStatus`] variants to indicate
     ///   what the user should do.
     /// * `cancelled` – checked every 250 ms; return `true` to cancel.
     pub fn reinsert(
         &mut self,
-        enumerators: &[EnumerateFn],
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
         if self.transport == Transport::Nfc {
             self.reinsert_nfc(status_cb, cancelled)
         } else {
-            self.reinsert_usb(enumerators, status_cb, cancelled)
+            self.reinsert_usb(status_cb, cancelled)
         }
     }
 
     fn reinsert_usb(
         &mut self,
-        enumerators: &[EnumerateFn],
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
+        // Build enumerators based on which transports this device was found on.
+        let mut enumerators: Vec<EnumerateFn> = Vec::new();
+        if self.reader_name.is_some() {
+            enumerators.push(list_devices_ccid_usb);
+        }
+        if self.hid_path.is_some() {
+            enumerators.push(list_devices_otp);
+        }
+        if self.fido_path.is_some() {
+            enumerators.push(list_devices_fido);
+        }
+
         let (pids, mut state) = scan_usb_devices();
         let n_devs: usize = pids.values().sum();
         let my_serial = self.info.serial;
@@ -374,7 +382,7 @@ impl YubiKeyDevice {
             }
             state = new_state;
 
-            let devs = list_devices(enumerators)?;
+            let devs = list_devices(&enumerators)?;
 
             if !removed {
                 if new_pids == pids {
@@ -649,6 +657,42 @@ pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
         log::debug!("Found {} PC/SC reader(s)", readers.len());
         for reader in &readers {
             log::debug!("Checking PC/SC reader: {reader}");
+            match read_info(reader) {
+                Ok((info, transport)) => {
+                    let pid = pid_from_reader_name(reader);
+                    devices.push(YubiKeyDevice {
+                        reader_name: Some(reader.clone()),
+                        hid_path: None,
+                        fido_path: None,
+                        pid,
+                        transport,
+                        info,
+                    });
+                }
+                Err(e) => {
+                    log::debug!("Skipping reader {reader}: {e}");
+                }
+            }
+        }
+    }
+
+    Ok(devices)
+}
+
+/// Discover USB-connected YubiKeys over CCID (PC/SC) only.
+///
+/// Like [`list_devices_ccid`] but only checks readers with "yubi" in the name,
+/// skipping NFC and other non-YubiKey readers.
+fn list_devices_ccid_usb() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!("Listing YubiKey devices (CCID, USB only)");
+    let mut devices = Vec::new();
+
+    if let Ok(readers) = list_readers() {
+        for reader in &readers {
+            if !reader.to_ascii_lowercase().contains("yubi") {
+                continue;
+            }
+            log::debug!("Checking USB PC/SC reader: {reader}");
             match read_info(reader) {
                 Ok((info, transport)) => {
                     let pid = pid_from_reader_name(reader);

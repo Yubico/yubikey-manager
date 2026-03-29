@@ -157,28 +157,10 @@ pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
     Ok((dict.into_any(), state).into_pyobject(py)?.into())
 }
 
-/// Map a list of transport name strings to Rust enumerator functions.
-fn resolve_enumerators(transports: &[String]) -> PyResult<Vec<device::EnumerateFn>> {
-    let mut fns = Vec::new();
-    for t in transports {
-        match t.as_str() {
-            "ccid" => fns.push(device::list_devices_ccid as device::EnumerateFn),
-            "otp" => fns.push(device::list_devices_otp as device::EnumerateFn),
-            "fido" => fns.push(device::list_devices_fido as device::EnumerateFn),
-            _ => {
-                return Err(PyRuntimeError::new_err(format!("Unknown transport: {t}")));
-            }
-        }
-    }
-    Ok(fns)
-}
-
 /// A YubiKey device discovered via native enumeration.
 #[pyclass(unsendable)]
 pub struct NativeYubiKeyDevice {
     inner: device::YubiKeyDevice,
-    /// Which enumerators were used to discover this device (for reinsert).
-    enumerators: Vec<device::EnumerateFn>,
 }
 
 #[pymethods]
@@ -251,7 +233,6 @@ impl NativeYubiKeyDevice {
     ) -> PyResult<()> {
         self.inner
             .reinsert(
-                &self.enumerators.clone(),
                 &|status| {
                     let status_str = match status {
                         device::ReinsertStatus::Remove => "remove",
@@ -285,14 +266,21 @@ impl NativeYubiKeyDevice {
 /// Returns a list of NativeYubiKeyDevice.
 #[pyfunction]
 pub fn list_devices(transports: Vec<String>) -> PyResult<Vec<NativeYubiKeyDevice>> {
-    let enumerators = resolve_enumerators(&transports)?;
+    let mut enumerators: Vec<device::EnumerateFn> = Vec::new();
+    for t in &transports {
+        match t.as_str() {
+            "ccid" => enumerators.push(device::list_devices_ccid),
+            "otp" => enumerators.push(device::list_devices_otp),
+            "fido" => enumerators.push(device::list_devices_fido),
+            _ => {
+                return Err(PyRuntimeError::new_err(format!("Unknown transport: {t}")));
+            }
+        }
+    }
     let devices = device::list_devices(&enumerators).map_err(device_err)?;
     Ok(devices
         .into_iter()
-        .map(|d| NativeYubiKeyDevice {
-            inner: d,
-            enumerators: enumerators.clone(),
-        })
+        .map(|d| NativeYubiKeyDevice { inner: d })
         .collect())
 }
 
