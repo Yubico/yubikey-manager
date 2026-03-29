@@ -307,9 +307,6 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
-    /// The static DEK from the SCP03 key set used for authentication.
-    /// Required for `put_key_static` and `put_key_ec_private` operations.
-    dek: Option<Vec<u8>>,
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -319,11 +316,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         protocol.select(Aid::SECURE_DOMAIN)?;
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
-        Ok(Self {
-            protocol,
-            version,
-            dek: None,
-        })
+        Ok(Self { protocol, version })
     }
 
     /// Open a Security Domain session with SCP (Secure Channel Protocol).
@@ -336,27 +329,12 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         protocol.init_scp(scp_key_params)?;
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
-        // Store DEK from SCP03 key params for key management operations
-        let dek = match scp_key_params {
-            crate::scp::ScpKeyParams::Scp03 { key_dek, .. } => key_dek.clone(),
-            _ => None,
-        };
-        Ok(Self {
-            protocol,
-            version,
-            dek,
-        })
+        Ok(Self { protocol, version })
     }
 
     /// The Security Domain version.
     pub fn version(&self) -> Version {
         self.version
-    }
-
-    /// The static DEK from the SCP03 key set, if authenticated with SCP03.
-    /// Needed as the `dek` parameter for `put_key_static` and `put_key_ec_private`.
-    pub fn dek(&self) -> Option<&[u8]> {
-        self.dek.as_deref()
     }
 
     /// Override the version (for development devices).
@@ -683,9 +661,12 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         &mut self,
         key: KeyRef,
         static_keys: &StaticKeys,
-        dek: &[u8],
         replace_kvn: u8,
     ) -> Result<(), SmartCardError> {
+        let dek = self.protocol.scp_dek().ok_or_else(|| {
+            SmartCardError::BadResponse("No DEK available (SCP session required)".into())
+        })?;
+
         let keys_dek = static_keys
             .key_dek
             .as_ref()
@@ -726,9 +707,12 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         key: KeyRef,
         private_key: &[u8],
         curve: Curve,
-        dek: &[u8],
         replace_kvn: u8,
     ) -> Result<(), SmartCardError> {
+        let dek = self.protocol.scp_dek().ok_or_else(|| {
+            SmartCardError::BadResponse("No DEK available (SCP session required)".into())
+        })?;
+
         let encrypted = encrypt_cbc_zero_iv(dek, private_key);
         let mut data = vec![key.kvn];
         data.extend_from_slice(&tlv_encode(KeyType::EccPrivateKey as u32, &encrypted));

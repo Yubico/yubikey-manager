@@ -155,13 +155,12 @@ impl SecurityDomainSession {
         key_enc: &[u8],
         key_mac: &[u8],
         key_dek: Option<Vec<u8>>,
-        dek: &[u8],
         replace_kvn: u8,
     ) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
         let static_keys = StaticKeys::new(key_enc.to_vec(), key_mac.to_vec(), key_dek);
         self.inner
-            .put_key_static(key, &static_keys, dek, replace_kvn)
+            .put_key_static(key, &static_keys, replace_kvn)
             .map_err(smartcard_err)
     }
 
@@ -172,13 +171,12 @@ impl SecurityDomainSession {
         kvn: u8,
         private_key: &[u8],
         curve: u8,
-        dek: &[u8],
         replace_kvn: u8,
     ) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
         let c = parse_curve(curve)?;
         self.inner
-            .put_key_ec_private(key, private_key, c, dek, replace_kvn)
+            .put_key_ec_private(key, private_key, c, replace_kvn)
             .map_err(smartcard_err)
     }
 

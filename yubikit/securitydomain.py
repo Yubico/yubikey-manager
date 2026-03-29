@@ -27,7 +27,6 @@ from .core.smartcard import (
 )
 from .core.smartcard.scp import (
     KeyRef,
-    Scp03KeyParams,
     ScpKeyParams,
     StaticKeys,
 )
@@ -73,7 +72,6 @@ class SecurityDomainSession:
         if self._version != Version(*native.version):
             native.version = tuple(self._version)
         self._authenticated = False
-        self._dek: bytes | None = None
         logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
@@ -96,11 +94,6 @@ class SecurityDomainSession:
             if "receipt" in str(e).lower():
                 raise InvalidSignature(str(e))
             raise ValueError("Incorrect SCP parameters")
-        # Store DEK for put_key operations
-        if isinstance(key_params, Scp03KeyParams):
-            self._dek = key_params.keys.key_dek
-        else:
-            self._dek = None
         self._authenticated = True
 
     def get_data(self, tag: int, data: bytes = b"") -> bytes:
@@ -253,8 +246,6 @@ class SecurityDomainSession:
             raise ValueError("Must be authenticated!")
 
         if isinstance(sk, StaticKeys):
-            if not self._dek:
-                raise ValueError("No session DEK key available")
             if not sk.key_dek:
                 raise ValueError("New DEK must be set in static keys")
             self._native.put_key_static(
@@ -263,17 +254,14 @@ class SecurityDomainSession:
                 sk.key_enc,
                 sk.key_mac,
                 sk.key_dek,
-                self._dek,
                 replace_kvn,
             )
         elif isinstance(sk, ec.EllipticCurvePrivateKey):
-            if not self._dek:
-                raise ValueError("No session DEK key available")
             n = (sk.key_size + 7) // 8
             s = int2bytes(sk.private_numbers().private_value, n)
             curve_val = Curve._from_key(sk)
             self._native.put_key_ec_private(
-                key.kid, key.kvn, s, int(curve_val), self._dek, replace_kvn
+                key.kid, key.kvn, s, int(curve_val), replace_kvn
             )
         elif isinstance(sk, ec.EllipticCurvePublicKey):
             pk_bytes = sk.public_bytes(

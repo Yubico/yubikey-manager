@@ -545,6 +545,11 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         self.scp_state.is_some()
     }
 
+    /// The data-encryption key from the SCP session, if available.
+    pub fn scp_dek(&self) -> Option<&[u8]> {
+        self.scp_state.as_ref().and_then(|s| s.dek())
+    }
+
     /// Send an APDU through the SCP layer.
     fn send_apdu_scp(
         &mut self,
@@ -636,7 +641,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         kvn: u8,
         key_enc: &[u8],
         key_mac: &[u8],
-        _key_dek: Option<&[u8]>,
+        key_dek: Option<&[u8]>,
     ) -> Result<(), SmartCardError> {
         // 1. Generate host challenge
         let mut host_challenge = [0u8; 8];
@@ -676,8 +681,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // 6. Compute host cryptogram
         let host_cryptogram = scp03_derive(&key_smac, 0x01, &context, 0x40)?;
 
-        // 7. Set SCP state
-        let state = ScpState::new(key_senc, key_smac, key_srmac, None, None);
+        // 7. Set SCP state (including the static DEK for PUT KEY operations)
+        let state = ScpState::new(key_senc, key_smac, key_srmac, None, None)
+            .with_dek(key_dek.map(|d| d.to_vec()));
         self.set_scp_state(state);
 
         // 8. EXTERNAL AUTHENTICATE (MAC but no encryption)
@@ -849,13 +855,15 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             ));
         }
 
-        // Session keys
+        // Session keys (keys[1..4]) + DEK (keys[4])
         let key_senc = keybytes[16..32].to_vec();
         let key_smac = keybytes[32..48].to_vec();
         let key_srmac = keybytes[48..64].to_vec();
+        let key_dek = keybytes[64..80].to_vec();
 
         // For SCP11 the MAC chain starts with the receipt
-        let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1));
+        let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1))
+            .with_dek(Some(key_dek));
         self.set_scp_state(state);
 
         Ok(())

@@ -1704,9 +1704,8 @@ mod securitydomain {
 
         let new_ref = KeyRef::new(0x01, 0x02);
         let new_keys = StaticKeys::new(new_enc.to_vec(), new_mac.to_vec(), Some(new_dek.to_vec()));
-        let default_dek: Vec<u8> = (0x40..=0x4Fu8).collect();
         session
-            .put_key_static(new_ref, &new_keys, &default_dek, 0)
+            .put_key_static(new_ref, &new_keys, 0)
             .expect("put new SCP03 keys");
         drop(session);
 
@@ -1817,13 +1816,7 @@ mod securitydomain {
 
         let import_ref = KeyRef::new(0x13, 0x02);
         session
-            .put_key_ec_private(
-                import_ref,
-                scalar_bytes.as_slice(),
-                Curve::Secp256r1,
-                &(0x40..=0x4Fu8).collect::<Vec<u8>>(),
-                0,
-            )
+            .put_key_ec_private(import_ref, scalar_bytes.as_slice(), Curve::Secp256r1, 0)
             .expect("put_key_ec_private for SCP11b");
 
         // Get the public key for authentication
@@ -1997,9 +1990,8 @@ mod securitydomain {
 
         let new_scp03_ref = KeyRef::new(0x01, 0x02);
         let new_keys = StaticKeys::new(new_enc.to_vec(), new_mac.to_vec(), Some(new_dek.to_vec()));
-        let default_dek: Vec<u8> = (0x40..=0x4Fu8).collect();
         session
-            .put_key_static(new_scp03_ref, &new_keys, &default_dek, 0)
+            .put_key_static(new_scp03_ref, &new_keys, 0)
             .expect("put new SCP03 keys");
 
         // Delete default SCP11b key

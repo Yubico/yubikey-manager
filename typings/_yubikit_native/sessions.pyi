@@ -361,7 +361,6 @@ class SecurityDomainSession:
         key_enc: bytes,
         key_mac: bytes,
         key_dek: bytes | None,
-        dek: bytes,
         replace_kvn: int,
     ) -> None: ...
     def put_key_ec_private(
@@ -370,7 +369,6 @@ class SecurityDomainSession:
         kvn: int,
         private_key: bytes,
         curve: int,
-        dek: bytes,
         replace_kvn: int,
     ) -> None: ...
     def put_key_ec_public(

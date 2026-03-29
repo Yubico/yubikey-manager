@@ -254,16 +254,8 @@ pub fn run_keys_import(
                 key_mac: mac,
                 key_dek: dek,
             };
-            let session_dek = session.dek().map(|d| d.to_vec()).ok_or_else(|| {
-                CliError("SCP03 authentication required for key import (use --scp with DEK)".into())
-            })?;
             session
-                .put_key_static(
-                    key_ref,
-                    &static_keys,
-                    &session_dek,
-                    replace_kvn.unwrap_or(0),
-                )
+                .put_key_static(key_ref, &static_keys, replace_kvn.unwrap_or(0))
                 .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;
             eprintln!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
         }
@@ -363,19 +355,8 @@ pub fn run_keys_import(
                             .into(),
                     ));
                     };
-                let session_dek = session.dek().map(|d| d.to_vec()).ok_or_else(|| {
-                    CliError(
-                        "SCP03 authentication required for key import (use --scp with DEK)".into(),
-                    )
-                })?;
                 session
-                    .put_key_ec_private(
-                        key_ref,
-                        &scalar_bytes,
-                        curve,
-                        &session_dek,
-                        replace_kvn.unwrap_or(0),
-                    )
+                    .put_key_ec_private(key_ref, &scalar_bytes, curve, replace_kvn.unwrap_or(0))
                     .map_err(|e| CliError(format!("Failed to import EC private key: {e}")))?;
                 eprintln!("EC private key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
             }

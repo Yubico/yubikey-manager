@@ -149,13 +149,17 @@ fn aes_cbc_decrypt(
         .map_err(|e| ScpError::CbcDecrypt(e.to_string()))
 }
 
-/// SCP03 session state managing encryption, decryption, and MAC operations.
+/// SCP session state managing encryption, decryption, and MAC operations.
 pub struct ScpState {
     key_senc: Vec<u8>,
     key_smac: Vec<u8>,
     key_srmac: Vec<u8>,
     mac_chain: Vec<u8>,
     enc_counter: u32,
+    /// Data-encryption key for wrapping imported keys (PUT KEY).
+    /// For SCP03: the static DEK from the key set.
+    /// For SCP11: derived as the 5th key from the X9.63-KDF output.
+    key_dek: Option<Vec<u8>>,
 }
 
 impl ScpState {
@@ -172,7 +176,18 @@ impl ScpState {
             key_srmac,
             mac_chain: mac_chain.unwrap_or_else(|| vec![0u8; 16]),
             enc_counter: enc_counter.unwrap_or(1),
+            key_dek: None,
         }
+    }
+
+    pub fn with_dek(mut self, dek: Option<Vec<u8>>) -> Self {
+        self.key_dek = dek;
+        self
+    }
+
+    /// The data-encryption key, if available.
+    pub fn dek(&self) -> Option<&[u8]> {
+        self.key_dek.as_deref()
     }
 
     /// Pad and encrypt data using AES-CBC with counter-derived IV.
