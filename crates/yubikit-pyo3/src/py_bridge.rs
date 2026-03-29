@@ -303,7 +303,8 @@ fn init_scp03_from_py<C: SmartCardConnection>(
 
     protocol
         .init_scp03(kvn, &key_enc, &key_mac, key_dek.as_deref())
-        .map_err(smartcard_err)
+        .map_err(smartcard_err)?;
+    Ok(())
 }
 
 fn init_scp11_from_py<C: SmartCardConnection>(
@@ -366,5 +367,6 @@ fn init_scp11_from_py<C: SmartCardConnection>(
 
     protocol
         .init_scp11(kid, kvn, &pk_bytes, sk_oce.as_deref(), &cert_refs, oce_ref)
-        .map_err(smartcard_err)
+        .map_err(smartcard_err)?;
+    Ok(())
 }

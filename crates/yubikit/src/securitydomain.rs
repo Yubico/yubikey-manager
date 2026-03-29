@@ -307,6 +307,7 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
+    dek: Option<Vec<u8>>,
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -316,7 +317,11 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         protocol.select(Aid::SECURE_DOMAIN)?;
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
-        Ok(Self { protocol, version })
+        Ok(Self {
+            protocol,
+            version,
+            dek: None,
+        })
     }
 
     /// Open a Security Domain session with SCP (Secure Channel Protocol).
@@ -326,10 +331,14 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     ) -> Result<Self, SmartCardError> {
         let mut protocol = SmartCardProtocol::new(connection);
         protocol.select(Aid::SECURE_DOMAIN)?;
-        protocol.init_scp(scp_key_params)?;
+        let dek = protocol.init_scp(scp_key_params)?;
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
-        Ok(Self { protocol, version })
+        Ok(Self {
+            protocol,
+            version,
+            dek,
+        })
     }
 
     /// The Security Domain version.
@@ -663,7 +672,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         static_keys: &StaticKeys,
         replace_kvn: u8,
     ) -> Result<(), SmartCardError> {
-        let dek = self.protocol.scp_dek().ok_or_else(|| {
+        let dek = self.dek.as_deref().ok_or_else(|| {
             SmartCardError::BadResponse("No DEK available (SCP session required)".into())
         })?;
 
@@ -709,7 +718,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<(), SmartCardError> {
-        let dek = self.protocol.scp_dek().ok_or_else(|| {
+        let dek = self.dek.as_deref().ok_or_else(|| {
             SmartCardError::BadResponse("No DEK available (SCP session required)".into())
         })?;
 
