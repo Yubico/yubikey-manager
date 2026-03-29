@@ -836,15 +836,23 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
 /// Uses [`ManagementOtpSession`] to read [`DeviceInfo`].
 /// Applies standard fixups for known device quirks.
 /// Returns the info and the connection for reuse.
-pub fn read_info_otp<T: OtpConnection>(conn: T) -> Result<(DeviceInfo, T), DeviceError> {
-    let mut session = ManagementOtpSession::new(conn)
-        .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
-    let mut info = session
-        .read_device_info_unchecked()
-        .map_err(DeviceError::SmartCard)?;
-    apply_device_info_fixups(&mut info);
-    let conn = session.into_connection();
-    Ok((info, conn))
+/// The connection is returned when possible, even on error.
+pub fn read_info_otp<T: OtpConnection>(
+    conn: T,
+) -> Result<(DeviceInfo, T), (DeviceError, Option<T>)> {
+    let mut session = ManagementOtpSession::new(conn).map_err(|e| {
+        (
+            DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())),
+            None,
+        )
+    })?;
+    match session.read_device_info_unchecked() {
+        Ok(mut info) => {
+            apply_device_info_fixups(&mut info);
+            Ok((info, session.into_connection()))
+        }
+        Err(e) => Err((DeviceError::SmartCard(e), Some(session.into_connection()))),
+    }
 }
 
 /// Read device info via FIDO HID (CTAP) from an open connection.
@@ -852,14 +860,19 @@ pub fn read_info_otp<T: OtpConnection>(conn: T) -> Result<(DeviceInfo, T), Devic
 /// Uses [`ManagementFidoSession`] to read [`DeviceInfo`].
 /// Applies standard fixups for known device quirks.
 /// Returns the info and the connection for reuse.
-pub fn read_info_fido<C: FidoConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
-    let mut session = ManagementFidoSession::new(conn).map_err(DeviceError::SmartCard)?;
-    let mut info = session
-        .read_device_info_unchecked()
-        .map_err(DeviceError::SmartCard)?;
-    apply_device_info_fixups(&mut info);
-    let conn = session.into_connection();
-    Ok((info, conn))
+/// The connection is returned when possible, even on error.
+pub fn read_info_fido<C: FidoConnection>(
+    conn: C,
+) -> Result<(DeviceInfo, C), (DeviceError, Option<C>)> {
+    let mut session =
+        ManagementFidoSession::new(conn).map_err(|e| (DeviceError::SmartCard(e), None))?;
+    match session.read_device_info_unchecked() {
+        Ok(mut info) => {
+            apply_device_info_fixups(&mut info);
+            Ok((info, session.into_connection()))
+        }
+        Err(e) => Err((DeviceError::SmartCard(e), Some(session.into_connection()))),
+    }
 }
 
 /// List Yubico FIDO HID devices with device info.

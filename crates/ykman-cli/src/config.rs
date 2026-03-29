@@ -47,6 +47,11 @@ fn write_config(
 }
 
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
+    if !hex.len().is_multiple_of(2) {
+        return Err(CliError(
+            "Lock code hex string must have even length.".into(),
+        ));
+    }
     let bytes: Result<Vec<u8>, _> = (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))

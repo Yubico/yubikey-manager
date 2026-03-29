@@ -89,6 +89,8 @@ pub fn require_version(version: Version, required: Version, feature: &str) -> Re
 }
 
 /// Decode big-endian bytes into an integer.
+///
+/// Only the last 8 bytes are used; longer inputs silently lose high-order bytes.
 pub fn bytes2int(data: &[u8]) -> u64 {
     let mut v: u64 = 0;
     for &b in data {

@@ -400,11 +400,11 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             println!("      Name: {name}");
                             conn
                         }
-                        Err(e) => {
+                        Err((e, conn)) => {
                             println!("      Error: {e}");
-                            match HidOtpConnection::new(&hid.path) {
-                                Ok(c) => c,
-                                Err(_) => continue,
+                            match conn.or_else(|| HidOtpConnection::new(&hid.path).ok()) {
+                                Some(c) => c,
+                                None => continue,
                             }
                         }
                     };

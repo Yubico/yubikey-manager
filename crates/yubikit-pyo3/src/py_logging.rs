@@ -1,8 +1,9 @@
 //! Bridge from Rust `log` crate to Python `logging` module.
 //!
 //! When initialized, Rust log messages are forwarded to Python's logging system.
-//! Uses Python::with_gil_unchecked which is only safe when called from a thread
-//! that holds the GIL. We track this with a thread-local flag.
+//! Calls into Python using `Python::with_gil`, and only forwards log records
+//! from the Python main thread, with a thread-local flag used to prevent
+//! reentrant logging.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};

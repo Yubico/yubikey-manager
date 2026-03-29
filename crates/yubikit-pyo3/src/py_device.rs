@@ -46,26 +46,34 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyOb
     // Try OTP connection
     if let Ok(otp_conn) = connection.downcast::<py_hid::OtpConnection>() {
         let native = otp_conn.borrow_mut().take_inner()?;
-        let result = device::read_info_otp(native).map_err(device_err);
-        match result {
+        match device::read_info_otp(native) {
             Ok((info, conn)) => {
                 otp_conn.borrow_mut().restore_inner(conn);
                 return device_info_to_dict(py, &info);
             }
-            Err(e) => return Err(e),
+            Err((e, conn)) => {
+                if let Some(conn) = conn {
+                    otp_conn.borrow_mut().restore_inner(conn);
+                }
+                return Err(device_err(e));
+            }
         }
     }
 
     // Try FIDO connection
     if let Ok(fido_conn) = connection.downcast::<py_hid::FidoConnection>() {
         let native = fido_conn.borrow_mut().take_inner()?;
-        let result = device::read_info_fido(native).map_err(device_err);
-        match result {
+        match device::read_info_fido(native) {
             Ok((info, conn)) => {
                 fido_conn.borrow_mut().restore_inner(conn);
                 return device_info_to_dict(py, &info);
             }
-            Err(e) => return Err(e),
+            Err((e, conn)) => {
+                if let Some(conn) = conn {
+                    fido_conn.borrow_mut().restore_inner(conn);
+                }
+                return Err(device_err(e));
+            }
         }
     }
 
