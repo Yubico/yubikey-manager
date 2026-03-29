@@ -149,7 +149,7 @@ pub fn get_name(
 /// and state is a hash that changes when attached devices change.
 #[pyfunction]
 pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
-    let (counts, state) = device::scan_devices();
+    let (counts, state) = device::scan_usb_devices();
     let dict = PyDict::new(py);
     for (pid, count) in counts {
         dict.set_item(pid, count)?;
@@ -256,8 +256,6 @@ impl NativeYubiKeyDevice {
                     let status_str = match status {
                         device::ReinsertStatus::Remove => "remove",
                         device::ReinsertStatus::Reinsert => "reinsert",
-                        device::ReinsertStatus::RemoveFromReader => "remove_from_reader",
-                        device::ReinsertStatus::PlaceOnReader => "place_on_reader",
                     };
                     Python::with_gil(|py| {
                         let _ = status_cb.call1(py, (status_str,));

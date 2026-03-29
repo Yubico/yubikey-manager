@@ -130,8 +130,6 @@ class _NativeCompositeDevice(YkmanDevice):
         status_map = {
             "remove": REINSERT_STATUS.REMOVE,
             "reinsert": REINSERT_STATUS.REINSERT,
-            "remove_from_reader": REINSERT_STATUS.REMOVE_FROM_READER,
-            "place_on_reader": REINSERT_STATUS.PLACE_ON_READER,
         }
         try:
             self._native.reinsert(

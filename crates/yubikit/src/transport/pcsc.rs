@@ -233,11 +233,6 @@ impl PcscSmartCardConnection {
         }
     }
 
-    /// Set the transport type (USB or NFC).
-    pub fn set_transport(&mut self, transport: Transport) {
-        self.transport = transport;
-    }
-
     /// Get the ATR (Answer-To-Reset) of the connected card.
     pub fn get_atr(&self) -> Result<Vec<u8>, PcscError> {
         let card = self.card.as_ref().ok_or(PcscError::ConnectionClosed)?;

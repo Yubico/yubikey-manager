@@ -44,10 +44,8 @@ class ScardSmartCardConnection(SmartCardConnection):
         # PcscConnection.open() handles exclusive→shared fallback and
         # killing scdaemon/yubikey-agent if they block access.
         self.connection = PcscConnection.open(reader_name)
-
-        atr = self.connection.get_atr()
         self._transport = (
-            TRANSPORT.USB if atr and atr[1] & 0xF0 == 0xF0 else TRANSPORT.NFC
+            TRANSPORT.USB if self.connection.transport == "usb" else TRANSPORT.NFC
         )
 
     @property

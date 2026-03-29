@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use yubikit::smartcard::SmartCardConnection;
 use yubikit::transport::pcsc;
 
 fn pcsc_err(e: pcsc::PcscError) -> PyErr {
@@ -58,6 +59,15 @@ impl PcscConnection {
     #[pyo3(signature = (exclusive=true))]
     fn reconnect(&mut self, exclusive: bool) -> PyResult<()> {
         self.inner.reconnect(exclusive).map_err(pcsc_err)
+    }
+
+    /// Get the detected transport type ("usb" or "nfc").
+    #[getter]
+    fn transport(&self) -> &'static str {
+        match self.inner.transport() {
+            yubikit::core::Transport::Usb => "usb",
+            yubikit::core::Transport::Nfc => "nfc",
+        }
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

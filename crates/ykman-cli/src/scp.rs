@@ -1,14 +1,13 @@
 //! SCP (Secure Channel Protocol) utilities for automatic SCP11b negotiation
 //! and explicit SCP from CLI flags.
 
+use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
 
 use crate::util::CliError;
-
-const YK_READER_PREFIX: &str = "yubico yubikey";
 
 /// SCP configuration resolved from CLI flags and device state.
 #[derive(Clone)]
@@ -65,10 +64,7 @@ impl ScpParams {
 
 /// Check if a device is connected over NFC (external reader).
 pub fn is_nfc(dev: &YubiKeyDevice) -> bool {
-    match dev.reader_name() {
-        Some(name) => !name.to_ascii_lowercase().contains(YK_READER_PREFIX),
-        None => false,
-    }
+    dev.transport() == Transport::Nfc
 }
 
 /// Check if automatic SCP11b should be used for a given capability.

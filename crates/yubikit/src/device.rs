@@ -89,14 +89,10 @@ pub enum DeviceError {
 /// Status updates during a device reinsert operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReinsertStatus {
-    /// The USB device should be removed.
+    /// The device should be removed (USB: unplug, NFC: remove from reader).
     Remove,
-    /// The USB device has been removed and should be reinserted.
+    /// The device has been removed and should be reinserted (USB: plug in, NFC: place on reader).
     Reinsert,
-    /// The NFC card should be removed from the reader.
-    RemoveFromReader,
-    /// The NFC card has been removed and should be placed on the reader again.
-    PlaceOnReader,
 }
 
 impl fmt::Display for DeviceError {
@@ -325,7 +321,7 @@ impl YubiKeyDevice {
 
     /// Wait for the user to remove and reinsert this YubiKey.
     ///
-    /// For USB devices, polls `scan_devices` to detect removal, then
+    /// For USB devices, polls `scan_usb_devices` to detect removal, then
     /// `list_devices` to find the device again after reinsertion.
     ///
     /// For NFC devices, the reader stays connected — polls the reader for
@@ -357,7 +353,7 @@ impl YubiKeyDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
-        let (pids, mut state) = scan_devices();
+        let (pids, mut state) = scan_usb_devices();
         let n_devs: usize = pids.values().sum();
         let my_serial = self.info.serial;
         let my_version = self.info.version;
@@ -372,7 +368,7 @@ impl YubiKeyDevice {
                 return Err(DeviceError::Cancelled);
             }
 
-            let (new_pids, new_state) = scan_devices();
+            let (new_pids, new_state) = scan_usb_devices();
             if new_state == state {
                 continue;
             }
@@ -435,7 +431,7 @@ impl YubiKeyDevice {
         let mut removed = false;
 
         log::debug!("NFC reinsert: waiting for card removal from reader {reader}");
-        status_cb(ReinsertStatus::RemoveFromReader);
+        status_cb(ReinsertStatus::Remove);
 
         loop {
             thread::sleep(Duration::from_millis(500));
@@ -450,7 +446,7 @@ impl YubiKeyDevice {
                     Err(e) if e.is_no_card() => {
                         removed = true;
                         log::debug!("NFC card removed, waiting for tap");
-                        status_cb(ReinsertStatus::PlaceOnReader);
+                        status_cb(ReinsertStatus::Reinsert);
                     }
                     Err(e) => return Err(e.into()),
                 }
@@ -550,9 +546,12 @@ fn pid_from_interfaces(interfaces: UsbInterface, is_neo: bool) -> Option<u16> {
 
 /// Scan USB for attached YubiKeys without opening any connections.
 ///
+/// Only checks USB-connected devices (Yubico readers, OTP HID, FIDO HID).
+/// NFC readers are excluded since they are not USB-attached YubiKeys.
+///
 /// Returns a mapping of PID to device count, and a state value that changes
 /// whenever the set of attached devices changes (useful for polling).
-pub fn scan_devices() -> (HashMap<u16, usize>, u64) {
+pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
     let mut counts: HashMap<u16, usize> = HashMap::new();
     let mut fingerprints: Vec<String> = Vec::new();
 

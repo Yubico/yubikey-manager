@@ -3,6 +3,7 @@
 //! Lists connected YubiKeys, picks the first one, and asks the user to
 //! remove and reinsert it.
 
+use yubikit::core::Transport;
 use yubikit::device::{
     ReinsertStatus, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
 };
@@ -19,8 +20,9 @@ fn main() {
     }
 
     let dev = &mut devices[0];
+    let transport = dev.transport();
     println!(
-        "Found: {} (serial: {:?}, version: {})",
+        "Found: {} (serial: {:?}, version: {}, transport: {transport:?})",
         dev.name(),
         dev.serial(),
         dev.version(),
@@ -29,18 +31,18 @@ fn main() {
 
     if let Err(e) = dev.reinsert(
         ENUMERATORS,
-        &|status| match status {
-            ReinsertStatus::Remove => {
-                println!("Remove the YubiKey from the USB port...");
-            }
-            ReinsertStatus::Reinsert => {
-                println!("Now reinsert the YubiKey...");
-            }
-            ReinsertStatus::RemoveFromReader => {
+        &|status| match (status, transport) {
+            (ReinsertStatus::Remove, Transport::Nfc) => {
                 println!("Remove the YubiKey from the NFC reader...");
             }
-            ReinsertStatus::PlaceOnReader => {
+            (ReinsertStatus::Remove, _) => {
+                println!("Remove the YubiKey from the USB port...");
+            }
+            (ReinsertStatus::Reinsert, Transport::Nfc) => {
                 println!("Place the YubiKey on the NFC reader again...");
+            }
+            (ReinsertStatus::Reinsert, _) => {
+                println!("Now reinsert the YubiKey...");
             }
         },
         &|| false,

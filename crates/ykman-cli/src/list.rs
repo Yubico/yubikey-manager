@@ -1,3 +1,4 @@
+use yubikit::core::Transport;
 use yubikit::device::{
     get_name, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp, list_readers,
 };
@@ -51,7 +52,16 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
                 Some(s) => format!(" Serial: {s}"),
                 None => String::new(),
             };
-            println!("{name} ({version}){ifaces_str}{serial_str}");
+            let reader_str = if dev.transport() == Transport::Nfc {
+                if let Some(name) = dev.reader_name() {
+                    format!(" [{name}]")
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            println!("{name} ({version}){ifaces_str}{serial_str}{reader_str}");
         }
     }
 

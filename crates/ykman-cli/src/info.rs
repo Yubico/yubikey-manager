@@ -20,12 +20,8 @@ pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
         println!("Form factor: {}", info.form_factor);
     }
 
-    // Show USB interfaces only when connected via USB (YubiKey reader, not NFC)
-    let is_usb = dev
-        .reader_name()
-        .map(|r| r.to_ascii_lowercase().contains("yubi"))
-        .unwrap_or(false)
-        || dev.hid_path().is_some();
+    // Show USB interfaces only when connected via USB
+    let is_usb = dev.transport() == Transport::Usb;
     if is_usb {
         let usb_ifaces = dev.usb_interfaces();
         if usb_ifaces.0 != 0 {
