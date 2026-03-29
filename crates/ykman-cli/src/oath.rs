@@ -756,3 +756,326 @@ fn urldecode(s: &str) -> String {
     }
     result
 }
+
+// ---------------------------------------------------------------------------
+// PSKC import
+// ---------------------------------------------------------------------------
+
+const PSKC_ALG_PREFIX: &str = "urn:ietf:params:xml:ns:keyprov:pskc:";
+
+/// A credential parsed from a PSKC XML file.
+struct PskcCredential {
+    #[allow(dead_code)]
+    id: String,
+    issuer: Option<String>,
+    name: String,
+    oath_type: OathType,
+    hash_algorithm: HashAlgorithm,
+    secret: Vec<u8>,
+    digits: u8,
+    period: u32,
+    counter: u32,
+}
+
+pub fn run_accounts_import(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    file: &str,
+    password: Option<&str>,
+    remember: bool,
+    touch: bool,
+    force: bool,
+) -> Result<(), CliError> {
+    let data = crate::util::read_file_or_stdin(file)?;
+    let xml_str =
+        String::from_utf8(data).map_err(|_| CliError("PSKC file is not valid UTF-8.".into()))?;
+
+    let credentials = parse_pskc(&xml_str)?;
+
+    if credentials.is_empty() {
+        return Err(CliError("No valid OATH accounts found in the file.".into()));
+    }
+
+    let mut session = open_session(dev, scp_params, password, remember)?;
+
+    let existing = session
+        .list_credentials()
+        .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
+
+    let mut n_keys = 0;
+    for cred in &credentials {
+        let account_name = match &cred.issuer {
+            Some(i) => format!("{i}:{}", cred.name),
+            None => cred.name.clone(),
+        };
+
+        if !force {
+            eprint!("Import account: {account_name} ? [Y/n] ");
+            io::stderr().flush().ok();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).ok();
+            let answer = input.trim().to_ascii_lowercase();
+            if answer == "n" || answer == "no" {
+                continue;
+            }
+        }
+
+        let cred_data = CredentialData {
+            name: cred.name.clone(),
+            oath_type: cred.oath_type,
+            hash_algorithm: cred.hash_algorithm,
+            secret: cred.secret.clone(),
+            digits: cred.digits,
+            period: cred.period,
+            counter: cred.counter,
+            issuer: cred.issuer.clone(),
+        };
+
+        // Check for duplicate when forcing
+        if force {
+            let display = match &cred.issuer {
+                Some(i) => format!("{i}:{}", cred.name),
+                None => cred.name.clone(),
+            };
+            if existing.iter().any(|c| format_cred_name(c) == display) {
+                // Delete existing before re-adding
+                let id = cred_data.get_id();
+                let _ = session.delete_credential(&id);
+            }
+        }
+
+        session
+            .put_credential(&cred_data, touch)
+            .map_err(|e| CliError(format!("Failed to add credential '{account_name}': {e}")))?;
+        eprintln!("Added account: {account_name}");
+        n_keys += 1;
+    }
+
+    eprintln!("{n_keys} OATH account(s) added.");
+    Ok(())
+}
+
+/// Parse a PSKC XML string and extract OATH credentials.
+fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>, CliError> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    let mut reader = Reader::from_str(xml);
+    let mut credentials = Vec::new();
+
+    // Track XML state
+    let mut in_key_package = false;
+    let mut current_id: Option<String> = None;
+    let mut current_algorithm: Option<String> = None;
+    let mut current_algorithm_suite: Option<String> = None;
+    let mut current_issuer: Option<String> = None;
+    let mut current_userid: Option<String> = None;
+    let mut current_friendly_name: Option<String> = None;
+    let mut current_secret_b64: Option<String> = None;
+    let mut current_response_length: Option<u8> = None;
+    let mut current_time_interval: Option<u32> = None;
+    let mut current_counter: Option<u32> = None;
+    let mut in_secret = false;
+    let mut in_plain_value = false;
+    let mut _in_response_format = false;
+    let mut in_otp_params = false;
+    let mut current_tag: Option<String> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                let local = local_name(e.name().as_ref());
+                match local.as_str() {
+                    "KeyPackage" => {
+                        in_key_package = true;
+                        current_id = None;
+                        current_algorithm = None;
+                        current_algorithm_suite = None;
+                        current_issuer = None;
+                        current_userid = None;
+                        current_friendly_name = None;
+                        current_secret_b64 = None;
+                        current_response_length = None;
+                        current_time_interval = None;
+                        current_counter = None;
+                    }
+                    "Key" if in_key_package => {
+                        for attr in e.attributes().flatten() {
+                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let val = attr.unescape_value().unwrap_or_default().to_string();
+                            match local_name(key.as_bytes()).as_str() {
+                                "Id" => current_id = Some(val),
+                                "Algorithm" => current_algorithm = Some(val),
+                                _ => {}
+                            }
+                        }
+                    }
+                    "AlgorithmParameters" if in_key_package => {}
+                    "Suite" if in_key_package => {
+                        current_tag = Some("Suite".to_string());
+                    }
+                    "Secret" if in_key_package => in_secret = true,
+                    "PlainValue" if in_secret => in_plain_value = true,
+                    "ResponseFormat" if in_key_package => {
+                        _in_response_format = true;
+                        for attr in e.attributes().flatten() {
+                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let val = attr.unescape_value().unwrap_or_default().to_string();
+                            if local_name(key.as_bytes()) == "Length" {
+                                current_response_length = val.parse().ok();
+                            }
+                        }
+                    }
+                    "OTPParameters" if in_key_package => in_otp_params = true,
+                    "Time" | "TimeInterval" if in_otp_params => {
+                        current_tag = Some("TimeInterval".to_string());
+                    }
+                    "Counter" if in_otp_params || in_key_package => {
+                        current_tag = Some("Counter".to_string());
+                    }
+                    "Issuer" if in_key_package => {
+                        current_tag = Some("Issuer".to_string());
+                    }
+                    "KeyUserId" | "UserId" if in_key_package => {
+                        current_tag = Some("KeyUserId".to_string());
+                    }
+                    "FriendlyName" if in_key_package => {
+                        current_tag = Some("FriendlyName".to_string());
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(ref e)) => {
+                let text = e.unescape().unwrap_or_default().to_string();
+                if in_plain_value && in_secret {
+                    current_secret_b64 = Some(text.clone());
+                }
+                if let Some(tag) = &current_tag {
+                    match tag.as_str() {
+                        "Suite" => current_algorithm_suite = Some(text.clone()),
+                        "TimeInterval" => current_time_interval = text.parse().ok(),
+                        "Counter" => current_counter = text.parse().ok(),
+                        "Issuer" => current_issuer = Some(text.clone()),
+                        "KeyUserId" => current_userid = Some(text.clone()),
+                        "FriendlyName" => current_friendly_name = Some(text.clone()),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let local = local_name(e.name().as_ref());
+                match local.as_str() {
+                    "PlainValue" => in_plain_value = false,
+                    "Secret" => in_secret = false,
+                    "ResponseFormat" => _in_response_format = false,
+                    "OTPParameters" => in_otp_params = false,
+                    "Suite" | "Time" | "TimeInterval" | "Counter" | "Issuer" | "KeyUserId"
+                    | "UserId" | "FriendlyName" => {
+                        current_tag = None;
+                    }
+                    "KeyPackage" => {
+                        in_key_package = false;
+
+                        // Build credential from collected data
+                        let algorithm = match &current_algorithm {
+                            Some(a) if a.starts_with(PSKC_ALG_PREFIX) => a.clone(),
+                            _ => continue,
+                        };
+
+                        let oath_type_str = &algorithm[PSKC_ALG_PREFIX.len()..];
+                        let oath_type = match oath_type_str.to_ascii_uppercase().as_str() {
+                            "HOTP" => OathType::Hotp,
+                            "TOTP" => OathType::Totp,
+                            _ => continue,
+                        };
+
+                        let secret = match &current_secret_b64 {
+                            Some(b64) => {
+                                use base64::Engine;
+                                match base64::engine::general_purpose::STANDARD.decode(b64.trim()) {
+                                    Ok(s) => s,
+                                    Err(_) => continue,
+                                }
+                            }
+                            None => continue,
+                        };
+
+                        let id = match &current_id {
+                            Some(id) => id.clone(),
+                            None => continue,
+                        };
+
+                        let hash_algorithm = match current_algorithm_suite
+                            .as_deref()
+                            .map(|s| s.to_ascii_uppercase())
+                        {
+                            Some(ref s) if s.contains("SHA256") || s == "SHA256" => {
+                                HashAlgorithm::Sha256
+                            }
+                            Some(ref s) if s.contains("SHA512") || s == "SHA512" => {
+                                HashAlgorithm::Sha512
+                            }
+                            _ => HashAlgorithm::Sha1,
+                        };
+
+                        let mut issuer = None;
+                        let mut name = id.clone();
+
+                        // Try friendly_name for issuer:name
+                        if let Some(ref friendly) = current_friendly_name
+                            && friendly.contains(':')
+                        {
+                            let mut parts = friendly.splitn(2, ':');
+                            issuer = parts.next().map(|s| s.to_string());
+                            if let Some(n) = parts.next() {
+                                name = n.to_string();
+                            }
+                        }
+                        if let Some(ref iss) = current_issuer {
+                            issuer = Some(iss.clone());
+                        }
+                        if let Some(ref uid) = current_userid {
+                            // Try to extract CN from DN format
+                            if uid.contains("CN=") {
+                                if let Some(cn) =
+                                    uid.split("CN=").nth(1).and_then(|s| s.split(',').next())
+                                {
+                                    name = cn.to_string();
+                                }
+                            } else {
+                                name = uid.clone();
+                            }
+                        }
+
+                        credentials.push(PskcCredential {
+                            id,
+                            issuer,
+                            name,
+                            oath_type,
+                            hash_algorithm,
+                            secret,
+                            digits: current_response_length.unwrap_or(6),
+                            period: current_time_interval.unwrap_or(30),
+                            counter: current_counter.unwrap_or(0),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(CliError(format!("Failed to parse PSKC XML: {e}"))),
+            _ => {}
+        }
+    }
+
+    Ok(credentials)
+}
+
+/// Extract the local name from a potentially namespace-prefixed XML name.
+fn local_name(full: &[u8]) -> String {
+    let s = std::str::from_utf8(full).unwrap_or("");
+    match s.rfind(':') {
+        Some(idx) => s[idx + 1..].to_string(),
+        None => s.to_string(),
+    }
+}

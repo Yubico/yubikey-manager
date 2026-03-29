@@ -1908,11 +1908,15 @@ fn run() -> Result<(), CliError> {
                         remember,
                         touch,
                         force,
-                    } => {
-                        eprintln!("PSKC import is not yet implemented in Rust CLI");
-                        let _ = (&file, &password, remember, touch, force);
-                        Ok(())
-                    }
+                    } => oath::run_accounts_import(
+                        &dev,
+                        &scp_params,
+                        &file,
+                        password.as_deref(),
+                        remember,
+                        touch,
+                        force,
+                    ),
                 },
             }
         }
@@ -1967,9 +1971,6 @@ fn run() -> Result<(), CliError> {
                     force,
                     config_output,
                 } => {
-                    if config_output.is_some() {
-                        eprintln!("WARNING: --config-output is not yet implemented.");
-                    }
                     let enter_flag = if enter {
                         Some(true)
                     } else if no_enter {
@@ -1990,6 +1991,7 @@ fn run() -> Result<(), CliError> {
                         enter_flag,
                         access_code.as_deref(),
                         force,
+                        config_output.as_deref(),
                     )
                 }
                 OtpAction::Static {
@@ -2061,9 +2063,6 @@ fn run() -> Result<(), CliError> {
                     force,
                     identifier,
                 } => {
-                    if identifier.is_some() {
-                        eprintln!("WARNING: --identifier is not yet implemented.");
-                    }
                     let enter_flag = if enter {
                         Some(true)
                     } else if no_enter {
@@ -2081,6 +2080,7 @@ fn run() -> Result<(), CliError> {
                         enter_flag,
                         access_code.as_deref(),
                         force,
+                        identifier.as_deref(),
                     )
                 }
                 OtpAction::Settings {
@@ -2201,21 +2201,17 @@ fn run() -> Result<(), CliError> {
                         management_key,
                         pin,
                         password,
-                    } => {
-                        if password.is_some() {
-                            eprintln!("WARNING: password-protected keys not yet supported.");
-                        }
-                        piv::run_keys_import(
-                            &dev,
-                            &scp_params,
-                            &slot,
-                            &key_file,
-                            pin_policy,
-                            touch_policy,
-                            management_key.as_deref(),
-                            pin.as_deref(),
-                        )
-                    }
+                    } => piv::run_keys_import(
+                        &dev,
+                        &scp_params,
+                        &slot,
+                        &key_file,
+                        pin_policy,
+                        touch_policy,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                        password.as_deref(),
+                    ),
                     PivKeysAction::Info { slot } => piv::run_keys_info(&dev, &scp_params, &slot),
                     PivKeysAction::Attest {
                         slot,
@@ -2227,13 +2223,16 @@ fn run() -> Result<(), CliError> {
                         output,
                         format,
                         verify,
-                        pin: _,
-                    } => {
-                        if verify {
-                            eprintln!("NOTE: --verify is not yet implemented for key export.");
-                        }
-                        piv::run_keys_export(&dev, &scp_params, &slot, &output, format)
-                    }
+                        pin,
+                    } => piv::run_keys_export(
+                        &dev,
+                        &scp_params,
+                        &slot,
+                        &output,
+                        format,
+                        verify,
+                        pin.as_deref(),
+                    ),
                     PivKeysAction::Move {
                         source,
                         dest,
@@ -2274,28 +2273,18 @@ fn run() -> Result<(), CliError> {
                         password,
                         verify,
                         no_update_chuid,
-                    } => {
-                        if password.is_some() {
-                            eprintln!(
-                                "WARNING: --password is not yet implemented for certificate import."
-                            );
-                        }
-                        if verify {
-                            eprintln!(
-                                "WARNING: --verify is not yet implemented for certificate import."
-                            );
-                        }
-                        piv::run_certificates_import(
-                            &dev,
-                            &scp_params,
-                            &slot,
-                            &cert_file,
-                            management_key.as_deref(),
-                            pin.as_deref(),
-                            compress,
-                            !no_update_chuid,
-                        )
-                    }
+                    } => piv::run_certificates_import(
+                        &dev,
+                        &scp_params,
+                        &slot,
+                        &cert_file,
+                        management_key.as_deref(),
+                        pin.as_deref(),
+                        compress,
+                        !no_update_chuid,
+                        password.as_deref(),
+                        verify,
+                    ),
                     PivCertAction::Delete {
                         slot,
                         management_key,
@@ -2610,18 +2599,16 @@ fn run() -> Result<(), CliError> {
                         credential_password,
                         management_key,
                         touch,
-                    } => {
-                        eprintln!("HSM Auth credential import is not yet implemented in Rust CLI");
-                        let _ = (
-                            &label,
-                            &private_key,
-                            &password,
-                            &credential_password,
-                            &management_key,
-                            touch,
-                        );
-                        Ok(())
-                    }
+                    } => hsmauth::run_credentials_import(
+                        &dev,
+                        &scp_params,
+                        &label,
+                        &private_key,
+                        password.as_deref(),
+                        credential_password.as_deref(),
+                        management_key.as_deref(),
+                        touch,
+                    ),
                 },
                 HsmauthAction::Access(access) => match access {
                     HsmauthAccessAction::ChangeManagementPassword {
@@ -2688,11 +2675,6 @@ fn run() -> Result<(), CliError> {
                             replace_kvn,
                             password,
                         } => {
-                            if password.is_some() {
-                                eprintln!(
-                                    "WARNING: --password is not yet implemented for SD key import."
-                                );
-                            }
                             let kid = parse_hex_u8(&kid)?;
                             let kvn = parse_hex_u8(&kvn)?;
                             let rkvn = replace_kvn.as_deref().map(&parse_hex_u8).transpose()?;
@@ -2704,6 +2686,7 @@ fn run() -> Result<(), CliError> {
                                 key_type,
                                 &input,
                                 rkvn,
+                                password.as_deref(),
                             )
                         }
                         SecurityDomainKeysAction::SetAllowlist { kid, kvn, serials } => {

@@ -923,6 +923,7 @@ pub fn run_yubiotp(
     enter: Option<bool>,
     access_code: Option<&str>,
     force: bool,
+    config_output: Option<&str>,
 ) -> Result<(), CliError> {
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
@@ -1006,6 +1007,30 @@ pub fn run_yubiotp(
     println!("Public ID: {}", modhex_encode(&pub_id_bytes));
     println!("Private ID: {}", hex::encode(priv_id));
     println!("Key: {}", hex::encode(key_bytes));
+
+    if let Some(output_path) = config_output {
+        // Get serial for CSV
+        let serial = {
+            let mut session = open_session(dev, scp_params)?;
+            session
+                .get_serial()
+                .map_err(|e| CliError(format!("Failed to get serial: {e}")))?
+        };
+        let timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+        let access_code_hex = acc.as_ref().map_or(String::new(), hex::encode);
+        let csv_line = format!(
+            "{},{},{},{},{},{},",
+            serial,
+            modhex_encode(&pub_id_bytes),
+            hex::encode(priv_id),
+            hex::encode(key_bytes),
+            access_code_hex,
+            timestamp,
+        );
+        crate::util::write_file_or_stdout(output_path, (csv_line + "\n").as_bytes())?;
+        eprintln!("Configuration parameters written to {output_path}.");
+    }
+
     Ok(())
 }
 
@@ -1166,6 +1191,7 @@ pub fn run_hotp(
     enter: Option<bool>,
     access_code: Option<&str>,
     force: bool,
+    identifier: Option<&str>,
 ) -> Result<(), CliError> {
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
@@ -1173,6 +1199,49 @@ pub fn run_hotp(
     let key_bytes = key
         .ok_or_else(|| CliError("A key is required.".into()))
         .and_then(|k| hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into())))?;
+
+    // Parse token identifier
+    let (token_id, mh1, mh2) = if let Some(ident) = identifier {
+        let ident = if ident == "-" { "ubhe" } else { ident };
+        let ident = match ident.len() {
+            4 => {
+                let mut session = open_session(dev, scp_params)?;
+                let serial = session
+                    .get_serial()
+                    .map_err(|e| CliError(format!("Failed to get serial: {e}")))?;
+                format!("{ident}{serial:08}")
+            }
+            8 => format!("ubhe{ident}"),
+            12 => ident.to_string(),
+            _ => return Err(CliError("Incorrect length for token identifier.".into())),
+        };
+
+        let (omp_m, omp) = parse_modhex_or_bcd(&ident[..2])?;
+        let (tt_m, tt) = parse_modhex_or_bcd(&ident[2..4])?;
+        let (mui_m, mui) = parse_modhex_or_bcd(&ident[4..])?;
+
+        if tt_m && !omp_m {
+            return Err(CliError(
+                "TT can only be modhex encoded if OMP is as well.".into(),
+            ));
+        }
+        if mui_m && !(omp_m && tt_m) {
+            return Err(CliError(
+                "MUI can only be modhex encoded if OMP and TT are as well.".into(),
+            ));
+        }
+
+        let mut tid = Vec::new();
+        tid.extend_from_slice(&omp);
+        tid.extend_from_slice(&tt);
+        tid.extend_from_slice(&mui);
+
+        let mh1 = if mui_m { true } else { omp_m && !tt_m };
+        let mh2 = mui_m || tt_m;
+        (tid, mh1, mh2)
+    } else {
+        (vec![], false, false)
+    };
 
     if !force && !confirm(&format!("Program HOTP in slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
@@ -1190,6 +1259,11 @@ pub fn run_hotp(
     }
     if let Some(cr) = enter {
         config = config.append_cr(cr);
+    }
+    if !token_id.is_empty() {
+        config = config
+            .token_id(&token_id, mh1, mh2)
+            .map_err(|e| CliError(format!("Invalid token identifier: {e}")))?;
     }
 
     let mut session = open_session(dev, scp_params)?;
@@ -1254,4 +1328,19 @@ pub fn run_settings(
 
     eprintln!("Settings updated for slot {}.", slot.map(1, 2));
     Ok(())
+}
+
+/// Parse a value as modhex or BCD (decimal digits encoded as hex).
+/// Returns (is_modhex, decoded_bytes).
+fn parse_modhex_or_bcd(value: &str) -> Result<(bool, Vec<u8>), CliError> {
+    if let Ok(bytes) = modhex_decode(value) {
+        return Ok((true, bytes));
+    }
+    // Try to parse as decimal digits (BCD)
+    if value.chars().all(|c| c.is_ascii_digit()) {
+        let bytes =
+            hex::decode(value).map_err(|_| CliError("Value must be modhex or decimal.".into()))?;
+        return Ok((false, bytes));
+    }
+    Err(CliError("Value must be modhex or decimal.".into()))
 }

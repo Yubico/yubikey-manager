@@ -232,6 +232,7 @@ pub fn run_keys_import(
     key_type: CliSdKeyType,
     input: &str,
     replace_kvn: Option<u8>,
+    password: Option<&str>,
 ) -> Result<(), CliError> {
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev, scp_params)?;
@@ -268,6 +269,7 @@ pub fn run_keys_import(
 
             let mut certs = Vec::new();
             let mut private_key: Option<Vec<u8>> = None;
+            let mut has_encrypted_key = false;
 
             for block in pem_data.split("-----BEGIN ") {
                 if block.trim().is_empty() {
@@ -282,6 +284,8 @@ pub fn run_keys_import(
                             .map_err(|_| CliError("Invalid certificate PEM".into()))?;
                         certs.push(der);
                     }
+                } else if block.starts_with("ENCRYPTED PRIVATE KEY-----") {
+                    has_encrypted_key = true;
                 } else if (block.starts_with("EC PRIVATE KEY-----")
                     || block.starts_with("PRIVATE KEY-----"))
                     && let Some(b64) = block.split("-----END").next()
@@ -298,6 +302,16 @@ pub fn run_keys_import(
                         .map_err(|_| CliError("Invalid private key PEM".into()))?;
                     private_key = Some(der);
                 }
+            }
+
+            // Handle encrypted private keys
+            if has_encrypted_key && private_key.is_none() {
+                let pw = match password {
+                    Some(p) => p.to_string(),
+                    None => crate::util::prompt_secret("Enter password to decrypt key")?,
+                };
+                // Try to parse the encrypted key using EC key types
+                private_key = try_decrypt_sd_private_key(&pem_data, &pw)?;
             }
 
             // OCE CA key references (KID=0x10 or 0x20-0x2F): extract public key
@@ -472,4 +486,38 @@ fn extract_ski_from_cert(cert_der: &[u8]) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+/// Try to decrypt an encrypted private key from PEM data.
+/// Returns the DER-encoded PKCS#8 private key on success.
+fn try_decrypt_sd_private_key(
+    _pem_data: &str,
+    _password: &str,
+) -> Result<Option<Vec<u8>>, CliError> {
+    // The pkcs8 crate at version 0.10 does not support encrypted PKCS#8 without
+    // the "encryption" feature. Try to parse as unencrypted in case the tool
+    // wrote an unencrypted key with the ENCRYPTED header.
+    use elliptic_curve::SecretKey;
+    use elliptic_curve::pkcs8::DecodePrivateKey;
+
+    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_pem(_pem_data) {
+        use elliptic_curve::pkcs8::EncodePrivateKey;
+        let doc = sk
+            .to_pkcs8_der()
+            .map_err(|e| CliError(format!("Failed to re-encode key: {e}")))?;
+        return Ok(Some(doc.as_bytes().to_vec()));
+    }
+    if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_pem(_pem_data) {
+        use elliptic_curve::pkcs8::EncodePrivateKey;
+        let doc = sk
+            .to_pkcs8_der()
+            .map_err(|e| CliError(format!("Failed to re-encode key: {e}")))?;
+        return Ok(Some(doc.as_bytes().to_vec()));
+    }
+
+    Err(CliError(
+        "Cannot decrypt encrypted key in-process. Convert first:\n  \
+         openssl pkey -in key.pem -out key_dec.pem"
+            .into(),
+    ))
 }

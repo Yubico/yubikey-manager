@@ -230,6 +230,90 @@ pub fn run_credentials_change_password(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn run_credentials_import(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    label: &str,
+    private_key_file: &str,
+    password: Option<&str>,
+    credential_password: Option<&str>,
+    management_key: Option<&str>,
+    touch: bool,
+) -> Result<(), CliError> {
+    let mgmt = parse_mgmt_key(management_key)?;
+    let cred_pw = match credential_password {
+        Some(p) => credential_password_from_str(p),
+        None => {
+            let p = crate::util::prompt_secret("Enter credential password")?;
+            credential_password_from_str(&p)
+        }
+    };
+
+    let data = crate::util::read_file_or_stdin(private_key_file)?;
+
+    // Parse the private key, handling encrypted keys
+    let secret_key = parse_ec_private_key(&data, password)?;
+
+    let mut session = open_session(dev, scp_params)?;
+    session
+        .put_credential_asymmetric(&mgmt, label, &secret_key, &cred_pw, touch)
+        .map_err(|e| CliError(format!("Failed to import asymmetric credential: {e}")))?;
+    eprintln!("Asymmetric credential imported.");
+    Ok(())
+}
+
+/// Parse an EC P-256 private key from PEM or DER data, with optional password decryption.
+fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::SecretKey, CliError> {
+    use elliptic_curve::SecretKey;
+    use elliptic_curve::pkcs8::DecodePrivateKey;
+    use p256::NistP256;
+
+    if let Ok(text) = std::str::from_utf8(data)
+        && text.contains("-----BEGIN")
+    {
+        if text.contains("ENCRYPTED") {
+            let _pw = match password {
+                Some(p) => p.to_string(),
+                None => crate::util::prompt_secret("Enter password to decrypt key")?,
+            };
+            // Try parsing as non-encrypted first (some tools wrap non-encrypted keys)
+            if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
+                return Ok(sk);
+            }
+            return Err(CliError(
+                "Cannot decrypt encrypted key in-process. Convert first:\n  \
+                 openssl pkey -in key.pem -out key_dec.pem"
+                    .into(),
+            ));
+        }
+        // Try PKCS#8 PEM
+        if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
+            return Ok(sk);
+        }
+        // Try SEC1 PEM (EC PRIVATE KEY)
+        if let Ok(sk) = SecretKey::<NistP256>::from_sec1_pem(text) {
+            return Ok(sk);
+        }
+        return Err(CliError(
+            "Failed to parse EC P-256 private key from PEM.".into(),
+        ));
+    }
+
+    // Try PKCS#8 DER
+    if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_der(data) {
+        return Ok(sk);
+    }
+    // Try SEC1 DER
+    if let Ok(sk) = SecretKey::<NistP256>::from_sec1_der(data) {
+        return Ok(sk);
+    }
+
+    Err(CliError(
+        "Failed to parse EC P-256 private key. Expected PKCS#8 or SEC1 format.".into(),
+    ))
+}
+
 pub fn run_credentials_export(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,

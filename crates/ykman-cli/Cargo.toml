@@ -18,9 +18,10 @@ hex = "0.4.3"
 base64 = "0.22.1"
 log = { version = "0.4", features = ["std"] }
 elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }
-p256 = { version = "0.13", features = ["pkcs8"] }
-p384 = { version = "0.13", features = ["pkcs8"] }
+p256 = { version = "0.13", features = ["pkcs8", "ecdsa"] }
+p384 = { version = "0.13", features = ["pkcs8", "ecdsa"] }
 sha2 = "0.10"
+quick-xml = "0.37"
 rpassword = "7"
 x509-cert = { version = "0.2.5", features = ["pem"] }
 aes-gcm = "0.10"
