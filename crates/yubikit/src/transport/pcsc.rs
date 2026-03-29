@@ -30,8 +30,9 @@ use std::ffi::CString;
 use std::thread;
 use std::time::Duration;
 
+use crate::core::Transport;
 use crate::log_traffic;
-use crate::smartcard::{SmartCardConnection, SmartCardError, Transport};
+use crate::smartcard::{SmartCardConnection, SmartCardError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PcscError {

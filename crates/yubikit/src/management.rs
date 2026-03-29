@@ -33,15 +33,12 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::core::bytes2int;
-use crate::core::patch_version;
+use crate::core::{Transport, Version, bytes2int, patch_version};
 use crate::fido::FidoConnection;
 use crate::otp::{
     OtpConnection, OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc,
 };
-use crate::smartcard::{
-    Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
-};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode};
 use crate::transport::ctaphid::CtapHidTransportError;
 use crate::yubiotp::ConfigSlot;

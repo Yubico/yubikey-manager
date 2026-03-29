@@ -30,10 +30,8 @@ use std::time::Instant;
 
 use thiserror::Error;
 
+use crate::core::{Transport, Version};
 use crate::scp::{ScpState, aes_cmac, constant_time_eq, scp03_derive, x963_kdf};
-
-// Re-export types that were moved to core for backwards compatibility.
-pub use crate::core::{Transport, Version};
 
 // ---------------------------------------------------------------------------
 // AID — YubiKey application identifiers

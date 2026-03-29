@@ -102,8 +102,8 @@ pub fn get_name(
     has_nfc: bool,
 ) -> PyResult<String> {
     use std::collections::HashMap;
+    use yubikit::core::{Transport, Version};
     use yubikit::management::{Capability, DeviceConfig, DeviceInfo, FormFactor, VersionQualifier};
-    use yubikit::smartcard::{Transport, Version};
 
     let ver = Version(version.0, version.1, version.2);
     let ff = FormFactor::from_code(form_factor);

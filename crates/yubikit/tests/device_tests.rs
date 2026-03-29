@@ -16,6 +16,7 @@
 
 use rstest::{fixture, rstest};
 use std::sync::OnceLock;
+use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::{
     YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
@@ -24,7 +25,6 @@ use yubikit::management::{
     Capability, DeviceInfo, ManagementCcidSession, ManagementSession, ReleaseType,
 };
 use yubikit::securitydomain::SecurityDomainSession;
-use yubikit::smartcard::Transport;
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
 
 // ───────────────────────── Connection Parameterization ─────────────────────────

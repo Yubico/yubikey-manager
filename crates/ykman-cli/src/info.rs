@@ -1,6 +1,6 @@
+use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
-use yubikit::smartcard::Transport;
 
 use crate::util::CliError;
 

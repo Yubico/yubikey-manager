@@ -129,8 +129,8 @@ impl ManagementCcidSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
+        use yubikit::core::Transport;
         use yubikit::management::{Capability, DeviceConfig, DeviceFlag};
-        use yubikit::smartcard::Transport;
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {
@@ -240,8 +240,8 @@ impl ManagementOtpSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
+        use yubikit::core::Transport;
         use yubikit::management::{Capability, DeviceConfig, DeviceFlag};
-        use yubikit::smartcard::Transport;
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {
@@ -334,8 +334,8 @@ impl ManagementFidoSession {
         nfc_restricted: Option<bool>,
     ) -> PyResult<()> {
         use std::collections::HashMap;
+        use yubikit::core::Transport;
         use yubikit::management::{Capability, DeviceConfig, DeviceFlag};
-        use yubikit::smartcard::Transport;
 
         let mut caps = HashMap::new();
         for (key, value) in enabled_capabilities.iter() {

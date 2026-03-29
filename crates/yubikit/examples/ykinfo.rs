@@ -11,6 +11,7 @@
 //!   cargo run -p yubikit --example ykinfo -- --reader ACR122
 
 use std::env;
+use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::{
     YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
@@ -22,7 +23,6 @@ use yubikit::oath::OathSession;
 use yubikit::openpgp::OpenPgpSession;
 use yubikit::piv::PivSession;
 use yubikit::securitydomain::SecurityDomainSession;
-use yubikit::smartcard::Transport;
 use yubikit::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
 
 fn main() {

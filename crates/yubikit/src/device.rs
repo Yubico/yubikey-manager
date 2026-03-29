@@ -47,16 +47,14 @@ use std::hash::{Hash, Hasher};
 use std::thread;
 use std::time::Duration;
 
-use crate::core::set_override_version;
+use crate::core::{Transport, Version, set_override_version};
 use crate::fido::FidoConnection;
 use crate::management::{
     Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementCcidSession, ManagementFidoSession,
     ManagementOtpSession, ManagementSession, ReleaseType, UsbInterface,
 };
 use crate::otp::OtpConnection;
-use crate::smartcard::{
-    Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
-};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
 #[cfg(windows)]
 use crate::transport::otphid::list_all_hid_devices;

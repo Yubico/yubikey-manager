@@ -32,8 +32,9 @@ use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
 
+use crate::core::Version;
 use crate::core::patch_version;
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
 use crate::tlv::{parse_tlv_list, tlv_encode, tlv_parse, tlv_unpack};
 
 // ---------------------------------------------------------------------------

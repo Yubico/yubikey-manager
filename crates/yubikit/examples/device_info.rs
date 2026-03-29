@@ -1,7 +1,7 @@
 //! Read detailed device information from the first connected YubiKey.
 
+use yubikit::core::Transport;
 use yubikit::device::{list_devices, list_devices_ccid, list_devices_fido, list_devices_otp};
-use yubikit::smartcard::Transport;
 
 fn main() {
     let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])

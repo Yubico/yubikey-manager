@@ -30,8 +30,9 @@ use std::collections::HashMap;
 use sha2::Digest;
 use thiserror::Error;
 
+use crate::core::Version;
 use crate::core::{bytes2int, patch_version};
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::tlv::{
     TlvError, int2bytes, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list,
     tlv_encode, tlv_unpack,

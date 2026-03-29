@@ -30,8 +30,9 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::core::Version;
 use crate::core::patch_version;
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::tlv::{TlvError, parse_tlv_list, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags

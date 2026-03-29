@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 
+use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{
     Capability, DeviceConfig, DeviceFlag, ManagementCcidSession, ManagementFidoSession,
     ManagementOtpSession, ManagementSession,
 };
-use yubikit::smartcard::Transport;
 
 use crate::cli_enums::CliCapability;
 use crate::util::CliError;

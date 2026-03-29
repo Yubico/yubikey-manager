@@ -35,11 +35,12 @@ use std::sync::atomic::AtomicBool;
 
 use sha1::{Digest, Sha1};
 
+use crate::core::Version;
 use crate::core::patch_version;
 use crate::otp::calculate_crc;
 #[cfg(test)]
 use crate::otp::check_crc;
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol};
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
 pub use crate::otp::{OtpConnection, OtpProtocol, YubiOtpError};
