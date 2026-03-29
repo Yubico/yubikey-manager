@@ -53,12 +53,15 @@ impl SecurityDomainSession {
                 Ok(())
             }
             Err((e, conn)) => {
-                // SCP failed — re-open a plain session so the object stays usable.
-                self.inner = Some(
-                    RustSecurityDomainSession::new(conn)
-                        .map_err(|(e, _)| e)
-                        .expect("re-opening plain SD session after failed auth"),
-                );
+                // SCP failed — try to re-open a plain session so the object stays usable.
+                match RustSecurityDomainSession::new(conn) {
+                    Ok(session) => self.inner = Some(session),
+                    Err((recovery_err, _)) => {
+                        log::warn!(
+                            "Failed to recover SD session after auth failure: {recovery_err}"
+                        );
+                    }
+                }
                 Err(smartcard_err(e))
             }
         }
