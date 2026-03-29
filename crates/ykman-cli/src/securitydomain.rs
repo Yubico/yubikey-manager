@@ -4,13 +4,34 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 
 use crate::cli_enums::CliSdKeyType;
-use crate::scp::ScpParams;
+use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
-fn open_session(
-    dev: &YubiKeyDevice,
-) -> Result<SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection + use<'_>>, CliError>
+fn open_session<'a>(
+    dev: &'a YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError>
 {
+    if scp_params.is_explicit() {
+        // SD doesn't use auto SCP11b (it manages those keys), but explicit SCP
+        // is needed for authenticated operations like key management.
+        let scp_config = scp::resolve_scp(dev, scp_params, yubikit::management::Capability::NONE)?;
+        if let ScpConfig::None = scp_config {
+            // resolve_scp returned None despite explicit params — shouldn't happen
+        }
+        match scp_config {
+            ScpConfig::None => {}
+            ref config => {
+                let conn = dev
+                    .open_smartcard()
+                    .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                let params = scp::to_scp_key_params(config)
+                    .expect("non-None ScpConfig must convert to ScpKeyParams");
+                return SecurityDomainSession::new_with_scp(conn, &params)
+                    .map_err(|e| CliError(format!("Failed to open SD session with SCP: {e}")));
+            }
+        }
+    }
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
@@ -27,8 +48,7 @@ fn confirm(msg: &str) -> bool {
 }
 
 pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
-    let _ = scp_params;
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
 
     let keys = session
         .get_key_information()
@@ -112,14 +132,13 @@ fn extract_cert_subject(der: &[u8]) -> String {
 }
 
 pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
-    let _ = scp_params;
     if !force {
         eprintln!("WARNING! This will reset all Security Domain data.");
         if !confirm("Proceed?") {
             return Err(CliError("Aborted.".into()));
         }
     }
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .reset()
         .map_err(|e| CliError(format!("Failed to reset: {e}")))?;
@@ -135,9 +154,8 @@ pub fn run_keys_generate(
     output: &str,
     replace_kvn: Option<u8>,
 ) -> Result<(), CliError> {
-    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let pub_key = session
         .generate_ec_key(
             key_ref,
@@ -160,11 +178,10 @@ pub fn run_keys_delete(
     kvn: u8,
     force: bool,
 ) -> Result<(), CliError> {
-    let _ = scp_params;
     if !force && !confirm(&format!("Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?")) {
         return Err(CliError("Aborted.".into()));
     }
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .delete_key(kid, kvn, false)
         .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
@@ -179,9 +196,8 @@ pub fn run_keys_export(
     kvn: u8,
     output: &str,
 ) -> Result<(), CliError> {
-    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     let certs = session
         .get_certificate_bundle(key_ref)
         .map_err(|e| CliError(format!("Failed to get certificates: {e}")))?;
@@ -216,9 +232,8 @@ pub fn run_keys_import(
     input: &str,
     replace_kvn: Option<u8>,
 ) -> Result<(), CliError> {
-    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
 
     match key_type {
         CliSdKeyType::Scp03 => {
@@ -239,8 +254,16 @@ pub fn run_keys_import(
                 key_mac: mac,
                 key_dek: dek,
             };
+            let session_dek = session.dek().map(|d| d.to_vec()).ok_or_else(|| {
+                CliError("SCP03 authentication required for key import (use --scp with DEK)".into())
+            })?;
             session
-                .put_key_static(key_ref, &static_keys, &[0u8; 16], replace_kvn.unwrap_or(0))
+                .put_key_static(
+                    key_ref,
+                    &static_keys,
+                    &session_dek,
+                    replace_kvn.unwrap_or(0),
+                )
                 .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;
             eprintln!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
         }
@@ -284,6 +307,31 @@ pub fn run_keys_import(
                 }
             }
 
+            // OCE CA key references (KID=0x10 or 0x20-0x2F): extract public key
+            // from cert and import as public key + store CA issuer (SKI).
+            if kid == 0x10 || (0x20..=0x2F).contains(&kid) {
+                if certs.is_empty() {
+                    return Err(CliError(
+                        "Input does not contain a certificate for CA key import.".into(),
+                    ));
+                }
+                let (pubkey, curve) = extract_ec_pubkey_and_curve(&certs[0])?;
+                session
+                    .put_key_ec_public(key_ref, &pubkey, curve, replace_kvn.unwrap_or(0))
+                    .map_err(|e| CliError(format!("Failed to import CA public key: {e}")))?;
+                eprintln!("CA public key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
+
+                // Extract and store Subject Key Identifier (SKI) if present
+                if let Some(ski) = extract_ski_from_cert(&certs[0]) {
+                    session
+                        .store_ca_issuer(key_ref, &ski)
+                        .map_err(|e| CliError(format!("Failed to store CA issuer: {e}")))?;
+                    eprintln!("CA key identifier stored.");
+                }
+                return Ok(());
+            }
+
+            // SCP11a/b/c key references: import private key + cert bundle
             if let Some(pk_der) = &private_key {
                 // Extract raw EC scalar from PKCS#8 or SEC1 DER encoding
                 use elliptic_curve::SecretKey;
@@ -315,12 +363,17 @@ pub fn run_keys_import(
                             .into(),
                     ));
                     };
+                let session_dek = session.dek().map(|d| d.to_vec()).ok_or_else(|| {
+                    CliError(
+                        "SCP03 authentication required for key import (use --scp with DEK)".into(),
+                    )
+                })?;
                 session
                     .put_key_ec_private(
                         key_ref,
                         &scalar_bytes,
                         curve,
-                        &[0u8; 16],
+                        &session_dek,
                         replace_kvn.unwrap_or(0),
                     )
                     .map_err(|e| CliError(format!("Failed to import EC private key: {e}")))?;
@@ -355,14 +408,13 @@ pub fn run_keys_set_allowlist(
     kvn: u8,
     serials: &[String],
 ) -> Result<(), CliError> {
-    let _ = scp_params;
     let key_ref = KeyRef::new(kid, kvn);
     let serial_bytes: Vec<Vec<u8>> = serials
         .iter()
         .map(|s| hex::decode(s).map_err(|_| CliError(format!("Invalid hex serial: {s}"))))
         .collect::<Result<_, _>>()?;
 
-    let mut session = open_session(dev)?;
+    let mut session = open_session(dev, scp_params)?;
     session
         .store_allowlist(key_ref, &serial_bytes)
         .map_err(|e| CliError(format!("Failed to set allowlist: {e}")))?;
@@ -371,4 +423,71 @@ pub fn run_keys_set_allowlist(
         serial_bytes.len()
     );
     Ok(())
+}
+
+/// Extract EC public key bytes and curve from a DER-encoded X.509 certificate.
+fn extract_ec_pubkey_and_curve(
+    cert_der: &[u8],
+) -> Result<(Vec<u8>, yubikit::securitydomain::Curve), CliError> {
+    use x509_cert::Certificate;
+    use x509_cert::der::{Decode, Encode, oid::ObjectIdentifier};
+
+    let cert = Certificate::from_der(cert_der)
+        .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
+
+    let spki = &cert.tbs_certificate.subject_public_key_info;
+    let pk_bits = spki
+        .subject_public_key
+        .as_bytes()
+        .ok_or_else(|| CliError("Public key has unused bits".into()))?;
+
+    // Determine curve from the algorithm parameters
+    // P-256 OID: 1.2.840.10045.3.1.7, P-384 OID: 1.3.132.0.34
+    const P256_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+    const P384_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
+
+    let params = spki
+        .algorithm
+        .parameters
+        .as_ref()
+        .ok_or_else(|| CliError("Missing EC curve parameters in certificate".into()))?;
+    let curve_oid = ObjectIdentifier::from_der(
+        &params
+            .to_der()
+            .map_err(|e| CliError(format!("Failed to encode algorithm parameters: {e}")))?,
+    )
+    .map_err(|e| CliError(format!("Failed to parse curve OID: {e}")))?;
+
+    let curve = if curve_oid == P256_OID {
+        yubikit::securitydomain::Curve::Secp256r1
+    } else if curve_oid == P384_OID {
+        yubikit::securitydomain::Curve::Secp384r1
+    } else {
+        return Err(CliError(format!("Unsupported EC curve OID: {curve_oid}")));
+    };
+
+    Ok((pk_bits.to_vec(), curve))
+}
+
+/// Extract Subject Key Identifier (SKI) from a DER-encoded X.509 certificate.
+fn extract_ski_from_cert(cert_der: &[u8]) -> Option<Vec<u8>> {
+    use x509_cert::Certificate;
+    use x509_cert::der::{Decode, oid::ObjectIdentifier};
+
+    let cert = Certificate::from_der(cert_der).ok()?;
+    let exts = cert.tbs_certificate.extensions.as_ref()?;
+
+    // SubjectKeyIdentifier OID: 2.5.29.14
+    const SKI_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.14");
+
+    for ext in exts.iter() {
+        if ext.extn_id == SKI_OID {
+            // Extension value is DER: OCTET STRING wrapping the key identifier
+            let bytes = ext.extn_value.as_bytes();
+            // Parse the outer OCTET STRING to get the raw SKI
+            let ski = x509_cert::der::asn1::OctetString::from_der(bytes).ok()?;
+            return Some(ski.as_bytes().to_vec());
+        }
+    }
+    None
 }
