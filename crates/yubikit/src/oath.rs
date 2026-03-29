@@ -513,12 +513,6 @@ impl<C: SmartCardConnection> OathSession<C> {
         self.version
     }
 
-    /// Override the version (for development devices reporting 0.0.1).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-        self.protocol.configure(version);
-    }
-
     /// A random static identifier, re-generated on reset.
     pub fn device_id(&self) -> &str {
         &self.device_id

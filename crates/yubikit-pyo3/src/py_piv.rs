@@ -116,12 +116,6 @@ impl PivSession {
         (v.0, v.1, v.2)
     }
 
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner
-            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
-    }
-
     #[getter]
     fn management_key_type(&self) -> u8 {
         self.inner.management_key_type() as u8

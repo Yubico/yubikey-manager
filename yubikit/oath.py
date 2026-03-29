@@ -12,7 +12,7 @@ from _yubikit_native.oath import format_cred_id as _format_cred_id_native
 from _yubikit_native.oath import parse_b32_key
 from _yubikit_native.sessions import OathSession as _NativeOathSession
 
-from .core import Version, _override_version
+from .core import Version
 from .core.smartcard import ScpKeyParams, SmartCardConnection
 
 logger = logging.getLogger(__name__)
@@ -144,9 +144,7 @@ class OathSession:
     ):
         native = _NativeOathSession(connection, scp_key_params)
         self._native = native
-        self._version = _override_version.patch(Version(*native.version))
-        if self._version != Version(*native.version):
-            native.version = tuple(self._version)
+        self._version = Version(*native.version)
         self._device_id = native.device_id
 
         logger.debug(

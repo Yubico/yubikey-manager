@@ -817,9 +817,6 @@ pub trait ManagementSession {
     /// The firmware version of the YubiKey.
     fn version(&self) -> Version;
 
-    /// Override the version (for development devices reporting 0.0.1).
-    fn set_version(&mut self, version: Version);
-
     /// Read a configuration page from the device.
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError>;
 
@@ -976,11 +973,6 @@ impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
         self.version
     }
 
-    fn set_version(&mut self, version: Version) {
-        self.version = version;
-        self.protocol.configure(version);
-    }
-
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
         // YubiKey 4+ and dev devices use INS_READ_CONFIG.
         // YubiKey NEO (v3) also uses INS_READ_CONFIG but against the OTP applet
@@ -1056,10 +1048,6 @@ impl<T: OtpConnection> ManagementOtpSession<T> {
 impl<T: OtpConnection> ManagementSession for ManagementOtpSession<T> {
     fn version(&self) -> Version {
         self.version
-    }
-
-    fn set_version(&mut self, version: Version) {
-        self.version = version;
     }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
@@ -1204,10 +1192,6 @@ impl<C: FidoConnection> ManagementFidoSession<C> {
 impl<C: FidoConnection> ManagementSession for ManagementFidoSession<C> {
     fn version(&self) -> Version {
         self.version
-    }
-
-    fn set_version(&mut self, version: Version) {
-        self.version = version;
     }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {

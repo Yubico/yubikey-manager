@@ -1,6 +1,5 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit::smartcard::Version;
 use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{
     self, ConfigSlot, NdefType, Slot, YubiOtpCcidSession as RustYubiOtpCcidSession,
@@ -108,12 +107,6 @@ impl PyYubiOtpSession {
     fn version(&self) -> (u8, u8, u8) {
         let v = self.session.version();
         (v.0, v.1, v.2)
-    }
-
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.session
-            .set_version(Version(version.0, version.1, version.2));
     }
 
     fn get_serial(&mut self) -> PyResult<u32> {
@@ -233,12 +226,6 @@ impl PyYubiOtpOtpSession {
     fn version(&self) -> (u8, u8, u8) {
         let v = self.session.version();
         (v.0, v.1, v.2)
-    }
-
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.session
-            .set_version(Version(version.0, version.1, version.2));
     }
 
     fn get_serial(&mut self) -> PyResult<u32> {

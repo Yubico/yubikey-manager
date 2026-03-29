@@ -17,7 +17,6 @@ from .core import (
     BadResponseError,
     NotSupportedError,
     Version,
-    _override_version,
     int2bytes,
 )
 from .core.smartcard import (
@@ -68,9 +67,7 @@ class SecurityDomainSession:
     def __init__(self, connection: SmartCardConnection):
         native = _NativeSecurityDomainSession(connection)
         self._native = native
-        self._version = _override_version.patch(Version(*native.version))
-        if self._version != Version(*native.version):
-            native.version = tuple(self._version)
+        self._version = Version(*native.version)
         logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:

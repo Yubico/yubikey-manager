@@ -862,9 +862,6 @@ pub trait YubiOtpSession {
     /// The firmware version of the YubiKey.
     fn version(&self) -> Version;
 
-    /// Override the firmware version (used for dev devices).
-    fn set_version(&mut self, version: Version);
-
     /// Access the raw status bytes.
     fn status(&self) -> &[u8];
 
@@ -1100,10 +1097,6 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
         self.version
     }
 
-    fn set_version(&mut self, version: Version) {
-        self.version = version;
-    }
-
     fn status(&self) -> &[u8] {
         &self.status
     }
@@ -1217,10 +1210,6 @@ impl<T: OtpConnection> YubiOtpOtpSession<T> {
 impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
     fn version(&self) -> Version {
         self.version
-    }
-
-    fn set_version(&mut self, version: Version) {
-        self.version = version;
     }
 
     fn status(&self) -> &[u8] {

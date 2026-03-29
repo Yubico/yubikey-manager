@@ -357,12 +357,6 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         self.version
     }
 
-    /// Override the version (for development devices).
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-        self.protocol.configure(version);
-    }
-
     /// Get a reference to the underlying protocol.
     pub fn protocol(&self) -> &SmartCardProtocol<C> {
         &self.protocol

@@ -44,7 +44,6 @@ from _yubikit_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 from .core import (
     InvalidPinError,  # noqa: F401 - re-exported
     Version,
-    _override_version,
     int2bytes,
     require_version,
 )
@@ -175,9 +174,7 @@ class HsmAuthSession:
     ) -> None:
         native = _NativeHsmAuthSession(connection, scp_key_params)
         self._native = native
-        self._version = _override_version.patch(Version(*native.version))
-        if self._version != Version(*native.version):
-            native.version = tuple(self._version)
+        self._version = Version(*native.version)
 
         logger.debug(f"YubiHSM Auth session initialized (version={self.version})")
 

@@ -1335,11 +1335,6 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.version
     }
 
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-        self.protocol.configure(version);
-    }
-
     pub fn extended_capabilities(&self) -> &ExtendedCapabilities {
         &self.app_data.discretionary.extended_capabilities
     }

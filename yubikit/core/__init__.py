@@ -252,26 +252,12 @@ class InvalidPinError(CommandError, ValueError):
         self.attempts_remaining = attempts_remaining
 
 
-class _OverrideVersion:
-    def __init__(self):
-        self._version: Version | None = None
+def _override_version(value: Version) -> None:
+    """Override the version check for development devices."""
+    logger.info(f"Overriding version check for development devices with {value}")
+    from _yubikit_native.core import set_override_version
 
-    def __call__(self, value: Version) -> None:
-        logger.info(f"Overriding version check for development devices with {value}")
-        self._version = value
-        try:
-            from _yubikit_native.core import set_override_version
-
-            set_override_version(*value)
-        except ImportError:
-            pass
-
-    def patch(self, version: Version) -> Version:
-        return version == (0, 0, 1) and _override_version._version or version
-
-
-# Set this to override development versions in version checks
-_override_version = _OverrideVersion()
+    set_override_version(*value)
 
 
 def require_version(

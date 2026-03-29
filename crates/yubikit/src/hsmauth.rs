@@ -302,11 +302,6 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.version
     }
 
-    pub fn set_version(&mut self, version: Version) {
-        self.version = version;
-        self.protocol.configure(version);
-    }
-
     /// Get a mutable reference to the underlying protocol.
     pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
         &mut self.protocol

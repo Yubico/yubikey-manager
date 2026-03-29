@@ -51,12 +51,6 @@ impl OathSession {
         (v.0, v.1, v.2)
     }
 
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner
-            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
-    }
-
     #[getter]
     fn device_id(&self) -> &str {
         self.inner.device_id()

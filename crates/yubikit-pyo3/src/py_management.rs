@@ -98,12 +98,6 @@ impl ManagementCcidSession {
         (v.0, v.1, v.2)
     }
 
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner
-            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
-    }
-
     /// Read device info. Returns a dict with parsed fields.
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self.inner.read_device_info().map_err(smartcard_err)?;
@@ -220,12 +214,6 @@ impl ManagementOtpSession {
         (v.0, v.1, v.2)
     }
 
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner
-            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
-    }
-
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self.inner.read_device_info().map_err(smartcard_err)?;
         device_info_to_dict(py, &info)
@@ -318,12 +306,6 @@ impl ManagementFidoSession {
     fn version(&self) -> (u8, u8, u8) {
         let v = self.inner.version();
         (v.0, v.1, v.2)
-    }
-
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) {
-        self.inner
-            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
     }
 
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {

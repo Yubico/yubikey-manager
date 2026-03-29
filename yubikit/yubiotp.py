@@ -43,7 +43,6 @@ from _yubikit_native.sessions import (
 from .core import (
     NotSupportedError,
     Version,
-    _override_version,
     require_version,
 )
 from .core.otp import (
@@ -652,9 +651,7 @@ class YubiOtpSession:
         else:
             raise TypeError("Unsupported connection type")
 
-        self._version = _override_version.patch(Version(*native.version))
-        if self._version != Version(*native.version):
-            native.version = tuple(self._version)
+        self._version = Version(*native.version)
         self._native: Any = native
         logger.debug(
             "YubiOTP session initialized for "

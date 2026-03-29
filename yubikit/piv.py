@@ -56,7 +56,6 @@ from .core import (
     NotSupportedError,
     Tlv,
     Version,
-    _override_version,
     bytes2int,
     int2bytes,
     require_version,
@@ -671,15 +670,8 @@ class PivSession:
         native = _NativePivSession(connection, scp_key_params)
         self._native = native
         self.connection = connection
-        self._version = _override_version.patch(Version(*native.version))
-        if self._version != Version(*native.version):
-            native.version = tuple(self._version)
-        # Re-query management key type now that version may be patched
-        try:
-            key_type, _, _ = native.get_management_key_metadata()
-            self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
-        except Exception:
-            self._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)
+        self._version = Version(*native.version)
+        self._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)
         self._current_pin_retries = 3
         self._max_pin_retries = 3
 

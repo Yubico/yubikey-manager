@@ -63,7 +63,6 @@ from .core import (
     Oid,
     Tlv,
     Version,
-    _override_version,
     bytes2int,
     int2bytes,
 )
@@ -977,9 +976,7 @@ class OpenPgpSession:
     ):
         native = _NativeOpenPgpSession(connection, scp_key_params)
         self._native = native
-        self._version = _override_version.patch(Version(*native.version))
-        if self._version != Version(*native.version):
-            native.version = tuple(self._version)
+        self._version = Version(*native.version)
         self._app_data = ApplicationRelatedData.parse(
             native.get_application_related_data()
         )

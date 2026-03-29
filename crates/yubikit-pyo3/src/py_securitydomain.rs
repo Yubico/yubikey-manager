@@ -70,13 +70,6 @@ impl SecurityDomainSession {
         Ok((v.0, v.1, v.2))
     }
 
-    #[setter]
-    fn set_version(&mut self, version: (u8, u8, u8)) -> PyResult<()> {
-        self.session_mut()?
-            .set_version(yubikit::smartcard::Version(version.0, version.1, version.2));
-        Ok(())
-    }
-
     fn get_data(&mut self, tag: u32, data: &[u8]) -> PyResult<Vec<u8>> {
         self.session_mut()?
             .get_data(tag, data)
