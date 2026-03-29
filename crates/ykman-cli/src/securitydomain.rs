@@ -284,12 +284,42 @@ pub fn run_keys_import(
                 }
             }
 
-            if let Some(pk) = &private_key {
+            if let Some(pk_der) = &private_key {
+                // Extract raw EC scalar from PKCS#8 or SEC1 DER encoding
+                use elliptic_curve::SecretKey;
+                use elliptic_curve::pkcs8::DecodePrivateKey;
+                let (scalar_bytes, curve) =
+                    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_der(pk_der) {
+                        (
+                            sk.to_bytes().as_slice().to_vec(),
+                            yubikit::securitydomain::Curve::Secp256r1,
+                        )
+                    } else if let Ok(sk) = SecretKey::<p256::NistP256>::from_sec1_der(pk_der) {
+                        (
+                            sk.to_bytes().as_slice().to_vec(),
+                            yubikit::securitydomain::Curve::Secp256r1,
+                        )
+                    } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_der(pk_der) {
+                        (
+                            sk.to_bytes().as_slice().to_vec(),
+                            yubikit::securitydomain::Curve::Secp384r1,
+                        )
+                    } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_sec1_der(pk_der) {
+                        (
+                            sk.to_bytes().as_slice().to_vec(),
+                            yubikit::securitydomain::Curve::Secp384r1,
+                        )
+                    } else {
+                        return Err(CliError(
+                        "Failed to parse EC private key (expected P-256 or P-384 PKCS#8/SEC1 DER)"
+                            .into(),
+                    ));
+                    };
                 session
                     .put_key_ec_private(
                         key_ref,
-                        pk,
-                        yubikit::securitydomain::Curve::Secp256r1,
+                        &scalar_bytes,
+                        curve,
                         &[0u8; 16],
                         replace_kvn.unwrap_or(0),
                     )
