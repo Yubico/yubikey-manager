@@ -29,14 +29,11 @@ fn test_config_usb_list() {
 #[ignore]
 #[serial]
 fn test_config_nfc_list() {
-    // NFC may not be present on all keys; accept success or a clear error
     let output = ykman_dev()
         .args(["config", "nfc", "--list"])
         .output()
         .expect("failed to run command");
 
-    // If the key supports NFC the command succeeds, otherwise it may fail
-    // with a descriptive error. Either outcome is acceptable for this test.
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(!stdout.is_empty(), "Expected non-empty NFC capability list");
@@ -47,37 +44,144 @@ fn test_config_nfc_list() {
 #[ignore]
 #[serial]
 fn test_config_usb_disable_enable_hsmauth() {
-    // Ensure HSMAUTH is enabled first (ignore errors if already enabled)
     let _ = ykman_dev()
         .args(["config", "usb", "--enable", "hsmauth", "-f"])
         .ok();
     wait_for_reenumeration();
 
-    // Disable HSMAUTH over USB
     ykman_dev()
         .args(["config", "usb", "--disable", "hsmauth", "-f"])
         .assert()
         .success();
     wait_for_reenumeration();
 
-    // Verify it is no longer listed as enabled
     ykman_dev()
         .args(["config", "usb", "--list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("YubiHSM Auth: Disabled"));
 
-    // Re-enable HSMAUTH
     ykman_dev()
         .args(["config", "usb", "--enable", "hsmauth", "-f"])
         .assert()
         .success();
     wait_for_reenumeration();
 
-    // Verify it is listed again
     ykman_dev()
         .args(["config", "usb", "--list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("YubiHSM Auth: Enabled"));
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_config_nfc_enable_disable() {
+    // Skip if key has no NFC support
+    let output = ykman_dev()
+        .args(["config", "nfc", "--list"])
+        .output()
+        .expect("failed to run command");
+    if !output.status.success() {
+        return;
+    }
+
+    // Ensure HSMAUTH is enabled over NFC first
+    let _ = ykman_dev()
+        .args(["config", "nfc", "--enable", "hsmauth", "-f"])
+        .ok();
+
+    // Disable HSMAUTH over NFC
+    ykman_dev()
+        .args(["config", "nfc", "--disable", "hsmauth", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["config", "nfc", "--list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("YubiHSM Auth: Disabled"));
+
+    // Re-enable HSMAUTH over NFC
+    ykman_dev()
+        .args(["config", "nfc", "--enable", "hsmauth", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["config", "nfc", "--list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("YubiHSM Auth: Enabled"));
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_config_usb_enable_all() {
+    // First disable an app so --enable-all has something to do
+    let _ = ykman_dev()
+        .args(["config", "usb", "--disable", "hsmauth", "-f"])
+        .ok();
+    wait_for_reenumeration();
+
+    // Now enable-all should succeed
+    ykman_dev()
+        .args(["config", "usb", "--enable-all", "-f"])
+        .assert()
+        .success();
+    wait_for_reenumeration();
+
+    // Verify everything is enabled
+    ykman_dev()
+        .args(["config", "usb", "--list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("YubiHSM Auth: Enabled"));
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_config_nfc_disable_all_enable_all() {
+    // NFC disable-all is safe — USB access can always recover.
+    let output = ykman_dev()
+        .args(["config", "nfc", "--list"])
+        .output()
+        .expect("failed to run command");
+    if !output.status.success() {
+        return; // NFC not supported on this key
+    }
+
+    ykman_dev()
+        .args(["config", "nfc", "--disable-all", "-f"])
+        .assert()
+        .success();
+
+    // Re-enable all NFC apps
+    ykman_dev()
+        .args(["config", "nfc", "--enable-all", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_config_set_lock_code() {
+    let lock_code = "01020304050607080102030405060708";
+
+    // Set a lock code
+    ykman_dev()
+        .args(["config", "set-lock-code", "-n", lock_code, "-f"])
+        .assert()
+        .success();
+
+    // Clear the lock code (must supply current code)
+    ykman_dev()
+        .args(["config", "set-lock-code", "-l", lock_code, "--clear", "-f"])
+        .assert()
+        .success();
 }

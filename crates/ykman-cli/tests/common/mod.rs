@@ -2,6 +2,7 @@
 
 use assert_cmd::Command;
 use std::env;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Test device configuration, resolved from environment variables.
@@ -65,6 +66,20 @@ pub const DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "000000000000000000000000000000
 // OTP access codes
 pub const OTP_ACCESS_CODE_1: &str = "111111111111";
 
+/// Return the path to the test fixtures directory.
+pub fn fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+}
+
+/// Return the full path to a fixture file.
+pub fn fixture_path(name: &str) -> PathBuf {
+    let p = fixtures_dir().join(name);
+    assert!(p.exists(), "fixture not found: {}", p.display());
+    p
+}
+
 /// Build a base `ykman` command from the compiled binary.
 pub fn ykman() -> Command {
     require_device();
@@ -120,4 +135,22 @@ pub fn hsmauth_reset() {
 /// Delete OTP slot 2 (ignore errors if empty).
 pub fn otp_delete_slot2() {
     let _ = ykman_dev().args(["otp", "delete", "2", "-f"]).ok();
+}
+
+/// Reset Security Domain to factory defaults.
+pub fn sd_reset() {
+    ykman_dev()
+        .args(["sd", "reset", "-f"])
+        .ok()
+        .expect("SD reset failed");
+}
+
+/// Default SCP03 key set (K-ENC:K-MAC:K-DEK) used after SD reset.
+pub const DEFAULT_SCP03_KEYS: &str = "404142434445464748494a4b4c4d4e4f:404142434445464748494a4b4c4d4e4f:404142434445464748494a4b4c4d4e4f";
+
+/// Like `ykman_dev()` but with default SCP03 authentication.
+pub fn ykman_dev_scp() -> Command {
+    let mut cmd = ykman_dev();
+    cmd.args(["--scp", DEFAULT_SCP03_KEYS]);
+    cmd
 }

@@ -1128,7 +1128,7 @@ enum OpenpgpAccessAction {
         #[arg(short, long)]
         admin_pin: Option<String>,
         /// New reset code
-        #[arg(short = 'r', long)]
+        #[arg(short = 'R', long)]
         reset_code: Option<String>,
     },
     /// Unblock PIN

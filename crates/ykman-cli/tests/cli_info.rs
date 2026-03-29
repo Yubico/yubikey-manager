@@ -21,13 +21,24 @@ fn test_list_devices() {
 fn test_list_devices_serial() {
     let serial = match device_serial() {
         Some(s) => s,
-        None => return, // NFC-only, no serial to check in list output
+        None => return,
     };
     ykman()
         .args(["list", "--serials"])
         .assert()
         .success()
         .stdout(predicate::str::contains(serial));
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_list_readers() {
+    ykman()
+        .args(["list", "--readers"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
 }
 
 #[test]

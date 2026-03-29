@@ -2,7 +2,7 @@ mod common;
 
 use common::{
     DEFAULT_OPENPGP_ADMIN_PIN, DEFAULT_OPENPGP_PIN, NON_DEFAULT_OPENPGP_ADMIN_PIN,
-    NON_DEFAULT_OPENPGP_PIN, openpgp_reset, ykman_dev,
+    NON_DEFAULT_OPENPGP_PIN, fixture_path, openpgp_reset, ykman_dev,
 };
 use predicates::prelude::*;
 use serial_test::serial;
@@ -38,7 +38,6 @@ fn test_openpgp_reset() {
 fn test_openpgp_change_pin() {
     openpgp_reset();
 
-    // Change PIN to non-default
     ykman_dev()
         .args([
             "openpgp",
@@ -52,7 +51,6 @@ fn test_openpgp_change_pin() {
         .assert()
         .success();
 
-    // Change back
     ykman_dev()
         .args([
             "openpgp",
@@ -75,7 +73,6 @@ fn test_openpgp_change_pin() {
 fn test_openpgp_change_admin_pin() {
     openpgp_reset();
 
-    // Change admin PIN to non-default
     ykman_dev()
         .args([
             "openpgp",
@@ -89,7 +86,6 @@ fn test_openpgp_change_admin_pin() {
         .assert()
         .success();
 
-    // Change back
     ykman_dev()
         .args([
             "openpgp",
@@ -112,7 +108,6 @@ fn test_openpgp_change_admin_pin() {
 fn test_openpgp_set_pin_retries() {
     openpgp_reset();
 
-    // Set custom PIN retries (PIN, Reset Code, Admin PIN)
     ykman_dev()
         .args([
             "openpgp",
@@ -128,9 +123,139 @@ fn test_openpgp_set_pin_retries() {
         .assert()
         .success();
 
-    // Verify retries changed in info output
     ykman_dev().args(["openpgp", "info"]).assert().success();
 
-    // Reset to restore defaults
+    openpgp_reset();
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_openpgp_keys_set_touch() {
+    openpgp_reset();
+
+    // Set touch on aut key to "on"
+    ykman_dev()
+        .args([
+            "openpgp",
+            "keys",
+            "set-touch",
+            "aut",
+            "on",
+            "--admin-pin",
+            DEFAULT_OPENPGP_ADMIN_PIN,
+            "-f",
+        ])
+        .assert()
+        .success();
+
+    // Set touch back to "off"
+    ykman_dev()
+        .args([
+            "openpgp",
+            "keys",
+            "set-touch",
+            "aut",
+            "off",
+            "--admin-pin",
+            DEFAULT_OPENPGP_ADMIN_PIN,
+            "-f",
+        ])
+        .assert()
+        .success();
+
+    openpgp_reset();
+}
+
+// NOTE: openpgp keys import is not yet implemented in the CLI.
+// test_openpgp_keys_import would test this when available.
+
+#[test]
+#[ignore]
+#[serial]
+fn test_openpgp_certificates_import_export() {
+    openpgp_reset();
+
+    let cert_file = fixture_path("ec_p256_cert.pem");
+    ykman_dev()
+        .args([
+            "openpgp",
+            "certificates",
+            "import",
+            "att",
+            cert_file.to_str().unwrap(),
+            "--admin-pin",
+            DEFAULT_OPENPGP_ADMIN_PIN,
+        ])
+        .assert()
+        .success();
+
+    // Export and verify content
+    ykman_dev()
+        .args(["openpgp", "certificates", "export", "att", "-"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("BEGIN CERTIFICATE"));
+
+    openpgp_reset();
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_openpgp_certificates_delete() {
+    openpgp_reset();
+
+    let cert_file = fixture_path("ec_p256_cert.pem");
+    ykman_dev()
+        .args([
+            "openpgp",
+            "certificates",
+            "import",
+            "att",
+            cert_file.to_str().unwrap(),
+            "--admin-pin",
+            DEFAULT_OPENPGP_ADMIN_PIN,
+        ])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args([
+            "openpgp",
+            "certificates",
+            "delete",
+            "att",
+            "--admin-pin",
+            DEFAULT_OPENPGP_ADMIN_PIN,
+        ])
+        .assert()
+        .success();
+
+    openpgp_reset();
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_openpgp_change_reset_code() {
+    openpgp_reset();
+
+    let new_reset_code = "12345679";
+
+    // Set a reset code (requires admin PIN)
+    ykman_dev()
+        .args([
+            "openpgp",
+            "access",
+            "change-reset-code",
+            "--admin-pin",
+            DEFAULT_OPENPGP_ADMIN_PIN,
+            "--reset-code",
+            new_reset_code,
+        ])
+        .assert()
+        .success();
+
     openpgp_reset();
 }

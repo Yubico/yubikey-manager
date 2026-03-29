@@ -144,13 +144,31 @@ impl KeyType {
 
     /// Detect key type from a SubjectPublicKeyInfo DER encoding.
     pub fn from_public_key_der(der: &[u8]) -> Result<Self, PivError> {
+        Self::detect_algorithm_from_der(der, false)
+    }
+
+    /// Detect key type from a PKCS#8 PrivateKeyInfo DER encoding.
+    pub fn from_private_key_der(der: &[u8]) -> Result<Self, PivError> {
+        Self::detect_algorithm_from_der(der, true)
+    }
+
+    fn detect_algorithm_from_der(der: &[u8], is_private: bool) -> Result<Self, PivError> {
         // Parse outer SEQUENCE
         let (_, seq_off, seq_len, _) =
             tlv_parse(der, 0).map_err(|_| PivError::InvalidValue("Invalid DER".into()))?;
         let seq_data = &der[seq_off..seq_off + seq_len];
 
+        // For PKCS#8 PrivateKeyInfo, skip the version INTEGER
+        let algo_start = if is_private {
+            let (_, _, _, ver_end) = tlv_parse(seq_data, 0)
+                .map_err(|_| PivError::InvalidValue("Invalid version INTEGER".into()))?;
+            ver_end
+        } else {
+            0
+        };
+
         // Parse AlgorithmIdentifier SEQUENCE
-        let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, 0)
+        let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, algo_start)
             .map_err(|_| PivError::InvalidValue("Invalid AlgorithmIdentifier".into()))?;
         let algo_data = &seq_data[algo_off..algo_off + algo_len];
 
@@ -169,17 +187,35 @@ impl KeyType {
         const X25519_OID: &[u8] = &[0x2b, 0x65, 0x6e];
 
         if oid == RSA_OID {
-            // Parse BIT STRING to find modulus size
-            let (_, bs_off, bs_len, _) = tlv_parse(seq_data, algo_end)
-                .map_err(|_| PivError::InvalidValue("Invalid BIT STRING".into()))?;
-            // BIT STRING has unused-bits prefix byte
-            let bs_data = &seq_data[bs_off + 1..bs_off + bs_len];
-            // Parse inner SEQUENCE containing modulus INTEGER
-            let (_, inner_off, inner_len, _) = tlv_parse(bs_data, 0)
+            // For public keys: BIT STRING containing SEQUENCE { modulus, exponent }
+            // For private keys: OCTET STRING containing SEQUENCE { version, modulus, ... }
+            let (tag, data_off, data_len, _) = tlv_parse(seq_data, algo_end)
+                .map_err(|_| PivError::InvalidValue("Invalid key data".into()))?;
+            let key_data = if tag == 0x03 {
+                // BIT STRING: skip unused-bits prefix byte
+                &seq_data[data_off + 1..data_off + data_len]
+            } else if tag == 0x04 {
+                // OCTET STRING: content is RSAPrivateKey directly
+                &seq_data[data_off..data_off + data_len]
+            } else {
+                return Err(PivError::InvalidValue(
+                    "Expected BIT STRING or OCTET STRING".into(),
+                ));
+            };
+            // Parse inner SEQUENCE
+            let (_, inner_off, inner_len, _) = tlv_parse(key_data, 0)
                 .map_err(|_| PivError::InvalidValue("Invalid RSA inner SEQUENCE".into()))?;
-            let inner = &bs_data[inner_off..inner_off + inner_len];
+            let inner = &key_data[inner_off..inner_off + inner_len];
+            // For private keys, skip version INTEGER first
+            let mod_start = if is_private {
+                let (_, _, _, ver_end) = tlv_parse(inner, 0)
+                    .map_err(|_| PivError::InvalidValue("Invalid RSA version".into()))?;
+                ver_end
+            } else {
+                0
+            };
             // Parse modulus INTEGER
-            let (_, mod_off, mod_len, _) = tlv_parse(inner, 0)
+            let (_, mod_off, mod_len, _) = tlv_parse(inner, mod_start)
                 .map_err(|_| PivError::InvalidValue("Invalid RSA modulus".into()))?;
             let modulus = &inner[mod_off..mod_off + mod_len];
             // Strip leading zero if present
@@ -220,6 +256,63 @@ impl KeyType {
             Ok(Self::X25519)
         } else {
             Err(PivError::InvalidValue("Unknown key algorithm OID".into()))
+        }
+    }
+
+    /// Extract the inner private key data from a PKCS#8 PrivateKeyInfo DER.
+    ///
+    /// For RSA, returns the PKCS#1 RSAPrivateKey.
+    /// For EC, returns the raw secret key scalar bytes.
+    /// For Ed25519/X25519, returns the 32-byte key.
+    pub fn extract_private_key_from_pkcs8(pkcs8_der: &[u8]) -> Result<Vec<u8>, PivError> {
+        // Parse outer SEQUENCE
+        let (_, seq_off, seq_len, _) =
+            tlv_parse(pkcs8_der, 0).map_err(|_| PivError::InvalidValue("Invalid DER".into()))?;
+        let seq_data = &pkcs8_der[seq_off..seq_off + seq_len];
+
+        // Skip version INTEGER
+        let (_, _, _, ver_end) =
+            tlv_parse(seq_data, 0).map_err(|_| PivError::InvalidValue("Invalid version".into()))?;
+
+        // Parse AlgorithmIdentifier SEQUENCE
+        let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, ver_end)
+            .map_err(|_| PivError::InvalidValue("Invalid AlgorithmIdentifier".into()))?;
+        let algo_data = &seq_data[algo_off..algo_off + algo_len];
+
+        // Parse OID
+        let (_, oid_off, oid_len, _) =
+            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidValue("Invalid OID".into()))?;
+        let oid = &algo_data[oid_off..oid_off + oid_len];
+
+        const RSA_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+        const EC_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
+
+        // Parse OCTET STRING containing the private key
+        let (_, oct_off, oct_len, _) = tlv_parse(seq_data, algo_end)
+            .map_err(|_| PivError::InvalidValue("Invalid OCTET STRING".into()))?;
+        let private_key_data = &seq_data[oct_off..oct_off + oct_len];
+
+        if oid == RSA_OID {
+            // RSA: OCTET STRING contains PKCS#1 RSAPrivateKey SEQUENCE
+            Ok(private_key_data.to_vec())
+        } else if oid == EC_OID {
+            // EC: OCTET STRING contains ECPrivateKey SEQUENCE { version, privateKey, ... }
+            // Parse SEQUENCE
+            let (_, inner_off, inner_len, _) = tlv_parse(private_key_data, 0)
+                .map_err(|_| PivError::InvalidValue("Invalid ECPrivateKey".into()))?;
+            let inner = &private_key_data[inner_off..inner_off + inner_len];
+            // Skip version INTEGER
+            let (_, _, _, ver_end) = tlv_parse(inner, 0)
+                .map_err(|_| PivError::InvalidValue("Invalid EC version".into()))?;
+            // Parse privateKey OCTET STRING
+            let (_, key_off, key_len, _) = tlv_parse(inner, ver_end)
+                .map_err(|_| PivError::InvalidValue("Invalid EC private key".into()))?;
+            Ok(inner[key_off..key_off + key_len].to_vec())
+        } else {
+            // Ed25519/X25519: OCTET STRING contains another OCTET STRING wrapping the 32-byte key
+            let (_, key_off, key_len, _) = tlv_parse(private_key_data, 0)
+                .map_err(|_| PivError::InvalidValue("Invalid key OCTET STRING".into()))?;
+            Ok(private_key_data[key_off..key_off + key_len].to_vec())
         }
     }
 }

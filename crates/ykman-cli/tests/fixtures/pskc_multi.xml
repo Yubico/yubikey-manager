@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<KeyContainer Version="1.0" xmlns="urn:ietf:params:xml:ns:keyprov:pskc">
+  <KeyPackage>
+    <Key Id="multi-1" Algorithm="urn:ietf:params:xml:ns:keyprov:pskc:hotp">
+      <Issuer>Issuer1</Issuer>
+      <AlgorithmParameters>
+        <ResponseFormat Length="6" Encoding="DECIMAL"/>
+      </AlgorithmParameters>
+      <Data>
+        <Secret>
+          <PlainValue>MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=</PlainValue>
+        </Secret>
+      </Data>
+    </Key>
+  </KeyPackage>
+  <KeyPackage>
+    <Key Id="multi-2" Algorithm="urn:ietf:params:xml:ns:keyprov:pskc:totp">
+      <Issuer>Issuer2</Issuer>
+      <AlgorithmParameters>
+        <ResponseFormat Length="8" Encoding="DECIMAL"/>
+      </AlgorithmParameters>
+      <Data>
+        <Secret>
+          <PlainValue>MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=</PlainValue>
+        </Secret>
+      </Data>
+    </Key>
+  </KeyPackage>
+</KeyContainer>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<KeyContainer Version="1.0" xmlns="urn:ietf:params:xml:ns:keyprov:pskc">
+  <KeyPackage>
+    <DeviceInfo>
+      <Manufacturer>Test</Manufacturer>
+      <SerialNo>12345</SerialNo>
+    </DeviceInfo>
+    <Key Id="pskc-test" Algorithm="urn:ietf:params:xml:ns:keyprov:pskc:totp">
+      <Issuer>TestIssuer</Issuer>
+      <AlgorithmParameters>
+        <ResponseFormat Length="6" Encoding="DECIMAL"/>
+      </AlgorithmParameters>
+      <Data>
+        <Secret>
+          <PlainValue>MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=</PlainValue>
+        </Secret>
+      </Data>
+    </Key>
+  </KeyPackage>
+</KeyContainer>

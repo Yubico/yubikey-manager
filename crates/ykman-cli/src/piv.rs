@@ -749,8 +749,12 @@ pub fn run_keys_import(
     let der = decrypt_private_key_data(&data, password)?;
 
     // Auto-detect key type from DER
-    let key_type = KeyType::from_public_key_der(&der)
+    let key_type = KeyType::from_private_key_der(&der)
         .map_err(|_| CliError("Could not determine key type from file.".into()))?;
+
+    // Extract the inner private key data from PKCS#8 wrapper
+    let inner_key = KeyType::extract_private_key_from_pkcs8(&der)
+        .map_err(|e| CliError(format!("Failed to extract private key: {e}")))?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -759,7 +763,7 @@ pub fn run_keys_import(
     }
 
     session
-        .put_key(slot, key_type, &der, pp, tp)
+        .put_key(slot, key_type, &inner_key, pp, tp)
         .map_err(|e| CliError(format!("Failed to import key: {e}")))?;
 
     eprintln!("Private key imported to slot {slot}.");
