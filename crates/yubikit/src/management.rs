@@ -824,6 +824,14 @@ pub trait ManagementSession {
     /// Write configuration data to the device.
     fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError>;
 
+    /// Write USB mode configuration (YubiKey NEO/4 style).
+    fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), SmartCardError>;
+
     /// Get detailed information about the YubiKey.
     fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
         log::debug!("Reading device info");
@@ -930,31 +938,6 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
         self.protocol.into_connection()
     }
 
-    /// Write USB mode configuration (YubiKey NEO/4 style).
-    pub fn set_mode(
-        &mut self,
-        mode_code: u8,
-        chalresp_timeout: u8,
-        auto_eject_timeout: u16,
-    ) -> Result<(), SmartCardError> {
-        // Little-endian: mode_code, chalresp_timeout, auto_eject_timeout (u16 LE)
-        let data = [
-            mode_code,
-            chalresp_timeout,
-            (auto_eject_timeout & 0xFF) as u8,
-            (auto_eject_timeout >> 8) as u8,
-        ];
-        if self.version.0 == 3 {
-            // NEO: using OTP application, INS=0x01, P1=SLOT_DEVICE_CONFIG
-            self.protocol
-                .send_apdu(0, 0x01, CONFIG_SLOT_DEVICE_CONFIG, 0, &data)?;
-        } else {
-            self.protocol
-                .send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, &data)?;
-        }
-        Ok(())
-    }
-
     /// Global factory reset (YubiKey Bio only, SmartCard-only).
     pub fn device_reset(&mut self) -> Result<(), SmartCardError> {
         self.protocol.send_apdu(0, INS_DEVICE_RESET, 0, 0, &[])?;
@@ -983,6 +966,29 @@ impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
         self.protocol.send_apdu(0, INS_WRITE_CONFIG, 0, 0, config)?;
         Ok(())
     }
+
+    fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), SmartCardError> {
+        let data = [
+            mode_code,
+            chalresp_timeout,
+            (auto_eject_timeout & 0xFF) as u8,
+            (auto_eject_timeout >> 8) as u8,
+        ];
+        if self.version.0 == 3 {
+            // NEO: using OTP application, INS=0x01, P1=SLOT_DEVICE_CONFIG
+            self.protocol
+                .send_apdu(0, 0x01, CONFIG_SLOT_DEVICE_CONFIG, 0, &data)?;
+        } else {
+            self.protocol
+                .send_apdu(0, INS_SET_MODE, P1_DEVICE_CONFIG, 0, &data)?;
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,32 +1013,6 @@ impl ManagementOtpSession {
             ));
         }
         Ok(Self { protocol, version })
-    }
-
-    /// Set USB mode via OTP slot.
-    pub fn set_mode(
-        &mut self,
-        mode_code: u8,
-        chalresp_timeout: u8,
-        auto_eject_timeout: u16,
-    ) -> Result<(), YubiOtpError> {
-        let data = [
-            mode_code,
-            chalresp_timeout,
-            (auto_eject_timeout & 0xFF) as u8,
-            (auto_eject_timeout >> 8) as u8,
-        ];
-        let empty = self.protocol.read_status()?[STATUS_OFFSET_PROG_SEQ] == 0;
-        match self
-            .protocol
-            .send_and_receive(ConfigSlot::DeviceConfig as u8, Some(&data), None)
-        {
-            Err(YubiOtpError::CommandRejected(_)) if empty => Ok(()),
-            other => {
-                other?;
-                Ok(())
-            }
-        }
     }
 
     /// Consume the session, returning the underlying connection.
@@ -1072,6 +1052,30 @@ impl ManagementSession for ManagementOtpSession {
             .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config), None)
             .map_err(otp_to_smartcard_err)?;
         Ok(())
+    }
+
+    fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), SmartCardError> {
+        let data = [
+            mode_code,
+            chalresp_timeout,
+            (auto_eject_timeout & 0xFF) as u8,
+            (auto_eject_timeout >> 8) as u8,
+        ];
+        let empty =
+            self.protocol.read_status().map_err(otp_to_smartcard_err)?[STATUS_OFFSET_PROG_SEQ] == 0;
+        match self
+            .protocol
+            .send_and_receive(ConfigSlot::DeviceConfig as u8, Some(&data), None)
+        {
+            Err(YubiOtpError::CommandRejected(_)) if empty => Ok(()),
+            Err(e) => Err(otp_to_smartcard_err(e)),
+            Ok(_) => Ok(()),
+        }
     }
 }
 
@@ -1154,25 +1158,6 @@ impl ManagementFidoSession {
         })
     }
 
-    /// Set USB mode via vendor CTAP command.
-    pub fn set_mode(
-        &mut self,
-        mode_code: u8,
-        chalresp_timeout: u8,
-        auto_eject_timeout: u16,
-    ) -> Result<(), SmartCardError> {
-        let data = [
-            mode_code,
-            chalresp_timeout,
-            (auto_eject_timeout & 0xFF) as u8,
-            (auto_eject_timeout >> 8) as u8,
-        ];
-        self.connection
-            .call(CTAP_YUBIKEY_DEVICE_CONFIG, &data)
-            .map_err(fido_to_smartcard_err)?;
-        Ok(())
-    }
-
     /// Get a reference to the underlying FidoConnection.
     pub fn connection(&self) -> &FidoConnection {
         &self.connection
@@ -1203,6 +1188,24 @@ impl ManagementSession for ManagementFidoSession {
     fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
         self.connection
             .call(CTAP_WRITE_CONFIG, config)
+            .map_err(fido_to_smartcard_err)?;
+        Ok(())
+    }
+
+    fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), SmartCardError> {
+        let data = [
+            mode_code,
+            chalresp_timeout,
+            (auto_eject_timeout & 0xFF) as u8,
+            (auto_eject_timeout >> 8) as u8,
+        ];
+        self.connection
+            .call(CTAP_YUBIKEY_DEVICE_CONFIG, &data)
             .map_err(fido_to_smartcard_err)?;
         Ok(())
     }

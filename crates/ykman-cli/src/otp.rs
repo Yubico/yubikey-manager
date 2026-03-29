@@ -6,8 +6,8 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::otp::{modhex_decode, modhex_encode};
 use yubikit::yubiotp::{
-    ACC_CODE_SIZE, ConfigState, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE,
-    YubiOtpCcidSession, YubiOtpError, YubiOtpOtpSession, YubiOtpSession,
+    ACC_CODE_SIZE, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE, YubiOtpCcidSession,
+    YubiOtpOtpSession, YubiOtpSession,
 };
 
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
@@ -16,107 +16,12 @@ use crate::util::CliError;
 
 const SHIFT: u8 = 0x80;
 
-/// Unified OTP session that can be either HID or SmartCard backed.
-enum OtpSession<C: yubikit::smartcard::SmartCardConnection> {
-    Otp(YubiOtpOtpSession),
-    Sc(YubiOtpCcidSession<C>),
-}
-
-macro_rules! delegate {
-    ($self:expr, $method:ident $(, $arg:expr)*) => {
-        match $self {
-            OtpSession::Otp(s) => s.$method($($arg),*),
-            OtpSession::Sc(s) => s.$method($($arg),*),
-        }
-    };
-}
-
-impl<C: yubikit::smartcard::SmartCardConnection> OtpSession<C> {
-    fn get_config_state(&self) -> ConfigState {
-        delegate!(self, get_config_state)
-    }
-
-    fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
-        delegate!(self, get_serial)
-    }
-
-    fn swap_slots(&mut self) -> Result<(), YubiOtpError> {
-        delegate!(self, swap_slots)
-    }
-
-    fn delete_slot(&mut self, slot: Slot, cur_acc_code: Option<&[u8]>) -> Result<(), YubiOtpError> {
-        delegate!(self, delete_slot, slot, cur_acc_code)
-    }
-
-    fn set_ndef_configuration(
-        &mut self,
-        slot: Slot,
-        uri: Option<&str>,
-        cur_acc_code: Option<&[u8]>,
-        ndef_type: NdefType,
-    ) -> Result<(), YubiOtpError> {
-        delegate!(
-            self,
-            set_ndef_configuration,
-            slot,
-            uri,
-            cur_acc_code,
-            ndef_type
-        )
-    }
-
-    fn put_configuration(
-        &mut self,
-        slot: Slot,
-        config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        delegate!(
-            self,
-            put_configuration,
-            slot,
-            config,
-            acc_code,
-            cur_acc_code
-        )
-    }
-
-    fn update_configuration(
-        &mut self,
-        slot: Slot,
-        config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
-        delegate!(
-            self,
-            update_configuration,
-            slot,
-            config,
-            acc_code,
-            cur_acc_code
-        )
-    }
-
-    fn calculate_hmac_sha1_otp(
-        &mut self,
-        slot: Slot,
-        challenge: &[u8],
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        match self {
-            OtpSession::Otp(s) => s.calculate_hmac_sha1(slot, challenge, None, None),
-            OtpSession::Sc(s) => s.calculate_hmac_sha1(slot, challenge),
-        }
-    }
-}
-
 /// Open an OTP session, preferring HID. Falls back to SmartCard if HID is
 /// unavailable, SCP is specified, or the device is on NFC.
-fn open_session<'a>(
-    dev: &'a YubiKeyDevice,
+fn open_session(
+    dev: &YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<OtpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<Box<dyn YubiOtpSession>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
 
     // If SCP is needed or NFC, must use SmartCard
@@ -128,35 +33,32 @@ fn open_session<'a>(
     if let Ok(conn) = dev.open_otp()
         && let Ok(session) = YubiOtpOtpSession::new(conn)
     {
-        return Ok(OtpSession::Otp(session));
+        return Ok(Box::new(session));
     }
 
     // Fall back to SmartCard
     open_sc(dev, scp_config)
 }
 
-fn open_sc<'a>(
-    dev: &'a YubiKeyDevice,
+fn open_sc(
+    dev: &YubiKeyDevice,
     scp_config: ScpConfig,
-) -> Result<OtpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<Box<dyn YubiOtpSession>, CliError> {
+    let conn = dev
+        .open_smartcard()
+        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
     match scp_config {
         ScpConfig::None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             let session = YubiOtpCcidSession::new(conn)
                 .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
-            Ok(OtpSession::Sc(session))
+            Ok(Box::new(session))
         }
         ref config => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             let session = YubiOtpCcidSession::new_with_scp(conn, &params)
                 .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
-            Ok(OtpSession::Sc(session))
+            Ok(Box::new(session))
         }
     }
 }
@@ -1242,7 +1144,7 @@ pub fn run_calculate(
     // Prefer OTP HID for challenge-response (supports touch keepalive)
     let mut session = open_session(dev, scp_params)?;
     let result = session
-        .calculate_hmac_sha1_otp(slot, &challenge_bytes)
+        .calculate_hmac_sha1(slot, &challenge_bytes)
         .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
 
     if totp {

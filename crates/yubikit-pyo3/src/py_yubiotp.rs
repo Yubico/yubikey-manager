@@ -326,7 +326,7 @@ impl PyYubiOtpOtpSession {
         let s = parse_slot(slot)?;
         let result = self
             .session
-            .calculate_hmac_sha1(s, challenge, None, None)
+            .calculate_hmac_sha1(s, challenge)
             .map_err(yubiotp_err)?;
         Ok(PyBytes::new(py, &result))
     }

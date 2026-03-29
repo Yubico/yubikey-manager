@@ -292,7 +292,7 @@ impl ManagementOtpSession {
     ) -> PyResult<()> {
         self.inner
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
-            .map_err(yubiotp_err)
+            .map_err(smartcard_err)
     }
 }
 

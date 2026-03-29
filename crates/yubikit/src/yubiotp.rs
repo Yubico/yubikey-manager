@@ -885,6 +885,23 @@ pub trait YubiOtpSession {
         expected_len: usize,
     ) -> Result<Vec<u8>, YubiOtpError>;
 
+    /// Perform an HMAC-SHA1 challenge-response operation.
+    fn calculate_hmac_sha1(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, YubiOtpError>;
+
+    /// Perform an HMAC-SHA1 challenge-response operation with optional cancellation and keepalive.
+    /// Note: The underlying transport must support cancellation for the `cancel` parameter to have an effect.
+    fn calculate_hmac_sha1_with_cancel(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+        cancel: Option<Arc<AtomicBool>>,
+        on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError>;
+
     /// Get the serial number of the YubiKey.
     fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
         let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
@@ -1024,28 +1041,6 @@ impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
         })
     }
 
-    /// Perform an HMAC-SHA1 challenge-response operation.
-    pub fn calculate_hmac_sha1(
-        &mut self,
-        slot: Slot,
-        challenge: &[u8],
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
-        let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
-
-        // Pad challenge to HMAC_CHALLENGE_SIZE with a byte different from the last
-        let pad_byte = if challenge.last() == Some(&0) {
-            1u8
-        } else {
-            0u8
-        };
-        let mut padded = [pad_byte; HMAC_CHALLENGE_SIZE];
-        let copy_len = challenge.len().min(HMAC_CHALLENGE_SIZE);
-        padded[..copy_len].copy_from_slice(&challenge[..copy_len]);
-
-        self.send_and_receive(config_slot, &padded, HMAC_RESPONSE_SIZE)
-    }
-
     /// Access the underlying SmartCardProtocol.
     pub fn protocol(&self) -> &SmartCardProtocol<C> {
         &self.protocol
@@ -1135,6 +1130,39 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
             )))
         }
     }
+
+    /// Perform an HMAC-SHA1 challenge-response operation.
+    fn calculate_hmac_sha1(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
+        let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
+
+        // Pad challenge to HMAC_CHALLENGE_SIZE with a byte different from the last
+        let pad_byte = if challenge.last() == Some(&0) {
+            1u8
+        } else {
+            0u8
+        };
+        let mut padded = [pad_byte; HMAC_CHALLENGE_SIZE];
+        let copy_len = challenge.len().min(HMAC_CHALLENGE_SIZE);
+        padded[..copy_len].copy_from_slice(&challenge[..copy_len]);
+
+        self.send_and_receive(config_slot, &padded, HMAC_RESPONSE_SIZE)
+    }
+
+    fn calculate_hmac_sha1_with_cancel(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+        _cancel: Option<Arc<AtomicBool>>,
+        _on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        // SmartCard transport does not support cancellation or keepalives, so we ignore those parameters.
+        self.calculate_hmac_sha1(slot, challenge)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,37 +1189,6 @@ impl YubiOtpOtpSession {
             status,
             version,
         })
-    }
-
-    /// Perform an HMAC-SHA1 challenge-response operation.
-    pub fn calculate_hmac_sha1(
-        &mut self,
-        slot: Slot,
-        challenge: &[u8],
-        cancel: Option<Arc<AtomicBool>>,
-        on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
-        let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
-
-        let pad_byte = if challenge.last() == Some(&0) {
-            1u8
-        } else {
-            0u8
-        };
-        let mut padded = [pad_byte; HMAC_CHALLENGE_SIZE];
-        let copy_len = challenge.len().min(HMAC_CHALLENGE_SIZE);
-        padded[..copy_len].copy_from_slice(&challenge[..copy_len]);
-
-        let response = self.protocol.send_and_receive_with_cancel(
-            config_slot as u8,
-            Some(&padded),
-            Some(HMAC_RESPONSE_SIZE as i32),
-            cancel.as_ref().map(|a| a.as_ref()),
-            on_keepalive,
-        )?;
-
-        response.ok_or_else(|| YubiOtpError::BadResponse("No data in HMAC response".into()))
     }
 
     /// Consume the session, returning the underlying connection.
@@ -1240,6 +1237,44 @@ impl YubiOtpSession for YubiOtpOtpSession {
         self.protocol
             .send_and_receive(slot as u8, send_data, Some(expected_len as i32))?
             .ok_or_else(|| YubiOtpError::BadResponse("Expected data response, got status".into()))
+    }
+
+    fn calculate_hmac_sha1_with_cancel(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+        cancel: Option<Arc<AtomicBool>>,
+        on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
+        let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
+
+        let pad_byte = if challenge.last() == Some(&0) {
+            1u8
+        } else {
+            0u8
+        };
+        let mut padded = [pad_byte; HMAC_CHALLENGE_SIZE];
+        let copy_len = challenge.len().min(HMAC_CHALLENGE_SIZE);
+        padded[..copy_len].copy_from_slice(&challenge[..copy_len]);
+
+        let response = self.protocol.send_and_receive_with_cancel(
+            config_slot as u8,
+            Some(&padded),
+            Some(HMAC_RESPONSE_SIZE as i32),
+            cancel.as_ref().map(|a| a.as_ref()),
+            on_keepalive,
+        )?;
+
+        response.ok_or_else(|| YubiOtpError::BadResponse("No data in HMAC response".into()))
+    }
+
+    fn calculate_hmac_sha1(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, YubiOtpError> {
+        self.calculate_hmac_sha1_with_cancel(slot, challenge, None, None)
     }
 }
 
