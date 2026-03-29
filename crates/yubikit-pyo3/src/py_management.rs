@@ -4,7 +4,8 @@ use yubikit::management::{
     ManagementFidoSession as RustManagementFidoSession,
     ManagementOtpSession as RustManagementOtpSession, ManagementSession,
 };
-use yubikit::transport::ctaphid::list_fido_devices;
+use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::transport::otphid::HidOtpConnection;
 
 use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
 
@@ -198,7 +199,7 @@ fn yubiotp_err(e: yubikit::otp::YubiOtpError) -> PyErr {
 
 #[pyclass(name = "ManagementOtpSession", unsendable)]
 pub struct ManagementOtpSession {
-    inner: RustManagementOtpSession,
+    inner: RustManagementOtpSession<HidOtpConnection>,
 }
 
 #[pymethods]
@@ -298,7 +299,7 @@ impl ManagementOtpSession {
 
 #[pyclass(name = "ManagementFidoSession", unsendable)]
 pub struct ManagementFidoSession {
-    inner: RustManagementFidoSession,
+    inner: RustManagementFidoSession<HidFidoConnection>,
 }
 
 #[pymethods]

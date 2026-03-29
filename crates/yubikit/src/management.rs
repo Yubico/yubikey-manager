@@ -35,13 +35,15 @@ use std::fmt;
 
 use crate::core::bytes2int;
 use crate::core::patch_version;
-use crate::otp::{OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc};
+use crate::fido::FidoConnection;
+use crate::otp::{
+    OtpConnection, OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc,
+};
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
 };
 use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode};
-use crate::transport::ctaphid::{CtapHidTransportError, HidFidoConnection};
-use crate::transport::otphid::HidOtpConnection;
+use crate::transport::ctaphid::CtapHidTransportError;
 use crate::yubiotp::ConfigSlot;
 
 // ---------------------------------------------------------------------------
@@ -996,14 +998,14 @@ impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
 // ---------------------------------------------------------------------------
 
 /// Management operations over the OTP (HID) interface.
-pub struct ManagementOtpSession {
-    protocol: OtpProtocol<HidOtpConnection>,
+pub struct ManagementOtpSession<T: OtpConnection> {
+    protocol: OtpProtocol<T>,
     version: Version,
 }
 
-impl ManagementOtpSession {
+impl<T: OtpConnection> ManagementOtpSession<T> {
     /// Open a management session over OTP HID.
-    pub fn new(connection: HidOtpConnection) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: T) -> Result<Self, YubiOtpError> {
         log::debug!("Opening ManagementOtpSession");
         let protocol = OtpProtocol::new(connection)?;
         let version = patch_version(protocol.version);
@@ -1016,12 +1018,12 @@ impl ManagementOtpSession {
     }
 
     /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> HidOtpConnection {
+    pub fn into_connection(self) -> T {
         self.protocol.into_connection()
     }
 }
 
-impl ManagementSession for ManagementOtpSession {
+impl<T: OtpConnection> ManagementSession for ManagementOtpSession<T> {
     fn version(&self) -> Version {
         self.version
     }
@@ -1135,14 +1137,14 @@ const CTAP_READ_CONFIG: u8 = CTAP_VENDOR_FIRST + 2;
 const CTAP_WRITE_CONFIG: u8 = CTAP_VENDOR_FIRST + 3;
 
 /// Management operations over the FIDO (CTAP HID) interface.
-pub struct ManagementFidoSession {
-    connection: HidFidoConnection,
+pub struct ManagementFidoSession<C: FidoConnection> {
+    connection: C,
     version: Version,
 }
 
-impl ManagementFidoSession {
+impl<C: FidoConnection> ManagementFidoSession<C> {
     /// Open a management session over FIDO HID.
-    pub fn new(connection: HidFidoConnection) -> Result<Self, SmartCardError> {
+    pub fn new(connection: C) -> Result<Self, SmartCardError> {
         log::debug!("Opening ManagementFidoSession");
         let (v1, v2, v3) = connection.device_version();
         let mut version = Version(v1, v2, v3);
@@ -1158,18 +1160,18 @@ impl ManagementFidoSession {
         })
     }
 
-    /// Get a reference to the underlying HidFidoConnection.
-    pub fn connection(&self) -> &HidFidoConnection {
+    /// Get a reference to the underlying connection.
+    pub fn connection(&self) -> &C {
         &self.connection
     }
 
     /// Close the session and return the underlying connection.
-    pub fn into_connection(self) -> HidFidoConnection {
+    pub fn into_connection(self) -> C {
         self.connection
     }
 }
 
-impl ManagementSession for ManagementFidoSession {
+impl<C: FidoConnection> ManagementSession for ManagementFidoSession<C> {
     fn version(&self) -> Version {
         self.version
     }

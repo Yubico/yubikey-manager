@@ -48,10 +48,12 @@ use std::thread;
 use std::time::Duration;
 
 use crate::core::set_override_version;
+use crate::fido::FidoConnection;
 use crate::management::{
     Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementCcidSession, ManagementFidoSession,
     ManagementOtpSession, ManagementSession, ReleaseType, UsbInterface,
 };
+use crate::otp::OtpConnection;
 use crate::smartcard::{
     Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Transport, Version,
 };
@@ -834,9 +836,7 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
 /// Uses [`ManagementOtpSession`] to read [`DeviceInfo`].
 /// Applies standard fixups for known device quirks.
 /// Returns the info and the connection for reuse.
-pub fn read_info_otp(
-    conn: HidOtpConnection,
-) -> Result<(DeviceInfo, HidOtpConnection), DeviceError> {
+pub fn read_info_otp<T: OtpConnection>(conn: T) -> Result<(DeviceInfo, T), DeviceError> {
     let mut session = ManagementOtpSession::new(conn)
         .map_err(|e| DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())))?;
     let mut info = session
@@ -852,9 +852,7 @@ pub fn read_info_otp(
 /// Uses [`ManagementFidoSession`] to read [`DeviceInfo`].
 /// Applies standard fixups for known device quirks.
 /// Returns the info and the connection for reuse.
-pub fn read_info_fido(
-    conn: HidFidoConnection,
-) -> Result<(DeviceInfo, HidFidoConnection), DeviceError> {
+pub fn read_info_fido<C: FidoConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
     let mut session = ManagementFidoSession::new(conn).map_err(DeviceError::SmartCard)?;
     let mut info = session
         .read_device_info_unchecked()

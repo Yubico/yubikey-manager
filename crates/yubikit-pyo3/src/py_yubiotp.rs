@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::smartcard::Version;
+use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{
     self, ConfigSlot, NdefType, Slot, YubiOtpCcidSession as RustYubiOtpCcidSession,
     YubiOtpOtpSession as RustYubiOtpOtpSession, YubiOtpSession as _,
@@ -213,7 +214,7 @@ impl PyYubiOtpSession {
 
 #[pyclass(name = "YubiOtpOtpSession", unsendable)]
 pub struct PyYubiOtpOtpSession {
-    session: RustYubiOtpOtpSession,
+    session: RustYubiOtpOtpSession<HidOtpConnection>,
 }
 
 #[pymethods]

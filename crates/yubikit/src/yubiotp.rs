@@ -40,7 +40,6 @@ use crate::otp::calculate_crc;
 #[cfg(test)]
 use crate::otp::check_crc;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol, Version};
-use crate::transport::otphid::HidOtpConnection;
 
 // Re-export types that were moved to otp_protocol for backwards compatibility.
 pub use crate::otp::{OtpConnection, OtpProtocol, YubiOtpError};
@@ -1170,15 +1169,15 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
 // ---------------------------------------------------------------------------
 
 /// A session with the YubiOTP application over an OTP HID connection.
-pub struct YubiOtpOtpSession {
-    protocol: OtpProtocol<HidOtpConnection>,
+pub struct YubiOtpOtpSession<T: OtpConnection> {
+    protocol: OtpProtocol<T>,
     status: Vec<u8>,
     version: Version,
 }
 
-impl YubiOtpOtpSession {
+impl<T: OtpConnection> YubiOtpOtpSession<T> {
     /// Open a YubiOTP session on the given HID connection.
-    pub fn new(connection: HidOtpConnection) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: T) -> Result<Self, YubiOtpError> {
         log::debug!("Opening YubiOtpOtpSession (HID)");
         let protocol = OtpProtocol::new(connection)?;
         let status = protocol.read_status()?;
@@ -1192,12 +1191,12 @@ impl YubiOtpOtpSession {
     }
 
     /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> HidOtpConnection {
+    pub fn into_connection(self) -> T {
         self.protocol.into_connection()
     }
 }
 
-impl YubiOtpSession for YubiOtpOtpSession {
+impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
     fn version(&self) -> Version {
         self.version
     }
