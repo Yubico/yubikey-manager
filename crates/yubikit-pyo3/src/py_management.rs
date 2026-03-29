@@ -84,10 +84,10 @@ impl ManagementCcidSession {
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustManagementCcidSession::new_with_scp(conn, &scp_params)
-                .map_err(smartcard_err)?;
+                .map_err(|(e, _)| smartcard_err(e))?;
             Ok(Self { inner })
         } else {
-            let inner = RustManagementCcidSession::new(conn).map_err(smartcard_err)?;
+            let inner = RustManagementCcidSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
             Ok(Self { inner })
         }
     }
@@ -210,7 +210,7 @@ impl ManagementOtpSession {
             .downcast::<crate::py_hid::OtpConnection>()?
             .borrow_mut();
         let hid_conn = conn_wrapper.take_inner()?;
-        let inner = RustManagementOtpSession::new(hid_conn).map_err(yubiotp_err)?;
+        let inner = RustManagementOtpSession::new(hid_conn).map_err(|(e, _)| yubiotp_err(e))?;
         Ok(Self { inner })
     }
 
@@ -310,7 +310,7 @@ impl ManagementFidoSession {
             .downcast::<crate::py_hid::FidoConnection>()?
             .borrow_mut();
         let conn = conn_wrapper.take_inner()?;
-        let inner = RustManagementFidoSession::new(conn).map_err(smartcard_err)?;
+        let inner = RustManagementFidoSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
         Ok(Self { inner })
     }
 

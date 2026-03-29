@@ -196,7 +196,7 @@ fn print_oath_info(dev: &YubiKeyDevice) {
     };
     let mut session = match OathSession::new(conn) {
         Ok(s) => s,
-        Err(e) => {
+        Err((e, _)) => {
             println!("\n  [OATH] Error: {e}");
             return;
         }
@@ -216,7 +216,7 @@ fn print_piv_info(dev: &YubiKeyDevice) {
     };
     let mut session = match PivSession::new(conn) {
         Ok(s) => s,
-        Err(e) => {
+        Err((e, _)) => {
             println!("\n  [PIV] Error: {e}");
             return;
         }
@@ -236,7 +236,7 @@ fn print_openpgp_info(dev: &YubiKeyDevice) {
     };
     let mut session = match OpenPgpSession::new(conn) {
         Ok(s) => s,
-        Err(e) => {
+        Err((e, _)) => {
             println!("\n  [OpenPGP] Error: {e}");
             return;
         }
@@ -261,7 +261,7 @@ fn print_yubiotp_info(dev: &YubiKeyDevice) {
         Ok(session) => {
             println!("\n  [YubiOTP] version {}", session.version());
         }
-        Err(e) => {
+        Err((e, _)) => {
             println!("\n  [YubiOTP] Error: {e}");
         }
     }
@@ -274,7 +274,7 @@ fn print_hsmauth_info(dev: &YubiKeyDevice) {
     };
     let mut session = match HsmAuthSession::new(conn) {
         Ok(s) => s,
-        Err(e) => {
+        Err((e, _)) => {
             println!("\n  [HSM Auth] Error: {e}");
             return;
         }

@@ -76,6 +76,14 @@ pub struct PcscSmartCardConnection {
     transport: Transport,
 }
 
+impl std::fmt::Debug for PcscSmartCardConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PcscSmartCardConnection")
+            .field("reader_name", &self.reader_name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PcscSmartCardConnection {
     /// Connect to a reader, optionally using exclusive mode.
     pub fn new(reader_name: &str, exclusive: bool) -> Result<Self, PcscError> {

@@ -312,9 +312,13 @@ pub struct SecurityDomainSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Open a new Security Domain session by selecting the Secure Domain AID.
-    pub fn new(connection: C) -> Result<Self, SmartCardError> {
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        protocol.select(Aid::SECURE_DOMAIN)?;
+        if let Err(e) = protocol.select(Aid::SECURE_DOMAIN) {
+            return Err((e, protocol.into_connection()));
+        }
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
         Ok(Self {
@@ -325,13 +329,20 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     }
 
     /// Open a Security Domain session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, SmartCardError> {
+    ) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        protocol.select(Aid::SECURE_DOMAIN)?;
-        let dek = protocol.init_scp(scp_key_params)?;
+        if let Err(e) = protocol.select(Aid::SECURE_DOMAIN) {
+            return Err((e, protocol.into_connection()));
+        }
+        let dek = match protocol.init_scp(scp_key_params) {
+            Ok(dek) => dek,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
         let version = patch_version(Version(5, 3, 0));
         protocol.configure(version);
         Ok(Self {
@@ -360,6 +371,11 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Get a mutable reference to the underlying protocol.
     pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
         &mut self.protocol
+    }
+
+    /// Consume this session and return the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
     }
 
     /// Read data from the security domain.

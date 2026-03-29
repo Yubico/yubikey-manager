@@ -881,27 +881,39 @@ pub struct ManagementCcidSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> ManagementCcidSession<C> {
     /// Open a management session, selecting the management AID.
-    pub fn new(connection: C) -> Result<Self, SmartCardError> {
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        let select_bytes = protocol.select(Aid::MANAGEMENT)?;
+        let select_bytes = match protocol.select(Aid::MANAGEMENT) {
+            Ok(v) => v,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
         Self::init(protocol, &select_bytes)
     }
 
     /// Open a management session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, SmartCardError> {
+    ) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        let select_bytes = protocol.select(Aid::MANAGEMENT)?;
-        protocol.init_scp(scp_key_params)?;
+        let select_bytes = match protocol.select(Aid::MANAGEMENT) {
+            Ok(v) => v,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e, protocol.into_connection()));
+        }
         Self::init(protocol, &select_bytes)
     }
 
     fn init(
         mut protocol: SmartCardProtocol<C>,
         select_bytes: &[u8],
-    ) -> Result<Self, SmartCardError> {
+    ) -> Result<Self, (SmartCardError, C)> {
         log::debug!("Opening ManagementCcidSession");
         // YubiKey Edge incorrectly appends SW twice
         let select_bytes =
@@ -911,9 +923,19 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
                 select_bytes
             };
 
-        let version_str = std::str::from_utf8(select_bytes)
-            .map_err(|_| SmartCardError::BadResponse("Invalid version string".into()))?;
-        let version = parse_version_string(version_str)?;
+        let version_str = match std::str::from_utf8(select_bytes) {
+            Ok(v) => v,
+            Err(_) => {
+                return Err((
+                    SmartCardError::BadResponse("Invalid version string".into()),
+                    protocol.into_connection(),
+                ));
+            }
+        };
+        let version = match parse_version_string(version_str) {
+            Ok(v) => v,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
         let version = patch_version(version);
 
         // For YubiKey NEO (v3), switch to OTP applet for further commands
@@ -922,7 +944,9 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
             let _ = protocol
                 .connection()
                 .send_and_receive(&[0xa4, 0x04, 0x00, 0x08]);
-            protocol.select(Aid::OTP)?;
+            if let Err(e) = protocol.select(Aid::OTP) {
+                return Err((e, protocol.into_connection()));
+            }
         }
 
         protocol.configure(version);
@@ -1005,13 +1029,19 @@ pub struct ManagementOtpSession<T: OtpConnection> {
 
 impl<T: OtpConnection> ManagementOtpSession<T> {
     /// Open a management session over OTP HID.
-    pub fn new(connection: T) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: T) -> Result<Self, (YubiOtpError, T)> {
         log::debug!("Opening ManagementOtpSession");
-        let protocol = OtpProtocol::new(connection)?;
+        let protocol = match OtpProtocol::new(connection) {
+            Ok(p) => p,
+            Err((e, conn)) => return Err((e, conn)),
+        };
         let version = patch_version(protocol.version);
         if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {
-            return Err(YubiOtpError::NotSupported(
-                "Management over OTP not supported for YubiKey v1.x-v2.x".into(),
+            return Err((
+                YubiOtpError::NotSupported(
+                    "Management over OTP not supported for YubiKey v1.x-v2.x".into(),
+                ),
+                protocol.into_connection(),
             ));
         }
         Ok(Self { protocol, version })
@@ -1144,7 +1174,7 @@ pub struct ManagementFidoSession<C: FidoConnection> {
 
 impl<C: FidoConnection> ManagementFidoSession<C> {
     /// Open a management session over FIDO HID.
-    pub fn new(connection: C) -> Result<Self, SmartCardError> {
+    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
         log::debug!("Opening ManagementFidoSession");
         let (v1, v2, v3) = connection.device_version();
         let mut version = Version(v1, v2, v3);

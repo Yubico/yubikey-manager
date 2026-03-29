@@ -1633,6 +1633,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 authentication with default keys");
         verify_auth(&mut session);
         eprintln!("  PASS {tc:?}");
@@ -1662,7 +1663,7 @@ mod securitydomain {
             key_mac: vec![0x01u8; 16],
             key_dek: Some(vec![0x01u8; 16]),
         };
-        let result = SecurityDomainSession::new_with_scp(conn, &params);
+        let result = SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| e);
         assert!(result.is_err(), "SCP03 with wrong keys should fail");
         eprintln!("  PASS {tc:?}");
     }
@@ -1692,6 +1693,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &default_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth with default keys");
 
         // Generate random keys
@@ -1718,13 +1720,14 @@ mod securitydomain {
             key_dek: Some(new_dek.to_vec()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &new_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth with new keys");
         verify_auth(&mut session);
         drop(session);
 
         // Verify old default keys no longer work
         let conn = open_smartcard_connection(&tc);
-        let result = SecurityDomainSession::new_with_scp(conn, &default_params);
+        let result = SecurityDomainSession::new_with_scp(conn, &default_params).map_err(|(e, _)| e);
         assert!(result.is_err(), "Default keys should fail after key change");
 
         // Reset to restore defaults
@@ -1768,8 +1771,9 @@ mod securitydomain {
             kvn: 0x01,
             pk_sd_ecka: pk,
         };
-        let mut session =
-            SecurityDomainSession::new_with_scp(conn, &params).expect("SCP11b authentication");
+        let mut session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
+            .expect("SCP11b authentication");
 
         // SCP11b grants read-only access; generate_ec_key should fail
         let temp_ref = KeyRef::new(0x13, 0x7F);
@@ -1806,6 +1810,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth for SCP11b import");
 
         // Generate a new P-256 private key
@@ -1833,6 +1838,7 @@ mod securitydomain {
             pk_sd_ecka: pk_bytes.as_bytes().to_vec(),
         };
         let _session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
             .expect("SCP11b auth with imported key");
 
         // Clean up: reset to restore defaults
@@ -1867,6 +1873,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth for SCP11a setup");
 
         let kvn = 0x03;
@@ -1875,8 +1882,9 @@ mod securitydomain {
 
         // Authenticate with SCP11a
         let conn = open_smartcard_connection(&tc);
-        let mut session =
-            SecurityDomainSession::new_with_scp(conn, &params).expect("SCP11a authentication");
+        let mut session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
+            .expect("SCP11a authentication");
 
         // Verify full access by deleting the keys we created
         session
@@ -1915,6 +1923,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth for SCP11a allowlist setup");
 
         let kvn = 0x03;
@@ -1938,8 +1947,9 @@ mod securitydomain {
 
         // Authenticate with SCP11a
         let conn = open_smartcard_connection(&tc);
-        let mut session =
-            SecurityDomainSession::new_with_scp(conn, &params).expect("SCP11a auth with allowlist");
+        let mut session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
+            .expect("SCP11a auth with allowlist");
 
         // Verify by deleting keys
         session
@@ -1978,6 +1988,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth for allowlist_blocked setup");
 
         // Replace default SCP03 keys with new ones
@@ -2013,7 +2024,7 @@ mod securitydomain {
 
         // Attempt SCP11a auth — should fail due to wrong allowlist
         let conn = open_smartcard_connection(&tc);
-        let result = SecurityDomainSession::new_with_scp(conn, &params);
+        let result = SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| e);
         assert!(result.is_err(), "SCP11a should fail with wrong allowlist");
 
         // Remove allowlist by authenticating with new SCP03 keys
@@ -2025,6 +2036,7 @@ mod securitydomain {
             key_dek: Some(new_dek.to_vec()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &new_scp03_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth with new keys to remove allowlist");
         session
             .store_allowlist(oce_ref, &[])
@@ -2034,6 +2046,7 @@ mod securitydomain {
         // Now SCP11a should work
         let conn = open_smartcard_connection(&tc);
         let _session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
             .expect("SCP11a auth after removing allowlist");
 
         // Reset to restore defaults
@@ -2068,6 +2081,7 @@ mod securitydomain {
             key_dek: Some((0x40..=0x4Fu8).collect()),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
+            .map_err(|(e, _)| e)
             .expect("SCP03 auth for SCP11c setup");
 
         let kvn = 0x03;
@@ -2076,8 +2090,9 @@ mod securitydomain {
 
         // Authenticate with SCP11c
         let conn = open_smartcard_connection(&tc);
-        let mut session =
-            SecurityDomainSession::new_with_scp(conn, &params).expect("SCP11c authentication");
+        let mut session = SecurityDomainSession::new_with_scp(conn, &params)
+            .map_err(|(e, _)| e)
+            .expect("SCP11c authentication");
 
         // SCP11c grants read-only access; delete_key should fail
         let result = session.delete_key(0, kvn, false);

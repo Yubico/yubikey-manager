@@ -14,17 +14,17 @@ use crate::util::CliError;
 fn open_management_session(dev: &YubiKeyDevice) -> Result<Box<dyn ManagementSession>, CliError> {
     if let Ok(conn) = dev.open_smartcard() {
         let session = ManagementCcidSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
         return Ok(Box::new(session));
     }
     if let Ok(conn) = dev.open_otp() {
         let session = ManagementOtpSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
         return Ok(Box::new(session));
     }
     if let Ok(conn) = dev.open_fido() {
         let session = ManagementFidoSession::new(conn)
-            .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
         return Ok(Box::new(session));
     }
     Err(CliError(
@@ -370,7 +370,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
     let mut session = ManagementCcidSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open management session: {e}")))?;
+        .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
     session
         .device_reset()
         .map_err(|e| CliError(format!("Failed to reset device: {e}")))?;

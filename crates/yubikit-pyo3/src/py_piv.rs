@@ -101,10 +101,11 @@ impl PivSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = RustPivSession::new_with_scp(conn, &scp_params).map_err(piv_err)?;
+            let inner =
+                RustPivSession::new_with_scp(conn, &scp_params).map_err(|(e, _)| piv_err(e))?;
             Ok(Self { inner })
         } else {
-            let inner = RustPivSession::new(conn).map_err(piv_err)?;
+            let inner = RustPivSession::new(conn).map_err(|(e, _)| piv_err(e))?;
             Ok(Self { inner })
         }
     }

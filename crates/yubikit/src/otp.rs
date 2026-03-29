@@ -188,13 +188,15 @@ pub struct OtpProtocol<T: OtpConnection> {
 }
 
 impl<T: OtpConnection> OtpProtocol<T> {
-    pub fn new(connection: T) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: T) -> Result<Self, (YubiOtpError, T)> {
         let mut proto = Self {
             connection,
             version: Version(0, 0, 0),
         };
-        let report = proto.receive()?;
-        proto.version = Version::from_bytes(&report[1..4]);
+        match proto.receive() {
+            Ok(report) => proto.version = Version::from_bytes(&report[1..4]),
+            Err(e) => return Err((e, proto.into_connection())),
+        }
 
         // NEO (version 3.x): force communication to refresh pgmSeq
         if proto.version.0 == 3 {

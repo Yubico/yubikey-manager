@@ -35,7 +35,8 @@ fn open_session<'a>(
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            PivSession::new(conn).map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+            PivSession::new(conn)
+                .map_err(|(e, _)| CliError(format!("Failed to open PIV session: {e}")))
         }
         ref config => {
             let conn = dev
@@ -44,7 +45,7 @@ fn open_session<'a>(
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             PivSession::new_with_scp(conn, &params)
-                .map_err(|e| CliError(format!("Failed to open PIV session: {e}")))
+                .map_err(|(e, _)| CliError(format!("Failed to open PIV session: {e}")))
         }
     }
 }

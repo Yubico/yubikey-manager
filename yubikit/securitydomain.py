@@ -71,7 +71,6 @@ class SecurityDomainSession:
         self._version = _override_version.patch(Version(*native.version))
         if self._version != Version(*native.version):
             native.version = tuple(self._version)
-        self._authenticated = False
         logger.debug("SecurityDomain session initialized")
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
@@ -94,7 +93,6 @@ class SecurityDomainSession:
             if "receipt" in str(e).lower():
                 raise InvalidSignature(str(e))
             raise ValueError("Incorrect SCP parameters")
-        self._authenticated = True
 
     def get_data(self, tag: int, data: bytes = b"") -> bytes:
         """Read data from the security domain."""
@@ -242,8 +240,6 @@ class SecurityDomainSession:
         Use replace_kvn to replace an existing key.
         """
         logger.debug(f"Importing key into {key} of type {type(sk)}")
-        if not self._authenticated:
-            raise ValueError("Must be authenticated!")
 
         if isinstance(sk, StaticKeys):
             if not sk.key_dek:

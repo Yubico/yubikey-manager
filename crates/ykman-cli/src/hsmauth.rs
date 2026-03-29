@@ -21,7 +21,7 @@ fn open_session<'a>(
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             HsmAuthSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+                .map_err(|(e, _)| CliError(format!("Failed to open HSM Auth session: {e}")))
         }
         ref config => {
             let conn = dev
@@ -30,7 +30,7 @@ fn open_session<'a>(
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             HsmAuthSession::new_with_scp(conn, &params)
-                .map_err(|e| CliError(format!("Failed to open HSM Auth session: {e}")))
+                .map_err(|(e, _)| CliError(format!("Failed to open HSM Auth session: {e}")))
         }
     }
 }

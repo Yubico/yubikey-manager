@@ -447,32 +447,51 @@ pub struct OathSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> OathSession<C> {
     /// Open an OATH session on the given connection.
-    pub fn new(connection: C) -> Result<Self, SmartCardError> {
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
         let mut protocol =
             SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);
-        let resp = protocol.select(Aid::OATH)?;
+        let resp = match protocol.select(Aid::OATH) {
+            Ok(resp) => resp,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
         Self::init(protocol, &resp)
     }
 
     /// Open an OATH session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, SmartCardError> {
+    ) -> Result<Self, (SmartCardError, C)> {
         let mut protocol =
             SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);
-        let resp = protocol.select(Aid::OATH)?;
-        protocol.init_scp(scp_key_params)?;
+        let resp = match protocol.select(Aid::OATH) {
+            Ok(resp) => resp,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e, protocol.into_connection()));
+        }
         Self::init(protocol, &resp)
     }
 
     fn init(
         mut protocol: SmartCardProtocol<C>,
         select_response: &[u8],
-    ) -> Result<Self, SmartCardError> {
+    ) -> Result<Self, (SmartCardError, C)> {
         log::debug!("Opening OathSession");
-        let (version, salt, challenge) = parse_select(select_response)
-            .map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+        let (version, salt, challenge) = match parse_select(select_response) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err((
+                    SmartCardError::BadResponse(e.to_string()),
+                    protocol.into_connection(),
+                ));
+            }
+        };
         let version = patch_version(version);
         protocol.configure(version);
 

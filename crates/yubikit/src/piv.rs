@@ -842,26 +842,40 @@ pub struct PivSession<C: SmartCardConnection> {
 }
 
 impl<C: SmartCardConnection> PivSession<C> {
-    pub fn new(connection: C) -> Result<Self, PivError> {
+    /// Open a PIV session on the given connection.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (PivError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        protocol.select(Aid::PIV)?;
+        if let Err(e) = protocol.select(Aid::PIV) {
+            return Err((e.into(), protocol.into_connection()));
+        }
         Self::init(protocol)
     }
 
     /// Open a PIV session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, PivError> {
+    ) -> Result<Self, (PivError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        protocol.select(Aid::PIV)?;
-        protocol.init_scp(scp_key_params)?;
+        if let Err(e) = protocol.select(Aid::PIV) {
+            return Err((e.into(), protocol.into_connection()));
+        }
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e.into(), protocol.into_connection()));
+        }
         Self::init(protocol)
     }
 
-    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, PivError> {
+    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, (PivError, C)> {
         log::debug!("Opening PivSession");
-        let version_data = protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[])?;
+        let version_data = match protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[]) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
         let version = patch_version(Version::from_bytes(&version_data));
         protocol.configure(version);
 
@@ -877,7 +891,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             Ok(meta) => meta.key_type,
             Err(PivError::NotSupported(_))
             | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => ManagementKeyType::Tdes,
-            Err(e) => return Err(e),
+            Err(e) => return Err((e, session.protocol.into_connection())),
         };
 
         Ok(session)

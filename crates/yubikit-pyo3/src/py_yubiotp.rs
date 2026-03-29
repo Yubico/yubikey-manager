@@ -95,11 +95,11 @@ impl PyYubiOtpSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let session =
-                RustYubiOtpCcidSession::new_with_scp(conn, &scp_params).map_err(yubiotp_err)?;
+            let session = RustYubiOtpCcidSession::new_with_scp(conn, &scp_params)
+                .map_err(|(e, _)| yubiotp_err(e))?;
             Ok(Self { session })
         } else {
-            let session = RustYubiOtpCcidSession::new(conn).map_err(yubiotp_err)?;
+            let session = RustYubiOtpCcidSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
             Ok(Self { session })
         }
     }
@@ -225,7 +225,7 @@ impl PyYubiOtpOtpSession {
             .downcast::<crate::py_hid::OtpConnection>()?
             .borrow_mut();
         let conn = conn_wrapper.take_inner()?;
-        let session = RustYubiOtpOtpSession::new(conn).map_err(yubiotp_err)?;
+        let session = RustYubiOtpOtpSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
         Ok(Self { session })
     }
 

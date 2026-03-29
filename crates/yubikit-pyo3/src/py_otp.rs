@@ -89,7 +89,7 @@ impl OtpProtocol {
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_conn = PyOtpConnection::from_py(connection)?;
         let protocol = RustOtpProtocol::new(py_conn)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            .map_err(|(e, _)| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self {
             inner: protocol,
             connection: connection.clone().unbind(),

@@ -1009,24 +1009,36 @@ pub struct YubiOtpCcidSession<C: SmartCardConnection> {
 
 impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
     /// Open a YubiOTP session on the given SmartCard connection.
-    pub fn new(connection: C) -> Result<Self, YubiOtpError> {
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (YubiOtpError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        let status = protocol.select(Aid::OTP)?;
+        let status = match protocol.select(Aid::OTP) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
         Self::init(protocol, &status)
     }
 
     /// Open a YubiOTP session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, YubiOtpError> {
+    ) -> Result<Self, (YubiOtpError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        let status = protocol.select(Aid::OTP)?;
-        protocol.init_scp(scp_key_params)?;
+        let status = match protocol.select(Aid::OTP) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e.into(), protocol.into_connection()));
+        }
         Self::init(protocol, &status)
     }
 
-    fn init(mut protocol: SmartCardProtocol<C>, status: &[u8]) -> Result<Self, YubiOtpError> {
+    fn init(mut protocol: SmartCardProtocol<C>, status: &[u8]) -> Result<Self, (YubiOtpError, C)> {
         log::debug!("Opening YubiOtpCcidSession (SmartCard)");
         let version = patch_version(Version::from_bytes(&status[..3]));
         let prog_seq = *status.get(3).unwrap_or(&0);
@@ -1177,10 +1189,16 @@ pub struct YubiOtpOtpSession<T: OtpConnection> {
 
 impl<T: OtpConnection> YubiOtpOtpSession<T> {
     /// Open a YubiOTP session on the given HID connection.
-    pub fn new(connection: T) -> Result<Self, YubiOtpError> {
+    pub fn new(connection: T) -> Result<Self, (YubiOtpError, T)> {
         log::debug!("Opening YubiOtpOtpSession (HID)");
-        let protocol = OtpProtocol::new(connection)?;
-        let status = protocol.read_status()?;
+        let protocol = match OtpProtocol::new(connection) {
+            Ok(p) => p,
+            Err((e, conn)) => return Err((e, conn)),
+        };
+        let status = match protocol.read_status() {
+            Ok(s) => s,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
         let version = patch_version(protocol.version);
 
         Ok(Self {

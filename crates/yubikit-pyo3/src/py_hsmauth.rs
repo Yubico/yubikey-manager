@@ -54,10 +54,11 @@ impl HsmAuthSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = RustHsmAuthSession::new_with_scp(conn, &scp_params).map_err(hsmauth_err)?;
+            let inner = RustHsmAuthSession::new_with_scp(conn, &scp_params)
+                .map_err(|(e, _)| hsmauth_err(e))?;
             Ok(Self { inner })
         } else {
-            let inner = RustHsmAuthSession::new(conn).map_err(hsmauth_err)?;
+            let inner = RustHsmAuthSession::new(conn).map_err(|(e, _)| hsmauth_err(e))?;
             Ok(Self { inner })
         }
     }

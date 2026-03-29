@@ -50,14 +50,14 @@ fn open_sc(
     match scp_config {
         ScpConfig::None => {
             let session = YubiOtpCcidSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
+                .map_err(|(e, _)| CliError(format!("Failed to open OTP session: {e}")))?;
             Ok(Box::new(session))
         }
         ref config => {
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             let session = YubiOtpCcidSession::new_with_scp(conn, &params)
-                .map_err(|e| CliError(format!("Failed to open OTP session: {e}")))?;
+                .map_err(|(e, _)| CliError(format!("Failed to open OTP session: {e}")))?;
             Ok(Box::new(session))
         }
     }

@@ -269,12 +269,9 @@ pub fn run_diagnose() -> Result<(), CliError> {
                 }
                 session.into_connection()
             }
-            Err(e) => {
+            Err((e, conn)) => {
                 println!("      Error: {e}");
-                match PcscSmartCardConnection::new(reader, false) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                }
+                conn
             }
         };
 
@@ -290,12 +287,9 @@ pub fn run_diagnose() -> Result<(), CliError> {
                 );
                 session.into_connection()
             }
-            Err(e) => {
+            Err((e, conn)) => {
                 println!("      Error: {e}");
-                match PcscSmartCardConnection::new(reader, false) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                }
+                conn
             }
         };
 
@@ -338,12 +332,9 @@ pub fn run_diagnose() -> Result<(), CliError> {
                 }
                 session.into_connection()
             }
-            Err(e) => {
+            Err((e, conn)) => {
                 println!("      Error: {e}");
-                match PcscSmartCardConnection::new(reader, false) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                }
+                conn
             }
         };
 
@@ -360,7 +351,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                     println!("      Management key retries remaining: {retries}/8");
                 }
             }
-            Err(e) => println!("      Error: {e}"),
+            Err((e, _)) => println!("      Error: {e}"),
         }
     }
     if !pcsc_found {
@@ -445,7 +436,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                                 }
                             );
                         }
-                        Err(e) => println!("      Error: {e}"),
+                        Err((e, _)) => println!("      Error: {e}"),
                     }
                 }
             }
@@ -485,7 +476,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                                     }
                                     Err(e) => println!("      Error: {e}"),
                                 },
-                                Err(e) => println!("      Error: {e}"),
+                                Err((e, _)) => println!("      Error: {e}"),
                             }
                         }
                         Err(e) => println!("    Error: {e}"),

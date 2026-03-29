@@ -208,7 +208,7 @@ fn find_scp11_pk(
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;
     let mut sd = SecurityDomainSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open Security Domain: {e}")))?;
+        .map_err(|(e, _)| CliError(format!("Failed to open Security Domain: {e}")))?;
 
     let key_ref = KeyRef::new(kid, kvn);
     let certs = sd
@@ -230,7 +230,7 @@ fn find_scp11_pk_with_kid(dev: &YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>),
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;
     let mut sd = SecurityDomainSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open Security Domain: {e}")))?;
+        .map_err(|(e, _)| CliError(format!("Failed to open Security Domain: {e}")))?;
 
     let keys = sd
         .get_key_information()

@@ -88,6 +88,12 @@ pub struct HidOtpConnection {
     device: Option<hidapi::HidDevice>,
 }
 
+impl std::fmt::Debug for HidOtpConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HidOtpConnection").finish_non_exhaustive()
+    }
+}
+
 impl HidOtpConnection {
     pub fn new(path: &str) -> Result<Self, HidError> {
         log_traffic!("Opening HID connection to '{}'", path);

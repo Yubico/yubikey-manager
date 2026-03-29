@@ -812,7 +812,7 @@ pub fn read_info(reader_name: &str) -> Result<DeviceInfo, DeviceError> {
 ///
 /// Returns the info and the connection so it can be reused.
 pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
-    let mut session = ManagementCcidSession::new(conn)?;
+    let mut session = ManagementCcidSession::new(conn).map_err(|(e, _)| e)?;
     let version = session.version();
 
     match session.read_device_info_unchecked() {
@@ -840,10 +840,10 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
 pub fn read_info_otp<T: OtpConnection>(
     conn: T,
 ) -> Result<(DeviceInfo, T), (DeviceError, Option<T>)> {
-    let mut session = ManagementOtpSession::new(conn).map_err(|e| {
+    let mut session = ManagementOtpSession::new(conn).map_err(|(e, conn)| {
         (
             DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())),
-            None,
+            Some(conn),
         )
     })?;
     match session.read_device_info_unchecked() {
@@ -864,8 +864,8 @@ pub fn read_info_otp<T: OtpConnection>(
 pub fn read_info_fido<C: FidoConnection>(
     conn: C,
 ) -> Result<(DeviceInfo, C), (DeviceError, Option<C>)> {
-    let mut session =
-        ManagementFidoSession::new(conn).map_err(|e| (DeviceError::SmartCard(e), None))?;
+    let mut session = ManagementFidoSession::new(conn)
+        .map_err(|(e, conn)| (DeviceError::SmartCard(e), Some(conn)))?;
     match session.read_device_info_unchecked() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
@@ -928,13 +928,9 @@ fn synthesize_info_ccid<C: SmartCardConnection>(
             }
             otp_session.into_connection()
         }
-        Err(e) => {
+        Err((e, conn)) => {
             log::debug!("Couldn't select OTP application: {e}");
-            // Connection lost — this is an older device fallback path,
-            // re-opening would need the reader name which we don't have.
-            return Err(DeviceError::SmartCard(SmartCardError::BadResponse(
-                format!("Failed to open OTP session for synthesis: {e}"),
-            )));
+            conn
         }
     };
 

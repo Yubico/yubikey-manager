@@ -170,10 +170,11 @@ impl OpenPgpSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = RustOpenPgpSession::new_with_scp(conn, &scp_params).map_err(openpgp_err)?;
+            let inner = RustOpenPgpSession::new_with_scp(conn, &scp_params)
+                .map_err(|(e, _)| openpgp_err(e))?;
             Ok(Self { inner })
         } else {
-            let inner = RustOpenPgpSession::new(conn).map_err(openpgp_err)?;
+            let inner = RustOpenPgpSession::new(conn).map_err(|(e, _)| openpgp_err(e))?;
             Ok(Self { inner })
         }
     }

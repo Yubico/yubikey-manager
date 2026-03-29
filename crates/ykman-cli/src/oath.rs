@@ -50,7 +50,7 @@ fn open_session<'a>(
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             OathSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
         }
         ref config => {
             let conn = dev
@@ -59,7 +59,7 @@ fn open_session<'a>(
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             OathSession::new_with_scp(conn, &params)
-                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
         }
     };
 
@@ -147,7 +147,7 @@ pub fn run_info(
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             OathSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
         }
         ref config => {
             let conn = dev
@@ -156,7 +156,7 @@ pub fn run_info(
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             OathSession::new_with_scp(conn, &params)
-                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
         }
     };
     let _ = password; // Not needed for info
@@ -190,7 +190,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
     let mut session = OathSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?;
+        .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?;
     let device_id = session.device_id().to_string();
     session
         .reset()
@@ -543,7 +543,7 @@ pub fn run_access_remember(
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
             OathSession::new(conn)
-                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
         }
         ref config => {
             let conn = dev
@@ -552,7 +552,7 @@ pub fn run_access_remember(
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             OathSession::new_with_scp(conn, &params)
-                .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
         }
     };
 
@@ -591,7 +591,7 @@ pub fn run_access_forget(
                     .open_smartcard()
                     .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
                 OathSession::new(conn)
-                    .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                    .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
             }
             ref config => {
                 let conn = dev
@@ -600,7 +600,7 @@ pub fn run_access_forget(
                 let params = scp::to_scp_key_params(config)
                     .expect("non-None ScpConfig must convert to ScpKeyParams");
                 OathSession::new_with_scp(conn, &params)
-                    .map_err(|e| CliError(format!("Failed to open OATH session: {e}")))?
+                    .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
             }
         };
         let device_id = session.device_id();

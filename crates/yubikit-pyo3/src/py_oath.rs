@@ -36,10 +36,11 @@ impl OathSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = RustOathSession::new_with_scp(conn, &scp_params).map_err(smartcard_err)?;
+            let inner = RustOathSession::new_with_scp(conn, &scp_params)
+                .map_err(|(e, _)| smartcard_err(e))?;
             Ok(Self { inner })
         } else {
-            let inner = RustOathSession::new(conn).map_err(smartcard_err)?;
+            let inner = RustOathSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
             Ok(Self { inner })
         }
     }

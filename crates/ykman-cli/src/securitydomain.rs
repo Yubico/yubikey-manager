@@ -27,8 +27,9 @@ fn open_session<'a>(
                     .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
                 let params = scp::to_scp_key_params(config)
                     .expect("non-None ScpConfig must convert to ScpKeyParams");
-                return SecurityDomainSession::new_with_scp(conn, &params)
-                    .map_err(|e| CliError(format!("Failed to open SD session with SCP: {e}")));
+                return SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| {
+                    CliError(format!("Failed to open SD session with SCP: {e}"))
+                });
             }
         }
     }
@@ -36,7 +37,7 @@ fn open_session<'a>(
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
     SecurityDomainSession::new(conn)
-        .map_err(|e| CliError(format!("Failed to open Security Domain session: {e}")))
+        .map_err(|(e, _)| CliError(format!("Failed to open Security Domain session: {e}")))
 }
 
 fn confirm(msg: &str) -> bool {

@@ -239,37 +239,59 @@ pub struct HsmAuthSession<C: SmartCardConnection> {
 }
 
 impl<C: SmartCardConnection> HsmAuthSession<C> {
-    pub fn new(connection: C) -> Result<Self, HsmAuthError> {
+    /// Open an HSM Auth session on the given connection.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (HsmAuthError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        let select_response = protocol.select(Aid::HSMAUTH)?;
+        let select_response = match protocol.select(Aid::HSMAUTH) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
         Self::init(protocol, &select_response)
     }
 
     /// Open an HSM Auth session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, HsmAuthError> {
+    ) -> Result<Self, (HsmAuthError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
-        let select_response = protocol.select(Aid::HSMAUTH)?;
-        protocol.init_scp(scp_key_params)?;
+        let select_response = match protocol.select(Aid::HSMAUTH) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e.into(), protocol.into_connection()));
+        }
         Self::init(protocol, &select_response)
     }
 
     fn init(
         mut protocol: SmartCardProtocol<C>,
         select_response: &[u8],
-    ) -> Result<Self, HsmAuthError> {
+    ) -> Result<Self, (HsmAuthError, C)> {
         log::debug!("Opening HsmAuthSession");
         // Parse version from TAG_VERSION in select response
-        let entries = parse_tlv_list(select_response)?;
-        let version_data = entries
+        let entries = match parse_tlv_list(select_response) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+        let version_data = match entries
             .iter()
             .find(|(tag, _)| *tag == TAG_VERSION)
             .map(|(_, v)| v.as_slice())
-            .ok_or_else(|| {
-                HsmAuthError::InvalidResponse("Missing version tag in SELECT response".into())
-            })?;
+        {
+            Some(v) => v,
+            None => {
+                return Err((
+                    HsmAuthError::InvalidResponse("Missing version tag in SELECT response".into()),
+                    protocol.into_connection(),
+                ));
+            }
+        };
         let version = patch_version(Version::from_bytes(version_data));
         protocol.configure(version);
 

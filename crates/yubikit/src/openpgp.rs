@@ -1234,44 +1234,59 @@ pub struct OpenPgpSession<C: SmartCardConnection> {
 }
 
 impl<C: SmartCardConnection> OpenPgpSession<C> {
-    pub fn new(connection: C) -> Result<Self, OpenPgpError> {
+    /// Open an OpenPGP session on the given connection.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (OpenPgpError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
 
         // SELECT OpenPGP application; auto-activate if needed
         match protocol.select(Aid::OPENPGP) {
             Ok(_) => {}
             Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6285 || sw == 0x6985 => {
-                protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
-                protocol.select(Aid::OPENPGP)?;
+                if let Err(e) = protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[]) {
+                    return Err((e.into(), protocol.into_connection()));
+                }
+                if let Err(e) = protocol.select(Aid::OPENPGP) {
+                    return Err((e.into(), protocol.into_connection()));
+                }
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err((e.into(), protocol.into_connection())),
         }
 
         Self::init(protocol)
     }
 
     /// Open an OpenPGP session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, OpenPgpError> {
+    ) -> Result<Self, (OpenPgpError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
 
         // SELECT OpenPGP application; auto-activate if needed
         match protocol.select(Aid::OPENPGP) {
             Ok(_) => {}
             Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6285 || sw == 0x6985 => {
-                protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
-                protocol.select(Aid::OPENPGP)?;
+                if let Err(e) = protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[]) {
+                    return Err((e.into(), protocol.into_connection()));
+                }
+                if let Err(e) = protocol.select(Aid::OPENPGP) {
+                    return Err((e.into(), protocol.into_connection()));
+                }
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err((e.into(), protocol.into_connection())),
         }
 
-        protocol.init_scp(scp_key_params)?;
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e.into(), protocol.into_connection()));
+        }
         Self::init(protocol)
     }
 
-    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, OpenPgpError> {
+    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, (OpenPgpError, C)> {
         log::debug!("Opening OpenPgpSession");
         // Read version (BCD encoded)
         let version = match protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[]) {
@@ -1281,21 +1296,27 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 bcd(*bcd_bytes.get(2).unwrap_or(&0)),
             ),
             Err(SmartCardError::Apdu { sw: 0x6985, .. }) => Version(1, 0, 0),
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err((e.into(), protocol.into_connection())),
         };
         let version = patch_version(version);
 
         protocol.configure(version);
 
         // Cache application related data
-        let app_data_raw = protocol.send_apdu(
+        let app_data_raw = match protocol.send_apdu(
             0,
             INS_GET_DATA,
             Do::ApplicationRelatedData.p1(),
             Do::ApplicationRelatedData.p2(),
             &[],
-        )?;
-        let app_data = ApplicationRelatedData::parse(&app_data_raw)?;
+        ) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+        let app_data = match ApplicationRelatedData::parse(&app_data_raw) {
+            Ok(v) => v,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
 
         Ok(Self {
             protocol,
