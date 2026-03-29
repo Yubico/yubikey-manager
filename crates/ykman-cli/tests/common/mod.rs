@@ -1,8 +1,46 @@
 #![allow(dead_code)]
 
 use assert_cmd::Command;
+use std::env;
+use std::sync::OnceLock;
 
-pub const DEVICE_SERIAL: &str = "104";
+/// Test device configuration, resolved from environment variables.
+///
+/// Set `YKMAN_TEST_SERIAL` for USB testing, or `YKMAN_TEST_READER` for NFC.
+/// If neither is set, all device tests abort.
+struct TestDevice {
+    serial: Option<String>,
+    reader: Option<String>,
+}
+
+fn test_device() -> &'static TestDevice {
+    static DEVICE: OnceLock<TestDevice> = OnceLock::new();
+    DEVICE.get_or_init(|| TestDevice {
+        serial: env::var("YKMAN_TEST_SERIAL").ok(),
+        reader: env::var("YKMAN_TEST_READER").ok(),
+    })
+}
+
+/// Abort the test if no device is configured.
+fn require_device() {
+    let dev = test_device();
+    if dev.serial.is_none() && dev.reader.is_none() {
+        panic!(
+            "No test device configured. Set YKMAN_TEST_SERIAL=<serial> \
+             or YKMAN_TEST_READER=<reader_substring> to run device tests."
+        );
+    }
+}
+
+/// Returns true when testing over NFC (YKMAN_TEST_READER is set).
+pub fn is_nfc() -> bool {
+    test_device().reader.is_some()
+}
+
+/// Returns the configured serial number, if any.
+pub fn device_serial() -> Option<&'static str> {
+    test_device().serial.as_deref()
+}
 
 // PIV defaults
 pub const DEFAULT_PIN: &str = "123456";
@@ -29,13 +67,21 @@ pub const OTP_ACCESS_CODE_1: &str = "111111111111";
 
 /// Build a base `ykman` command from the compiled binary.
 pub fn ykman() -> Command {
+    require_device();
     Command::cargo_bin("ykman").expect("binary 'ykman' not found")
 }
 
-/// Build a `ykman` command pre-configured with `--device 104`.
+/// Build a `ykman` command targeting the configured test device.
+///
+/// Uses `--reader <substring>` for NFC, or `--device <serial>` for USB.
 pub fn ykman_dev() -> Command {
     let mut cmd = ykman();
-    cmd.args(["--device", DEVICE_SERIAL]);
+    let dev = test_device();
+    if let Some(ref reader) = dev.reader {
+        cmd.args(["--reader", reader]);
+    } else if let Some(ref serial) = dev.serial {
+        cmd.args(["--device", serial]);
+    }
     cmd
 }
 
@@ -73,6 +119,5 @@ pub fn hsmauth_reset() {
 
 /// Delete OTP slot 2 (ignore errors if empty).
 pub fn otp_delete_slot2() {
-    // Ignore failure – slot may already be empty
     let _ = ykman_dev().args(["otp", "delete", "2", "-f"]).ok();
 }

@@ -1,14 +1,17 @@
 mod common;
 
-use common::ykman_dev;
+use common::{is_nfc, ykman_dev};
 use predicates::prelude::*;
 use serial_test::serial;
 use std::thread;
 use std::time::Duration;
 
 /// Wait for the YubiKey to re-enumerate after a USB config change.
+/// Only needed over USB — NFC doesn't disconnect.
 fn wait_for_reenumeration() {
-    thread::sleep(Duration::from_secs(3));
+    if !is_nfc() {
+        thread::sleep(Duration::from_secs(3));
+    }
 }
 
 #[test]
