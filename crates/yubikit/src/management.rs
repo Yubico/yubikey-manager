@@ -398,6 +398,10 @@ impl UsbInterface {
     pub const OTP: Self = Self(0x01);
     pub const CCID: Self = Self(0x02);
     pub const FIDO: Self = Self(0x04);
+
+    pub fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
 }
 
 impl std::ops::BitOr for UsbInterface {

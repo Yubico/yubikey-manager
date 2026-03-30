@@ -1,7 +1,6 @@
 use yubikit::core::Transport;
-use yubikit::device::{
-    get_name, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp, list_readers,
-};
+use yubikit::device::{get_name, list_devices, list_readers};
+use yubikit::management::UsbInterface;
 
 use crate::util::CliError;
 
@@ -15,8 +14,9 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
         return Ok(());
     }
 
-    let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
-        .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+    let devices =
+        list_devices(all).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
 
     if devices.is_empty() && !serials {
         println!("No YubiKeys detected.");

@@ -1,11 +1,12 @@
 //! List OATH accounts on the first connected YubiKey.
 
-use yubikit::device::{list_devices, list_devices_ccid, list_devices_fido, list_devices_otp};
+use yubikit::device::list_devices;
+use yubikit::management::UsbInterface;
 use yubikit::oath::OathSession;
 
 fn main() {
-    let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
-        .expect("Failed to enumerate devices");
+    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+    let devices = list_devices(all).expect("Failed to enumerate devices");
     let dev = devices.first().expect("No YubiKey found");
 
     let conn = dev.open_smartcard().expect("Failed to open connection");

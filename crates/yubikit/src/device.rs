@@ -33,9 +33,10 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikit::device::{list_devices, list_devices_ccid, list_devices_otp, list_devices_fido};
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
 //!
-//! let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido]).unwrap();
+//! let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO).unwrap();
 //! for dev in &devices {
 //!     println!("{} (serial: {:?})", dev.name(), dev.serial());
 //! }
@@ -346,16 +347,16 @@ impl YubiKeyDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
-        // Build enumerators based on which transports this device was found on.
-        let mut enumerators: Vec<EnumerateFn> = Vec::new();
+        // Build interface set based on which transports this device was found on.
+        let mut interfaces = UsbInterface(0);
         if self.reader_name.is_some() {
-            enumerators.push(list_devices_ccid_usb);
+            interfaces = interfaces | UsbInterface::CCID;
         }
         if self.hid_path.is_some() {
-            enumerators.push(list_devices_otp);
+            interfaces = interfaces | UsbInterface::OTP;
         }
         if self.fido_path.is_some() {
-            enumerators.push(list_devices_fido);
+            interfaces = interfaces | UsbInterface::FIDO;
         }
 
         let (pids, mut state) = scan_usb_devices();
@@ -379,7 +380,7 @@ impl YubiKeyDevice {
             }
             state = new_state;
 
-            let devs = list_devices(&enumerators)?;
+            let devs = list_devices(interfaces)?;
 
             if !removed {
                 if new_pids == pids {
@@ -624,53 +625,176 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
     (counts, state)
 }
 
-/// Open a device on a specific PC/SC reader by name.
+/// Discover connected YubiKeys over the requested USB interfaces.
 ///
-/// Unlike [`list_devices`], this does not filter by reader name, so it works
-/// for external NFC readers.
-pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
-    let pid = pid_from_reader_name(reader_name);
-    let (info, transport) = read_info(reader_name)?;
-    Ok(YubiKeyDevice {
-        reader_name: Some(reader_name.to_string()),
-        hid_path: None,
-        fido_path: None,
-        pid,
-        transport,
-        info,
-    })
-}
-
-/// Discover connected YubiKeys over CCID (PC/SC), filtering readers by a predicate.
+/// `interfaces` is a bitmask of [`UsbInterface`] values indicating which
+/// transports the caller is interested in. CCID automatically includes both
+/// USB and NFC readers; NFC devices are appended without merging since they
+/// are always 1-to-1 with their reader.
 ///
-/// Only readers for which `predicate(reader_name)` returns `true` are checked.
-fn list_devices_ccid_matching(
-    predicate: impl Fn(&str) -> bool,
-) -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    let mut devices = Vec::new();
+/// **Fast-path optimisation:** the function first performs cheap, non-
+/// connecting scans (reader names, HID device lists) to discover which PIDs
+/// are present. For a PID with only a single device, only one connection is
+/// opened (CCID preferred, then OTP, then FIDO). Multiple devices sharing
+/// a PID require connections on all requested interfaces so they can be
+/// merged by identity (version + serial).
+pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    log::debug!("Listing YubiKey devices (interfaces: {interfaces})");
 
-    if let Ok(readers) = list_readers() {
-        log::debug!("Found {} PC/SC reader(s)", readers.len());
-        for reader in &readers {
-            if !predicate(reader) {
-                continue;
+    let want_ccid = interfaces.contains(UsbInterface::CCID);
+    let want_otp = interfaces.contains(UsbInterface::OTP);
+    let want_fido = interfaces.contains(UsbInterface::FIDO);
+
+    // ── Phase 1: cheap discovery (no connections opened) ──────────
+    // For each transport, collect (PID, path/reader_name).
+    let mut usb_readers: Vec<(u16, String)> = Vec::new(); // PID → reader_name
+    let mut nfc_readers: Vec<String> = Vec::new();
+    if want_ccid && let Ok(readers) = list_readers() {
+        for reader in readers {
+            if is_reader_usb(&reader) {
+                if let Some(pid) = pid_from_reader_name(&reader) {
+                    usb_readers.push((pid, reader));
+                }
+            } else {
+                nfc_readers.push(reader);
             }
-            log::debug!("Checking PC/SC reader: {reader}");
-            match read_info(reader) {
-                Ok((info, transport)) => {
-                    let pid = pid_from_reader_name(reader);
-                    devices.push(YubiKeyDevice {
-                        reader_name: Some(reader.clone()),
-                        hid_path: None,
-                        fido_path: None,
-                        pid,
-                        transport,
-                        info,
-                    });
+        }
+    }
+
+    let mut otp_devs: Vec<HidDeviceInfo> = Vec::new();
+    if want_otp && let Ok(devs) = list_otp_devices() {
+        otp_devs = devs;
+    }
+
+    let mut fido_devs: Vec<FidoDeviceInfo> = Vec::new();
+    if want_fido && let Ok(devs) = list_fido_devices() {
+        fido_devs = devs;
+    }
+
+    // Count devices per PID across all transports.
+    let mut pid_counts: HashMap<u16, usize> = HashMap::new();
+    for &(pid, _) in &usb_readers {
+        *pid_counts.entry(pid).or_insert(0) += 1;
+    }
+    for hid in &otp_devs {
+        let entry = pid_counts.entry(hid.pid).or_insert(0);
+        *entry = (*entry).max(1); // HID is 1-per-PID in practice
+    }
+    for fido in &fido_devs {
+        let entry = pid_counts.entry(fido.pid).or_insert(0);
+        *entry = (*entry).max(1);
+    }
+
+    let n_usb: usize = pid_counts.values().sum();
+    log::debug!(
+        "Fast scan: {n_usb} USB device(s) across {} PID(s)",
+        pid_counts.len()
+    );
+
+    // ── Phase 2: open connections and build device list ───────────
+    let mut devices: Vec<YubiKeyDevice> = Vec::new();
+
+    // For each PID, decide whether we need full multi-transport enumeration.
+    for (&pid, &count) in &pid_counts {
+        if count <= 1 {
+            // Single device for this PID — open one connection only.
+            if let Some(dev) = open_single_usb(pid, &usb_readers, &otp_devs, &fido_devs) {
+                devices.push(dev);
+            }
+        } else {
+            // Multiple devices with this PID — enumerate all requested
+            // interfaces and merge by identity.
+            let mut base: Vec<YubiKeyDevice> = Vec::new();
+
+            if want_ccid {
+                for &(p, ref reader) in &usb_readers {
+                    if p == pid
+                        && let Ok((info, transport)) = read_info(reader)
+                    {
+                        base.push(YubiKeyDevice {
+                            reader_name: Some(reader.clone()),
+                            hid_path: None,
+                            fido_path: None,
+                            pid: Some(pid),
+                            transport,
+                            info,
+                        });
+                    }
                 }
-                Err(e) => {
-                    log::debug!("Skipping reader {reader}: {e}");
+            }
+
+            if want_otp {
+                let mut otp_group = Vec::new();
+                for hid in &otp_devs {
+                    if hid.pid == pid {
+                        let info = HidOtpConnection::new(&hid.path)
+                            .ok()
+                            .and_then(|conn| read_info_otp(conn).ok())
+                            .map(|(info, _)| info)
+                            .unwrap_or_else(|| synthetic_hid_info(hid));
+                        otp_group.push(YubiKeyDevice {
+                            reader_name: None,
+                            hid_path: Some(hid.path.clone()),
+                            fido_path: None,
+                            pid: Some(pid),
+                            transport: Transport::Usb,
+                            info,
+                        });
+                    }
                 }
+                if base.is_empty() {
+                    base = otp_group;
+                } else {
+                    merge_devices(&mut base, otp_group);
+                }
+            }
+
+            if want_fido {
+                let mut fido_group = Vec::new();
+                for fido in &fido_devs {
+                    if fido.pid == pid {
+                        let info = HidFidoConnection::open(fido)
+                            .ok()
+                            .and_then(|conn| read_info_fido(conn).ok())
+                            .map(|(info, _)| info)
+                            .unwrap_or_else(|| synthetic_fido_info(fido));
+                        fido_group.push(YubiKeyDevice {
+                            reader_name: None,
+                            hid_path: None,
+                            fido_path: Some(fido.path.clone()),
+                            pid: Some(pid),
+                            transport: Transport::Usb,
+                            info,
+                        });
+                    }
+                }
+                if base.is_empty() {
+                    base = fido_group;
+                } else {
+                    merge_devices(&mut base, fido_group);
+                }
+            }
+
+            devices.extend(base);
+        }
+    }
+
+    // ── Phase 3: NFC devices (no merging needed) ─────────────────
+    for reader in &nfc_readers {
+        log::debug!("Checking NFC reader: {reader}");
+        match read_info(reader) {
+            Ok((info, transport)) => {
+                devices.push(YubiKeyDevice {
+                    reader_name: Some(reader.clone()),
+                    hid_path: None,
+                    fido_path: None,
+                    pid: pid_from_reader_name(reader),
+                    transport,
+                    info,
+                });
+            }
+            Err(e) => {
+                log::debug!("Skipping NFC reader {reader}: {e}");
             }
         }
     }
@@ -678,67 +802,70 @@ fn list_devices_ccid_matching(
     Ok(devices)
 }
 
-/// Discover connected YubiKeys over CCID (PC/SC), checking all readers.
-pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    list_devices_ccid_matching(|_| true)
-}
-
-/// Discover USB-connected YubiKeys over CCID (PC/SC) only.
-fn list_devices_ccid_usb() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    list_devices_ccid_matching(is_reader_usb)
-}
-
-pub type EnumerateFn = fn() -> Result<Vec<YubiKeyDevice>, DeviceError>;
-
-/// Discover connected YubiKeys using the provided enumeration functions.
+/// Open a single USB device, preferring CCID > OTP > FIDO.
 ///
-/// Each function typically enumerates a single transport (CCID, OTP HID, or
-/// FIDO HID) and returns partial [`YubiKeyDevice`] objects. This function
-/// calls each enumerator, then merges results so that a single physical
-/// YubiKey is represented by exactly one `YubiKeyDevice` with all of its
-/// transport paths populated.
-///
-/// Merging uses two strategies:
-/// 1. **PID uniqueness** – if only one device exists for a given USB PID,
-///    all partial devices with that PID must be the same physical key.
-/// 2. **Identity match** – devices sharing the same firmware version *and*
-///    serial number (or both lacking a serial) are the same key.
-pub fn list_devices(enumerators: &[EnumerateFn]) -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    log::debug!(
-        "Listing YubiKey devices with {} enumerator(s)",
-        enumerators.len()
-    );
+/// Since there is exactly one device for this PID, any transport yields the
+/// same physical key. We open only one connection and populate the paths from
+/// the fast-scan data.
+fn open_single_usb(
+    pid: u16,
+    usb_readers: &[(u16, String)],
+    otp_devs: &[HidDeviceInfo],
+    fido_devs: &[FidoDeviceInfo],
+) -> Option<YubiKeyDevice> {
+    let reader = usb_readers.iter().find(|(p, _)| *p == pid).map(|(_, r)| r);
+    let otp = otp_devs.iter().find(|h| h.pid == pid);
+    let fido = fido_devs.iter().find(|f| f.pid == pid);
 
-    // Collect partial device lists from each enumerator.
-    // Each enumerator may fail (e.g. permission issues); we silently skip
-    // failures since the user told us a transport either works for all
-    // devices or not at all.
-    let mut groups: Vec<Vec<YubiKeyDevice>> = Vec::new();
-    for enumerate in enumerators {
-        match enumerate() {
-            Ok(devs) => {
-                log::debug!("Enumerator returned {} device(s)", devs.len());
-                groups.push(devs);
-            }
-            Err(e) => {
-                log::debug!("Enumerator failed: {e}");
-            }
-        }
+    // Try CCID first (gives the most complete info).
+    if let Some(reader_name) = reader
+        && let Ok((info, transport)) = read_info(reader_name)
+    {
+        return Some(YubiKeyDevice {
+            reader_name: Some(reader_name.clone()),
+            hid_path: otp.map(|h| h.path.clone()),
+            fido_path: fido.map(|f| f.path.clone()),
+            pid: Some(pid),
+            transport,
+            info,
+        });
     }
 
-    if groups.is_empty() {
-        return Ok(Vec::new());
+    // Fall back to OTP HID.
+    if let Some(hid) = otp {
+        let info = HidOtpConnection::new(&hid.path)
+            .ok()
+            .and_then(|conn| read_info_otp(conn).ok())
+            .map(|(info, _)| info)
+            .unwrap_or_else(|| synthetic_hid_info(hid));
+        return Some(YubiKeyDevice {
+            reader_name: None,
+            hid_path: Some(hid.path.clone()),
+            fido_path: fido.map(|f| f.path.clone()),
+            pid: Some(pid),
+            transport: Transport::Usb,
+            info,
+        });
     }
 
-    // Start with the first group as the base set.
-    let mut merged = groups.remove(0);
-
-    // Merge each subsequent group into the base set.
-    for group in groups {
-        merge_devices(&mut merged, group);
+    // Fall back to FIDO HID.
+    if let Some(f) = fido {
+        let info = HidFidoConnection::open(f)
+            .ok()
+            .and_then(|conn| read_info_fido(conn).ok())
+            .map(|(info, _)| info)
+            .unwrap_or_else(|| synthetic_fido_info(f));
+        return Some(YubiKeyDevice {
+            reader_name: None,
+            hid_path: None,
+            fido_path: Some(f.path.clone()),
+            pid: Some(pid),
+            transport: Transport::Usb,
+            info,
+        });
     }
 
-    Ok(merged)
+    None
 }
 
 /// Merge `incoming` partial devices into `base`, combining entries that
@@ -860,36 +987,6 @@ fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
     }
 }
 
-/// Discover YubiKeys using only OTP HID.
-///
-/// Scans HID devices only (no PC/SC), returning devices that have OTP HID
-/// interfaces. Use this for OTP-preferred commands to avoid opening CCID
-/// connections unnecessarily.
-pub fn list_devices_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    log::debug!("Listing YubiKey devices (OTP HID only)");
-    let mut devices = Vec::new();
-
-    if let Ok(hid_devices) = list_otp_devices() {
-        for hid in hid_devices {
-            let info = HidOtpConnection::new(&hid.path)
-                .ok()
-                .and_then(|conn| read_info_otp(conn).ok())
-                .map(|(info, _conn)| info)
-                .unwrap_or_else(|| synthetic_hid_info(&hid));
-            devices.push(YubiKeyDevice {
-                reader_name: None,
-                hid_path: Some(hid.path.clone()),
-                fido_path: None,
-                pid: Some(hid.pid),
-                transport: Transport::Usb,
-                info,
-            });
-        }
-    }
-
-    Ok(devices)
-}
-
 // ---------------------------------------------------------------------------
 // read_info
 // ---------------------------------------------------------------------------
@@ -990,32 +1087,6 @@ pub fn read_info_fido<C: FidoConnection>(
         }
         Err(e) => Err((DeviceError::SmartCard(e), Some(session.into_connection()))),
     }
-}
-
-/// List Yubico FIDO HID devices with device info.
-pub fn list_devices_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    log::debug!("Listing YubiKey devices (FIDO HID only)");
-    let mut devices = Vec::new();
-
-    if let Ok(fido_devs) = list_fido_devices() {
-        for fido in fido_devs {
-            let info = HidFidoConnection::open(&fido)
-                .ok()
-                .and_then(|conn| read_info_fido(conn).ok())
-                .map(|(info, _conn)| info)
-                .unwrap_or_else(|| synthetic_fido_info(&fido));
-            devices.push(YubiKeyDevice {
-                reader_name: None,
-                hid_path: None,
-                fido_path: Some(fido.path),
-                pid: Some(fido.pid),
-                transport: Transport::Usb,
-                info,
-            });
-        }
-    }
-
-    Ok(devices)
 }
 
 /// Applets to scan when synthesizing DeviceInfo for older keys.
@@ -1389,39 +1460,35 @@ mod tests {
 
     #[test]
     fn test_merge_by_pid_uniqueness() {
-        // Three enumerators each find one device with the same PID → merge.
-        fn enum_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Ok(vec![make_device(
-                Some("Yubico YubiKey OTP+FIDO+CCID 00"),
-                None,
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(12345),
-            )])
-        }
-        fn enum_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Ok(vec![make_device(
-                None,
-                Some("/dev/hidraw0"),
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(12345),
-            )])
-        }
-        fn enum_fido() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Ok(vec![make_device(
-                None,
-                None,
-                Some("/dev/hidraw1"),
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(12345),
-            )])
-        }
+        // Three groups each with one device sharing the same PID → merge.
+        let ccid = vec![make_device(
+            Some("Yubico YubiKey OTP+FIDO+CCID 00"),
+            None,
+            None,
+            Some(0x0407),
+            Version(5, 4, 3),
+            Some(12345),
+        )];
+        let otp = vec![make_device(
+            None,
+            Some("/dev/hidraw0"),
+            None,
+            Some(0x0407),
+            Version(5, 4, 3),
+            Some(12345),
+        )];
+        let fido = vec![make_device(
+            None,
+            None,
+            Some("/dev/hidraw1"),
+            Some(0x0407),
+            Version(5, 4, 3),
+            Some(12345),
+        )];
 
-        let result = list_devices(&[enum_ccid, enum_otp, enum_fido]).unwrap();
+        let mut result = ccid;
+        merge_devices(&mut result, otp);
+        merge_devices(&mut result, fido);
         assert_eq!(result.len(), 1, "Should merge into a single device");
         let dev = &result[0];
         assert_eq!(dev.reader_name(), Some("Yubico YubiKey OTP+FIDO+CCID 00"));
@@ -1432,84 +1499,54 @@ mod tests {
 
     #[test]
     fn test_merge_by_identity() {
-        // Two devices with same PID but different serials are NOT merged.
-        fn enum_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Ok(vec![
-                make_device(
-                    Some("reader0"),
-                    None,
-                    None,
-                    Some(0x0407),
-                    Version(5, 4, 3),
-                    Some(111),
-                ),
-                make_device(
-                    Some("reader1"),
-                    None,
-                    None,
-                    Some(0x0407),
-                    Version(5, 4, 3),
-                    Some(222),
-                ),
-            ])
-        }
-        fn enum_otp() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Ok(vec![
-                make_device(
-                    None,
-                    Some("/dev/h0"),
-                    None,
-                    Some(0x0407),
-                    Version(5, 4, 3),
-                    Some(111),
-                ),
-                make_device(
-                    None,
-                    Some("/dev/h1"),
-                    None,
-                    Some(0x0407),
-                    Version(5, 4, 3),
-                    Some(222),
-                ),
-            ])
-        }
+        // Two devices with same PID but different serials are NOT merged by PID,
+        // but merged by identity when serial matches.
+        let ccid = vec![
+            make_device(
+                Some("reader0"),
+                None,
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(111),
+            ),
+            make_device(
+                Some("reader1"),
+                None,
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(222),
+            ),
+        ];
+        let otp = vec![
+            make_device(
+                None,
+                Some("/dev/h0"),
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(111),
+            ),
+            make_device(
+                None,
+                Some("/dev/h1"),
+                None,
+                Some(0x0407),
+                Version(5, 4, 3),
+                Some(222),
+            ),
+        ];
 
-        let result = list_devices(&[enum_ccid, enum_otp]).unwrap();
+        let mut result = ccid;
+        merge_devices(&mut result, otp);
         assert_eq!(result.len(), 2, "Should remain as two devices");
-        // Each should have merged with its identity match
         let d1 = result.iter().find(|d| d.serial() == Some(111)).unwrap();
         assert!(d1.reader_name().is_some());
         assert!(d1.hid_path().is_some());
         let d2 = result.iter().find(|d| d.serial() == Some(222)).unwrap();
         assert!(d2.reader_name().is_some());
         assert!(d2.hid_path().is_some());
-    }
-
-    #[test]
-    fn test_merge_failed_enumerator() {
-        // A failing enumerator is silently skipped.
-        fn enum_ok() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Ok(vec![make_device(
-                Some("reader"),
-                None,
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(100),
-            )])
-        }
-        fn enum_fail() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-            Err(DeviceError::NoDeviceFound)
-        }
-
-        let result = list_devices(&[enum_ok, enum_fail]).unwrap();
-        assert_eq!(result.len(), 1);
-    }
-
-    #[test]
-    fn test_merge_no_enumerators() {
-        let result = list_devices(&[]).unwrap();
-        assert!(result.is_empty());
     }
 
     #[test]

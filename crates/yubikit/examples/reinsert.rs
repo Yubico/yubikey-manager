@@ -4,15 +4,12 @@
 //! remove and reinsert it.
 
 use yubikit::core::Transport;
-use yubikit::device::{
-    ReinsertStatus, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
-};
-
-const ENUMERATORS: &[yubikit::device::EnumerateFn] =
-    &[list_devices_ccid, list_devices_otp, list_devices_fido];
+use yubikit::device::{ReinsertStatus, list_devices};
+use yubikit::management::UsbInterface;
 
 fn main() {
-    let mut devices = list_devices(ENUMERATORS).expect("Failed to enumerate YubiKeys");
+    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+    let mut devices = list_devices(all).expect("Failed to enumerate YubiKeys");
 
     if devices.is_empty() {
         eprintln!("No YubiKeys detected.");

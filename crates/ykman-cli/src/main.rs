@@ -3,11 +3,9 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::set_override_version;
-use yubikit::device::{
-    YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
-    list_readers, open_reader,
-};
+use yubikit::device::{YubiKeyDevice, list_devices};
 use yubikit::management::ReleaseType;
+use yubikit::management::UsbInterface;
 
 mod apdu;
 mod appdata;
@@ -47,10 +45,6 @@ struct Cli {
     /// Specify which YubiKey to interact with by serial number
     #[arg(short = 'd', long = "device", global = true)]
     device: Option<u32>,
-
-    /// Specify a YubiKey by smart card reader name
-    #[arg(short = 'r', long = "reader", global = true)]
-    reader: Option<String>,
 
     /// SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
     #[arg(long = "scp", global = true)]
@@ -1412,62 +1406,33 @@ enum SecurityDomainKeysAction {
 }
 
 /// Which transports to scan when resolving a device.
-enum TransportPreference {
-    /// Scan both CCID and OTP (default for info, config, list)
-    Any,
-    /// Only scan CCID (for PIV, OATH, OpenPGP, HSMAuth, SecurityDomain)
-    CcidOnly,
-    /// Prefer OTP HID, fall back to Any (for OTP commands)
-    OtpPreferred,
+/// Select a single YubiKey from a device list, optionally filtered by serial.
+fn select_device(
+    devices: Vec<YubiKeyDevice>,
+    serial: Option<u32>,
+) -> Result<YubiKeyDevice, CliError> {
+    match (serial, devices.len()) {
+        (None, 0) => Err(CliError("No YubiKey detected!".into())),
+        (None, 1) => Ok(devices.into_iter().next().unwrap()),
+        (None, n) => Err(CliError(format!(
+            "Multiple YubiKeys detected ({n}). Use --device SERIAL to specify."
+        ))),
+        (Some(s), _) => devices
+            .into_iter()
+            .find(|d| d.serial() == Some(s))
+            .ok_or_else(|| CliError(format!("YubiKey with serial {s} not found."))),
+    }
 }
 
-/// Resolve a YubiKey device based on CLI options.
-fn resolve_device(
+/// Enumerate devices over the given interfaces and select one, optionally
+/// by serial number.
+fn require_device(
     serial: Option<u32>,
-    reader: &Option<String>,
-    transport: TransportPreference,
+    interfaces: UsbInterface,
 ) -> Result<YubiKeyDevice, CliError> {
-    if let Some(reader_name) = reader {
-        let readers =
-            list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
-        let matching: Vec<_> = readers
-            .iter()
-            .filter(|r| {
-                r.to_ascii_lowercase()
-                    .contains(&reader_name.to_ascii_lowercase())
-            })
-            .collect();
-        match matching.len() {
-            0 => Err(CliError(format!(
-                "No reader matching '{reader_name}' found."
-            ))),
-            1 => open_reader(matching[0])
-                .map_err(|e| CliError(format!("Failed to open reader: {e}"))),
-            _ => Err(CliError(format!(
-                "Multiple readers matching '{reader_name}'. Be more specific."
-            ))),
-        }
-    } else {
-        let devices = match transport {
-            TransportPreference::CcidOnly => list_devices(&[list_devices_ccid])
-                .map_err(|e| CliError(format!("Failed to list devices: {e}")))?,
-            TransportPreference::OtpPreferred | TransportPreference::Any => {
-                list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido])
-                    .map_err(|e| CliError(format!("Failed to list devices: {e}")))?
-            }
-        };
-        match (serial, devices.len()) {
-            (None, 0) => Err(CliError("No YubiKey detected!".into())),
-            (None, 1) => Ok(devices.into_iter().next().unwrap()),
-            (None, n) => Err(CliError(format!(
-                "Multiple YubiKeys detected ({n}). Use --device SERIAL to specify."
-            ))),
-            (Some(s), _) => devices
-                .into_iter()
-                .find(|d| d.serial() == Some(s))
-                .ok_or_else(|| CliError(format!("YubiKey with serial {s} not found."))),
-        }
-    }
+    let devices =
+        list_devices(interfaces).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+    select_device(devices, serial)
 }
 
 /// After resolving a device, apply version override if needed.
@@ -1680,18 +1645,17 @@ fn run() -> Result<(), CliError> {
             if cli.device.is_some() {
                 return Err(CliError("--device can't be used with 'list'.".into()));
             }
-            if cli.reader.is_some() {
-                return Err(CliError("--reader can't be used with 'list'.".into()));
-            }
             list::run(serials, readers)
         }
         Commands::Info { check_fips } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::Any)?;
+            let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+            let dev = require_device(cli.device, all)?;
             apply_version_override(&dev);
             info::run(&dev, check_fips)
         }
         Commands::Config { action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::Any)?;
+            let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+            let dev = require_device(cli.device, all)?;
             apply_version_override(&dev);
             match action {
                 ConfigAction::Usb {
@@ -1770,7 +1734,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Oath { action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            let dev = require_device(cli.device, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 OathAction::Info { password } => {
@@ -1924,13 +1888,8 @@ fn run() -> Result<(), CliError> {
             access_code,
             action,
         } => {
-            // Use OTP-preferred unless SCP or NFC require CCID
-            let transport = if scp_params.is_explicit() || cli.reader.is_some() {
-                TransportPreference::Any
-            } else {
-                TransportPreference::OtpPreferred
-            };
-            let dev = resolve_device(cli.device, &cli.reader, transport)?;
+            let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+            let dev = require_device(cli.device, all)?;
             apply_version_override(&dev);
             // access_code from parent command overrides per-subcommand access_code
             let _ = access_code; // available for subcommands that need it
@@ -2119,7 +2078,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Piv { action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            let dev = require_device(cli.device, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 PivAction::Info => piv::run_info(&dev, &scp_params),
@@ -2373,7 +2332,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Openpgp { action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            let dev = require_device(cli.device, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 OpenpgpAction::Info => openpgp::run_info(&dev, &scp_params),
@@ -2509,7 +2468,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Hsmauth { action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            let dev = require_device(cli.device, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 HsmauthAction::Info => hsmauth::run_info(&dev, &scp_params),
@@ -2626,7 +2585,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::SecurityDomain { action } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            let dev = require_device(cli.device, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 SecurityDomainAction::Info => securitydomain::run_info(&dev, &scp_params),
@@ -2711,7 +2670,7 @@ fn run() -> Result<(), CliError> {
             short,
             send_apdu,
         } => {
-            let dev = resolve_device(cli.device, &cli.reader, TransportPreference::CcidOnly)?;
+            let dev = require_device(cli.device, UsbInterface::CCID)?;
             apdu::run_apdu(
                 &dev,
                 &scp_params,

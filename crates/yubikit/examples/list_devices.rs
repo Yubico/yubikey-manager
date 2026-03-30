@@ -1,9 +1,11 @@
 //! List all connected YubiKeys and display their information.
 
-use yubikit::device::{list_devices, list_devices_ccid, list_devices_fido, list_devices_otp};
+use yubikit::device::list_devices;
+use yubikit::management::UsbInterface;
 
 fn main() {
-    match list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido]) {
+    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+    match list_devices(all) {
         Ok(devices) => {
             println!("Found {} YubiKey(s):", devices.len());
             for dev in &devices {

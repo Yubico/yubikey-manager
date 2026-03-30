@@ -32,6 +32,7 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use yubikit::device;
+use yubikit::management;
 
 fn device_err(e: device::DeviceError) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
@@ -266,18 +267,18 @@ impl NativeYubiKeyDevice {
 /// Returns a list of NativeYubiKeyDevice.
 #[pyfunction]
 pub fn list_devices(transports: Vec<String>) -> PyResult<Vec<NativeYubiKeyDevice>> {
-    let mut enumerators: Vec<device::EnumerateFn> = Vec::new();
+    let mut interfaces = management::UsbInterface(0);
     for t in &transports {
         match t.as_str() {
-            "ccid" => enumerators.push(device::list_devices_ccid),
-            "otp" => enumerators.push(device::list_devices_otp),
-            "fido" => enumerators.push(device::list_devices_fido),
+            "ccid" => interfaces = interfaces | management::UsbInterface::CCID,
+            "otp" => interfaces = interfaces | management::UsbInterface::OTP,
+            "fido" => interfaces = interfaces | management::UsbInterface::FIDO,
             _ => {
                 return Err(PyRuntimeError::new_err(format!("Unknown transport: {t}")));
             }
         }
     }
-    let devices = device::list_devices(&enumerators).map_err(device_err)?;
+    let devices = device::list_devices(interfaces).map_err(device_err)?;
     Ok(devices
         .into_iter()
         .map(|d| NativeYubiKeyDevice { inner: d })
