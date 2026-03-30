@@ -5,11 +5,11 @@
 
 use yubikit::core::Transport;
 use yubikit::device::{
-    ReinsertStatus, list_devices, list_devices_ccid_all, list_devices_fido, list_devices_otp,
+    ReinsertStatus, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
 };
 
 const ENUMERATORS: &[yubikit::device::EnumerateFn] =
-    &[list_devices_ccid_all, list_devices_otp, list_devices_fido];
+    &[list_devices_ccid, list_devices_otp, list_devices_fido];
 
 fn main() {
     let mut devices = list_devices(ENUMERATORS).expect("Failed to enumerate YubiKeys");

@@ -33,9 +33,9 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikit::device::{list_devices, list_devices_ccid_all, list_devices_otp, list_devices_fido};
+//! use yubikit::device::{list_devices, list_devices_ccid, list_devices_otp, list_devices_fido};
 //!
-//! let devices = list_devices(&[list_devices_ccid_all, list_devices_otp, list_devices_fido]).unwrap();
+//! let devices = list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido]).unwrap();
 //! for dev in &devices {
 //!     println!("{} (serial: {:?})", dev.name(), dev.serial());
 //! }
@@ -60,7 +60,7 @@ use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_dev
 use crate::transport::otphid::list_all_hid_devices;
 use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
-use crate::transport::pcsc::{PcscError, PcscSmartCardConnection, YUBICO_READER_PREFIX};
+use crate::transport::pcsc::{PcscError, PcscSmartCardConnection, is_reader_usb};
 use crate::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
 
 // ---------------------------------------------------------------------------
@@ -494,8 +494,7 @@ impl fmt::Display for YubiKeyDevice {
 /// Parses interface indicators (OTP, CCID, FIDO/U2F) from the reader name
 /// and maps to the corresponding Yubico PID.
 fn pid_from_reader_name(name: &str) -> Option<u16> {
-    use crate::transport::pcsc::is_yubico_reader;
-    if !is_yubico_reader(name) {
+    if !is_reader_usb(name) {
         return None;
     }
 
@@ -642,22 +641,18 @@ pub fn open_reader(reader_name: &str) -> Result<YubiKeyDevice, DeviceError> {
     })
 }
 
-/// Discover connected YubiKeys over CCID (PC/SC) only.
+/// Discover connected YubiKeys over CCID (PC/SC), filtering readers by a predicate.
 ///
-/// Unlike [`list_devices`], this does not scan HID devices.
-/// Use when the command only needs SmartCard connections.
-///
-/// `reader_filter` limits scanning to readers whose name contains the given
-/// substring (case-insensitive). Pass an empty string to check all readers.
-pub fn list_devices_ccid(reader_filter: &str) -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    let filter_lower = reader_filter.to_ascii_lowercase();
-    log::debug!("Listing YubiKey devices (CCID, filter={reader_filter:?})");
+/// Only readers for which `predicate(reader_name)` returns `true` are checked.
+fn list_devices_ccid_matching(
+    predicate: impl Fn(&str) -> bool,
+) -> Result<Vec<YubiKeyDevice>, DeviceError> {
     let mut devices = Vec::new();
 
     if let Ok(readers) = list_readers() {
         log::debug!("Found {} PC/SC reader(s)", readers.len());
         for reader in &readers {
-            if !filter_lower.is_empty() && !reader.to_ascii_lowercase().contains(&filter_lower) {
+            if !predicate(reader) {
                 continue;
             }
             log::debug!("Checking PC/SC reader: {reader}");
@@ -683,15 +678,14 @@ pub fn list_devices_ccid(reader_filter: &str) -> Result<Vec<YubiKeyDevice>, Devi
     Ok(devices)
 }
 
-/// Type alias for device enumeration functions.
-/// List CCID devices across all PC/SC readers (USB and NFC).
-pub fn list_devices_ccid_all() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    list_devices_ccid("")
+/// Discover connected YubiKeys over CCID (PC/SC), checking all readers.
+pub fn list_devices_ccid() -> Result<Vec<YubiKeyDevice>, DeviceError> {
+    list_devices_ccid_matching(|_| true)
 }
 
-/// List CCID devices on USB-connected YubiKey readers only.
+/// Discover USB-connected YubiKeys over CCID (PC/SC) only.
 fn list_devices_ccid_usb() -> Result<Vec<YubiKeyDevice>, DeviceError> {
-    list_devices_ccid(YUBICO_READER_PREFIX)
+    list_devices_ccid_matching(is_reader_usb)
 }
 
 pub type EnumerateFn = fn() -> Result<Vec<YubiKeyDevice>, DeviceError>;

@@ -157,10 +157,10 @@ fn kill_pcsc_blockers() -> bool {
 const YKMAN_NO_EXCLUSIVE: &str = "YKMAN_NO_EXLUSIVE"; // Intentional typo for compat
 
 /// PC/SC reader name prefix for USB-connected YubiKeys.
-pub const YUBICO_READER_PREFIX: &str = "yubico yubikey";
+const YUBICO_READER_PREFIX: &str = "yubico yubikey";
 
 /// Check whether a PC/SC reader name refers to a USB-connected YubiKey.
-pub fn is_yubico_reader(reader_name: &str) -> bool {
+pub fn is_reader_usb(reader_name: &str) -> bool {
     reader_name
         .to_ascii_lowercase()
         .contains(YUBICO_READER_PREFIX)
@@ -216,7 +216,7 @@ impl PcscSmartCardConnection {
     /// 4. For USB devices (YubiKey Neo), retry up to 8 times on "no card"
     ///    errors since the card may not be ready immediately after insertion.
     pub fn open(reader_name: &str) -> Result<Self, PcscError> {
-        let is_usb = is_yubico_reader(reader_name);
+        let is_usb = is_reader_usb(reader_name);
         let max_attempts = if is_usb { 9 } else { 1 };
         let mut last_err = None;
 
