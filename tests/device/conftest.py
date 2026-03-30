@@ -26,23 +26,12 @@ def _device(pytestconfig):
         else:
             pytest.skip("No serial specified for device tests")
 
-    reader = pytestconfig.getoption("reader")
-    if reader:
-        devices = [
-            (d, i)
-            for d, i in list_all_devices([SmartCardConnection])
-            if reader.lower() in d.fingerprint.lower()
-        ]
-        if len(devices) != 1:
-            pytest.exit("No/Multiple readers matched")
-        dev, info = devices[0]
-    else:
-        devices = list_all_devices()
-        if len(devices) != 1:
-            pytest.exit("Device tests require a single YubiKey")
-        dev, info = devices[0]
-    if info.serial != serial:
-        pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
+    devices = list_all_devices()
+    if serial is not None:
+        devices = [(d, i) for d, i in devices if i.serial == serial]
+    if len(devices) != 1:
+        pytest.exit(f"Expected a single device (serial={serial}), found {len(devices)}")
+    dev, info = devices[0]
 
     if info.version_qualifier.type != RELEASE_TYPE.FINAL:
         _override_version(info.version)
