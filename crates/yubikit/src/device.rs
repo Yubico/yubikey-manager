@@ -920,7 +920,16 @@ pub fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceErr
 ///
 /// Returns the info and the connection so it can be reused.
 pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
-    let mut session = ManagementCcidSession::new(conn).map_err(|(e, _)| e)?;
+    let mut session = match ManagementCcidSession::new(conn) {
+        Ok(s) => s,
+        Err((e, conn)) => {
+            // NEO and other old devices don't have the management applet.
+            // Fall back to probing individual applets.
+            log::debug!("Management session init failed ({e}), synthesizing info");
+            let (info, conn) = synthesize_info_ccid(conn, Version(0, 0, 0))?;
+            return Ok((info, conn));
+        }
+    };
     let version = session.version();
 
     match session.read_device_info_unchecked() {
@@ -1020,17 +1029,20 @@ const SCAN_APPLETS: &[(&[u8], Capability)] = &[
 /// Synthesize DeviceInfo for older YubiKeys (NEO) over CCID by probing applets.
 fn synthesize_info_ccid<C: SmartCardConnection>(
     conn: C,
-    version: Version,
+    mut version: Version,
 ) -> Result<(DeviceInfo, C), DeviceError> {
     use std::collections::HashMap;
 
     let mut capabilities = Capability::NONE;
 
-    // Try to read serial from OTP application
+    // Try to read serial and version from OTP application
     let mut serial = None;
     let conn = match YubiOtpCcidSession::new(conn) {
         Ok(mut otp_session) => {
             capabilities |= Capability::OTP;
+            if version == Version(0, 0, 0) {
+                version = otp_session.version();
+            }
             match otp_session.get_serial() {
                 Ok(s) => serial = Some(s),
                 Err(e) => log::debug!("Unable to read serial over OTP: {e}"),
