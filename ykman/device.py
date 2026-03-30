@@ -95,6 +95,10 @@ class _NativeCompositeDevice(YkmanDevice):
         self._native = native_dev
         self._info = info
 
+    @property
+    def reader_name(self) -> str | None:
+        return self._native.reader_name
+
     def supports_connection(self, connection_type: type) -> bool:
         if issubclass(connection_type, SmartCardConnection):
             return self._native.reader_name is not None
