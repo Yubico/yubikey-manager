@@ -25,9 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Low-level OTP HID frame protocol and related helpers.
-
-//! OTP HID frame protocol, codec, and related helpers.
+//! Low-level OTP HID frame protocol, codec, and related helpers.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;

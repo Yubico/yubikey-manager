@@ -269,12 +269,8 @@ const INS_SEND_REMAINING: u8 = 0xC0;
 
 /// High-level smart card protocol handler.
 ///
-/// Wraps a [`SmartCardConnection`] and handles:
-/// - APDU formatting (short vs extended)
-/// - Command chaining (splitting large payloads)
-/// - Response chaining (reading continuation data)
-/// - Touch workaround for YK 4.2.0–4.2.6
-/// - SCP03 secure messaging
+/// Wraps a [`SmartCardConnection`] and handles APDU formatting, command
+/// and response chaining, and optional SCP03 secure messaging.
 pub struct SmartCardProtocol<C: SmartCardConnection> {
     connection: C,
     apdu_format: ApduFormat,

@@ -236,13 +236,8 @@ impl YubiKeyDevice {
 
     /// Open a SmartCard (PC/SC) connection to this device.
     ///
-    /// Tries exclusive access first, falling back to shared. If another process
-    /// (such as `scdaemon` or `yubikey-agent`) holds a lock, attempts to kill
-    /// it and retry.
-    ///
-    /// On YubiKey NEO, opening an OTP or FIDO connection ejects the virtual
-    /// smartcard. It reappears after a few seconds. This method retries for
-    /// up to 4 seconds if the card is temporarily absent.
+    /// Requires that this device was discovered over CCID (i.e. has a reader
+    /// name). Attempts exclusive access first, falling back to shared.
     pub fn open_smartcard(&self) -> Result<PcscSmartCardConnection, DeviceError> {
         let reader = self
             .reader_name
@@ -320,17 +315,11 @@ impl YubiKeyDevice {
 
     /// Wait for the user to remove and reinsert this YubiKey.
     ///
-    /// For USB devices, polls `scan_usb_devices` to detect removal, then
-    /// `list_devices` to find the device again after reinsertion.
-    ///
-    /// For NFC devices, the reader stays connected — polls the reader for
-    /// card absence then presence by attempting to read device info.
-    ///
     /// On success, updates this device's transport paths and info.
     ///
     /// * `status_cb` – called with [`ReinsertStatus`] variants to indicate
     ///   what the user should do.
-    /// * `cancelled` – checked every 250 ms; return `true` to cancel.
+    /// * `cancelled` – checked periodically; return `true` to cancel.
     pub fn reinsert(
         &mut self,
         status_cb: &dyn Fn(ReinsertStatus),
@@ -628,16 +617,13 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
 /// Discover connected YubiKeys over the requested USB interfaces.
 ///
 /// `interfaces` is a bitmask of [`UsbInterface`] values indicating which
-/// transports the caller is interested in. CCID automatically includes both
-/// USB and NFC readers; NFC devices are appended without merging since they
-/// are always 1-to-1 with their reader.
+/// transports the caller is interested in. [`UsbInterface::CCID`] covers
+/// both USB and NFC readers.
 ///
-/// **Fast-path optimisation:** the function first performs cheap, non-
-/// connecting scans (reader names, HID device lists) to discover which PIDs
-/// are present. For a PID with only a single device, only one connection is
-/// opened (CCID preferred, then OTP, then FIDO). Multiple devices sharing
-/// a PID require connections on all requested interfaces so they can be
-/// merged by identity (version + serial).
+/// Each physical YubiKey is returned as a single [`YubiKeyDevice`] with
+/// transport paths populated for every interface that was discovered. When
+/// only one device is present per USB Product ID the merge is trivial;
+/// multiple devices sharing a PID are matched by firmware version and serial.
 pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, DeviceError> {
     log::debug!("Listing YubiKey devices (interfaces: {interfaces})");
 
@@ -991,17 +977,12 @@ fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
 // read_info
 // ---------------------------------------------------------------------------
 
-/// Read device info from a PC/SC reader.
-///
-/// Read device info from a PC/SC reader, returning the info and detected transport.
-///
-/// Opens a fresh [`PcscSmartCardConnection`] and uses [`ManagementCcidSession`] to read
-/// [`DeviceInfo`]. For older devices (NEO, etc.) that don't support the
-/// management protocol, synthesizes DeviceInfo by probing individual applets.
 /// Open a PC/SC connection and read [`DeviceInfo`] from a YubiKey.
 ///
-/// Returns the device info and the transport (USB or NFC) detected from the
-/// connection's ATR.
+/// For older devices (NEO, etc.) that lack the management applet,
+/// synthesizes DeviceInfo by probing individual applets.
+///
+/// Returns the device info and the detected transport (USB or NFC).
 pub fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
     let conn = PcscSmartCardConnection::open(reader_name)?;
     let transport = conn.transport();
@@ -1009,13 +990,10 @@ pub fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceErr
     Ok((info, transport))
 }
 
-/// Read device info from an open smart card connection.
+/// Read [`DeviceInfo`] from an open smart card connection.
 ///
-/// Uses [`ManagementCcidSession`] to read [`DeviceInfo`]. For older devices
-/// (NEO, etc.) that don't support the management protocol, synthesizes
-/// DeviceInfo by probing individual applets.
-///
-/// Returns the info and the connection so it can be reused.
+/// Falls back to probing individual applets on older devices that lack
+/// the management applet. Returns the connection for reuse.
 pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
     let mut session = match ManagementCcidSession::new(conn) {
         Ok(s) => s,
@@ -1045,12 +1023,10 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
     }
 }
 
-/// Read device info via OTP HID from an open connection.
+/// Read [`DeviceInfo`] via OTP HID from an open connection.
 ///
-/// Uses [`ManagementOtpSession`] to read [`DeviceInfo`].
-/// Applies standard fixups for known device quirks.
-/// Returns the info and the connection for reuse.
-/// The connection is returned when possible, even on error.
+/// Returns the connection for reuse. On error the connection is returned
+/// when possible.
 pub fn read_info_otp<T: OtpConnection>(
     conn: T,
 ) -> Result<(DeviceInfo, T), (DeviceError, Option<T>)> {
@@ -1069,12 +1045,10 @@ pub fn read_info_otp<T: OtpConnection>(
     }
 }
 
-/// Read device info via FIDO HID (CTAP) from an open connection.
+/// Read [`DeviceInfo`] via FIDO HID (CTAP) from an open connection.
 ///
-/// Uses [`ManagementFidoSession`] to read [`DeviceInfo`].
-/// Applies standard fixups for known device quirks.
-/// Returns the info and the connection for reuse.
-/// The connection is returned when possible, even on error.
+/// Returns the connection for reuse. On error the connection is returned
+/// when possible.
 pub fn read_info_fido<C: FidoConnection>(
     conn: C,
 ) -> Result<(DeviceInfo, C), (DeviceError, Option<C>)> {
@@ -1179,9 +1153,6 @@ fn synthesize_info_ccid<C: SmartCardConnection>(
 }
 
 /// Apply standard fixups for known device quirks.
-///
-/// This corrects issues with certain YubiKey firmware versions that
-/// report incorrect or incomplete information.
 pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
     // Override version from version qualifier for non-final (dev) firmware
     if info.version_qualifier.release_type != ReleaseType::Final {
@@ -1267,8 +1238,6 @@ fn fido_only(cap: Capability) -> bool {
 }
 
 /// Determine the product name of a YubiKey from its [`DeviceInfo`].
-///
-/// Ports the naming logic from the Python `yubikit.support.get_name`.
 pub fn get_name(info: &DeviceInfo) -> String {
     let usb_supported = info
         .supported_capabilities
