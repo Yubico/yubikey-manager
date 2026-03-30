@@ -14,7 +14,7 @@ use std::env;
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::{
-    YubiKeyDevice, list_devices, list_devices_ccid, list_devices_fido, list_devices_otp,
+    YubiKeyDevice, list_devices, list_devices_ccid_all, list_devices_fido, list_devices_otp,
     list_readers, open_reader,
 };
 use yubikit::hsmauth::HsmAuthSession;
@@ -84,7 +84,7 @@ fn main() {
         }
         devs
     } else {
-        match list_devices(&[list_devices_ccid, list_devices_otp, list_devices_fido]) {
+        match list_devices(&[list_devices_ccid_all, list_devices_otp, list_devices_fido]) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Failed to enumerate devices: {e}");

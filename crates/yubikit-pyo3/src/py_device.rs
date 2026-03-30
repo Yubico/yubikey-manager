@@ -269,7 +269,7 @@ pub fn list_devices(transports: Vec<String>) -> PyResult<Vec<NativeYubiKeyDevice
     let mut enumerators: Vec<device::EnumerateFn> = Vec::new();
     for t in &transports {
         match t.as_str() {
-            "ccid" => enumerators.push(device::list_devices_ccid),
+            "ccid" => enumerators.push(device::list_devices_ccid_all),
             "otp" => enumerators.push(device::list_devices_otp),
             "fido" => enumerators.push(device::list_devices_fido),
             _ => {

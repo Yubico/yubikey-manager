@@ -156,6 +156,16 @@ fn kill_pcsc_blockers() -> bool {
 /// Name of the env var that disables exclusive PC/SC access attempts.
 const YKMAN_NO_EXCLUSIVE: &str = "YKMAN_NO_EXLUSIVE"; // Intentional typo for compat
 
+/// PC/SC reader name prefix for USB-connected YubiKeys.
+pub const YUBICO_READER_PREFIX: &str = "yubico yubikey";
+
+/// Check whether a PC/SC reader name refers to a USB-connected YubiKey.
+pub fn is_yubico_reader(reader_name: &str) -> bool {
+    reader_name
+        .to_ascii_lowercase()
+        .contains(YUBICO_READER_PREFIX)
+}
+
 /// A connection to a smart card via PC/SC.
 pub struct PcscSmartCardConnection {
     card: Option<Card>,
@@ -203,8 +213,28 @@ impl PcscSmartCardConnection {
     /// 1. Try exclusive access (unless `YKMAN_NO_EXLUSIVE` env var is set).
     /// 2. Fall back to shared access.
     /// 3. If both fail, try killing `scdaemon` or `yubikey-agent` and retry.
+    /// 4. For USB devices (YubiKey Neo), retry up to 8 times on "no card"
+    ///    errors since the card may not be ready immediately after insertion.
     pub fn open(reader_name: &str) -> Result<Self, PcscError> {
-        Self::open_inner(reader_name, true)
+        let is_usb = is_yubico_reader(reader_name);
+        let max_attempts = if is_usb { 9 } else { 1 };
+        let mut last_err = None;
+
+        for attempt in 0..max_attempts {
+            match Self::open_inner(reader_name, true) {
+                Ok(conn) => return Ok(conn),
+                Err(e) if is_usb && e.is_no_card() && attempt + 1 < max_attempts => {
+                    log::debug!(
+                        "SmartCard not ready (attempt {}), retrying in 500ms...",
+                        attempt + 1
+                    );
+                    thread::sleep(Duration::from_millis(500));
+                    last_err = Some(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap())
     }
 
     fn open_inner(reader_name: &str, retry: bool) -> Result<Self, PcscError> {
