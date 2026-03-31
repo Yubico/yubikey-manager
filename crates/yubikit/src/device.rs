@@ -79,6 +79,8 @@ pub enum DeviceError {
     Hid(HidError),
     /// No YubiKey device was found.
     NoDeviceFound,
+    /// The card is not a YubiKey.
+    NotYubiKey,
     /// The operation was cancelled by the caller.
     Cancelled,
     /// A different YubiKey was inserted or removed during reinsert.
@@ -101,6 +103,7 @@ impl fmt::Display for DeviceError {
             Self::Pcsc(e) => write!(f, "PC/SC error: {e}"),
             Self::Hid(e) => write!(f, "HID error: {e}"),
             Self::NoDeviceFound => write!(f, "No YubiKey device found"),
+            Self::NotYubiKey => write!(f, "Not a YubiKey"),
             Self::Cancelled => write!(f, "Operation cancelled"),
             Self::WrongDevice => write!(f, "A different YubiKey was inserted/removed"),
         }
@@ -113,7 +116,7 @@ impl std::error::Error for DeviceError {
             Self::SmartCard(e) => Some(e),
             Self::Pcsc(e) => Some(e),
             Self::Hid(e) => Some(e),
-            Self::NoDeviceFound | Self::Cancelled | Self::WrongDevice => None,
+            Self::NoDeviceFound | Self::NotYubiKey | Self::Cancelled | Self::WrongDevice => None,
         }
     }
 }
@@ -779,15 +782,6 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
         log::debug!("Checking NFC reader: {reader}");
         match read_info_reader(reader) {
             Ok((info, transport)) => {
-                // Skip non-YubiKey cards (no supported capabilities)
-                let has_caps = info
-                    .supported_capabilities
-                    .values()
-                    .any(|c| *c != Capability::NONE);
-                if !has_caps {
-                    log::debug!("Skipping NFC reader {reader}: no YubiKey capabilities");
-                    continue;
-                }
                 devices.push(YubiKeyDevice {
                     reader_name: Some(reader.clone()),
                     hid_path: None,
@@ -1005,7 +999,8 @@ fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), Device
 /// Read [`DeviceInfo`] from an open smart card connection.
 ///
 /// Falls back to probing individual applets on older devices that lack
-/// the management applet. Returns the connection for reuse.
+/// the management applet. Returns an error if the card is not a YubiKey
+/// (no supported capabilities detected). Returns the connection for reuse.
 pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
     let mut session = match ManagementCcidSession::new(conn) {
         Ok(s) => s,
@@ -1014,7 +1009,7 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
             // Fall back to probing individual applets.
             log::debug!("Management session init failed ({e}), synthesizing info");
             let (info, conn) = synthesize_info_ccid(conn, Version(0, 0, 0))?;
-            return Ok((info, conn));
+            return check_yubikey_info(info, conn);
         }
     };
     let version = session.version();
@@ -1023,15 +1018,29 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             let conn = session.into_connection();
-            Ok((info, conn))
+            check_yubikey_info(info, conn)
         }
         Err(_) if version < Version(4, 1, 0) => {
             log::debug!("Management read_device_info not supported, synthesizing");
             let conn = session.into_connection();
             let (info, conn) = synthesize_info_ccid(conn, version)?;
-            Ok((info, conn))
+            check_yubikey_info(info, conn)
         }
         Err(e) => Err(DeviceError::SmartCard(e)),
+    }
+}
+
+/// Verify that a DeviceInfo has at least one supported capability,
+/// indicating it belongs to a YubiKey rather than some other smart card.
+fn check_yubikey_info<C>(info: DeviceInfo, conn: C) -> Result<(DeviceInfo, C), DeviceError> {
+    let has_caps = info
+        .supported_capabilities
+        .values()
+        .any(|c| *c != Capability::NONE);
+    if has_caps {
+        Ok((info, conn))
+    } else {
+        Err(DeviceError::NotYubiKey)
     }
 }
 

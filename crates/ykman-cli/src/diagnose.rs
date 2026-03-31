@@ -148,18 +148,8 @@ pub fn run_diagnose() -> Result<(), CliError> {
                 Ok(c) => c,
                 Err(_) => continue, // no card present
             };
-            match read_info_ccid(conn) {
-                Ok((info, _)) => {
-                    // Check if any supported capability is non-zero
-                    let has_caps = info
-                        .supported_capabilities
-                        .values()
-                        .any(|c| *c != Capability::NONE);
-                    if !has_caps {
-                        continue; // not a YubiKey
-                    }
-                }
-                Err(_) => continue,
+            if read_info_ccid(conn).is_err() {
+                continue; // not a YubiKey
             }
         }
 
