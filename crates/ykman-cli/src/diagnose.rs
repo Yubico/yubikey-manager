@@ -132,221 +132,228 @@ pub fn run_diagnose() -> Result<(), CliError> {
 
     // YubiKeys over PC/SC (USB and NFC readers)
     println!();
-    let mut pcsc_found = false;
     print!("Detected YubiKeys over PC/SC:");
-    let readers = match list_readers() {
-        Ok(r) => r,
-        Err(e) => {
-            println!("  Error listing readers: {e}");
-            Vec::new()
-        }
-    };
-    for reader in &readers {
-        // For NFC readers, verify it's a YubiKey before printing
-        if !is_reader_usb(reader) {
-            let conn = match PcscSmartCardConnection::new(reader, false) {
-                Ok(c) => c,
-                Err(_) => continue, // no card present
-            };
-            if read_info_ccid(conn).is_err() {
-                continue; // not a YubiKey
-            }
-        }
+    match list_readers() {
+        Ok(readers) => {
+            // Collect readers with a YubiKey present, caching NFC read results
+            let yubikey_readers: Vec<(&String, Option<DeviceInfo>)> = readers
+                .iter()
+                .filter_map(|r| {
+                    if is_reader_usb(r) {
+                        return Some((r, None));
+                    }
+                    // NFC: verify a YubiKey is present, cache the result
+                    let conn = PcscSmartCardConnection::new(r, false).ok()?;
+                    let (info, _) = read_info_ccid(conn).ok()?;
+                    Some((r, Some(info)))
+                })
+                .collect();
 
-        if !pcsc_found {
-            println!(); // newline after "Detected YubiKeys over PC/SC:"
-        }
-        pcsc_found = true;
-        println!("  {reader}:");
-
-        // Open a single connection and reuse it across all sessions.
-        // Each session consumes the connection; we reclaim it via into_connection().
-        // If a session fails to open, the connection is lost and we must re-open.
-        let conn = match PcscSmartCardConnection::new(reader, false) {
-            Ok(c) => c,
-            Err(e) => {
-                println!("    Error opening connection: {e}");
-                continue;
-            }
-        };
-
-        // Management / DeviceInfo
-        println!("    Management:");
-        let conn = match read_info_ccid(conn) {
-            Ok((info, c)) => {
-                let name = get_name(&info);
-                print_device_info(&info, "      ");
+            if yubikey_readers.is_empty() {
+                println!(" (none)");
+            } else {
                 println!();
-                println!("      Name: {name}");
-                c
-            }
-            Err(e) => {
-                println!("      Error: {e}");
-                match PcscSmartCardConnection::new(reader, false) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                }
-            }
-        };
+                for (reader, cached_info) in &yubikey_readers {
+                    println!("  {reader}:");
 
-        // PIV
-        println!();
-        println!("    PIV:");
-        let conn = match yubikit::piv::PivSession::new(conn) {
-            Ok(mut session) => {
-                println!("      PIV version:              {}", session.version());
-                if let Ok(meta) = session.get_pin_metadata() {
-                    println!(
-                        "      PIN tries remaining:      {}/{}",
-                        meta.attempts_remaining, meta.total_attempts
-                    );
-                }
-                if let Ok(meta) = session.get_puk_metadata() {
-                    println!(
-                        "      PUK tries remaining:      {}/{}",
-                        meta.attempts_remaining, meta.total_attempts
-                    );
-                }
-                if let Ok(meta) = session.get_management_key_metadata() {
-                    println!("      Management key algorithm: {}", meta.key_type);
-                }
-                if let Ok(meta) = session.get_pin_metadata()
-                    && meta.default_value
-                {
-                    println!("      WARNING: Using default PIN!");
-                }
-                if let Ok(meta) = session.get_puk_metadata()
-                    && meta.default_value
-                {
-                    println!("      WARNING: Using default PUK!");
-                }
-                if let Ok(meta) = session.get_management_key_metadata()
-                    && meta.default_value
-                {
-                    println!("      WARNING: Using default Management key!");
-                }
-                use yubikit::piv::{ObjectId, Slot};
-                match session.get_object(ObjectId::Chuid) {
-                    Ok(data) => {
-                        let hex: String = data.iter().map(|b| format!("{b:02x}")).collect();
-                        println!("      CHUID: {hex}");
-                    }
-                    Err(_) => println!("      CHUID: No data available"),
-                }
-                match session.get_object(ObjectId::Capability) {
-                    Ok(data) => {
-                        let hex: String = data.iter().map(|b| format!("{b:02x}")).collect();
-                        println!("      CCC:   {hex}");
-                    }
-                    Err(_) => println!("      CCC:   No data available"),
-                }
-                let slots = [
-                    (Slot::Authentication, "9A", "AUTHENTICATION"),
-                    (Slot::Signature, "9C", "DIGITAL SIGNATURE"),
-                    (Slot::KeyManagement, "9D", "KEY MANAGEMENT"),
-                    (Slot::CardAuth, "9E", "CARD AUTH"),
-                ];
-                for (slot, hex, name) in slots {
-                    if let Ok(meta) = session.get_slot_metadata(slot) {
-                        println!("      Slot {hex} ({name}):");
-                        println!("        Private key type: {}", meta.key_type);
-                        if let Ok(cert_bytes) = session.get_certificate(slot) {
-                            use sha2::{Digest, Sha256};
-                            let fp = Sha256::digest(&cert_bytes);
-                            let fp_hex: String = fp.iter().map(|b| format!("{b:02x}")).collect();
-                            println!("        Fingerprint:      {fp_hex}");
+                    let conn = match PcscSmartCardConnection::new(reader, false) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            println!("    Error opening connection: {e}");
+                            continue;
                         }
+                    };
+
+                    // Management / DeviceInfo
+                    println!("    Management:");
+                    let conn = if let Some(info) = cached_info {
+                        // NFC reader: reuse cached info, read fresh connection for remaining probes
+                        let name = get_name(info);
+                        print_device_info(info, "      ");
+                        println!();
+                        println!("      Name: {name}");
+                        conn
+                    } else {
+                        match read_info_ccid(conn) {
+                            Ok((info, c)) => {
+                                let name = get_name(&info);
+                                print_device_info(&info, "      ");
+                                println!();
+                                println!("      Name: {name}");
+                                c
+                            }
+                            Err(e) => {
+                                println!("      Error: {e}");
+                                match PcscSmartCardConnection::new(reader, false) {
+                                    Ok(c) => c,
+                                    Err(_) => continue,
+                                }
+                            }
+                        }
+                    };
+
+                    // PIV
+                    println!();
+                    println!("    PIV:");
+                    let conn = match yubikit::piv::PivSession::new(conn) {
+                        Ok(mut session) => {
+                            println!("      PIV version:              {}", session.version());
+                            if let Ok(meta) = session.get_pin_metadata() {
+                                println!(
+                                    "      PIN tries remaining:      {}/{}",
+                                    meta.attempts_remaining, meta.total_attempts
+                                );
+                            }
+                            if let Ok(meta) = session.get_puk_metadata() {
+                                println!(
+                                    "      PUK tries remaining:      {}/{}",
+                                    meta.attempts_remaining, meta.total_attempts
+                                );
+                            }
+                            if let Ok(meta) = session.get_management_key_metadata() {
+                                println!("      Management key algorithm: {}", meta.key_type);
+                            }
+                            if let Ok(meta) = session.get_pin_metadata()
+                                && meta.default_value
+                            {
+                                println!("      WARNING: Using default PIN!");
+                            }
+                            if let Ok(meta) = session.get_puk_metadata()
+                                && meta.default_value
+                            {
+                                println!("      WARNING: Using default PUK!");
+                            }
+                            if let Ok(meta) = session.get_management_key_metadata()
+                                && meta.default_value
+                            {
+                                println!("      WARNING: Using default Management key!");
+                            }
+                            use yubikit::piv::{ObjectId, Slot};
+                            match session.get_object(ObjectId::Chuid) {
+                                Ok(data) => {
+                                    let hex: String =
+                                        data.iter().map(|b| format!("{b:02x}")).collect();
+                                    println!("      CHUID: {hex}");
+                                }
+                                Err(_) => println!("      CHUID: No data available"),
+                            }
+                            match session.get_object(ObjectId::Capability) {
+                                Ok(data) => {
+                                    let hex: String =
+                                        data.iter().map(|b| format!("{b:02x}")).collect();
+                                    println!("      CCC:   {hex}");
+                                }
+                                Err(_) => println!("      CCC:   No data available"),
+                            }
+                            let slots = [
+                                (Slot::Authentication, "9A", "AUTHENTICATION"),
+                                (Slot::Signature, "9C", "DIGITAL SIGNATURE"),
+                                (Slot::KeyManagement, "9D", "KEY MANAGEMENT"),
+                                (Slot::CardAuth, "9E", "CARD AUTH"),
+                            ];
+                            for (slot, hex, name) in slots {
+                                if let Ok(meta) = session.get_slot_metadata(slot) {
+                                    println!("      Slot {hex} ({name}):");
+                                    println!("        Private key type: {}", meta.key_type);
+                                    if let Ok(cert_bytes) = session.get_certificate(slot) {
+                                        use sha2::{Digest, Sha256};
+                                        let fp = Sha256::digest(&cert_bytes);
+                                        let fp_hex: String =
+                                            fp.iter().map(|b| format!("{b:02x}")).collect();
+                                        println!("        Fingerprint:      {fp_hex}");
+                                    }
+                                }
+                            }
+                            session.into_connection()
+                        }
+                        Err((e, conn)) => {
+                            println!("      Error: {e}");
+                            conn
+                        }
+                    };
+
+                    // OATH
+                    println!();
+                    println!("    OATH:");
+                    let conn = match yubikit::oath::OathSession::new(conn) {
+                        Ok(session) => {
+                            println!("      Oath version:       {}", session.version());
+                            println!(
+                                "      Password protected: {}",
+                                if session.locked() { "True" } else { "False" }
+                            );
+                            session.into_connection()
+                        }
+                        Err((e, conn)) => {
+                            println!("      Error: {e}");
+                            conn
+                        }
+                    };
+
+                    // OpenPGP
+                    println!();
+                    println!("    OpenPGP:");
+                    let conn = match yubikit::openpgp::OpenPgpSession::new(conn) {
+                        Ok(mut session) => {
+                            let aid_ver = session.aid().version();
+                            println!(
+                                "      OpenPGP version:            {}.{}",
+                                aid_ver.0, aid_ver.1
+                            );
+                            println!("      Application version:        {}", session.version());
+                            if let Ok(pw_status) = session.get_pin_status() {
+                                println!(
+                                    "      PIN tries remaining:        {}",
+                                    pw_status.attempts_user
+                                );
+                                println!(
+                                    "      Reset code tries remaining: {}",
+                                    pw_status.attempts_reset
+                                );
+                                println!(
+                                    "      Admin PIN tries remaining:  {}",
+                                    pw_status.attempts_admin
+                                );
+                                let sig_policy = match pw_status.pin_policy_user {
+                                    yubikit::openpgp::PinPolicy::Once => "Once",
+                                    yubikit::openpgp::PinPolicy::Always => "Always",
+                                };
+                                println!("      Require PIN for signature:  {sig_policy}");
+                            }
+                            if let Ok(kdf) = session.get_kdf() {
+                                let enabled = !matches!(kdf, yubikit::openpgp::Kdf::None);
+                                println!(
+                                    "      KDF enabled:                {}",
+                                    if enabled { "True" } else { "False" }
+                                );
+                            }
+                            session.into_connection()
+                        }
+                        Err((e, conn)) => {
+                            println!("      Error: {e}");
+                            conn
+                        }
+                    };
+
+                    // YubiHSM Auth
+                    println!();
+                    println!("    YubiHSM Auth:");
+                    match yubikit::hsmauth::HsmAuthSession::new(conn) {
+                        Ok(mut session) => {
+                            println!(
+                                "      YubiHSM Auth version:             {}",
+                                session.version()
+                            );
+                            if let Ok(retries) = session.get_management_key_retries() {
+                                println!("      Management key retries remaining: {retries}/8");
+                            }
+                        }
+                        Err((e, _)) => println!("      Error: {e}"),
                     }
                 }
-                session.into_connection()
             }
-            Err((e, conn)) => {
-                println!("      Error: {e}");
-                conn
-            }
-        };
-
-        // OATH
-        println!();
-        println!("    OATH:");
-        let conn = match yubikit::oath::OathSession::new(conn) {
-            Ok(session) => {
-                println!("      Oath version:       {}", session.version());
-                println!(
-                    "      Password protected: {}",
-                    if session.locked() { "True" } else { "False" }
-                );
-                session.into_connection()
-            }
-            Err((e, conn)) => {
-                println!("      Error: {e}");
-                conn
-            }
-        };
-
-        // OpenPGP
-        println!();
-        println!("    OpenPGP:");
-        let conn = match yubikit::openpgp::OpenPgpSession::new(conn) {
-            Ok(mut session) => {
-                let aid_ver = session.aid().version();
-                println!(
-                    "      OpenPGP version:            {}.{}",
-                    aid_ver.0, aid_ver.1
-                );
-                println!("      Application version:        {}", session.version());
-                if let Ok(pw_status) = session.get_pin_status() {
-                    println!(
-                        "      PIN tries remaining:        {}",
-                        pw_status.attempts_user
-                    );
-                    println!(
-                        "      Reset code tries remaining: {}",
-                        pw_status.attempts_reset
-                    );
-                    println!(
-                        "      Admin PIN tries remaining:  {}",
-                        pw_status.attempts_admin
-                    );
-                    let sig_policy = match pw_status.pin_policy_user {
-                        yubikit::openpgp::PinPolicy::Once => "Once",
-                        yubikit::openpgp::PinPolicy::Always => "Always",
-                    };
-                    println!("      Require PIN for signature:  {sig_policy}");
-                }
-                if let Ok(kdf) = session.get_kdf() {
-                    let enabled = !matches!(kdf, yubikit::openpgp::Kdf::None);
-                    println!(
-                        "      KDF enabled:                {}",
-                        if enabled { "True" } else { "False" }
-                    );
-                }
-                session.into_connection()
-            }
-            Err((e, conn)) => {
-                println!("      Error: {e}");
-                conn
-            }
-        };
-
-        // YubiHSM Auth
-        println!();
-        println!("    YubiHSM Auth:");
-        match yubikit::hsmauth::HsmAuthSession::new(conn) {
-            Ok(mut session) => {
-                println!(
-                    "      YubiHSM Auth version:             {}",
-                    session.version()
-                );
-                if let Ok(retries) = session.get_management_key_retries() {
-                    println!("      Management key retries remaining: {retries}/8");
-                }
-            }
-            Err((e, _)) => println!("      Error: {e}"),
         }
-    }
-    if !pcsc_found {
-        println!(" (none)");
+        Err(e) => println!(" Error: {e}"),
     }
 
     // YubiKeys over HID OTP
