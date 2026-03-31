@@ -2,10 +2,10 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
-use yubikit::core::set_override_version;
+use yubikit::core::{Transport, set_override_version};
 use yubikit::device::{YubiKeyDevice, list_devices};
-use yubikit::management::ReleaseType;
 use yubikit::management::UsbInterface;
+use yubikit::management::{Capability, ReleaseType};
 
 mod apdu;
 mod appdata;
@@ -1424,47 +1424,105 @@ fn select_device(
     }
 }
 
-/// Enumerate devices over the given interfaces and select one, optionally
-/// by serial number.
-fn require_device(
-    serial: Option<u32>,
-    interfaces: UsbInterface,
-) -> Result<YubiKeyDevice, CliError> {
+/// Enumerate devices and select one, optionally by serial number.
+fn require_device(serial: Option<u32>) -> Result<YubiKeyDevice, CliError> {
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
     let devices =
         list_devices(all).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
-    let dev = select_device(devices, serial)?;
+    select_device(devices, serial)
+}
 
-    // Check if the device supports the required interfaces
-    if interfaces != all {
-        let has_ccid = dev.reader_name().is_some();
-        let has_otp = dev.hid_path().is_some();
-        let has_fido = dev.fido_path().is_some();
-        let satisfied = (interfaces.contains(UsbInterface::CCID) && has_ccid)
-            || (interfaces.contains(UsbInterface::OTP) && has_otp)
-            || (interfaces.contains(UsbInterface::FIDO) && has_fido);
+/// Check that the device has the required USB interfaces available.
+///
+/// Returns an error if none of the required interfaces are present.
+fn check_interface(dev: &YubiKeyDevice, interfaces: UsbInterface) -> Result<(), CliError> {
+    let has_ccid = dev.reader_name().is_some();
+    let has_otp = dev.hid_path().is_some();
+    let has_fido = dev.fido_path().is_some();
+    let satisfied = (interfaces.contains(UsbInterface::CCID) && has_ccid)
+        || (interfaces.contains(UsbInterface::OTP) && has_otp)
+        || (interfaces.contains(UsbInterface::FIDO) && has_fido);
 
-        if !satisfied {
-            let mut names = Vec::new();
-            if interfaces.contains(UsbInterface::CCID) {
-                names.push("CCID");
-            }
-            if interfaces.contains(UsbInterface::OTP) {
-                names.push("OTP");
-            }
-            if interfaces.contains(UsbInterface::FIDO) {
-                names.push("FIDO");
-            }
-            return Err(CliError(format!(
-                "Command requires one of the following USB interfaces \
-                 to be enabled: {}.\n\n\
-                 Use 'ykman config usb' to set the enabled USB interfaces.",
-                names.join(", ")
-            )));
+    if !satisfied {
+        let mut names = Vec::new();
+        if interfaces.contains(UsbInterface::CCID) {
+            names.push("CCID");
         }
+        if interfaces.contains(UsbInterface::OTP) {
+            names.push("OTP");
+        }
+        if interfaces.contains(UsbInterface::FIDO) {
+            names.push("FIDO");
+        }
+        return Err(CliError(format!(
+            "Command requires one of the following USB interfaces \
+             to be enabled: {}.\n\n\
+             Use 'ykman config usb' to set the enabled USB interfaces.",
+            names.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// Check that a capability is available and enabled on the device.
+///
+/// Returns an error distinguishing between "not supported" and "disabled".
+fn check_capability(dev: &YubiKeyDevice, capability: Capability) -> Result<(), CliError> {
+    let info = dev.info();
+    let transport = dev.transport();
+    let name = capability_name(capability);
+
+    let supported = info
+        .supported_capabilities
+        .get(&transport)
+        .copied()
+        .unwrap_or(Capability::NONE);
+
+    if !supported.contains(capability) {
+        return Err(CliError(format!(
+            "{name} is not available on this YubiKey."
+        )));
     }
 
-    Ok(dev)
+    let enabled = info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .copied()
+        .unwrap_or(Capability::NONE);
+
+    if !enabled.contains(capability) {
+        let transport_name = match transport {
+            Transport::Usb => "USB",
+            Transport::Nfc => "NFC",
+        };
+        return Err(CliError(format!(
+            "{name} is currently disabled on this YubiKey over {transport_name}.\n\n\
+             Use 'ykman config {transport}' to enable it.",
+            transport = match transport {
+                Transport::Usb => "usb",
+                Transport::Nfc => "nfc",
+            }
+        )));
+    }
+
+    Ok(())
+}
+
+fn capability_name(cap: Capability) -> &'static str {
+    if cap == Capability::OATH {
+        "OATH"
+    } else if cap == Capability::PIV {
+        "PIV"
+    } else if cap == Capability::OPENPGP {
+        "OpenPGP"
+    } else if cap == Capability::OTP {
+        "OTP"
+    } else if cap == Capability::HSMAUTH {
+        "YubiHSM Auth"
+    } else {
+        "Application"
+    }
 }
 
 /// After resolving a device, apply version override if needed.
@@ -1680,14 +1738,12 @@ fn run() -> Result<(), CliError> {
             list::run(serials, readers)
         }
         Commands::Info { check_fips } => {
-            let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-            let dev = require_device(cli.device, all)?;
+            let dev = require_device(cli.device)?;
             apply_version_override(&dev);
             info::run(&dev, check_fips)
         }
         Commands::Config { action } => {
-            let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-            let dev = require_device(cli.device, all)?;
+            let dev = require_device(cli.device)?;
             apply_version_override(&dev);
             match action {
                 ConfigAction::Usb {
@@ -1766,7 +1822,9 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Oath { action } => {
-            let dev = require_device(cli.device, UsbInterface::CCID)?;
+            let dev = require_device(cli.device)?;
+            check_capability(&dev, Capability::OATH)?;
+            check_interface(&dev, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 OathAction::Info { password } => {
@@ -1920,8 +1978,9 @@ fn run() -> Result<(), CliError> {
             access_code,
             action,
         } => {
-            let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-            let dev = require_device(cli.device, all)?;
+            let dev = require_device(cli.device)?;
+            check_capability(&dev, Capability::OTP)?;
+            check_interface(&dev, UsbInterface::CCID | UsbInterface::OTP)?;
             apply_version_override(&dev);
             // access_code from parent command overrides per-subcommand access_code
             let _ = access_code; // available for subcommands that need it
@@ -2110,7 +2169,9 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Piv { action } => {
-            let dev = require_device(cli.device, UsbInterface::CCID)?;
+            let dev = require_device(cli.device)?;
+            check_capability(&dev, Capability::PIV)?;
+            check_interface(&dev, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 PivAction::Info => piv::run_info(&dev, &scp_params),
@@ -2364,7 +2425,9 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Openpgp { action } => {
-            let dev = require_device(cli.device, UsbInterface::CCID)?;
+            let dev = require_device(cli.device)?;
+            check_capability(&dev, Capability::OPENPGP)?;
+            check_interface(&dev, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 OpenpgpAction::Info => openpgp::run_info(&dev, &scp_params),
@@ -2500,7 +2563,9 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Hsmauth { action } => {
-            let dev = require_device(cli.device, UsbInterface::CCID)?;
+            let dev = require_device(cli.device)?;
+            check_capability(&dev, Capability::HSMAUTH)?;
+            check_interface(&dev, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 HsmauthAction::Info => hsmauth::run_info(&dev, &scp_params),
@@ -2617,7 +2682,8 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::SecurityDomain { action } => {
-            let dev = require_device(cli.device, UsbInterface::CCID)?;
+            let dev = require_device(cli.device)?;
+            check_interface(&dev, UsbInterface::CCID)?;
             apply_version_override(&dev);
             match action {
                 SecurityDomainAction::Info => securitydomain::run_info(&dev, &scp_params),
@@ -2702,7 +2768,8 @@ fn run() -> Result<(), CliError> {
             short,
             send_apdu,
         } => {
-            let dev = require_device(cli.device, UsbInterface::CCID)?;
+            let dev = require_device(cli.device)?;
+            check_interface(&dev, UsbInterface::CCID)?;
             apdu::run_apdu(
                 &dev,
                 &scp_params,
