@@ -32,7 +32,7 @@ use thiserror::Error;
 
 use crate::core::Version;
 use crate::core::{bytes2int, patch_version};
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
 use crate::tlv::{
     TlvError, int2bytes, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list,
     tlv_encode, tlv_unpack,
@@ -2010,8 +2010,37 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Safe Reset
 // ---------------------------------------------------------------------------
+
+/// Performs an OpenPGP factory reset without requiring a working session.
+///
+/// Unlike [`OpenPgpSession::reset`], this operates directly on a connection
+/// and avoids reading application data that may be corrupted. It blocks all
+/// PINs by repeatedly verifying with invalid values, then issues TERMINATE
+/// and ACTIVATE to restore the application to its factory state.
+pub fn safe_reset<C: SmartCardConnection>(connection: C) -> Result<(), SmartCardError> {
+    let mut protocol = SmartCardProtocol::new(connection);
+    protocol.select(Aid::OPENPGP)?;
+
+    for pw in [Pw::User, Pw::Admin] {
+        loop {
+            match protocol.send_apdu(0, INS_VERIFY, 0, pw as u8, INVALID_PIN) {
+                Err(SmartCardError::Apdu { sw, .. })
+                    if sw == Sw::SecurityConditionNotSatisfied as u16 =>
+                {
+                    // PIN not yet blocked, try again
+                    continue;
+                }
+                _ => break,
+            }
+        }
+    }
+
+    protocol.send_apdu(0, INS_TERMINATE, 0, 0, &[])?;
+    protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
+    Ok(())
+}
 
 fn require_version(current: Version, required: Version, feature: &str) -> Result<(), OpenPgpError> {
     crate::core::require_version(current, required, feature).map_err(OpenPgpError::NotSupported)

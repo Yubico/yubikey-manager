@@ -173,10 +173,19 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
             return Err(CliError("Aborted.".into()));
         }
     }
-    let mut session = open_session(dev, scp_params)?;
-    session
-        .reset()
-        .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
+
+    if scp_params.is_explicit() {
+        let mut session = open_session(dev, scp_params)?;
+        session
+            .reset()
+            .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
+    } else {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        yubikit::openpgp::safe_reset(conn)
+            .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
+    }
     eprintln!("OpenPGP application has been reset.");
     Ok(())
 }
