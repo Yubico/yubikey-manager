@@ -27,6 +27,7 @@
 
 use hidapi::HidApi;
 
+use crate::core::Version;
 use crate::log_traffic;
 
 const YUBICO_VID: u16 = 0x1050;
@@ -48,6 +49,18 @@ pub enum HidError {
 pub struct HidDeviceInfo {
     pub path: String,
     pub pid: u16,
+    /// Firmware version from USB bcdDevice descriptor.
+    pub version: Version,
+}
+
+/// Parse a USB bcdDevice value into a firmware [`Version`].
+///
+/// bcdDevice uses BCD encoding: `0xMMmp` where MM = major, m = minor, p = patch.
+fn version_from_bcd(bcd: u16) -> Version {
+    let major = ((bcd >> 12) & 0xF) * 10 + ((bcd >> 8) & 0xF);
+    let minor = ((bcd >> 4) & 0xF) as u8;
+    let patch = (bcd & 0xF) as u8;
+    Version(major as u8, minor, patch)
 }
 
 /// List Yubico OTP HID devices.
@@ -62,6 +75,7 @@ pub fn list_otp_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
             devices.push(HidDeviceInfo {
                 path: dev.path().to_string_lossy().into_owned(),
                 pid: dev.product_id(),
+                version: version_from_bcd(dev.release_number()),
             });
         }
     }
@@ -77,6 +91,7 @@ pub fn list_all_hid_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
             devices.push(HidDeviceInfo {
                 path: dev.path().to_string_lossy().into_owned(),
                 pid: dev.product_id(),
+                version: version_from_bcd(dev.release_number()),
             });
         }
     }

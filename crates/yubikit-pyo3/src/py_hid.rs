@@ -175,6 +175,7 @@ impl FidoConnection {
         let info = ctaphid::FidoDeviceInfo {
             path: path.to_string(),
             pid,
+            version: yubikit::core::Version(0, 0, 0),
             report_size_in: 64,
             report_size_out: 64,
         };

@@ -33,6 +33,7 @@
 
 use hidapi::HidApi;
 
+use crate::core::Version;
 use crate::log_traffic;
 
 const YUBICO_VID: u16 = 0x1050;
@@ -146,8 +147,18 @@ pub enum CtapHidTransportError {
 pub struct FidoDeviceInfo {
     pub path: String,
     pub pid: u16,
+    /// Firmware version from USB bcdDevice descriptor.
+    pub version: Version,
     pub report_size_in: usize,
     pub report_size_out: usize,
+}
+
+/// Parse a USB bcdDevice value into a firmware [`Version`].
+fn version_from_bcd(bcd: u16) -> Version {
+    let major = ((bcd >> 12) & 0xF) * 10 + ((bcd >> 8) & 0xF);
+    let minor = ((bcd >> 4) & 0xF) as u8;
+    let patch = (bcd & 0xF) as u8;
+    Version(major as u8, minor, patch)
 }
 
 /// List Yubico FIDO HID devices.
@@ -162,6 +173,7 @@ pub fn list_fido_devices() -> Result<Vec<FidoDeviceInfo>, CtapHidTransportError>
             devices.push(FidoDeviceInfo {
                 path: dev.path().to_string_lossy().into_owned(),
                 pid: dev.product_id(),
+                version: version_from_bcd(dev.release_number()),
                 // hidapi doesn't directly expose report sizes from the descriptor.
                 // FIDO HID spec uses 64-byte packets; this is the standard for all
                 // USB FIDO devices including YubiKeys.

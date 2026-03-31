@@ -730,11 +730,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
                 let mut otp_group = Vec::new();
                 for hid in &otp_devs {
                     if hid.pid == pid {
-                        let info = HidOtpConnection::new(&hid.path)
-                            .ok()
-                            .and_then(|conn| read_info_otp(conn).ok())
-                            .map(|(info, _)| info)
-                            .unwrap_or_else(|| synthetic_hid_info(hid));
+                        let info = read_info_otp_device(hid);
                         otp_group.push(YubiKeyDevice {
                             reader_name: None,
                             hid_path: Some(hid.path.clone()),
@@ -756,11 +752,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
                 let mut fido_group = Vec::new();
                 for fido in &fido_devs {
                     if fido.pid == pid {
-                        let info = HidFidoConnection::open(fido)
-                            .ok()
-                            .and_then(|conn| read_info_fido(conn).ok())
-                            .map(|(info, _)| info)
-                            .unwrap_or_else(|| synthetic_fido_info(fido));
+                        let info = read_info_fido_device(fido);
                         fido_group.push(YubiKeyDevice {
                             reader_name: None,
                             hid_path: None,
@@ -836,11 +828,7 @@ fn open_single_usb(
 
     // Fall back to OTP HID.
     if let Some(hid) = otp {
-        let info = HidOtpConnection::new(&hid.path)
-            .ok()
-            .and_then(|conn| read_info_otp(conn).ok())
-            .map(|(info, _)| info)
-            .unwrap_or_else(|| synthetic_hid_info(hid));
+        let info = read_info_otp_device(hid);
         return Some(YubiKeyDevice {
             reader_name: None,
             hid_path: Some(hid.path.clone()),
@@ -853,11 +841,7 @@ fn open_single_usb(
 
     // Fall back to FIDO HID.
     if let Some(f) = fido {
-        let info = HidFidoConnection::open(f)
-            .ok()
-            .and_then(|conn| read_info_fido(conn).ok())
-            .map(|(info, _)| info)
-            .unwrap_or_else(|| synthetic_fido_info(f));
+        let info = read_info_fido_device(f);
         return Some(YubiKeyDevice {
             reader_name: None,
             hid_path: None,
@@ -916,15 +900,15 @@ fn is_sky_pid(pid: u16) -> bool {
     pid == 0x0120
 }
 
-/// Build a minimal synthetic [`DeviceInfo`] for an HID-only device.
-fn synthetic_hid_info(hid: &HidDeviceInfo) -> DeviceInfo {
+/// Build a minimal synthetic [`DeviceInfo`] for an OTP HID device.
+fn synthesize_info_otp(hid: &HidDeviceInfo) -> DeviceInfo {
     use std::collections::HashMap;
 
-    let version = pid_to_version(hid.pid);
+    let version = hid.version;
     let mut supported = HashMap::new();
     supported.insert(Transport::Usb, Capability::OTP);
 
-    DeviceInfo {
+    let mut info = DeviceInfo {
         config: crate::management::DeviceConfig {
             enabled_capabilities: HashMap::new(),
             auto_eject_timeout: None,
@@ -947,33 +931,24 @@ fn synthetic_hid_info(hid: &HidDeviceInfo) -> DeviceInfo {
         fps_version: None,
         stm_version: None,
         version_qualifier: crate::management::VersionQualifier::final_release(version),
-    }
+    };
+    apply_device_info_fixups(&mut info);
+    info
 }
 
-/// Best-effort version guess from USB PID.
-fn pid_to_version(pid: u16) -> Version {
-    match pid {
-        0x0110..=0x0116 => Version(3, 0, 0), // NEO family
-        0x0120 => Version(0, 0, 0),          // SKY (version unknown from PID)
-        0x0401..=0x0405 => Version(4, 0, 0), // YK4 family
-        0x0406..=0x0410 => Version(5, 0, 0), // YK5 family
-        _ => Version(0, 0, 0),
-    }
-}
-
-/// Build a minimal synthetic [`DeviceInfo`] for a FIDO-only device.
+/// Build a minimal synthetic [`DeviceInfo`] for a FIDO HID device.
 ///
 /// Used when reading DeviceInfo over CTAP fails (e.g. CTAP1-only devices).
-fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
+fn synthesize_info_fido(fido: &FidoDeviceInfo) -> DeviceInfo {
     use std::collections::HashMap;
 
-    let version = pid_to_version(fido.pid);
+    let version = fido.version;
     let mut supported = HashMap::new();
     // Only U2F is guaranteed; if CTAP2 were available, read_info_fido would
     // have succeeded and this function wouldn't be called.
     supported.insert(Transport::Usb, Capability::U2F);
 
-    DeviceInfo {
+    let mut info = DeviceInfo {
         config: crate::management::DeviceConfig {
             enabled_capabilities: HashMap::new(),
             auto_eject_timeout: None,
@@ -996,7 +971,9 @@ fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
         fps_version: None,
         stm_version: None,
         version_qualifier: crate::management::VersionQualifier::final_release(version),
-    }
+    };
+    apply_device_info_fixups(&mut info);
+    info
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,7 +986,7 @@ fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
 /// synthesizes DeviceInfo by probing individual applets.
 ///
 /// Returns the device info and the detected transport (USB or NFC).
-pub fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
+fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
     let conn = PcscSmartCardConnection::open(reader_name)?;
     let transport = conn.transport();
     let (info, _conn) = read_info_ccid(conn)?;
@@ -1071,6 +1048,20 @@ pub fn read_info_otp<T: OtpConnection>(
     }
 }
 
+/// Open an OTP HID device and read [`DeviceInfo`].
+///
+/// Falls back to synthetic info on failure.
+fn read_info_otp_device(hid: &HidDeviceInfo) -> DeviceInfo {
+    HidOtpConnection::new(&hid.path)
+        .ok()
+        .and_then(|conn| read_info_otp(conn).ok())
+        .map(|(info, _)| info)
+        .unwrap_or_else(|| {
+            log::debug!("OTP read_info failed for {}, synthesizing", hid.path);
+            synthesize_info_otp(hid)
+        })
+}
+
 /// Read [`DeviceInfo`] via FIDO HID (CTAP) from an open connection.
 ///
 /// Returns the connection for reuse. On error the connection is returned
@@ -1087,6 +1078,20 @@ pub fn read_info_fido<C: FidoConnection>(
         }
         Err(e) => Err((DeviceError::SmartCard(e), Some(session.into_connection()))),
     }
+}
+
+/// Open a FIDO HID device and read [`DeviceInfo`].
+///
+/// Falls back to synthetic info on failure.
+fn read_info_fido_device(fido: &FidoDeviceInfo) -> DeviceInfo {
+    HidFidoConnection::open(fido)
+        .ok()
+        .and_then(|conn| read_info_fido(conn).ok())
+        .map(|(info, _)| info)
+        .unwrap_or_else(|| {
+            log::debug!("FIDO read_info failed for {}, synthesizing", fido.path);
+            synthesize_info_fido(fido)
+        })
 }
 
 /// Applets to scan when synthesizing DeviceInfo for older keys.
