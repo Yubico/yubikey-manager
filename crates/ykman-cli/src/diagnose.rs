@@ -126,14 +126,14 @@ fn print_device_info(info: &DeviceInfo, indent: &str) {
 }
 
 pub fn run_diagnose() -> Result<(), CliError> {
-    println!("ykman:         {}", env!("CARGO_PKG_VERSION"));
+    println!("ykman:            {}", env!("CARGO_PKG_VERSION"));
     println!("Platform:         {}", std::env::consts::OS);
     println!("Arch:             {}", std::env::consts::ARCH);
 
     // YubiKeys over PC/SC (USB and NFC readers)
     println!();
     let mut pcsc_found = false;
-    println!("Detected YubiKeys over PC/SC:");
+    print!("Detected YubiKeys over PC/SC:");
     let readers = match list_readers() {
         Ok(r) => r,
         Err(e) => {
@@ -153,6 +153,9 @@ pub fn run_diagnose() -> Result<(), CliError> {
             }
         }
 
+        if !pcsc_found {
+            println!(); // newline after "Detected YubiKeys over PC/SC:"
+        }
         pcsc_found = true;
         println!("  {reader}:");
 
@@ -343,7 +346,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
         }
     }
     if !pcsc_found {
-        println!("  (none)");
+        println!(" (none)");
     }
 
     // YubiKeys over HID OTP
