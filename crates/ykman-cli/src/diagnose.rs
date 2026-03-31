@@ -1,8 +1,6 @@
 use yubikit::core::Transport;
-use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_otp};
-use yubikit::management::{
-    Capability, DeviceInfo, ManagementFidoSession, ManagementSession, ReleaseType,
-};
+use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_fido, read_info_otp};
+use yubikit::management::{Capability, DeviceInfo, ReleaseType};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
 use yubikit::transport::pcsc::PcscSmartCardConnection;
@@ -466,17 +464,13 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             println!("    Capabilities:        {:#04x}", caps.raw());
 
                             println!("    Management:");
-                            match ManagementFidoSession::new(conn) {
-                                Ok(mut session) => match session.read_device_info_unchecked() {
-                                    Ok(mut info) => {
-                                        yubikit::device::apply_device_info_fixups(&mut info);
-                                        let name = get_name(&info);
-                                        print_device_info(&info, "      ");
-                                        println!();
-                                        println!("      Name: {name}");
-                                    }
-                                    Err(e) => println!("      Error: {e}"),
-                                },
+                            match read_info_fido(conn) {
+                                Ok((info, _conn)) => {
+                                    let name = get_name(&info);
+                                    print_device_info(&info, "      ");
+                                    println!();
+                                    println!("      Name: {name}");
+                                }
                                 Err((e, _)) => println!("      Error: {e}"),
                             }
                         }
