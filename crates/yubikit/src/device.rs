@@ -658,17 +658,34 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
     }
 
     // Count devices per PID across all transports.
+    // Take the maximum count across transports (each transport may see
+    // multiple physical devices with the same PID).
     let mut pid_counts: HashMap<u16, usize> = HashMap::new();
-    for &(pid, _) in &usb_readers {
-        *pid_counts.entry(pid).or_insert(0) += 1;
-    }
-    for hid in &otp_devs {
-        let entry = pid_counts.entry(hid.pid).or_insert(0);
-        *entry = (*entry).max(1); // HID is 1-per-PID in practice
-    }
-    for fido in &fido_devs {
-        let entry = pid_counts.entry(fido.pid).or_insert(0);
-        *entry = (*entry).max(1);
+    {
+        let mut ccid_per_pid: HashMap<u16, usize> = HashMap::new();
+        for &(pid, _) in &usb_readers {
+            *ccid_per_pid.entry(pid).or_insert(0) += 1;
+        }
+        let mut otp_per_pid: HashMap<u16, usize> = HashMap::new();
+        for hid in &otp_devs {
+            *otp_per_pid.entry(hid.pid).or_insert(0) += 1;
+        }
+        let mut fido_per_pid: HashMap<u16, usize> = HashMap::new();
+        for fido in &fido_devs {
+            *fido_per_pid.entry(fido.pid).or_insert(0) += 1;
+        }
+        let all_pids: std::collections::HashSet<u16> = ccid_per_pid
+            .keys()
+            .chain(otp_per_pid.keys())
+            .chain(fido_per_pid.keys())
+            .copied()
+            .collect();
+        for pid in all_pids {
+            let c = ccid_per_pid.get(&pid).copied().unwrap_or(0);
+            let o = otp_per_pid.get(&pid).copied().unwrap_or(0);
+            let f = fido_per_pid.get(&pid).copied().unwrap_or(0);
+            pid_counts.insert(pid, c.max(o).max(f));
+        }
     }
 
     let n_usb: usize = pid_counts.values().sum();
@@ -894,6 +911,11 @@ fn merge_devices(base: &mut Vec<YubiKeyDevice>, incoming: Vec<YubiKeyDevice>) {
     }
 }
 
+/// Check if a USB PID belongs to a Security Key (SKY).
+fn is_sky_pid(pid: u16) -> bool {
+    pid == 0x0120
+}
+
 /// Build a minimal synthetic [`DeviceInfo`] for an HID-only device.
 fn synthetic_hid_info(hid: &HidDeviceInfo) -> DeviceInfo {
     use std::collections::HashMap;
@@ -916,7 +938,7 @@ fn synthetic_hid_info(hid: &HidDeviceInfo) -> DeviceInfo {
         supported_capabilities: supported,
         is_locked: false,
         is_fips: false,
-        is_sky: false,
+        is_sky: is_sky_pid(hid.pid),
         part_number: None,
         fips_capable: Capability::NONE,
         fips_approved: Capability::NONE,
@@ -931,8 +953,8 @@ fn synthetic_hid_info(hid: &HidDeviceInfo) -> DeviceInfo {
 /// Best-effort version guess from USB PID.
 fn pid_to_version(pid: u16) -> Version {
     match pid {
-        0x0110..=0x0113 => Version(3, 0, 0), // NEO family
-        0x0116..=0x0120 => Version(3, 0, 0),
+        0x0110..=0x0116 => Version(3, 0, 0), // NEO family
+        0x0120 => Version(0, 0, 0),          // SKY (version unknown from PID)
         0x0401..=0x0405 => Version(4, 0, 0), // YK4 family
         0x0406..=0x0410 => Version(5, 0, 0), // YK5 family
         _ => Version(0, 0, 0),
@@ -940,12 +962,16 @@ fn pid_to_version(pid: u16) -> Version {
 }
 
 /// Build a minimal synthetic [`DeviceInfo`] for a FIDO-only device.
+///
+/// Used when reading DeviceInfo over CTAP fails (e.g. CTAP1-only devices).
 fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
     use std::collections::HashMap;
 
     let version = pid_to_version(fido.pid);
     let mut supported = HashMap::new();
-    supported.insert(Transport::Usb, Capability::FIDO2);
+    // Only U2F is guaranteed; if CTAP2 were available, read_info_fido would
+    // have succeeded and this function wouldn't be called.
+    supported.insert(Transport::Usb, Capability::U2F);
 
     DeviceInfo {
         config: crate::management::DeviceConfig {
@@ -961,7 +987,7 @@ fn synthetic_fido_info(fido: &FidoDeviceInfo) -> DeviceInfo {
         supported_capabilities: supported,
         is_locked: false,
         is_fips: false,
-        is_sky: false,
+        is_sky: is_sky_pid(fido.pid),
         part_number: None,
         fips_capable: Capability::NONE,
         fips_approved: Capability::NONE,
@@ -1260,6 +1286,19 @@ pub fn get_name(info: &DeviceInfo) -> String {
 
     let major = info.version.0;
 
+    // SKY devices are handled separately — they never get "YubiKey Preview"
+    // even on preview firmware, matching the Python behavior where key_type
+    // is determined from PID before the preview check.
+    if info.is_sky {
+        if !usb_supported.contains(Capability::FIDO2) {
+            return "FIDO U2F Security Key".to_string();
+        }
+        if info.version >= Version(5, 1, 0) {
+            return build_yk5_name(info, usb_supported);
+        }
+        return "Security Key".to_string();
+    }
+
     // Pre-YK4 devices
     if major < 4 {
         return if major == 0 {
@@ -1282,15 +1321,9 @@ pub fn get_name(info: &DeviceInfo) -> String {
         return "YubiKey 4".to_string();
     }
 
-    // Preview firmware
+    // Preview firmware (non-SKY only)
     if is_preview(info.version) {
         return "YubiKey Preview".to_string();
-    }
-
-    // SKY without FIDO2 (SKY 1), only for pre-5.1.0
-    if info.is_sky && !usb_supported.contains(Capability::FIDO2) && info.version < Version(5, 1, 0)
-    {
-        return "FIDO U2F Security Key".to_string();
     }
 
     // YK5+ dynamic naming (5.1.0+)
@@ -1299,11 +1332,7 @@ pub fn get_name(info: &DeviceInfo) -> String {
     }
 
     // Fallback for 5.0.x
-    if info.is_sky {
-        "Security Key".to_string()
-    } else {
-        "YubiKey 5".to_string()
-    }
+    "YubiKey 5".to_string()
 }
 
 fn build_yk5_name(info: &DeviceInfo, usb_supported: Capability) -> String {
@@ -1785,5 +1814,47 @@ mod tests {
             true,
         );
         assert_eq!(get_name(&info), "YubiKey 5C - Enhanced PIN");
+    }
+
+    #[test]
+    fn test_sky_preview_firmware() {
+        // SKY with preview firmware should still show as "Security Key",
+        // not "YubiKey Preview"
+        let mut info = make_info(
+            Version(5, 0, 2),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            None,
+            false,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        apply_device_info_fixups(&mut info);
+        assert!(info.is_sky);
+        assert_eq!(get_name(&info), "Security Key");
+    }
+
+    #[test]
+    fn test_sky_u2f_only() {
+        // Very old SKY (CTAP1 only) with unknown version
+        let info = make_info(
+            Version(0, 0, 0),
+            FormFactor::Unknown,
+            true,
+            false,
+            None,
+            false,
+            Capability::U2F,
+            false,
+        );
+        assert_eq!(get_name(&info), "FIDO U2F Security Key");
+    }
+
+    #[test]
+    fn test_is_sky_pid() {
+        assert!(is_sky_pid(0x0120));
+        assert!(!is_sky_pid(0x0116));
+        assert!(!is_sky_pid(0x0401));
     }
 }

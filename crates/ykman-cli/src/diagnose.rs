@@ -468,7 +468,8 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             println!("    Management:");
                             match ManagementFidoSession::new(conn) {
                                 Ok(mut session) => match session.read_device_info_unchecked() {
-                                    Ok(info) => {
+                                    Ok(mut info) => {
+                                        yubikit::device::apply_device_info_fixups(&mut info);
                                         let name = get_name(&info);
                                         print_device_info(&info, "      ");
                                         println!();
