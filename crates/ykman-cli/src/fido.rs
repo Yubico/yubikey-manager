@@ -32,9 +32,10 @@
 
 use std::cell::RefCell;
 
+use fido2::cbor::Value;
 use fido2::ctap::{CtapDevice, CtapError};
 use fido2::ctap2::Ctap2;
-use fido2::pin::ClientPin;
+use fido2::pin::{ClientPin, PinProtocol};
 use yubikit::core::Transport;
 use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
@@ -610,4 +611,595 @@ pub fn run_access_verify_pin(
 
     println!("PIN verified.");
     Ok(())
+}
+
+/// Prompt for PIN if not provided.
+fn require_pin(pin: Option<&str>) -> Result<String, CliError> {
+    match pin {
+        Some(p) => Ok(p.to_string()),
+        None => {
+            eprint!("Enter your PIN: ");
+            rpassword::read_password().map_err(|e| CliError(format!("Failed to read PIN: {e}")))
+        }
+    }
+}
+
+/// Get a PIN token with the given permissions.
+fn get_pin_token<'a>(
+    client_pin: &'a ClientPin<'a>,
+    pin: &str,
+    permissions: u32,
+) -> Result<(Vec<u8>, &'a PinProtocol), CliError> {
+    let token = client_pin
+        .get_pin_token(pin, Some(permissions), None)
+        .map_err(|e| CliError(format!("PIN authentication failed: {e}")))?;
+    Ok((token, client_pin.protocol()))
+}
+
+pub fn run_access_force_change(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let options = &ctap2.info().options;
+    if !options.get("setMinPINLength").copied().unwrap_or(false) {
+        return Err(CliError(
+            "Force change PIN is not supported on this YubiKey.".to_string(),
+        ));
+    }
+    if !options.get("clientPin").copied().unwrap_or(false) {
+        return Err(CliError("No PIN is set.".to_string()));
+    }
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?; // AuthenticatorConfig
+
+    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    config
+        .set_min_pin_length(None, None, true)
+        .map_err(|e| CliError(format!("Failed to set force change: {e}")))?;
+
+    println!("Force PIN change set.");
+    Ok(())
+}
+
+pub fn run_access_set_min_length(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    length: u32,
+    pin: Option<&str>,
+    rp_ids: &[String],
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let info = ctap2.info();
+    if !info
+        .options
+        .get("setMinPINLength")
+        .copied()
+        .unwrap_or(false)
+    {
+        return Err(CliError(
+            "Set minimum PIN length is not supported on this YubiKey.".to_string(),
+        ));
+    }
+
+    if (length as usize) < info.min_pin_length {
+        return Err(CliError(format!(
+            "Cannot set a minimum length shorter than {}.",
+            info.min_pin_length
+        )));
+    }
+
+    if !rp_ids.is_empty() && rp_ids.len() > info.max_rpids_for_min_pin {
+        return Err(CliError(format!(
+            "Authenticator supports up to {} RP IDs ({} given).",
+            info.max_rpids_for_min_pin,
+            rp_ids.len()
+        )));
+    }
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
+
+    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let rp_strs: Vec<&str> = rp_ids.iter().map(|s| s.as_str()).collect();
+    let rp_arg = if rp_strs.is_empty() {
+        None
+    } else {
+        Some(rp_strs.as_slice())
+    };
+    config
+        .set_min_pin_length(Some(length), rp_arg, false)
+        .map_err(|e| CliError(format!("Failed to set minimum PIN length: {e}")))?;
+
+    println!("Minimum PIN length set.");
+    Ok(())
+}
+
+pub fn run_credentials_list(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    if !ctap2
+        .info()
+        .options
+        .get("credMgmt")
+        .or(ctap2.info().options.get("credentialMgmtPreview"))
+        .copied()
+        .unwrap_or(false)
+    {
+        return Err(CliError(
+            "Credential management is not supported on this YubiKey.".to_string(),
+        ));
+    }
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x04)?; // CredentialManagement
+
+    let credman = fido2::credman::CredentialManagement::new(&ctap2, protocol, &token);
+
+    let rps = credman
+        .enumerate_rps()
+        .map_err(|e| CliError(format!("Failed to enumerate RPs: {e}")))?;
+
+    if rps.is_empty() {
+        println!("No discoverable credentials.");
+        return Ok(());
+    }
+
+    for rp_resp in &rps {
+        let rp_map = match rp_resp {
+            Value::Map(m) => m,
+            _ => continue,
+        };
+        // Key 3 = rp entity, Key 4 = rpIDHash
+        let rp_id = cbor_map_get_text(rp_map, 3, "id").unwrap_or_default();
+        let rp_id_hash = cbor_map_get_bytes(rp_map, 4).unwrap_or_default();
+
+        let creds = credman
+            .enumerate_creds(&rp_id_hash)
+            .map_err(|e| CliError(format!("Failed to enumerate credentials: {e}")))?;
+
+        for cred_resp in &creds {
+            let cred_map = match cred_resp {
+                Value::Map(m) => m,
+                _ => continue,
+            };
+            // Key 6 = user entity, Key 7 = credentialID
+            let user_name = cbor_map_get_text(cred_map, 6, "name").unwrap_or_default();
+            let display_name = cbor_map_get_text(cred_map, 6, "displayName").unwrap_or_default();
+            let cred_id_bytes = cbor_map_get_nested_bytes(cred_map, 7, "id").unwrap_or_default();
+            let cred_id_hex = hex::encode(&cred_id_bytes);
+
+            println!(
+                "{}... {} {} {}",
+                &cred_id_hex[..8.min(cred_id_hex.len())],
+                rp_id,
+                user_name,
+                display_name
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub fn run_credentials_delete(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    credential_id: &str,
+    pin: Option<&str>,
+    force: bool,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x04)?;
+
+    let credman = fido2::credman::CredentialManagement::new(&ctap2, protocol, &token);
+    let search = credential_id.trim_end_matches('.').to_lowercase();
+
+    // Find matching credentials
+    let rps = credman
+        .enumerate_rps()
+        .map_err(|e| CliError(format!("Failed to enumerate RPs: {e}")))?;
+
+    let mut hits = Vec::new();
+    for rp_resp in &rps {
+        let rp_map = match rp_resp {
+            Value::Map(m) => m,
+            _ => continue,
+        };
+        let rp_id = cbor_map_get_text(rp_map, 3, "id").unwrap_or_default();
+        let rp_id_hash = cbor_map_get_bytes(rp_map, 4).unwrap_or_default();
+
+        let creds = credman.enumerate_creds(&rp_id_hash).unwrap_or_default();
+        for cred_resp in &creds {
+            let cred_map = match cred_resp {
+                Value::Map(m) => m,
+                _ => continue,
+            };
+            let user_name = cbor_map_get_text(cred_map, 6, "name").unwrap_or_default();
+            let display_name = cbor_map_get_text(cred_map, 6, "displayName").unwrap_or_default();
+            let cred_id_bytes = cbor_map_get_nested_bytes(cred_map, 7, "id").unwrap_or_default();
+            let cred_id_hex = hex::encode(&cred_id_bytes);
+
+            if cred_id_hex.starts_with(&search) {
+                // Build the credentialID CBOR value for deletion
+                let cred_id_value = cbor_map_get_value(cred_map, 7).cloned();
+                if let Some(v) = cred_id_value {
+                    hits.push((rp_id.clone(), user_name, display_name, cred_id_hex, v));
+                }
+            }
+        }
+    }
+
+    match hits.len() {
+        0 => Err(CliError("No matches, nothing to be done.".to_string())),
+        1 => {
+            let (rp_id, user_name, display_name, cred_id_hex, cred_id_val) = &hits[0];
+            if !force {
+                eprint!("Delete {rp_id} {user_name} {display_name} ({cred_id_hex})? [y/N] ");
+                let mut answer = String::new();
+                std::io::stdin()
+                    .read_line(&mut answer)
+                    .map_err(|e| CliError(format!("Failed to read input: {e}")))?;
+                if !answer.trim().eq_ignore_ascii_case("y") {
+                    return Err(CliError("Deletion aborted.".to_string()));
+                }
+            }
+            println!("Deleting credential, DO NOT REMOVE YOUR YUBIKEY!");
+            credman
+                .delete_cred(cred_id_val.clone())
+                .map_err(|e| CliError(format!("Failed to delete credential: {e}")))?;
+            println!("Credential deleted.");
+            Ok(())
+        }
+        _ => Err(CliError(
+            "Multiple matches, make the credential ID more specific.".to_string(),
+        )),
+    }
+}
+
+pub fn run_fingerprints_list(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let bio_enroll = ctap2.info().options.get("bioEnroll").copied();
+    if bio_enroll.is_none() {
+        return Err(CliError(
+            "Fingerprints are not supported on this YubiKey.".to_string(),
+        ));
+    }
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?; // BioEnrollment
+
+    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+
+    let enrollments = bio
+        .enumerate_enrollments()
+        .map_err(|e| CliError(format!("Failed to enumerate fingerprints: {e}")))?;
+
+    match enrollments {
+        Value::Map(entries) => {
+            if entries.is_empty() {
+                println!("No fingerprints registered.");
+            }
+            for (id, name) in &entries {
+                let id_hex = id
+                    .as_bytes()
+                    .map(hex::encode)
+                    .unwrap_or_else(|| format!("{id:?}"));
+                let name_str = name.as_text().unwrap_or("(unnamed)");
+                println!("ID: {id_hex} {name_str}");
+            }
+        }
+        _ => println!("No fingerprints registered."),
+    }
+
+    Ok(())
+}
+
+pub fn run_fingerprints_add(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    name: &str,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    if name.len() > 15 {
+        return Err(CliError(
+            "Fingerprint name must be a maximum of 15 characters.".to_string(),
+        ));
+    }
+
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
+
+    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+
+    // Begin enrollment
+    eprintln!("Place your finger against the sensor now...");
+    let (template_id, _status, remaining) = bio
+        .enroll_begin(None, &mut |status| {
+            if status == fido2::ctap::keepalive::UPNEEDED {
+                eprintln!("Touch the sensor...");
+            }
+        })
+        .map_err(|e| CliError(format!("Enrollment failed: {e}")))?;
+
+    if remaining > 0 {
+        eprintln!("{remaining} more scans needed.");
+    }
+
+    // Continue capturing
+    let mut scans_remaining = remaining;
+    while scans_remaining > 0 {
+        eprintln!("Place your finger against the sensor now...");
+        match bio.enroll_capture_next(&template_id, None, &mut |status| {
+            if status == fido2::ctap::keepalive::UPNEEDED {
+                eprintln!("Touch the sensor...");
+            }
+        }) {
+            Ok((_status, remaining)) => {
+                scans_remaining = remaining;
+                if remaining > 0 {
+                    eprintln!("{remaining} more scans needed.");
+                }
+            }
+            Err(e) => {
+                if e.get_status() == Some(fido2::ctap::CtapStatus::FpDatabaseFull) {
+                    return Err(CliError(
+                        "Fingerprint storage full. Remove some fingerprints first.".to_string(),
+                    ));
+                }
+                if e.get_status() == Some(fido2::ctap::CtapStatus::UserActionTimeout) {
+                    return Err(CliError(
+                        "Failed to add fingerprint due to user inactivity.".to_string(),
+                    ));
+                }
+                eprintln!("Capture failed. Re-center your finger, and try again.");
+            }
+        }
+    }
+
+    eprintln!("Capture complete.");
+    bio.set_name(&template_id, name)
+        .map_err(|e| CliError(format!("Failed to set fingerprint name: {e}")))?;
+    println!("Fingerprint registered.");
+    Ok(())
+}
+
+pub fn run_fingerprints_rename(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    template_id: &str,
+    name: &str,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    if name.len() > 15 {
+        return Err(CliError(
+            "Fingerprint name must be a maximum of 15 characters.".to_string(),
+        ));
+    }
+
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
+
+    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+
+    let key =
+        hex::decode(template_id).map_err(|e| CliError(format!("Invalid template ID hex: {e}")))?;
+
+    bio.set_name(&key, name)
+        .map_err(|e| CliError(format!("Failed to rename fingerprint: {e}")))?;
+    println!("Fingerprint renamed.");
+    Ok(())
+}
+
+pub fn run_fingerprints_delete(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    template_id: &str,
+    pin: Option<&str>,
+    force: bool,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
+
+    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+
+    let key = hex::decode(template_id)
+        .map_err(|_| CliError(format!("Invalid template ID hex: {template_id}")))?;
+
+    if !force {
+        eprint!("Delete fingerprint {template_id}? [y/N] ");
+        let mut answer = String::new();
+        std::io::stdin()
+            .read_line(&mut answer)
+            .map_err(|e| CliError(format!("Failed to read input: {e}")))?;
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            return Err(CliError("Deletion aborted.".to_string()));
+        }
+    }
+
+    bio.remove_enrollment(&key)
+        .map_err(|e| CliError(format!("Failed to delete fingerprint: {e}")))?;
+    println!("Fingerprint deleted.");
+    Ok(())
+}
+
+pub fn run_config_toggle_always_uv(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let options = &ctap2.info().options;
+    let always_uv = match options.get("alwaysUv") {
+        Some(&v) => v,
+        None => {
+            return Err(CliError(
+                "Always Require UV is not supported on this YubiKey.".to_string(),
+            ));
+        }
+    };
+
+    let info = dev.info();
+    if info.fips_capable.contains(Capability::FIDO2) {
+        return Err(CliError(
+            "Always Require UV cannot be disabled on this YubiKey.".to_string(),
+        ));
+    }
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
+
+    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    config
+        .toggle_always_uv()
+        .map_err(|e| CliError(format!("Failed to toggle Always Require UV: {e}")))?;
+
+    println!(
+        "Always Require UV is {}.",
+        if always_uv { "off" } else { "on" }
+    );
+    Ok(())
+}
+
+pub fn run_config_enable_ep_attestation(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+
+    let options = &ctap2.info().options;
+    if !options.contains_key("ep") {
+        return Err(CliError(
+            "Enterprise Attestation is not supported on this YubiKey.".to_string(),
+        ));
+    }
+    if options.get("alwaysUv") == Some(&true) && options.get("clientPin") != Some(&true) {
+        return Err(CliError(
+            "Enabling Enterprise Attestation requires a PIN when alwaysUv is enabled.".to_string(),
+        ));
+    }
+
+    let pin_str = require_pin(pin)?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
+
+    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    config
+        .enable_enterprise_attestation()
+        .map_err(|e| CliError(format!("Failed to enable Enterprise Attestation: {e}")))?;
+
+    println!("Enterprise Attestation enabled.");
+    Ok(())
+}
+
+// --- CBOR map helper functions ---
+
+fn cbor_map_get_value(map: &[(Value, Value)], key: i64) -> Option<&Value> {
+    map.iter()
+        .find(|(k, _)| matches!(k, Value::Int(n) if *n == key))
+        .map(|(_, v)| v)
+}
+
+fn cbor_map_get_text(map: &[(Value, Value)], key: i64, field: &str) -> Option<String> {
+    let entity = cbor_map_get_value(map, key)?;
+    if let Value::Map(entries) = entity {
+        for (k, v) in entries {
+            if k.as_text() == Some(field) {
+                return v.as_text().map(|s| s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn cbor_map_get_bytes(map: &[(Value, Value)], key: i64) -> Option<Vec<u8>> {
+    cbor_map_get_value(map, key)?.as_bytes().map(|b| b.to_vec())
+}
+
+fn cbor_map_get_nested_bytes(map: &[(Value, Value)], key: i64, field: &str) -> Option<Vec<u8>> {
+    let entity = cbor_map_get_value(map, key)?;
+    if let Value::Map(entries) = entity {
+        for (k, v) in entries {
+            if k.as_text() == Some(field) {
+                return v.as_bytes().map(|b| b.to_vec());
+            }
+        }
+    }
+    None
 }

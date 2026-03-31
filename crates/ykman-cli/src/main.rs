@@ -276,6 +276,15 @@ enum FidoAction {
     /// Manage FIDO2 PIN
     #[command(subcommand)]
     Access(FidoAccessAction),
+    /// Manage discoverable credentials
+    #[command(subcommand)]
+    Credentials(FidoCredentialAction),
+    /// Manage fingerprints
+    #[command(subcommand)]
+    Fingerprints(FidoFingerprintAction),
+    /// Manage configuration options
+    #[command(subcommand)]
+    Config(FidoConfigAction),
 }
 
 #[derive(Subcommand)]
@@ -293,6 +302,103 @@ enum FidoAccessAction {
     /// Verify the PIN (and unblock if needed)
     #[command(name = "verify-pin")]
     VerifyPin {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Force the PIN to be changed before use
+    #[command(name = "force-change")]
+    ForceChange {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Set the minimum length allowed for PIN
+    #[command(name = "set-min-length")]
+    SetMinLength {
+        /// New minimum PIN length (4-63)
+        length: u32,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// RP ID to allow (can be repeated)
+        #[arg(short = 'R', long = "rp-id", action = clap::ArgAction::Append)]
+        rp_id: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum FidoCredentialAction {
+    /// List stored credentials
+    List {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Delete a credential
+    Delete {
+        /// Credential ID (hex prefix)
+        credential_id: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Confirm deletion without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum FidoFingerprintAction {
+    /// List registered fingerprints
+    List {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Add a new fingerprint
+    Add {
+        /// Name for the fingerprint
+        name: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Rename a fingerprint
+    Rename {
+        /// Fingerprint template ID (hex)
+        template_id: String,
+        /// New name
+        name: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Delete a fingerprint
+    Delete {
+        /// Fingerprint template ID (hex) or name
+        template_id: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Confirm deletion without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum FidoConfigAction {
+    /// Toggle the Always Require UV setting
+    #[command(name = "toggle-always-uv")]
+    ToggleAlwaysUv {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Enable Enterprise Attestation
+    #[command(name = "enable-ep-attestation")]
+    EnableEpAttestation {
         /// PIN code
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -2487,6 +2593,85 @@ fn run() -> Result<(), CliError> {
                         }
                         FidoAccessAction::VerifyPin { pin } => {
                             fido::run_access_verify_pin(&dev, &scp_params, pin.as_deref())
+                        }
+                        FidoAccessAction::ForceChange { pin } => {
+                            fido::run_access_force_change(&dev, &scp_params, pin.as_deref())
+                        }
+                        FidoAccessAction::SetMinLength { length, pin, rp_id } => {
+                            fido::run_access_set_min_length(
+                                &dev,
+                                &scp_params,
+                                length,
+                                pin.as_deref(),
+                                &rp_id,
+                            )
+                        }
+                    }
+                }
+                FidoAction::Credentials(cred) => {
+                    check_capability(&dev, Capability::FIDO2)?;
+                    match cred {
+                        FidoCredentialAction::List { pin } => {
+                            fido::run_credentials_list(&dev, &scp_params, pin.as_deref())
+                        }
+                        FidoCredentialAction::Delete {
+                            credential_id,
+                            pin,
+                            force,
+                        } => fido::run_credentials_delete(
+                            &dev,
+                            &scp_params,
+                            &credential_id,
+                            pin.as_deref(),
+                            force,
+                        ),
+                    }
+                }
+                FidoAction::Fingerprints(fp) => {
+                    check_capability(&dev, Capability::FIDO2)?;
+                    match fp {
+                        FidoFingerprintAction::List { pin } => {
+                            fido::run_fingerprints_list(&dev, &scp_params, pin.as_deref())
+                        }
+                        FidoFingerprintAction::Add { name, pin } => {
+                            fido::run_fingerprints_add(&dev, &scp_params, &name, pin.as_deref())
+                        }
+                        FidoFingerprintAction::Rename {
+                            template_id,
+                            name,
+                            pin,
+                        } => fido::run_fingerprints_rename(
+                            &dev,
+                            &scp_params,
+                            &template_id,
+                            &name,
+                            pin.as_deref(),
+                        ),
+                        FidoFingerprintAction::Delete {
+                            template_id,
+                            pin,
+                            force,
+                        } => fido::run_fingerprints_delete(
+                            &dev,
+                            &scp_params,
+                            &template_id,
+                            pin.as_deref(),
+                            force,
+                        ),
+                    }
+                }
+                FidoAction::Config(cfg) => {
+                    check_capability(&dev, Capability::FIDO2)?;
+                    match cfg {
+                        FidoConfigAction::ToggleAlwaysUv { pin } => {
+                            fido::run_config_toggle_always_uv(&dev, &scp_params, pin.as_deref())
+                        }
+                        FidoConfigAction::EnableEpAttestation { pin } => {
+                            fido::run_config_enable_ep_attestation(
+                                &dev,
+                                &scp_params,
+                                pin.as_deref(),
+                            )
                         }
                     }
                 }
