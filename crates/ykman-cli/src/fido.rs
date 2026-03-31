@@ -35,7 +35,8 @@ use std::cell::RefCell;
 use fido2::ctap::{CtapDevice, CtapError};
 use fido2::ctap2::Ctap2;
 use fido2::pin::ClientPin;
-use yubikit::device::YubiKeyDevice;
+use yubikit::core::Transport;
+use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
 use yubikit::transport::ctaphid::HidFidoConnection;
@@ -434,5 +435,179 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
         }
     }
 
+    Ok(())
+}
+
+pub fn run_reset(
+    dev: &mut YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
+    let info = dev.info();
+    let transport = dev.transport();
+
+    // Check if FIDO reset is blocked
+    if info.reset_blocked.contains(Capability::FIDO2) {
+        return Err(CliError(
+            "Cannot perform FIDO reset when PIV is configured, \
+             use 'ykman config reset' for full factory reset."
+                .to_string(),
+        ));
+    }
+
+    let fido2_enabled = info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+
+    if !force {
+        eprint!(
+            "WARNING! This will delete all FIDO credentials, including FIDO U2F \
+             credentials, and restore factory settings. Proceed? [y/N] "
+        );
+        let mut answer = String::new();
+        std::io::stdin()
+            .read_line(&mut answer)
+            .map_err(|e| CliError(format!("Failed to read input: {e}")))?;
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            return Err(CliError("Reset aborted by user.".to_string()));
+        }
+
+        // Close and reinsert for USB
+        if transport == Transport::Usb {
+            dev.reinsert(
+                &|status| match status {
+                    ReinsertStatus::Remove => eprintln!("Remove your YubiKey from the USB port."),
+                    ReinsertStatus::Reinsert => eprintln!("Re-insert your YubiKey now..."),
+                },
+                &|| false,
+            )
+            .map_err(|e| CliError(format!("Reinsert failed: {e}")))?;
+        }
+    }
+
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+
+    if fido2_enabled {
+        let ctap2 = Ctap2::new(ctap_dev, false)
+            .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        eprintln!("Touch your YubiKey...");
+        ctap2
+            .reset(&mut |status| {
+                if status == fido2::ctap::keepalive::UPNEEDED {
+                    eprintln!("Touch your YubiKey now!");
+                }
+            })
+            .map_err(|e| CliError(format!("FIDO reset failed: {e}")))?;
+    } else {
+        return Err(CliError(
+            "FIDO2 is not enabled on this YubiKey.".to_string(),
+        ));
+    }
+
+    println!("FIDO application has been reset.");
+    Ok(())
+}
+
+pub fn run_access_change_pin(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+    new_pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+
+    let pin_is_set = ctap2.info().options.get("clientPin") == Some(&true);
+
+    if pin_is_set {
+        // Change existing PIN
+        let current_pin = match pin {
+            Some(p) => p.to_string(),
+            None => {
+                eprint!("Enter your current PIN: ");
+                rpassword::read_password()
+                    .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?
+            }
+        };
+        let new = match new_pin {
+            Some(p) => p.to_string(),
+            None => {
+                eprint!("Enter your new PIN: ");
+                let p1 = rpassword::read_password()
+                    .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?;
+                eprint!("Confirm your new PIN: ");
+                let p2 = rpassword::read_password()
+                    .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?;
+                if p1 != p2 {
+                    return Err(CliError("PINs do not match.".to_string()));
+                }
+                p1
+            }
+        };
+        client_pin
+            .change_pin(&current_pin, &new)
+            .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
+        println!("PIN has been changed.");
+    } else {
+        // Set new PIN
+        let new = match new_pin.or(pin) {
+            Some(p) => p.to_string(),
+            None => {
+                eprint!("Enter your new PIN: ");
+                let p1 = rpassword::read_password()
+                    .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?;
+                eprint!("Confirm your new PIN: ");
+                let p2 = rpassword::read_password()
+                    .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?;
+                if p1 != p2 {
+                    return Err(CliError("PINs do not match.".to_string()));
+                }
+                p1
+            }
+        };
+        client_pin
+            .set_pin(&new)
+            .map_err(|e| CliError(format!("Failed to set PIN: {e}")))?;
+        println!("PIN has been set.");
+    }
+
+    Ok(())
+}
+
+pub fn run_access_verify_pin(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+    let client_pin = ClientPin::new(&ctap2, None)
+        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+
+    let pin_str = match pin {
+        Some(p) => p.to_string(),
+        None => {
+            eprint!("Enter your PIN: ");
+            rpassword::read_password().map_err(|e| CliError(format!("Failed to read PIN: {e}")))?
+        }
+    };
+
+    // Get a PIN token to verify the PIN
+    client_pin
+        .get_pin_token(&pin_str, None, None)
+        .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+
+    println!("PIN verified.");
     Ok(())
 }

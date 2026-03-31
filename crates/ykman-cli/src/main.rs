@@ -267,6 +267,36 @@ enum Commands {
 enum FidoAction {
     /// Display general status of the FIDO2 application
     Info,
+    /// Reset all FIDO applications
+    Reset {
+        /// Confirm the action without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage FIDO2 PIN
+    #[command(subcommand)]
+    Access(FidoAccessAction),
+}
+
+#[derive(Subcommand)]
+enum FidoAccessAction {
+    /// Set or change the PIN code
+    #[command(name = "change-pin")]
+    ChangePin {
+        /// Current PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// New PIN code
+        #[arg(short = 'n', long = "new-pin")]
+        new_pin: Option<String>,
+    },
+    /// Verify the PIN (and unblock if needed)
+    #[command(name = "verify-pin")]
+    VerifyPin {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2438,11 +2468,28 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
-            let dev = require_device(cli.device)?;
+            let mut dev = require_device(cli.device)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
                 FidoAction::Info => fido::run_info(&dev, &scp_params),
+                FidoAction::Reset { force } => fido::run_reset(&mut dev, &scp_params, force),
+                FidoAction::Access(access) => {
+                    check_capability(&dev, Capability::FIDO2)?;
+                    match access {
+                        FidoAccessAction::ChangePin { pin, new_pin } => {
+                            fido::run_access_change_pin(
+                                &dev,
+                                &scp_params,
+                                pin.as_deref(),
+                                new_pin.as_deref(),
+                            )
+                        }
+                        FidoAccessAction::VerifyPin { pin } => {
+                            fido::run_access_verify_pin(&dev, &scp_params, pin.as_deref())
+                        }
+                    }
+                }
             }
         }
         Commands::Openpgp { action } => {
