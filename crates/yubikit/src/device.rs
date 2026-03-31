@@ -1313,11 +1313,11 @@ pub fn get_name(info: &DeviceInfo) -> String {
     // even on preview firmware, matching the Python behavior where key_type
     // is determined from PID before the preview check.
     if info.is_sky {
-        if !usb_supported.contains(Capability::FIDO2) {
-            return "FIDO U2F Security Key".to_string();
-        }
         if info.version >= Version(5, 1, 0) {
             return build_yk5_name(info, usb_supported);
+        }
+        if !usb_supported.contains(Capability::FIDO2) {
+            return "FIDO U2F Security Key".to_string();
         }
         return "Security Key".to_string();
     }
