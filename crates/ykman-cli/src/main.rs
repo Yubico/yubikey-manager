@@ -2,10 +2,9 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
-use yubikit::core::{Transport, set_override_version};
+use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::{YubiKeyDevice, list_devices};
-use yubikit::management::UsbInterface;
-use yubikit::management::{Capability, ReleaseType};
+use yubikit::management::{Capability, ReleaseType, UsbInterface};
 
 mod apdu;
 mod appdata;
@@ -1432,38 +1431,6 @@ fn require_device(serial: Option<u32>) -> Result<YubiKeyDevice, CliError> {
     select_device(devices, serial)
 }
 
-/// Check that the device has the required USB interfaces available.
-///
-/// Returns an error if none of the required interfaces are present.
-fn check_interface(dev: &YubiKeyDevice, interfaces: UsbInterface) -> Result<(), CliError> {
-    let has_ccid = dev.reader_name().is_some();
-    let has_otp = dev.hid_path().is_some();
-    let has_fido = dev.fido_path().is_some();
-    let satisfied = (interfaces.contains(UsbInterface::CCID) && has_ccid)
-        || (interfaces.contains(UsbInterface::OTP) && has_otp)
-        || (interfaces.contains(UsbInterface::FIDO) && has_fido);
-
-    if !satisfied {
-        let mut names = Vec::new();
-        if interfaces.contains(UsbInterface::CCID) {
-            names.push("CCID");
-        }
-        if interfaces.contains(UsbInterface::OTP) {
-            names.push("OTP");
-        }
-        if interfaces.contains(UsbInterface::FIDO) {
-            names.push("FIDO");
-        }
-        return Err(CliError(format!(
-            "Command requires one of the following USB interfaces \
-             to be enabled: {}.\n\n\
-             Use 'ykman config usb' to set the enabled USB interfaces.",
-            names.join(", ")
-        )));
-    }
-    Ok(())
-}
-
 /// Check that a capability is available and enabled on the device.
 ///
 /// Returns an error distinguishing between "not supported" and "disabled".
@@ -1523,6 +1490,34 @@ fn capability_name(cap: Capability) -> &'static str {
     } else {
         "Application"
     }
+}
+
+/// Check that the device firmware version meets a minimum requirement.
+fn check_version(dev: &YubiKeyDevice, required: Version, feature: &str) -> Result<(), CliError> {
+    let version = dev.info().version;
+    if version < required {
+        Err(CliError(format!(
+            "{feature} requires YubiKey {required} or later (this device has {version}).",
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+/// Check that the device supports the SCP parameters being used.
+fn check_scp_version(dev: &YubiKeyDevice, scp: &ScpParams) -> Result<(), CliError> {
+    if scp.scp03_keys.is_some() {
+        check_version(dev, Version(5, 3, 0), "SCP03")?;
+    }
+    if scp.scp11_private_key.is_some()
+        || !scp.scp11_certificates.is_empty()
+        || scp.sd_ref.is_some()
+        || scp.oce_ref.is_some()
+        || scp.ca_cert.is_some()
+    {
+        check_version(dev, Version(5, 7, 2), "SCP11")?;
+    }
+    Ok(())
 }
 
 /// After resolving a device, apply version override if needed.
@@ -1824,7 +1819,7 @@ fn run() -> Result<(), CliError> {
         Commands::Oath { action } => {
             let dev = require_device(cli.device)?;
             check_capability(&dev, Capability::OATH)?;
-            check_interface(&dev, UsbInterface::CCID)?;
+            check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
                 OathAction::Info { password } => {
@@ -1980,7 +1975,7 @@ fn run() -> Result<(), CliError> {
         } => {
             let dev = require_device(cli.device)?;
             check_capability(&dev, Capability::OTP)?;
-            check_interface(&dev, UsbInterface::CCID | UsbInterface::OTP)?;
+            check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             // access_code from parent command overrides per-subcommand access_code
             let _ = access_code; // available for subcommands that need it
@@ -2171,7 +2166,7 @@ fn run() -> Result<(), CliError> {
         Commands::Piv { action } => {
             let dev = require_device(cli.device)?;
             check_capability(&dev, Capability::PIV)?;
-            check_interface(&dev, UsbInterface::CCID)?;
+            check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
                 PivAction::Info => piv::run_info(&dev, &scp_params),
@@ -2427,7 +2422,7 @@ fn run() -> Result<(), CliError> {
         Commands::Openpgp { action } => {
             let dev = require_device(cli.device)?;
             check_capability(&dev, Capability::OPENPGP)?;
-            check_interface(&dev, UsbInterface::CCID)?;
+            check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
                 OpenpgpAction::Info => openpgp::run_info(&dev, &scp_params),
@@ -2565,7 +2560,7 @@ fn run() -> Result<(), CliError> {
         Commands::Hsmauth { action } => {
             let dev = require_device(cli.device)?;
             check_capability(&dev, Capability::HSMAUTH)?;
-            check_interface(&dev, UsbInterface::CCID)?;
+            check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
                 HsmauthAction::Info => hsmauth::run_info(&dev, &scp_params),
@@ -2683,7 +2678,8 @@ fn run() -> Result<(), CliError> {
         }
         Commands::SecurityDomain { action } => {
             let dev = require_device(cli.device)?;
-            check_interface(&dev, UsbInterface::CCID)?;
+            check_version(&dev, Version(5, 3, 0), "Security Domain")?;
+            check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
                 SecurityDomainAction::Info => securitydomain::run_info(&dev, &scp_params),
@@ -2769,7 +2765,12 @@ fn run() -> Result<(), CliError> {
             send_apdu,
         } => {
             let dev = require_device(cli.device)?;
-            check_interface(&dev, UsbInterface::CCID)?;
+            if dev.reader_name().is_none() {
+                return Err(CliError(
+                    "The apdu command requires a CCID (smart card) connection.".into(),
+                ));
+            }
+            check_scp_version(&dev, &scp_params)?;
             apdu::run_apdu(
                 &dev,
                 &scp_params,
