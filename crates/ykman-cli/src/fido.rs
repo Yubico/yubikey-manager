@@ -72,11 +72,10 @@ impl CtapDevice for HidCtapDevice {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        _cancel: Option<&AtomicBool>,
+        cancel: Option<&AtomicBool>,
     ) -> Result<Vec<u8>, CtapError> {
-        // TODO: Pass cancel to HidFidoConnection once it supports it
         self.conn
-            .call_with_keepalive(cmd, data, on_keepalive)
+            .call_with_keepalive(cmd, data, on_keepalive, cancel)
             .map_err(|e| CtapError::TransportError(e.to_string()))
     }
 
@@ -458,6 +457,12 @@ pub fn run_reset(
         .get(&transport)
         .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
 
+    if !fido2_enabled {
+        return Err(CliError(
+            "FIDO2 is not enabled on this YubiKey.".to_string(),
+        ));
+    }
+
     if !force {
         eprint!(
             "WARNING! This will delete all FIDO credentials, including FIDO U2F \
@@ -487,28 +492,77 @@ pub fn run_reset(
     let fido_device = open_fido_device(dev, scp_params)?;
     let ctap_dev = fido_device.as_ctap_device();
 
-    if fido2_enabled {
-        let ctap2 = Ctap2::new(ctap_dev, false)
-            .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
-        eprintln!("Touch your YubiKey...");
-        ctap2
-            .reset(
-                &mut |status| {
-                    if status == fido2::ctap::keepalive::UPNEEDED {
-                        eprintln!("Touch your YubiKey now!");
-                    }
-                },
-                None,
-            )
-            .map_err(|e| CliError(format!("FIDO reset failed: {e}")))?;
-    } else {
-        return Err(CliError(
-            "FIDO2 is not enabled on this YubiKey.".to_string(),
-        ));
+    let ctap2 = Ctap2::new(ctap_dev, false)
+        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+    let ctap_info = ctap2.info();
+
+    // Check transport restrictions
+    let transports_for_reset = &ctap_info.transports_for_reset;
+    if !transports_for_reset.is_empty() {
+        let transport_name = match transport {
+            Transport::Usb => "usb",
+            Transport::Nfc => "nfc",
+        };
+        if !transports_for_reset.iter().any(|t| t == transport_name) {
+            return Err(CliError(format!(
+                "Cannot perform FIDO reset over the current transport. \
+                 Allowed transports: {}",
+                transports_for_reset.join(", ")
+            )));
+        }
     }
 
-    println!("FIDO application has been reset.");
-    Ok(())
+    let touch_msg = if ctap_info.long_touch_for_reset {
+        "Press and hold the YubiKey button for 5 seconds to confirm."
+    } else {
+        "Touch the YubiKey to confirm."
+    };
+
+    // Set up Ctrl+C handler for cancellation
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    let cancel_clone = cancel.clone();
+    let _ = ctrlc::set_handler(move || {
+        cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    let result = ctap2.reset(
+        &mut |status| {
+            if status == fido2::ctap::keepalive::UPNEEDED {
+                eprintln!("{touch_msg}");
+            } else if status == fido2::ctap::keepalive::PROCESSING {
+                eprintln!("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!");
+            }
+        },
+        Some(&cancel),
+    );
+
+    match result {
+        Ok(()) => {
+            println!("FIDO application has been reset.");
+            Ok(())
+        }
+        Err(e) => {
+            if e.get_status() == Some(fido2::ctap::CtapStatus::UserActionTimeout) {
+                Err(CliError(
+                    "Reset failed. You need to touch your YubiKey to confirm the reset."
+                        .to_string(),
+                ))
+            } else if matches!(
+                e.get_status(),
+                Some(fido2::ctap::CtapStatus::NotAllowed | fido2::ctap::CtapStatus::PinAuthBlocked)
+            ) {
+                Err(CliError(
+                    "Reset failed. Reset must be triggered within 5 seconds after the \
+                     YubiKey is inserted."
+                        .to_string(),
+                ))
+            } else if e.get_status() == Some(fido2::ctap::CtapStatus::KeepaliveCancel) {
+                Err(CliError("Reset aborted by user.".to_string()))
+            } else {
+                Err(CliError(format!("FIDO reset failed: {e}")))
+            }
+        }
+    }
 }
 
 pub fn run_access_change_pin(

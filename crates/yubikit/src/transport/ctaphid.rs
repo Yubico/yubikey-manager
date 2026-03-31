@@ -263,22 +263,23 @@ impl HidFidoConnection {
 
     /// Send a CTAP HID command and receive the response.
     pub fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
-        self.call_with_keepalive(cmd, data, &mut |_| {})
+        self.call_with_keepalive(cmd, data, &mut |_| {}, None)
     }
 
-    /// Send a CTAP HID command with a keepalive callback.
+    /// Send a CTAP HID command with a keepalive callback and optional cancel.
     ///
-    /// The callback is invoked with the keepalive status byte whenever
-    /// the device signals it is still processing (status 1) or waiting
-    /// for user presence (status 2).
+    /// The callback is invoked with the keepalive status byte when the status
+    /// changes. Consecutive keepalive messages with the same status are filtered.
+    /// If cancel is set, a CTAPHID_CANCEL command is sent to abort the operation.
     pub fn call_with_keepalive(
         &self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<Vec<u8>, CtapHidTransportError> {
         self.send_request(cmd, data)?;
-        self.recv_response(cmd, on_keepalive)
+        self.recv_response(cmd, on_keepalive, cancel)
     }
 
     /// Close the connection.
@@ -297,7 +298,7 @@ impl HidFidoConnection {
 
     fn call_raw(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
         self.send_request(cmd, data)?;
-        self.recv_response(cmd, &mut |_| {})
+        self.recv_response(cmd, &mut |_| {}, None)
     }
 
     fn send_request(&self, cmd: u8, data: &[u8]) -> Result<(), CtapHidTransportError> {
@@ -344,12 +345,14 @@ impl HidFidoConnection {
         &self,
         expected_cmd: u8,
         on_keepalive: &mut dyn FnMut(u8),
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<Vec<u8>, CtapHidTransportError> {
         let dev = self.device()?;
         let mut response = Vec::new();
         let mut r_len: usize = 0;
         let mut seq: u8 = 0;
         let mut first = true;
+        let mut last_ka: Option<u8> = None;
 
         loop {
             let mut buf = vec![0u8; self.packet_size];
@@ -385,7 +388,16 @@ impl HidFidoConnection {
                     if !data.is_empty() {
                         let status = data[0];
                         log::debug!("CTAP keepalive status: {:#04X}", status);
-                        on_keepalive(status);
+                        if last_ka != Some(status) {
+                            last_ka = Some(status);
+                            on_keepalive(status);
+                        }
+                    }
+                    if let Some(flag) = cancel
+                        && flag.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        let _ = self.send_request(CtapHidCommand::Cancel as u8, &[]);
+                        return Err(CtapHidTransportError::CtapHidError(CtapHidError::Other));
                     }
                     continue;
                 } else if r_cmd == TYPE_INIT | CtapHidCommand::Error as u8 {
@@ -431,8 +443,9 @@ impl crate::fido::FidoConnection for HidFidoConnection {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<Vec<u8>, CtapHidTransportError> {
-        self.call_with_keepalive(cmd, data, on_keepalive)
+        self.call_with_keepalive(cmd, data, on_keepalive, cancel)
     }
 
     fn device_version(&self) -> (u8, u8, u8) {
