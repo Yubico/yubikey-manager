@@ -32,6 +32,12 @@ use crate::transport::ctaphid::CtapHidTransportError;
 /// Abstract FIDO connection — send CTAP HID commands.
 pub trait FidoConnection {
     fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError>;
+    fn call_with_keepalive(
+        &self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: &mut dyn FnMut(u8),
+    ) -> Result<Vec<u8>, CtapHidTransportError>;
     fn device_version(&self) -> (u8, u8, u8);
     fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability;
     fn close(&mut self);

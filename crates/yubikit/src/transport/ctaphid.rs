@@ -263,7 +263,22 @@ impl HidFidoConnection {
 
     /// Send a CTAP HID command and receive the response.
     pub fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
-        self.call_raw(cmd, data)
+        self.call_with_keepalive(cmd, data, &mut |_| {})
+    }
+
+    /// Send a CTAP HID command with a keepalive callback.
+    ///
+    /// The callback is invoked with the keepalive status byte whenever
+    /// the device signals it is still processing (status 1) or waiting
+    /// for user presence (status 2).
+    pub fn call_with_keepalive(
+        &self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: &mut dyn FnMut(u8),
+    ) -> Result<Vec<u8>, CtapHidTransportError> {
+        self.send_request(cmd, data)?;
+        self.recv_response(cmd, on_keepalive)
     }
 
     /// Close the connection.
@@ -282,7 +297,7 @@ impl HidFidoConnection {
 
     fn call_raw(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
         self.send_request(cmd, data)?;
-        self.recv_response(cmd)
+        self.recv_response(cmd, &mut |_| {})
     }
 
     fn send_request(&self, cmd: u8, data: &[u8]) -> Result<(), CtapHidTransportError> {
@@ -325,7 +340,11 @@ impl HidFidoConnection {
         Ok(())
     }
 
-    fn recv_response(&self, expected_cmd: u8) -> Result<Vec<u8>, CtapHidTransportError> {
+    fn recv_response(
+        &self,
+        expected_cmd: u8,
+        on_keepalive: &mut dyn FnMut(u8),
+    ) -> Result<Vec<u8>, CtapHidTransportError> {
         let dev = self.device()?;
         let mut response = Vec::new();
         let mut r_len: usize = 0;
@@ -363,10 +382,10 @@ impl HidFidoConnection {
                 let data = &payload[3..];
 
                 if r_cmd == TYPE_INIT | CtapHidCommand::Keepalive as u8 {
-                    // Keepalive — just log and continue waiting
                     if !data.is_empty() {
                         let status = data[0];
                         log::debug!("CTAP keepalive status: {:#04X}", status);
+                        on_keepalive(status);
                     }
                     continue;
                 } else if r_cmd == TYPE_INIT | CtapHidCommand::Error as u8 {
@@ -405,6 +424,15 @@ impl HidFidoConnection {
 impl crate::fido::FidoConnection for HidFidoConnection {
     fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
         self.call(cmd, data)
+    }
+
+    fn call_with_keepalive(
+        &self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: &mut dyn FnMut(u8),
+    ) -> Result<Vec<u8>, CtapHidTransportError> {
+        self.call_with_keepalive(cmd, data, on_keepalive)
     }
 
     fn device_version(&self) -> (u8, u8, u8) {

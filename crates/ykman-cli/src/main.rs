@@ -11,6 +11,7 @@ mod appdata;
 mod cli_enums;
 mod config;
 mod diagnose;
+mod fido;
 mod hsmauth;
 mod info;
 mod list;

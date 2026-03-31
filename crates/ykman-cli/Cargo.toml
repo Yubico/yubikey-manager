@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 yubikit = { path = "../yubikit" }
+fido2 = { path = "../../../fido2-rust/crates/fido2" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 getrandom = "0.3"

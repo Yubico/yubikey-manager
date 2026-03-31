@@ -6,6 +6,7 @@ use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
 use yubikit::transport::pcsc::{PcscSmartCardConnection, is_reader_usb};
 use yubikit::yubiotp::YubiOtpSession;
 
+use crate::fido::HidCtapDevice;
 use crate::util::CliError;
 
 fn cap_names(cap: Capability) -> String {
@@ -122,6 +123,78 @@ fn print_device_info(info: &DeviceInfo, indent: &str) {
             "{indent}    iteration: {}",
             info.version_qualifier.iteration
         );
+    }
+}
+
+fn print_ctap2_info(info: &fido2::ctap2::Info) {
+    println!("      versions:      {:?}", info.versions);
+    if !info.extensions.is_empty() {
+        println!("      extensions:    {:?}", info.extensions);
+    }
+    println!("      aaguid:        {}", info.aaguid);
+    if !info.options.is_empty() {
+        println!("      options:");
+        for (k, v) in &info.options {
+            println!("        {k}: {v}");
+        }
+    }
+    println!("      max_msg_size:  {}", info.max_msg_size);
+    if !info.pin_uv_protocols.is_empty() {
+        println!("      pin_uv_auth_protocols: {:?}", info.pin_uv_protocols);
+    }
+    if info.max_creds_in_list > 0 {
+        println!("      max_creds_in_list:     {}", info.max_creds_in_list);
+    }
+    if info.max_cred_id_length > 0 {
+        println!("      max_cred_id_length:    {}", info.max_cred_id_length);
+    }
+    if !info.transports.is_empty() {
+        println!("      transports:    {:?}", info.transports);
+    }
+    if info.min_pin_length != 4 {
+        println!("      min_pin_length: {}", info.min_pin_length);
+    }
+    if info.firmware_version > 0 {
+        println!("      firmware_version: {}", info.firmware_version);
+    }
+    if let Some(remaining) = info.remaining_disc_creds {
+        println!("      remaining_disc_creds: {remaining}");
+    }
+    if info.force_pin_change {
+        println!("      force_pin_change: true");
+    }
+}
+
+fn print_ctap2_pin_status(ctap2: &fido2::ctap2::Ctap2) {
+    let info = ctap2.info();
+    if info.options.get("clientPin") == Some(&true) {
+        match fido2::pin::ClientPin::new(ctap2, None) {
+            Ok(client_pin) => {
+                match client_pin.get_pin_retries() {
+                    Ok((retries, power_cycle)) => {
+                        print!("      PIN retries: {retries}");
+                        if let Some(pc) = power_cycle {
+                            print!(" (power_cycle: {pc})");
+                        }
+                        println!();
+                    }
+                    Err(e) => println!("      PIN retries error: {e}"),
+                }
+                // Fingerprint status
+                let bio_enroll = info.options.get("bioEnroll");
+                match bio_enroll {
+                    Some(true) => match client_pin.get_uv_retries() {
+                        Ok(retries) => println!("      UV retries: {retries}"),
+                        Err(e) => println!("      UV retries error: {e}"),
+                    },
+                    Some(false) => println!("      Fingerprints: Not configured"),
+                    _ => {}
+                }
+            }
+            Err(e) => println!("      ClientPin error: {e}"),
+        }
+    } else if info.options.contains_key("clientPin") {
+        println!("      PIN: Not configured");
     }
 }
 
@@ -463,15 +536,41 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             println!("    CTAP device version: {v1}.{v2}.{v3}");
                             println!("    Capabilities:        {:#04x}", caps.raw());
 
-                            println!("    Management:");
-                            match read_info_fido(conn) {
-                                Ok((info, _conn)) => {
-                                    let name = get_name(&info);
-                                    print_device_info(&info, "      ");
-                                    println!();
-                                    println!("      Name: {name}");
+                            // CTAP2 Info
+                            if caps.has_cbor() {
+                                println!("    CTAP2 Info:");
+                                let adapter = HidCtapDevice::new(conn);
+                                match fido2::ctap2::Ctap2::new(&adapter, false) {
+                                    Ok(ctap2) => {
+                                        print_ctap2_info(ctap2.info());
+                                        // PIN status
+                                        print_ctap2_pin_status(&ctap2);
+                                    }
+                                    Err(e) => println!("      Error: {e}"),
                                 }
-                                Err((e, _)) => println!("      Error: {e}"),
+                                let conn = adapter.into_connection();
+
+                                println!("    Management:");
+                                match read_info_fido(conn) {
+                                    Ok((info, _conn)) => {
+                                        let name = get_name(&info);
+                                        print_device_info(&info, "      ");
+                                        println!();
+                                        println!("      Name: {name}");
+                                    }
+                                    Err((e, _)) => println!("      Error: {e}"),
+                                }
+                            } else {
+                                println!("    Management:");
+                                match read_info_fido(conn) {
+                                    Ok((info, _conn)) => {
+                                        let name = get_name(&info);
+                                        print_device_info(&info, "      ");
+                                        println!();
+                                        println!("      Name: {name}");
+                                    }
+                                    Err((e, _)) => println!("      Error: {e}"),
+                                }
                             }
                         }
                         Err(e) => println!("    Error: {e}"),
