@@ -33,8 +33,15 @@
 use std::cell::RefCell;
 
 use fido2::ctap::{CtapDevice, CtapError};
+use fido2::ctap2::Ctap2;
+use fido2::pin::ClientPin;
+use yubikit::device::YubiKeyDevice;
+use yubikit::management::Capability;
 use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
 use yubikit::transport::ctaphid::HidFidoConnection;
+
+use crate::scp::{self, ScpParams};
+use crate::util::CliError;
 
 #[allow(dead_code)]
 const AID_FIDO: &[u8] = &[0xA0, 0x00, 0x00, 0x06, 0x47, 0x2F, 0x00, 0x01];
@@ -253,4 +260,179 @@ impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
     fn close(&mut self) {
         // SmartCardProtocol handles cleanup on drop
     }
+}
+
+// --- CLI command implementations ---
+
+/// Open a FIDO connection as a CtapDevice, preferring HID, falling back to SmartCard.
+///
+/// When SCP params are explicit, always uses SmartCard connection.
+/// Otherwise tries HID first (USB direct), then SmartCard (NFC or USB CCID).
+enum FidoDevice {
+    Hid(HidCtapDevice),
+    SmartCard(SmartCardCtapDevice<yubikit::transport::pcsc::PcscSmartCardConnection>),
+}
+
+impl FidoDevice {
+    fn as_ctap_device(&self) -> &dyn CtapDevice {
+        match self {
+            Self::Hid(d) => d,
+            Self::SmartCard(d) => d,
+        }
+    }
+}
+
+fn open_fido_device(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<FidoDevice, CliError> {
+    if scp_params.is_explicit() {
+        // SCP requires SmartCard transport
+        let scp_config = scp::resolve_scp(dev, scp_params, Capability::FIDO2)?;
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        let mut protocol = SmartCardProtocol::new(conn);
+        if let Some(params) = scp::to_scp_key_params(&scp_config) {
+            protocol
+                .init_scp(&params)
+                .map_err(|e| CliError(format!("SCP authentication failed: {e}")))?;
+        }
+        SmartCardCtapDevice::open(protocol)
+            .map(FidoDevice::SmartCard)
+            .map_err(|e| CliError(format!("Failed to open FIDO over SmartCard: {e}")))
+    } else if dev.open_fido().is_ok() {
+        let conn = dev
+            .open_fido()
+            .map_err(|e| CliError(format!("Failed to open FIDO connection: {e}")))?;
+        Ok(FidoDevice::Hid(HidCtapDevice::new(conn)))
+    } else {
+        // Fall back to SmartCard (NFC reader)
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        let protocol = SmartCardProtocol::new(conn);
+        SmartCardCtapDevice::open(protocol)
+            .map(FidoDevice::SmartCard)
+            .map_err(|e| CliError(format!("Failed to open FIDO over SmartCard: {e}")))
+    }
+}
+
+pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    let info = dev.info();
+    let transport = dev.transport();
+
+    let fido_device = open_fido_device(dev, scp_params)?;
+    let ctap_dev = fido_device.as_ctap_device();
+
+    // Check if FIDO2 is enabled
+    let fido2_enabled = info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+
+    if fido2_enabled {
+        let ctap2 = Ctap2::new(ctap_dev, false)
+            .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        let ctap_info = ctap2.info();
+
+        // FIPS status
+        if info.fips_capable.contains(Capability::FIDO2) {
+            println!(
+                "FIPS approved:  {}",
+                if info.fips_approved.contains(Capability::FIDO2) {
+                    "Yes"
+                } else {
+                    "No"
+                }
+            );
+        }
+
+        // AAGUID
+        println!("AAGUID:         {}", ctap_info.aaguid);
+
+        // PIN status
+        let client_pin = ClientPin::new(&ctap2, None)
+            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        if ctap_info.options.get("clientPin") == Some(&true) {
+            if ctap_info.force_pin_change {
+                println!(
+                    "NOTE: The FIDO PIN is disabled and must be changed before it can be used!"
+                );
+            }
+            match client_pin.get_pin_retries() {
+                Ok((retries, power_cycle)) => {
+                    if retries > 0 {
+                        print!("PIN:            {retries} attempt(s) remaining");
+                        if power_cycle.is_some_and(|pc| pc > 0) {
+                            print!(
+                                "\nPIN is temporarily blocked. \
+                                 Remove and re-insert the YubiKey to unblock."
+                            );
+                        }
+                        println!();
+                    } else {
+                        println!("PIN:            Blocked");
+                    }
+                }
+                Err(e) => println!("PIN:            Error: {e}"),
+            }
+        } else {
+            println!("PIN:            Not set");
+        }
+
+        // Minimum PIN length
+        println!("Minimum PIN length: {}", ctap_info.min_pin_length);
+
+        // Fingerprint status
+        let bio_enroll = ctap_info.options.get("bioEnroll");
+        match bio_enroll {
+            Some(true) => match client_pin.get_uv_retries() {
+                Ok(retries) => {
+                    if retries > 0 {
+                        println!("Fingerprints:   Registered, {retries} attempt(s) remaining");
+                    } else {
+                        println!("Fingerprints:   Registered, blocked until PIN is verified");
+                    }
+                }
+                Err(e) => println!("Fingerprints:   Error: {e}"),
+            },
+            Some(false) => println!("Fingerprints:   Not registered"),
+            None => {}
+        }
+
+        // Always Require UV
+        if let Some(&always_uv) = ctap_info.options.get("alwaysUv") {
+            println!(
+                "Always Require UV: {}",
+                if always_uv { "On" } else { "Off" }
+            );
+        }
+
+        // Remaining discoverable credentials
+        if let Some(remaining) = ctap_info.remaining_disc_creds {
+            println!("Credential storage remaining: {remaining}");
+        }
+
+        // Enterprise Attestation
+        if let Some(&ep) = ctap_info.options.get("ep") {
+            println!(
+                "Enterprise Attestation: {}",
+                if ep { "Enabled" } else { "Disabled" }
+            );
+        }
+    } else {
+        // FIDO2 not enabled — check if supported
+        let fido2_supported = info
+            .supported_capabilities
+            .get(&transport)
+            .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+        if fido2_supported {
+            println!("CTAP2:          Disabled");
+            println!("PIN:            Disabled");
+        } else {
+            println!("CTAP2:          Not supported");
+            println!("PIN:            Not supported");
+        }
+    }
+
+    Ok(())
 }

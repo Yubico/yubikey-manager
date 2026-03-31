@@ -195,6 +195,17 @@ enum Commands {
         #[command(subcommand)]
         action: PivAction,
     },
+    /// Manage the FIDO applications
+    #[command(after_help = "Examples:\n\
+      \n  Reset the FIDO (FIDO2 and U2F) applications:\
+      \n  $ ykman fido reset\
+      \n\
+      \n  Change the FIDO2 PIN from 123456 to 654321:\
+      \n  $ ykman fido access change-pin --pin 123456 --new-pin 654321")]
+    Fido {
+        #[command(subcommand)]
+        action: FidoAction,
+    },
     /// Manage the OpenPGP application
     #[command(after_help = "Examples:\n\
       \n  Set the retries for PIN, Reset Code and Admin PIN to 10:\
@@ -250,6 +261,12 @@ enum Commands {
         #[arg(short = 's', long = "send-apdu")]
         send_apdu: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum FidoAction {
+    /// Display general status of the FIDO2 application
+    Info,
 }
 
 #[derive(Subcommand)]
@@ -2418,6 +2435,14 @@ fn run() -> Result<(), CliError> {
                         pin.as_deref(),
                     ),
                 },
+            }
+        }
+        Commands::Fido { action } => {
+            let dev = require_device(cli.device)?;
+            check_scp_version(&dev, &scp_params)?;
+            apply_version_override(&dev);
+            match action {
+                FidoAction::Info => fido::run_info(&dev, &scp_params),
             }
         }
         Commands::Openpgp { action } => {
