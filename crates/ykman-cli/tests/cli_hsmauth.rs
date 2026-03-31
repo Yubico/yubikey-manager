@@ -10,6 +10,7 @@ const NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "010203040506070801020304050607
 #[ignore]
 #[serial]
 fn test_hsmauth_info() {
+    require_interface!("CCID");
     hsmauth_reset();
     ykman_dev()
         .args(["hsmauth", "info"])
@@ -22,6 +23,7 @@ fn test_hsmauth_info() {
 #[ignore]
 #[serial]
 fn test_hsmauth_reset() {
+    require_interface!("CCID");
     ykman_dev()
         .args(["hsmauth", "reset", "-f"])
         .assert()
@@ -32,6 +34,7 @@ fn test_hsmauth_reset() {
 #[ignore]
 #[serial]
 fn test_hsmauth_add_symmetric_and_list() {
+    require_interface!("CCID");
     hsmauth_reset();
 
     ykman_dev()
@@ -81,6 +84,7 @@ fn test_hsmauth_add_symmetric_and_list() {
 #[ignore]
 #[serial]
 fn test_hsmauth_add_derive_and_list() {
+    require_interface!("CCID");
     hsmauth_reset();
 
     ykman_dev()
@@ -111,6 +115,7 @@ fn test_hsmauth_add_derive_and_list() {
 #[ignore]
 #[serial]
 fn test_hsmauth_credential_import() {
+    require_interface!("CCID");
     hsmauth_reset();
 
     let key_file = fixture_path("ec_p256_key.pem");
@@ -146,6 +151,7 @@ fn test_hsmauth_credential_import() {
 #[ignore]
 #[serial]
 fn test_hsmauth_change_management_password() {
+    require_interface!("CCID");
     hsmauth_reset();
 
     // Change management password to non-default

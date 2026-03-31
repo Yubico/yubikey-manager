@@ -2,13 +2,14 @@
 //!
 //! These tests require a YubiKey to be connected and the `YUBIKEY_SERIAL`
 //! environment variable to be set to the device's serial number.
+//! For devices without a serial, set `YUBIKEY_NO_SERIAL=1` instead.
 //!
 //! Optional: Set `YUBIKEY_READER` to a partial PC/SC reader name (case-insensitive)
 //! and `YUBIKEY_NFC_SERIAL` to the NFC device's serial to also run tests over NFC.
 //!
 //! ```sh
 //! YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests -- --test-threads=1
-//! YUBIKEY_SERIAL=12345678 YUBIKEY_READER=OMNIKEY YUBIKEY_NFC_SERIAL=19762577 cargo test ...
+//! YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1
 //! ```
 //!
 //! **WARNING**: Some tests are destructive (they reset applications).
@@ -57,14 +58,15 @@ static NFC_SCP11B_PARAMS: OnceLock<Option<(u8, u8, Vec<u8>)>> = OnceLock::new();
 /// Cached NFC device version.
 static NFC_DEVICE_VERSION: OnceLock<Option<Version>> = OnceLock::new();
 
-fn required_serial() -> u32 {
-    std::env::var("YUBIKEY_SERIAL")
-        .expect(
-            "YUBIKEY_SERIAL env var must be set to the serial number of the test YubiKey.\n\
-             Example: YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests",
-        )
-        .parse()
-        .expect("YUBIKEY_SERIAL must be a valid integer")
+fn required_serial() -> Option<u32> {
+    if std::env::var("YUBIKEY_NO_SERIAL").is_ok() {
+        return None;
+    }
+    let s = std::env::var("YUBIKEY_SERIAL").expect(
+        "Set YUBIKEY_SERIAL to the device serial, or YUBIKEY_NO_SERIAL=1 for devices without one.\n\
+         Example: YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests",
+    );
+    Some(s.parse().expect("YUBIKEY_SERIAL must be a valid integer"))
 }
 
 fn required_nfc_serial() -> Option<u32> {
@@ -79,10 +81,26 @@ fn get_device_and_info() -> &'static (YubiKeyDevice, DeviceInfo) {
         let serial = required_serial();
         let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
             .expect("Failed to enumerate YubiKeys");
-        let dev = devices
-            .into_iter()
-            .find(|d| d.serial() == Some(serial))
-            .unwrap_or_else(|| panic!("No YubiKey found with serial {serial}"));
+
+        let dev = match serial {
+            Some(s) => devices
+                .into_iter()
+                .find(|d| d.serial() == Some(s))
+                .unwrap_or_else(|| panic!("No YubiKey found with serial {s}")),
+            None => {
+                let mut devs: Vec<_> = devices
+                    .into_iter()
+                    .filter(|d| d.serial().is_none())
+                    .collect();
+                match devs.len() {
+                    0 => panic!("No YubiKey without serial found"),
+                    1 => devs.remove(0),
+                    n => {
+                        panic!("Multiple YubiKeys without serial found ({n}), cannot disambiguate")
+                    }
+                }
+            }
+        };
 
         let info = dev.info().clone();
 
@@ -188,15 +206,32 @@ fn scp_params(tc: &TestConnection) -> Option<&'static (u8, u8, Vec<u8>)> {
 }
 
 fn should_skip(tc: &TestConnection) -> Option<String> {
-    if std::env::var("YUBIKEY_SERIAL").is_err() {
-        return Some("YUBIKEY_SERIAL not set".into());
+    if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
+        return Some("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set".into());
     }
 
+    let (dev, _) = get_device_and_info();
+
     match tc {
-        TestConnection::UsbSmartCard | TestConnection::UsbOtp => None,
+        TestConnection::UsbSmartCard => {
+            if dev.reader_name().is_none() {
+                Some("CCID not available".into())
+            } else {
+                None
+            }
+        }
         TestConnection::UsbSmartCardScp11b => {
-            if get_scp11b_params().is_none() {
+            if dev.reader_name().is_none() {
+                Some("CCID not available".into())
+            } else if get_scp11b_params().is_none() {
                 Some("SCP11b not available on USB device".into())
+            } else {
+                None
+            }
+        }
+        TestConnection::UsbOtp => {
+            if dev.hid_path().is_none() {
+                Some("OTP HID not available".into())
             } else {
                 None
             }
@@ -291,17 +326,23 @@ fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::scp::ScpKeyParam
 
 #[test]
 fn test_list_devices_finds_key() {
-    if std::env::var("YUBIKEY_SERIAL").is_err() {
-        eprintln!("  SKIP: YUBIKEY_SERIAL not set");
+    if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
+        eprintln!("  SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
         return;
     }
     let serial = required_serial();
     let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
         .expect("list_devices");
-    assert!(
-        devices.iter().any(|d| d.serial() == Some(serial)),
-        "Expected YubiKey with serial {serial} in device list"
-    );
+    match serial {
+        Some(s) => assert!(
+            devices.iter().any(|d| d.serial() == Some(s)),
+            "Expected YubiKey with serial {s} in device list"
+        ),
+        None => assert!(
+            devices.iter().any(|d| d.serial().is_none()),
+            "Expected YubiKey without serial in device list"
+        ),
+    }
 }
 
 #[rstest]
@@ -322,7 +363,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             let info = session
                 .read_device_info_unchecked()
                 .expect("read_device_info_unchecked");
-            assert_eq!(info.serial, Some(required_serial()));
+            assert_eq!(info.serial, required_serial());
         }
         _ => {
             let conn = open_smartcard_connection(&tc);
@@ -336,12 +377,11 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             let info = session
                 .read_device_info_unchecked()
                 .expect("read_device_info_unchecked");
-            assert!(info.serial.is_some(), "Expected serial number");
             if matches!(
                 tc,
                 TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b
             ) {
-                assert_eq!(info.serial, Some(required_serial()));
+                assert_eq!(info.serial, required_serial());
             } else if let Some(nfc_serial) = required_nfc_serial() {
                 assert_eq!(info.serial, Some(nfc_serial));
             }
@@ -352,8 +392,8 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
 
 #[test]
 fn test_management_device_info_capabilities() {
-    if std::env::var("YUBIKEY_SERIAL").is_err() {
-        eprintln!("  SKIP: YUBIKEY_SERIAL not set");
+    if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
+        eprintln!("  SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
         return;
     }
     let (_, info) = get_device_and_info();
@@ -361,7 +401,7 @@ fn test_management_device_info_capabilities() {
         .supported_capabilities
         .get(&Transport::Usb)
         .expect("USB capabilities should be present");
-    // Every modern YubiKey has at least OTP
+    // Every YubiKey has at least one USB capability
     assert!(!caps.is_empty(), "Expected at least one capability on USB");
 }
 

@@ -11,6 +11,7 @@ use serial_test::serial;
 #[ignore]
 #[serial]
 fn test_piv_info() {
+    require_interface!("CCID");
     piv_reset();
     ykman_dev().args(["piv", "info"]).assert().success().stdout(
         predicate::str::contains("PIV version:")
@@ -22,6 +23,7 @@ fn test_piv_info() {
 #[ignore]
 #[serial]
 fn test_piv_reset() {
+    require_interface!("CCID");
     ykman_dev().args(["piv", "reset", "-f"]).assert().success();
 }
 
@@ -29,6 +31,7 @@ fn test_piv_reset() {
 #[ignore]
 #[serial]
 fn test_piv_change_pin() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -64,6 +67,7 @@ fn test_piv_change_pin() {
 #[ignore]
 #[serial]
 fn test_piv_change_puk() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -99,6 +103,7 @@ fn test_piv_change_puk() {
 #[ignore]
 #[serial]
 fn test_piv_change_management_key() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -136,6 +141,7 @@ fn test_piv_change_management_key() {
 #[ignore]
 #[serial]
 fn test_piv_generate_self_signed() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -183,6 +189,7 @@ fn test_piv_generate_self_signed() {
 #[ignore]
 #[serial]
 fn test_piv_export_certificate() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -229,6 +236,7 @@ fn test_piv_export_certificate() {
 #[ignore]
 #[serial]
 fn test_piv_import_key_ec() {
+    require_interface!("CCID");
     piv_reset();
 
     let key_file = fixture_path("ec_p256_key.pem");
@@ -257,6 +265,7 @@ fn test_piv_import_key_ec() {
 #[ignore]
 #[serial]
 fn test_piv_import_key_rsa() {
+    require_interface!("CCID");
     piv_reset();
 
     let key_file = fixture_path("rsa_2048_key.pem");
@@ -282,6 +291,7 @@ fn test_piv_import_key_rsa() {
 #[ignore]
 #[serial]
 fn test_piv_import_certificate() {
+    require_interface!("CCID");
     piv_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -313,6 +323,7 @@ fn test_piv_import_certificate() {
 #[ignore]
 #[serial]
 fn test_piv_import_certificate_der() {
+    require_interface!("CCID");
     piv_reset();
 
     let cert_file = fixture_path("ec_p256_cert.der");
@@ -338,6 +349,7 @@ fn test_piv_import_certificate_der() {
 #[ignore]
 #[serial]
 fn test_piv_delete_certificate() {
+    require_interface!("CCID");
     piv_reset();
 
     // Generate a key and self-signed cert
@@ -394,6 +406,7 @@ fn test_piv_delete_certificate() {
 #[ignore]
 #[serial]
 fn test_piv_export_key() {
+    require_interface!("CCID");
     piv_reset();
 
     // Generate a key and self-signed cert (cert needed for export)
@@ -442,6 +455,7 @@ fn test_piv_export_key() {
 #[ignore]
 #[serial]
 fn test_piv_export_key_der() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -490,6 +504,7 @@ fn test_piv_export_key_der() {
 #[ignore]
 #[serial]
 fn test_piv_export_key_verify() {
+    require_interface!("CCID");
     piv_reset();
 
     // Generate key and cert so --verify can match them
@@ -546,6 +561,7 @@ fn test_piv_export_key_verify() {
 #[ignore]
 #[serial]
 fn test_piv_key_move() {
+    require_interface!("CCID");
     piv_reset();
 
     // Generate key in 9a
@@ -587,6 +603,7 @@ fn test_piv_key_move() {
 #[ignore]
 #[serial]
 fn test_piv_objects_generate_chuid() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -610,6 +627,7 @@ fn test_piv_objects_generate_chuid() {
 #[ignore]
 #[serial]
 fn test_piv_objects_generate_ccc() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -633,6 +651,7 @@ fn test_piv_objects_generate_ccc() {
 #[ignore]
 #[serial]
 fn test_piv_objects_export_chuid() {
+    require_interface!("CCID");
     piv_reset();
 
     // Generate CHUID first
@@ -668,6 +687,7 @@ fn test_piv_objects_export_chuid() {
 #[ignore]
 #[serial]
 fn test_piv_unblock_pin() {
+    require_interface!("CCID");
     piv_reset();
 
     // Exhaust PIN tries to lock the PIN
@@ -706,6 +726,7 @@ fn test_piv_unblock_pin() {
 #[ignore]
 #[serial]
 fn test_piv_generate_rsa2048() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -733,6 +754,7 @@ fn test_piv_generate_rsa2048() {
 #[ignore]
 #[serial]
 fn test_piv_generate_eccp384() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -760,6 +782,7 @@ fn test_piv_generate_eccp384() {
 #[ignore]
 #[serial]
 fn test_piv_key_pin_policy() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()
@@ -787,6 +810,7 @@ fn test_piv_key_pin_policy() {
 #[ignore]
 #[serial]
 fn test_piv_key_touch_policy() {
+    require_interface!("CCID");
     piv_reset();
 
     ykman_dev()

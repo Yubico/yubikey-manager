@@ -8,6 +8,7 @@ use serial_test::serial;
 #[ignore]
 #[serial]
 fn test_sd_info() {
+    require_interface!("CCID");
     ykman_dev()
         .args(["sd", "info"])
         .assert()
@@ -19,6 +20,7 @@ fn test_sd_info() {
 #[ignore]
 #[serial]
 fn test_sd_reset() {
+    require_interface!("CCID");
     ykman_dev().args(["sd", "reset", "-f"]).assert().success();
 }
 
@@ -26,6 +28,7 @@ fn test_sd_reset() {
 #[ignore]
 #[serial]
 fn test_sd_keys_generate() {
+    require_interface!("CCID");
     sd_reset();
 
     // Generate an EC key pair at KID=0x13 (SCP11b range), KVN=0x7F.
@@ -52,6 +55,7 @@ fn test_sd_keys_generate() {
 #[ignore]
 #[serial]
 fn test_sd_keys_import_scp03() {
+    require_interface!("CCID");
     sd_reset();
 
     // Import a new SCP03 key set at KVN=0x02 (default is KVN=0xFF)
@@ -76,6 +80,7 @@ fn test_sd_keys_import_scp03() {
 #[ignore]
 #[serial]
 fn test_sd_keys_delete() {
+    require_interface!("CCID");
     sd_reset();
 
     // Generate a key (replace pre-installed KVN=0x01 with KVN=0x7F)
@@ -106,6 +111,7 @@ fn test_sd_keys_delete() {
 #[ignore]
 #[serial]
 fn test_sd_keys_import_scp11() {
+    require_interface!("CCID");
     sd_reset();
 
     // Import a CA certificate as SCP11 OCE CA key (KID=0x10).

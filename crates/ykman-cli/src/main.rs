@@ -1430,9 +1430,41 @@ fn require_device(
     serial: Option<u32>,
     interfaces: UsbInterface,
 ) -> Result<YubiKeyDevice, CliError> {
+    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
     let devices =
-        list_devices(interfaces).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
-    select_device(devices, serial)
+        list_devices(all).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+    let dev = select_device(devices, serial)?;
+
+    // Check if the device supports the required interfaces
+    if interfaces != all {
+        let has_ccid = dev.reader_name().is_some();
+        let has_otp = dev.hid_path().is_some();
+        let has_fido = dev.fido_path().is_some();
+        let satisfied = (interfaces.contains(UsbInterface::CCID) && has_ccid)
+            || (interfaces.contains(UsbInterface::OTP) && has_otp)
+            || (interfaces.contains(UsbInterface::FIDO) && has_fido);
+
+        if !satisfied {
+            let mut names = Vec::new();
+            if interfaces.contains(UsbInterface::CCID) {
+                names.push("CCID");
+            }
+            if interfaces.contains(UsbInterface::OTP) {
+                names.push("OTP");
+            }
+            if interfaces.contains(UsbInterface::FIDO) {
+                names.push("FIDO");
+            }
+            return Err(CliError(format!(
+                "Command requires one of the following USB interfaces \
+                 to be enabled: {}.\n\n\
+                 Use 'ykman config usb' to set the enabled USB interfaces.",
+                names.join(", ")
+            )));
+        }
+    }
+
+    Ok(dev)
 }
 
 /// After resolving a device, apply version override if needed.

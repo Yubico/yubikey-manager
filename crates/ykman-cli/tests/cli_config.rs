@@ -1,17 +1,14 @@
 mod common;
 
-use common::{is_nfc, ykman_dev};
+use common::ykman_dev;
 use predicates::prelude::*;
 use serial_test::serial;
 use std::thread;
 use std::time::Duration;
 
 /// Wait for the YubiKey to re-enumerate after a USB config change.
-/// Only needed over USB — NFC doesn't disconnect.
 fn wait_for_reenumeration() {
-    if !is_nfc() {
-        thread::sleep(Duration::from_secs(3));
-    }
+    thread::sleep(Duration::from_secs(3));
 }
 
 #[test]
@@ -44,6 +41,7 @@ fn test_config_nfc_list() {
 #[ignore]
 #[serial]
 fn test_config_usb_disable_enable_hsmauth() {
+    require_interface!("CCID");
     let _ = ykman_dev()
         .args(["config", "usb", "--enable", "hsmauth", "-f"])
         .ok();
@@ -78,6 +76,7 @@ fn test_config_usb_disable_enable_hsmauth() {
 #[ignore]
 #[serial]
 fn test_config_nfc_enable_disable() {
+    require_interface!("CCID");
     // Skip if key has no NFC support
     let output = ykman_dev()
         .args(["config", "nfc", "--list"])
@@ -121,6 +120,7 @@ fn test_config_nfc_enable_disable() {
 #[ignore]
 #[serial]
 fn test_config_usb_enable_all() {
+    require_interface!("CCID");
     // First disable an app so --enable-all has something to do
     let _ = ykman_dev()
         .args(["config", "usb", "--disable", "hsmauth", "-f"])
@@ -146,6 +146,7 @@ fn test_config_usb_enable_all() {
 #[ignore]
 #[serial]
 fn test_config_nfc_disable_all_enable_all() {
+    require_interface!("CCID");
     // NFC disable-all is safe — USB access can always recover.
     let output = ykman_dev()
         .args(["config", "nfc", "--list"])
@@ -171,6 +172,7 @@ fn test_config_nfc_disable_all_enable_all() {
 #[ignore]
 #[serial]
 fn test_config_set_lock_code() {
+    require_interface!("CCID");
     let lock_code = "01020304050607080102030405060708";
 
     // Set a lock code

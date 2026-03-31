@@ -8,6 +8,7 @@ use serial_test::serial;
 #[ignore]
 #[serial]
 fn test_oath_info() {
+    require_interface!("CCID");
     oath_reset();
     ykman_dev()
         .args(["oath", "info"])
@@ -20,6 +21,7 @@ fn test_oath_info() {
 #[ignore]
 #[serial]
 fn test_oath_reset() {
+    require_interface!("CCID");
     ykman_dev().args(["oath", "reset", "-f"]).assert().success();
 }
 
@@ -27,6 +29,7 @@ fn test_oath_reset() {
 #[ignore]
 #[serial]
 fn test_oath_add_and_list() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -73,6 +76,7 @@ fn test_oath_add_and_list() {
 #[ignore]
 #[serial]
 fn test_oath_add_totp_and_code() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -107,6 +111,7 @@ fn test_oath_add_totp_and_code() {
 #[ignore]
 #[serial]
 fn test_oath_add_hotp_and_code() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -141,6 +146,7 @@ fn test_oath_add_hotp_and_code() {
 #[ignore]
 #[serial]
 fn test_oath_rename() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -190,6 +196,7 @@ fn test_oath_rename() {
 #[ignore]
 #[serial]
 fn test_oath_password_set_and_clear() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -219,6 +226,7 @@ fn test_oath_password_set_and_clear() {
 #[ignore]
 #[serial]
 fn test_oath_add_totp_sha256_7digits() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -253,6 +261,7 @@ fn test_oath_add_totp_sha256_7digits() {
 #[ignore]
 #[serial]
 fn test_oath_add_with_issuer() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -284,6 +293,7 @@ fn test_oath_add_with_issuer() {
 #[ignore]
 #[serial]
 fn test_oath_add_totp_touch() {
+    require_interface!("CCID");
     oath_reset();
 
     // Just verify the --touch flag is accepted
@@ -315,6 +325,7 @@ fn test_oath_add_totp_touch() {
 #[ignore]
 #[serial]
 fn test_oath_import_pskc() {
+    require_interface!("CCID");
     oath_reset();
 
     let pskc = fixture_path("pskc_totp.xml");
@@ -336,6 +347,7 @@ fn test_oath_import_pskc() {
 #[ignore]
 #[serial]
 fn test_oath_import_pskc_multi() {
+    require_interface!("CCID");
     oath_reset();
 
     let pskc = fixture_path("pskc_multi.xml");
@@ -357,6 +369,7 @@ fn test_oath_import_pskc_multi() {
 #[ignore]
 #[serial]
 fn test_oath_list_oath_type() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()
@@ -386,6 +399,7 @@ fn test_oath_list_oath_type() {
 #[ignore]
 #[serial]
 fn test_oath_accounts_code_totp_single() {
+    require_interface!("CCID");
     oath_reset();
 
     ykman_dev()

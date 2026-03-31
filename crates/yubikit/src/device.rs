@@ -1170,6 +1170,19 @@ pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
         info.is_fips = true;
     }
 
+    // Infer SKY for older firmware that doesn't set the flag.
+    // Devices before 5.2.8 with no serial and FIDO-only capabilities are SKY.
+    if !info.is_sky
+        && info.serial.is_none()
+        && info.version < Version(5, 2, 8)
+        && info
+            .supported_capabilities
+            .get(&Transport::Usb)
+            .is_some_and(|c| fido_only(*c))
+    {
+        info.is_sky = true;
+    }
+
     // Fix NFC: set enabled if missing
     if info.has_transport(Transport::Nfc) {
         if !info
@@ -1681,6 +1694,41 @@ mod tests {
             false,
         );
         assert_eq!(get_name(&info), "Security Key A - Enterprise Edition");
+    }
+
+    #[test]
+    fn test_sky_nfc_inferred() {
+        // Older SKY devices (< 5.2.8) don't set the is_sky flag.
+        // is_sky should be inferred from no serial + FIDO-only capabilities.
+        let mut info = make_info(
+            Version(5, 1, 2),
+            FormFactor::UsbAKeychain,
+            false, // is_sky NOT set by device
+            false,
+            None, // no serial
+            true, // has NFC
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        apply_device_info_fixups(&mut info);
+        assert!(info.is_sky);
+        assert_eq!(get_name(&info), "Security Key NFC");
+    }
+
+    #[test]
+    fn test_sky_inference_not_applied_with_serial() {
+        let mut info = make_info(
+            Version(5, 1, 2),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            Some(123), // has serial — not a SKY
+            true,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        apply_device_info_fixups(&mut info);
+        assert!(!info.is_sky);
     }
 
     #[test]

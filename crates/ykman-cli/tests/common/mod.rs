@@ -7,35 +7,31 @@ use std::sync::OnceLock;
 
 /// Test device configuration, resolved from environment variables.
 ///
-/// Set `YKMAN_TEST_SERIAL` for USB testing, or `YKMAN_TEST_READER` for NFC.
+/// Set `YKMAN_TEST_SERIAL` for USB testing with a known serial.
+/// Set `YKMAN_TEST_NO_SERIAL=1` for devices without a serial number.
 /// If neither is set, all device tests abort.
 struct TestDevice {
     serial: Option<String>,
-    reader: Option<String>,
+    no_serial: bool,
 }
 
 fn test_device() -> &'static TestDevice {
     static DEVICE: OnceLock<TestDevice> = OnceLock::new();
     DEVICE.get_or_init(|| TestDevice {
         serial: env::var("YKMAN_TEST_SERIAL").ok(),
-        reader: env::var("YKMAN_TEST_READER").ok(),
+        no_serial: env::var("YKMAN_TEST_NO_SERIAL").is_ok(),
     })
 }
 
 /// Abort the test if no device is configured.
 fn require_device() {
     let dev = test_device();
-    if dev.serial.is_none() && dev.reader.is_none() {
+    if dev.serial.is_none() && !dev.no_serial {
         panic!(
             "No test device configured. Set YKMAN_TEST_SERIAL=<serial> \
-             or YKMAN_TEST_READER=<reader_substring> to run device tests."
+             or YKMAN_TEST_NO_SERIAL=1 to run device tests."
         );
     }
-}
-
-/// Returns true when testing over NFC (YKMAN_TEST_READER is set).
-pub fn is_nfc() -> bool {
-    test_device().reader.is_some()
 }
 
 /// Returns the configured serial number, if any.
@@ -88,16 +84,41 @@ pub fn ykman() -> Command {
 
 /// Build a `ykman` command targeting the configured test device.
 ///
-/// Uses `--reader <substring>` for NFC, or `--device <serial>` for USB.
+/// Uses `--device <serial>` when a serial is configured.
 pub fn ykman_dev() -> Command {
     let mut cmd = ykman();
     let dev = test_device();
-    if let Some(ref reader) = dev.reader {
-        cmd.args(["--reader", reader]);
-    } else if let Some(ref serial) = dev.serial {
+    if let Some(ref serial) = dev.serial {
         cmd.args(["--device", serial]);
     }
     cmd
+}
+
+/// Returns true if the device has the given USB interface enabled.
+pub fn has_usb_interface(name: &str) -> bool {
+    static INFO: OnceLock<String> = OnceLock::new();
+    let stdout = INFO.get_or_init(|| {
+        let output = ykman_dev()
+            .args(["info"])
+            .output()
+            .expect("failed to run ykman info");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    });
+    // Look for the interface name in the "Enabled USB interfaces:" line
+    stdout
+        .lines()
+        .any(|line| line.starts_with("Enabled USB interfaces:") && line.contains(name))
+}
+
+/// Skip the test if the device does not have the given USB interface enabled.
+#[macro_export]
+macro_rules! require_interface {
+    ($name:expr) => {
+        if !common::has_usb_interface($name) {
+            eprintln!("SKIP: {} not enabled on device", $name);
+            return;
+        }
+    };
 }
 
 /// Reset PIV to factory defaults (force, no prompt).

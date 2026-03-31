@@ -8,6 +8,7 @@ use serial_test::serial;
 #[ignore]
 #[serial]
 fn test_apdu_select_oath() {
+    require_interface!("CCID");
     // Send a LIST instruction (0xa1) to the OATH applet
     ykman_dev()
         .args(["apdu", "-a", "oath", "a1"])
@@ -19,6 +20,7 @@ fn test_apdu_select_oath() {
 #[ignore]
 #[serial]
 fn test_apdu_hex_format() {
+    require_interface!("CCID");
     // Send LIST instruction with hex-only output
     ykman_dev()
         .args(["apdu", "-x", "-a", "oath", "a1"])
@@ -31,6 +33,7 @@ fn test_apdu_hex_format() {
 #[ignore]
 #[serial]
 fn test_apdu_send_flag() {
+    require_interface!("CCID");
     // Send a raw SELECT APDU via the -s flag (SELECT OATH AID)
     ykman_dev()
         .args(["apdu", "-s", "00a4040008a000000527210101"])
@@ -42,6 +45,7 @@ fn test_apdu_send_flag() {
 #[ignore]
 #[serial]
 fn test_apdu_expected_sw() {
+    require_interface!("CCID");
     // Send LIST with expected SW=9000
     ykman_dev()
         .args(["apdu", "-a", "oath", "a1=9000"])

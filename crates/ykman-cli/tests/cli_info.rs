@@ -45,10 +45,14 @@ fn test_list_readers() {
 #[ignore]
 #[serial]
 fn test_info() {
-    ykman_dev().arg("info").assert().success().stdout(
-        predicate::str::contains("Serial number:")
-            .and(predicate::str::contains("Firmware version:")),
-    );
+    let assert = ykman_dev()
+        .arg("info")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Firmware version:"));
+    if device_serial().is_some() {
+        assert.stdout(predicate::str::contains("Serial number:"));
+    }
 }
 
 #[test]

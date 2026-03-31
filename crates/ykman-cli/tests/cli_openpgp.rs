@@ -11,6 +11,7 @@ use serial_test::serial;
 #[ignore]
 #[serial]
 fn test_openpgp_info() {
+    require_interface!("CCID");
     openpgp_reset();
     ykman_dev()
         .args(["openpgp", "info"])
@@ -26,6 +27,7 @@ fn test_openpgp_info() {
 #[ignore]
 #[serial]
 fn test_openpgp_reset() {
+    require_interface!("CCID");
     ykman_dev()
         .args(["openpgp", "reset", "-f"])
         .assert()
@@ -36,6 +38,7 @@ fn test_openpgp_reset() {
 #[ignore]
 #[serial]
 fn test_openpgp_change_pin() {
+    require_interface!("CCID");
     openpgp_reset();
 
     ykman_dev()
@@ -71,6 +74,7 @@ fn test_openpgp_change_pin() {
 #[ignore]
 #[serial]
 fn test_openpgp_change_admin_pin() {
+    require_interface!("CCID");
     openpgp_reset();
 
     ykman_dev()
@@ -106,6 +110,7 @@ fn test_openpgp_change_admin_pin() {
 #[ignore]
 #[serial]
 fn test_openpgp_set_pin_retries() {
+    require_interface!("CCID");
     openpgp_reset();
 
     ykman_dev()
@@ -132,6 +137,7 @@ fn test_openpgp_set_pin_retries() {
 #[ignore]
 #[serial]
 fn test_openpgp_keys_set_touch() {
+    require_interface!("CCID");
     openpgp_reset();
 
     // Set touch on aut key to "on"
@@ -174,6 +180,7 @@ fn test_openpgp_keys_set_touch() {
 #[ignore]
 #[serial]
 fn test_openpgp_certificates_import_export() {
+    require_interface!("CCID");
     openpgp_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -204,6 +211,7 @@ fn test_openpgp_certificates_import_export() {
 #[ignore]
 #[serial]
 fn test_openpgp_certificates_delete() {
+    require_interface!("CCID");
     openpgp_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -239,6 +247,7 @@ fn test_openpgp_certificates_delete() {
 #[ignore]
 #[serial]
 fn test_openpgp_change_reset_code() {
+    require_interface!("CCID");
     openpgp_reset();
 
     let new_reset_code = "12345679";
