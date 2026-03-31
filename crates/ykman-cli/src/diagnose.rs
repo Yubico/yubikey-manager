@@ -3,7 +3,7 @@ use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_fido, re
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
-use yubikit::transport::pcsc::PcscSmartCardConnection;
+use yubikit::transport::pcsc::{PcscSmartCardConnection, is_reader_usb};
 use yubikit::yubiotp::YubiOtpSession;
 
 use crate::util::CliError;
@@ -130,39 +130,39 @@ pub fn run_diagnose() -> Result<(), CliError> {
     println!("Platform:         {}", std::env::consts::OS);
     println!("Arch:             {}", std::env::consts::ARCH);
 
-    // PC/SC readers
-    println!();
-    print!("Detected PC/SC readers:");
-    let readers = match list_readers() {
-        Ok(readers) => {
-            if readers.is_empty() {
-                println!(" (none)");
-            } else {
-                println!();
-                for r in &readers {
-                    let status = match PcscSmartCardConnection::new(r, false) {
-                        Ok(_) => "Success".to_string(),
-                        Err(e) => format!("Error: {e}"),
-                    };
-                    println!("  {r}: {status}");
-                }
-            }
-            readers
-        }
-        Err(e) => {
-            println!(" Error: {e}");
-            Vec::new()
-        }
-    };
-
-    // YubiKeys over PC/SC
+    // YubiKeys over PC/SC (USB and NFC readers)
     println!();
     let mut pcsc_found = false;
     println!("Detected YubiKeys over PC/SC:");
-    for reader in &readers {
-        if !reader.to_ascii_lowercase().contains("yubi") {
-            continue;
+    let readers = match list_readers() {
+        Ok(r) => r,
+        Err(e) => {
+            println!("  Error listing readers: {e}");
+            Vec::new()
         }
+    };
+    for reader in &readers {
+        // For NFC readers, verify it's a YubiKey before printing
+        if !is_reader_usb(reader) {
+            let conn = match PcscSmartCardConnection::new(reader, false) {
+                Ok(c) => c,
+                Err(_) => continue, // no card present
+            };
+            match read_info_ccid(conn) {
+                Ok((info, _)) => {
+                    // Check if any supported capability is non-zero
+                    let has_caps = info
+                        .supported_capabilities
+                        .values()
+                        .any(|c| *c != Capability::NONE);
+                    if !has_caps {
+                        continue; // not a YubiKey
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+
         pcsc_found = true;
         println!("  {reader}:");
 

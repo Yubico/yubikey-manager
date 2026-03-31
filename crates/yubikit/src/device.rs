@@ -447,7 +447,7 @@ impl YubiKeyDevice {
                 }
             } else {
                 // Wait for card to reappear and verify it's the same device
-                match read_info(reader) {
+                match read_info_reader(reader) {
                     Ok((info, _transport)) => {
                         if info.serial == my_serial && info.version == my_version {
                             log::debug!("NFC card reinserted successfully");
@@ -712,7 +712,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
             if want_ccid {
                 for &(p, ref reader) in &usb_readers {
                     if p == pid
-                        && let Ok((info, transport)) = read_info(reader)
+                        && let Ok((info, transport)) = read_info_reader(reader)
                     {
                         base.push(YubiKeyDevice {
                             reader_name: Some(reader.clone()),
@@ -777,13 +777,22 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
     // ── Phase 3: NFC devices (no merging needed) ─────────────────
     for reader in &nfc_readers {
         log::debug!("Checking NFC reader: {reader}");
-        match read_info(reader) {
+        match read_info_reader(reader) {
             Ok((info, transport)) => {
+                // Skip non-YubiKey cards (no supported capabilities)
+                let has_caps = info
+                    .supported_capabilities
+                    .values()
+                    .any(|c| *c != Capability::NONE);
+                if !has_caps {
+                    log::debug!("Skipping NFC reader {reader}: no YubiKey capabilities");
+                    continue;
+                }
                 devices.push(YubiKeyDevice {
                     reader_name: Some(reader.clone()),
                     hid_path: None,
                     fido_path: None,
-                    pid: pid_from_reader_name(reader),
+                    pid: None,
                     transport,
                     info,
                 });
@@ -814,7 +823,7 @@ fn open_single_usb(
 
     // Try CCID first (gives the most complete info).
     if let Some(reader_name) = reader
-        && let Ok((info, transport)) = read_info(reader_name)
+        && let Ok((info, transport)) = read_info_reader(reader_name)
     {
         return Some(YubiKeyDevice {
             reader_name: Some(reader_name.clone()),
@@ -977,7 +986,7 @@ fn synthesize_info_fido(fido: &FidoDeviceInfo) -> DeviceInfo {
 }
 
 // ---------------------------------------------------------------------------
-// read_info
+// read_info_reader
 // ---------------------------------------------------------------------------
 
 /// Open a PC/SC connection and read [`DeviceInfo`] from a YubiKey.
@@ -986,7 +995,7 @@ fn synthesize_info_fido(fido: &FidoDeviceInfo) -> DeviceInfo {
 /// synthesizes DeviceInfo by probing individual applets.
 ///
 /// Returns the device info and the detected transport (USB or NFC).
-fn read_info(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
+fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
     let conn = PcscSmartCardConnection::open(reader_name)?;
     let transport = conn.transport();
     let (info, _conn) = read_info_ccid(conn)?;
