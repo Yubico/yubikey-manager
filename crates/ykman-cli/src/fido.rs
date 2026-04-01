@@ -483,17 +483,25 @@ pub fn run_reset(
             return Err(CliError("Reset aborted by user.".to_string()));
         }
 
-        // Close and reinsert for USB
-        if transport == Transport::Usb {
-            dev.reinsert(
-                &|status| match status {
-                    ReinsertStatus::Remove => eprintln!("Remove your YubiKey from the USB port."),
-                    ReinsertStatus::Reinsert => eprintln!("Re-insert your YubiKey now..."),
-                },
-                &|| false,
-            )
-            .map_err(|e| CliError(format!("Reinsert failed: {e}")))?;
-        }
+        // Close and reinsert
+        dev.reinsert(
+            &|status| match (transport, status) {
+                (Transport::Usb, ReinsertStatus::Remove) => {
+                    eprintln!("Remove your YubiKey from the USB port.")
+                }
+                (Transport::Usb, ReinsertStatus::Reinsert) => {
+                    eprintln!("Re-insert your YubiKey now...")
+                }
+                (Transport::Nfc, ReinsertStatus::Remove) => {
+                    eprintln!("Remove your YubiKey from the NFC reader.")
+                }
+                (Transport::Nfc, ReinsertStatus::Reinsert) => {
+                    eprintln!("Place your YubiKey back on the NFC reader now...")
+                }
+            },
+            &|| false,
+        )
+        .map_err(|e| CliError(format!("Reinsert failed: {e}")))?;
     }
 
     let fido_device = open_fido_device(dev, scp_params)?;
