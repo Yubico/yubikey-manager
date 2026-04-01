@@ -679,6 +679,14 @@ pub fn run_access_verify_pin(
 }
 
 /// Require a PIN to be set and prompt if not provided.
+fn map_enroll_error(e: CtapError, context: &str) -> CliError {
+    if e.get_status() == Some(CtapStatus::KeepaliveCancel) {
+        CliError("Fingerprint enrollment aborted by user.".to_string())
+    } else {
+        CliError(format!("{context}: {e}"))
+    }
+}
+
 fn require_pin(ctap2: &Ctap2, pin: Option<&str>, feature: &str) -> Result<String, CliError> {
     if ctap2.info().options.get("clientPin") != Some(&true) {
         return Err(CliError(format!(
@@ -1063,11 +1071,18 @@ pub fn run_fingerprints_add(
     let bio = fido2_client::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
         .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
+    // Set up Ctrl+C handler for cancellation
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    let cancel_clone = cancel.clone();
+    let _ = ctrlc::set_handler(move || {
+        cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
     // Begin enrollment
     eprintln!("Place your finger against the sensor now...");
     let (template_id, _status, remaining) = bio
-        .enroll_begin(None, &mut |_| {}, None)
-        .map_err(|e| CliError(format!("Enrollment failed: {e}")))?;
+        .enroll_begin(None, &mut |_| {}, Some(&cancel))
+        .map_err(|e| map_enroll_error(e, "Enrollment failed"))?;
 
     if remaining > 0 {
         eprintln!("{remaining} more scans needed.");
@@ -1077,7 +1092,7 @@ pub fn run_fingerprints_add(
     let mut scans_remaining = remaining;
     while scans_remaining > 0 {
         eprintln!("Place your finger against the sensor now...");
-        match bio.enroll_capture_next(&template_id, None, &mut |_| {}, None) {
+        match bio.enroll_capture_next(&template_id, None, &mut |_| {}, Some(&cancel)) {
             Ok((_status, remaining)) => {
                 scans_remaining = remaining;
                 if remaining > 0 {
@@ -1085,12 +1100,17 @@ pub fn run_fingerprints_add(
                 }
             }
             Err(e) => {
-                if e.get_status() == Some(fido2_client::ctap::CtapStatus::FpDatabaseFull) {
+                if e.get_status() == Some(CtapStatus::KeepaliveCancel) {
+                    return Err(CliError(
+                        "Fingerprint enrollment aborted by user.".to_string(),
+                    ));
+                }
+                if e.get_status() == Some(CtapStatus::FpDatabaseFull) {
                     return Err(CliError(
                         "Fingerprint storage full. Remove some fingerprints first.".to_string(),
                     ));
                 }
-                if e.get_status() == Some(fido2_client::ctap::CtapStatus::UserActionTimeout) {
+                if e.get_status() == Some(CtapStatus::UserActionTimeout) {
                     return Err(CliError(
                         "Failed to add fingerprint due to user inactivity.".to_string(),
                     ));
