@@ -196,11 +196,20 @@ impl SecurityDomainSession {
         replace_kvn: u8,
     ) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
-        let static_keys = StaticKeys::new(
-            zeroize::Zeroizing::new(key_enc.to_vec()),
-            zeroize::Zeroizing::new(key_mac.to_vec()),
-            key_dek.map(zeroize::Zeroizing::new),
-        );
+        let key_enc_arr: [u8; 16] = key_enc
+            .try_into()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_enc must be 16 bytes"))?;
+        let key_mac_arr: [u8; 16] = key_mac
+            .try_into()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_mac must be 16 bytes"))?;
+        let key_dek_arr: Option<[u8; 16]> = key_dek
+            .map(|v| {
+                v.as_slice().try_into().map_err(|_| {
+                    pyo3::exceptions::PyValueError::new_err("key_dek must be 16 bytes")
+                })
+            })
+            .transpose()?;
+        let static_keys = StaticKeys::new(key_enc_arr, key_mac_arr, key_dek_arr);
         self.session_mut()?
             .put_key_static(key, &static_keys, replace_kvn)
             .map_err(smartcard_err)

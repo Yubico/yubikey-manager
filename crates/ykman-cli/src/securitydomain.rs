@@ -251,11 +251,20 @@ pub fn run_keys_import(
             } else {
                 None
             };
-            let static_keys = yubikit::securitydomain::StaticKeys {
-                key_enc: zeroize::Zeroizing::new(enc),
-                key_mac: zeroize::Zeroizing::new(mac),
-                key_dek: dek.map(zeroize::Zeroizing::new),
-            };
+            let static_keys = yubikit::securitydomain::StaticKeys::new(
+                enc.as_slice()
+                    .try_into()
+                    .map_err(|_| CliError("K-ENC must be 16 bytes".into()))?,
+                mac.as_slice()
+                    .try_into()
+                    .map_err(|_| CliError("K-MAC must be 16 bytes".into()))?,
+                dek.map(|v| {
+                    v.as_slice()
+                        .try_into()
+                        .map_err(|_| CliError("K-DEK must be 16 bytes".into()))
+                })
+                .transpose()?,
+            );
             session
                 .put_key_static(key_ref, &static_keys, replace_kvn.unwrap_or(0))
                 .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;

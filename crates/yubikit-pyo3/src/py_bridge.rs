@@ -188,11 +188,27 @@ fn scp03_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
         Some(key_dek_obj.call_method0("__bytes__")?.extract()?)
     };
 
+    let key_enc: [u8; 16] = key_enc
+        .as_slice()
+        .try_into()
+        .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_enc must be 16 bytes"))?;
+    let key_mac: [u8; 16] = key_mac
+        .as_slice()
+        .try_into()
+        .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_mac must be 16 bytes"))?;
+    let key_dek: Option<[u8; 16]> = key_dek
+        .map(|v| {
+            v.as_slice()
+                .try_into()
+                .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_dek must be 16 bytes"))
+        })
+        .transpose()?;
+
     Ok(yubikit::scp::ScpKeyParams::Scp03 {
         kvn,
-        key_enc: zeroize::Zeroizing::new(key_enc),
-        key_mac: zeroize::Zeroizing::new(key_mac),
-        key_dek: key_dek.map(zeroize::Zeroizing::new),
+        key_enc,
+        key_mac,
+        key_dek,
     })
 }
 
@@ -247,14 +263,19 @@ fn scp11_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
     };
 
     match sk_oce {
-        Some(sk) => Ok(yubikit::scp::ScpKeyParams::Scp11ac {
-            kid,
-            kvn,
-            pk_sd_ecka: pk_bytes,
-            sk_oce_ecka: zeroize::Zeroizing::new(sk),
-            certificates: cert_ders,
-            oce_ref,
-        }),
+        Some(sk) => {
+            let sk_arr: [u8; 32] = sk.as_slice().try_into().map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err("sk_oce_ecka must be 32 bytes")
+            })?;
+            Ok(yubikit::scp::ScpKeyParams::Scp11ac {
+                kid,
+                kvn,
+                pk_sd_ecka: pk_bytes,
+                sk_oce_ecka: sk_arr,
+                certificates: cert_ders,
+                oce_ref,
+            })
+        }
         None => Ok(yubikit::scp::ScpKeyParams::Scp11b {
             kid,
             kvn,

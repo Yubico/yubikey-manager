@@ -6,7 +6,6 @@ use yubikit::management::Capability;
 use yubikit::oath::{
     Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
-use zeroize::Zeroizing;
 
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
@@ -359,7 +358,7 @@ pub fn run_accounts_add(
         name: name.to_string(),
         oath_type,
         hash_algorithm,
-        secret: Zeroizing::new(secret_bytes),
+        secret: secret_bytes,
         digits,
         period,
         counter,
@@ -524,7 +523,7 @@ pub fn run_access_change(
         eprintln!("Password set.");
         if remember {
             let mut keys = oath_keys();
-            keys.put_secret(session.device_id(), &hex::encode(&key))
+            keys.put_secret(session.device_id(), &hex::encode(key))
                 .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
             eprintln!("Password remembered.");
         }
@@ -719,7 +718,7 @@ pub fn run_accounts_uri(
         name: name.clone(),
         oath_type,
         hash_algorithm: algorithm,
-        secret: Zeroizing::new(secret_bytes),
+        secret: secret_bytes,
         digits,
         period,
         counter,
@@ -825,7 +824,7 @@ pub fn run_accounts_import(
             name: cred.name.clone(),
             oath_type: cred.oath_type,
             hash_algorithm: cred.hash_algorithm,
-            secret: Zeroizing::new(cred.secret.clone()),
+            secret: cred.secret.clone(),
             digits: cred.digits,
             period: cred.period,
             counter: cred.counter,

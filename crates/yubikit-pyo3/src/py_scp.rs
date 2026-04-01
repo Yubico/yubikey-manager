@@ -5,7 +5,6 @@ use yubikit::scp;
 #[pyo3(signature = (key, t, context, l=0x80))]
 fn scp_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> PyResult<Vec<u8>> {
     scp::scp03_derive(key, t, context, l)
-        .map(|v| v.to_vec())
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
@@ -36,17 +35,22 @@ impl ScpState {
         key_srmac: Vec<u8>,
         mac_chain: Option<Vec<u8>>,
         enc_counter: Option<u32>,
-    ) -> Self {
-        use zeroize::Zeroizing;
-        ScpState {
-            inner: scp::ScpState::new(
-                Zeroizing::new(key_senc),
-                Zeroizing::new(key_smac),
-                Zeroizing::new(key_srmac),
-                mac_chain,
-                enc_counter,
-            ),
-        }
+    ) -> PyResult<Self> {
+        let key_senc: [u8; 16] = key_senc
+            .as_slice()
+            .try_into()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_senc must be 16 bytes"))?;
+        let key_smac: [u8; 16] = key_smac
+            .as_slice()
+            .try_into()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_smac must be 16 bytes"))?;
+        let key_srmac: [u8; 16] = key_srmac
+            .as_slice()
+            .try_into()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("key_srmac must be 16 bytes"))?;
+        Ok(ScpState {
+            inner: scp::ScpState::new(key_senc, key_smac, key_srmac, mac_chain, enc_counter),
+        })
     }
 
     fn encrypt(&mut self, data: &[u8]) -> PyResult<Vec<u8>> {

@@ -28,7 +28,7 @@
 use std::fmt;
 
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -125,11 +125,11 @@ pub struct Credential {
 // SessionKeys
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SessionKeys {
-    pub key_senc: Zeroizing<Vec<u8>>,
-    pub key_smac: Zeroizing<Vec<u8>>,
-    pub key_srmac: Zeroizing<Vec<u8>>,
+    pub key_senc: [u8; 16],
+    pub key_smac: [u8; 16],
+    pub key_srmac: [u8; 16],
 }
 
 impl fmt::Debug for SessionKeys {
@@ -150,9 +150,9 @@ impl SessionKeys {
             ));
         }
         Ok(Self {
-            key_senc: Zeroizing::new(response[..16].to_vec()),
-            key_smac: Zeroizing::new(response[16..32].to_vec()),
-            key_srmac: Zeroizing::new(response[32..48].to_vec()),
+            key_senc: response[..16].try_into().unwrap(),
+            key_smac: response[16..32].try_into().unwrap(),
+            key_srmac: response[32..48].try_into().unwrap(),
         })
     }
 }
@@ -191,30 +191,29 @@ fn parse_label(label: &str) -> Result<Vec<u8>, HsmAuthError> {
     Ok(bytes.to_vec())
 }
 
-fn parse_credential_password(password: &[u8]) -> Result<Vec<u8>, HsmAuthError> {
-    if password.len() != CREDENTIAL_PASSWORD_LEN {
-        return Err(HsmAuthError::InvalidParameter(format!(
+fn parse_credential_password(password: &[u8]) -> Result<[u8; 16], HsmAuthError> {
+    password.try_into().map_err(|_| {
+        HsmAuthError::InvalidParameter(format!(
             "Credential password must be {CREDENTIAL_PASSWORD_LEN} bytes long"
-        )));
-    }
-    Ok(password.to_vec())
+        ))
+    })
 }
 
-pub fn credential_password_from_str(password: &str) -> Zeroizing<Vec<u8>> {
-    let mut pw = password.as_bytes().to_vec();
-    pw.resize(CREDENTIAL_PASSWORD_LEN, 0);
-    Zeroizing::new(pw)
+pub fn credential_password_from_str(password: &str) -> [u8; 16] {
+    let mut pw = [0u8; 16];
+    let bytes = password.as_bytes();
+    let len = bytes.len().min(16);
+    pw[..len].copy_from_slice(&bytes[..len]);
+    pw
 }
 
-fn password_to_key(password: &str) -> (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>) {
+fn password_to_key(password: &str) -> ([u8; 16], [u8; 16]) {
     let mut key = [0u8; 32];
     pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut key);
-    let result = (
-        Zeroizing::new(key[..16].to_vec()),
-        Zeroizing::new(key[16..].to_vec()),
-    );
-    key.iter_mut().for_each(|b| *b = 0);
-    result
+    let key_enc: [u8; 16] = key[..16].try_into().unwrap();
+    let key_mac: [u8; 16] = key[16..].try_into().unwrap();
+    key.zeroize();
+    (key_enc, key_mac)
 }
 
 fn retries_from_sw(sw: u16) -> Option<u32> {
@@ -780,8 +779,8 @@ mod tests {
     #[test]
     fn test_password_to_key() {
         let (enc, mac) = password_to_key("password");
-        assert_eq!((*enc).len(), 16);
-        assert_eq!((*mac).len(), 16);
+        assert_eq!(enc.len(), 16);
+        assert_eq!(mac.len(), 16);
     }
 
     #[test]

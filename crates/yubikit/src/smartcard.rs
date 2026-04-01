@@ -32,7 +32,6 @@ use thiserror::Error;
 
 use crate::core::{Transport, Version};
 use crate::scp::{ScpState, aes_cmac, constant_time_eq, scp03_derive, x963_kdf};
-use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // AID — YubiKey application identifiers
@@ -657,9 +656,18 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         context.extend_from_slice(&host_challenge);
         context.extend_from_slice(card_challenge);
 
-        let key_senc = scp03_derive(key_enc, 0x04, &context, 0x80)?;
-        let key_smac = scp03_derive(key_mac, 0x06, &context, 0x80)?;
-        let key_srmac = scp03_derive(key_mac, 0x07, &context, 0x80)?;
+        let key_senc: [u8; 16] = scp03_derive(key_enc, 0x04, &context, 0x80)?
+            .as_slice()
+            .try_into()
+            .map_err(|_| SmartCardError::BadResponse("bad derive length".into()))?;
+        let key_smac: [u8; 16] = scp03_derive(key_mac, 0x06, &context, 0x80)?
+            .as_slice()
+            .try_into()
+            .map_err(|_| SmartCardError::BadResponse("bad derive length".into()))?;
+        let key_srmac: [u8; 16] = scp03_derive(key_mac, 0x07, &context, 0x80)?
+            .as_slice()
+            .try_into()
+            .map_err(|_| SmartCardError::BadResponse("bad derive length".into()))?;
 
         // 5. Verify card cryptogram
         let gen_card_crypto = scp03_derive(&key_smac, 0x00, &context, 0x40)?;
@@ -846,16 +854,16 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         }
 
         // Session keys (keys[1..4]) + DEK (keys[4])
-        let key_senc = Zeroizing::new(keybytes[16..32].to_vec());
-        let key_smac = Zeroizing::new(keybytes[32..48].to_vec());
-        let key_srmac = Zeroizing::new(keybytes[48..64].to_vec());
-        let key_dek = keybytes[64..80].to_vec();
+        let key_senc: [u8; 16] = keybytes[16..32].try_into().unwrap();
+        let key_smac: [u8; 16] = keybytes[32..48].try_into().unwrap();
+        let key_srmac: [u8; 16] = keybytes[48..64].try_into().unwrap();
+        let key_dek: [u8; 16] = keybytes[64..80].try_into().unwrap();
 
         // For SCP11 the MAC chain starts with the receipt
         let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1));
         self.set_scp_state(state);
 
-        Ok(Some(key_dek))
+        Ok(Some(key_dek.to_vec()))
     }
 
     /// Initialize SCP using key parameters. Returns the DEK if available.
@@ -871,8 +879,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                 key_dek,
             } => self.init_scp03(
                 *kvn,
-                key_enc,
-                key_mac,
+                key_enc.as_slice(),
+                key_mac.as_slice(),
                 key_dek.as_ref().map(|v| v.as_slice()),
             ),
             crate::scp::ScpKeyParams::Scp11b {
@@ -893,7 +901,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                     *kid,
                     *kvn,
                     pk_sd_ecka,
-                    Some(sk_oce_ecka),
+                    Some(sk_oce_ecka.as_slice()),
                     &cert_refs,
                     *oce_ref,
                 )

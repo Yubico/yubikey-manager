@@ -111,7 +111,7 @@ pub fn run_credentials_generate(
     let mgmt = parse_mgmt_key(management_key)?;
     let pw = credential_password
         .map(credential_password_from_str)
-        .unwrap_or_else(|| zeroize::Zeroizing::new(vec![0u8; 16]));
+        .unwrap_or([0u8; 16]);
 
     let mut session = open_session(dev, scp_params)?;
     session
@@ -154,7 +154,7 @@ pub fn run_credentials_symmetric(
     let mgmt = parse_mgmt_key(management_key)?;
     let pw = credential_password
         .map(credential_password_from_str)
-        .unwrap_or_else(|| zeroize::Zeroizing::new(vec![0u8; 16]));
+        .unwrap_or([0u8; 16]);
 
     let (enc, mac) = if generate {
         let mut e = [0u8; 16];
@@ -200,7 +200,7 @@ pub fn run_credentials_derive(
     let mgmt = parse_mgmt_key(management_key)?;
     let pw = credential_password
         .map(credential_password_from_str)
-        .unwrap_or_else(|| zeroize::Zeroizing::new(vec![0u8; 16]));
+        .unwrap_or([0u8; 16]);
 
     let mut session = open_session(dev, scp_params)?;
     session
@@ -219,7 +219,7 @@ pub fn run_credentials_change_password(
 ) -> Result<(), CliError> {
     let old_pw = credential_password
         .map(credential_password_from_str)
-        .unwrap_or_else(|| zeroize::Zeroizing::new(vec![0u8; 16]));
+        .unwrap_or([0u8; 16]);
     let new_pw = credential_password_from_str(new_credential_password);
 
     let mut session = open_session(dev, scp_params)?;

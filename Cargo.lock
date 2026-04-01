@@ -3953,7 +3953,6 @@ dependencies = [
  "p256",
  "pyo3",
  "yubikit",
- "zeroize",
 ]
 
 [[package]]

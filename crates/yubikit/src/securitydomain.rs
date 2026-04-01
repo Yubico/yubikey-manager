@@ -31,7 +31,7 @@ use std::fmt;
 use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -235,11 +235,11 @@ impl fmt::Display for KeyRef {
 // ---------------------------------------------------------------------------
 
 /// SCP03 static key set.
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct StaticKeys {
-    pub key_enc: Zeroizing<Vec<u8>>,
-    pub key_mac: Zeroizing<Vec<u8>>,
-    pub key_dek: Option<Zeroizing<Vec<u8>>>,
+    pub key_enc: [u8; 16],
+    pub key_mac: [u8; 16],
+    pub key_dek: Option<[u8; 16]>,
 }
 
 impl fmt::Debug for StaticKeys {
@@ -253,11 +253,7 @@ impl fmt::Debug for StaticKeys {
 }
 
 impl StaticKeys {
-    pub fn new(
-        key_enc: Zeroizing<Vec<u8>>,
-        key_mac: Zeroizing<Vec<u8>>,
-        key_dek: Option<Zeroizing<Vec<u8>>>,
-    ) -> Self {
+    pub fn new(key_enc: [u8; 16], key_mac: [u8; 16], key_dek: Option<[u8; 16]>) -> Self {
         Self {
             key_enc,
             key_mac,
@@ -267,11 +263,11 @@ impl StaticKeys {
 
     /// Default SCP03 static keys (all 0x40..0x4f repeated).
     pub fn default_keys() -> Self {
-        let key: Vec<u8> = (0x40..=0x4F).collect();
+        let key: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
         Self {
-            key_enc: Zeroizing::new(key.clone()),
-            key_mac: Zeroizing::new(key.clone()),
-            key_dek: Some(Zeroizing::new(key)),
+            key_enc: key,
+            key_mac: key,
+            key_dek: Some(key),
         }
     }
 
@@ -281,7 +277,10 @@ impl StaticKeys {
         [
             &self.key_enc,
             &self.key_mac,
-            self.key_dek.as_deref().expect("key_dek must be set"),
+            self.key_dek
+                .as_ref()
+                .map(|v| v.as_slice())
+                .expect("key_dek must be set"),
         ]
     }
 }
@@ -323,7 +322,15 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
-    dek: Option<Zeroizing<Vec<u8>>>,
+    dek: Option<[u8; 16]>,
+}
+
+impl<C: SmartCardConnection> Drop for SecurityDomainSession<C> {
+    fn drop(&mut self) {
+        if let Some(ref mut dek) = self.dek {
+            dek.zeroize();
+        }
+    }
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -356,7 +363,10 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             return Err((e, protocol.into_connection()));
         }
         let dek = match protocol.init_scp(scp_key_params) {
-            Ok(dek) => dek.map(Zeroizing::new),
+            Ok(dek) => dek.map(|v| {
+                let a: [u8; 16] = v.as_slice().try_into().expect("DEK must be 16 bytes");
+                a
+            }),
             Err(e) => return Err((e, protocol.into_connection())),
         };
         let version = patch_version(Version(5, 3, 0));
@@ -384,8 +394,17 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     }
 
     /// Consume this session and return the underlying connection.
-    pub fn into_connection(self) -> C {
-        self.protocol.into_connection()
+    pub fn into_connection(mut self) -> C {
+        // Zeroize the DEK before we disassemble the struct.
+        if let Some(ref mut dek) = self.dek {
+            dek.zeroize();
+        }
+        // Use ManuallyDrop so the Drop impl doesn't run after we move
+        // the protocol field out.
+        let me = std::mem::ManuallyDrop::new(self);
+        // SAFETY: we already zeroized dek above, and we're taking ownership
+        // of protocol. ManuallyDrop prevents the Drop impl from running.
+        unsafe { std::ptr::read(&me.protocol) }.into_connection()
     }
 
     /// Read data from the security domain.
@@ -698,7 +717,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         static_keys: &StaticKeys,
         replace_kvn: u8,
     ) -> Result<(), SmartCardError> {
-        let dek = self.dek.as_deref().ok_or_else(|| {
+        let dek: &[u8] = self.dek.as_ref().map(|v| v.as_slice()).ok_or_else(|| {
             SmartCardError::BadResponse("No DEK available (SCP session required)".into())
         })?;
 
@@ -744,7 +763,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<(), SmartCardError> {
-        let dek = self.dek.as_deref().ok_or_else(|| {
+        let dek: &[u8] = self.dek.as_ref().map(|v| v.as_slice()).ok_or_else(|| {
             SmartCardError::BadResponse("No DEK available (SCP session required)".into())
         })?;
 
@@ -918,10 +937,10 @@ mod tests {
     #[test]
     fn test_static_keys_default() {
         let keys = StaticKeys::default_keys();
-        let expected: Vec<u8> = (0x40..=0x4F).collect();
-        assert_eq!(*keys.key_enc, expected);
-        assert_eq!(*keys.key_mac, expected);
-        assert_eq!(&**keys.key_dek.as_ref().unwrap(), &expected);
+        let expected: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
+        assert_eq!(keys.key_enc, expected);
+        assert_eq!(keys.key_mac, expected);
+        assert_eq!(keys.key_dek.as_ref().unwrap(), &expected);
     }
 
     #[test]
@@ -929,7 +948,7 @@ mod tests {
         let keys = StaticKeys::default_keys();
         let all = keys.keys();
         assert_eq!(all.len(), 3);
-        let expected: Vec<u8> = (0x40..=0x4F).collect();
+        let expected: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
         for k in all {
             assert_eq!(k, expected.as_slice());
         }

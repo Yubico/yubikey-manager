@@ -119,7 +119,7 @@ impl OathSession {
             name: name.to_string(),
             oath_type: ot,
             hash_algorithm: ha,
-            secret: zeroize::Zeroizing::new(secret.to_vec()),
+            secret: secret.to_vec(),
             digits,
             period,
             counter,
