@@ -26,6 +26,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 use std::collections::HashMap;
+use std::fmt;
 
 use sha2::Digest;
 use thiserror::Error;
@@ -1074,7 +1075,7 @@ fn kdf_s2k_hash(
 // Private Key Template (for import)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum OpenPgpPrivateKey {
     Rsa {
         e: Vec<u8>,
@@ -1094,6 +1095,16 @@ pub enum OpenPgpPrivateKey {
         scalar: Vec<u8>,
         public_key: Option<Vec<u8>>,
     },
+}
+
+impl fmt::Debug for OpenPgpPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OpenPgpPrivateKey::Rsa { .. } => write!(f, "OpenPgpPrivateKey::Rsa(..)"),
+            OpenPgpPrivateKey::RsaCrt { .. } => write!(f, "OpenPgpPrivateKey::RsaCrt(..)"),
+            OpenPgpPrivateKey::Ec { .. } => write!(f, "OpenPgpPrivateKey::Ec(..)"),
+        }
+    }
 }
 
 /// Build the private key template for PUT_DATA_ODD (tag 0x4D).

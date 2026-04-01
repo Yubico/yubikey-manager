@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use std::fmt;
+
 use thiserror::Error;
 
 use crate::core::Version;
@@ -122,11 +124,21 @@ pub struct Credential {
 // SessionKeys
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SessionKeys {
     pub key_senc: Vec<u8>,
     pub key_smac: Vec<u8>,
     pub key_srmac: Vec<u8>,
+}
+
+impl fmt::Debug for SessionKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionKeys")
+            .field("key_senc", &"<redacted>")
+            .field("key_smac", &"<redacted>")
+            .field("key_srmac", &"<redacted>")
+            .finish()
+    }
 }
 
 impl SessionKeys {

@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use std::fmt;
+
 use aes::Aes128;
 use cbc::Decryptor as CbcDecryptor;
 use cbc::Encryptor as CbcEncryptor;
@@ -248,7 +250,7 @@ pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<
 }
 
 /// SCP key parameters for establishing a secure channel when opening a session.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum ScpKeyParams {
     /// SCP03 with static keys.
     Scp03 {
@@ -272,4 +274,39 @@ pub enum ScpKeyParams {
         certificates: Vec<Vec<u8>>,
         oce_ref: Option<(u8, u8)>,
     },
+}
+
+impl fmt::Debug for ScpKeyParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScpKeyParams::Scp03 { kvn, .. } => f
+                .debug_struct("Scp03")
+                .field("kvn", kvn)
+                .field("key_enc", &"<redacted>")
+                .field("key_mac", &"<redacted>")
+                .field("key_dek", &"<redacted>")
+                .finish(),
+            ScpKeyParams::Scp11b { kid, kvn, .. } => f
+                .debug_struct("Scp11b")
+                .field("kid", kid)
+                .field("kvn", kvn)
+                .field("pk_sd_ecka", &"<redacted>")
+                .finish(),
+            ScpKeyParams::Scp11ac {
+                kid,
+                kvn,
+                certificates,
+                oce_ref,
+                ..
+            } => f
+                .debug_struct("Scp11ac")
+                .field("kid", kid)
+                .field("kvn", kvn)
+                .field("pk_sd_ecka", &"<redacted>")
+                .field("sk_oce_ecka", &"<redacted>")
+                .field("certificates", certificates)
+                .field("oce_ref", oce_ref)
+                .finish(),
+        }
+    }
 }

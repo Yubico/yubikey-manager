@@ -234,11 +234,21 @@ impl fmt::Display for KeyRef {
 // ---------------------------------------------------------------------------
 
 /// SCP03 static key set.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct StaticKeys {
     pub key_enc: Vec<u8>,
     pub key_mac: Vec<u8>,
     pub key_dek: Option<Vec<u8>>,
+}
+
+impl fmt::Debug for StaticKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaticKeys")
+            .field("key_enc", &"<redacted>")
+            .field("key_mac", &"<redacted>")
+            .field("key_dek", &"<redacted>")
+            .finish()
+    }
 }
 
 impl StaticKeys {
