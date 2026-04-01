@@ -3884,7 +3884,6 @@ dependencies = [
  "tempfile",
  "x509-cert 0.2.5",
  "yubikit",
- "zeroize",
 ]
 
 [[package]]
