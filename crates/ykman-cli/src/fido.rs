@@ -33,7 +33,7 @@
 use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
 
-use fido2_client::ctap::{CtapDevice, CtapError};
+use fido2_client::ctap::{CtapDevice, CtapError, CtapStatus};
 use fido2_client::ctap2::Ctap2;
 use fido2_client::pin::{ClientPin, PinProtocol};
 use fido2_server::cbor::Value;
@@ -667,13 +667,7 @@ pub fn run_access_verify_pin(
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
 
-    let pin_str = match pin {
-        Some(p) => p.to_string(),
-        None => {
-            eprint!("Enter your PIN: ");
-            rpassword::read_password().map_err(|e| CliError(format!("Failed to read PIN: {e}")))?
-        }
-    };
+    let pin_str = require_pin(&ctap2, pin, "PIN verification")?;
 
     // Get a PIN token to verify the PIN
     client_pin
@@ -684,8 +678,13 @@ pub fn run_access_verify_pin(
     Ok(())
 }
 
-/// Prompt for PIN if not provided.
-fn require_pin(pin: Option<&str>) -> Result<String, CliError> {
+/// Require a PIN to be set and prompt if not provided.
+fn require_pin(ctap2: &Ctap2, pin: Option<&str>, feature: &str) -> Result<String, CliError> {
+    if ctap2.info().options.get("clientPin") != Some(&true) {
+        return Err(CliError(format!(
+            "{feature} requires having a PIN. Set a PIN first."
+        )));
+    }
     match pin {
         Some(p) => Ok(p.to_string()),
         None => {
@@ -707,6 +706,21 @@ fn get_pin_token<'a>(
     Ok((token, client_pin.protocol()))
 }
 
+/// Get an optional PIN token — only required if a PIN is set on the device.
+fn get_optional_pin_token<'a>(
+    ctap2: &Ctap2,
+    client_pin: &'a ClientPin<'a>,
+    pin: Option<&str>,
+    permissions: u32,
+) -> Result<(Option<Vec<u8>>, Option<&'a PinProtocol>), CliError> {
+    if ctap2.info().options.get("clientPin") != Some(&true) {
+        return Ok((None, None));
+    }
+    let pin_str = require_pin(ctap2, pin, "This feature")?;
+    let (token, protocol) = get_pin_token(client_pin, &pin_str, permissions)?;
+    Ok((Some(token), Some(protocol)))
+}
+
 pub fn run_access_force_change(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
@@ -723,11 +737,7 @@ pub fn run_access_force_change(
             "Force change PIN is not supported on this YubiKey.".to_string(),
         ));
     }
-    if !options.get("clientPin").copied().unwrap_or(false) {
-        return Err(CliError("No PIN is set.".to_string()));
-    }
-
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Force change PIN")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?; // AuthenticatorConfig
@@ -780,7 +790,7 @@ pub fn run_access_set_min_length(
         )));
     }
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Set minimum PIN length")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
@@ -823,7 +833,7 @@ pub fn run_credentials_list(
         ));
     }
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Credential Management")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x04)?; // CredentialManagement
@@ -888,7 +898,7 @@ pub fn run_credentials_delete(
     let ctap2 = Ctap2::new(ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Credential Management")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x04)?;
@@ -968,14 +978,13 @@ pub fn run_fingerprints_list(
     let ctap2 = Ctap2::new(ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
-    let bio_enroll = ctap2.info().options.get("bioEnroll").copied();
-    if bio_enroll.is_none() {
+    if !ctap2.info().options.contains_key("bioEnroll") {
         return Err(CliError(
             "Fingerprints are not supported on this YubiKey.".to_string(),
         ));
     }
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?; // BioEnrollment
@@ -983,25 +992,47 @@ pub fn run_fingerprints_list(
     let bio = fido2_client::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
         .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
-    let enrollments = bio
-        .enumerate_enrollments()
-        .map_err(|e| CliError(format!("Failed to enumerate fingerprints: {e}")))?;
-
-    match enrollments {
-        Value::Map(entries) => {
-            if entries.is_empty() {
-                println!("No fingerprints registered.");
-            }
-            for (id, name) in &entries {
-                let id_hex = id
-                    .as_bytes()
-                    .map(hex::encode)
-                    .unwrap_or_else(|| format!("{id:?}"));
-                let name_str = name.as_text().unwrap_or("(unnamed)");
-                println!("ID: {id_hex} {name_str}");
+    let enrollments = match bio.enumerate_enrollments() {
+        Ok(resp) => {
+            // Extract template infos array (key 0x07)
+            let template_infos = match &resp {
+                Value::Map(entries) => entries
+                    .iter()
+                    .find(|(k, _)| matches!(k, Value::Int(0x07)))
+                    .map(|(_, v)| v),
+                _ => None,
+            };
+            match template_infos {
+                Some(Value::Array(infos)) => infos.clone(),
+                _ => vec![],
             }
         }
-        _ => println!("No fingerprints registered."),
+        Err(CtapError::StatusError(CtapStatus::InvalidOption)) => vec![],
+        Err(e) => return Err(CliError(format!("Failed to enumerate fingerprints: {e}"))),
+    };
+
+    if enrollments.is_empty() {
+        println!("No fingerprints registered.");
+    } else {
+        for info in &enrollments {
+            if let Value::Map(entries) = info {
+                let id = entries
+                    .iter()
+                    .find(|(k, _)| matches!(k, Value::Int(0x01)))
+                    .and_then(|(_, v)| v.as_bytes())
+                    .map(hex::encode)
+                    .unwrap_or_default();
+                let name = entries
+                    .iter()
+                    .find(|(k, _)| matches!(k, Value::Int(0x02)))
+                    .and_then(|(_, v)| v.as_text());
+                if let Some(name) = name {
+                    println!("ID: {id} ({name})");
+                } else {
+                    println!("ID: {id}");
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1024,7 +1055,7 @@ pub fn run_fingerprints_add(
     let ctap2 = Ctap2::new(ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
@@ -1035,15 +1066,7 @@ pub fn run_fingerprints_add(
     // Begin enrollment
     eprintln!("Place your finger against the sensor now...");
     let (template_id, _status, remaining) = bio
-        .enroll_begin(
-            None,
-            &mut |status| {
-                if status == fido2_client::ctap::keepalive::UPNEEDED {
-                    eprintln!("Touch the sensor...");
-                }
-            },
-            None,
-        )
+        .enroll_begin(None, &mut |_| {}, None)
         .map_err(|e| CliError(format!("Enrollment failed: {e}")))?;
 
     if remaining > 0 {
@@ -1054,16 +1077,7 @@ pub fn run_fingerprints_add(
     let mut scans_remaining = remaining;
     while scans_remaining > 0 {
         eprintln!("Place your finger against the sensor now...");
-        match bio.enroll_capture_next(
-            &template_id,
-            None,
-            &mut |status| {
-                if status == fido2_client::ctap::keepalive::UPNEEDED {
-                    eprintln!("Touch the sensor...");
-                }
-            },
-            None,
-        ) {
+        match bio.enroll_capture_next(&template_id, None, &mut |_| {}, None) {
             Ok((_status, remaining)) => {
                 scans_remaining = remaining;
                 if remaining > 0 {
@@ -1111,7 +1125,7 @@ pub fn run_fingerprints_rename(
     let ctap2 = Ctap2::new(ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
@@ -1140,7 +1154,7 @@ pub fn run_fingerprints_delete(
     let ctap2 = Ctap2::new(ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
-    let pin_str = require_pin(pin)?;
+    let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
@@ -1195,12 +1209,11 @@ pub fn run_config_toggle_always_uv(
         ));
     }
 
-    let pin_str = require_pin(pin)?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
-    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
+    let (token, protocol) = get_optional_pin_token(&ctap2, &client_pin, pin, 0x20)?; // AuthenticatorConfig
 
-    let config = fido2_client::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let config = fido2_client::config::Config::from_parts(&ctap2, protocol, token.as_deref());
     config
         .toggle_always_uv()
         .map_err(|e| CliError(format!("Failed to toggle Always Require UV: {e}")))?;
@@ -1234,12 +1247,11 @@ pub fn run_config_enable_ep_attestation(
         ));
     }
 
-    let pin_str = require_pin(pin)?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
-    let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
+    let (token, protocol) = get_optional_pin_token(&ctap2, &client_pin, pin, 0x20)?; // AuthenticatorConfig
 
-    let config = fido2_client::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let config = fido2_client::config::Config::from_parts(&ctap2, protocol, token.as_deref());
     config
         .enable_enterprise_attestation()
         .map_err(|e| CliError(format!("Failed to enable Enterprise Attestation: {e}")))?;
