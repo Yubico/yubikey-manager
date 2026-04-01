@@ -425,3 +425,63 @@ fn test_oath_accounts_code_totp_single() {
 
     oath_reset();
 }
+
+// ── PSKC import (additional formats) ─────────────────────────────────
+
+#[test]
+#[ignore]
+#[serial]
+fn test_oath_import_pskc_hotp() {
+    require_interface!("CCID");
+    oath_reset();
+
+    let pskc = fixture_path("pskc_hotp.xml");
+    ykman_dev()
+        .args(["oath", "accounts", "import", pskc.to_str().unwrap(), "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["oath", "accounts", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pskc-hotp-test"));
+
+    // Verify it produces a code (HOTP)
+    ykman_dev()
+        .args(["oath", "accounts", "code", "pskc-hotp-test", "-s"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"\d{6}").unwrap());
+
+    oath_reset();
+}
+
+#[test]
+#[ignore]
+#[serial]
+fn test_oath_import_pskc_sha256() {
+    require_interface!("CCID");
+    oath_reset();
+
+    let pskc = fixture_path("pskc_sha256.xml");
+    ykman_dev()
+        .args(["oath", "accounts", "import", pskc.to_str().unwrap(), "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["oath", "accounts", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pskc-sha256-test"));
+
+    // SHA-256 TOTP with 8 digits
+    ykman_dev()
+        .args(["oath", "accounts", "code", "pskc-sha256-test", "-s"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^\d{8}\n?$").unwrap());
+
+    oath_reset();
+}

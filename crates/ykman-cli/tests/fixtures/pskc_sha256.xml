@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<KeyContainer Version="1.0" xmlns="urn:ietf:params:xml:ns:keyprov:pskc">
+  <KeyPackage>
+    <Key Id="pskc-sha256-test" Algorithm="urn:ietf:params:xml:ns:keyprov:pskc:totp">
+      <Issuer>Sha256Issuer</Issuer>
+      <AlgorithmParameters>
+        <Suite>HMAC-SHA256</Suite>
+        <ResponseFormat Length="8" Encoding="DECIMAL"/>
+      </AlgorithmParameters>
+      <Data>
+        <Secret>
+          <PlainValue>MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=</PlainValue>
+        </Secret>
+      </Data>
+    </Key>
+  </KeyPackage>
+</KeyContainer>

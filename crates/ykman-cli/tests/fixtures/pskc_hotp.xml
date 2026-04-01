@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<KeyContainer Version="1.0" xmlns="urn:ietf:params:xml:ns:keyprov:pskc">
+  <KeyPackage>
+    <Key Id="pskc-hotp-test" Algorithm="urn:ietf:params:xml:ns:keyprov:pskc:hotp">
+      <Issuer>HotpIssuer</Issuer>
+      <AlgorithmParameters>
+        <ResponseFormat Length="6" Encoding="DECIMAL"/>
+      </AlgorithmParameters>
+      <Data>
+        <Secret>
+          <PlainValue>MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=</PlainValue>
+        </Secret>
+        <Counter>
+          <PlainValue>5</PlainValue>
+        </Counter>
+      </Data>
+    </Key>
+  </KeyPackage>
+</KeyContainer>
