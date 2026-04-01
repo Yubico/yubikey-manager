@@ -356,7 +356,17 @@ impl HidFidoConnection {
 
         loop {
             let mut buf = vec![0u8; self.packet_size];
-            let n = dev.read_timeout(&mut buf, 5000)?;
+            let n = match dev.read_timeout(&mut buf, 5000) {
+                Ok(n) => n,
+                Err(hidapi::HidError::HidApiError { ref message })
+                    if message.contains("Interrupted") =>
+                {
+                    // EINTR from signal handler (e.g. Ctrl+C) — retry read.
+                    // Cancel will be handled via the keepalive check below.
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
             if n == 0 {
                 return Err(CtapHidTransportError::Timeout);
             }
