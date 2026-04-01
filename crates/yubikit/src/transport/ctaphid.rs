@@ -397,7 +397,8 @@ impl HidFidoConnection {
                         && flag.load(std::sync::atomic::Ordering::Relaxed)
                     {
                         let _ = self.send_request(CtapHidCommand::Cancel as u8, &[]);
-                        return Err(CtapHidTransportError::CtapHidError(CtapHidError::Other));
+                        // Continue reading — the authenticator will respond to the
+                        // pending command with a CBOR error (KeepaliveCancel).
                     }
                     continue;
                 } else if r_cmd == TYPE_INIT | CtapHidCommand::Error as u8 {

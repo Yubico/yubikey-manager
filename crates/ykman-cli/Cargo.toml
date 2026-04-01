@@ -9,6 +9,10 @@ license = "BSD-2-Clause"
 name = "ykman"
 path = "src/main.rs"
 
+[[example]]
+name = "fido_selection"
+path = "examples/fido_selection.rs"
+
 [dependencies]
 yubikit = { path = "../yubikit" }
 fido2 = { path = "../../../fido2-rust/crates/fido2" }

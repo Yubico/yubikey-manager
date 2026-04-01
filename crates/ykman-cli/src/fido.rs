@@ -101,8 +101,11 @@ pub struct SmartCardCtapDevice<C: SmartCardConnection> {
 impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
     /// Open a FIDO device over SmartCard.
     pub fn new(connection: C) -> Result<Self, CtapError> {
-        let protocol = SmartCardProtocol::new(connection);
-        Self::init(protocol)
+        let mut protocol = SmartCardProtocol::new(connection);
+        let resp = protocol
+            .select(AID_FIDO)
+            .map_err(|e| CtapError::TransportError(format!("FIDO applet select failed: {e}")))?;
+        Self::init(protocol, &resp)
     }
 
     /// Open a FIDO device over SmartCard with SCP.
@@ -111,20 +114,19 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
         scp_key_params: &yubikit::scp::ScpKeyParams,
     ) -> Result<Self, CtapError> {
         let mut protocol = SmartCardProtocol::new(connection);
-        protocol
-            .init_scp(scp_key_params)
-            .map_err(|e| CtapError::TransportError(format!("SCP init failed: {e}")))?;
-        Self::init(protocol)
-    }
-
-    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, CtapError> {
-        // Select FIDO applet
+        // Select FIDO applet first, then establish SCP within its context
         let resp = protocol
             .select(AID_FIDO)
             .map_err(|e| CtapError::TransportError(format!("FIDO applet select failed: {e}")))?;
+        protocol
+            .init_scp(scp_key_params)
+            .map_err(|e| CtapError::TransportError(format!("SCP init failed: {e}")))?;
+        Self::init(protocol, &resp)
+    }
 
+    fn init(protocol: SmartCardProtocol<C>, select_resp: &[u8]) -> Result<Self, CtapError> {
         let mut capabilities = 0u8;
-        if resp == b"U2F_V2" {
+        if select_resp == b"U2F_V2" {
             capabilities |= fido2::ctap::capability::NMSG;
         }
 
@@ -202,8 +204,10 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
             }
         };
 
-        // Keepalive loop
+        // Keepalive loop with dedup
+        let mut last_ka: Option<u8> = None;
         if !resp.is_empty() {
+            last_ka = Some(resp[0]);
             on_keepalive(resp[0]);
         }
 
@@ -221,8 +225,11 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
             match protocol.send_apdu(0x80, 0x11, p1, 0x00, &[]) {
                 Ok(resp) => return Ok(resp),
                 Err(SmartCardError::Apdu { data, sw }) if sw == SW_KEEPALIVE => {
-                    if !data.is_empty() {
-                        on_keepalive(data[0]);
+                    if let Some(&status) = data.first()
+                        && last_ka != Some(status)
+                    {
+                        last_ka = Some(status);
+                        on_keepalive(status);
                     }
                 }
                 Err(SmartCardError::Apdu { sw, .. }) => {
