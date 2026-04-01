@@ -59,6 +59,9 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.mypy]
+mypy_path = "typings"
+
 [tool.ruff.lint]
 extend-select = ["E", "I", "S"]
 

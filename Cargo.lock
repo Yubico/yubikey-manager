@@ -880,7 +880,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
-name = "fido2"
+name = "fido2-client"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "cbc",
+ "fido2-server",
+ "flate2",
+ "getrandom 0.3.4",
+ "hidapi",
+ "hkdf",
+ "log",
+ "p256",
+ "pcsc",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "fido2-server"
 version = "0.1.0"
 dependencies = [
  "aes",
@@ -892,9 +912,7 @@ dependencies = [
  "ecdsa",
  "ed25519-dalek",
  "elliptic-curve",
- "flate2",
  "getrandom 0.3.4",
- "hidapi",
  "hkdf",
  "hmac",
  "k256",
@@ -902,7 +920,6 @@ dependencies = [
  "p256",
  "p384",
  "p521",
- "pcsc",
  "rsa",
  "serde",
  "serde_json",
@@ -3219,7 +3236,8 @@ dependencies = [
  "ctrlc",
  "dirs",
  "elliptic-curve",
- "fido2",
+ "fido2-client",
+ "fido2-server",
  "getrandom 0.3.4",
  "hex",
  "keyring",

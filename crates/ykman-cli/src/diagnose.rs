@@ -126,7 +126,7 @@ fn print_device_info(info: &DeviceInfo, indent: &str) {
     }
 }
 
-fn print_ctap2_info(info: &fido2::ctap2::Info) {
+fn print_ctap2_info(info: &fido2_client::ctap2::Info) {
     println!("      versions:      {:?}", info.versions);
     if !info.extensions.is_empty() {
         println!("      extensions:    {:?}", info.extensions);
@@ -165,10 +165,10 @@ fn print_ctap2_info(info: &fido2::ctap2::Info) {
     }
 }
 
-fn print_ctap2_pin_status(ctap2: &fido2::ctap2::Ctap2) {
+fn print_ctap2_pin_status(ctap2: &fido2_client::ctap2::Ctap2) {
     let info = ctap2.info();
     if info.options.get("clientPin") == Some(&true) {
-        match fido2::pin::ClientPin::new(ctap2, None) {
+        match fido2_client::pin::ClientPin::new(ctap2, None) {
             Ok(client_pin) => {
                 match client_pin.get_pin_retries() {
                     Ok((retries, power_cycle)) => {
@@ -540,7 +540,7 @@ pub fn run_diagnose() -> Result<(), CliError> {
                             if caps.has_cbor() {
                                 println!("    CTAP2 Info:");
                                 let adapter = HidCtapDevice::new(conn);
-                                match fido2::ctap2::Ctap2::new(&adapter, false) {
+                                match fido2_client::ctap2::Ctap2::new(&adapter, false) {
                                     Ok(ctap2) => {
                                         print_ctap2_info(ctap2.info());
                                         // PIN status

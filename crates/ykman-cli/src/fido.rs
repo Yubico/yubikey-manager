@@ -27,16 +27,16 @@
 
 //! FIDO CLI commands and CtapDevice adapters.
 //!
-//! Provides adapters that implement `fido2::ctap::CtapDevice` for ykman's
+//! Provides adapters that implement `fido2_client::ctap::CtapDevice` for ykman's
 //! connection types, enabling use of the fido2 crate's CTAP2 protocol support.
 
 use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
 
-use fido2::cbor::Value;
-use fido2::ctap::{CtapDevice, CtapError};
-use fido2::ctap2::Ctap2;
-use fido2::pin::{ClientPin, PinProtocol};
+use fido2_client::ctap::{CtapDevice, CtapError};
+use fido2_client::ctap2::Ctap2;
+use fido2_client::pin::{ClientPin, PinProtocol};
+use fido2_server::cbor::Value;
 use yubikit::core::Transport;
 use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
@@ -127,7 +127,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
     fn init(protocol: SmartCardProtocol<C>, select_resp: &[u8]) -> Result<Self, CtapError> {
         let mut capabilities = 0u8;
         if select_resp == b"U2F_V2" {
-            capabilities |= fido2::ctap::capability::NMSG;
+            capabilities |= fido2_client::ctap::capability::NMSG;
         }
 
         let protocol = RefCell::new(protocol);
@@ -136,7 +136,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
         {
             let mut proto = protocol.borrow_mut();
             if proto.send_apdu(0x80, 0x10, 0x80, 0x00, b"\x04").is_ok() {
-                capabilities |= fido2::ctap::capability::CBOR;
+                capabilities |= fido2_client::ctap::capability::CBOR;
             } else if capabilities == 0 {
                 return Err(CtapError::TransportError("Unsupported device".to_string()));
             }
@@ -148,10 +148,10 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
         })
     }
 
-    /// Consume the adapter and return the underlying protocol.
+    /// Consume the adapter and return the underlying Connection.
     #[allow(dead_code)]
-    pub fn into_protocol(self) -> SmartCardProtocol<C> {
-        self.protocol.into_inner()
+    pub fn into_connection(self) -> C {
+        self.protocol.into_inner().into_connection()
     }
 
     fn call_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, CtapError> {
@@ -252,10 +252,10 @@ impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
         cancel: Option<&AtomicBool>,
     ) -> Result<Vec<u8>, CtapError> {
         match cmd {
-            fido2::ctap::cmd::CBOR => self.call_cbor(data, on_keepalive, cancel),
-            fido2::ctap::cmd::MSG => self.call_apdu(data),
+            fido2_client::ctap::cmd::CBOR => self.call_cbor(data, on_keepalive, cancel),
+            fido2_client::ctap::cmd::MSG => self.call_apdu(data),
             _ => Err(CtapError::StatusError(
-                fido2::ctap::CtapStatus::InvalidCommand,
+                fido2_client::ctap::CtapStatus::InvalidCommand,
             )),
         }
     }
@@ -534,9 +534,9 @@ pub fn run_reset(
 
     let result = ctap2.reset(
         &mut |status| {
-            if status == fido2::ctap::keepalive::UPNEEDED {
+            if status == fido2_client::ctap::keepalive::UPNEEDED {
                 eprintln!("{touch_msg}");
-            } else if status == fido2::ctap::keepalive::PROCESSING {
+            } else if status == fido2_client::ctap::keepalive::PROCESSING {
                 eprintln!("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!");
             }
         },
@@ -549,21 +549,24 @@ pub fn run_reset(
             Ok(())
         }
         Err(e) => {
-            if e.get_status() == Some(fido2::ctap::CtapStatus::UserActionTimeout) {
+            if e.get_status() == Some(fido2_client::ctap::CtapStatus::UserActionTimeout) {
                 Err(CliError(
                     "Reset failed. You need to touch your YubiKey to confirm the reset."
                         .to_string(),
                 ))
             } else if matches!(
                 e.get_status(),
-                Some(fido2::ctap::CtapStatus::NotAllowed | fido2::ctap::CtapStatus::PinAuthBlocked)
+                Some(
+                    fido2_client::ctap::CtapStatus::NotAllowed
+                        | fido2_client::ctap::CtapStatus::PinAuthBlocked
+                )
             ) {
                 Err(CliError(
                     "Reset failed. Reset must be triggered within 5 seconds after the \
                      YubiKey is inserted."
                         .to_string(),
                 ))
-            } else if e.get_status() == Some(fido2::ctap::CtapStatus::KeepaliveCancel) {
+            } else if e.get_status() == Some(fido2_client::ctap::CtapStatus::KeepaliveCancel) {
                 Err(CliError("Reset aborted by user.".to_string()))
             } else {
                 Err(CliError(format!("FIDO reset failed: {e}")))
@@ -721,7 +724,7 @@ pub fn run_access_force_change(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?; // AuthenticatorConfig
 
-    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let config = fido2_client::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
     config
         .set_min_pin_length(None, None, true)
         .map_err(|e| CliError(format!("Failed to set force change: {e}")))?;
@@ -774,7 +777,7 @@ pub fn run_access_set_min_length(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
 
-    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let config = fido2_client::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
     let rp_strs: Vec<&str> = rp_ids.iter().map(|s| s.as_str()).collect();
     let rp_arg = if rp_strs.is_empty() {
         None
@@ -817,7 +820,7 @@ pub fn run_credentials_list(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x04)?; // CredentialManagement
 
-    let credman = fido2::credman::CredentialManagement::new(&ctap2, protocol, &token);
+    let credman = fido2_client::credman::CredentialManagement::new(&ctap2, protocol, &token);
 
     let rps = credman
         .enumerate_rps()
@@ -882,7 +885,7 @@ pub fn run_credentials_delete(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x04)?;
 
-    let credman = fido2::credman::CredentialManagement::new(&ctap2, protocol, &token);
+    let credman = fido2_client::credman::CredentialManagement::new(&ctap2, protocol, &token);
     let search = credential_id.trim_end_matches('.').to_lowercase();
 
     // Find matching credentials
@@ -969,7 +972,7 @@ pub fn run_fingerprints_list(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?; // BioEnrollment
 
-    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+    let bio = fido2_client::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
         .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     let enrollments = bio
@@ -1018,7 +1021,7 @@ pub fn run_fingerprints_add(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
 
-    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+    let bio = fido2_client::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
         .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     // Begin enrollment
@@ -1027,7 +1030,7 @@ pub fn run_fingerprints_add(
         .enroll_begin(
             None,
             &mut |status| {
-                if status == fido2::ctap::keepalive::UPNEEDED {
+                if status == fido2_client::ctap::keepalive::UPNEEDED {
                     eprintln!("Touch the sensor...");
                 }
             },
@@ -1047,7 +1050,7 @@ pub fn run_fingerprints_add(
             &template_id,
             None,
             &mut |status| {
-                if status == fido2::ctap::keepalive::UPNEEDED {
+                if status == fido2_client::ctap::keepalive::UPNEEDED {
                     eprintln!("Touch the sensor...");
                 }
             },
@@ -1060,12 +1063,12 @@ pub fn run_fingerprints_add(
                 }
             }
             Err(e) => {
-                if e.get_status() == Some(fido2::ctap::CtapStatus::FpDatabaseFull) {
+                if e.get_status() == Some(fido2_client::ctap::CtapStatus::FpDatabaseFull) {
                     return Err(CliError(
                         "Fingerprint storage full. Remove some fingerprints first.".to_string(),
                     ));
                 }
-                if e.get_status() == Some(fido2::ctap::CtapStatus::UserActionTimeout) {
+                if e.get_status() == Some(fido2_client::ctap::CtapStatus::UserActionTimeout) {
                     return Err(CliError(
                         "Failed to add fingerprint due to user inactivity.".to_string(),
                     ));
@@ -1105,7 +1108,7 @@ pub fn run_fingerprints_rename(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
 
-    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+    let bio = fido2_client::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
         .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     let key =
@@ -1134,7 +1137,7 @@ pub fn run_fingerprints_delete(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x08)?;
 
-    let bio = fido2::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
+    let bio = fido2_client::bio::FPBioEnrollment::new(&ctap2, protocol, &token)
         .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     let key = hex::decode(template_id)
@@ -1189,7 +1192,7 @@ pub fn run_config_toggle_always_uv(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
 
-    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let config = fido2_client::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
     config
         .toggle_always_uv()
         .map_err(|e| CliError(format!("Failed to toggle Always Require UV: {e}")))?;
@@ -1228,7 +1231,7 @@ pub fn run_config_enable_ep_attestation(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&client_pin, &pin_str, 0x20)?;
 
-    let config = fido2::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
+    let config = fido2_client::config::Config::from_parts(&ctap2, Some(protocol), Some(&token));
     config
         .enable_enterprise_attestation()
         .map_err(|e| CliError(format!("Failed to enable Enterprise Attestation: {e}")))?;

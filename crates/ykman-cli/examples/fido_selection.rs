@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use fido2::ctap::{self, CtapDevice, CtapError};
-use fido2::ctap2::Ctap2;
+use fido2_client::ctap::{self, CtapDevice, CtapError};
+use fido2_client::ctap2::Ctap2;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
