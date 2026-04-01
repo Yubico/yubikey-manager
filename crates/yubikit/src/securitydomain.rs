@@ -31,6 +31,7 @@ use std::fmt;
 use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
+use zeroize::Zeroizing;
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -236,9 +237,9 @@ impl fmt::Display for KeyRef {
 /// SCP03 static key set.
 #[derive(Clone)]
 pub struct StaticKeys {
-    pub key_enc: Vec<u8>,
-    pub key_mac: Vec<u8>,
-    pub key_dek: Option<Vec<u8>>,
+    pub key_enc: Zeroizing<Vec<u8>>,
+    pub key_mac: Zeroizing<Vec<u8>>,
+    pub key_dek: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl fmt::Debug for StaticKeys {
@@ -252,7 +253,11 @@ impl fmt::Debug for StaticKeys {
 }
 
 impl StaticKeys {
-    pub fn new(key_enc: Vec<u8>, key_mac: Vec<u8>, key_dek: Option<Vec<u8>>) -> Self {
+    pub fn new(
+        key_enc: Zeroizing<Vec<u8>>,
+        key_mac: Zeroizing<Vec<u8>>,
+        key_dek: Option<Zeroizing<Vec<u8>>>,
+    ) -> Self {
         Self {
             key_enc,
             key_mac,
@@ -264,9 +269,9 @@ impl StaticKeys {
     pub fn default_keys() -> Self {
         let key: Vec<u8> = (0x40..=0x4F).collect();
         Self {
-            key_enc: key.clone(),
-            key_mac: key.clone(),
-            key_dek: Some(key),
+            key_enc: Zeroizing::new(key.clone()),
+            key_mac: Zeroizing::new(key.clone()),
+            key_dek: Some(Zeroizing::new(key)),
         }
     }
 
@@ -318,7 +323,7 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
-    dek: Option<Vec<u8>>,
+    dek: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -351,7 +356,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             return Err((e, protocol.into_connection()));
         }
         let dek = match protocol.init_scp(scp_key_params) {
-            Ok(dek) => dek,
+            Ok(dek) => dek.map(Zeroizing::new),
             Err(e) => return Err((e, protocol.into_connection())),
         };
         let version = patch_version(Version(5, 3, 0));
@@ -914,9 +919,9 @@ mod tests {
     fn test_static_keys_default() {
         let keys = StaticKeys::default_keys();
         let expected: Vec<u8> = (0x40..=0x4F).collect();
-        assert_eq!(keys.key_enc, expected);
-        assert_eq!(keys.key_mac, expected);
-        assert_eq!(keys.key_dek.as_ref().unwrap(), &expected);
+        assert_eq!(*keys.key_enc, expected);
+        assert_eq!(*keys.key_mac, expected);
+        assert_eq!(&**keys.key_dek.as_ref().unwrap(), &expected);
     }
 
     #[test]

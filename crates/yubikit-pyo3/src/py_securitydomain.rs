@@ -196,7 +196,11 @@ impl SecurityDomainSession {
         replace_kvn: u8,
     ) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
-        let static_keys = StaticKeys::new(key_enc.to_vec(), key_mac.to_vec(), key_dek);
+        let static_keys = StaticKeys::new(
+            zeroize::Zeroizing::new(key_enc.to_vec()),
+            zeroize::Zeroizing::new(key_mac.to_vec()),
+            key_dek.map(zeroize::Zeroizing::new),
+        );
         self.session_mut()?
             .put_key_static(key, &static_keys, replace_kvn)
             .map_err(smartcard_err)

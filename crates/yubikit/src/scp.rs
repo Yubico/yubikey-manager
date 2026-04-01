@@ -35,6 +35,7 @@ use cmac::{Cmac, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 type Aes128CbcEnc = CbcEncryptor<Aes128>;
 type Aes128CbcDec = CbcDecryptor<Aes128>;
@@ -84,7 +85,12 @@ fn calculate_mac_inner(
 }
 
 /// SCP03 key derivation using AES-CMAC.
-pub fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Vec<u8>, ScpError> {
+pub fn scp03_derive(
+    key: &[u8],
+    t: u8,
+    context: &[u8],
+    l: u16,
+) -> Result<Zeroizing<Vec<u8>>, ScpError> {
     if l != 0x80 && l != 0x40 {
         return Err(ScpError::InvalidDerivationLength);
     }
@@ -97,7 +103,7 @@ pub fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Vec<u8>
     input.extend_from_slice(context);
 
     let result = aes_cmac(key, &input)?;
-    Ok(result[..(l as usize / 8)].to_vec())
+    Ok(Zeroizing::new(result[..(l as usize / 8)].to_vec()))
 }
 
 /// SCP03 MAC calculation: CMAC(key, chain || message).
@@ -153,18 +159,18 @@ fn aes_cbc_decrypt(
 
 /// SCP session state managing encryption, decryption, and MAC operations.
 pub struct ScpState {
-    key_senc: Vec<u8>,
-    key_smac: Vec<u8>,
-    key_srmac: Vec<u8>,
-    mac_chain: Vec<u8>,
+    key_senc: Zeroizing<Vec<u8>>,
+    key_smac: Zeroizing<Vec<u8>>,
+    key_srmac: Zeroizing<Vec<u8>>,
+    mac_chain: Zeroizing<Vec<u8>>,
     enc_counter: u32,
 }
 
 impl ScpState {
     pub fn new(
-        key_senc: Vec<u8>,
-        key_smac: Vec<u8>,
-        key_srmac: Vec<u8>,
+        key_senc: Zeroizing<Vec<u8>>,
+        key_smac: Zeroizing<Vec<u8>>,
+        key_srmac: Zeroizing<Vec<u8>>,
         mac_chain: Option<Vec<u8>>,
         enc_counter: Option<u32>,
     ) -> Self {
@@ -172,7 +178,7 @@ impl ScpState {
             key_senc,
             key_smac,
             key_srmac,
-            mac_chain: mac_chain.unwrap_or_else(|| vec![0u8; 16]),
+            mac_chain: Zeroizing::new(mac_chain.unwrap_or_else(|| vec![0u8; 16])),
             enc_counter: enc_counter.unwrap_or(1),
         }
     }
@@ -194,7 +200,7 @@ impl ScpState {
     /// Compute MAC over data, updating the MAC chain. Returns 8-byte MAC.
     pub fn mac(&mut self, data: &[u8]) -> Result<[u8; 8], ScpError> {
         let (new_chain, mac) = calculate_mac_inner(&self.key_smac, &self.mac_chain, data)?;
-        self.mac_chain = new_chain.to_vec();
+        self.mac_chain = Zeroizing::new(new_chain.to_vec());
         Ok(mac)
     }
 
@@ -234,7 +240,7 @@ impl ScpState {
 }
 
 /// X9.63 KDF using SHA-256.
-pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<u8> {
+pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Zeroizing<Vec<u8>> {
     let mut output = Vec::with_capacity(length);
     let mut counter: u32 = 1;
     while output.len() < length {
@@ -246,7 +252,7 @@ pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<
         counter += 1;
     }
     output.truncate(length);
-    output
+    Zeroizing::new(output)
 }
 
 /// SCP key parameters for establishing a secure channel when opening a session.
@@ -255,9 +261,9 @@ pub enum ScpKeyParams {
     /// SCP03 with static keys.
     Scp03 {
         kvn: u8,
-        key_enc: Vec<u8>,
-        key_mac: Vec<u8>,
-        key_dek: Option<Vec<u8>>,
+        key_enc: Zeroizing<Vec<u8>>,
+        key_mac: Zeroizing<Vec<u8>>,
+        key_dek: Option<Zeroizing<Vec<u8>>>,
     },
     /// SCP11b — needs card key reference + public key from SD.
     Scp11b {
@@ -270,7 +276,7 @@ pub enum ScpKeyParams {
         kid: u8,
         kvn: u8,
         pk_sd_ecka: Vec<u8>,
-        sk_oce_ecka: Vec<u8>,
+        sk_oce_ecka: Zeroizing<Vec<u8>>,
         certificates: Vec<Vec<u8>>,
         oce_ref: Option<(u8, u8)>,
     },

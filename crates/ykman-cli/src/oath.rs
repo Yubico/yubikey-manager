@@ -6,6 +6,7 @@ use yubikit::management::Capability;
 use yubikit::oath::{
     Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
 };
+use zeroize::Zeroizing;
 
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
@@ -358,7 +359,7 @@ pub fn run_accounts_add(
         name: name.to_string(),
         oath_type,
         hash_algorithm,
-        secret: secret_bytes,
+        secret: Zeroizing::new(secret_bytes),
         digits,
         period,
         counter,
@@ -718,7 +719,7 @@ pub fn run_accounts_uri(
         name: name.clone(),
         oath_type,
         hash_algorithm: algorithm,
-        secret: secret_bytes,
+        secret: Zeroizing::new(secret_bytes),
         digits,
         period,
         counter,
@@ -824,7 +825,7 @@ pub fn run_accounts_import(
             name: cred.name.clone(),
             oath_type: cred.oath_type,
             hash_algorithm: cred.hash_algorithm,
-            secret: cred.secret.clone(),
+            secret: Zeroizing::new(cred.secret.clone()),
             digits: cred.digits,
             period: cred.period,
             counter: cred.counter,

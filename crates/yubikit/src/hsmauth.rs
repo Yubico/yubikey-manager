@@ -28,6 +28,7 @@
 use std::fmt;
 
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -126,9 +127,9 @@ pub struct Credential {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct SessionKeys {
-    pub key_senc: Vec<u8>,
-    pub key_smac: Vec<u8>,
-    pub key_srmac: Vec<u8>,
+    pub key_senc: Zeroizing<Vec<u8>>,
+    pub key_smac: Zeroizing<Vec<u8>>,
+    pub key_srmac: Zeroizing<Vec<u8>>,
 }
 
 impl fmt::Debug for SessionKeys {
@@ -149,9 +150,9 @@ impl SessionKeys {
             ));
         }
         Ok(Self {
-            key_senc: response[..16].to_vec(),
-            key_smac: response[16..32].to_vec(),
-            key_srmac: response[32..48].to_vec(),
+            key_senc: Zeroizing::new(response[..16].to_vec()),
+            key_smac: Zeroizing::new(response[16..32].to_vec()),
+            key_srmac: Zeroizing::new(response[32..48].to_vec()),
         })
     }
 }
@@ -199,16 +200,21 @@ fn parse_credential_password(password: &[u8]) -> Result<Vec<u8>, HsmAuthError> {
     Ok(password.to_vec())
 }
 
-pub fn credential_password_from_str(password: &str) -> Vec<u8> {
+pub fn credential_password_from_str(password: &str) -> Zeroizing<Vec<u8>> {
     let mut pw = password.as_bytes().to_vec();
     pw.resize(CREDENTIAL_PASSWORD_LEN, 0);
-    pw
+    Zeroizing::new(pw)
 }
 
-fn password_to_key(password: &str) -> (Vec<u8>, Vec<u8>) {
+fn password_to_key(password: &str) -> (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>) {
     let mut key = [0u8; 32];
     pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut key);
-    (key[..16].to_vec(), key[16..].to_vec())
+    let result = (
+        Zeroizing::new(key[..16].to_vec()),
+        Zeroizing::new(key[16..].to_vec()),
+    );
+    key.iter_mut().for_each(|b| *b = 0);
+    result
 }
 
 fn retries_from_sw(sw: u16) -> Option<u32> {
@@ -774,8 +780,8 @@ mod tests {
     #[test]
     fn test_password_to_key() {
         let (enc, mac) = password_to_key("password");
-        assert_eq!(enc.len(), 16);
-        assert_eq!(mac.len(), 16);
+        assert_eq!((*enc).len(), 16);
+        assert_eq!((*mac).len(), 16);
     }
 
     #[test]

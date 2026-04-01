@@ -465,7 +465,7 @@ mod oath {
             name: "test@example.com".into(),
             oath_type: OathType::Totp,
             hash_algorithm: HashAlgorithm::Sha1,
-            secret: b"12345678901234567890".to_vec(),
+            secret: zeroize::Zeroizing::new(b"12345678901234567890".to_vec()),
             digits: 6,
             period: 30,
             counter: 0,
@@ -504,7 +504,7 @@ mod oath {
             name: "calc@test.com".into(),
             oath_type: OathType::Totp,
             hash_algorithm: HashAlgorithm::Sha1,
-            secret: b"12345678901234567890".to_vec(),
+            secret: zeroize::Zeroizing::new(b"12345678901234567890".to_vec()),
             digits: 6,
             period: 30,
             counter: 0,
@@ -1369,6 +1369,7 @@ mod securitydomain {
     use super::*;
     use yubikit::scp::ScpKeyParams;
     use yubikit::securitydomain::{Curve, KeyRef, ScpKid, SecurityDomainSession, StaticKeys};
+    use zeroize::Zeroizing;
 
     /// Path to SCP test files relative to the workspace root.
     fn scp_test_file(name: &str) -> std::path::PathBuf {
@@ -1576,7 +1577,7 @@ mod securitydomain {
             kid,
             kvn,
             pk_sd_ecka: pk_sd,
-            sk_oce_ecka: sk_oce,
+            sk_oce_ecka: zeroize::Zeroizing::new(sk_oce),
             certificates,
             oce_ref: Some((oce_ref.kid, oce_ref.kvn)),
         }
@@ -1666,9 +1667,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &params)
             .map_err(|(e, _)| e)
@@ -1697,9 +1698,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: vec![0x01u8; 16],
-            key_mac: vec![0x01u8; 16],
-            key_dek: Some(vec![0x01u8; 16]),
+            key_enc: Zeroizing::new(vec![0x01u8; 16]),
+            key_mac: Zeroizing::new(vec![0x01u8; 16]),
+            key_dek: Some(Zeroizing::new(vec![0x01u8; 16])),
         };
         let result = SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| e);
         assert!(result.is_err(), "SCP03 with wrong keys should fail");
@@ -1726,9 +1727,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let default_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &default_params)
             .map_err(|(e, _)| e)
@@ -1743,7 +1744,11 @@ mod securitydomain {
         getrandom::fill(&mut new_dek).expect("getrandom");
 
         let new_ref = KeyRef::new(0x01, 0x02);
-        let new_keys = StaticKeys::new(new_enc.to_vec(), new_mac.to_vec(), Some(new_dek.to_vec()));
+        let new_keys = StaticKeys::new(
+            Zeroizing::new(new_enc.to_vec()),
+            Zeroizing::new(new_mac.to_vec()),
+            Some(Zeroizing::new(new_dek.to_vec())),
+        );
         session
             .put_key_static(new_ref, &new_keys, 0)
             .expect("put new SCP03 keys");
@@ -1753,9 +1758,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let new_params = ScpKeyParams::Scp03 {
             kvn: 0x02,
-            key_enc: new_enc.to_vec(),
-            key_mac: new_mac.to_vec(),
-            key_dek: Some(new_dek.to_vec()),
+            key_enc: Zeroizing::new(new_enc.to_vec()),
+            key_mac: Zeroizing::new(new_mac.to_vec()),
+            key_dek: Some(Zeroizing::new(new_dek.to_vec())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &new_params)
             .map_err(|(e, _)| e)
@@ -1843,9 +1848,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
             .map_err(|(e, _)| e)
@@ -1906,9 +1911,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
             .map_err(|(e, _)| e)
@@ -1956,9 +1961,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
             .map_err(|(e, _)| e)
@@ -2021,9 +2026,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
             .map_err(|(e, _)| e)
@@ -2038,7 +2043,11 @@ mod securitydomain {
         getrandom::fill(&mut new_dek).expect("getrandom");
 
         let new_scp03_ref = KeyRef::new(0x01, 0x02);
-        let new_keys = StaticKeys::new(new_enc.to_vec(), new_mac.to_vec(), Some(new_dek.to_vec()));
+        let new_keys = StaticKeys::new(
+            Zeroizing::new(new_enc.to_vec()),
+            Zeroizing::new(new_mac.to_vec()),
+            Some(Zeroizing::new(new_dek.to_vec())),
+        );
         session
             .put_key_static(new_scp03_ref, &new_keys, 0)
             .expect("put new SCP03 keys");
@@ -2069,9 +2078,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let new_scp03_params = ScpKeyParams::Scp03 {
             kvn: 0x02,
-            key_enc: new_enc.to_vec(),
-            key_mac: new_mac.to_vec(),
-            key_dek: Some(new_dek.to_vec()),
+            key_enc: Zeroizing::new(new_enc.to_vec()),
+            key_mac: Zeroizing::new(new_mac.to_vec()),
+            key_dek: Some(Zeroizing::new(new_dek.to_vec())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &new_scp03_params)
             .map_err(|(e, _)| e)
@@ -2114,9 +2123,9 @@ mod securitydomain {
         let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
-            key_enc: (0x40..=0x4Fu8).collect(),
-            key_mac: (0x40..=0x4Fu8).collect(),
-            key_dek: Some((0x40..=0x4Fu8).collect()),
+            key_enc: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_mac: Zeroizing::new((0x40..=0x4Fu8).collect()),
+            key_dek: Some(Zeroizing::new((0x40..=0x4Fu8).collect())),
         };
         let mut session = SecurityDomainSession::new_with_scp(conn, &scp03_params)
             .map_err(|(e, _)| e)

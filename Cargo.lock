@@ -1160,6 +1160,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror",
  "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -3883,6 +3884,7 @@ dependencies = [
  "tempfile",
  "x509-cert 0.2.5",
  "yubikit",
+ "zeroize",
 ]
 
 [[package]]
@@ -3939,6 +3941,7 @@ dependencies = [
  "thiserror",
  "x25519-dalek",
  "x509-cert 0.2.5",
+ "zeroize",
 ]
 
 [[package]]
@@ -3950,6 +3953,7 @@ dependencies = [
  "p256",
  "pyo3",
  "yubikit",
+ "zeroize",
 ]
 
 [[package]]

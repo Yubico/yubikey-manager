@@ -144,9 +144,9 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParam
             key_dek,
         } => Some(yubikit::scp::ScpKeyParams::Scp03 {
             kvn: *kvn,
-            key_enc: key_enc.clone(),
-            key_mac: key_mac.clone(),
-            key_dek: key_dek.clone(),
+            key_enc: zeroize::Zeroizing::new(key_enc.clone()),
+            key_mac: zeroize::Zeroizing::new(key_mac.clone()),
+            key_dek: key_dek.as_ref().map(|v| zeroize::Zeroizing::new(v.clone())),
         }),
         ScpConfig::Scp11b {
             kid,
@@ -168,7 +168,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParam
             kid: *kid,
             kvn: *kvn,
             pk_sd_ecka: pk_sd_ecka.clone(),
-            sk_oce_ecka: sk_oce_ecka.clone(),
+            sk_oce_ecka: zeroize::Zeroizing::new(sk_oce_ecka.clone()),
             certificates: certificates.clone(),
             oce_ref: *oce_ref,
         }),

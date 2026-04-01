@@ -238,7 +238,11 @@ impl HsmAuthSession {
             .inner
             .calculate_session_keys_symmetric(label, context, credential_password, card_crypto)
             .map_err(hsmauth_err)?;
-        Ok((keys.key_senc, keys.key_smac, keys.key_srmac))
+        Ok((
+            keys.key_senc.to_vec(),
+            keys.key_smac.to_vec(),
+            keys.key_srmac.to_vec(),
+        ))
     }
 
     /// Calculate asymmetric session keys.
@@ -268,7 +272,11 @@ impl HsmAuthSession {
                 card_crypto,
             )
             .map_err(hsmauth_err)?;
-        Ok((keys.key_senc, keys.key_smac, keys.key_srmac))
+        Ok((
+            keys.key_senc.to_vec(),
+            keys.key_smac.to_vec(),
+            keys.key_srmac.to_vec(),
+        ))
     }
 
     /// Get challenge for a credential.

@@ -32,6 +32,7 @@ use thiserror::Error;
 
 use crate::core::{Transport, Version};
 use crate::scp::{ScpState, aes_cmac, constant_time_eq, scp03_derive, x963_kdf};
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // AID — YubiKey application identifiers
@@ -845,9 +846,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         }
 
         // Session keys (keys[1..4]) + DEK (keys[4])
-        let key_senc = keybytes[16..32].to_vec();
-        let key_smac = keybytes[32..48].to_vec();
-        let key_srmac = keybytes[48..64].to_vec();
+        let key_senc = Zeroizing::new(keybytes[16..32].to_vec());
+        let key_smac = Zeroizing::new(keybytes[32..48].to_vec());
+        let key_srmac = Zeroizing::new(keybytes[48..64].to_vec());
         let key_dek = keybytes[64..80].to_vec();
 
         // For SCP11 the MAC chain starts with the receipt
@@ -868,7 +869,12 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                 key_enc,
                 key_mac,
                 key_dek,
-            } => self.init_scp03(*kvn, key_enc, key_mac, key_dek.as_deref()),
+            } => self.init_scp03(
+                *kvn,
+                key_enc,
+                key_mac,
+                key_dek.as_ref().map(|v| v.as_slice()),
+            ),
             crate::scp::ScpKeyParams::Scp11b {
                 kid,
                 kvn,

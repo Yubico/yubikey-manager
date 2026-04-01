@@ -252,9 +252,9 @@ pub fn run_keys_import(
                 None
             };
             let static_keys = yubikit::securitydomain::StaticKeys {
-                key_enc: enc,
-                key_mac: mac,
-                key_dek: dek,
+                key_enc: zeroize::Zeroizing::new(enc),
+                key_mac: zeroize::Zeroizing::new(mac),
+                key_dek: dek.map(zeroize::Zeroizing::new),
             };
             session
                 .put_key_static(key_ref, &static_keys, replace_kvn.unwrap_or(0))

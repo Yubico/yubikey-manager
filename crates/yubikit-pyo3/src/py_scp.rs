@@ -5,6 +5,7 @@ use yubikit::scp;
 #[pyo3(signature = (key, t, context, l=0x80))]
 fn scp_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> PyResult<Vec<u8>> {
     scp::scp03_derive(key, t, context, l)
+        .map(|v| v.to_vec())
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
@@ -36,8 +37,15 @@ impl ScpState {
         mac_chain: Option<Vec<u8>>,
         enc_counter: Option<u32>,
     ) -> Self {
+        use zeroize::Zeroizing;
         ScpState {
-            inner: scp::ScpState::new(key_senc, key_smac, key_srmac, mac_chain, enc_counter),
+            inner: scp::ScpState::new(
+                Zeroizing::new(key_senc),
+                Zeroizing::new(key_smac),
+                Zeroizing::new(key_srmac),
+                mac_chain,
+                enc_counter,
+            ),
         }
     }
 

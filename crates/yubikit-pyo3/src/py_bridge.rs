@@ -190,9 +190,9 @@ fn scp03_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
 
     Ok(yubikit::scp::ScpKeyParams::Scp03 {
         kvn,
-        key_enc,
-        key_mac,
-        key_dek,
+        key_enc: zeroize::Zeroizing::new(key_enc),
+        key_mac: zeroize::Zeroizing::new(key_mac),
+        key_dek: key_dek.map(zeroize::Zeroizing::new),
     })
 }
 
@@ -251,7 +251,7 @@ fn scp11_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
             kid,
             kvn,
             pk_sd_ecka: pk_bytes,
-            sk_oce_ecka: sk,
+            sk_oce_ecka: zeroize::Zeroizing::new(sk),
             certificates: cert_ders,
             oce_ref,
         }),

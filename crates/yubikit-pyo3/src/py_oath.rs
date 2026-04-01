@@ -71,7 +71,7 @@ impl OathSession {
     }
 
     fn derive_key(&self, password: &str) -> Vec<u8> {
-        self.inner.derive_key(password)
+        self.inner.derive_key(password).to_vec()
     }
 
     fn validate(&mut self, key: &[u8]) -> PyResult<()> {
@@ -119,7 +119,7 @@ impl OathSession {
             name: name.to_string(),
             oath_type: ot,
             hash_algorithm: ha,
-            secret: secret.to_vec(),
+            secret: zeroize::Zeroizing::new(secret.to_vec()),
             digits,
             period,
             counter,

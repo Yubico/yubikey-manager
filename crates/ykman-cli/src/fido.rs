@@ -707,7 +707,7 @@ fn get_pin_token<'a>(
     client_pin: &'a ClientPin<'a>,
     pin: &str,
     permissions: u32,
-) -> Result<(Vec<u8>, &'a PinProtocol), CliError> {
+) -> Result<(zeroize::Zeroizing<Vec<u8>>, &'a PinProtocol), CliError> {
     let token = client_pin
         .get_pin_token(pin, Some(permissions), None)
         .map_err(|e| CliError(format!("PIN authentication failed: {e}")))?;
@@ -720,7 +720,7 @@ fn get_optional_pin_token<'a>(
     client_pin: &'a ClientPin<'a>,
     pin: Option<&str>,
     permissions: u32,
-) -> Result<(Option<Vec<u8>>, Option<&'a PinProtocol>), CliError> {
+) -> Result<(Option<zeroize::Zeroizing<Vec<u8>>>, Option<&'a PinProtocol>), CliError> {
     if ctap2.info().options.get("clientPin") != Some(&true) {
         return Ok((None, None));
     }
@@ -1233,7 +1233,11 @@ pub fn run_config_toggle_always_uv(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_optional_pin_token(&ctap2, &client_pin, pin, 0x20)?; // AuthenticatorConfig
 
-    let config = fido2_client::config::Config::from_parts(&ctap2, protocol, token.as_deref());
+    let config = fido2_client::config::Config::from_parts(
+        &ctap2,
+        protocol,
+        token.as_deref().map(|v| v.as_slice()),
+    );
     config
         .toggle_always_uv()
         .map_err(|e| CliError(format!("Failed to toggle Always Require UV: {e}")))?;
@@ -1271,7 +1275,11 @@ pub fn run_config_enable_ep_attestation(
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_optional_pin_token(&ctap2, &client_pin, pin, 0x20)?; // AuthenticatorConfig
 
-    let config = fido2_client::config::Config::from_parts(&ctap2, protocol, token.as_deref());
+    let config = fido2_client::config::Config::from_parts(
+        &ctap2,
+        protocol,
+        token.as_deref().map(|v| v.as_slice()),
+    );
     config
         .enable_enterprise_attestation()
         .map_err(|e| CliError(format!("Failed to enable Enterprise Attestation: {e}")))?;

@@ -37,6 +37,7 @@ dirs = "6"
 ctrlc = "3.5.2"
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
 p12-keystore = "0.3.0-rc3"
+zeroize = { version = "1", features = ["derive"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

@@ -29,6 +29,7 @@ use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -236,10 +237,12 @@ pub fn hmac_verify(key: &[u8], message: &[u8], expected: &[u8]) -> bool {
 }
 
 /// Derive OATH access key from password and salt.
-pub fn derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
+pub fn derive_key(salt: &[u8], passphrase: &str) -> Zeroizing<Vec<u8>> {
     let mut key = [0u8; 16];
     pbkdf2::pbkdf2_hmac::<Sha1>(passphrase.as_bytes(), salt, 1000, &mut key);
-    key.to_vec()
+    let result = Zeroizing::new(key.to_vec());
+    key.iter_mut().for_each(|b| *b = 0);
+    result
 }
 
 /// Shorten HMAC key per RFC 2104.
@@ -394,7 +397,7 @@ pub struct CredentialData {
     pub name: String,
     pub oath_type: OathType,
     pub hash_algorithm: HashAlgorithm,
-    pub secret: Vec<u8>,
+    pub secret: Zeroizing<Vec<u8>>,
     pub digits: u8,
     pub period: u32,
     pub counter: u32,
@@ -558,7 +561,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Derive an access key from a password.
-    pub fn derive_key(&self, password: &str) -> Vec<u8> {
+    pub fn derive_key(&self, password: &str) -> Zeroizing<Vec<u8>> {
         derive_key(&self.salt, password)
     }
 
