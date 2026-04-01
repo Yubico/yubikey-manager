@@ -1336,44 +1336,17 @@ fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u
     Ok(data.to_vec())
 }
 
-/// Decrypt a PEM-encoded encrypted private key using EC key parsing.
+/// Decrypt an encrypted PKCS#8 PEM private key.
 fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>, CliError> {
-    // Try P-256 encrypted PKCS#8 PEM
-    if let Some(der) = try_decrypt_ec_pem::<p256::NistP256>(pem_text, password) {
-        return Ok(der);
-    }
-    // Try P-384 encrypted PKCS#8 PEM
-    if let Some(der) = try_decrypt_ec_pem::<p384::NistP384>(pem_text, password) {
-        return Ok(der);
-    }
+    use pkcs8::EncryptedPrivateKeyInfo;
 
-    // For RSA encrypted keys, we can't decrypt in-process without additional deps.
-    // Direct the user to use openssl to convert.
-    let _ = (pem_text, password);
-    Err(CliError(
-        "Cannot decrypt this key type in-process. For RSA encrypted keys, convert first:\n  \
-         openssl pkey -in key.pem -out key_dec.pem"
-            .into(),
-    ))
-}
-
-/// Try to decrypt an encrypted PKCS#8 PEM as a specific EC curve.
-fn try_decrypt_ec_pem<C>(pem_text: &str, _password: &str) -> Option<Vec<u8>>
-where
-    C: elliptic_curve::Curve + elliptic_curve::CurveArithmetic,
-    elliptic_curve::SecretKey<C>:
-        elliptic_curve::pkcs8::DecodePrivateKey + elliptic_curve::pkcs8::EncodePrivateKey,
-{
-    // The pkcs8 crate at version 0.10 does not support encrypted PEM without
-    // the "encryption" feature. Try to parse as an unencrypted PKCS#8 key first
-    // (some tools mark the PEM as ENCRYPTED even when the password is empty).
-    use elliptic_curve::SecretKey;
-    use elliptic_curve::pkcs8::DecodePrivateKey;
-
-    SecretKey::<C>::from_pkcs8_pem(pem_text).ok().map(|sk| {
-        use elliptic_curve::pkcs8::EncodePrivateKey;
-        sk.to_pkcs8_der().ok().map(|d| d.as_bytes().to_vec())
-    })?
+    let der = pem_decode(pem_text)?;
+    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
+        .map_err(|e| CliError(format!("Failed to parse encrypted key: {e}")))?;
+    let dec_key = enc_key
+        .decrypt(password)
+        .map_err(|_| CliError("Wrong password for encrypted key.".into()))?;
+    Ok(dec_key.as_bytes().to_vec())
 }
 
 /// Attempt to parse a certificate from raw data, supporting password-protected
@@ -1398,47 +1371,60 @@ fn decrypt_certificate_data(data: &[u8], password: Option<&str>) -> Result<Vec<u
     Ok(data.to_vec())
 }
 
-/// Check if data looks like a PKCS#12 file (DER-encoded, starts with SEQUENCE).
+/// Check if data looks like a PKCS#12 file.
+/// PKCS#12 is a DER SEQUENCE whose first element is INTEGER with value 3.
 fn is_pkcs12(data: &[u8]) -> bool {
-    // PKCS#12 is a SEQUENCE containing version INTEGER 3
-    if data.len() < 4 {
+    if data.len() < 10 || data[0] != 0x30 {
         return false;
     }
-    // ASN.1 SEQUENCE tag = 0x30
-    data[0] == 0x30
-        && data.len() > 10
-        // Quick heuristic: not a certificate (certificates also start with 0x30,
-        // but PKCS#12's first inner element is an INTEGER with value 3)
-        && {
-            // Skip the length bytes to find the first inner tag
-            let len_byte = data[1];
-            let offset = if len_byte & 0x80 == 0 {
-                2
-            } else {
-                2 + (len_byte & 0x7f) as usize
-            };
-            offset < data.len() && data[offset] == 0x02 // INTEGER tag
-        }
+    // Skip the outer SEQUENCE length bytes
+    let len_byte = data[1];
+    let offset = if len_byte & 0x80 == 0 {
+        2
+    } else {
+        2 + (len_byte & 0x7f) as usize
+    };
+    // Expect INTEGER tag (0x02) with length 1 and value 3
+    offset + 3 <= data.len()
+        && data[offset] == 0x02
+        && data[offset + 1] == 0x01
+        && data[offset + 2] == 0x03
 }
 
 /// Extract a private key from PKCS#12 data.
-fn extract_private_key_from_pkcs12(_data: &[u8], _password: &str) -> Result<Vec<u8>, CliError> {
-    // Full PKCS#12 parsing requires a dedicated library (e.g., `p12` or `pkcs12` crate).
-    // For now, provide a clear error message.
-    Err(CliError(
-        "PKCS#12 file parsing is not yet supported. Convert the file to PEM first using:\n  \
-         openssl pkcs12 -in file.p12 -out key.pem -nodes"
-            .into(),
-    ))
+fn extract_private_key_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>, CliError> {
+    use p12_keystore::{KeyStore, Pkcs12ImportPolicy};
+
+    let ks = KeyStore::from_pkcs12(data, password, Pkcs12ImportPolicy::Relaxed)
+        .map_err(|e| CliError(format!("Failed to parse PKCS#12 file: {e}")))?;
+    let (_, chain) = ks
+        .private_key_chain()
+        .ok_or_else(|| CliError("No private key found in PKCS#12 file.".into()))?;
+    Ok(chain.key().as_der().to_vec())
 }
 
 /// Extract a certificate from PKCS#12 data.
-fn extract_certificate_from_pkcs12(_data: &[u8], _password: &str) -> Result<Vec<u8>, CliError> {
-    Err(CliError(
-        "PKCS#12 file parsing is not yet supported. Convert the file to PEM first using:\n  \
-         openssl pkcs12 -in file.p12 -out cert.pem -nokeys"
-            .into(),
-    ))
+fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>, CliError> {
+    use p12_keystore::{KeyStore, KeyStoreEntry, Pkcs12ImportPolicy};
+
+    let ks = KeyStore::from_pkcs12(data, password, Pkcs12ImportPolicy::Relaxed)
+        .map_err(|e| CliError(format!("Failed to parse PKCS#12 file: {e}")))?;
+
+    // Try cert from a key chain first, then standalone certs
+    for (_, entry) in ks.entries() {
+        match entry {
+            KeyStoreEntry::PrivateKeyChain(chain) => {
+                if let Some(cert) = chain.certs().first() {
+                    return Ok(cert.as_der().to_vec());
+                }
+            }
+            KeyStoreEntry::Certificate(cert) => {
+                return Ok(cert.as_der().to_vec());
+            }
+            _ => {}
+        }
+    }
+    Err(CliError("No certificate found in PKCS#12 file.".into()))
 }
 
 /// Verify that a public key (as SPKI DER) matches the private key in a PIV slot
