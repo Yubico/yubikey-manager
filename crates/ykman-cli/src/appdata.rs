@@ -53,7 +53,7 @@ impl AppData {
     }
 
     /// Write the current state to disk.
-    fn write(&self) -> Result<(), String> {
+    pub fn write(&self) -> Result<(), String> {
         let dir = data_dir();
         fs::create_dir_all(&dir)
             .map_err(|e| format!("Failed to create data directory {}: {e}", dir.display()))?;
@@ -65,7 +65,7 @@ impl AppData {
 
     /// Initialize the AES-256-GCM cipher from the OS keyring, generating a
     /// new key if one doesn't exist yet.
-    fn ensure_unlocked(&mut self) -> Result<(), String> {
+    pub fn ensure_unlocked(&mut self) -> Result<(), String> {
         if self.cipher.is_some() {
             return Ok(());
         }
@@ -93,6 +93,11 @@ impl AppData {
     /// Check if a key exists in the store.
     pub fn contains(&self, key: &str) -> bool {
         self.data.contains_key(key)
+    }
+
+    /// Iterate over all keys in the store.
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.data.keys()
     }
 
     /// Retrieve and decrypt a secret value.

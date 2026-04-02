@@ -6,7 +6,7 @@ use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
 use yubikit::transport::pcsc::{PcscSmartCardConnection, is_reader_usb};
 use yubikit::yubiotp::YubiOtpSession;
 
-use crate::fido::HidCtapDevice;
+use crate::ctap_device::HidCtapDevice;
 use crate::util::CliError;
 
 fn cap_names(cap: Capability) -> String {

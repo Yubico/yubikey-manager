@@ -7,7 +7,6 @@ use yubikit::device::{YubiKeyDevice, list_devices};
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
 
 mod apdu;
-mod appdata;
 mod cli_enums;
 mod config;
 mod diagnose;
@@ -23,6 +22,11 @@ mod piv;
 mod scp;
 mod securitydomain;
 mod util;
+
+// Re-export library modules so binary-internal modules can use them via crate::
+use ykman_cli::appdata;
+use ykman_cli::ctap_device;
+use ykman_cli::keyboard;
 
 use cli_enums::*;
 

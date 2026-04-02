@@ -5,6 +5,10 @@ edition = "2024"
 description = "YubiKey Manager CLI (Rust)"
 license = "BSD-2-Clause"
 
+[lib]
+name = "ykman_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ykman"
 path = "src/main.rs"
