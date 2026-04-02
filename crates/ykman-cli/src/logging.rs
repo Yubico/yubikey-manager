@@ -24,6 +24,21 @@ pub enum LogLevel {
     Traffic,
 }
 
+impl std::str::FromStr for LogLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_uppercase().as_str() {
+            "ERROR" => Ok(Self::Error),
+            "WARNING" => Ok(Self::Warning),
+            "INFO" => Ok(Self::Info),
+            "DEBUG" => Ok(Self::Debug),
+            "TRAFFIC" => Ok(Self::Traffic),
+            _ => Err(format!("Unknown log level: {s}")),
+        }
+    }
+}
+
 impl LogLevel {
     pub fn name(self) -> &'static str {
         match self {
@@ -169,15 +184,21 @@ pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), Strin
     log::set_boxed_logger(Box::new(logger)).map_err(|e| format!("Failed to set logger: {e}"))?;
     log::set_max_level(level.to_level_filter());
 
-    log::info!("Logging at level: {}", level.name());
     if let Some(file) = &log_file {
         log::warn!("Logging to file: {file}");
     }
+    set_log_level(level);
+
+    Ok(())
+}
+
+/// Set the active log level, logging a warning if sensitive data may be captured.
+pub fn set_log_level(level: LogLevel) {
+    log::set_max_level(level.to_level_filter());
+    log::info!("Logging at level: {}", level.name());
     if level == LogLevel::Traffic {
         log::warn!("{}", print_box(TRAFFIC_WARNING));
     } else if level == LogLevel::Debug {
         log::warn!("{}", print_box(DEBUG_WARNING));
     }
-
-    Ok(())
 }
