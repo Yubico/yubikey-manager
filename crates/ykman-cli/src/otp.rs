@@ -1,4 +1,6 @@
 use std::io::{self, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use yubikit::device::YubiKeyDevice;
@@ -595,15 +597,28 @@ pub fn run_calculate(
         ));
     }
 
-    let prompted = std::sync::atomic::AtomicBool::new(false);
+    // Set up Ctrl+C handler for cancellation
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = cancel.clone();
+    let _ = ctrlc::set_handler(move || {
+        cancel_clone.store(true, Ordering::Relaxed);
+    });
+
+    let is_cancelled = || cancel.load(Ordering::Relaxed);
+    let prompted = AtomicBool::new(false);
     let on_keepalive = |status: u8| {
-        if status == 2 && !prompted.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if status == 2 && !prompted.swap(true, Ordering::Relaxed) {
             prompt_for_touch();
         }
     };
 
     let result = session
-        .calculate_hmac_sha1_with_cancel(slot, &challenge_bytes, None, Some(&on_keepalive))
+        .calculate_hmac_sha1_with_cancel(
+            slot,
+            &challenge_bytes,
+            Some(&is_cancelled),
+            Some(&on_keepalive),
+        )
         .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
 
     if totp {
