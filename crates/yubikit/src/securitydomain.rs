@@ -31,7 +31,7 @@ use std::fmt;
 use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -322,15 +322,7 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
-    dek: Option<[u8; 16]>,
-}
-
-impl<C: SmartCardConnection> Drop for SecurityDomainSession<C> {
-    fn drop(&mut self) {
-        if let Some(ref mut dek) = self.dek {
-            dek.zeroize();
-        }
-    }
+    dek: Option<Zeroizing<[u8; 16]>>,
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -365,7 +357,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         let dek = match protocol.init_scp(scp_key_params) {
             Ok(dek) => dek.map(|v| {
                 let a: [u8; 16] = v.as_slice().try_into().expect("DEK must be 16 bytes");
-                a
+                Zeroizing::new(a)
             }),
             Err(e) => return Err((e, protocol.into_connection())),
         };
@@ -394,17 +386,8 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     }
 
     /// Consume this session and return the underlying connection.
-    pub fn into_connection(mut self) -> C {
-        // Zeroize the DEK before we disassemble the struct.
-        if let Some(ref mut dek) = self.dek {
-            dek.zeroize();
-        }
-        // Use ManuallyDrop so the Drop impl doesn't run after we move
-        // the protocol field out.
-        let me = std::mem::ManuallyDrop::new(self);
-        // SAFETY: we already zeroized dek above, and we're taking ownership
-        // of protocol. ManuallyDrop prevents the Drop impl from running.
-        unsafe { std::ptr::read(&me.protocol) }.into_connection()
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
     }
 
     /// Read data from the security domain.
