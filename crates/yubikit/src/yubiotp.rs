@@ -30,9 +30,6 @@
 //! Provides configuration and challenge-response for the two OTP slots on a
 //! YubiKey, accessible over both SmartCard (CCID) and HID OTP transports.
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-
 use sha1::{Digest, Sha1};
 
 use crate::core::Version;
@@ -895,7 +892,7 @@ pub trait YubiOtpSession {
         &mut self,
         slot: Slot,
         challenge: &[u8],
-        cancel: Option<Arc<AtomicBool>>,
+        cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
     ) -> Result<Vec<u8>, YubiOtpError>;
 
@@ -1162,7 +1159,7 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
         &mut self,
         slot: Slot,
         challenge: &[u8],
-        _cancel: Option<Arc<AtomicBool>>,
+        _cancel: Option<&dyn Fn() -> bool>,
         _on_keepalive: Option<&dyn Fn(u8)>,
     ) -> Result<Vec<u8>, YubiOtpError> {
         // SmartCard transport does not support cancellation or keepalives, so we ignore those parameters.
@@ -1250,7 +1247,7 @@ impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
         &mut self,
         slot: Slot,
         challenge: &[u8],
-        cancel: Option<Arc<AtomicBool>>,
+        cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
     ) -> Result<Vec<u8>, YubiOtpError> {
         require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
@@ -1269,7 +1266,7 @@ impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
             config_slot as u8,
             Some(&padded),
             Some(HMAC_RESPONSE_SIZE as i32),
-            cancel.as_ref().map(|a| a.as_ref()),
+            cancel,
             on_keepalive,
         )?;
 

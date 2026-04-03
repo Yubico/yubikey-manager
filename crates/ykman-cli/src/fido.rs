@@ -27,7 +27,7 @@
 
 //! FIDO CLI commands.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use fido2_client::ctap::{CtapDevice, CtapError, CtapStatus};
 use fido2_client::ctap2::Ctap2;
@@ -309,9 +309,10 @@ pub fn run_reset(
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     let cancel_clone = cancel.clone();
     let _ = ctrlc::set_handler(move || {
-        cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+        cancel_clone.store(true, Ordering::Relaxed);
     });
 
+    let is_cancelled = || cancel.load(Ordering::Relaxed);
     let result = ctap2.reset(
         &mut |status| {
             if status == fido2_client::ctap::keepalive::UPNEEDED {
@@ -320,7 +321,7 @@ pub fn run_reset(
                 eprintln!("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!");
             }
         },
-        Some(&cancel),
+        Some(&is_cancelled),
     );
 
     match result {
@@ -847,13 +848,15 @@ pub fn run_fingerprints_add(
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     let cancel_clone = cancel.clone();
     let _ = ctrlc::set_handler(move || {
-        cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+        cancel_clone.store(true, Ordering::Relaxed);
     });
+
+    let is_cancelled = || cancel.load(Ordering::Relaxed);
 
     // Begin enrollment
     eprintln!("Place your finger against the sensor now...");
     let (template_id, _status, remaining) = bio
-        .enroll_begin(None, &mut |_| {}, Some(&cancel))
+        .enroll_begin(None, &mut |_| {}, Some(&is_cancelled))
         .map_err(|e| map_enroll_error(e, "Enrollment failed"))?;
 
     if remaining > 0 {
@@ -864,7 +867,7 @@ pub fn run_fingerprints_add(
     let mut scans_remaining = remaining;
     while scans_remaining > 0 {
         eprintln!("Place your finger against the sensor now...");
-        match bio.enroll_capture_next(&template_id, None, &mut |_| {}, Some(&cancel)) {
+        match bio.enroll_capture_next(&template_id, None, &mut |_| {}, Some(&is_cancelled)) {
             Ok((_status, remaining)) => {
                 scans_remaining = remaining;
                 if remaining > 0 {

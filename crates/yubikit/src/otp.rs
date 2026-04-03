@@ -27,7 +27,6 @@
 
 //! Low-level OTP HID frame protocol, codec, and related helpers.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -234,7 +233,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         slot: u8,
         data: Option<&[u8]>,
         expected_len: Option<i32>,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
     ) -> Result<Option<Vec<u8>>, YubiOtpError> {
         let payload_data = data.unwrap_or(&[]);
@@ -307,12 +306,13 @@ impl<T: OtpConnection> OtpProtocol<T> {
     fn read_frame(
         &self,
         prog_seq: u8,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
     ) -> Result<Option<Vec<u8>>, YubiOtpError> {
         let mut response = Vec::new();
         let mut seq: u8 = 0;
         let mut needs_touch = false;
+        let mut last_ka: Option<u8> = None;
 
         loop {
             let report = self.receive()?;
@@ -349,12 +349,13 @@ impl<T: OtpConnection> OtpProtocol<T> {
                     thread::sleep(Duration::from_millis(20));
                     1u8 // STATUS_PROCESSING
                 };
-                if let Some(cb) = on_keepalive {
+                if let Some(cb) = on_keepalive
+                    && last_ka != Some(status)
+                {
+                    last_ka = Some(status);
                     cb(status);
                 }
-                if let Some(flag) = cancel
-                    && flag.load(Ordering::Relaxed)
-                {
+                if cancel.is_some_and(|f| f()) {
                     self.reset_state()?;
                     return Err(YubiOtpError::Timeout("Command cancelled".into()));
                 }

@@ -276,7 +276,7 @@ impl HidFidoConnection {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&std::sync::atomic::AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapHidTransportError> {
         self.send_request(cmd, data)?;
         self.recv_response(cmd, on_keepalive, cancel)
@@ -345,7 +345,7 @@ impl HidFidoConnection {
         &self,
         expected_cmd: u8,
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&std::sync::atomic::AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapHidTransportError> {
         let dev = self.device()?;
         let mut response = Vec::new();
@@ -403,9 +403,7 @@ impl HidFidoConnection {
                             on_keepalive(status);
                         }
                     }
-                    if let Some(flag) = cancel
-                        && flag.load(std::sync::atomic::Ordering::Relaxed)
-                    {
+                    if cancel.is_some_and(|f| f()) {
                         let _ = self.send_request(CtapHidCommand::Cancel as u8, &[]);
                         // Continue reading — the authenticator will respond to the
                         // pending command with a CBOR error (KeepaliveCancel).
@@ -454,7 +452,7 @@ impl crate::fido::FidoConnection for HidFidoConnection {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&std::sync::atomic::AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapHidTransportError> {
         self.call_with_keepalive(cmd, data, on_keepalive, cancel)
     }

@@ -31,7 +31,7 @@ impl CtapDevice for HidCtapDevice {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         self.conn
             .call_with_keepalive(cmd, data, on_keepalive, cancel)
@@ -85,7 +85,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
         &self,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         let resp = {
             let mut protocol = self.protocol.borrow_mut();
@@ -109,7 +109,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
 
         loop {
             std::thread::sleep(Duration::from_millis(100));
-            let p1 = if cancel.is_some_and(|f| f.load(Ordering::Relaxed)) {
+            let p1 = if cancel.is_some_and(|f| f()) {
                 0x11
             } else {
                 0x00
@@ -142,7 +142,7 @@ impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         match cmd {
             ctap::cmd::CBOR => self.call_cbor(data, on_keepalive, cancel),
@@ -181,11 +181,12 @@ fn run_selection(device: &dyn CtapDevice, transport_name: &str) {
         cancel_thread.store(true, Ordering::Relaxed);
     });
 
+    let is_cancelled = || cancel.load(Ordering::Relaxed);
     let result = ctap2.selection(
         &mut |status| {
             println!("  [keepalive] status={status:#04x}");
         },
-        Some(&cancel),
+        Some(&is_cancelled),
     );
 
     handle.join().unwrap();

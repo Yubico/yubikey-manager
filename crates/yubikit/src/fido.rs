@@ -37,7 +37,7 @@ pub trait FidoConnection {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&std::sync::atomic::AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapHidTransportError>;
     fn device_version(&self) -> (u8, u8, u8);
     fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability;

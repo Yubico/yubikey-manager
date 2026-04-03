@@ -4,7 +4,6 @@
 //! and SmartCard connections, enabling use of the fido2 crate's CTAP2 protocol support.
 
 use std::cell::RefCell;
-use std::sync::atomic::AtomicBool;
 
 use fido2_client::ctap::{self, CtapDevice, CtapError, CtapStatus};
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
@@ -36,7 +35,7 @@ impl CtapDevice for HidCtapDevice {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         self.conn
             .call_with_keepalive(cmd, data, on_keepalive, cancel)
@@ -148,7 +147,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
         &self,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         let resp = {
             let mut protocol = self.protocol.borrow_mut();
@@ -174,7 +173,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
         loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
 
-            let p1 = if cancel.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed)) {
+            let p1 = if cancel.is_some_and(|f| f()) {
                 0x11
             } else {
                 0x00
@@ -208,7 +207,7 @@ impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&AtomicBool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         match cmd {
             ctap::cmd::CBOR => self.call_cbor(data, on_keepalive, cancel),

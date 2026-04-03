@@ -1,6 +1,3 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::transport::otphid::HidOtpConnection;
@@ -318,26 +315,30 @@ impl PyYubiOtpOtpSession {
         on_keepalive: Option<PyObject>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let s = parse_slot(slot)?;
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_ref = if event.is_some() {
-            Some(cancel.clone())
-        } else {
-            None
-        };
-        let keepalive_fn = |status: u8| {
+        let cancel_fn = || {
             Python::with_gil(|py| {
                 if let Some(ref evt) = event
                     && let Ok(is_set) = evt.call_method0(py, "is_set")
                     && is_set.extract::<bool>(py).unwrap_or(false)
                 {
-                    cancel.store(true, Ordering::Relaxed);
+                    return true;
                 }
-                if let Some(ref cb) = on_keepalive {
-                    let _ = cb.call1(py, (status,));
-                }
-            });
+                false
+            })
         };
-        let keepalive_ref: Option<&dyn Fn(u8)> = if event.is_some() || on_keepalive.is_some() {
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_fn = |status: u8| {
+            if let Some(ref cb) = on_keepalive {
+                Python::with_gil(|py| {
+                    let _ = cb.call1(py, (status,));
+                });
+            }
+        };
+        let keepalive_ref: Option<&dyn Fn(u8)> = if on_keepalive.is_some() {
             Some(&keepalive_fn)
         } else {
             None

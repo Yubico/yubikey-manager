@@ -31,8 +31,6 @@
 //! implementation, bridging a Python OTP connection to the Rust
 //! `OtpTransport` trait.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::otp::{OtpConnection, OtpProtocol as RustOtpProtocol, YubiOtpError};
@@ -122,26 +120,33 @@ impl OtpProtocol {
         event: Option<PyObject>,
         on_keepalive: Option<PyObject>,
     ) -> PyResult<Option<Vec<u8>>> {
-        // Bridge Python Event to AtomicBool cancel flag
-        let cancel = AtomicBool::new(false);
-        let cancel_ref = if event.is_some() { Some(&cancel) } else { None };
-
-        // Build keepalive callback that checks event.is_set() and calls on_keepalive
-        let keepalive_fn = |status: u8| {
+        // Bridge Python Event to cancel closure
+        let cancel_fn = || {
             Python::with_gil(|py| {
                 if let Some(ref evt) = event
                     && let Ok(is_set) = evt.call_method0(py, "is_set")
                     && is_set.extract::<bool>(py).unwrap_or(false)
                 {
-                    cancel.store(true, Ordering::Relaxed);
+                    return true;
                 }
-                if let Some(ref cb) = on_keepalive {
-                    let _ = cb.call1(py, (status,));
-                }
-            });
+                false
+            })
+        };
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
         };
 
-        let keepalive_ref: Option<&dyn Fn(u8)> = if event.is_some() || on_keepalive.is_some() {
+        // Build keepalive callback
+        let keepalive_fn = |status: u8| {
+            if let Some(ref cb) = on_keepalive {
+                Python::with_gil(|py| {
+                    let _ = cb.call1(py, (status,));
+                });
+            }
+        };
+        let keepalive_ref: Option<&dyn Fn(u8)> = if on_keepalive.is_some() {
             Some(&keepalive_fn)
         } else {
             None
