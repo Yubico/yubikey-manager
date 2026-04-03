@@ -43,7 +43,7 @@ challenge = b"\x00" * 8
 
 try:
     result = session.calculate_hmac_sha1(
-        SLOT.TWO, challenge, event=event, on_keepalive=on_keepalive
+        SLOT.ONE, challenge, event=event, on_keepalive=on_keepalive
     )
     print(f"Response: {result.hex()}")
 except Exception as e:

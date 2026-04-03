@@ -1,8 +1,11 @@
 use std::io::{self, Write};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
+use yubikit::oath::parse_b32_key;
 use yubikit::otp::{modhex_decode, modhex_encode};
 use yubikit::yubiotp::{
     ACC_CODE_SIZE, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE, YubiOtpCcidSession,
@@ -12,7 +15,7 @@ use yubikit::yubiotp::{
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpConfig, ScpParams};
-use crate::util::CliError;
+use crate::util::{self, CliError};
 
 /// Open an OTP session, preferring HID. Falls back to SmartCard if HID is
 /// unavailable, SCP is specified, or the device is on NFC.
@@ -129,6 +132,18 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+fn confirm_slot_overwrite(session: &dyn YubiOtpSession, slot: Slot) {
+    let state = session.get_config_state();
+    if state.is_configured(slot).unwrap_or(false)
+        && !confirm(&format!(
+            "Slot {} is already configured. Overwrite configuration?",
+            slot.map(1, 2)
+        ))
+    {
+        std::process::exit(1);
+    }
+}
+
 fn format_oath_code(response: &[u8], digits: u8) -> String {
     let offs = (response[response.len() - 1] & 0xF) as usize;
     let code = u32::from_be_bytes([
@@ -139,6 +154,18 @@ fn format_oath_code(response: &[u8], digits: u8) -> String {
     ]);
     let modulus = 10u32.pow(digits as u32);
     format!("{:0>width$}", code % modulus, width = digits as usize)
+}
+
+fn b32_encode(data: &[u8]) -> String {
+    base32::encode(base32::Alphabet::Rfc4648 { padding: true }, data)
+}
+
+fn parse_hex_key(s: &str) -> Result<Vec<u8>, CliError> {
+    hex::decode(s).map_err(|_| CliError("Key must be hex-encoded.".into()))
+}
+
+fn prompt_for_touch() {
+    eprintln!("Touch your YubiKey...");
 }
 
 pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
@@ -159,7 +186,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
 }
 
 pub fn run_swap(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
-    if !force && !confirm("Swap the two OTP slot configurations?") {
+    if !force && !confirm("Swap the two slot configurations?") {
         return Err(CliError("Aborted.".into()));
     }
     let mut session = open_session(dev, scp_params)?;
@@ -179,14 +206,21 @@ pub fn run_delete(
 ) -> Result<(), CliError> {
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
+
+    let session = open_session(dev, scp_params)?;
+    if !force && matches!(session.get_config_state().is_configured(slot), Ok(false)) {
+        return Err(CliError("Not possible to delete an empty slot.".into()));
+    }
     if !force && !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
         return Err(CliError("Aborted.".into()));
     }
+    drop(session);
+
     let mut session = open_session(dev, scp_params)?;
     session
         .delete_slot(slot, acc.as_ref().map(|a| a.as_slice()))
         .map_err(|e| CliError(format!("Failed to delete slot: {e}")))?;
-    eprintln!("Slot {} deleted.", slot.map(1, 2));
+    eprintln!("Configuration slot {} deleted.", slot.map(1, 2));
     Ok(())
 }
 
@@ -214,7 +248,7 @@ pub fn run_ndef(
     session
         .set_ndef_configuration(slot, prefix, acc.as_ref().map(|a| a.as_slice()), nt)
         .map_err(|e| CliError(format!("Failed to configure NDEF: {e}")))?;
-    eprintln!("NDEF configured for slot {}.", slot.map(1, 2));
+    eprintln!("NDEF configuration updated.");
     Ok(())
 }
 
@@ -236,6 +270,22 @@ pub fn run_yubiotp(
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
+    if public_id.is_some() && serial_public_id {
+        return Err(CliError(
+            "Invalid options: --public-id conflicts with --serial-public-id.".into(),
+        ));
+    }
+    if private_id.is_some() && generate_private_id {
+        return Err(CliError(
+            "Invalid options: --private-id conflicts with --generate-private-id.".into(),
+        ));
+    }
+    if key.is_some() && generate_key {
+        return Err(CliError(
+            "Invalid options: --key conflicts with --generate-key.".into(),
+        ));
+    }
+
     // Resolve public ID
     let pub_id_bytes: Vec<u8> = if serial_public_id {
         let mut session = open_session(dev, scp_params)?;
@@ -244,19 +294,29 @@ pub fn run_yubiotp(
             .map_err(|e| CliError(format!("Failed to get serial: {e}")))?;
         let mut id = vec![0xffu8, 0x00];
         id.extend_from_slice(&serial.to_be_bytes());
+        eprintln!("Using YubiKey serial as public ID: {}", modhex_encode(&id));
         id
     } else if let Some(pid) = public_id {
         modhex_decode(pid).map_err(|_| CliError("Invalid modhex public ID.".into()))?
-    } else {
+    } else if force {
         return Err(CliError(
-            "Provide --public-id or --serial-public-id.".into(),
+            "Public ID not given. Remove the --force flag, or add the --serial-public-id flag or --public-id option.".into(),
         ));
+    } else {
+        let pid = util::prompt("Enter public ID")?;
+        if pid.len() % 2 != 0 {
+            return Err(CliError(
+                "Invalid public ID, length must be a multiple of 2.".into(),
+            ));
+        }
+        modhex_decode(&pid).map_err(|_| CliError("Invalid modhex public ID.".into()))?
     };
 
     // Resolve private ID
     let priv_id: [u8; UID_SIZE] = if generate_private_id {
         let mut id = [0u8; UID_SIZE];
         getrandom::fill(&mut id).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        eprintln!("Using a randomly generated private ID: {}", hex::encode(id));
         id
     } else if let Some(pid) = private_id {
         let bytes =
@@ -270,16 +330,30 @@ pub fn run_yubiotp(
         let mut arr = [0u8; UID_SIZE];
         arr.copy_from_slice(&bytes);
         arr
-    } else {
+    } else if force {
         return Err(CliError(
-            "Provide --private-id or --generate-private-id.".into(),
+            "Private ID not given. Remove the --force flag, or add the --generate-private-id flag or --private-id option.".into(),
         ));
+    } else {
+        let pid = util::prompt("Enter private ID")?;
+        let bytes =
+            hex::decode(&pid).map_err(|_| CliError("Private ID must be hex-encoded.".into()))?;
+        if bytes.len() != UID_SIZE {
+            return Err(CliError(format!(
+                "Private ID must be {UID_SIZE} bytes ({} hex chars).",
+                UID_SIZE * 2
+            )));
+        }
+        let mut arr = [0u8; UID_SIZE];
+        arr.copy_from_slice(&bytes);
+        arr
     };
 
     // Resolve key
     let key_bytes: [u8; KEY_SIZE] = if generate_key {
         let mut k = [0u8; KEY_SIZE];
         getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        eprintln!("Using a randomly generated secret key: {}", hex::encode(k));
         k
     } else if let Some(k) = key {
         let bytes = hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))?;
@@ -292,11 +366,30 @@ pub fn run_yubiotp(
         let mut arr = [0u8; KEY_SIZE];
         arr.copy_from_slice(&bytes);
         arr
+    } else if force {
+        return Err(CliError(
+            "Secret key not given. Remove the --force flag, or add the --generate-key flag or --key option.".into(),
+        ));
     } else {
-        return Err(CliError("Provide --key or --generate-key.".into()));
+        let k = util::prompt("Enter secret key")?;
+        let bytes = hex::decode(&k).map_err(|_| CliError("Key must be hex-encoded.".into()))?;
+        if bytes.len() != KEY_SIZE {
+            return Err(CliError(format!(
+                "Key must be {KEY_SIZE} bytes ({} hex chars).",
+                KEY_SIZE * 2
+            )));
+        }
+        let mut arr = [0u8; KEY_SIZE];
+        arr.copy_from_slice(&bytes);
+        arr
     };
 
-    if !force && !confirm(&format!("Program Yubico OTP in slot {}?", slot.map(1, 2))) {
+    if !force
+        && !confirm(&format!(
+            "Program a YubiOTP credential in slot {}?",
+            slot.map(1, 2)
+        ))
+    {
         return Err(CliError("Aborted.".into()));
     }
 
@@ -311,19 +404,11 @@ pub fn run_yubiotp(
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
-    eprintln!("Yubico OTP programmed in slot {}.", slot.map(1, 2));
-    println!("Public ID: {}", modhex_encode(&pub_id_bytes));
-    println!("Private ID: {}", hex::encode(priv_id));
-    println!("Key: {}", hex::encode(key_bytes));
-
     if let Some(output_path) = config_output {
         // Get serial for CSV
-        let serial = {
-            let mut session = open_session(dev, scp_params)?;
-            session
-                .get_serial()
-                .map_err(|e| CliError(format!("Failed to get serial: {e}")))?
-        };
+        let serial = session
+            .get_serial()
+            .map_err(|e| CliError(format!("Failed to get serial: {e}")))?;
         let timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
         let access_code_hex = acc.as_ref().map_or(String::new(), hex::encode);
         let csv_line = format!(
@@ -335,7 +420,7 @@ pub fn run_yubiotp(
             access_code_hex,
             timestamp,
         );
-        crate::util::write_file_or_stdout(output_path, (csv_line + "\n").as_bytes())?;
+        util::write_file_or_stdout(output_path, (csv_line + "\n").as_bytes())?;
         eprintln!("Configuration parameters written to {output_path}.");
     }
 
@@ -358,23 +443,24 @@ pub fn run_static(
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
-    let pw = if generate {
-        generate_static_pw(length, keyboard_layout)?
-    } else if let Some(p) = password {
+    let pw = if let Some(p) = password {
+        if p.len() > 38 {
+            return Err(CliError(
+                "Password too long (maximum length is 38 characters).".into(),
+            ));
+        }
         p.to_string()
+    } else if generate {
+        generate_static_pw(length, keyboard_layout)?
     } else {
-        return Err(CliError("Provide a password or use --generate.".into()));
+        util::prompt("Enter a static password")?
     };
 
     let scan_codes = encode_password(&pw, keyboard_layout)?;
 
-    if !force
-        && !confirm(&format!(
-            "Program static password in slot {}?",
-            slot.map(1, 2)
-        ))
-    {
-        return Err(CliError("Aborted.".into()));
+    if !force {
+        let session = open_session(dev, scp_params)?;
+        confirm_slot_overwrite(session.as_ref(), slot);
     }
 
     let mut config = SlotConfiguration::static_password(&scan_codes)
@@ -388,11 +474,7 @@ pub fn run_static(
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
-    if generate {
-        eprintln!("Static password set in slot {}: {pw}", slot.map(1, 2));
-    } else {
-        eprintln!("Static password set in slot {}.", slot.map(1, 2));
-    }
+    eprintln!("Static password stored in slot {}.", slot.map(1, 2));
     Ok(())
 }
 
@@ -410,19 +492,50 @@ pub fn run_chalresp(
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
-    let key_bytes: Vec<u8> = if generate {
+    let key_bytes: Vec<u8> = if let Some(k) = key {
+        if generate {
+            return Err(CliError(
+                "Invalid options: --generate conflicts with KEY argument.".into(),
+            ));
+        }
+        if totp {
+            parse_b32_key(k).map_err(|_| CliError("Invalid Base32-encoded key.".into()))?
+        } else {
+            parse_hex_key(k)?
+        }
+    } else if generate {
         let mut k = vec![0u8; 20];
         getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        if totp {
+            eprintln!(
+                "Using a randomly generated key (base32): {}",
+                b32_encode(&k)
+            );
+        } else {
+            eprintln!("Using a randomly generated key (hex): {}", hex::encode(&k));
+        }
         k
-    } else if let Some(k) = key {
-        hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))?
+    } else if force {
+        return Err(CliError(
+            "No secret key given. Remove the --force flag, set the KEY argument or set the --generate flag.".into(),
+        ));
+    } else if totp {
+        loop {
+            let input = util::prompt("Enter a secret key (base32)")?;
+            match parse_b32_key(&input) {
+                Ok(k) => break k,
+                Err(e) => eprintln!("{e}"),
+            }
+        }
     } else {
-        return Err(CliError("Provide a key or use --generate.".into()));
+        let input = util::prompt("Enter a secret key")?;
+        parse_hex_key(&input)?
     };
 
+    let cred_type = if totp { "TOTP" } else { "challenge-response" };
     if !force
         && !confirm(&format!(
-            "Program challenge-response in slot {}?",
+            "Program a {cred_type} credential in slot {}?",
             slot.map(1, 2)
         ))
     {
@@ -434,19 +547,13 @@ pub fn run_chalresp(
     if touch {
         config = config.require_touch(true);
     }
-    if totp {
-        config = config.digits8(true);
-    }
 
     let mut session = open_session(dev, scp_params)?;
     session
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
-    println!(
-        "Challenge-response (HMAC-SHA1) programmed in slot {}.",
-        slot.map(1, 2)
-    );
+    eprintln!("{cred_type} credential stored in slot {}.", slot.map(1, 2));
     Ok(())
 }
 
@@ -462,22 +569,44 @@ pub fn run_calculate(
     let digits = digits.as_u8();
 
     let challenge_bytes: Vec<u8> = if totp {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let period = 30u64;
-        (now / period).to_be_bytes().to_vec()
+        if let Some(c) = challenge {
+            let ts: u64 = c
+                .parse()
+                .map_err(|_| CliError("Timestamp challenge for TOTP must be an integer.".into()))?;
+            (ts / 30).to_be_bytes().to_vec()
+        } else {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            (now / 30).to_be_bytes().to_vec()
+        }
     } else if let Some(c) = challenge {
         hex::decode(c).map_err(|_| CliError("Challenge must be hex-encoded.".into()))?
     } else {
-        return Err(CliError("Provide a challenge or use --totp.".into()));
+        let input = util::prompt("Enter a challenge (hex)")?;
+        hex::decode(&input).map_err(|_| CliError("Challenge must be hex-encoded.".into()))?
     };
 
-    // Prefer OTP HID for challenge-response (supports touch keepalive)
     let mut session = open_session(dev, scp_params)?;
+
+    // Check that slot is configured
+    if matches!(session.get_config_state().is_configured(slot), Ok(false)) {
+        return Err(CliError(
+            "Cannot perform challenge-response on an empty slot.".into(),
+        ));
+    }
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let prompted = AtomicBool::new(false);
+    let on_keepalive = |status: u8| {
+        if status == 2 && !prompted.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            prompt_for_touch();
+        }
+    };
+
     let result = session
-        .calculate_hmac_sha1(slot, &challenge_bytes)
+        .calculate_hmac_sha1_with_cancel(slot, &challenge_bytes, Some(cancel), Some(&on_keepalive))
         .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
 
     if totp {
@@ -504,9 +633,17 @@ pub fn run_hotp(
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
-    let key_bytes = key
-        .ok_or_else(|| CliError("A key is required.".into()))
-        .and_then(|k| hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into())))?;
+    let key_bytes = if let Some(k) = key {
+        parse_b32_key(k).map_err(|_| CliError("Invalid Base32-encoded key.".into()))?
+    } else {
+        loop {
+            let input = util::prompt("Enter a secret key (base32)")?;
+            match parse_b32_key(&input) {
+                Ok(k) => break k,
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+    };
 
     // Parse token identifier
     let (token_id, mh1, mh2) = if let Some(ident) = identifier {
@@ -551,7 +688,12 @@ pub fn run_hotp(
         (vec![], false, false)
     };
 
-    if !force && !confirm(&format!("Program HOTP in slot {}?", slot.map(1, 2))) {
+    if !force
+        && !confirm(&format!(
+            "Program a HOTP credential in slot {}?",
+            slot.map(1, 2)
+        ))
+    {
         return Err(CliError("Aborted.".into()));
     }
 
@@ -579,7 +721,7 @@ pub fn run_hotp(
         .put_configuration(slot, &config, acc.as_ref().map(|a| a.as_slice()), None)
         .map_err(|e| CliError(format!("Failed to program: {e}")))?;
 
-    eprintln!("HOTP programmed in slot {}.", slot.map(1, 2));
+    eprintln!("HOTP credential stored in slot {}.", slot.map(1, 2));
     Ok(())
 }
 
@@ -599,13 +741,41 @@ pub fn run_settings(
 ) -> Result<(), CliError> {
     let slot: Slot = slot.into();
     let cur_acc = access_code.map(parse_access_code).transpose()?;
+
+    if new_access_code.is_some() && delete_access_code {
+        return Err(CliError(
+            "--new-access-code conflicts with --delete-access-code.".into(),
+        ));
+    }
+
+    if delete_access_code && access_code.is_none() {
+        return Err(CliError(
+            "--delete-access-code used without providing an access code (see \"ykman otp --help\" for more info).".into(),
+        ));
+    }
+
+    let session = open_session(dev, scp_params)?;
+    if matches!(session.get_config_state().is_configured(slot), Ok(false)) {
+        return Err(CliError(
+            "Not possible to update settings on an empty slot.".into(),
+        ));
+    }
+    drop(session);
+
     let new_acc = if delete_access_code {
-        Some([0u8; ACC_CODE_SIZE])
+        None
+    } else if let Some(nac) = new_access_code {
+        Some(parse_access_code(nac)?)
     } else {
-        new_access_code.map(parse_access_code).transpose()?
+        cur_acc
     };
 
-    if !force && !confirm(&format!("Update settings for slot {}?", slot.map(1, 2))) {
+    if !force
+        && !confirm(&format!(
+            "Update the settings for slot {}? All existing settings will be overwritten.",
+            slot.map(1, 2)
+        ))
+    {
         return Err(CliError("Aborted.".into()));
     }
 
@@ -634,7 +804,7 @@ pub fn run_settings(
         )
         .map_err(|e| CliError(format!("Failed to update settings: {e}")))?;
 
-    eprintln!("Settings updated for slot {}.", slot.map(1, 2));
+    eprintln!("Settings for slot {} updated.", slot.map(1, 2));
     Ok(())
 }
 

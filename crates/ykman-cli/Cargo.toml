@@ -25,6 +25,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 getrandom = "0.3"
 hex = "0.4.3"
+base32 = "0.5"
 base64 = "0.22.1"
 log = { version = "0.4", features = ["std"] }
 elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }

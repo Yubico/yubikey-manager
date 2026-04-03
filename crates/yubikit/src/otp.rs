@@ -341,17 +341,16 @@ impl<T: OtpConnection> OtpProtocol<T> {
                 }
             } else {
                 // Need to wait
-                if status_byte & RESP_TIMEOUT_WAIT_FLAG != 0 {
-                    if let Some(cb) = on_keepalive {
-                        cb(2); // STATUS_UPNEEDED
-                    }
+                let status = if status_byte & RESP_TIMEOUT_WAIT_FLAG != 0 {
                     needs_touch = true;
                     thread::sleep(Duration::from_millis(100));
+                    2u8 // STATUS_UPNEEDED
                 } else {
-                    if let Some(cb) = on_keepalive {
-                        cb(1); // STATUS_PROCESSING
-                    }
                     thread::sleep(Duration::from_millis(20));
+                    1u8 // STATUS_PROCESSING
+                };
+                if let Some(cb) = on_keepalive {
+                    cb(status);
                 }
                 if let Some(flag) = cancel
                     && flag.load(Ordering::Relaxed)

@@ -3,6 +3,17 @@ use std::io::{self, Read, Write};
 /// CLI error type for user-facing error messages.
 pub struct CliError(pub String);
 
+/// Prompt the user for visible text input.
+pub fn prompt(prompt: &str) -> Result<String, CliError> {
+    eprint!("{prompt}: ");
+    io::stderr().flush().ok();
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| CliError(format!("Failed to read input: {e}")))?;
+    Ok(input.trim().to_string())
+}
+
 /// Prompt for a secret value with hidden input.
 pub fn prompt_secret(prompt: &str) -> Result<String, CliError> {
     rpassword::prompt_password(format!("{prompt}: "))
