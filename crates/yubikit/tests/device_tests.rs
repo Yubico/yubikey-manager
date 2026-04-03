@@ -1282,7 +1282,9 @@ mod openpgp {
 
 mod yubiotp {
     use super::*;
-    use yubikit::yubiotp::{YubiOtpCcidSession, YubiOtpOtpSession, YubiOtpSession};
+    use yubikit::yubiotp::{
+        Slot, SlotConfiguration, YubiOtpCcidSession, YubiOtpOtpSession, YubiOtpSession,
+    };
 
     #[rstest]
     #[case(TestConnection::UsbSmartCard)]
@@ -1313,6 +1315,128 @@ mod yubiotp {
             }
         }
         eprintln!("  PASS {tc:?}");
+    }
+
+    /// Test that cancelling an OTP HMAC challenge-response with touch works.
+    ///
+    /// Programs slot 2 with HMAC-SHA1 + require_touch, starts a
+    /// calculate_hmac_sha1 and immediately cancels it, verifying
+    /// that it returns a Timeout error promptly.
+    #[rstest]
+    #[case(TestConnection::UsbOtp)]
+    fn test_calculate_hmac_sha1_cancel(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OTP);
+
+        let (dev, _) = get_device_and_info();
+
+        // Program slot 2 with HMAC-SHA1 requiring touch (use CCID)
+        {
+            let conn = dev.open_smartcard().expect("open smartcard");
+            let mut session = YubiOtpCcidSession::new(conn).expect("YubiOtpCcidSession");
+            let config = SlotConfiguration::hmac_sha1(&[0x0b; 20])
+                .expect("hmac config")
+                .require_touch(true);
+            session
+                .put_configuration(Slot::Two, &config, None, None)
+                .expect("put_configuration");
+        }
+
+        // Open OTP session and attempt calculate, cancel after first keepalive
+        let conn = dev.open_otp().expect("open OTP");
+        let mut session = YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession");
+
+        let got_keepalive = std::sync::atomic::AtomicBool::new(false);
+        let start = std::time::Instant::now();
+        let result = session.calculate_hmac_sha1_with_cancel(
+            Slot::Two,
+            b"test challenge",
+            Some(&|| got_keepalive.load(std::sync::atomic::Ordering::Relaxed)),
+            Some(&|_status| {
+                got_keepalive.store(true, std::sync::atomic::Ordering::Relaxed);
+            }),
+        );
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "Expected error from cancelled operation");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("cancelled") || err_msg.contains("Timeout"),
+            "Expected cancel/timeout error, got: {err_msg}"
+        );
+        assert!(
+            elapsed.as_secs() < 10,
+            "Cancel took too long: {elapsed:?} (expected < 10s)"
+        );
+
+        // Clean up: delete slot 2
+        {
+            let conn = dev.open_smartcard().expect("open smartcard");
+            let mut session = YubiOtpCcidSession::new(conn).expect("YubiOtpCcidSession");
+            session.delete_slot(Slot::Two, None).expect("delete slot");
+        }
+
+        eprintln!("  PASS {tc:?} (cancelled in {elapsed:?})");
+    }
+}
+
+// ───────────────────────── FIDO / CTAP HID ─────────────────────────
+
+mod fido {
+    use super::*;
+
+    /// Test that cancelling a CTAP2 selection command over HID works.
+    ///
+    /// Sends an authenticatorSelection CBOR command and cancels it
+    /// after receiving a keepalive, verifying that the authenticator
+    /// responds with KeepaliveCancel (0x2D) promptly.
+    #[rstest]
+    #[case(TestConnection::UsbOtp)] // UsbOtp just means USB HID is available
+    fn test_fido_selection_cancel(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::FIDO2);
+
+        let (dev, _) = get_device_and_info();
+        let conn = dev.open_fido().expect("open FIDO HID");
+
+        // Cancel after the first keepalive is received (the cancel command
+        // can only be sent in response to a keepalive packet).
+        let got_keepalive = std::sync::atomic::AtomicBool::new(false);
+        let start = std::time::Instant::now();
+        let result = conn.call_with_keepalive(
+            0x10,
+            &[0x0B], // CBOR authenticatorSelection
+            &mut |_status| {
+                got_keepalive.store(true, std::sync::atomic::Ordering::Relaxed);
+            },
+            Some(&|| got_keepalive.load(std::sync::atomic::Ordering::Relaxed)),
+        );
+        let elapsed = start.elapsed();
+
+        match &result {
+            Ok(response) if !response.is_empty() && response[0] == 0x01 => {
+                // CTAP1_ERR_INVALID_COMMAND: selection not supported (pre-CTAP 2.1)
+                eprintln!("  SKIP: authenticatorSelection not supported on this device");
+                return;
+            }
+            Ok(response) => {
+                assert!(
+                    !response.is_empty() && response[0] == 0x2D,
+                    "Expected KeepaliveCancel (0x2D), got: {:#04X?}",
+                    response.first()
+                );
+            }
+            Err(e) => {
+                panic!("Unexpected error: {e}");
+            }
+        }
+
+        assert!(
+            elapsed.as_secs() < 10,
+            "Cancel took too long: {elapsed:?} (expected < 10s)"
+        );
+
+        eprintln!("  PASS {tc:?} (cancelled in {elapsed:?})");
     }
 }
 

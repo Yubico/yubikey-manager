@@ -162,3 +162,30 @@ class TestChallengeResponse:
         )
         output = session.calculate_hmac_sha1(SLOT.TWO, b"Hi There")
         assert output == bytes.fromhex("b617318655057264e28bc0b6fb378c8ef146be00")
+
+    @condition.transport(TRANSPORT.USB)
+    def test_calculate_hmac_sha1_cancel(self, session, conn_type):
+        import time
+        from threading import Event
+
+        if conn_type != OtpConnection:
+            pytest.skip("Cancel only supported over OTP HID")
+
+        session.put_configuration(
+            SLOT.TWO,
+            HmacSha1SlotConfiguration(b"\x0b" * 20).require_touch(True),
+        )
+
+        event = Event()
+        event.set()  # Cancel immediately
+
+        start = time.monotonic()
+        with pytest.raises(Exception) as exc_info:
+            session.calculate_hmac_sha1(SLOT.TWO, b"test challenge", event=event)
+        elapsed = time.monotonic() - start
+
+        assert (
+            "cancel" in str(exc_info.value).lower()
+            or "timeout" in str(exc_info.value).lower()
+        )
+        assert elapsed < 5, f"Cancel took too long: {elapsed:.1f}s (expected < 5s)"
