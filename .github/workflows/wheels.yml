@@ -1,0 +1,70 @@
+name: Wheels
+
+on: [push, pull_request]
+
+permissions: read-all
+
+jobs:
+  sdist:
+    runs-on: ubuntu-latest
+    name: Build source distribution
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v6
+        with:
+          name: ykman-sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    runs-on: ${{ matrix.os }}
+    name: Wheels - ${{ matrix.os }} ${{ matrix.target }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: ubuntu-latest
+            target: aarch64
+          - os: macos-latest
+            target: universal2-apple-darwin
+          - os: windows-latest
+            target: x64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        if: matrix.os != 'ubuntu-latest'
+        uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter
+          manylinux: auto
+          before-script-linux: yum install -y pcsc-lite-devel systemd-devel
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: ykman-wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/*.whl
