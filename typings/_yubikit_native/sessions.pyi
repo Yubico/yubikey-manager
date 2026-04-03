@@ -450,4 +450,10 @@ class YubiOtpOtpSession:
         uri: str | None = None,
         cur_acc_code: bytes | None = None,
     ) -> None: ...
-    def calculate_hmac_sha1(self, slot: int, challenge: bytes) -> bytes: ...
+    def calculate_hmac_sha1(
+        self,
+        slot: int,
+        challenge: bytes,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> bytes: ...

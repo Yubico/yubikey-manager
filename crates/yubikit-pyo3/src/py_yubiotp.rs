@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::transport::otphid::HidOtpConnection;
@@ -305,16 +308,43 @@ impl PyYubiOtpOtpSession {
             .map_err(yubiotp_err)
     }
 
+    #[pyo3(signature = (slot, challenge, event=None, on_keepalive=None))]
     fn calculate_hmac_sha1<'py>(
         &mut self,
         py: Python<'py>,
         slot: u8,
         challenge: &[u8],
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let s = parse_slot(slot)?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_ref = if event.is_some() {
+            Some(cancel.clone())
+        } else {
+            None
+        };
+        let keepalive_fn = |status: u8| {
+            Python::with_gil(|py| {
+                if let Some(ref evt) = event
+                    && let Ok(is_set) = evt.call_method0(py, "is_set")
+                    && is_set.extract::<bool>(py).unwrap_or(false)
+                {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                if let Some(ref cb) = on_keepalive {
+                    let _ = cb.call1(py, (status,));
+                }
+            });
+        };
+        let keepalive_ref: Option<&dyn Fn(u8)> = if event.is_some() || on_keepalive.is_some() {
+            Some(&keepalive_fn)
+        } else {
+            None
+        };
         let result = self
             .session
-            .calculate_hmac_sha1(s, challenge)
+            .calculate_hmac_sha1_with_cancel(s, challenge, cancel_ref, keepalive_ref)
             .map_err(yubiotp_err)?;
         Ok(PyBytes::new(py, &result))
     }

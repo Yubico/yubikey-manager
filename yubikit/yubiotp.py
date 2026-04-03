@@ -800,4 +800,10 @@ class YubiOtpSession:
         require_version(self.version, (2, 2, 0))
         slot = SLOT(slot)
         logger.debug(f"Calculating response for slot {slot}")
+        if isinstance(self._native, _NativeYubiOtpOtpSession):
+            return bytes(
+                self._native.calculate_hmac_sha1(
+                    int(slot), challenge, event, on_keepalive
+                )
+            )
         return bytes(self._native.calculate_hmac_sha1(int(slot), challenge))
