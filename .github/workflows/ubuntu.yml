@@ -5,6 +5,34 @@ on: [push, pull_request]
 permissions: read-all
 
 jobs:
+  rust-cli:
+    runs-on: ubuntu-latest
+    name: Rust CLI
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qq libpcsclite-dev libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust CLI
+        run: |
+          cargo build --release -p ykman-cli
+          mkdir -p rust-dist
+          cp target/release/ykman rust-dist/
+          rust-dist/ykman --version
+
+      - name: Upload Rust build
+        uses: actions/upload-artifact@v6
+        with:
+          name: ykman-rust-ubuntu
+          path: rust-dist
+
   build:
 
     runs-on: ubuntu-latest
@@ -40,19 +68,6 @@ jobs:
 
       - name: Run unit tests
         run: uv run pytest
-
-      - name: Build Rust CLI
-        run: |
-          cargo build --release -p ykman-cli
-          target/release/ykman --version
-          mkdir -p rust-dist
-          cp target/release/ykman rust-dist/
-
-      - name: Upload Rust build
-        uses: actions/upload-artifact@v6
-        with:
-          name: ykman-rust-ubuntu
-          path: rust-dist
 
       - name: PyInstaller
         run: |

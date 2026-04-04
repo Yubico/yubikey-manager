@@ -5,6 +5,39 @@ on: [push, pull_request]
 permissions: read-all
 
 jobs:
+  rust-cli:
+    runs-on: ${{ matrix.os }}
+    name: Rust CLI - ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ykman-rust-windows-x64
+          - os: windows-11-arm
+            artifact: ykman-rust-windows-arm64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust CLI
+        shell: bash
+        run: |
+          cargo build --release -p ykman-cli
+          mkdir -p rust-dist
+          cp target/release/ykman.exe rust-dist/
+          rust-dist/ykman.exe --version
+
+      - name: Upload Rust build
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: rust-dist
+
   build:
 
     runs-on: windows-latest
@@ -76,39 +109,6 @@ jobs:
         with:
           name: ykman-builds-windows
           path: dist
-
-  rust-cli:
-    runs-on: ${{ matrix.os }}
-    name: Rust CLI - ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: ykman-rust-windows-x64
-          - os: windows-11-arm
-            artifact: ykman-rust-windows-arm64
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Rust CLI
-        shell: bash
-        run: |
-          cargo build --release -p ykman-cli
-          mkdir -p rust-dist
-          cp target/release/ykman.exe rust-dist/
-          rust-dist/ykman.exe --version
-
-      - name: Upload Rust build
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ matrix.artifact }}
-          path: rust-dist
 
   sign-exe-dll:
     if: startsWith(github.ref, 'refs/tags/')
