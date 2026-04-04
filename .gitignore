@@ -21,3 +21,4 @@ lib/
 # Rust
 /target/
 /_yubikit_native/
+security_review.md

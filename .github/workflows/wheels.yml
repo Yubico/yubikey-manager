@@ -34,34 +34,43 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-          - os: ubuntu-latest
+            container: quay.io/pypa/manylinux_2_28_x86_64
+          - os: ubuntu-arm64
             target: aarch64
           - os: macos-latest
             target: universal2-apple-darwin
+            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
           - os: windows-latest
             target: x64
+            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
+          - os: windows-11-arm
+            target: aarch64
+            interpreter: 3.11 3.12 3.13 3.14
+            python-versions: "3.11\n3.12\n3.13\n3.14"
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Python
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.python-versions
         uses: actions/setup-python@v6
         with:
-          python-version: |
-            3.10
-            3.11
-            3.12
-            3.13
-            3.14
+          python-version: ${{ matrix.python-versions }}
+
+      - name: Install dependencies
+        if: "startsWith(matrix.os, 'ubuntu')"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq libpcsclite-dev libudev-dev
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter
-          manylinux: auto
-          before-script-linux: yum install -y pcsc-lite-devel systemd-devel
+          args: --release --out dist ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
+          manylinux: manylinux_2_28
+          container: ${{ matrix.container }}
+          before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel' || '' }}
 
       - name: Upload wheels
         uses: actions/upload-artifact@v6
