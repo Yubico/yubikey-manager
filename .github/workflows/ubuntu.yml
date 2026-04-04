@@ -6,8 +6,17 @@ permissions: read-all
 
 jobs:
   rust-cli:
-    runs-on: ubuntu-latest
-    name: Rust CLI
+    runs-on: ${{ matrix.os }}
+    name: Rust CLI - ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: ykman-rust-linux-x64
+          - os: ubuntu-arm64
+            artifact: ykman-rust-linux-arm64
 
     steps:
       - uses: actions/checkout@v6
@@ -30,7 +39,7 @@ jobs:
       - name: Upload Rust build
         uses: actions/upload-artifact@v6
         with:
-          name: ykman-rust-ubuntu
+          name: ${{ matrix.artifact }}
           path: rust-dist
 
   build:
