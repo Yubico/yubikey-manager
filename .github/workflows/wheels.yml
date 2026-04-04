@@ -35,7 +35,7 @@ jobs:
           - os: ubuntu-latest
             target: x86_64
             container: quay.io/pypa/manylinux_2_28_x86_64
-          - os: ubuntu-arm64
+          - os: ubuntu-22.04-arm
             target: aarch64
           - os: macos-latest
             target: universal2-apple-darwin

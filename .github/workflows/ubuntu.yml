@@ -15,7 +15,7 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: ykman-rust-linux-x64
-          - os: ubuntu-arm64
+          - os: ubuntu-22.04-arm
             artifact: ykman-rust-linux-arm64
 
     steps:
@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -qq libpcsclite-dev libudev-dev
+          sudo apt-get install -qq libpcsclite-dev libudev-dev libdbus-1-dev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
