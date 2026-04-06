@@ -47,47 +47,33 @@ use crate::util::CliError;
 ///
 /// When SCP params are explicit, always uses SmartCard connection.
 /// Otherwise tries HID first (USB direct), then SmartCard (NFC or USB CCID).
-enum FidoDevice {
-    Hid(HidCtapDevice),
-    SmartCard(SmartCardCtapDevice<yubikit::transport::pcsc::PcscSmartCardConnection>),
-}
-
-impl FidoDevice {
-    fn as_ctap_device(&self) -> &dyn CtapDevice {
-        match self {
-            Self::Hid(d) => d,
-            Self::SmartCard(d) => d,
-        }
-    }
-}
-
-fn open_fido_device(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<FidoDevice, CliError> {
+fn open_fido_device(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<Box<dyn CtapDevice>, CliError> {
     if scp_params.is_explicit() {
         // SCP requires SmartCard transport
         let scp_config = scp::resolve_scp(dev, scp_params, Capability::FIDO2)?;
         let conn = dev
             .open_smartcard()
             .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        if let Some(params) = scp::to_scp_key_params(&scp_config) {
+        let dev = if let Some(params) = scp::to_scp_key_params(&scp_config) {
             SmartCardCtapDevice::new_with_scp(conn, &params)
         } else {
             SmartCardCtapDevice::new(conn)
         }
-        .map(FidoDevice::SmartCard)
-        .map_err(|e| CliError(format!("Failed to open FIDO over SmartCard: {e}")))
-    } else if dev.open_fido().is_ok() {
-        let conn = dev
-            .open_fido()
-            .map_err(|e| CliError(format!("Failed to open FIDO connection: {e}")))?;
-        Ok(FidoDevice::Hid(HidCtapDevice::new(conn)))
+        .map_err(|e| CliError(format!("Failed to open FIDO over SmartCard: {e}")))?;
+        Ok(Box::new(dev))
+    } else if let Ok(conn) = dev.open_fido() {
+        Ok(Box::new(HidCtapDevice::new(conn)))
     } else {
         // Fall back to SmartCard (NFC reader)
         let conn = dev
             .open_smartcard()
             .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-        SmartCardCtapDevice::new(conn)
-            .map(FidoDevice::SmartCard)
-            .map_err(|e| CliError(format!("Failed to open FIDO over SmartCard: {e}")))
+        let dev = SmartCardCtapDevice::new(conn)
+            .map_err(|e| CliError(format!("Failed to open FIDO over SmartCard: {e}")))?;
+        Ok(Box::new(dev))
     }
 }
 
@@ -95,8 +81,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
     let info = dev.info();
     let transport = dev.transport();
 
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
+    let ctap_dev = open_fido_device(dev, scp_params)?;
 
     // Check if FIDO2 is enabled
     let fido2_enabled = info
@@ -106,7 +91,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
         .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
 
     if fido2_enabled {
-        let ctap2 = Ctap2::new(ctap_dev, false)
+        let ctap2 = Ctap2::new(&*ctap_dev, false)
             .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
         let ctap_info = ctap2.info();
 
@@ -276,10 +261,9 @@ pub fn run_reset(
         .map_err(|e| CliError(format!("Reinsert failed: {e}")))?;
     }
 
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
+    let ctap_dev = open_fido_device(dev, scp_params)?;
 
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
     let ctap_info = ctap2.info();
 
@@ -362,10 +346,9 @@ pub fn run_access_change_pin(
     pin: Option<&str>,
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
+    let ctap_dev = open_fido_device(dev, scp_params)?;
 
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
@@ -432,10 +415,9 @@ pub fn run_access_verify_pin(
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
+    let ctap_dev = open_fido_device(dev, scp_params)?;
 
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
     let client_pin = ClientPin::new(&ctap2, None)
         .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
@@ -507,9 +489,8 @@ pub fn run_access_force_change(
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let options = &ctap2.info().options;
@@ -539,9 +520,8 @@ pub fn run_access_set_min_length(
     pin: Option<&str>,
     rp_ids: &[String],
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let info = ctap2.info();
@@ -596,9 +576,8 @@ pub fn run_credentials_list(
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     if !ctap2
@@ -674,9 +653,8 @@ pub fn run_credentials_delete(
     pin: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Credential Management")?;
@@ -754,9 +732,8 @@ pub fn run_fingerprints_list(
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     if !ctap2.info().options.contains_key("bioEnroll") {
@@ -831,9 +808,8 @@ pub fn run_fingerprints_add(
         ));
     }
 
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
@@ -915,9 +891,8 @@ pub fn run_fingerprints_rename(
         ));
     }
 
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
@@ -944,9 +919,8 @@ pub fn run_fingerprints_delete(
     pin: Option<&str>,
     force: bool,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
@@ -982,9 +956,8 @@ pub fn run_config_toggle_always_uv(
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let options = &ctap2.info().options;
@@ -1025,9 +998,8 @@ pub fn run_config_enable_ep_attestation(
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
-    let fido_device = open_fido_device(dev, scp_params)?;
-    let ctap_dev = fido_device.as_ctap_device();
-    let ctap2 = Ctap2::new(ctap_dev, false)
+    let ctap_dev = open_fido_device(dev, scp_params)?;
+    let ctap2 = Ctap2::new(&*ctap_dev, false)
         .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let options = &ctap2.info().options;
