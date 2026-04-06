@@ -141,6 +141,16 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
             },
             Err(_) => PyRuntimeError::new_err(msg.clone()),
         },
+        SmartCardError::InvalidState(msg) => match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("BadResponseError") {
+                Ok(cls) => match cls.call1((msg.clone(),)) {
+                    Ok(exc) => PyErr::from_value(exc),
+                    Err(_) => PyRuntimeError::new_err(msg.clone()),
+                },
+                Err(_) => PyRuntimeError::new_err(msg.clone()),
+            },
+            Err(_) => PyRuntimeError::new_err(msg.clone()),
+        },
         SmartCardError::ApplicationNotAvailable => match py.import("yubikit.core") {
             Ok(module) => match module.getattr("ApplicationNotAvailableError") {
                 Ok(cls) => match cls.call0() {
