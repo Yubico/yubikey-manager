@@ -14,7 +14,7 @@ use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
 use yubikit::transport::pcsc::{PcscSmartCardConnection, is_reader_usb};
 
-use yubikit::yubiotp::YubiOtpSession as _;
+use yubikit::yubiotp::YubiOtpSession;
 
 use crate::ctap_device::HidCtapDevice;
 
@@ -755,7 +755,7 @@ fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
                     }
                 };
 
-                let otp = match yubikit::yubiotp::YubiOtpOtpSession::new(conn) {
+                let otp = match YubiOtpSession::new_otp(conn) {
                     Ok(session) => {
                         let state = session.get_config_state();
                         ResultOrError::Ok(OtpConfigDiag {

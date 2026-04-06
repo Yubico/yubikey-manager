@@ -33,7 +33,6 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::core::Version;
-use crate::smartcard::SmartCardError;
 use crate::transport::otphid::HidOtpConnection;
 
 // --- OTP Codec ---
@@ -133,20 +132,15 @@ const SCAN_MAP_SLOT: u8 = 0x12;
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Connection-level error for OTP HID transport.
 #[derive(Debug, Error)]
-pub enum YubiOtpError {
-    #[error("SmartCard error: {0}")]
-    SmartCard(#[from] SmartCardError),
+pub enum OtpError {
     #[error("Command rejected: {0}")]
     CommandRejected(String),
     #[error("Bad response: {0}")]
     BadResponse(String),
-    #[error("Not supported: {0}")]
-    NotSupported(String),
     #[error("Timeout: {0}")]
     Timeout(String),
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
     #[error("HID error: {0}")]
     Hid(#[from] crate::transport::otphid::HidError),
 }
@@ -156,21 +150,25 @@ pub enum YubiOtpError {
 // ---------------------------------------------------------------------------
 
 /// Trait for low-level OTP HID transport (feature report read/write).
-pub trait OtpConnection {
-    fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError>;
-    fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError>;
-    fn close(&mut self) {}
+pub trait OtpConnection: crate::core::Connection<Error = OtpError> {
+    fn otp_receive(&self) -> Result<Vec<u8>, OtpError>;
+    fn otp_send(&self, data: &[u8]) -> Result<(), OtpError>;
+}
+
+impl crate::core::Connection for HidOtpConnection {
+    type Error = OtpError;
+
+    fn close(&mut self) {
+        HidOtpConnection::close(self);
+    }
 }
 
 impl OtpConnection for HidOtpConnection {
-    fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError> {
-        self.get_feature_report().map_err(YubiOtpError::from)
+    fn otp_receive(&self) -> Result<Vec<u8>, OtpError> {
+        self.get_feature_report().map_err(OtpError::from)
     }
-    fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError> {
-        self.set_feature_report(data).map_err(YubiOtpError::from)
-    }
-    fn close(&mut self) {
-        HidOtpConnection::close(self);
+    fn otp_send(&self, data: &[u8]) -> Result<(), OtpError> {
+        self.set_feature_report(data).map_err(OtpError::from)
     }
 }
 
@@ -185,7 +183,7 @@ pub struct OtpProtocol<T: OtpConnection> {
 }
 
 impl<T: OtpConnection> OtpProtocol<T> {
-    pub fn new(connection: T) -> Result<Self, (YubiOtpError, T)> {
+    pub fn new(connection: T) -> Result<Self, (OtpError, T)> {
         let mut proto = Self {
             connection,
             version: Version(0, 0, 0),
@@ -205,7 +203,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
     }
 
     /// Read status bytes from the YubiKey (first 3 bytes are firmware version).
-    pub fn read_status(&self) -> Result<Vec<u8>, YubiOtpError> {
+    pub fn read_status(&self) -> Result<Vec<u8>, OtpError> {
         let report = self.receive()?;
         // Return bytes 1..7 (skip first byte, drop last byte = status flags)
         Ok(report[1..FEATURE_RPT_DATA_SIZE].to_vec())
@@ -220,7 +218,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         slot: u8,
         data: Option<&[u8]>,
         expected_len: Option<i32>,
-    ) -> Result<Option<Vec<u8>>, YubiOtpError> {
+    ) -> Result<Option<Vec<u8>>, OtpError> {
         self.send_and_receive_with_cancel(slot, data, expected_len, None, None)
     }
 
@@ -235,10 +233,10 @@ impl<T: OtpConnection> OtpProtocol<T> {
         expected_len: Option<i32>,
         cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Option<Vec<u8>>, YubiOtpError> {
+    ) -> Result<Option<Vec<u8>>, OtpError> {
         let payload_data = data.unwrap_or(&[]);
         if payload_data.len() > SLOT_DATA_SIZE {
-            return Err(YubiOtpError::InvalidParameter(
+            return Err(OtpError::BadResponse(
                 "Payload too large for HID frame".into(),
             ));
         }
@@ -258,10 +256,10 @@ impl<T: OtpConnection> OtpProtocol<T> {
         }
     }
 
-    fn receive(&self) -> Result<Vec<u8>, YubiOtpError> {
+    fn receive(&self) -> Result<Vec<u8>, OtpError> {
         let report = self.connection.otp_receive()?;
         if report.len() != FEATURE_RPT_SIZE {
-            return Err(YubiOtpError::BadResponse(format!(
+            return Err(OtpError::BadResponse(format!(
                 "Incorrect feature report size (was {}, expected {FEATURE_RPT_SIZE})",
                 report.len()
             )));
@@ -269,7 +267,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         Ok(report)
     }
 
-    fn await_ready_to_write(&self) -> Result<(), YubiOtpError> {
+    fn await_ready_to_write(&self) -> Result<(), OtpError> {
         for _ in 0..20 {
             let report = self.receive()?;
             if report[FEATURE_RPT_DATA_SIZE] & SLOT_WRITE_FLAG == 0 {
@@ -277,12 +275,12 @@ impl<T: OtpConnection> OtpProtocol<T> {
             }
             thread::sleep(Duration::from_millis(50));
         }
-        Err(YubiOtpError::Timeout(
+        Err(OtpError::Timeout(
             "Timeout waiting for YubiKey to become ready to receive".into(),
         ))
     }
 
-    fn send_frame(&self, buf: &[u8]) -> Result<u8, YubiOtpError> {
+    fn send_frame(&self, buf: &[u8]) -> Result<u8, OtpError> {
         debug_assert_eq!(buf.len(), FRAME_SIZE);
         let prog_seq = self.receive()?[STATUS_OFFSET_PROG_SEQ];
         let mut seq: u8 = 0;
@@ -308,7 +306,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         prog_seq: u8,
         cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Option<Vec<u8>>, YubiOtpError> {
+    ) -> Result<Option<Vec<u8>>, OtpError> {
         let mut response = Vec::new();
         let mut seq: u8 = 0;
         let mut needs_touch = false;
@@ -331,13 +329,13 @@ impl<T: OtpConnection> OtpProtocol<T> {
             } else if status_byte == 0 {
                 // Status response
                 if !response.is_empty() {
-                    return Err(YubiOtpError::BadResponse("Incomplete transfer".into()));
+                    return Err(OtpError::BadResponse("Incomplete transfer".into()));
                 } else if is_sequence_updated(&report, prog_seq) {
                     return Ok(None);
                 } else if needs_touch {
-                    return Err(YubiOtpError::Timeout("Timed out waiting for touch".into()));
+                    return Err(OtpError::Timeout("Timed out waiting for touch".into()));
                 } else {
-                    return Err(YubiOtpError::CommandRejected("No data".into()));
+                    return Err(OtpError::CommandRejected("No data".into()));
                 }
             } else {
                 // Need to wait
@@ -357,13 +355,13 @@ impl<T: OtpConnection> OtpProtocol<T> {
                 }
                 if cancel.is_some_and(|f| f()) {
                     self.reset_state()?;
-                    return Err(YubiOtpError::Timeout("Command cancelled".into()));
+                    return Err(OtpError::Timeout("Command cancelled".into()));
                 }
             }
         }
     }
 
-    fn reset_state(&self) -> Result<(), YubiOtpError> {
+    fn reset_state(&self) -> Result<(), OtpError> {
         let mut report = [0u8; FEATURE_RPT_SIZE];
         report[FEATURE_RPT_DATA_SIZE] = 0xFF;
         self.connection.otp_send(&report)?;
@@ -377,9 +375,9 @@ impl<T: OtpConnection> OtpProtocol<T> {
 }
 
 /// Verify and strip CRC from a raw OTP data response, returning `expected_len` bytes.
-pub fn verify_and_strip_crc(response: &[u8], expected_len: usize) -> Result<Vec<u8>, YubiOtpError> {
+pub fn verify_and_strip_crc(response: &[u8], expected_len: usize) -> Result<Vec<u8>, OtpError> {
     if response.len() < expected_len + 2 {
-        return Err(YubiOtpError::BadResponse(format!(
+        return Err(OtpError::BadResponse(format!(
             "Response too short: expected at least {}, got {}",
             expected_len + 2,
             response.len()
@@ -388,7 +386,7 @@ pub fn verify_and_strip_crc(response: &[u8], expected_len: usize) -> Result<Vec<
     if check_crc(&response[..expected_len + 2]) {
         Ok(response[..expected_len].to_vec())
     } else {
-        Err(YubiOtpError::BadResponse("Invalid CRC".into()))
+        Err(OtpError::BadResponse("Invalid CRC".into()))
     }
 }
 

@@ -31,16 +31,64 @@
 //! YubiKey, accessible over both SmartCard (CCID) and HID OTP transports.
 
 use sha1::{Digest, Sha1};
+use thiserror::Error;
 
 use crate::core::Version;
 use crate::core::patch_version;
+use std::fmt;
+
+use crate::core::Connection;
+use crate::otp::OtpError;
 use crate::otp::calculate_crc;
 #[cfg(test)]
 use crate::otp::check_crc;
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
-// Re-export types that were moved to otp_protocol for backwards compatibility.
-pub use crate::otp::{OtpConnection, OtpProtocol, YubiOtpError};
+pub use crate::otp::{OtpConnection, OtpProtocol};
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Session-level error for YubiOTP operations.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum YubiOtpError<E: fmt::Debug + fmt::Display = std::convert::Infallible> {
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+    #[error("Connection error: {0}")]
+    Connection(E),
+}
+
+impl YubiOtpError {
+    /// Widen an infallible error into any concrete connection-error type.
+    pub fn widen<E: fmt::Debug + fmt::Display>(self) -> YubiOtpError<E> {
+        match self {
+            YubiOtpError::NotSupported(msg) => YubiOtpError::NotSupported(msg),
+            YubiOtpError::InvalidData(msg) => YubiOtpError::InvalidData(msg),
+            YubiOtpError::Connection(e) => match e {},
+        }
+    }
+}
+
+impl From<SmartCardError> for YubiOtpError<SmartCardError> {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::ApplicationNotAvailable => {
+                YubiOtpError::NotSupported("Application not available".into())
+            }
+            other => YubiOtpError::Connection(other),
+        }
+    }
+}
+
+impl From<OtpError> for YubiOtpError<OtpError> {
+    fn from(e: OtpError) -> Self {
+        YubiOtpError::Connection(e)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -386,12 +434,12 @@ pub fn build_update(
     // All ext flags are valid for update (EXTFLAG_UPDATE_MASK == 0xFF)
     let _ = ext;
     if tkt & !TKTFLAG_UPDATE_MASK != 0 {
-        return Err(YubiOtpError::InvalidParameter(
+        return Err(YubiOtpError::InvalidData(
             "Unsupported tkt flags for update".into(),
         ));
     }
     if cfg & !CFGFLAG_UPDATE_MASK != 0 {
-        return Err(YubiOtpError::InvalidParameter(
+        return Err(YubiOtpError::InvalidData(
             "Unsupported cfg flags for update".into(),
         ));
     }
@@ -432,9 +480,7 @@ pub fn build_ndef_config(
     };
 
     if data.len() > NDEF_DATA_SIZE {
-        return Err(YubiOtpError::InvalidParameter(
-            "URI payload too large".into(),
-        ));
+        return Err(YubiOtpError::InvalidData("URI payload too large".into()));
     }
 
     let mut buf = vec![data.len() as u8, ndef_type as u8];
@@ -532,7 +578,7 @@ impl SlotConfiguration {
         key: &[u8; KEY_SIZE],
     ) -> Result<Self, YubiOtpError> {
         if fixed.len() > FIXED_SIZE {
-            return Err(YubiOtpError::InvalidParameter(format!(
+            return Err(YubiOtpError::InvalidData(format!(
                 "fixed must be <= {FIXED_SIZE} bytes"
             )));
         }
@@ -606,7 +652,7 @@ impl SlotConfiguration {
         key: &[u8; KEY_SIZE],
     ) -> Result<Self, YubiOtpError> {
         if fixed.len() > FIXED_SIZE {
-            return Err(YubiOtpError::InvalidParameter(format!(
+            return Err(YubiOtpError::InvalidData(format!(
                 "fixed must be <= {FIXED_SIZE} bytes"
             )));
         }
@@ -700,7 +746,7 @@ impl SlotConfiguration {
 
     pub fn protect_slot2(mut self, value: bool) -> Result<Self, YubiOtpError> {
         if self.kind == SlotConfigKind::Update {
-            return Err(YubiOtpError::InvalidParameter(
+            return Err(YubiOtpError::InvalidData(
                 "protect_slot2 cannot be applied to UpdateConfiguration".into(),
             ));
         }
@@ -761,7 +807,7 @@ impl SlotConfiguration {
         fixed_modhex2: bool,
     ) -> Result<Self, YubiOtpError> {
         if token_id.len() > FIXED_SIZE {
-            return Err(YubiOtpError::InvalidParameter(format!(
+            return Err(YubiOtpError::InvalidData(format!(
                 "token_id must be <= {FIXED_SIZE} bytes"
             )));
         }
@@ -774,7 +820,7 @@ impl SlotConfiguration {
     /// Set initial moving factor for HOTP.
     pub fn imf(mut self, imf: u32) -> Result<Self, YubiOtpError> {
         if !imf.is_multiple_of(16) || imf > 0xFFFF0 {
-            return Err(YubiOtpError::InvalidParameter(
+            return Err(YubiOtpError::InvalidData(
                 "imf should be between 0 and 1048560, evenly divisible by 16".into(),
             ));
         }
@@ -832,7 +878,7 @@ impl SlotConfiguration {
     /// Returns error if an unsupported flag is used in update mode.
     pub fn set_update_tkt_flag(mut self, flag: TktFlag, value: bool) -> Result<Self, YubiOtpError> {
         if self.kind == SlotConfigKind::Update && (flag.0 & !TKTFLAG_UPDATE_MASK) != 0 {
-            return Err(YubiOtpError::InvalidParameter(
+            return Err(YubiOtpError::InvalidData(
                 "Unsupported TKT flag for update".into(),
             ));
         }
@@ -842,7 +888,7 @@ impl SlotConfiguration {
 
     pub fn set_update_cfg_flag(mut self, flag: CfgFlag, value: bool) -> Result<Self, YubiOtpError> {
         if self.kind == SlotConfigKind::Update && (flag.0 & !CFGFLAG_UPDATE_MASK) != 0 {
-            return Err(YubiOtpError::InvalidParameter(
+            return Err(YubiOtpError::InvalidData(
                 "Unsupported CFG flag for update".into(),
             ));
         }
@@ -852,58 +898,111 @@ impl SlotConfiguration {
 }
 
 // ---------------------------------------------------------------------------
-// YubiOtpSession trait — shared operations across transports
+// YubiOtpOps (private, object-safe trait for internal dispatch)
 // ---------------------------------------------------------------------------
 
-/// Common YubiOTP session operations shared across transports.
-pub trait YubiOtpSession {
-    /// The firmware version of the YubiKey.
+/// Object-safe trait for transport-specific YubiOTP operations.
+///
+/// Each transport (CCID, OTP HID) implements this trait. The public
+/// [`YubiOtpSession`] dispatches through this.
+trait YubiOtpOps<E: std::error::Error + Send + Sync + 'static>: Send {
     fn version(&self) -> Version;
-
-    /// Access the raw status bytes.
     fn status(&self) -> &[u8];
-
-    /// Write raw config bytes to a config slot.
     fn write_config(
         &mut self,
         slot: ConfigSlot,
         config: &[u8],
         cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError>;
-
-    /// Send a command and receive a response of expected length.
+    ) -> Result<(), YubiOtpError<E>>;
     fn send_and_receive(
         &mut self,
         slot: ConfigSlot,
         data: &[u8],
         expected_len: usize,
-    ) -> Result<Vec<u8>, YubiOtpError>;
-
-    /// Perform an HMAC-SHA1 challenge-response operation.
-    fn calculate_hmac_sha1(
-        &mut self,
-        slot: Slot,
-        challenge: &[u8],
-    ) -> Result<Vec<u8>, YubiOtpError>;
-
-    /// Perform an HMAC-SHA1 challenge-response operation with optional cancellation and keepalive.
-    /// Note: The underlying transport must support cancellation for the `cancel` parameter to have an effect.
+    ) -> Result<Vec<u8>, YubiOtpError<E>>;
     fn calculate_hmac_sha1_with_cancel(
         &mut self,
         slot: Slot,
         challenge: &[u8],
         cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Vec<u8>, YubiOtpError>;
+    ) -> Result<Vec<u8>, YubiOtpError<E>>;
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any>;
+}
+
+// ---------------------------------------------------------------------------
+// YubiOtpSession
+// ---------------------------------------------------------------------------
+
+/// YubiOTP session for configuring OTP slots.
+///
+/// Generic over the connection type `C`. Construct with [`YubiOtpSession::new`]
+/// for SmartCard (CCID) or [`YubiOtpSession::new_otp`] for OTP HID.
+pub struct YubiOtpSession<C: Connection> {
+    inner: Box<dyn YubiOtpOps<C::Error>>,
+    _phantom: std::marker::PhantomData<C>,
+}
+
+impl<C: Connection + 'static> YubiOtpSession<C> {
+    /// The firmware version of the YubiKey.
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+
+    /// Access the raw status bytes.
+    pub fn status(&self) -> &[u8] {
+        self.inner.status()
+    }
+
+    /// Write raw config bytes to a config slot.
+    pub fn write_config(
+        &mut self,
+        slot: ConfigSlot,
+        config: &[u8],
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError<C::Error>> {
+        self.inner.write_config(slot, config, cur_acc_code)
+    }
+
+    /// Send a command and receive a response of expected length.
+    pub fn send_and_receive(
+        &mut self,
+        slot: ConfigSlot,
+        data: &[u8],
+        expected_len: usize,
+    ) -> Result<Vec<u8>, YubiOtpError<C::Error>> {
+        self.inner.send_and_receive(slot, data, expected_len)
+    }
+
+    /// Perform an HMAC-SHA1 challenge-response operation.
+    pub fn calculate_hmac_sha1(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, YubiOtpError<C::Error>> {
+        self.calculate_hmac_sha1_with_cancel(slot, challenge, None, None)
+    }
+
+    /// Perform an HMAC-SHA1 challenge-response with optional cancellation and keepalive.
+    pub fn calculate_hmac_sha1_with_cancel(
+        &mut self,
+        slot: Slot,
+        challenge: &[u8],
+        cancel: Option<&dyn Fn() -> bool>,
+        on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError<C::Error>> {
+        self.inner
+            .calculate_hmac_sha1_with_cancel(slot, challenge, cancel, on_keepalive)
+    }
 
     /// Get the serial number of the YubiKey.
-    fn get_serial(&mut self) -> Result<u32, YubiOtpError> {
+    pub fn get_serial(&mut self) -> Result<u32, YubiOtpError<C::Error>> {
         let resp = self.send_and_receive(ConfigSlot::DeviceSerial, &[], 4)?;
         Ok(u32::from_be_bytes([resp[0], resp[1], resp[2], resp[3]]))
     }
 
     /// Get the current configuration state.
-    fn get_config_state(&self) -> ConfigState {
+    pub fn get_config_state(&self) -> ConfigState {
         let touch_level = if self.status().len() >= 6 {
             u16::from_le_bytes([self.status()[4], self.status()[5]])
         } else {
@@ -913,13 +1012,13 @@ pub trait YubiOtpSession {
     }
 
     /// Write a configuration to a slot.
-    fn put_configuration(
+    pub fn put_configuration(
         &mut self,
         slot: Slot,
         config: &SlotConfiguration,
         acc_code: Option<&[u8]>,
         cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
+    ) -> Result<(), YubiOtpError<C::Error>> {
         if !config.is_supported_by(self.version()) {
             return Err(YubiOtpError::NotSupported(
                 "This configuration is not supported on this YubiKey version".into(),
@@ -930,13 +1029,13 @@ pub trait YubiOtpSession {
     }
 
     /// Update an existing configuration in a slot.
-    fn update_configuration(
+    pub fn update_configuration(
         &mut self,
         slot: Slot,
         config: &SlotConfiguration,
         acc_code: Option<&[u8]>,
         cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
+    ) -> Result<(), YubiOtpError<C::Error>> {
         if !config.is_supported_by(self.version()) {
             return Err(YubiOtpError::NotSupported(
                 "This configuration is not supported on this YubiKey version".into(),
@@ -957,62 +1056,66 @@ pub trait YubiOtpSession {
     }
 
     /// Swap the two slot configurations.
-    fn swap_slots(&mut self) -> Result<(), YubiOtpError> {
+    pub fn swap_slots(&mut self) -> Result<(), YubiOtpError<C::Error>> {
         self.write_config(ConfigSlot::Swap, &[], None)
     }
 
     /// Delete the configuration stored in a slot.
-    fn delete_slot(&mut self, slot: Slot, cur_acc_code: Option<&[u8]>) -> Result<(), YubiOtpError> {
+    pub fn delete_slot(
+        &mut self,
+        slot: Slot,
+        cur_acc_code: Option<&[u8]>,
+    ) -> Result<(), YubiOtpError<C::Error>> {
         let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
         self.write_config(config_slot, &[0u8; CONFIG_SIZE], cur_acc_code)
     }
 
     /// Update scan-code map on the YubiKey.
-    fn set_scan_map(
+    pub fn set_scan_map(
         &mut self,
         scan_map: &[u8],
         cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
+    ) -> Result<(), YubiOtpError<C::Error>> {
         self.write_config(ConfigSlot::ScanMap, scan_map, cur_acc_code)
     }
 
     /// Configure a slot to be used over NDEF (NFC).
-    fn set_ndef_configuration(
+    pub fn set_ndef_configuration(
         &mut self,
         slot: Slot,
         uri: Option<&str>,
         cur_acc_code: Option<&[u8]>,
         ndef_type: NdefType,
-    ) -> Result<(), YubiOtpError> {
+    ) -> Result<(), YubiOtpError<C::Error>> {
         let config_slot = slot.map(ConfigSlot::Ndef1, ConfigSlot::Ndef2);
-        let ndef_data = build_ndef_config(uri, ndef_type)?;
+        let ndef_data = build_ndef_config(uri, ndef_type).map_err(YubiOtpError::widen)?;
         self.write_config(config_slot, &ndef_data, cur_acc_code)
+    }
+
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        *self
+            .inner
+            .into_connection_any()
+            .downcast::<C>()
+            .expect("YubiOtpSession inner type mismatch (this is a bug)")
+    }
+
+    fn from_inner(inner: Box<dyn YubiOtpOps<C::Error>>) -> Self {
+        Self {
+            inner,
+            _phantom: std::marker::PhantomData,
+        }
     }
 }
 
-// ---------------------------------------------------------------------------
-// YubiOtpCcidSession — SmartCard backend
-// ---------------------------------------------------------------------------
-
-/// A session with the YubiOTP application over a SmartCard connection.
-pub struct YubiOtpCcidSession<C: SmartCardConnection> {
-    protocol: SmartCardProtocol<C>,
-    version: Version,
-    status: Vec<u8>,
-    prog_seq: u8,
-}
-
-impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
-    /// Open a YubiOTP session on the given SmartCard connection.
+// SmartCard (CCID) constructors
+impl<C: SmartCardConnection + Send + 'static> YubiOtpSession<C> {
+    /// Open a YubiOTP session over SmartCard (CCID).
     ///
     /// On error, returns the connection so the caller can recover it.
-    pub fn new(connection: C) -> Result<Self, (YubiOtpError, C)> {
-        let mut protocol = SmartCardProtocol::new(connection);
-        let status = match protocol.select(Aid::OTP) {
-            Ok(v) => v,
-            Err(e) => return Err((e.into(), protocol.into_connection())),
-        };
-        Self::init(protocol, &status)
+    pub fn new(connection: C) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
+        CcidYubiOtp::open(connection).map(|inner| Self::from_inner(Box::new(inner)))
     }
 
     /// Open a YubiOTP session with SCP (Secure Channel Protocol).
@@ -1021,7 +1124,47 @@ impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
     pub fn new_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
-    ) -> Result<Self, (YubiOtpError, C)> {
+    ) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
+        CcidYubiOtp::open_with_scp(connection, scp_key_params)
+            .map(|inner| Self::from_inner(Box::new(inner)))
+    }
+}
+
+// OTP HID constructors
+impl<T: OtpConnection + Send + 'static> YubiOtpSession<T> {
+    /// Open a YubiOTP session over OTP HID.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_otp(connection: T) -> Result<Self, (YubiOtpError<OtpError>, T)> {
+        OtpYubiOtp::open(connection).map(|inner| Self::from_inner(Box::new(inner)))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CcidYubiOtp — SmartCard backend (internal)
+// ---------------------------------------------------------------------------
+
+struct CcidYubiOtp<C: SmartCardConnection> {
+    protocol: SmartCardProtocol<C>,
+    version: Version,
+    status: Vec<u8>,
+    prog_seq: u8,
+}
+
+impl<C: SmartCardConnection> CcidYubiOtp<C> {
+    fn open(connection: C) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        let status = match protocol.select(Aid::OTP) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+        Self::init(protocol, &status)
+    }
+
+    fn open_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
+    ) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
         let status = match protocol.select(Aid::OTP) {
             Ok(v) => v,
@@ -1033,8 +1176,11 @@ impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
         Self::init(protocol, &status)
     }
 
-    fn init(mut protocol: SmartCardProtocol<C>, status: &[u8]) -> Result<Self, (YubiOtpError, C)> {
-        log::debug!("Opening YubiOtpCcidSession (SmartCard)");
+    fn init(
+        mut protocol: SmartCardProtocol<C>,
+        status: &[u8],
+    ) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
+        log::debug!("Opening CcidYubiOtp (SmartCard)");
         let version = patch_version(Version::from_bytes(&status[..3]));
         let prog_seq = *status.get(3).unwrap_or(&0);
         protocol.configure(version);
@@ -1047,22 +1193,11 @@ impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
         })
     }
 
-    /// Access the underlying SmartCardProtocol.
-    pub fn protocol(&self) -> &SmartCardProtocol<C> {
-        &self.protocol
-    }
-
-    /// Access the underlying SmartCardProtocol mutably.
-    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
-        &mut self.protocol
-    }
-
-    /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> C {
-        self.protocol.into_connection()
-    }
-
-    fn write_update(&mut self, slot: ConfigSlot, data: &[u8]) -> Result<Vec<u8>, YubiOtpError> {
+    fn write_update(
+        &mut self,
+        slot: ConfigSlot,
+        data: &[u8],
+    ) -> Result<Vec<u8>, YubiOtpError<SmartCardError>> {
         let mut status = self
             .protocol
             .send_apdu(0, INS_CONFIG, slot as u8, 0, data)?;
@@ -1086,11 +1221,11 @@ impl<C: SmartCardConnection> YubiOtpCcidSession<C> {
                 return Ok(status);
             }
         }
-        Err(YubiOtpError::CommandRejected("Not updated".into()))
+        Err(YubiOtpError::InvalidData("Not updated".into()))
     }
 }
 
-impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
+impl<C: SmartCardConnection + Send + 'static> YubiOtpOps<SmartCardError> for CcidYubiOtp<C> {
     fn version(&self) -> Version {
         self.version
     }
@@ -1104,7 +1239,7 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
         slot: ConfigSlot,
         config: &[u8],
         cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
+    ) -> Result<(), YubiOtpError<SmartCardError>> {
         let mut data = config.to_vec();
         match cur_acc_code {
             Some(ac) => data.extend_from_slice(ac),
@@ -1119,30 +1254,32 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
         slot: ConfigSlot,
         data: &[u8],
         expected_len: usize,
-    ) -> Result<Vec<u8>, YubiOtpError> {
+    ) -> Result<Vec<u8>, YubiOtpError<SmartCardError>> {
         let response = self
             .protocol
             .send_apdu(0, INS_CONFIG, slot as u8, 0, data)?;
         if response.len() == expected_len {
             Ok(response)
         } else {
-            Err(YubiOtpError::BadResponse(format!(
+            Err(YubiOtpError::InvalidData(format!(
                 "Unexpected response length: expected {expected_len}, got {}",
                 response.len()
             )))
         }
     }
 
-    /// Perform an HMAC-SHA1 challenge-response operation.
-    fn calculate_hmac_sha1(
+    fn calculate_hmac_sha1_with_cancel(
         &mut self,
         slot: Slot,
         challenge: &[u8],
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
+        _cancel: Option<&dyn Fn() -> bool>,
+        _on_keepalive: Option<&dyn Fn(u8)>,
+    ) -> Result<Vec<u8>, YubiOtpError<SmartCardError>> {
+        // SmartCard transport does not support cancellation or keepalives.
+        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")
+            .map_err(YubiOtpError::widen)?;
         let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
 
-        // Pad challenge to HMAC_CHALLENGE_SIZE with a byte different from the last
         let pad_byte = if challenge.last() == Some(&0) {
             1u8
         } else {
@@ -1155,40 +1292,31 @@ impl<C: SmartCardConnection> YubiOtpSession for YubiOtpCcidSession<C> {
         self.send_and_receive(config_slot, &padded, HMAC_RESPONSE_SIZE)
     }
 
-    fn calculate_hmac_sha1_with_cancel(
-        &mut self,
-        slot: Slot,
-        challenge: &[u8],
-        _cancel: Option<&dyn Fn() -> bool>,
-        _on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        // SmartCard transport does not support cancellation or keepalives, so we ignore those parameters.
-        self.calculate_hmac_sha1(slot, challenge)
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        Box::new(self.protocol.into_connection())
     }
 }
 
 // ---------------------------------------------------------------------------
-// YubiOtpOtpSession — HID OTP backend
+// OtpYubiOtp — HID OTP backend (internal)
 // ---------------------------------------------------------------------------
 
-/// A session with the YubiOTP application over an OTP HID connection.
-pub struct YubiOtpOtpSession<T: OtpConnection> {
+struct OtpYubiOtp<T: OtpConnection> {
     protocol: OtpProtocol<T>,
     status: Vec<u8>,
     version: Version,
 }
 
-impl<T: OtpConnection> YubiOtpOtpSession<T> {
-    /// Open a YubiOTP session on the given HID connection.
-    pub fn new(connection: T) -> Result<Self, (YubiOtpError, T)> {
-        log::debug!("Opening YubiOtpOtpSession (HID)");
+impl<T: OtpConnection> OtpYubiOtp<T> {
+    fn open(connection: T) -> Result<Self, (YubiOtpError<OtpError>, T)> {
+        log::debug!("Opening OtpYubiOtp (HID)");
         let protocol = match OtpProtocol::new(connection) {
             Ok(p) => p,
-            Err((e, conn)) => return Err((e, conn)),
+            Err((e, conn)) => return Err((e.into(), conn)),
         };
         let status = match protocol.read_status() {
             Ok(s) => s,
-            Err(e) => return Err((e, protocol.into_connection())),
+            Err(e) => return Err((e.into(), protocol.into_connection())),
         };
         let version = patch_version(protocol.version);
 
@@ -1198,14 +1326,9 @@ impl<T: OtpConnection> YubiOtpOtpSession<T> {
             version,
         })
     }
-
-    /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> T {
-        self.protocol.into_connection()
-    }
 }
 
-impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
+impl<T: OtpConnection + Send + 'static> YubiOtpOps<OtpError> for OtpYubiOtp<T> {
     fn version(&self) -> Version {
         self.version
     }
@@ -1219,7 +1342,7 @@ impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
         slot: ConfigSlot,
         config: &[u8],
         cur_acc_code: Option<&[u8]>,
-    ) -> Result<(), YubiOtpError> {
+    ) -> Result<(), YubiOtpError<OtpError>> {
         let mut data = config.to_vec();
         match cur_acc_code {
             Some(ac) => data.extend_from_slice(ac),
@@ -1236,11 +1359,11 @@ impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
         slot: ConfigSlot,
         data: &[u8],
         expected_len: usize,
-    ) -> Result<Vec<u8>, YubiOtpError> {
+    ) -> Result<Vec<u8>, YubiOtpError<OtpError>> {
         let send_data = if data.is_empty() { None } else { Some(data) };
         self.protocol
             .send_and_receive(slot as u8, send_data, Some(expected_len as i32))?
-            .ok_or_else(|| YubiOtpError::BadResponse("Expected data response, got status".into()))
+            .ok_or_else(|| YubiOtpError::InvalidData("Expected data response, got status".into()))
     }
 
     fn calculate_hmac_sha1_with_cancel(
@@ -1249,8 +1372,9 @@ impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
         challenge: &[u8],
         cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")?;
+    ) -> Result<Vec<u8>, YubiOtpError<OtpError>> {
+        require_version(self.version, Version(2, 2, 0), "calculate_hmac_sha1")
+            .map_err(YubiOtpError::widen)?;
         let config_slot = slot.map(ConfigSlot::ChalHmac1, ConfigSlot::ChalHmac2);
 
         let pad_byte = if challenge.last() == Some(&0) {
@@ -1270,15 +1394,11 @@ impl<T: OtpConnection> YubiOtpSession for YubiOtpOtpSession<T> {
             on_keepalive,
         )?;
 
-        response.ok_or_else(|| YubiOtpError::BadResponse("No data in HMAC response".into()))
+        response.ok_or_else(|| YubiOtpError::InvalidData("No data in HMAC response".into()))
     }
 
-    fn calculate_hmac_sha1(
-        &mut self,
-        slot: Slot,
-        challenge: &[u8],
-    ) -> Result<Vec<u8>, YubiOtpError> {
-        self.calculate_hmac_sha1_with_cancel(slot, challenge, None, None)
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        Box::new(self.protocol.into_connection())
     }
 }
 

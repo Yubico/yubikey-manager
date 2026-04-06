@@ -20,9 +20,7 @@ use std::sync::OnceLock;
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::{YubiKeyDevice, list_devices};
-use yubikit::management::{
-    Capability, DeviceInfo, ManagementCcidSession, ManagementSession, ReleaseType, UsbInterface,
-};
+use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
 
@@ -170,7 +168,7 @@ fn get_scp11b_params() -> &'static Option<(u8, u8, Vec<u8>)> {
 fn get_nfc_device_version() -> &'static Option<Version> {
     NFC_DEVICE_VERSION.get_or_init(|| {
         let conn = open_nfc_smartcard()?;
-        let mut session = ManagementCcidSession::new(conn).ok()?;
+        let mut session = ManagementSession::new(conn).ok()?;
         let info = session.read_device_info_unchecked().ok()?;
         Some(info.version)
     })
@@ -356,10 +354,9 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
     require_version!(Version(4, 1, 0));
     match tc {
         TestConnection::UsbOtp => {
-            use yubikit::management::ManagementOtpSession;
             let (dev, _) = get_device_and_info();
             let conn = dev.open_otp().expect("open OTP");
-            let mut session = ManagementOtpSession::new(conn).expect("ManagementOtpSession::new");
+            let mut session = ManagementSession::new_otp(conn).expect("ManagementSession::new_otp");
             let info = session
                 .read_device_info_unchecked()
                 .expect("read_device_info_unchecked");
@@ -369,10 +366,9 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             let conn = open_smartcard_connection(&tc);
             let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
                 let params = make_scp_key_params(*kid, *kvn, pk);
-                ManagementCcidSession::new_with_scp(conn, &params)
-                    .expect("ManagementCcidSession with SCP")
+                ManagementSession::new_with_scp(conn, &params).expect("ManagementSession with SCP")
             } else {
-                ManagementCcidSession::new(conn).expect("ManagementCcidSession::new")
+                ManagementSession::new(conn).expect("ManagementSession::new (CCID)")
             };
             let info = session
                 .read_device_info_unchecked()
@@ -1282,9 +1278,7 @@ mod openpgp {
 
 mod yubiotp {
     use super::*;
-    use yubikit::yubiotp::{
-        Slot, SlotConfiguration, YubiOtpCcidSession, YubiOtpOtpSession, YubiOtpSession,
-    };
+    use yubikit::yubiotp::{Slot, SlotConfiguration, YubiOtpSession};
 
     #[rstest]
     #[case(TestConnection::UsbSmartCard)]
@@ -1299,17 +1293,16 @@ mod yubiotp {
             TestConnection::UsbOtp => {
                 let (dev, _) = get_device_and_info();
                 let conn = dev.open_otp().expect("open OTP");
-                let session = YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession::new");
+                let session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession::new_otp");
                 let _v = session.version();
             }
             _ => {
                 let conn = open_smartcard_connection(&tc);
                 let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
                     let params = make_scp_key_params(*kid, *kvn, pk);
-                    YubiOtpCcidSession::new_with_scp(conn, &params)
-                        .expect("YubiOtpCcidSession with SCP")
+                    YubiOtpSession::new_with_scp(conn, &params).expect("YubiOtpSession with SCP")
                 } else {
-                    YubiOtpCcidSession::new(conn).expect("YubiOtpCcidSession::new")
+                    YubiOtpSession::new(conn).expect("YubiOtpSession::new")
                 };
                 let _v = session.version();
             }
@@ -1333,7 +1326,7 @@ mod yubiotp {
         // Program slot 2 with HMAC-SHA1 requiring touch (use CCID)
         {
             let conn = dev.open_smartcard().expect("open smartcard");
-            let mut session = YubiOtpCcidSession::new(conn).expect("YubiOtpCcidSession");
+            let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
             let config = SlotConfiguration::hmac_sha1(&[0x0b; 20])
                 .expect("hmac config")
                 .require_touch(true);
@@ -1344,7 +1337,7 @@ mod yubiotp {
 
         // Open OTP session and attempt calculate, cancel after first keepalive
         let conn = dev.open_otp().expect("open OTP");
-        let mut session = YubiOtpOtpSession::new(conn).expect("YubiOtpOtpSession");
+        let mut session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession");
 
         let got_keepalive = std::sync::atomic::AtomicBool::new(false);
         let start = std::time::Instant::now();
@@ -1372,7 +1365,7 @@ mod yubiotp {
         // Clean up: delete slot 2
         {
             let conn = dev.open_smartcard().expect("open smartcard");
-            let mut session = YubiOtpCcidSession::new(conn).expect("YubiOtpCcidSession");
+            let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
             session.delete_slot(Slot::Two, None).expect("delete slot");
         }
 

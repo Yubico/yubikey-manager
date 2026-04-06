@@ -137,20 +137,32 @@ pub enum SmartCardError {
     Apdu { data: Vec<u8>, sw: u16 },
     #[error("Application not available")]
     ApplicationNotAvailable,
-    #[error("Transport error: {0}")]
-    Transport(Box<dyn std::error::Error + Send + Sync>),
-    #[error("APDU formatting error: {0}")]
-    ApduFormat(#[from] ApduError),
-    #[error("SCP error: {0}")]
-    Scp(#[from] crate::scp::ScpError),
-    #[error("Bad response: {0}")]
-    BadResponse(String),
     #[error("Not supported: {0}")]
     NotSupported(String),
-    #[error("Invalid PIN, {0} attempts remaining")]
-    InvalidPin(u32),
-    #[error("TLV error: {0}")]
-    Tlv(#[from] crate::tlv::TlvError),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+    #[error("Transport error: {0}")]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<ApduError> for SmartCardError {
+    fn from(e: ApduError) -> Self {
+        SmartCardError::InvalidData(e.to_string())
+    }
+}
+
+impl From<crate::scp::ScpError> for SmartCardError {
+    fn from(e: crate::scp::ScpError) -> Self {
+        use crate::scp::ScpError;
+        match e {
+            ScpError::WrongMac | ScpError::ResponseTooShort => {
+                SmartCardError::InvalidState(e.to_string())
+            }
+            _ => SmartCardError::InvalidData(e.to_string()),
+        }
+    }
 }
 
 impl SmartCardError {
@@ -168,10 +180,9 @@ impl SmartCardError {
 // ---------------------------------------------------------------------------
 
 /// Abstract smart card connection — send raw APDU bytes, get response + SW.
-pub trait SmartCardConnection {
+pub trait SmartCardConnection: crate::core::Connection<Error = SmartCardError> {
     fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError>;
     fn transport(&self) -> Transport;
-    fn close(&mut self) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -636,12 +647,12 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // 1. Generate host challenge
         let mut host_challenge = [0u8; 8];
         getrandom::fill(&mut host_challenge)
-            .map_err(|e| SmartCardError::BadResponse(format!("RNG error: {e}")))?;
+            .map_err(|e| SmartCardError::InvalidState(format!("RNG error: {e}")))?;
 
         // 2. INITIALIZE UPDATE
         let resp = self.send_apdu(0x80, 0x50, kvn, 0x00, &host_challenge)?;
         if resp.len() < 29 {
-            return Err(SmartCardError::BadResponse(format!(
+            return Err(SmartCardError::InvalidData(format!(
                 "INITIALIZE UPDATE response too short: {} bytes",
                 resp.len()
             )));
@@ -659,20 +670,20 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let key_senc: [u8; 16] = scp03_derive(key_enc, 0x04, &context, 0x80)?
             .as_slice()
             .try_into()
-            .map_err(|_| SmartCardError::BadResponse("bad derive length".into()))?;
+            .map_err(|_| SmartCardError::InvalidData("bad derive length".into()))?;
         let key_smac: [u8; 16] = scp03_derive(key_mac, 0x06, &context, 0x80)?
             .as_slice()
             .try_into()
-            .map_err(|_| SmartCardError::BadResponse("bad derive length".into()))?;
+            .map_err(|_| SmartCardError::InvalidData("bad derive length".into()))?;
         let key_srmac: [u8; 16] = scp03_derive(key_mac, 0x07, &context, 0x80)?
             .as_slice()
             .try_into()
-            .map_err(|_| SmartCardError::BadResponse("bad derive length".into()))?;
+            .map_err(|_| SmartCardError::InvalidData("bad derive length".into()))?;
 
         // 5. Verify card cryptogram
         let gen_card_crypto = scp03_derive(&key_smac, 0x00, &context, 0x40)?;
         if !constant_time_eq(&gen_card_crypto, card_cryptogram) {
-            return Err(SmartCardError::BadResponse(
+            return Err(SmartCardError::InvalidState(
                 "Card cryptogram verification failed".into(),
             ));
         }
@@ -724,7 +735,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             0x13 => 0x00u8, // SCP11b
             0x15 => 0x03u8, // SCP11c
             _ => {
-                return Err(SmartCardError::BadResponse(format!(
+                return Err(SmartCardError::InvalidData(format!(
                     "Unknown SCP11 KID: 0x{kid:02X}"
                 )));
             }
@@ -734,7 +745,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // 2. Upload certificate chain for SCP11a/c
         if !is_scp11b {
             let (oce_kid, oce_kvn) = oce_ref.ok_or_else(|| {
-                SmartCardError::BadResponse("OCE key reference required for SCP11a/c".into())
+                SmartCardError::InvalidState("OCE key reference required for SCP11a/c".into())
             })?;
             let n = certificates.len();
             for (i, cert) in certificates.iter().enumerate() {
@@ -781,7 +792,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             let mut offset = 0;
             while offset < resp.len() {
                 let (tag, val_off, val_len, end) = crate::tlv::tlv_parse(&resp, offset)
-                    .map_err(|e| SmartCardError::BadResponse(format!("TLV parse error: {e}")))?;
+                    .map_err(|e| SmartCardError::InvalidData(format!("TLV parse error: {e}")))?;
                 match tag {
                     0x5F49 => {
                         epk_sd_ecka_bytes = Some(&resp[val_off..val_off + val_len]);
@@ -794,11 +805,11 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             }
         }
         let epk_sd_ecka_bytes = epk_sd_ecka_bytes.ok_or_else(|| {
-            SmartCardError::BadResponse("Missing ephemeral public key (5F49) in response".into())
+            SmartCardError::InvalidData("Missing ephemeral public key (5F49) in response".into())
         })?;
         let (tlv_start, tlv_end) = epk_sd_ecka_tlv_range.unwrap();
         let receipt = receipt_bytes
-            .ok_or_else(|| SmartCardError::BadResponse("Missing receipt (86) in response".into()))?
+            .ok_or_else(|| SmartCardError::InvalidData("Missing receipt (86) in response".into()))?
             .to_vec();
 
         // key_agreement_data = request data + card's ephemeral public key TLV
@@ -806,16 +817,16 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
         // Perform ECDH
         let card_eph_point = EncodedPoint::from_bytes(epk_sd_ecka_bytes)
-            .map_err(|e| SmartCardError::BadResponse(format!("Invalid card ephemeral key: {e}")))?;
+            .map_err(|e| SmartCardError::InvalidData(format!("Invalid card ephemeral key: {e}")))?;
         let card_eph_pk = Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_eph_point))
-            .ok_or_else(|| SmartCardError::BadResponse("Card ephemeral key not on curve".into()))?;
+            .ok_or_else(|| SmartCardError::InvalidData("Card ephemeral key not on curve".into()))?;
 
         let card_static_point = EncodedPoint::from_bytes(pk_sd_ecka)
-            .map_err(|e| SmartCardError::BadResponse(format!("Invalid card static key: {e}")))?;
+            .map_err(|e| SmartCardError::InvalidData(format!("Invalid card static key: {e}")))?;
         let card_static_pk =
             Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_static_point))
                 .ok_or_else(|| {
-                    SmartCardError::BadResponse("Card static key not on curve".into())
+                    SmartCardError::InvalidData("Card static key not on curve".into())
                 })?;
 
         // shared1 = ECDH(eph_sk, card_eph_pk)
@@ -827,10 +838,10 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             p256::ecdh::diffie_hellman(eph_sk.to_nonzero_scalar(), card_static_pk.as_affine())
         } else {
             let oce_scalar = sk_oce_ecka.ok_or_else(|| {
-                SmartCardError::BadResponse("OCE private key required for SCP11a/c".into())
+                SmartCardError::InvalidState("OCE private key required for SCP11a/c".into())
             })?;
             let oce_sk = SecretKey::from_slice(oce_scalar).map_err(|e| {
-                SmartCardError::BadResponse(format!("Invalid OCE private key: {e}"))
+                SmartCardError::InvalidData(format!("Invalid OCE private key: {e}"))
             })?;
             p256::ecdh::diffie_hellman(oce_sk.to_nonzero_scalar(), card_static_pk.as_affine())
         };
@@ -848,7 +859,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let receipt_key = &keybytes[0..16];
         let expected_receipt = aes_cmac(receipt_key, &key_agreement_data)?;
         if !constant_time_eq(&expected_receipt[..receipt.len()], &receipt) {
-            return Err(SmartCardError::BadResponse(
+            return Err(SmartCardError::InvalidState(
                 "SCP11 receipt verification failed".into(),
             ));
         }

@@ -103,6 +103,19 @@ pub fn bytes2int(data: &[u8]) -> u64 {
 // Transport
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Connection
+// ---------------------------------------------------------------------------
+
+/// Common supertrait for all YubiKey connection types.
+pub trait Connection {
+    /// The transport-specific error type.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Close the connection.
+    fn close(&mut self);
+}
+
 /// Transport type for a smart card connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Transport {

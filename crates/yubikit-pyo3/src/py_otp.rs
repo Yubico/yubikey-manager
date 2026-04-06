@@ -33,7 +33,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit::otp::{OtpConnection, OtpProtocol as RustOtpProtocol, YubiOtpError};
+use yubikit::otp::{OtpConnection, OtpError, OtpProtocol as RustOtpProtocol};
 
 /// Bridges a Python OtpConnection object to the Rust OtpTransport trait.
 pub struct PyOtpConnection {
@@ -52,26 +52,32 @@ impl PyOtpConnection {
     }
 }
 
+impl yubikit::core::Connection for PyOtpConnection {
+    type Error = OtpError;
+
+    fn close(&mut self) {}
+}
+
 impl OtpConnection for PyOtpConnection {
-    fn otp_receive(&self) -> Result<Vec<u8>, YubiOtpError> {
+    fn otp_receive(&self) -> Result<Vec<u8>, OtpError> {
         Python::with_gil(|py| {
             let result = self
                 .receive_fn
                 .call0(py)
-                .map_err(|e| YubiOtpError::BadResponse(e.to_string()))?;
+                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
             let bytes: Vec<u8> = result
                 .extract(py)
-                .map_err(|e| YubiOtpError::BadResponse(e.to_string()))?;
+                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
             Ok(bytes)
         })
     }
 
-    fn otp_send(&self, data: &[u8]) -> Result<(), YubiOtpError> {
+    fn otp_send(&self, data: &[u8]) -> Result<(), OtpError> {
         Python::with_gil(|py| {
             let py_bytes = PyBytes::new(py, data);
             self.send_fn
                 .call1(py, (py_bytes,))
-                .map_err(|e| YubiOtpError::BadResponse(e.to_string()))?;
+                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
             Ok(())
         })
     }
@@ -155,7 +161,7 @@ impl OtpProtocol {
         self.inner
             .send_and_receive_with_cancel(slot, data, expected_len, cancel_ref, keepalive_ref)
             .map_err(|e| match e {
-                YubiOtpError::CommandRejected(msg) => {
+                OtpError::CommandRejected(msg) => {
                     Python::with_gil(|py| match py.import("yubikit.core.otp") {
                         Ok(module) => match module.getattr("CommandRejectedError") {
                             Ok(cls) => match cls.call1((msg.clone(),)) {
@@ -167,18 +173,16 @@ impl OtpProtocol {
                         Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
                     })
                 }
-                YubiOtpError::Timeout(msg) => {
-                    Python::with_gil(|py| match py.import("yubikit.core") {
-                        Ok(module) => match module.getattr("TimeoutError") {
-                            Ok(cls) => match cls.call1((msg.clone(),)) {
-                                Ok(exc) => PyErr::from_value(exc),
-                                Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
-                            },
+                OtpError::Timeout(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+                    Ok(module) => match module.getattr("TimeoutError") {
+                        Ok(cls) => match cls.call1((msg.clone(),)) {
+                            Ok(exc) => PyErr::from_value(exc),
                             Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
                         },
                         Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
-                    })
-                }
+                    },
+                    Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+                }),
                 _ => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
             })
     }

@@ -106,7 +106,7 @@ impl OtpConnection {
 // FIDO HID (CTAP)
 // ---------------------------------------------------------------------------
 
-fn ctap_err(e: ctaphid::CtapHidTransportError) -> PyErr {
+fn ctap_err(e: ctaphid::FidoError) -> PyErr {
     PyOSError::new_err(e.to_string())
 }
 

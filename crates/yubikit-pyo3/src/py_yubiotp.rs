@@ -1,41 +1,13 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::transport::otphid::HidOtpConnection;
-use yubikit::yubiotp::{
-    self, ConfigSlot, NdefType, Slot, YubiOtpCcidSession as RustYubiOtpCcidSession,
-    YubiOtpOtpSession as RustYubiOtpOtpSession, YubiOtpSession as _,
-};
+use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py};
 
-fn yubiotp_err(e: yubiotp::YubiOtpError) -> PyErr {
+fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
     use pyo3::exceptions::*;
     match e {
-        yubiotp::YubiOtpError::SmartCard(sc) => smartcard_err(sc),
-        yubiotp::YubiOtpError::CommandRejected(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core.otp") {
-                Ok(module) => match module.getattr("CommandRejectedError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            })
-        }
-        yubiotp::YubiOtpError::BadResponse(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("BadResponseError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            })
-        }
         yubiotp::YubiOtpError::NotSupported(msg) => {
             Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
@@ -48,9 +20,9 @@ fn yubiotp_err(e: yubiotp::YubiOtpError) -> PyErr {
                 Err(_) => PyValueError::new_err(msg),
             })
         }
-        yubiotp::YubiOtpError::Timeout(msg) => PyTimeoutError::new_err(msg),
-        yubiotp::YubiOtpError::InvalidParameter(msg) => PyValueError::new_err(msg),
-        yubiotp::YubiOtpError::Hid(e) => PyOSError::new_err(e.to_string()),
+        yubiotp::YubiOtpError::InvalidData(msg) => PyValueError::new_err(msg),
+        yubiotp::YubiOtpError::Connection(e) => PyRuntimeError::new_err(e.to_string()),
+        other => PyRuntimeError::new_err(other.to_string()),
     }
 }
 
@@ -78,9 +50,9 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
 // SmartCard-backed YubiOTP session
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "YubiOtpSession")]
+#[pyclass(name = "YubiOtpSession", unsendable)]
 pub struct PyYubiOtpSession {
-    session: RustYubiOtpCcidSession<PySmartCardConnection>,
+    session: YubiOtpSession<PySmartCardConnection>,
 }
 
 #[pymethods]
@@ -94,11 +66,11 @@ impl PyYubiOtpSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let session = RustYubiOtpCcidSession::new_with_scp(conn, &scp_params)
-                .map_err(|(e, _)| yubiotp_err(e))?;
+            let session =
+                YubiOtpSession::new_with_scp(conn, &scp_params).map_err(|(e, _)| yubiotp_err(e))?;
             Ok(Self { session })
         } else {
-            let session = RustYubiOtpCcidSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
+            let session = YubiOtpSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
             Ok(Self { session })
         }
     }
@@ -207,7 +179,7 @@ impl PyYubiOtpSession {
 
 #[pyclass(name = "YubiOtpOtpSession", unsendable)]
 pub struct PyYubiOtpOtpSession {
-    session: RustYubiOtpOtpSession<HidOtpConnection>,
+    session: YubiOtpSession<HidOtpConnection>,
 }
 
 #[pymethods]
@@ -218,7 +190,7 @@ impl PyYubiOtpOtpSession {
             .downcast::<crate::py_hid::OtpConnection>()?
             .borrow_mut();
         let conn = conn_wrapper.take_inner()?;
-        let session = RustYubiOtpOtpSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
+        let session = YubiOtpSession::new_otp(conn).map_err(|(e, _)| yubiotp_err(e))?;
         Ok(Self { session })
     }
 

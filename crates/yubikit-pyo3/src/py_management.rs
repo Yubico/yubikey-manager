@@ -1,13 +1,13 @@
 use pyo3::prelude::*;
-use yubikit::management::{
-    DeviceInfo, ManagementCcidSession as RustManagementCcidSession,
-    ManagementFidoSession as RustManagementFidoSession,
-    ManagementOtpSession as RustManagementOtpSession, ManagementSession,
-};
+use yubikit::management::{DeviceInfo, ManagementSession};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::HidOtpConnection;
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py};
+
+fn management_err(e: impl std::fmt::Display) -> PyErr {
+    pyo3::exceptions::PyOSError::new_err(e.to_string())
+}
 
 pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
     let dict = pyo3::types::PyDict::new(py);
@@ -67,9 +67,9 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
     Ok(dict.into())
 }
 
-#[pyclass(name = "ManagementSession")]
+#[pyclass(name = "ManagementSession", unsendable)]
 pub struct ManagementCcidSession {
-    inner: RustManagementCcidSession<PySmartCardConnection>,
+    inner: ManagementSession<PySmartCardConnection>,
 }
 
 #[pymethods]
@@ -83,11 +83,11 @@ impl ManagementCcidSession {
         let conn = PySmartCardConnection::from_py(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = RustManagementCcidSession::new_with_scp(conn, &scp_params)
-                .map_err(|(e, _)| smartcard_err(e))?;
+            let inner = ManagementSession::new_with_scp(conn, &scp_params)
+                .map_err(|(e, _)| management_err(e))?;
             Ok(Self { inner })
         } else {
-            let inner = RustManagementCcidSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
+            let inner = ManagementSession::new(conn).map_err(|(e, _)| management_err(e))?;
             Ok(Self { inner })
         }
     }
@@ -100,7 +100,7 @@ impl ManagementCcidSession {
 
     /// Read device info. Returns a dict with parsed fields.
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info().map_err(smartcard_err)?;
+        let info = self.inner.read_device_info().map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -109,7 +109,7 @@ impl ManagementCcidSession {
         let info = self
             .inner
             .read_device_info_unchecked()
-            .map_err(smartcard_err)?;
+            .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -159,7 +159,7 @@ impl ManagementCcidSession {
 
         self.inner
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
-            .map_err(smartcard_err)
+            .map_err(management_err)
     }
 
     fn set_mode(
@@ -170,30 +170,17 @@ impl ManagementCcidSession {
     ) -> PyResult<()> {
         self.inner
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
-            .map_err(smartcard_err)
+            .map_err(management_err)
     }
 
     fn device_reset(&mut self) -> PyResult<()> {
-        self.inner.device_reset().map_err(smartcard_err)
-    }
-}
-
-fn yubiotp_err(e: yubikit::otp::YubiOtpError) -> PyErr {
-    use yubikit::otp::YubiOtpError;
-    match e {
-        YubiOtpError::CommandRejected(msg) => {
-            pyo3::exceptions::PyValueError::new_err(format!("Command rejected: {msg}"))
-        }
-        YubiOtpError::NotSupported(msg) => {
-            pyo3::exceptions::PyValueError::new_err(format!("Not supported: {msg}"))
-        }
-        other => pyo3::exceptions::PyOSError::new_err(other.to_string()),
+        self.inner.device_reset().map_err(management_err)
     }
 }
 
 #[pyclass(name = "ManagementOtpSession", unsendable)]
 pub struct ManagementOtpSession {
-    inner: RustManagementOtpSession<HidOtpConnection>,
+    inner: ManagementSession<HidOtpConnection>,
 }
 
 #[pymethods]
@@ -204,7 +191,7 @@ impl ManagementOtpSession {
             .downcast::<crate::py_hid::OtpConnection>()?
             .borrow_mut();
         let hid_conn = conn_wrapper.take_inner()?;
-        let inner = RustManagementOtpSession::new(hid_conn).map_err(|(e, _)| yubiotp_err(e))?;
+        let inner = ManagementSession::new_otp(hid_conn).map_err(|(e, _)| management_err(e))?;
         Ok(Self { inner })
     }
 
@@ -215,7 +202,7 @@ impl ManagementOtpSession {
     }
 
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info().map_err(smartcard_err)?;
+        let info = self.inner.read_device_info().map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -223,7 +210,7 @@ impl ManagementOtpSession {
         let info = self
             .inner
             .read_device_info_unchecked()
-            .map_err(smartcard_err)?;
+            .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -270,7 +257,7 @@ impl ManagementOtpSession {
 
         self.inner
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
-            .map_err(smartcard_err)
+            .map_err(management_err)
     }
 
     fn set_mode(
@@ -281,13 +268,13 @@ impl ManagementOtpSession {
     ) -> PyResult<()> {
         self.inner
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
-            .map_err(smartcard_err)
+            .map_err(management_err)
     }
 }
 
 #[pyclass(name = "ManagementFidoSession", unsendable)]
 pub struct ManagementFidoSession {
-    inner: RustManagementFidoSession<HidFidoConnection>,
+    inner: ManagementSession<HidFidoConnection>,
 }
 
 #[pymethods]
@@ -298,7 +285,7 @@ impl ManagementFidoSession {
             .downcast::<crate::py_hid::FidoConnection>()?
             .borrow_mut();
         let conn = conn_wrapper.take_inner()?;
-        let inner = RustManagementFidoSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
+        let inner = ManagementSession::new_fido(conn).map_err(|(e, _)| management_err(e))?;
         Ok(Self { inner })
     }
 
@@ -309,7 +296,7 @@ impl ManagementFidoSession {
     }
 
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info().map_err(smartcard_err)?;
+        let info = self.inner.read_device_info().map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -317,7 +304,7 @@ impl ManagementFidoSession {
         let info = self
             .inner
             .read_device_info_unchecked()
-            .map_err(smartcard_err)?;
+            .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -364,7 +351,7 @@ impl ManagementFidoSession {
 
         self.inner
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
-            .map_err(smartcard_err)
+            .map_err(management_err)
     }
 
     fn set_mode(
@@ -375,7 +362,7 @@ impl ManagementFidoSession {
     ) -> PyResult<()> {
         self.inner
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
-            .map_err(smartcard_err)
+            .map_err(management_err)
     }
 }
 

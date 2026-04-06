@@ -145,7 +145,7 @@ impl fmt::Debug for SessionKeys {
 impl SessionKeys {
     pub fn parse(response: &[u8]) -> Result<Self, HsmAuthError> {
         if response.len() < 48 {
-            return Err(HsmAuthError::InvalidResponse(
+            return Err(HsmAuthError::InvalidData(
                 "Session key response too short".into(),
             ));
         }
@@ -162,19 +162,33 @@ impl SessionKeys {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HsmAuthError {
-    #[error("SmartCard error: {0}")]
-    SmartCard(#[from] SmartCardError),
-    #[error("Invalid response: {0}")]
-    InvalidResponse(String),
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
     #[error("Not supported: {0}")]
     NotSupported(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
-    #[error("TLV error: {0}")]
-    Tlv(#[from] crate::tlv::TlvError),
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for HsmAuthError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::ApplicationNotAvailable => {
+                HsmAuthError::NotSupported("Application not available".into())
+            }
+            other => HsmAuthError::Connection(other),
+        }
+    }
+}
+
+impl From<crate::tlv::TlvError> for HsmAuthError {
+    fn from(e: crate::tlv::TlvError) -> Self {
+        HsmAuthError::InvalidData(e.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +198,7 @@ pub enum HsmAuthError {
 fn parse_label(label: &str) -> Result<Vec<u8>, HsmAuthError> {
     let bytes = label.as_bytes();
     if bytes.len() < MIN_LABEL_LEN || bytes.len() > MAX_LABEL_LEN {
-        return Err(HsmAuthError::InvalidParameter(format!(
+        return Err(HsmAuthError::InvalidData(format!(
             "Label must be between {MIN_LABEL_LEN} and {MAX_LABEL_LEN} bytes long"
         )));
     }
@@ -193,7 +207,7 @@ fn parse_label(label: &str) -> Result<Vec<u8>, HsmAuthError> {
 
 fn parse_credential_password(password: &[u8]) -> Result<[u8; 16], HsmAuthError> {
     password.try_into().map_err(|_| {
-        HsmAuthError::InvalidParameter(format!(
+        HsmAuthError::InvalidData(format!(
             "Credential password must be {CREDENTIAL_PASSWORD_LEN} bytes long"
         ))
     })
@@ -230,7 +244,7 @@ fn require_version(version: Version, required: Version, feature: &str) -> Result
 
 fn validate_management_key(key: &[u8]) -> Result<(), HsmAuthError> {
     if key.len() != MANAGEMENT_KEY_LEN {
-        return Err(HsmAuthError::InvalidParameter(format!(
+        return Err(HsmAuthError::InvalidData(format!(
             "Management key must be {MANAGEMENT_KEY_LEN} bytes long"
         )));
     }
@@ -244,7 +258,7 @@ fn map_pin_error(e: SmartCardError) -> HsmAuthError {
     {
         return HsmAuthError::InvalidPin(retries);
     }
-    HsmAuthError::SmartCard(e)
+    HsmAuthError::Connection(e)
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +319,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             Some(v) => v,
             None => {
                 return Err((
-                    HsmAuthError::InvalidResponse("Missing version tag in SELECT response".into()),
+                    HsmAuthError::InvalidData("Missing version tag in SELECT response".into()),
                     protocol.into_connection(),
                 ));
             }
@@ -345,19 +359,19 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
                 continue;
             }
             if value.len() < 3 {
-                return Err(HsmAuthError::InvalidResponse(
+                return Err(HsmAuthError::InvalidData(
                     "Credential entry too short".into(),
                 ));
             }
             let algorithm = Algorithm::from_u8(value[0]).ok_or_else(|| {
-                HsmAuthError::InvalidResponse(format!("Unknown algorithm: {}", value[0]))
+                HsmAuthError::InvalidData(format!("Unknown algorithm: {}", value[0]))
             })?;
             let touch_required = value[1] != 0;
             // Label is bytes [2..len-1], counter is last byte
             let label_bytes = &value[2..value.len() - 1];
             let counter = *value.last().unwrap() as u32;
             let label = String::from_utf8(label_bytes.to_vec())
-                .map_err(|e| HsmAuthError::InvalidResponse(e.to_string()))?;
+                .map_err(|e| HsmAuthError::InvalidData(e.to_string()))?;
             creds.push(Credential {
                 label,
                 algorithm,
@@ -425,7 +439,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<Credential, HsmAuthError> {
         let aes_key_len = Algorithm::Aes128YubicoAuthentication.key_len();
         if key_enc.len() != aes_key_len || key_mac.len() != aes_key_len {
-            return Err(HsmAuthError::InvalidParameter(format!(
+            return Err(HsmAuthError::InvalidData(format!(
                 "Encryption and MAC key must be {aes_key_len} bytes long"
             )));
         }
@@ -601,7 +615,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             .protocol
             .send_apdu(0, INS_GET_MANAGEMENT_KEY_RETRIES, 0, 0, &[])?;
         if response.is_empty() {
-            return Err(HsmAuthError::InvalidResponse(
+            return Err(HsmAuthError::InvalidData(
                 "Empty response for management key retries".into(),
             ));
         }
@@ -724,10 +738,10 @@ fn parse_p256_public_key(data: &[u8]) -> Result<p256::PublicKey, HsmAuthError> {
     };
 
     let point = p256::EncodedPoint::from_bytes(&encoded)
-        .map_err(|e| HsmAuthError::InvalidResponse(format!("Invalid EC point: {e}")))?;
+        .map_err(|e| HsmAuthError::InvalidData(format!("Invalid EC point: {e}")))?;
 
     Option::from(p256::PublicKey::from_encoded_point(&point))
-        .ok_or_else(|| HsmAuthError::InvalidResponse("Invalid EC public key".into()))
+        .ok_or_else(|| HsmAuthError::InvalidData("Invalid EC public key".into()))
 }
 
 #[cfg(test)]

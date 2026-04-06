@@ -51,8 +51,8 @@ use std::time::Duration;
 use crate::core::{Transport, Version, set_override_version};
 use crate::fido::FidoConnection;
 use crate::management::{
-    Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementCcidSession, ManagementFidoSession,
-    ManagementOtpSession, ManagementSession, ReleaseType, UsbInterface,
+    BoxedManagementError, Capability, DeviceConfig, DeviceInfo, FormFactor, ManagementSession,
+    ReleaseType, UsbInterface,
 };
 use crate::otp::OtpConnection;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
@@ -62,7 +62,7 @@ use crate::transport::otphid::list_all_hid_devices;
 use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
 use crate::transport::pcsc::{PcscError, PcscSmartCardConnection, is_reader_usb};
-use crate::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
+use crate::yubiotp::YubiOtpSession;
 
 // ---------------------------------------------------------------------------
 // DeviceError
@@ -73,6 +73,8 @@ use crate::yubiotp::{YubiOtpCcidSession, YubiOtpSession};
 pub enum DeviceError {
     /// A SmartCard protocol error.
     SmartCard(SmartCardError),
+    /// A management session error.
+    Management(BoxedManagementError),
     /// A PC/SC transport error.
     Pcsc(PcscError),
     /// A HID transport error.
@@ -100,6 +102,7 @@ impl fmt::Display for DeviceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SmartCard(e) => write!(f, "SmartCard error: {e}"),
+            Self::Management(e) => write!(f, "Management error: {e}"),
             Self::Pcsc(e) => write!(f, "PC/SC error: {e}"),
             Self::Hid(e) => write!(f, "HID error: {e}"),
             Self::NoDeviceFound => write!(f, "No YubiKey device found"),
@@ -114,6 +117,7 @@ impl std::error::Error for DeviceError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::SmartCard(e) => Some(e),
+            Self::Management(e) => Some(e),
             Self::Pcsc(e) => Some(e),
             Self::Hid(e) => Some(e),
             Self::NoDeviceFound | Self::NotYubiKey | Self::Cancelled | Self::WrongDevice => None,
@@ -1001,8 +1005,10 @@ fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), Device
 /// Falls back to probing individual applets on older devices that lack
 /// the management applet. Returns an error if the card is not a YubiKey
 /// (no supported capabilities detected). Returns the connection for reuse.
-pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C), DeviceError> {
-    let mut session = match ManagementCcidSession::new(conn) {
+pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
+    conn: C,
+) -> Result<(DeviceInfo, C), DeviceError> {
+    let mut session = match ManagementSession::new(conn) {
         Ok(s) => s,
         Err((e, conn)) => {
             // NEO and other old devices don't have the management applet.
@@ -1026,7 +1032,7 @@ pub fn read_info_ccid<C: SmartCardConnection>(conn: C) -> Result<(DeviceInfo, C)
             let (info, conn) = synthesize_info_ccid(conn, version)?;
             check_yubikey_info(info, conn)
         }
-        Err(e) => Err(DeviceError::SmartCard(e)),
+        Err(e) => Err(DeviceError::Management(e.erase())),
     }
 }
 
@@ -1048,21 +1054,20 @@ fn check_yubikey_info<C>(info: DeviceInfo, conn: C) -> Result<(DeviceInfo, C), D
 ///
 /// Returns the connection for reuse. On error the connection is returned
 /// when possible.
-pub fn read_info_otp<T: OtpConnection>(
+pub fn read_info_otp<T: OtpConnection + 'static>(
     conn: T,
 ) -> Result<(DeviceInfo, T), (DeviceError, Option<T>)> {
-    let mut session = ManagementOtpSession::new(conn).map_err(|(e, conn)| {
-        (
-            DeviceError::SmartCard(SmartCardError::BadResponse(e.to_string())),
-            Some(conn),
-        )
-    })?;
+    let mut session = ManagementSession::new_otp(conn)
+        .map_err(|(e, conn)| (DeviceError::Management(e.erase()), Some(conn)))?;
     match session.read_device_info_unchecked() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             Ok((info, session.into_connection()))
         }
-        Err(e) => Err((DeviceError::SmartCard(e), Some(session.into_connection()))),
+        Err(e) => Err((
+            DeviceError::Management(e.erase()),
+            Some(session.into_connection()),
+        )),
     }
 }
 
@@ -1084,17 +1089,20 @@ fn read_info_otp_device(hid: &HidDeviceInfo) -> DeviceInfo {
 ///
 /// Returns the connection for reuse. On error the connection is returned
 /// when possible.
-pub fn read_info_fido<C: FidoConnection>(
+pub fn read_info_fido<C: FidoConnection + 'static>(
     conn: C,
 ) -> Result<(DeviceInfo, C), (DeviceError, Option<C>)> {
-    let mut session = ManagementFidoSession::new(conn)
-        .map_err(|(e, conn)| (DeviceError::SmartCard(e), Some(conn)))?;
+    let mut session = ManagementSession::new_fido(conn)
+        .map_err(|(e, conn)| (DeviceError::Management(e.erase()), Some(conn)))?;
     match session.read_device_info_unchecked() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             Ok((info, session.into_connection()))
         }
-        Err(e) => Err((DeviceError::SmartCard(e), Some(session.into_connection()))),
+        Err(e) => Err((
+            DeviceError::Management(e.erase()),
+            Some(session.into_connection()),
+        )),
     }
 }
 
@@ -1121,7 +1129,7 @@ const SCAN_APPLETS: &[(&[u8], Capability)] = &[
 ];
 
 /// Synthesize DeviceInfo for older YubiKeys (NEO) over CCID by probing applets.
-fn synthesize_info_ccid<C: SmartCardConnection>(
+fn synthesize_info_ccid<C: SmartCardConnection + Send + 'static>(
     conn: C,
     mut version: Version,
 ) -> Result<(DeviceInfo, C), DeviceError> {
@@ -1131,7 +1139,7 @@ fn synthesize_info_ccid<C: SmartCardConnection>(
 
     // Try to read serial and version from OTP application
     let mut serial = None;
-    let conn = match YubiOtpCcidSession::new(conn) {
+    let conn = match YubiOtpSession::new(conn) {
         Ok(mut otp_session) => {
             capabilities |= Capability::OTP;
             if version == Version(0, 0, 0) {

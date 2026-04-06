@@ -6,7 +6,7 @@ use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_
 fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
-        hsmauth::HsmAuthError::SmartCard(sc) => smartcard_err(sc),
+        hsmauth::HsmAuthError::Connection(sc) => smartcard_err(sc),
         hsmauth::HsmAuthError::InvalidPin(retries) => {
             Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
@@ -28,7 +28,7 @@ fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
             })
         }
         hsmauth::HsmAuthError::NotSupported(msg) => PyRuntimeError::new_err(msg),
-        hsmauth::HsmAuthError::InvalidParameter(msg) => PyValueError::new_err(msg),
+        hsmauth::HsmAuthError::InvalidData(msg) => PyValueError::new_err(msg),
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }

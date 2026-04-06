@@ -27,19 +27,18 @@
 
 //! FIDO connection trait.
 
-use crate::transport::ctaphid::CtapHidTransportError;
+use crate::transport::ctaphid::FidoError;
 
 /// Abstract FIDO connection — send CTAP HID commands.
-pub trait FidoConnection {
-    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError>;
+pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
+    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError>;
     fn call_with_keepalive(
         &self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapHidTransportError>;
+    ) -> Result<Vec<u8>, FidoError>;
     fn device_version(&self) -> (u8, u8, u8);
     fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability;
-    fn close(&mut self);
 }

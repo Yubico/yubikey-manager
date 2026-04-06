@@ -313,7 +313,7 @@ where
 {
     match f(session) {
         Ok(val) => Ok(val),
-        Err(yubikit::piv::PivError::SmartCard(yubikit::smartcard::SmartCardError::Apdu {
+        Err(yubikit::piv::PivError::Connection(yubikit::smartcard::SmartCardError::Apdu {
             sw,
             ..
         })) if sw == yubikit::smartcard::Sw::SecurityConditionNotSatisfied as u16 => {

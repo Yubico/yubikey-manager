@@ -8,7 +8,7 @@ use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
-        openpgp::OpenPgpError::SmartCard(sc) => smartcard_err(sc),
+        openpgp::OpenPgpError::Connection(sc) => smartcard_err(sc),
         openpgp::OpenPgpError::InvalidPin(retries) => {
             Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {

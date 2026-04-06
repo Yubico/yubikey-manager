@@ -69,6 +69,12 @@ impl PySmartCardConnection {
     }
 }
 
+impl yubikit::core::Connection for PySmartCardConnection {
+    type Error = SmartCardError;
+
+    fn close(&mut self) {}
+}
+
 impl SmartCardConnection for PySmartCardConnection {
     fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         Python::with_gil(|py| {
@@ -96,7 +102,8 @@ impl SmartCardConnection for PySmartCardConnection {
 /// Maps Rust error variants to the corresponding `yubikit` Python exceptions:
 /// - `SmartCardError::Apdu` → `yubikit.core.smartcard.ApduError(data, sw)`
 /// - `SmartCardError::NotSupported` → `yubikit.core.NotSupportedError`
-/// - `SmartCardError::BadResponse` → `yubikit.core.BadResponseError`
+/// - `SmartCardError::InvalidData` → `yubikit.core.BadResponseError`
+/// - `SmartCardError::ApplicationNotAvailable` → `yubikit.core.ApplicationNotAvailableError`
 /// - Others → `RuntimeError`
 pub fn smartcard_err(e: SmartCardError) -> PyErr {
     use pyo3::exceptions::*;
@@ -118,13 +125,13 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
             Ok(module) => match module.getattr("NotSupportedError") {
                 Ok(cls) => match cls.call1((msg.clone(),)) {
                     Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyValueError::new_err(msg.clone()),
+                    Err(_) => PyRuntimeError::new_err(msg.clone()),
                 },
-                Err(_) => PyValueError::new_err(msg.clone()),
+                Err(_) => PyRuntimeError::new_err(msg.clone()),
             },
-            Err(_) => PyValueError::new_err(msg.clone()),
+            Err(_) => PyRuntimeError::new_err(msg.clone()),
         },
-        SmartCardError::BadResponse(msg) => match py.import("yubikit.core") {
+        SmartCardError::InvalidData(msg) => match py.import("yubikit.core") {
             Ok(module) => match module.getattr("BadResponseError") {
                 Ok(cls) => match cls.call1((msg.clone(),)) {
                     Ok(exc) => PyErr::from_value(exc),
@@ -134,9 +141,6 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
             },
             Err(_) => PyRuntimeError::new_err(msg.clone()),
         },
-        SmartCardError::InvalidPin(retries) => {
-            PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
-        }
         SmartCardError::ApplicationNotAvailable => match py.import("yubikit.core") {
             Ok(module) => match module.getattr("ApplicationNotAvailableError") {
                 Ok(cls) => match cls.call0() {

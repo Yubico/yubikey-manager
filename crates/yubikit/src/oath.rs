@@ -127,23 +127,35 @@ impl OathType {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum OathError {
-    #[error("Invalid URI scheme")]
-    InvalidUriScheme,
-    #[error("Missing OATH type")]
-    MissingOathType,
-    #[error("Invalid OATH type: {0}")]
-    InvalidOathType(String),
-    #[error("Missing secret")]
-    MissingSecret,
-    #[error("Invalid hash algorithm: {0}")]
-    InvalidHashAlgorithm(String),
-    #[error("TLV error: {0}")]
-    Tlv(#[from] TlvError),
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
     #[error("Wrong response MAC")]
     WrongMac,
     #[error("Credential does not belong to this YubiKey")]
     WrongDevice,
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for OathError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::ApplicationNotAvailable => {
+                OathError::NotSupported("Application not available".into())
+            }
+            other => OathError::Connection(other),
+        }
+    }
+}
+
+impl From<TlvError> for OathError {
+    fn from(e: TlvError) -> Self {
+        OathError::InvalidData(e.to_string())
+    }
 }
 
 /// Format a credential ID from its components.
@@ -346,7 +358,7 @@ pub fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: 
 /// Parse a credential entry from LIST response.
 pub fn parse_list_entry(data: &[u8]) -> Result<(OathType, Vec<u8>), OathError> {
     let oath_type = OathType::from_u8(MASK_TYPE & data[0])
-        .ok_or_else(|| OathError::InvalidOathType(format!("0x{:02x}", data[0] & MASK_TYPE)))?;
+        .ok_or_else(|| OathError::InvalidData(format!("0x{:02x}", data[0] & MASK_TYPE)))?;
     Ok((oath_type, data[1..].to_vec()))
 }
 
@@ -362,7 +374,7 @@ pub fn parse_b32_key(key: &str) -> Result<Vec<u8>, OathError> {
         s
     };
     base32::decode(base32::Alphabet::Rfc4648 { padding: true }, &padded)
-        .ok_or(OathError::InvalidHashAlgorithm("Invalid base32 key".into()))
+        .ok_or(OathError::InvalidData("Invalid base32 key".into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -428,11 +440,11 @@ impl CredentialData {
 fn parse_select(response: &[u8]) -> Result<(Version, Vec<u8>, Option<Vec<u8>>), OathError> {
     let tlvs = parse_tlv_list(response)?;
     let version_data = tlv_get(&tlvs, TAG_VERSION)
-        .ok_or_else(|| OathError::InvalidOathType("Missing version in SELECT".into()))?;
+        .ok_or_else(|| OathError::InvalidData("Missing version in SELECT".into()))?;
     let version = Version::from_bytes(version_data);
 
     let salt = tlv_get(&tlvs, TAG_NAME)
-        .ok_or_else(|| OathError::InvalidOathType("Missing salt in SELECT".into()))?
+        .ok_or_else(|| OathError::InvalidData("Missing salt in SELECT".into()))?
         .to_vec();
 
     let challenge = tlv_get(&tlvs, TAG_CHALLENGE).map(|c| c.to_vec());
@@ -496,7 +508,7 @@ impl<C: SmartCardConnection> OathSession<C> {
             Ok(v) => v,
             Err(e) => {
                 return Err((
-                    SmartCardError::BadResponse(e.to_string()),
+                    SmartCardError::InvalidData(e.to_string()),
                     protocol.into_connection(),
                 ));
             }
@@ -553,11 +565,11 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Factory reset the OATH application.
-    pub fn reset(&mut self) -> Result<(), SmartCardError> {
+    pub fn reset(&mut self) -> Result<(), OathError> {
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
         let resp = self.protocol.select(Aid::OATH)?;
         let (_, salt, challenge) =
-            parse_select(&resp).map_err(|e| SmartCardError::BadResponse(e.to_string()))?;
+            parse_select(&resp).map_err(|e| OathError::InvalidData(e.to_string()))?;
         self.salt = salt;
         self.challenge = challenge;
         self.has_key = false;
@@ -571,11 +583,11 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Validate (unlock) the session with an access key.
-    pub fn validate(&mut self, key: &[u8]) -> Result<(), SmartCardError> {
+    pub fn validate(&mut self, key: &[u8]) -> Result<(), OathError> {
         let challenge = self
             .challenge
             .as_ref()
-            .ok_or_else(|| SmartCardError::BadResponse("Session is not locked".into()))?;
+            .ok_or_else(|| OathError::InvalidData("Session is not locked".into()))?;
 
         let host_challenge: [u8; 8] = rand_bytes();
         let data = build_validate_data(key, challenge, &host_challenge);
@@ -583,7 +595,7 @@ impl<C: SmartCardConnection> OathSession<C> {
 
         let resp_value = tlv_unpack(TAG_RESPONSE, &resp)?;
         if !hmac_verify(key, &host_challenge, &resp_value) {
-            return Err(SmartCardError::BadResponse(
+            return Err(OathError::InvalidData(
                 "Response from validation does not match verification".into(),
             ));
         }
@@ -593,7 +605,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Set an access key.
-    pub fn set_key(&mut self, key: &[u8]) -> Result<(), SmartCardError> {
+    pub fn set_key(&mut self, key: &[u8]) -> Result<(), OathError> {
         let challenge: [u8; 8] = rand_bytes();
         let data = build_set_key_data(key, &challenge);
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
@@ -602,7 +614,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Remove the access key.
-    pub fn unset_key(&mut self) -> Result<(), SmartCardError> {
+    pub fn unset_key(&mut self) -> Result<(), OathError> {
         let data = tlv_encode(TAG_KEY, &[]);
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
         self.has_key = false;
@@ -614,7 +626,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         &mut self,
         cred_data: &CredentialData,
         touch_required: bool,
-    ) -> Result<Credential, SmartCardError> {
+    ) -> Result<Credential, OathError> {
         let cred_id = cred_data.get_id();
         let data = build_put_data(
             &cred_id,
@@ -644,9 +656,9 @@ impl<C: SmartCardConnection> OathSession<C> {
         credential_id: &[u8],
         name: &str,
         issuer: Option<&str>,
-    ) -> Result<Vec<u8>, SmartCardError> {
+    ) -> Result<Vec<u8>, OathError> {
         if self.version < Version(5, 3, 1) {
-            return Err(SmartCardError::NotSupported(
+            return Err(OathError::NotSupported(
                 "Rename requires YubiKey 5.3.1 or later".into(),
             ));
         }
@@ -659,7 +671,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// List all credentials.
-    pub fn list_credentials(&mut self) -> Result<Vec<Credential>, SmartCardError> {
+    pub fn list_credentials(&mut self) -> Result<Vec<Credential>, OathError> {
         let resp = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
         let tlvs = parse_tlv_list(&resp)?;
 
@@ -669,7 +681,7 @@ impl<C: SmartCardConnection> OathSession<C> {
                 continue;
             }
             let oath_type = OathType::from_u8(MASK_TYPE & value[0])
-                .ok_or_else(|| SmartCardError::BadResponse("Invalid OATH type".into()))?;
+                .ok_or_else(|| OathError::InvalidData("Invalid OATH type".into()))?;
             let cred_id = &value[1..];
             let (issuer, name, period) = parse_cred_id(cred_id, oath_type);
             creds.push(Credential {
@@ -690,7 +702,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         &mut self,
         credential_id: &[u8],
         challenge: &[u8],
-    ) -> Result<Vec<u8>, SmartCardError> {
+    ) -> Result<Vec<u8>, OathError> {
         let mut data = tlv_encode(TAG_NAME, credential_id);
         data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
         let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, &data)?;
@@ -700,7 +712,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Delete a credential.
-    pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), SmartCardError> {
+    pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), OathError> {
         let data = tlv_encode(TAG_NAME, credential_id);
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, &data)?;
         Ok(())
@@ -710,7 +722,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     pub fn calculate_all(
         &mut self,
         timestamp: u64,
-    ) -> Result<Vec<(Credential, Option<Code>)>, SmartCardError> {
+    ) -> Result<Vec<(Credential, Option<Code>)>, OathError> {
         let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
         let mut data = tlv_encode(TAG_CHALLENGE, &challenge);
         let _ = &data; // suppress warning
@@ -730,7 +742,7 @@ impl<C: SmartCardConnection> OathSession<C> {
             let cred_id = value;
             let (resp_tag, resp_value) = iter
                 .next()
-                .ok_or_else(|| SmartCardError::BadResponse("Missing response TLV".into()))?;
+                .ok_or_else(|| OathError::InvalidData("Missing response TLV".into()))?;
 
             let oath_type = if resp_tag == TAG_HOTP {
                 OathType::Hotp
@@ -777,9 +789,9 @@ impl<C: SmartCardConnection> OathSession<C> {
         &mut self,
         credential: &Credential,
         timestamp: u64,
-    ) -> Result<Code, SmartCardError> {
+    ) -> Result<Code, OathError> {
         if credential.device_id != self.device_id {
-            return Err(SmartCardError::BadResponse(
+            return Err(OathError::InvalidData(
                 "Credential does not belong to this YubiKey".into(),
             ));
         }

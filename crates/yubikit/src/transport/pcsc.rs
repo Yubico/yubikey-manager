@@ -313,13 +313,21 @@ impl PcscSmartCardConnection {
     }
 }
 
+impl crate::core::Connection for PcscSmartCardConnection {
+    type Error = SmartCardError;
+
+    fn close(&mut self) {
+        let _ = self.disconnect();
+    }
+}
+
 impl SmartCardConnection for PcscSmartCardConnection {
     fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         use crate::logging::hex_encode;
         log_traffic!("SEND: {}", hex_encode(apdu));
         let resp = self.transmit(apdu).map_err(SmartCardError::from)?;
         if resp.len() < 2 {
-            return Err(SmartCardError::BadResponse(
+            return Err(SmartCardError::InvalidData(
                 "Response too short (no status word)".into(),
             ));
         }
@@ -331,10 +339,6 @@ impl SmartCardConnection for PcscSmartCardConnection {
 
     fn transport(&self) -> Transport {
         self.transport
-    }
-
-    fn close(&mut self) {
-        let _ = self.disconnect();
     }
 }
 

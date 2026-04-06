@@ -121,7 +121,7 @@ impl CtapHidCapability {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CtapHidTransportError {
+pub enum FidoError {
     #[error("HID error: {0}")]
     Hid(#[from] hidapi::HidError),
     #[error("Invalid device path")]
@@ -162,7 +162,7 @@ fn version_from_bcd(bcd: u16) -> Version {
 }
 
 /// List Yubico FIDO HID devices.
-pub fn list_fido_devices() -> Result<Vec<FidoDeviceInfo>, CtapHidTransportError> {
+pub fn list_fido_devices() -> Result<Vec<FidoDeviceInfo>, FidoError> {
     let api = HidApi::new()?;
     let mut devices = Vec::new();
     for dev in api.device_list() {
@@ -201,11 +201,11 @@ impl HidFidoConnection {
     /// Open a FIDO connection to the device at the given path.
     ///
     /// Performs CTAP HID INIT to allocate a channel.
-    pub fn open(info: &FidoDeviceInfo) -> Result<Self, CtapHidTransportError> {
+    pub fn open(info: &FidoDeviceInfo) -> Result<Self, FidoError> {
         log_traffic!("Opening FIDO connection to '{}'", info.path);
         let api = HidApi::new()?;
-        let cpath = std::ffi::CString::new(info.path.as_str())
-            .map_err(|_| CtapHidTransportError::InvalidPath)?;
+        let cpath =
+            std::ffi::CString::new(info.path.as_str()).map_err(|_| FidoError::InvalidPath)?;
         let device = api.open_path(&cpath)?;
 
         let mut conn = Self {
@@ -218,14 +218,14 @@ impl HidFidoConnection {
 
         // Perform INIT to allocate a channel
         let mut nonce = [0u8; 8];
-        getrandom::fill(&mut nonce).map_err(|_| CtapHidTransportError::InvalidResponse)?;
+        getrandom::fill(&mut nonce).map_err(|_| FidoError::InvalidResponse)?;
         let response = conn.call_raw(CtapHidCommand::Init as u8, &nonce)?;
 
         if response.len() < 17 {
-            return Err(CtapHidTransportError::InvalidResponse);
+            return Err(FidoError::InvalidResponse);
         }
         if response[..8] != nonce {
-            return Err(CtapHidTransportError::WrongNonce);
+            return Err(FidoError::WrongNonce);
         }
 
         let channel_id = u32::from_be_bytes([response[8], response[9], response[10], response[11]]);
@@ -262,7 +262,7 @@ impl HidFidoConnection {
     }
 
     /// Send a CTAP HID command and receive the response.
-    pub fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
+    pub fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
         self.call_with_keepalive(cmd, data, &mut |_| {}, None)
     }
 
@@ -277,7 +277,7 @@ impl HidFidoConnection {
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapHidTransportError> {
+    ) -> Result<Vec<u8>, FidoError> {
         self.send_request(cmd, data)?;
         self.recv_response(cmd, on_keepalive, cancel)
     }
@@ -290,18 +290,16 @@ impl HidFidoConnection {
         self.device.take();
     }
 
-    fn device(&self) -> Result<&hidapi::HidDevice, CtapHidTransportError> {
-        self.device
-            .as_ref()
-            .ok_or(CtapHidTransportError::ConnectionClosed)
+    fn device(&self) -> Result<&hidapi::HidDevice, FidoError> {
+        self.device.as_ref().ok_or(FidoError::ConnectionClosed)
     }
 
-    fn call_raw(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
+    fn call_raw(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
         self.send_request(cmd, data)?;
         self.recv_response(cmd, &mut |_| {}, None)
     }
 
-    fn send_request(&self, cmd: u8, data: &[u8]) -> Result<(), CtapHidTransportError> {
+    fn send_request(&self, cmd: u8, data: &[u8]) -> Result<(), FidoError> {
         let dev = self.device()?;
         let mut remaining = data;
         let mut seq: u8 = 0;
@@ -346,7 +344,7 @@ impl HidFidoConnection {
         expected_cmd: u8,
         on_keepalive: &mut dyn FnMut(u8),
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapHidTransportError> {
+    ) -> Result<Vec<u8>, FidoError> {
         let dev = self.device()?;
         let mut response = Vec::new();
         let mut r_len: usize = 0;
@@ -368,13 +366,13 @@ impl HidFidoConnection {
                 Err(e) => return Err(e.into()),
             };
             if n == 0 {
-                return Err(CtapHidTransportError::Timeout);
+                return Err(FidoError::Timeout);
             }
             let recv = &buf[..n];
             log_traffic!("RECV: {}", crate::logging::hex_encode(recv));
 
             if recv.len() < 4 {
-                return Err(CtapHidTransportError::InvalidResponse);
+                return Err(FidoError::InvalidResponse);
             }
 
             let r_channel = u32::from_be_bytes([recv[0], recv[1], recv[2], recv[3]]);
@@ -388,7 +386,7 @@ impl HidFidoConnection {
             if first {
                 // Initialization packet
                 if payload.len() < 3 {
-                    return Err(CtapHidTransportError::InvalidResponse);
+                    return Err(FidoError::InvalidResponse);
                 }
                 let r_cmd = payload[0];
                 r_len = u16::from_be_bytes([payload[1], payload[2]]) as usize;
@@ -412,9 +410,9 @@ impl HidFidoConnection {
                 } else if r_cmd == TYPE_INIT | CtapHidCommand::Error as u8 {
                     let err_code = if !data.is_empty() { data[0] } else { 0x7F };
                     let err = CtapHidError::from_byte(err_code);
-                    return Err(CtapHidTransportError::CtapHidError(err));
+                    return Err(FidoError::CtapHidError(err));
                 } else if r_cmd != TYPE_INIT | expected_cmd {
-                    return Err(CtapHidTransportError::InvalidResponse);
+                    return Err(FidoError::InvalidResponse);
                 }
 
                 response.extend_from_slice(data);
@@ -422,11 +420,11 @@ impl HidFidoConnection {
             } else {
                 // Continuation packet
                 if payload.is_empty() {
-                    return Err(CtapHidTransportError::InvalidResponse);
+                    return Err(FidoError::InvalidResponse);
                 }
                 let r_seq = payload[0] & 0x7F;
                 if r_seq != seq {
-                    return Err(CtapHidTransportError::WrongSequence);
+                    return Err(FidoError::WrongSequence);
                 }
                 seq += 1;
                 response.extend_from_slice(&payload[1..]);
@@ -442,8 +440,16 @@ impl HidFidoConnection {
     }
 }
 
+impl crate::core::Connection for HidFidoConnection {
+    type Error = FidoError;
+
+    fn close(&mut self) {
+        self.close()
+    }
+}
+
 impl crate::fido::FidoConnection for HidFidoConnection {
-    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, CtapHidTransportError> {
+    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
         self.call(cmd, data)
     }
 
@@ -453,7 +459,7 @@ impl crate::fido::FidoConnection for HidFidoConnection {
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapHidTransportError> {
+    ) -> Result<Vec<u8>, FidoError> {
         self.call_with_keepalive(cmd, data, on_keepalive, cancel)
     }
 
@@ -463,10 +469,6 @@ impl crate::fido::FidoConnection for HidFidoConnection {
 
     fn capabilities(&self) -> CtapHidCapability {
         self.capabilities()
-    }
-
-    fn close(&mut self) {
-        self.close()
     }
 }
 

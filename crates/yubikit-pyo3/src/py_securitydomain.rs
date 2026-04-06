@@ -1,9 +1,32 @@
 use pyo3::prelude::*;
 use yubikit::securitydomain::{
-    Curve, KeyRef, SecurityDomainSession as RustSecurityDomainSession, StaticKeys,
+    Curve, KeyRef, SecurityDomainError, SecurityDomainSession as RustSecurityDomainSession,
+    StaticKeys,
 };
 
 use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+
+fn sd_err(e: SecurityDomainError) -> PyErr {
+    use pyo3::exceptions::*;
+    match e {
+        SecurityDomainError::Connection(sc) => smartcard_err(sc),
+        SecurityDomainError::NotSupported(msg) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("NotSupportedError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg),
+                },
+                Err(_) => PyRuntimeError::new_err(msg),
+            })
+        }
+        SecurityDomainError::InvalidData(msg) => PyValueError::new_err(msg),
+        SecurityDomainError::InvalidConfig(msg) => PyValueError::new_err(msg),
+        other => PyRuntimeError::new_err(other.to_string()),
+    }
+}
 
 fn parse_curve(v: u8) -> PyResult<Curve> {
     Curve::from_u8(v).ok_or_else(|| {
@@ -74,17 +97,12 @@ impl SecurityDomainSession {
     }
 
     fn get_data(&mut self, tag: u32, data: &[u8]) -> PyResult<Vec<u8>> {
-        self.session_mut()?
-            .get_data(tag, data)
-            .map_err(smartcard_err)
+        self.session_mut()?.get_data(tag, data).map_err(sd_err)
     }
 
     /// Returns dict mapping (kid, kvn) tuples to dict of {component_id: version}.
     fn get_key_information(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self
-            .session_mut()?
-            .get_key_information()
-            .map_err(smartcard_err)?;
+        let info = self.session_mut()?.get_key_information().map_err(sd_err)?;
         let dict = pyo3::types::PyDict::new(py);
         for (key_ref, components) in &info {
             let inner_dict = pyo3::types::PyDict::new(py);
@@ -99,7 +117,7 @@ impl SecurityDomainSession {
     fn get_card_recognition_data(&mut self) -> PyResult<Vec<u8>> {
         self.session_mut()?
             .get_card_recognition_data()
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     /// Returns dict mapping (kid, kvn) tuples to identifier bytes.
@@ -112,7 +130,7 @@ impl SecurityDomainSession {
         let ids = self
             .session_mut()?
             .get_supported_ca_identifiers(kloc, klcc)
-            .map_err(smartcard_err)?;
+            .map_err(sd_err)?;
         let dict = pyo3::types::PyDict::new(py);
         for (key_ref, data) in &ids {
             dict.set_item((key_ref.kid, key_ref.kvn), data.clone())?;
@@ -125,15 +143,15 @@ impl SecurityDomainSession {
         let key = KeyRef::new(kid, kvn);
         self.session_mut()?
             .get_certificate_bundle(key)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     fn reset(&mut self) -> PyResult<()> {
-        self.session_mut()?.reset().map_err(smartcard_err)
+        self.session_mut()?.reset().map_err(sd_err)
     }
 
     fn store_data(&mut self, data: &[u8]) -> PyResult<()> {
-        self.session_mut()?.store_data(data).map_err(smartcard_err)
+        self.session_mut()?.store_data(data).map_err(sd_err)
     }
 
     /// Store a certificate bundle. `certificates` is a list of DER-encoded certs.
@@ -147,27 +165,27 @@ impl SecurityDomainSession {
         let cert_refs: Vec<&[u8]> = certificates.iter().map(|c| c.as_slice()).collect();
         self.session_mut()?
             .store_certificate_bundle(key, &cert_refs)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     fn store_allowlist(&mut self, kid: u8, kvn: u8, serials: Vec<Vec<u8>>) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
         self.session_mut()?
             .store_allowlist(key, &serials)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     fn store_ca_issuer(&mut self, kid: u8, kvn: u8, ski: &[u8]) -> PyResult<()> {
         let key = KeyRef::new(kid, kvn);
         self.session_mut()?
             .store_ca_issuer(key, ski)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     fn delete_key(&mut self, kid: u8, kvn: u8, delete_last: bool) -> PyResult<()> {
         self.session_mut()?
             .delete_key(kid, kvn, delete_last)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     /// Generate an EC key pair. Returns the public key bytes.
@@ -182,7 +200,7 @@ impl SecurityDomainSession {
         let c = parse_curve(curve)?;
         self.session_mut()?
             .generate_ec_key(key, c, replace_kvn)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     /// Import SCP03 static keys.
@@ -212,7 +230,7 @@ impl SecurityDomainSession {
         let static_keys = StaticKeys::new(key_enc_arr, key_mac_arr, key_dek_arr);
         self.session_mut()?
             .put_key_static(key, &static_keys, replace_kvn)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     /// Import an EC private key. `private_key` is the raw scalar bytes.
@@ -228,7 +246,7 @@ impl SecurityDomainSession {
         let c = parse_curve(curve)?;
         self.session_mut()?
             .put_key_ec_private(key, private_key, c, replace_kvn)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 
     /// Import an EC public key. `public_key` is the SEC1 uncompressed point.
@@ -244,6 +262,6 @@ impl SecurityDomainSession {
         let c = parse_curve(curve)?;
         self.session_mut()?
             .put_key_ec_public(key, public_key, c, replace_kvn)
-            .map_err(smartcard_err)
+            .map_err(sd_err)
     }
 }

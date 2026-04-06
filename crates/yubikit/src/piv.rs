@@ -58,19 +58,35 @@ use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode, tlv_parse, tlv_unpack};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PivError {
-    #[error("SmartCard error: {0}")]
-    SmartCard(#[from] SmartCardError),
-    #[error("TLV error: {0}")]
-    Tlv(#[from] crate::tlv::TlvError),
-    #[error("Bad response: {0}")]
-    BadResponse(String),
     #[error("Not supported: {0}")]
     NotSupported(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
-    #[error("Invalid value: {0}")]
-    InvalidValue(String),
+    #[error("PIN blocked")]
+    PinBlocked,
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for PivError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::ApplicationNotAvailable => {
+                PivError::NotSupported("Application not available".into())
+            }
+            other => PivError::Connection(other),
+        }
+    }
+}
+
+impl From<crate::tlv::TlvError> for PivError {
+    fn from(e: crate::tlv::TlvError) -> Self {
+        PivError::InvalidData(e.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -156,13 +172,13 @@ impl KeyType {
     fn detect_algorithm_from_der(der: &[u8], is_private: bool) -> Result<Self, PivError> {
         // Parse outer SEQUENCE
         let (_, seq_off, seq_len, _) =
-            tlv_parse(der, 0).map_err(|_| PivError::InvalidValue("Invalid DER".into()))?;
+            tlv_parse(der, 0).map_err(|_| PivError::InvalidData("Invalid DER".into()))?;
         let seq_data = &der[seq_off..seq_off + seq_len];
 
         // For PKCS#8 PrivateKeyInfo, skip the version INTEGER
         let algo_start = if is_private {
             let (_, _, _, ver_end) = tlv_parse(seq_data, 0)
-                .map_err(|_| PivError::InvalidValue("Invalid version INTEGER".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid version INTEGER".into()))?;
             ver_end
         } else {
             0
@@ -170,12 +186,12 @@ impl KeyType {
 
         // Parse AlgorithmIdentifier SEQUENCE
         let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, algo_start)
-            .map_err(|_| PivError::InvalidValue("Invalid AlgorithmIdentifier".into()))?;
+            .map_err(|_| PivError::InvalidData("Invalid AlgorithmIdentifier".into()))?;
         let algo_data = &seq_data[algo_off..algo_off + algo_len];
 
         // Parse OID
         let (_, oid_off, oid_len, _) =
-            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidValue("Invalid OID".into()))?;
+            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidData("Invalid OID".into()))?;
         let oid = &algo_data[oid_off..oid_off + oid_len];
 
         // RSA OID: 1.2.840.113549.1.1.1
@@ -191,7 +207,7 @@ impl KeyType {
             // For public keys: BIT STRING containing SEQUENCE { modulus, exponent }
             // For private keys: OCTET STRING containing SEQUENCE { version, modulus, ... }
             let (tag, data_off, data_len, _) = tlv_parse(seq_data, algo_end)
-                .map_err(|_| PivError::InvalidValue("Invalid key data".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid key data".into()))?;
             let key_data = if tag == 0x03 {
                 // BIT STRING: skip unused-bits prefix byte
                 &seq_data[data_off + 1..data_off + data_len]
@@ -199,25 +215,25 @@ impl KeyType {
                 // OCTET STRING: content is RSAPrivateKey directly
                 &seq_data[data_off..data_off + data_len]
             } else {
-                return Err(PivError::InvalidValue(
+                return Err(PivError::InvalidData(
                     "Expected BIT STRING or OCTET STRING".into(),
                 ));
             };
             // Parse inner SEQUENCE
             let (_, inner_off, inner_len, _) = tlv_parse(key_data, 0)
-                .map_err(|_| PivError::InvalidValue("Invalid RSA inner SEQUENCE".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid RSA inner SEQUENCE".into()))?;
             let inner = &key_data[inner_off..inner_off + inner_len];
             // For private keys, skip version INTEGER first
             let mod_start = if is_private {
                 let (_, _, _, ver_end) = tlv_parse(inner, 0)
-                    .map_err(|_| PivError::InvalidValue("Invalid RSA version".into()))?;
+                    .map_err(|_| PivError::InvalidData("Invalid RSA version".into()))?;
                 ver_end
             } else {
                 0
             };
             // Parse modulus INTEGER
             let (_, mod_off, mod_len, _) = tlv_parse(inner, mod_start)
-                .map_err(|_| PivError::InvalidValue("Invalid RSA modulus".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid RSA modulus".into()))?;
             let modulus = &inner[mod_off..mod_off + mod_len];
             // Strip leading zero if present
             let mod_bytes = if !modulus.is_empty() && modulus[0] == 0 {
@@ -231,14 +247,14 @@ impl KeyType {
                 2048 => Ok(Self::Rsa2048),
                 3072 => Ok(Self::Rsa3072),
                 4096 => Ok(Self::Rsa4096),
-                _ => Err(PivError::InvalidValue(format!(
+                _ => Err(PivError::InvalidData(format!(
                     "Unsupported RSA key size: {bit_len}"
                 ))),
             }
         } else if oid == EC_OID {
             // Parse curve OID parameter
             let (_, curve_off, curve_len, _) = tlv_parse(algo_data, oid_off + oid_len)
-                .map_err(|_| PivError::InvalidValue("Invalid EC curve OID".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid EC curve OID".into()))?;
             let curve_oid = &algo_data[curve_off..curve_off + curve_len];
             // P-256: 1.2.840.10045.3.1.7
             const P256_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
@@ -249,14 +265,14 @@ impl KeyType {
             } else if curve_oid == P384_OID {
                 Ok(Self::EccP384)
             } else {
-                Err(PivError::InvalidValue("Unsupported EC curve".into()))
+                Err(PivError::InvalidData("Unsupported EC curve".into()))
             }
         } else if oid == ED25519_OID {
             Ok(Self::Ed25519)
         } else if oid == X25519_OID {
             Ok(Self::X25519)
         } else {
-            Err(PivError::InvalidValue("Unknown key algorithm OID".into()))
+            Err(PivError::InvalidData("Unknown key algorithm OID".into()))
         }
     }
 
@@ -268,21 +284,21 @@ impl KeyType {
     pub fn extract_private_key_from_pkcs8(pkcs8_der: &[u8]) -> Result<Vec<u8>, PivError> {
         // Parse outer SEQUENCE
         let (_, seq_off, seq_len, _) =
-            tlv_parse(pkcs8_der, 0).map_err(|_| PivError::InvalidValue("Invalid DER".into()))?;
+            tlv_parse(pkcs8_der, 0).map_err(|_| PivError::InvalidData("Invalid DER".into()))?;
         let seq_data = &pkcs8_der[seq_off..seq_off + seq_len];
 
         // Skip version INTEGER
         let (_, _, _, ver_end) =
-            tlv_parse(seq_data, 0).map_err(|_| PivError::InvalidValue("Invalid version".into()))?;
+            tlv_parse(seq_data, 0).map_err(|_| PivError::InvalidData("Invalid version".into()))?;
 
         // Parse AlgorithmIdentifier SEQUENCE
         let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, ver_end)
-            .map_err(|_| PivError::InvalidValue("Invalid AlgorithmIdentifier".into()))?;
+            .map_err(|_| PivError::InvalidData("Invalid AlgorithmIdentifier".into()))?;
         let algo_data = &seq_data[algo_off..algo_off + algo_len];
 
         // Parse OID
         let (_, oid_off, oid_len, _) =
-            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidValue("Invalid OID".into()))?;
+            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidData("Invalid OID".into()))?;
         let oid = &algo_data[oid_off..oid_off + oid_len];
 
         const RSA_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
@@ -290,7 +306,7 @@ impl KeyType {
 
         // Parse OCTET STRING containing the private key
         let (_, oct_off, oct_len, _) = tlv_parse(seq_data, algo_end)
-            .map_err(|_| PivError::InvalidValue("Invalid OCTET STRING".into()))?;
+            .map_err(|_| PivError::InvalidData("Invalid OCTET STRING".into()))?;
         let private_key_data = &seq_data[oct_off..oct_off + oct_len];
 
         if oid == RSA_OID {
@@ -300,19 +316,19 @@ impl KeyType {
             // EC: OCTET STRING contains ECPrivateKey SEQUENCE { version, privateKey, ... }
             // Parse SEQUENCE
             let (_, inner_off, inner_len, _) = tlv_parse(private_key_data, 0)
-                .map_err(|_| PivError::InvalidValue("Invalid ECPrivateKey".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid ECPrivateKey".into()))?;
             let inner = &private_key_data[inner_off..inner_off + inner_len];
             // Skip version INTEGER
             let (_, _, _, ver_end) = tlv_parse(inner, 0)
-                .map_err(|_| PivError::InvalidValue("Invalid EC version".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid EC version".into()))?;
             // Parse privateKey OCTET STRING
             let (_, key_off, key_len, _) = tlv_parse(inner, ver_end)
-                .map_err(|_| PivError::InvalidValue("Invalid EC private key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid EC private key".into()))?;
             Ok(inner[key_off..key_off + key_len].to_vec())
         } else {
             // Ed25519/X25519: OCTET STRING contains another OCTET STRING wrapping the 32-byte key
             let (_, key_off, key_len, _) = tlv_parse(private_key_data, 0)
-                .map_err(|_| PivError::InvalidValue("Invalid key OCTET STRING".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid key OCTET STRING".into()))?;
             Ok(private_key_data[key_off..key_off + key_len].to_vec())
         }
     }
@@ -693,7 +709,7 @@ pub const PUK_P2: u8 = 0x81;
 fn pin_bytes(pin: &str) -> Result<Vec<u8>, PivError> {
     let bytes = pin.as_bytes();
     if bytes.len() > PIN_LEN {
-        return Err(PivError::InvalidValue(
+        return Err(PivError::InvalidData(
             "PIN/PUK must be no longer than 8 bytes".into(),
         ));
     }
@@ -763,28 +779,28 @@ fn mgmt_key_encrypt(
     match key_type {
         ManagementKeyType::Tdes => {
             let cipher = TdesEde3::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid TDES key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid TDES key".into()))?;
             let mut block = cipher::Block::<TdesEde3>::clone_from_slice(data);
             cipher.encrypt_block(&mut block);
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes128 => {
             let cipher = Aes128::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid AES-128 key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid AES-128 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
             cipher.encrypt_block(&mut block);
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes192 => {
             let cipher = Aes192::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid AES-192 key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid AES-192 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
             cipher.encrypt_block(&mut block);
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes256 => {
             let cipher = Aes256::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid AES-256 key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid AES-256 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
             cipher.encrypt_block(&mut block);
             Ok(block.to_vec())
@@ -801,28 +817,28 @@ fn mgmt_key_decrypt(
     match key_type {
         ManagementKeyType::Tdes => {
             let cipher = TdesEde3::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid TDES key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid TDES key".into()))?;
             let mut block = cipher::Block::<TdesEde3>::clone_from_slice(data);
             cipher.decrypt_block(&mut block);
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes128 => {
             let cipher = Aes128::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid AES-128 key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid AES-128 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
             cipher.decrypt_block(&mut block);
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes192 => {
             let cipher = Aes192::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid AES-192 key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid AES-192 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
             cipher.decrypt_block(&mut block);
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes256 => {
             let cipher = Aes256::new_from_slice(key)
-                .map_err(|_| PivError::InvalidValue("Invalid AES-256 key".into()))?;
+                .map_err(|_| PivError::InvalidData("Invalid AES-256 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
             cipher.decrypt_block(&mut block);
             Ok(block.to_vec())
@@ -840,7 +856,7 @@ fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
                 let mut decompressed = Vec::new();
                 decoder
                     .read_to_end(&mut decompressed)
-                    .map_err(|_| PivError::BadResponse("Failed to decompress gzip".into()))?;
+                    .map_err(|_| PivError::InvalidData("Failed to decompress gzip".into()))?;
                 return Ok(decompressed);
             }
             (0x01, 0x00) => {
@@ -851,9 +867,9 @@ fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
                     let mut decompressed = Vec::new();
                     decoder
                         .read_to_end(&mut decompressed)
-                        .map_err(|_| PivError::BadResponse("Failed to decompress zlib".into()))?;
+                        .map_err(|_| PivError::InvalidData("Failed to decompress zlib".into()))?;
                     if decompressed.len() != expected_len {
-                        return Err(PivError::BadResponse(
+                        return Err(PivError::InvalidData(
                             "Decompressed length does not match expected length".into(),
                         ));
                     }
@@ -863,7 +879,7 @@ fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
             _ => {}
         }
     }
-    Err(PivError::BadResponse(
+    Err(PivError::InvalidData(
         "Failed to decompress certificate".into(),
     ))
 }
@@ -983,8 +999,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         session.mgmt_key_type = match session.get_management_key_metadata() {
             Ok(meta) => meta.key_type,
-            Err(PivError::NotSupported(_))
-            | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => ManagementKeyType::Tdes,
+            Err(PivError::NotSupported(_)) => ManagementKeyType::Tdes,
             Err(e) => return Err((e, session.protocol.into_connection())),
         };
 
@@ -1022,7 +1037,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         // Check biometrics
         match self.get_bio_metadata() {
             Ok(bio) if bio.configured => {
-                return Err(PivError::InvalidValue(
+                return Err(PivError::InvalidData(
                     "Cannot perform PIV reset when biometrics are configured".into(),
                 ));
             }
@@ -1102,7 +1117,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         let challenge_len = key_type.challenge_len();
         let mut challenge = vec![0u8; challenge_len];
         getrandom::fill(&mut challenge)
-            .map_err(|_| PivError::InvalidValue("Failed to generate random bytes".into()))?;
+            .map_err(|_| PivError::InvalidData("Failed to generate random bytes".into()))?;
 
         let mut auth_data = tlv_encode(TAG_AUTH_WITNESS, &decrypted);
         auth_data.extend_from_slice(&tlv_encode(TAG_AUTH_CHALLENGE, &challenge));
@@ -1124,7 +1139,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         if expected.ct_eq(&encrypted).into() {
             Ok(())
         } else {
-            Err(PivError::BadResponse("Device response is incorrect".into()))
+            Err(PivError::InvalidData("Device response is incorrect".into()))
         }
     }
 
@@ -1142,7 +1157,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             require_version(self.version, Version(5, 4, 0), "AES management key")?;
         }
         if management_key.len() != key_type.key_len() {
-            return Err(PivError::InvalidValue(format!(
+            return Err(PivError::InvalidData(format!(
                 "Management key must be {} bytes",
                 key_type.key_len()
             )));
@@ -1176,7 +1191,7 @@ impl<C: SmartCardConnection> PivSession<C> {
                     self.current_pin_retries = retries;
                     return Err(PivError::InvalidPin(retries));
                 }
-                Err(PivError::SmartCard(e))
+                Err(PivError::Connection(e))
             }
         }
     }
@@ -1187,7 +1202,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         check_only: bool,
     ) -> Result<Option<Vec<u8>>, PivError> {
         if temporary_pin && check_only {
-            return Err(PivError::InvalidValue(
+            return Err(PivError::InvalidData(
                 "Cannot request temporary PIN when doing check-only verification".into(),
             ));
         }
@@ -1224,14 +1239,14 @@ impl<C: SmartCardConnection> PivSession<C> {
                 {
                     return Err(PivError::InvalidPin(retries));
                 }
-                Err(PivError::SmartCard(e))
+                Err(PivError::Connection(e))
             }
         }
     }
 
     pub fn verify_temporary_pin(&mut self, pin: &[u8]) -> Result<(), PivError> {
         if pin.len() != TEMPORARY_PIN_LEN {
-            return Err(PivError::InvalidValue(format!(
+            return Err(PivError::InvalidData(format!(
                 "Temporary PIN must be exactly {TEMPORARY_PIN_LEN} bytes"
             )));
         }
@@ -1254,7 +1269,7 @@ impl<C: SmartCardConnection> PivSession<C> {
                 {
                     return Err(PivError::InvalidPin(retries));
                 }
-                Err(PivError::SmartCard(e))
+                Err(PivError::Connection(e))
             }
         }
     }
@@ -1262,8 +1277,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
         match self.get_pin_metadata() {
             Ok(meta) => return Ok(meta.attempts_remaining),
-            Err(PivError::NotSupported(_))
-            | Err(PivError::SmartCard(SmartCardError::NotSupported(_))) => {}
+            Err(PivError::NotSupported(_)) => {}
             Err(e) => return Err(e),
         }
 
@@ -1278,13 +1292,13 @@ impl<C: SmartCardConnection> PivSession<C> {
                     self.current_pin_retries = retries;
                     Ok(retries)
                 } else {
-                    Err(PivError::SmartCard(SmartCardError::Apdu {
+                    Err(PivError::Connection(SmartCardError::Apdu {
                         data: vec![],
                         sw,
                     }))
                 }
             }
-            Err(e) => Err(PivError::SmartCard(e)),
+            Err(e) => Err(PivError::Connection(e)),
         }
     }
 
@@ -1294,7 +1308,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     pub fn change_puk(&mut self, old_puk: &str, new_puk: &str) -> Result<(), PivError> {
         match self.change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk) {
-            Err(PivError::SmartCard(SmartCardError::Apdu { sw, .. }))
+            Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
                 if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
             {
                 Err(PivError::NotSupported(
@@ -1307,7 +1321,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     pub fn unblock_pin(&mut self, puk: &str, new_pin: &str) -> Result<(), PivError> {
         match self.change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin) {
-            Err(PivError::SmartCard(SmartCardError::Apdu { sw, .. }))
+            Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
                 if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
             {
                 Err(PivError::NotSupported(
@@ -1335,7 +1349,7 @@ impl<C: SmartCardConnection> PivSession<C> {
                     "Setting PIN attempts not supported on this YubiKey".into(),
                 ))
             }
-            Err(e) => Err(PivError::SmartCard(e)),
+            Err(e) => Err(PivError::Connection(e)),
         }
     }
 
@@ -1367,7 +1381,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             .and_then(|v| v.first().copied())
             .unwrap_or(0x03);
         let key_type = ManagementKeyType::from_u8(algo_byte).ok_or_else(|| {
-            PivError::BadResponse(format!("Unknown management key type: 0x{algo_byte:02X}"))
+            PivError::InvalidData(format!("Unknown management key type: 0x{algo_byte:02X}"))
         })?;
 
         let default_value = data
@@ -1377,13 +1391,13 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         let policy = data
             .get(&TAG_METADATA_POLICY)
-            .ok_or_else(|| PivError::BadResponse("Missing policy in metadata".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Missing policy in metadata".into()))?;
         let touch_policy = TouchPolicy::from_u8(
             *policy
                 .get(INDEX_TOUCH_POLICY)
-                .ok_or_else(|| PivError::BadResponse("Missing touch policy".into()))?,
+                .ok_or_else(|| PivError::InvalidData("Missing touch policy".into()))?,
         )
-        .ok_or_else(|| PivError::BadResponse("Invalid touch policy".into()))?;
+        .ok_or_else(|| PivError::InvalidData("Invalid touch policy".into()))?;
 
         Ok(ManagementKeyMetadata {
             key_type,
@@ -1402,27 +1416,27 @@ impl<C: SmartCardConnection> PivSession<C> {
         let algo_byte = data
             .get(&TAG_METADATA_ALGO)
             .and_then(|v| v.first().copied())
-            .ok_or_else(|| PivError::BadResponse("Missing algorithm in metadata".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Missing algorithm in metadata".into()))?;
         let key_type = KeyType::from_u8(algo_byte)
-            .ok_or_else(|| PivError::BadResponse(format!("Unknown key type: 0x{algo_byte:02X}")))?;
+            .ok_or_else(|| PivError::InvalidData(format!("Unknown key type: 0x{algo_byte:02X}")))?;
 
         let policy = data
             .get(&TAG_METADATA_POLICY)
-            .ok_or_else(|| PivError::BadResponse("Missing policy in metadata".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Missing policy in metadata".into()))?;
         let pin_policy = PinPolicy::from_u8(policy[INDEX_PIN_POLICY])
-            .ok_or_else(|| PivError::BadResponse("Invalid pin policy".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Invalid pin policy".into()))?;
         let touch_policy = TouchPolicy::from_u8(policy[INDEX_TOUCH_POLICY])
-            .ok_or_else(|| PivError::BadResponse("Invalid touch policy".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Invalid touch policy".into()))?;
 
         let origin = data
             .get(&TAG_METADATA_ORIGIN)
             .and_then(|v| v.first().copied())
-            .ok_or_else(|| PivError::BadResponse("Missing origin in metadata".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Missing origin in metadata".into()))?;
 
         let public_key_der = data
             .get(&TAG_METADATA_PUBLIC_KEY)
             .cloned()
-            .ok_or_else(|| PivError::BadResponse("Missing public key in metadata".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Missing public key in metadata".into()))?;
 
         Ok(SlotMetadata {
             key_type,
@@ -1449,7 +1463,7 @@ impl<C: SmartCardConnection> PivSession<C> {
                     "Biometric verification not supported by this YubiKey".into(),
                 ));
             }
-            Err(e) => return Err(PivError::SmartCard(e)),
+            Err(e) => return Err(PivError::Connection(e)),
         };
 
         let data = parse_tlv_dict(&response)?;
@@ -1463,7 +1477,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         let attempts_remaining = data
             .get(&TAG_METADATA_RETRIES)
             .and_then(|v| v.first().copied())
-            .ok_or_else(|| PivError::BadResponse("Missing retries in bio metadata".into()))?
+            .ok_or_else(|| PivError::InvalidData("Missing retries in bio metadata".into()))?
             as u32;
 
         let temporary_pin = data
@@ -1502,9 +1516,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             3072 => KeyType::Rsa3072,
             4096 => KeyType::Rsa4096,
             _ => {
-                return Err(PivError::InvalidValue(
-                    "Invalid length of ciphertext".into(),
-                ));
+                return Err(PivError::InvalidData("Invalid length of ciphertext".into()));
             }
         };
         self.use_private_key(slot, key_type, cipher_text, false)
@@ -1519,7 +1531,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         peer_public_key: &[u8],
     ) -> Result<Vec<u8>, PivError> {
         if key_type.algorithm() != Algorithm::Ec {
-            return Err(PivError::InvalidValue("Unsupported key type".into()));
+            return Err(PivError::InvalidData("Unsupported key type".into()));
         }
         self.use_private_key(slot, key_type, peer_public_key, true)
     }
@@ -1550,7 +1562,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             .send_apdu(0, INS_GET_DATA, 0x3F, 0xFF, &request)?;
 
         tlv_unpack(expected, &response)
-            .map_err(|_| PivError::BadResponse("Malformed object data".into()))
+            .map_err(|_| PivError::InvalidData("Malformed object data".into()))
     }
 
     pub fn put_object_raw(&mut self, object_id: u32, data: Option<&[u8]>) -> Result<(), PivError> {
@@ -1571,11 +1583,11 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn get_certificate(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
         let obj_data = self.get_object(ObjectId::from_slot(slot))?;
         let entries = parse_tlv_dict(&obj_data)
-            .map_err(|_| PivError::BadResponse("Malformed certificate data object".into()))?;
+            .map_err(|_| PivError::InvalidData("Malformed certificate data object".into()))?;
 
         let cert_data = entries
             .get(&TAG_CERTIFICATE)
-            .ok_or_else(|| PivError::BadResponse("Malformed certificate data object".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Malformed certificate data object".into()))?;
 
         let cert_info = entries
             .get(&TAG_CERT_INFO)
@@ -1604,10 +1616,10 @@ impl<C: SmartCardConnection> PivSession<C> {
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder
                 .write_all(cert_der)
-                .map_err(|_| PivError::InvalidValue("Failed to compress certificate".into()))?;
+                .map_err(|_| PivError::InvalidData("Failed to compress certificate".into()))?;
             let compressed = encoder
                 .finish()
-                .map_err(|_| PivError::InvalidValue("Failed to finish compression".into()))?;
+                .map_err(|_| PivError::InvalidData("Failed to finish compression".into()))?;
             (1u8, compressed)
         } else {
             (0u8, cert_der.to_vec())
@@ -1790,7 +1802,7 @@ impl<C: SmartCardConnection> PivSession<C> {
                     }
                     return Err(PivError::InvalidPin(retries));
                 }
-                Err(PivError::SmartCard(e))
+                Err(PivError::Connection(e))
             }
         }
     }
@@ -1807,7 +1819,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         let attempts = data
             .get(&TAG_METADATA_RETRIES)
-            .ok_or_else(|| PivError::BadResponse("Missing retries in metadata".into()))?;
+            .ok_or_else(|| PivError::InvalidData("Missing retries in metadata".into()))?;
 
         Ok(PinMetadata {
             default_value,
@@ -1844,12 +1856,12 @@ impl<C: SmartCardConnection> PivSession<C> {
             Err(SmartCardError::Apdu { sw, .. })
                 if Sw::from_u16(sw) == Some(Sw::IncorrectParameters) =>
             {
-                Err(PivError::SmartCard(SmartCardError::Apdu {
+                Err(PivError::Connection(SmartCardError::Apdu {
                     data: vec![],
                     sw,
                 }))
             }
-            Err(e) => Err(PivError::SmartCard(e)),
+            Err(e) => Err(PivError::Connection(e)),
         }
     }
 }
@@ -1873,7 +1885,7 @@ fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
         KeyType::EccP256 | KeyType::EccP384 => build_ec_key_data(key_type, key_der),
         KeyType::Ed25519 => {
             if key_der.len() != 32 {
-                return Err(PivError::InvalidValue(
+                return Err(PivError::InvalidData(
                     "Ed25519 secret key must be 32 bytes".into(),
                 ));
             }
@@ -1881,7 +1893,7 @@ fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
         }
         KeyType::X25519 => {
             if key_der.len() != 32 {
-                return Err(PivError::InvalidValue(
+                return Err(PivError::InvalidData(
                     "X25519 secret key must be 32 bytes".into(),
                 ));
             }
@@ -1896,7 +1908,7 @@ fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
 
     // Parse PKCS#1 RSAPrivateKey SEQUENCE
     let (_, seq_off, seq_len, _) =
-        tlv_parse(key_der, 0).map_err(|_| PivError::InvalidValue("Invalid RSA DER".into()))?;
+        tlv_parse(key_der, 0).map_err(|_| PivError::InvalidData("Invalid RSA DER".into()))?;
     let seq_data = &key_der[seq_off..seq_off + seq_len];
 
     // Parse fields: version, n, e, d, p, q, dp, dq, qinv
@@ -1904,13 +1916,13 @@ fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
     let mut fields = Vec::new();
     while offset < seq_data.len() {
         let (_, val_off, val_len, end) = tlv_parse(seq_data, offset)
-            .map_err(|_| PivError::InvalidValue("Invalid RSA key field".into()))?;
+            .map_err(|_| PivError::InvalidData("Invalid RSA key field".into()))?;
         fields.push(&seq_data[val_off..val_off + val_len]);
         offset = end;
     }
 
     if fields.len() < 9 {
-        return Err(PivError::InvalidValue(
+        return Err(PivError::InvalidData(
             "RSA key missing required fields".into(),
         ));
     }
@@ -1949,7 +1961,7 @@ fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivEr
 
     // Otherwise, parse SEC1 ECPrivateKey DER
     let (_, seq_off, seq_len, _) =
-        tlv_parse(key_der, 0).map_err(|_| PivError::InvalidValue("Invalid EC DER".into()))?;
+        tlv_parse(key_der, 0).map_err(|_| PivError::InvalidData("Invalid EC DER".into()))?;
     let seq_data = &key_der[seq_off..seq_off + seq_len];
 
     // Parse fields: version, privateKey, [parameters], [publicKey]
@@ -1957,13 +1969,13 @@ fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivEr
     let mut fields = Vec::new();
     while offset < seq_data.len() {
         let (_, val_off, val_len, end) = tlv_parse(seq_data, offset)
-            .map_err(|_| PivError::InvalidValue("Invalid EC key field".into()))?;
+            .map_err(|_| PivError::InvalidData("Invalid EC key field".into()))?;
         fields.push(&seq_data[val_off..val_off + val_len]);
         offset = end;
     }
 
     if fields.len() < 2 {
-        return Err(PivError::InvalidValue(
+        return Err(PivError::InvalidData(
             "EC key missing required fields".into(),
         ));
     }
@@ -2042,14 +2054,14 @@ const OID_X25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.1
 /// Parse a single TLV from PIV device-encoded public key data.
 fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), PivError> {
     if offset >= data.len() {
-        return Err(PivError::InvalidValue(
+        return Err(PivError::InvalidData(
             "Unexpected end of device public key data".into(),
         ));
     }
     let tag = data[offset];
     let mut pos = offset + 1;
     if pos >= data.len() {
-        return Err(PivError::InvalidValue("Truncated TLV length".into()));
+        return Err(PivError::InvalidData("Truncated TLV length".into()));
     }
     let len = if data[pos] < 0x80 {
         let l = data[pos] as usize;
@@ -2066,12 +2078,12 @@ fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), 
         pos += 2;
         l
     } else {
-        return Err(PivError::InvalidValue(
+        return Err(PivError::InvalidData(
             "Unsupported TLV length encoding".into(),
         ));
     };
     if pos + len > data.len() {
-        return Err(PivError::InvalidValue("TLV value extends past data".into()));
+        return Err(PivError::InvalidData("TLV value extends past data".into()));
     }
     Ok((tag, data[pos..pos + len].to_vec(), pos + len))
 }
@@ -2087,7 +2099,7 @@ pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<V
         KeyType::EccP256 | KeyType::EccP384 => {
             let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
-                return Err(PivError::InvalidValue(format!(
+                return Err(PivError::InvalidData(format!(
                     "Expected tag 0x86 for EC point, got 0x{tag:02X}"
                 )));
             }
@@ -2103,35 +2115,35 @@ pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<V
             SubjectPublicKeyInfoOwned {
                 algorithm: algo,
                 subject_public_key: BitString::from_bytes(&ec_point).map_err(|e| {
-                    PivError::InvalidValue(format!("Failed to encode EC point: {e}"))
+                    PivError::InvalidData(format!("Failed to encode EC point: {e}"))
                 })?,
             }
         }
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
             let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
             if tag1 != 0x81 {
-                return Err(PivError::InvalidValue(format!(
+                return Err(PivError::InvalidData(format!(
                     "Expected tag 0x81 for RSA modulus, got 0x{tag1:02X}"
                 )));
             }
             let (tag2, exponent, _) = parse_device_tlv(device_bytes, end1)?;
             if tag2 != 0x82 {
-                return Err(PivError::InvalidValue(format!(
+                return Err(PivError::InvalidData(format!(
                     "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
                 )));
             }
             // Build RSAPublicKey DER: SEQUENCE { INTEGER modulus, INTEGER exponent }
             let mod_int = der::asn1::UintRef::new(&modulus)
-                .map_err(|e| PivError::InvalidValue(format!("Invalid RSA modulus: {e}")))?;
+                .map_err(|e| PivError::InvalidData(format!("Invalid RSA modulus: {e}")))?;
             let exp_int = der::asn1::UintRef::new(&exponent)
-                .map_err(|e| PivError::InvalidValue(format!("Invalid RSA exponent: {e}")))?;
+                .map_err(|e| PivError::InvalidData(format!("Invalid RSA exponent: {e}")))?;
             let mut rsa_body = Vec::new();
             mod_int
                 .encode_to_vec(&mut rsa_body)
-                .map_err(|e| PivError::InvalidValue(format!("Failed to encode modulus: {e}")))?;
+                .map_err(|e| PivError::InvalidData(format!("Failed to encode modulus: {e}")))?;
             exp_int
                 .encode_to_vec(&mut rsa_body)
-                .map_err(|e| PivError::InvalidValue(format!("Failed to encode exponent: {e}")))?;
+                .map_err(|e| PivError::InvalidData(format!("Failed to encode exponent: {e}")))?;
             // Wrap in SEQUENCE
             let mut rsa_pub_key = Vec::new();
             // Tag 0x30 = SEQUENCE
@@ -2139,7 +2151,7 @@ pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<V
             let len_bytes = der::Length::new(rsa_body.len() as u16);
             len_bytes
                 .encode_to_vec(&mut rsa_pub_key)
-                .map_err(|e| PivError::InvalidValue(format!("Failed to encode length: {e}")))?;
+                .map_err(|e| PivError::InvalidData(format!("Failed to encode length: {e}")))?;
             rsa_pub_key.extend_from_slice(&rsa_body);
 
             let algo = AlgorithmIdentifierOwned {
@@ -2148,15 +2160,14 @@ pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<V
             };
             SubjectPublicKeyInfoOwned {
                 algorithm: algo,
-                subject_public_key: BitString::from_bytes(&rsa_pub_key).map_err(|e| {
-                    PivError::InvalidValue(format!("Failed to encode RSA key: {e}"))
-                })?,
+                subject_public_key: BitString::from_bytes(&rsa_pub_key)
+                    .map_err(|e| PivError::InvalidData(format!("Failed to encode RSA key: {e}")))?,
             }
         }
         KeyType::Ed25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
-                return Err(PivError::InvalidValue(format!(
+                return Err(PivError::InvalidData(format!(
                     "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
                 )));
             }
@@ -2167,14 +2178,14 @@ pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<V
             SubjectPublicKeyInfoOwned {
                 algorithm: algo,
                 subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
-                    PivError::InvalidValue(format!("Failed to encode Ed25519 key: {e}"))
+                    PivError::InvalidData(format!("Failed to encode Ed25519 key: {e}"))
                 })?,
             }
         }
         KeyType::X25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
-                return Err(PivError::InvalidValue(format!(
+                return Err(PivError::InvalidData(format!(
                     "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
                 )));
             }
@@ -2185,14 +2196,14 @@ pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<V
             SubjectPublicKeyInfoOwned {
                 algorithm: algo,
                 subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
-                    PivError::InvalidValue(format!("Failed to encode X25519 key: {e}"))
+                    PivError::InvalidData(format!("Failed to encode X25519 key: {e}"))
                 })?,
             }
         }
     };
 
     spki.to_der()
-        .map_err(|e| PivError::InvalidValue(format!("Failed to encode SPKI: {e}")))
+        .map_err(|e| PivError::InvalidData(format!("Failed to encode SPKI: {e}")))
 }
 
 // ---------------------------------------------------------------------------

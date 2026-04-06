@@ -8,7 +8,7 @@ use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
-        piv::PivError::SmartCard(sc) => smartcard_err(sc),
+        piv::PivError::Connection(sc) => smartcard_err(sc),
         piv::PivError::InvalidPin(retries) => {
             Python::with_gil(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
@@ -41,7 +41,17 @@ fn piv_err(e: piv::PivError) -> PyErr {
                 Err(_) => PyRuntimeError::new_err(msg),
             })
         }
-        piv::PivError::BadResponse(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+        piv::PivError::PinBlocked => Python::with_gil(|py| match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("InvalidPinError") {
+                Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
+                    Ok(exc) => PyErr::from_value(exc),
+                    Err(_) => PyRuntimeError::new_err("PIN blocked"),
+                },
+                Err(_) => PyRuntimeError::new_err("PIN blocked"),
+            },
+            Err(_) => PyRuntimeError::new_err("PIN blocked"),
+        }),
+        piv::PivError::InvalidData(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
             Ok(module) => match module.getattr("BadResponseError") {
                 Ok(cls) => match cls.call1((msg.clone(),)) {
                     Ok(exc) => PyErr::from_value(exc),

@@ -1,7 +1,30 @@
 use pyo3::prelude::*;
-use yubikit::oath::{self, OathSession as RustOathSession};
+use yubikit::oath::{self, OathError, OathSession as RustOathSession};
 
 use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+
+fn oath_err(e: OathError) -> PyErr {
+    use pyo3::exceptions::*;
+    match e {
+        OathError::Connection(sc) => smartcard_err(sc),
+        OathError::NotSupported(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("NotSupportedError") {
+                Ok(cls) => match cls.call1((msg.clone(),)) {
+                    Ok(exc) => PyErr::from_value(exc),
+                    Err(_) => PyRuntimeError::new_err(msg),
+                },
+                Err(_) => PyRuntimeError::new_err(msg),
+            },
+            Err(_) => PyRuntimeError::new_err(msg),
+        }),
+        OathError::InvalidData(msg) => PyValueError::new_err(msg),
+        OathError::WrongMac => PyValueError::new_err("Wrong response MAC"),
+        OathError::WrongDevice => {
+            PyValueError::new_err("Credential does not belong to this YubiKey")
+        }
+        other => PyRuntimeError::new_err(other.to_string()),
+    }
+}
 
 #[pyfunction]
 fn format_cred_id(
@@ -67,7 +90,7 @@ impl OathSession {
     }
 
     fn reset(&mut self) -> PyResult<()> {
-        self.inner.reset().map_err(smartcard_err)
+        self.inner.reset().map_err(oath_err)
     }
 
     fn derive_key(&self, password: &str) -> Vec<u8> {
@@ -75,15 +98,15 @@ impl OathSession {
     }
 
     fn validate(&mut self, key: &[u8]) -> PyResult<()> {
-        self.inner.validate(key).map_err(smartcard_err)
+        self.inner.validate(key).map_err(oath_err)
     }
 
     fn set_key(&mut self, key: &[u8]) -> PyResult<()> {
-        self.inner.set_key(key).map_err(smartcard_err)
+        self.inner.set_key(key).map_err(oath_err)
     }
 
     fn unset_key(&mut self) -> PyResult<()> {
-        self.inner.unset_key().map_err(smartcard_err)
+        self.inner.unset_key().map_err(oath_err)
     }
 
     /// Put a credential on the device.
@@ -129,7 +152,7 @@ impl OathSession {
         let cred = self
             .inner
             .put_credential(&cred_data, touch_required)
-            .map_err(smartcard_err)?;
+            .map_err(oath_err)?;
 
         Ok((
             cred.device_id,
@@ -151,7 +174,7 @@ impl OathSession {
     ) -> PyResult<Vec<u8>> {
         self.inner
             .rename_credential(credential_id, name, issuer)
-            .map_err(smartcard_err)
+            .map_err(oath_err)
     }
 
     /// List credentials.
@@ -170,7 +193,7 @@ impl OathSession {
             Option<bool>,
         )>,
     > {
-        let creds = self.inner.list_credentials().map_err(smartcard_err)?;
+        let creds = self.inner.list_credentials().map_err(oath_err)?;
         Ok(creds
             .into_iter()
             .map(|c| {
@@ -190,13 +213,13 @@ impl OathSession {
     fn calculate(&mut self, credential_id: &[u8], challenge: &[u8]) -> PyResult<Vec<u8>> {
         self.inner
             .calculate(credential_id, challenge)
-            .map_err(smartcard_err)
+            .map_err(oath_err)
     }
 
     fn delete_credential(&mut self, credential_id: &[u8]) -> PyResult<()> {
         self.inner
             .delete_credential(credential_id)
-            .map_err(smartcard_err)
+            .map_err(oath_err)
     }
 
     /// Calculate all credentials.
@@ -222,7 +245,7 @@ impl OathSession {
             Option<u64>,
         )>,
     > {
-        let results = self.inner.calculate_all(timestamp).map_err(smartcard_err)?;
+        let results = self.inner.calculate_all(timestamp).map_err(oath_err)?;
         Ok(results
             .into_iter()
             .map(|(cred, code)| {
@@ -274,7 +297,7 @@ impl OathSession {
         let code = self
             .inner
             .calculate_code(&credential, timestamp)
-            .map_err(smartcard_err)?;
+            .map_err(oath_err)?;
         Ok((code.value, code.valid_from, code.valid_to))
     }
 }

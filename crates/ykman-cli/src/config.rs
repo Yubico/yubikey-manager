@@ -1,35 +1,46 @@
 use std::io::{self, Write};
 
+use yubikit::core::Connection;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::{
-    Capability, DeviceConfig, DeviceFlag, ManagementCcidSession, ManagementFidoSession,
-    ManagementOtpSession, ManagementSession,
-};
+use yubikit::management::{Capability, DeviceConfig, DeviceFlag, ManagementSession};
 
 use crate::cli_enums::CliCapability;
 use crate::util::CliError;
 
-/// Open a management session, trying SmartCard first, then OTP HID, then FIDO HID.
-fn open_management_session(dev: &YubiKeyDevice) -> Result<Box<dyn ManagementSession>, CliError> {
+/// Open a management session on any available transport and run a generic function.
+///
+/// Tries SmartCard first, then OTP HID, then FIDO HID.
+fn with_management_session<F, R>(dev: &YubiKeyDevice, f: F) -> Result<R, CliError>
+where
+    F: ManagementOp<R>,
+{
     if let Ok(conn) = dev.open_smartcard() {
-        let session = ManagementCcidSession::new(conn)
+        let mut session = ManagementSession::new(conn)
             .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
-        return Ok(Box::new(session));
+        return f.run(&mut session);
     }
     if let Ok(conn) = dev.open_otp() {
-        let session = ManagementOtpSession::new(conn)
+        let mut session = ManagementSession::new_otp(conn)
             .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
-        return Ok(Box::new(session));
+        return f.run(&mut session);
     }
     if let Ok(conn) = dev.open_fido() {
-        let session = ManagementFidoSession::new(conn)
+        let mut session = ManagementSession::new_fido(conn)
             .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
-        return Ok(Box::new(session));
+        return f.run(&mut session);
     }
     Err(CliError(
         "Failed to open connection: No SmartCard, OTP, or FIDO connection available.".into(),
     ))
+}
+
+/// Trait for operations that can be run on any [`ManagementSession`].
+trait ManagementOp<R> {
+    fn run<C: Connection + 'static>(
+        self,
+        session: &mut ManagementSession<C>,
+    ) -> Result<R, CliError>;
 }
 
 fn write_config(
@@ -39,11 +50,31 @@ fn write_config(
     lock_code: Option<&[u8]>,
     new_lock_code: Option<&[u8]>,
 ) -> Result<(), CliError> {
-    let mut session = open_management_session(dev)?;
-    session
-        .write_device_config(config, reboot, lock_code, new_lock_code)
-        .map_err(|e| CliError(format!("Failed to write config: {e}")))?;
-    Ok(())
+    struct WriteConfig<'a> {
+        config: &'a DeviceConfig,
+        reboot: bool,
+        lock_code: Option<&'a [u8]>,
+        new_lock_code: Option<&'a [u8]>,
+    }
+    impl ManagementOp<()> for WriteConfig<'_> {
+        fn run<C: Connection + 'static>(
+            self,
+            session: &mut ManagementSession<C>,
+        ) -> Result<(), CliError> {
+            session
+                .write_device_config(self.config, self.reboot, self.lock_code, self.new_lock_code)
+                .map_err(|e| CliError(format!("Failed to write config: {e}")))
+        }
+    }
+    with_management_session(
+        dev,
+        WriteConfig {
+            config,
+            reboot,
+            lock_code,
+            new_lock_code,
+        },
+    )
 }
 
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
@@ -369,7 +400,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementCcidSession::new(conn)
+    let mut session = ManagementSession::new(conn)
         .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
     session
         .device_reset()
@@ -436,14 +467,29 @@ pub fn run_mode(
         return Err(CliError("Aborted by user.".into()));
     }
 
-    let mut session = open_management_session(dev)?;
-    session
-        .set_mode(
+    struct SetMode {
+        code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    }
+    impl ManagementOp<()> for SetMode {
+        fn run<C: Connection + 'static>(
+            self,
+            session: &mut ManagementSession<C>,
+        ) -> Result<(), CliError> {
+            session
+                .set_mode(self.code, self.chalresp_timeout, self.auto_eject_timeout)
+                .map_err(|e| CliError(format!("Failed to set mode: {e}")))
+        }
+    }
+    with_management_session(
+        dev,
+        SetMode {
             code,
-            chalresp_timeout.unwrap_or(0),
-            autoeject_timeout.unwrap_or(0),
-        )
-        .map_err(|e| CliError(format!("Failed to set mode: {e}")))?;
+            chalresp_timeout: chalresp_timeout.unwrap_or(0),
+            auto_eject_timeout: autoeject_timeout.unwrap_or(0),
+        },
+    )?;
 
     println!(
         "Mode set! You must remove and re-insert your YubiKey for this change to take effect."

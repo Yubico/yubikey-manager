@@ -33,14 +33,16 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::core::{Transport, Version, bytes2int, patch_version};
+use thiserror::Error;
+
+use crate::core::{Connection, Transport, Version, bytes2int, patch_version};
 use crate::fido::FidoConnection;
 use crate::otp::{
-    OtpConnection, OtpProtocol, STATUS_OFFSET_PROG_SEQ, YubiOtpError, verify_and_strip_crc,
+    OtpConnection, OtpError, OtpProtocol, STATUS_OFFSET_PROG_SEQ, verify_and_strip_crc,
 };
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode};
-use crate::transport::ctaphid::CtapHidTransportError;
+use crate::transport::ctaphid::FidoError;
 use crate::yubiotp::ConfigSlot;
 
 // ---------------------------------------------------------------------------
@@ -551,7 +553,7 @@ impl DeviceConfig {
         }
 
         if buf.len() > 0xFF {
-            return Err(SmartCardError::NotSupported(
+            return Err(SmartCardError::InvalidData(
                 "DeviceConfiguration too large".into(),
             ));
         }
@@ -591,13 +593,14 @@ impl DeviceInfo {
     /// Parse a length-prefixed TLV response into [`DeviceInfo`].
     pub fn parse(encoded: &[u8], default_version: Version) -> Result<Self, SmartCardError> {
         if encoded.is_empty() {
-            return Err(SmartCardError::BadResponse("Empty response".into()));
+            return Err(SmartCardError::InvalidData("Empty response".into()));
         }
         let expected_len = encoded[0] as usize;
         if encoded.len() - 1 != expected_len {
-            return Err(SmartCardError::BadResponse("Invalid length".into()));
+            return Err(SmartCardError::InvalidData("Invalid length".into()));
         }
-        let tlvs = parse_tlv_dict(&encoded[1..])?;
+        let tlvs = parse_tlv_dict(&encoded[1..])
+            .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
         Self::parse_tlvs(&tlvs, default_version)
     }
 
@@ -672,7 +675,8 @@ impl DeviceInfo {
             Capability(bytes2int(data.get(&TAG_RESET_BLOCKED).map_or(&[0u8][..], |v| v)) as u16);
 
         let version_qualifier = if let Some(vq_data) = data.get(&TAG_VERSION_QUALIFIER) {
-            let vq_tlvs = parse_tlv_dict(vq_data)?;
+            let vq_tlvs =
+                parse_tlv_dict(vq_data).map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
             let vq_version = vq_tlvs
                 .get(&0x01)
                 .map(|v| Version::from_bytes(v))
@@ -745,26 +749,71 @@ impl DeviceInfo {
 }
 
 // ---------------------------------------------------------------------------
+// ManagementError
+// ---------------------------------------------------------------------------
+
+/// Errors returned by [`ManagementSession`] operations.
+///
+/// The `E` parameter is the transport-specific connection error type
+/// (e.g. [`SmartCardError`], [`OtpError`], [`FidoError`]).
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ManagementError<E: fmt::Debug + fmt::Display> {
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+    #[error("Connection error: {0}")]
+    Connection(E),
+}
+
+impl<E: fmt::Debug + fmt::Display> ManagementError<E> {
+    /// Convert a `SmartCardError` (from parsing helpers) into a `ManagementError<E>`.
+    fn from_parse(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::InvalidData(msg) => Self::InvalidData(msg),
+            other => Self::InvalidData(other.to_string()),
+        }
+    }
+}
+
+impl<E: std::error::Error + Send + Sync + 'static> ManagementError<E> {
+    /// Erase the connection error type for use with trait objects.
+    pub fn erase(self) -> ManagementError<Box<dyn std::error::Error + Send + Sync>> {
+        match self {
+            Self::NotSupported(msg) => ManagementError::NotSupported(msg),
+            Self::InvalidData(msg) => ManagementError::InvalidData(msg),
+            Self::Connection(e) => ManagementError::Connection(Box::new(e)),
+        }
+    }
+}
+
+/// Type-erased management error for use in contexts that are not generic
+/// over the connection type (e.g. [`DeviceError`](crate::device::DeviceError)).
+pub type BoxedManagementError = ManagementError<Box<dyn std::error::Error + Send + Sync>>;
+
+// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 /// Read device info by iterating config pages via the supplied reader closure.
-fn read_device_info_from_config(
+fn read_device_info_from_config<E: fmt::Debug + fmt::Display>(
     version: Version,
-    read_config: &mut dyn FnMut(u8) -> Result<Vec<u8>, SmartCardError>,
-) -> Result<DeviceInfo, SmartCardError> {
+    read_config: &mut dyn FnMut(u8) -> Result<Vec<u8>, E>,
+) -> Result<DeviceInfo, ManagementError<E>> {
     let mut tlvs: HashMap<u32, Vec<u8>> = HashMap::new();
     let mut page: u8 = 0;
     loop {
-        let encoded = read_config(page)?;
+        let encoded = read_config(page).map_err(ManagementError::Connection)?;
         if encoded.is_empty() {
-            return Err(SmartCardError::BadResponse("Empty config response".into()));
+            return Err(ManagementError::InvalidData("Empty config response".into()));
         }
         let expected_len = encoded[0] as usize;
         if encoded.len() - 1 != expected_len {
-            return Err(SmartCardError::BadResponse("Invalid length".into()));
+            return Err(ManagementError::InvalidData("Invalid length".into()));
         }
-        let page_tlvs = parse_tlv_dict(&encoded[1..])?;
+        let page_tlvs = parse_tlv_dict(&encoded[1..])
+            .map_err(|e| ManagementError::InvalidData(e.to_string()))?;
         let more_data = page_tlvs.get(&TAG_MORE_DATA).is_some_and(|v| v == &[0x01]);
         for (tag, value) in page_tlvs {
             if tag != TAG_MORE_DATA {
@@ -776,67 +825,101 @@ fn read_device_info_from_config(
         }
         page += 1;
     }
-    DeviceInfo::parse_tlvs(&tlvs, version)
+    DeviceInfo::parse_tlvs(&tlvs, version).map_err(ManagementError::from_parse)
 }
 
 /// Serialize a write_device_config call into bytes, with validation.
-fn validate_and_serialize_device_config(
+fn validate_and_serialize_device_config<E: fmt::Debug + fmt::Display>(
     version: Version,
     config: &DeviceConfig,
     reboot: bool,
     cur_lock_code: Option<&[u8]>,
     new_lock_code: Option<&[u8]>,
-) -> Result<Vec<u8>, SmartCardError> {
+) -> Result<Vec<u8>, ManagementError<E>> {
     if version < Version(5, 0, 0) {
-        return Err(SmartCardError::NotSupported(
+        return Err(ManagementError::NotSupported(
             "write_device_config requires YubiKey 5.0.0 or later".into(),
         ));
     }
     if let Some(code) = cur_lock_code
         && code.len() != 16
     {
-        return Err(SmartCardError::BadResponse(
+        return Err(ManagementError::InvalidData(
             "Lock code must be 16 bytes".into(),
         ));
     }
     if let Some(code) = new_lock_code
         && code.len() != 16
     {
-        return Err(SmartCardError::BadResponse(
+        return Err(ManagementError::InvalidData(
             "Lock code must be 16 bytes".into(),
         ));
     }
-    config.get_bytes(reboot, cur_lock_code, new_lock_code)
+    config
+        .get_bytes(reboot, cur_lock_code, new_lock_code)
+        .map_err(ManagementError::from_parse)
 }
 
 // ---------------------------------------------------------------------------
-// ManagementSession trait
+// ManagementOps (private, object-safe trait for internal dispatch)
 // ---------------------------------------------------------------------------
 
-/// Common management session operations shared across transports.
-pub trait ManagementSession {
-    /// The firmware version of the YubiKey.
+/// Object-safe trait for transport-specific management operations.
+///
+/// Each transport (CCID, OTP, FIDO) implements this trait. The error type `E`
+/// is determined by the connection's [`Connection::Error`](crate::core::Connection::Error).
+trait ManagementOps<E: std::error::Error + Send + Sync + 'static> {
     fn version(&self) -> Version;
-
-    /// Read a configuration page from the device.
-    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError>;
-
-    /// Write configuration data to the device.
-    fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError>;
-
-    /// Write USB mode configuration (YubiKey NEO/4 style).
+    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, E>;
+    fn write_config(&mut self, config: &[u8]) -> Result<(), E>;
     fn set_mode(
         &mut self,
         mode_code: u8,
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
-    ) -> Result<(), SmartCardError>;
+    ) -> Result<(), E>;
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any>;
+    fn device_reset(&mut self) -> Result<(), ManagementError<E>> {
+        Err(ManagementError::NotSupported(
+            "device_reset is only supported over SmartCard (CCID)".into(),
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ManagementSession (generic struct)
+// ---------------------------------------------------------------------------
+
+/// Management session for reading and writing YubiKey configuration.
+///
+/// Generic over the connection type `C`. Construct with [`ManagementSession::new`]
+/// for SmartCard, [`ManagementSession::new_otp`] for OTP HID, or
+/// [`ManagementSession::new_fido`] for FIDO HID.
+pub struct ManagementSession<C: Connection> {
+    inner: Box<dyn ManagementOps<C::Error>>,
+    _phantom: std::marker::PhantomData<C>,
+}
+
+impl<C: Connection + 'static> ManagementSession<C> {
+    /// The firmware version of the YubiKey.
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        *self
+            .inner
+            .into_connection_any()
+            .downcast::<C>()
+            .expect("ManagementSession inner type mismatch (this is a bug)")
+    }
 
     /// Get detailed information about the YubiKey.
-    fn read_device_info(&mut self) -> Result<DeviceInfo, SmartCardError> {
+    pub fn read_device_info(&mut self) -> Result<DeviceInfo, ManagementError<C::Error>> {
         log::debug!("Reading device info");
-        if self.version() < Version(4, 1, 0) {
-            return Err(SmartCardError::NotSupported(
+        if self.inner.version() < Version(4, 1, 0) {
+            return Err(ManagementError::NotSupported(
                 "DeviceInfo requires YubiKey 4.1.0 or later".into(),
             ));
         }
@@ -844,44 +927,116 @@ pub trait ManagementSession {
     }
 
     /// Read device info without version check (for dev device version override).
-    fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, SmartCardError> {
-        read_device_info_from_config(self.version(), &mut |page| self.read_config(page))
+    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, ManagementError<C::Error>> {
+        let version = self.inner.version();
+        read_device_info_from_config(version, &mut |page| self.inner.read_config(page))
     }
 
     /// Write configuration settings for YubiKey (requires 5.0.0+).
-    fn write_device_config(
+    pub fn write_device_config(
         &mut self,
         config: &DeviceConfig,
         reboot: bool,
         cur_lock_code: Option<&[u8]>,
         new_lock_code: Option<&[u8]>,
-    ) -> Result<(), SmartCardError> {
+    ) -> Result<(), ManagementError<C::Error>> {
         let data = validate_and_serialize_device_config(
-            self.version(),
+            self.inner.version(),
             config,
             reboot,
             cur_lock_code,
             new_lock_code,
         )?;
-        self.write_config(&data)
+        self.inner
+            .write_config(&data)
+            .map_err(ManagementError::Connection)
+    }
+
+    /// Write USB mode configuration (YubiKey NEO/4 style).
+    pub fn set_mode(
+        &mut self,
+        mode_code: u8,
+        chalresp_timeout: u8,
+        auto_eject_timeout: u16,
+    ) -> Result<(), ManagementError<C::Error>> {
+        self.inner
+            .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
+            .map_err(ManagementError::Connection)
+    }
+
+    fn from_inner(inner: Box<dyn ManagementOps<C::Error>>) -> Self {
+        Self {
+            inner,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+// SmartCard (CCID) constructors and CCID-only methods
+impl<C: SmartCardConnection + 'static> ManagementSession<C> {
+    /// Open a management session over SmartCard (CCID).
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (ManagementError<SmartCardError>, C)> {
+        CcidManagement::open(connection)
+            .map(|inner| Self::from_inner(Box::new(inner)))
+            .map_err(|(e, conn)| (ManagementError::Connection(e), conn))
+    }
+
+    /// Open a management session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::scp::ScpKeyParams,
+    ) -> Result<Self, (ManagementError<SmartCardError>, C)> {
+        CcidManagement::open_with_scp(connection, scp_key_params)
+            .map(|inner| Self::from_inner(Box::new(inner)))
+            .map_err(|(e, conn)| (ManagementError::Connection(e), conn))
+    }
+
+    /// Global factory reset (YubiKey Bio only, SmartCard-only).
+    pub fn device_reset(&mut self) -> Result<(), ManagementError<SmartCardError>> {
+        self.inner.device_reset()
+    }
+}
+
+// OTP HID constructor
+impl<T: OtpConnection + 'static> ManagementSession<T> {
+    /// Open a management session over OTP HID.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_otp(connection: T) -> Result<Self, (ManagementError<OtpError>, T)> {
+        OtpManagement::open(connection)
+            .map(|inner| Self::from_inner(Box::new(inner)))
+            .map_err(|(e, conn)| (ManagementError::Connection(e), conn))
+    }
+}
+
+// FIDO HID constructor
+impl<C: FidoConnection + 'static> ManagementSession<C> {
+    /// Open a management session over FIDO HID.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_fido(connection: C) -> Result<Self, (ManagementError<FidoError>, C)> {
+        FidoManagement::open(connection)
+            .map(|inner| Self::from_inner(Box::new(inner)))
+            .map_err(|(e, conn)| (ManagementError::Connection(e), conn))
     }
 }
 
 // ---------------------------------------------------------------------------
-// ManagementCcidSession (SmartCard)
+// CcidManagement (SmartCard) — internal
 // ---------------------------------------------------------------------------
 
-/// Management application session over SmartCard (CCID).
-pub struct ManagementCcidSession<C: SmartCardConnection> {
+/// Management connection over SmartCard (CCID).
+struct CcidManagement<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
 }
 
-impl<C: SmartCardConnection> ManagementCcidSession<C> {
-    /// Open a management session, selecting the management AID.
-    ///
-    /// On error, returns the connection so the caller can recover it.
-    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
+impl<C: SmartCardConnection> CcidManagement<C> {
+    fn open(connection: C) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
         let select_bytes = match protocol.select(Aid::MANAGEMENT) {
             Ok(v) => v,
@@ -890,10 +1045,7 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
         Self::init(protocol, &select_bytes)
     }
 
-    /// Open a management session with SCP (Secure Channel Protocol).
-    ///
-    /// On error, returns the connection so the caller can recover it.
-    pub fn new_with_scp(
+    fn open_with_scp(
         connection: C,
         scp_key_params: &crate::scp::ScpKeyParams,
     ) -> Result<Self, (SmartCardError, C)> {
@@ -912,7 +1064,7 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
         mut protocol: SmartCardProtocol<C>,
         select_bytes: &[u8],
     ) -> Result<Self, (SmartCardError, C)> {
-        log::debug!("Opening ManagementCcidSession");
+        log::debug!("Opening CcidManagement");
         // YubiKey Edge incorrectly appends SW twice
         let select_bytes =
             if select_bytes.len() >= 2 && select_bytes[select_bytes.len() - 2..] == [0x90, 0x00] {
@@ -925,14 +1077,19 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
             Ok(v) => v,
             Err(_) => {
                 return Err((
-                    SmartCardError::BadResponse("Invalid version string".into()),
+                    SmartCardError::InvalidData("Invalid version string".into()),
                     protocol.into_connection(),
                 ));
             }
         };
         let version = match parse_version_string(version_str) {
             Ok(v) => v,
-            Err(e) => return Err((e, protocol.into_connection())),
+            Err(e) => {
+                return Err((
+                    SmartCardError::InvalidData(e.to_string()),
+                    protocol.into_connection(),
+                ));
+            }
         };
         let version = patch_version(version);
 
@@ -951,33 +1108,14 @@ impl<C: SmartCardConnection> ManagementCcidSession<C> {
 
         Ok(Self { protocol, version })
     }
-
-    /// Get a mutable reference to the underlying protocol.
-    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
-        &mut self.protocol
-    }
-
-    /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> C {
-        self.protocol.into_connection()
-    }
-
-    /// Global factory reset (YubiKey Bio only, SmartCard-only).
-    pub fn device_reset(&mut self) -> Result<(), SmartCardError> {
-        self.protocol.send_apdu(0, INS_DEVICE_RESET, 0, 0, &[])?;
-        Ok(())
-    }
 }
 
-impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
+impl<C: SmartCardConnection + 'static> ManagementOps<SmartCardError> for CcidManagement<C> {
     fn version(&self) -> Version {
         self.version
     }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
-        // YubiKey 4+ and dev devices use INS_READ_CONFIG.
-        // YubiKey NEO (v3) also uses INS_READ_CONFIG but against the OTP applet
-        // (selected during init).
         self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0, &[])
     }
 
@@ -999,7 +1137,6 @@ impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
             (auto_eject_timeout >> 8) as u8,
         ];
         if self.version.0 == 3 {
-            // NEO: using OTP application, INS=0x01, P1=SLOT_DEVICE_CONFIG
             self.protocol
                 .send_apdu(0, 0x01, CONFIG_SLOT_DEVICE_CONFIG, 0, &data)?;
         } else {
@@ -1008,22 +1145,32 @@ impl<C: SmartCardConnection> ManagementSession for ManagementCcidSession<C> {
         }
         Ok(())
     }
+
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        Box::new(self.protocol.into_connection())
+    }
+
+    fn device_reset(&mut self) -> Result<(), ManagementError<SmartCardError>> {
+        self.protocol
+            .send_apdu(0, INS_DEVICE_RESET, 0, 0, &[])
+            .map_err(ManagementError::Connection)?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
-// ManagementOtpSession (OTP/HID)
+// OtpManagement (OTP/HID) — internal
 // ---------------------------------------------------------------------------
 
-/// Management operations over the OTP (HID) interface.
-pub struct ManagementOtpSession<T: OtpConnection> {
+/// Management connection over the OTP (HID) interface.
+struct OtpManagement<T: OtpConnection> {
     protocol: OtpProtocol<T>,
     version: Version,
 }
 
-impl<T: OtpConnection> ManagementOtpSession<T> {
-    /// Open a management session over OTP HID.
-    pub fn new(connection: T) -> Result<Self, (YubiOtpError, T)> {
-        log::debug!("Opening ManagementOtpSession");
+impl<T: OtpConnection> OtpManagement<T> {
+    fn open(connection: T) -> Result<Self, (OtpError, T)> {
+        log::debug!("Opening OtpManagement");
         let protocol = match OtpProtocol::new(connection) {
             Ok(p) => p,
             Err((e, conn)) => return Err((e, conn)),
@@ -1031,7 +1178,7 @@ impl<T: OtpConnection> ManagementOtpSession<T> {
         let version = patch_version(protocol.version);
         if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {
             return Err((
-                YubiOtpError::NotSupported(
+                OtpError::BadResponse(
                     "Management over OTP not supported for YubiKey v1.x-v2.x".into(),
                 ),
                 protocol.into_connection(),
@@ -1039,39 +1186,33 @@ impl<T: OtpConnection> ManagementOtpSession<T> {
         }
         Ok(Self { protocol, version })
     }
-
-    /// Consume the session, returning the underlying connection.
-    pub fn into_connection(self) -> T {
-        self.protocol.into_connection()
-    }
 }
 
-impl<T: OtpConnection> ManagementSession for ManagementOtpSession<T> {
+impl<T: OtpConnection + 'static> ManagementOps<OtpError> for OtpManagement<T> {
     fn version(&self) -> Version {
         self.version
     }
 
-    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
+    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, OtpError> {
         let data = int2bytes(page as u64);
-        let response = self
-            .protocol
-            .send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data), Some(-1))
-            .map_err(otp_to_smartcard_err)?;
+        let response = self.protocol.send_and_receive(
+            ConfigSlot::Yk4Capabilities as u8,
+            Some(&data),
+            Some(-1),
+        )?;
         match response {
             Some(raw) => {
                 let r_len = raw[0] as usize;
-                let checked =
-                    verify_and_strip_crc(&raw, r_len + 1).map_err(otp_to_smartcard_err)?;
+                let checked = verify_and_strip_crc(&raw, r_len + 1)?;
                 Ok(checked)
             }
-            None => Err(SmartCardError::BadResponse("Expected data response".into())),
+            None => Err(OtpError::BadResponse("Expected data response".into())),
         }
     }
 
-    fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
+    fn write_config(&mut self, config: &[u8]) -> Result<(), OtpError> {
         self.protocol
-            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config), None)
-            .map_err(otp_to_smartcard_err)?;
+            .send_and_receive(ConfigSlot::Yk4SetDeviceInfo as u8, Some(config), None)?;
         Ok(())
     }
 
@@ -1080,33 +1221,25 @@ impl<T: OtpConnection> ManagementSession for ManagementOtpSession<T> {
         mode_code: u8,
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
-    ) -> Result<(), SmartCardError> {
+    ) -> Result<(), OtpError> {
         let data = [
             mode_code,
             chalresp_timeout,
             (auto_eject_timeout & 0xFF) as u8,
             (auto_eject_timeout >> 8) as u8,
         ];
-        let empty =
-            self.protocol.read_status().map_err(otp_to_smartcard_err)?[STATUS_OFFSET_PROG_SEQ] == 0;
+        let empty = self.protocol.read_status()?[STATUS_OFFSET_PROG_SEQ] == 0;
         match self
             .protocol
             .send_and_receive(ConfigSlot::DeviceConfig as u8, Some(&data), None)
         {
-            Err(YubiOtpError::CommandRejected(_)) if empty => Ok(()),
-            Err(e) => Err(otp_to_smartcard_err(e)),
-            Ok(_) => Ok(()),
+            Err(OtpError::CommandRejected(_)) if empty => Ok(()),
+            other => other.map(|_| ()),
         }
     }
-}
 
-/// Convert a [`YubiOtpError`] into a [`SmartCardError`].
-fn otp_to_smartcard_err(e: YubiOtpError) -> SmartCardError {
-    match e {
-        YubiOtpError::SmartCard(sc) => sc,
-        YubiOtpError::BadResponse(msg) => SmartCardError::BadResponse(msg),
-        YubiOtpError::NotSupported(msg) => SmartCardError::NotSupported(msg),
-        other => SmartCardError::Transport(Box::new(other)),
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        Box::new(self.protocol.into_connection())
     }
 }
 
@@ -1115,7 +1248,7 @@ fn otp_to_smartcard_err(e: YubiOtpError) -> SmartCardError {
 // ---------------------------------------------------------------------------
 
 /// Parse a version string like "5.7.1" into a [`Version`].
-fn parse_version_string(s: &str) -> Result<Version, SmartCardError> {
+fn parse_version_string(s: &str) -> Result<Version, ManagementError<std::convert::Infallible>> {
     // Try exact "X.Y.Z" first
     let parts: Vec<&str> = s.trim().split('.').collect();
     if parts.len() == 3
@@ -1140,13 +1273,13 @@ fn parse_version_string(s: &str) -> Result<Version, SmartCardError> {
             return Ok(Version(a, b, c));
         }
     }
-    Err(SmartCardError::BadResponse(format!(
+    Err(ManagementError::InvalidData(format!(
         "Invalid version string: {s:?}"
     )))
 }
 
 // ---------------------------------------------------------------------------
-// ManagementFidoSession (CTAP HID / FIDO)
+// FidoManagement (CTAP HID / FIDO)
 // ---------------------------------------------------------------------------
 
 /// Vendor CTAP commands for YubiKey management.
@@ -1155,16 +1288,15 @@ const CTAP_YUBIKEY_DEVICE_CONFIG: u8 = CTAP_VENDOR_FIRST;
 const CTAP_READ_CONFIG: u8 = CTAP_VENDOR_FIRST + 2;
 const CTAP_WRITE_CONFIG: u8 = CTAP_VENDOR_FIRST + 3;
 
-/// Management operations over the FIDO (CTAP HID) interface.
-pub struct ManagementFidoSession<C: FidoConnection> {
+/// Management connection over the FIDO (CTAP HID) interface.
+struct FidoManagement<C: FidoConnection> {
     connection: C,
     version: Version,
 }
 
-impl<C: FidoConnection> ManagementFidoSession<C> {
-    /// Open a management session over FIDO HID.
-    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
-        log::debug!("Opening ManagementFidoSession");
+impl<C: FidoConnection> FidoManagement<C> {
+    fn open(connection: C) -> Result<Self, (FidoError, C)> {
+        log::debug!("Opening FidoManagement");
         let (v1, v2, v3) = connection.device_version();
         let mut version = Version(v1, v2, v3);
         // Prior to YK4 the device_version was not firmware version
@@ -1178,34 +1310,20 @@ impl<C: FidoConnection> ManagementFidoSession<C> {
             version,
         })
     }
-
-    /// Get a reference to the underlying connection.
-    pub fn connection(&self) -> &C {
-        &self.connection
-    }
-
-    /// Close the session and return the underlying connection.
-    pub fn into_connection(self) -> C {
-        self.connection
-    }
 }
 
-impl<C: FidoConnection> ManagementSession for ManagementFidoSession<C> {
+impl<C: FidoConnection + 'static> ManagementOps<FidoError> for FidoManagement<C> {
     fn version(&self) -> Version {
         self.version
     }
 
-    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
+    fn read_config(&mut self, page: u8) -> Result<Vec<u8>, FidoError> {
         let data = int2bytes(page as u64);
-        self.connection
-            .call(CTAP_READ_CONFIG, &data)
-            .map_err(fido_to_smartcard_err)
+        self.connection.call(CTAP_READ_CONFIG, &data)
     }
 
-    fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
-        self.connection
-            .call(CTAP_WRITE_CONFIG, config)
-            .map_err(fido_to_smartcard_err)?;
+    fn write_config(&mut self, config: &[u8]) -> Result<(), FidoError> {
+        self.connection.call(CTAP_WRITE_CONFIG, config)?;
         Ok(())
     }
 
@@ -1214,23 +1332,20 @@ impl<C: FidoConnection> ManagementSession for ManagementFidoSession<C> {
         mode_code: u8,
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
-    ) -> Result<(), SmartCardError> {
+    ) -> Result<(), FidoError> {
         let data = [
             mode_code,
             chalresp_timeout,
             (auto_eject_timeout & 0xFF) as u8,
             (auto_eject_timeout >> 8) as u8,
         ];
-        self.connection
-            .call(CTAP_YUBIKEY_DEVICE_CONFIG, &data)
-            .map_err(fido_to_smartcard_err)?;
+        self.connection.call(CTAP_YUBIKEY_DEVICE_CONFIG, &data)?;
         Ok(())
     }
-}
 
-/// Convert a [`CtapHidTransportError`] into a [`SmartCardError`].
-fn fido_to_smartcard_err(e: CtapHidTransportError) -> SmartCardError {
-    SmartCardError::Transport(Box::new(e))
+    fn into_connection_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        Box::new(self.connection)
+    }
 }
 
 // ---------------------------------------------------------------------------

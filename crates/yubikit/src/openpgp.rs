@@ -83,21 +83,35 @@ const BUTTON_FLAG: u8 = 0x20;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum OpenPgpError {
-    #[error("SmartCard error: {0}")]
-    SmartCard(#[from] SmartCardError),
-    #[error("TLV error: {0}")]
-    Tlv(#[from] TlvError),
-    #[error("Invalid response: {0}")]
-    InvalidResponse(String),
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
     #[error("PIN blocked")]
     PinBlocked,
-    #[error("Not supported: {0}")]
-    NotSupported(String),
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for OpenPgpError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::ApplicationNotAvailable => {
+                OpenPgpError::NotSupported("Application not available".into())
+            }
+            other => OpenPgpError::Connection(other),
+        }
+    }
+}
+
+impl From<TlvError> for OpenPgpError {
+    fn from(e: TlvError) -> Self {
+        OpenPgpError::InvalidData(e.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +456,7 @@ pub enum AlgorithmAttributes {
 impl AlgorithmAttributes {
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.is_empty() {
-            return Err(OpenPgpError::InvalidResponse(
+            return Err(OpenPgpError::InvalidData(
                 "Empty algorithm attributes".into(),
             ));
         }
@@ -453,7 +467,7 @@ impl AlgorithmAttributes {
                 algorithm_id,
                 &encoded[1..],
             )?)),
-            _ => Err(OpenPgpError::InvalidResponse(format!(
+            _ => Err(OpenPgpError::InvalidData(format!(
                 "Unsupported algorithm ID: 0x{algorithm_id:02X}"
             ))),
         }
@@ -492,14 +506,12 @@ impl RsaAttributes {
 
     fn parse_data(data: &[u8]) -> Result<Self, OpenPgpError> {
         if data.len() < 5 {
-            return Err(OpenPgpError::InvalidResponse(
-                "RSA attributes too short".into(),
-            ));
+            return Err(OpenPgpError::InvalidData("RSA attributes too short".into()));
         }
         let n_len = u16::from_be_bytes([data[0], data[1]]);
         let e_len = u16::from_be_bytes([data[2], data[3]]);
         let import_format = RsaImportFormat::from_u8(data[4]).ok_or_else(|| {
-            OpenPgpError::InvalidResponse(format!("Unknown RSA import format: {}", data[4]))
+            OpenPgpError::InvalidData(format!("Unknown RSA import format: {}", data[4]))
         })?;
         Ok(Self {
             n_len,
@@ -527,7 +539,7 @@ pub struct EcAttributes {
 impl EcAttributes {
     pub fn create(key_ref: KeyRef, oid_str: &str) -> Result<Self, OpenPgpError> {
         let oid_bytes = oid_from_string(oid_str)
-            .map_err(|e| OpenPgpError::InvalidParameter(format!("Invalid OID: {e}")))?;
+            .map_err(|e| OpenPgpError::InvalidData(format!("Invalid OID: {e}")))?;
         let algorithm_id = if oid_str == curve_oid::ED25519 {
             EC_ALG_EDDSA
         } else if key_ref == KeyRef::Dec {
@@ -544,9 +556,7 @@ impl EcAttributes {
 
     fn parse_data(algorithm_id: u8, data: &[u8]) -> Result<Self, OpenPgpError> {
         if data.is_empty() {
-            return Err(OpenPgpError::InvalidResponse(
-                "EC attributes too short".into(),
-            ));
+            return Err(OpenPgpError::InvalidData("EC attributes too short".into()));
         }
         let (oid, import_format) = if *data.last().unwrap() == 0xFF {
             (&data[..data.len() - 1], EcImportFormat::StandardWPubkey)
@@ -642,7 +652,7 @@ pub struct PwStatus {
 impl PwStatus {
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.len() < 7 {
-            return Err(OpenPgpError::InvalidResponse("PwStatus too short".into()));
+            return Err(OpenPgpError::InvalidData("PwStatus too short".into()));
         }
         Ok(Self {
             pin_policy_user: PinPolicy::from_u8(encoded[0]),
@@ -686,7 +696,7 @@ pub struct ExtendedCapabilities {
 impl ExtendedCapabilities {
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.len() < 10 {
-            return Err(OpenPgpError::InvalidResponse(
+            return Err(OpenPgpError::InvalidData(
                 "ExtendedCapabilities too short".into(),
             ));
         }
@@ -781,25 +791,25 @@ impl DiscretionaryDataObjects {
         Ok(Self {
             extended_capabilities: ExtendedCapabilities::parse(
                 data.get(&TAG_EXTENDED_CAPABILITIES).ok_or_else(|| {
-                    OpenPgpError::InvalidResponse("Missing extended capabilities".into())
+                    OpenPgpError::InvalidData("Missing extended capabilities".into())
                 })?,
             )?,
             attributes_sig: AlgorithmAttributes::parse(
                 data.get(&(Do::AlgorithmAttributesSig as u32))
                     .ok_or_else(|| {
-                        OpenPgpError::InvalidResponse("Missing SIG algorithm attributes".into())
+                        OpenPgpError::InvalidData("Missing SIG algorithm attributes".into())
                     })?,
             )?,
             attributes_dec: AlgorithmAttributes::parse(
                 data.get(&(Do::AlgorithmAttributesDec as u32))
                     .ok_or_else(|| {
-                        OpenPgpError::InvalidResponse("Missing DEC algorithm attributes".into())
+                        OpenPgpError::InvalidData("Missing DEC algorithm attributes".into())
                     })?,
             )?,
             attributes_aut: AlgorithmAttributes::parse(
                 data.get(&(Do::AlgorithmAttributesAut as u32))
                     .ok_or_else(|| {
-                        OpenPgpError::InvalidResponse("Missing AUT algorithm attributes".into())
+                        OpenPgpError::InvalidData("Missing AUT algorithm attributes".into())
                     })?,
             )?,
             attributes_att: data
@@ -807,9 +817,8 @@ impl DiscretionaryDataObjects {
                 .map(|v| AlgorithmAttributes::parse(v))
                 .transpose()?,
             pw_status: PwStatus::parse(
-                data.get(&(Do::PwStatusBytes as u32)).ok_or_else(|| {
-                    OpenPgpError::InvalidResponse("Missing PW status bytes".into())
-                })?,
+                data.get(&(Do::PwStatusBytes as u32))
+                    .ok_or_else(|| OpenPgpError::InvalidData("Missing PW status bytes".into()))?,
             )?,
             fingerprints: parse_fingerprints(
                 data.get(&TAG_FINGERPRINTS)
@@ -870,7 +879,7 @@ impl ApplicationRelatedData {
         let data = parse_tlv_dict(&outer)?;
         let aid_bytes = data
             .get(&(Do::Aid as u32))
-            .ok_or_else(|| OpenPgpError::InvalidResponse("Missing AID".into()))?;
+            .ok_or_else(|| OpenPgpError::InvalidData("Missing AID".into()))?;
         let historical = data
             .get(&(Do::HistoricalBytes as u32))
             .cloned()
@@ -980,11 +989,11 @@ impl Kdf {
         let mut salt_reset = [0u8; 8];
         let mut salt_admin = [0u8; 8];
         getrandom::fill(&mut salt_user)
-            .map_err(|e| OpenPgpError::InvalidParameter(format!("RNG error: {e}")))?;
+            .map_err(|e| OpenPgpError::InvalidData(format!("RNG error: {e}")))?;
         getrandom::fill(&mut salt_reset)
-            .map_err(|e| OpenPgpError::InvalidParameter(format!("RNG error: {e}")))?;
+            .map_err(|e| OpenPgpError::InvalidData(format!("RNG error: {e}")))?;
         getrandom::fill(&mut salt_admin)
-            .map_err(|e| OpenPgpError::InvalidParameter(format!("RNG error: {e}")))?;
+            .map_err(|e| OpenPgpError::InvalidData(format!("RNG error: {e}")))?;
 
         let initial_hash_user = kdf_s2k_hash(
             hash_algorithm,
@@ -1223,7 +1232,7 @@ fn pad_message(
                 SignHashAlgorithm::Sha384 => PKCS1_SHA384,
                 SignHashAlgorithm::Sha512 => PKCS1_SHA512,
                 SignHashAlgorithm::None => {
-                    return Err(OpenPgpError::InvalidParameter(
+                    return Err(OpenPgpError::InvalidData(
                         "Hash algorithm required for RSA".into(),
                     ));
                 }
@@ -1391,7 +1400,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         let dict = parse_tlv_dict(&inner)?;
         let counter_bytes = dict
             .get(&TAG_SIGNATURE_COUNTER)
-            .ok_or_else(|| OpenPgpError::InvalidResponse("Missing signature counter".into()))?;
+            .ok_or_else(|| OpenPgpError::InvalidData("Missing signature counter".into()))?;
         Ok(bytes2int(counter_bytes) as u32)
     }
 
@@ -1436,7 +1445,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         let min_len: usize = if matches!(pw, Pw::User) { 6 } else { 8 };
         let max_len = self.app_data.discretionary.pw_status.get_max_len(pw) as usize;
         if pin_len < min_len || pin_len > max_len {
-            return Err(OpenPgpError::InvalidParameter(format!(
+            return Err(OpenPgpError::InvalidData(format!(
                 "PIN length must be in the range {min_len}-{max_len}"
             )));
         }
@@ -1634,10 +1643,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .get_algorithm_attributes(key_ref)
             .cloned()
             .ok_or_else(|| {
-                OpenPgpError::InvalidResponse(format!(
-                    "No algorithm attributes for key {:?}",
-                    key_ref
-                ))
+                OpenPgpError::InvalidData(format!("No algorithm attributes for key {:?}", key_ref))
             })
     }
 
@@ -1728,8 +1734,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     pub fn get_uif(&mut self, key_ref: KeyRef) -> Result<Uif, OpenPgpError> {
         if self.version >= Version(4, 2, 0) {
             let data = self.get_data(key_ref.uif_do())?;
-            Uif::parse(&data)
-                .ok_or_else(|| OpenPgpError::InvalidResponse("Invalid UIF value".into()))
+            Uif::parse(&data).ok_or_else(|| OpenPgpError::InvalidData("Invalid UIF value".into()))
         } else {
             Ok(Uif::Off)
         }
@@ -1746,7 +1751,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
         let current = self.get_uif(key_ref)?;
         if current.is_fixed() {
-            return Err(OpenPgpError::InvalidParameter(
+            return Err(OpenPgpError::InvalidData(
                 "Cannot change UIF when set to FIXED".into(),
             ));
         }
@@ -1954,14 +1959,14 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             require_version(self.version, Version(5, 2, 0), "ATT certificate")?;
             let data = self.get_data(Do::AttCertificate)?;
             if data.is_empty() {
-                return Err(OpenPgpError::InvalidResponse("No certificate found".into()));
+                return Err(OpenPgpError::InvalidData("No certificate found".into()));
             }
             return Ok(data);
         }
         self.select_certificate(key_ref)?;
         let data = self.get_data(Do::CardholderCertificate)?;
         if data.is_empty() {
-            return Err(OpenPgpError::InvalidResponse("No certificate found".into()));
+            return Err(OpenPgpError::InvalidData("No certificate found".into()));
         }
         Ok(data)
     }
@@ -2005,7 +2010,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             ));
         }
         if length == 0 || length > ec.challenge_max_length {
-            return Err(OpenPgpError::InvalidParameter(
+            return Err(OpenPgpError::InvalidData(
                 "Unsupported challenge length".into(),
             ));
         }
