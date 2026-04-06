@@ -180,6 +180,8 @@ impl From<SmartCardError> for HsmAuthError {
             SmartCardError::ApplicationNotAvailable => {
                 HsmAuthError::NotSupported("Application not available".into())
             }
+            SmartCardError::NotSupported(msg) => HsmAuthError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => HsmAuthError::InvalidData(msg),
             other => HsmAuthError::Connection(other),
         }
     }

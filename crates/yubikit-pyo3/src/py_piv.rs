@@ -41,16 +41,6 @@ fn piv_err(e: piv::PivError) -> PyErr {
                 Err(_) => PyRuntimeError::new_err(msg),
             })
         }
-        piv::PivError::PinBlocked => Python::with_gil(|py| match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("InvalidPinError") {
-                Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err("PIN blocked"),
-                },
-                Err(_) => PyRuntimeError::new_err("PIN blocked"),
-            },
-            Err(_) => PyRuntimeError::new_err("PIN blocked"),
-        }),
         piv::PivError::InvalidData(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
             Ok(module) => match module.getattr("BadResponseError") {
                 Ok(cls) => match cls.call1((msg.clone(),)) {

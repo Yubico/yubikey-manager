@@ -66,8 +66,6 @@ pub enum PivError {
     InvalidData(String),
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
-    #[error("PIN blocked")]
-    PinBlocked,
     #[error("Connection error: {0}")]
     Connection(SmartCardError),
 }
@@ -78,6 +76,8 @@ impl From<SmartCardError> for PivError {
             SmartCardError::ApplicationNotAvailable => {
                 PivError::NotSupported("Application not available".into())
             }
+            SmartCardError::NotSupported(msg) => PivError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => PivError::InvalidData(msg),
             other => PivError::Connection(other),
         }
     }

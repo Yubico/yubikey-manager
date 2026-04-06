@@ -64,6 +64,8 @@ impl From<SmartCardError> for SecurityDomainError {
             SmartCardError::ApplicationNotAvailable => {
                 SecurityDomainError::NotSupported("Application not available".into())
             }
+            SmartCardError::NotSupported(msg) => SecurityDomainError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => SecurityDomainError::InvalidData(msg),
             other => SecurityDomainError::Connection(other),
         }
     }

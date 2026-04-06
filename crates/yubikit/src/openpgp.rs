@@ -103,6 +103,8 @@ impl From<SmartCardError> for OpenPgpError {
             SmartCardError::ApplicationNotAvailable => {
                 OpenPgpError::NotSupported("Application not available".into())
             }
+            SmartCardError::NotSupported(msg) => OpenPgpError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => OpenPgpError::InvalidData(msg),
             other => OpenPgpError::Connection(other),
         }
     }

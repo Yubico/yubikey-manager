@@ -147,6 +147,8 @@ impl From<SmartCardError> for OathError {
             SmartCardError::ApplicationNotAvailable => {
                 OathError::NotSupported("Application not available".into())
             }
+            SmartCardError::NotSupported(msg) => OathError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => OathError::InvalidData(msg),
             other => OathError::Connection(other),
         }
     }
