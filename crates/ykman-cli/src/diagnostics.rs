@@ -554,22 +554,32 @@ fn probe_hsmauth(
     }
 }
 
-fn probe_ctap2_pin(ctap2: &fido2_client::ctap2::Ctap2) -> ResultOrError<PinStatusDiag> {
+fn probe_ctap2_pin(
+    ctap2: fido2_client::ctap2::Ctap2<HidCtapDevice>,
+) -> (
+    ResultOrError<PinStatusDiag>,
+    fido2_client::ctap2::Ctap2<HidCtapDevice>,
+) {
     let info = ctap2.info();
     if info.options.get("clientPin") != Some(&true) {
-        return ResultOrError::Ok(PinStatusDiag {
-            configured: false,
-            retries: None,
-            power_cycle: None,
-            bio_enroll: None,
-        });
+        return (
+            ResultOrError::Ok(PinStatusDiag {
+                configured: false,
+                retries: None,
+                power_cycle: None,
+                bio_enroll: None,
+            }),
+            ctap2,
+        );
     }
 
+    let bio_enroll_option = info.options.get("bioEnroll").copied();
+
     match fido2_client::pin::ClientPin::new(ctap2, None) {
-        Ok(client_pin) => {
+        Ok(mut client_pin) => {
             let (retries, power_cycle) = client_pin.get_pin_retries().unwrap_or((0, None));
 
-            let bio_enroll = match info.options.get("bioEnroll") {
+            let bio_enroll = match bio_enroll_option {
                 Some(true) => Some(
                     client_pin
                         .get_uv_retries()
@@ -580,14 +590,18 @@ fn probe_ctap2_pin(ctap2: &fido2_client::ctap2::Ctap2) -> ResultOrError<PinStatu
                 _ => None,
             };
 
-            ResultOrError::Ok(PinStatusDiag {
-                configured: true,
-                retries: Some(retries),
-                power_cycle,
-                bio_enroll,
-            })
+            let ctap2 = client_pin.into_ctap();
+            (
+                ResultOrError::Ok(PinStatusDiag {
+                    configured: true,
+                    retries: Some(retries),
+                    power_cycle,
+                    bio_enroll,
+                }),
+                ctap2,
+            )
         }
-        Err(e) => ResultOrError::Err(format!("{e}")),
+        Err(e) => panic!("ClientPin::new failed after info check: {e}"),
     }
 }
 
@@ -802,16 +816,16 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                         if caps.has_cbor() {
                             let adapter = HidCtapDevice::new(conn);
                             let (ctap2, mgmt) =
-                                match fido2_client::ctap2::Ctap2::new(&adapter, false) {
+                                match fido2_client::ctap2::Ctap2::new(adapter, false) {
                                     Ok(ctap2) => {
                                         let info_diag = ctap2_info_diag(ctap2.info());
-                                        let pin = probe_ctap2_pin(&ctap2);
+                                        let (pin, ctap2) = probe_ctap2_pin(ctap2);
                                         let ctap2_diag = ResultOrError::Ok(Ctap2Diag {
                                             info: info_diag,
                                             pin,
                                         });
 
-                                        let conn = adapter.into_connection();
+                                        let conn = ctap2.into_device().into_connection();
                                         let mgmt = match read_info_fido(conn) {
                                             Ok((info, _)) => {
                                                 ResultOrError::Ok(management_diag(&info))
@@ -820,16 +834,10 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                                         };
                                         (ctap2_diag, mgmt)
                                     }
-                                    Err(e) => {
-                                        let conn = adapter.into_connection();
-                                        let mgmt = match read_info_fido(conn) {
-                                            Ok((info, _)) => {
-                                                ResultOrError::Ok(management_diag(&info))
-                                            }
-                                            Err((e, _)) => ResultOrError::Err(format!("{e}")),
-                                        };
-                                        (ResultOrError::Err(format!("{e}")), mgmt)
-                                    }
+                                    Err(e) => (
+                                        ResultOrError::Err(format!("{e}")),
+                                        ResultOrError::Err(format!("{e}")),
+                                    ),
                                 };
 
                             devices.insert(

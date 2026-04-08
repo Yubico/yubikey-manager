@@ -27,7 +27,7 @@ struct HidCtapDevice {
 
 impl CtapDevice for HidCtapDevice {
     fn call(
-        &self,
+        &mut self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
@@ -138,7 +138,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
 
 impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
     fn call(
-        &self,
+        &mut self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
@@ -159,10 +159,10 @@ impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
 
 // --- Main ---
 
-fn run_selection(device: &dyn CtapDevice, transport_name: &str) {
+fn run_selection<D: CtapDevice>(device: D, transport_name: &str) {
     println!("=== Testing selection over {transport_name} ===");
 
-    let ctap2 = match Ctap2::new(device, false) {
+    let mut ctap2 = match Ctap2::new(device, false) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to init CTAP2: {e}");
@@ -212,7 +212,7 @@ fn main() {
             match HidFidoConnection::open(dev_info) {
                 Ok(conn) => {
                     let device = HidCtapDevice { conn };
-                    run_selection(&device, "HID");
+                    run_selection(device, "HID");
                 }
                 Err(e) => eprintln!("Failed to open HID device: {e}"),
             }
@@ -225,7 +225,7 @@ fn main() {
             println!("Found PC/SC reader: {reader}");
             match PcscSmartCardConnection::open(reader) {
                 Ok(conn) => match SmartCardCtapDevice::open(conn) {
-                    Ok(device) => run_selection(&device, &format!("PC/SC ({reader})")),
+                    Ok(device) => run_selection(device, &format!("PC/SC ({reader})")),
                     Err(e) => eprintln!("  FIDO not available: {e}"),
                 },
                 Err(e) => eprintln!("  Failed to connect: {e}"),

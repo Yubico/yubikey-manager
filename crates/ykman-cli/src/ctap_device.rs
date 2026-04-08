@@ -31,7 +31,7 @@ impl HidCtapDevice {
 
 impl CtapDevice for HidCtapDevice {
     fn call(
-        &self,
+        &mut self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
@@ -203,7 +203,7 @@ impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
 
 impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
     fn call(
-        &self,
+        &mut self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
@@ -218,5 +218,40 @@ impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
 
     fn capabilities(&self) -> u8 {
         self.capabilities
+    }
+}
+
+/// Enum wrapping both FIDO device types for use with generic `Ctap2<D>`.
+pub enum FidoDevice {
+    Hid(HidCtapDevice),
+    SmartCard(SmartCardCtapDevice<yubikit::transport::pcsc::PcscSmartCardConnection>),
+}
+
+impl CtapDevice for FidoDevice {
+    fn call(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: &mut dyn FnMut(u8),
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, CtapError> {
+        match self {
+            Self::Hid(d) => d.call(cmd, data, on_keepalive, cancel),
+            Self::SmartCard(d) => d.call(cmd, data, on_keepalive, cancel),
+        }
+    }
+
+    fn capabilities(&self) -> u8 {
+        match self {
+            Self::Hid(d) => d.capabilities(),
+            Self::SmartCard(d) => d.capabilities(),
+        }
+    }
+
+    fn close(&mut self) {
+        match self {
+            Self::Hid(d) => d.close(),
+            Self::SmartCard(_) => {}
+        }
     }
 }
