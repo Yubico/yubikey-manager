@@ -89,7 +89,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
 
     if fido2_enabled {
         let ctap2 = Ctap2::new(ctap_dev, false)
-            .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+            .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
         let ctap_info = ctap2.info().clone();
 
         // FIPS status
@@ -109,7 +109,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
 
         // PIN status
         let mut client_pin = ClientPin::new(ctap2, None)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
         if ctap_info.options.get("clientPin") == Some(&true) {
             if ctap_info.force_pin_change {
                 println!(
@@ -261,7 +261,7 @@ pub fn run_reset(
     let ctap_dev = open_fido_device(dev, scp_params)?;
 
     let mut ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
     let ctap_info = ctap2.info();
 
     // Check transport restrictions
@@ -346,10 +346,10 @@ pub fn run_access_change_pin(
     let ctap_dev = open_fido_device(dev, scp_params)?;
 
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
     let pin_is_set = ctap2.info().options.get("clientPin") == Some(&true);
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
     if pin_is_set {
         // Change existing PIN
@@ -414,12 +414,12 @@ pub fn run_access_verify_pin(
     let ctap_dev = open_fido_device(dev, scp_params)?;
 
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "PIN verification")?;
 
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
     // Get a PIN token to verify the PIN
     client_pin
@@ -491,7 +491,7 @@ pub fn run_access_force_change(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     if !ctap2
         .info()
@@ -506,7 +506,7 @@ pub fn run_access_force_change(
     }
     let pin_str = require_pin(&ctap2, pin, "Force change PIN")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x20)?; // AuthenticatorConfig
     let ctap2 = client_pin.into_ctap();
 
@@ -528,7 +528,7 @@ pub fn run_access_set_min_length(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     {
         let info = ctap2.info();
@@ -561,7 +561,7 @@ pub fn run_access_set_min_length(
 
     let pin_str = require_pin(&ctap2, pin, "Set minimum PIN length")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x20)?;
     let ctap2 = client_pin.into_ctap();
 
@@ -587,7 +587,7 @@ pub fn run_credentials_list(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     if !ctap2
         .info()
@@ -604,7 +604,7 @@ pub fn run_credentials_list(
 
     let pin_str = require_pin(&ctap2, pin, "Credential Management")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x04)?; // CredentialManagement
     let ctap2 = client_pin.into_ctap();
 
@@ -665,11 +665,11 @@ pub fn run_credentials_delete(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Credential Management")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x04)?;
     let ctap2 = client_pin.into_ctap();
 
@@ -745,7 +745,7 @@ pub fn run_fingerprints_list(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     if !ctap2.info().options.contains_key("bioEnroll") {
         return Err(CliError(
@@ -755,12 +755,12 @@ pub fn run_fingerprints_list(
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x08)?; // BioEnrollment
     let ctap2 = client_pin.into_ctap();
 
     let mut bio = fido2_client::bio::FPBioEnrollment::new(ctap2, protocol, token)
-        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     let enrollments = match bio.enumerate_enrollments() {
         Ok(resp) => {
@@ -822,16 +822,16 @@ pub fn run_fingerprints_add(
 
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x08)?;
     let ctap2 = client_pin.into_ctap();
 
     let mut bio = fido2_client::bio::FPBioEnrollment::new(ctap2, protocol, token)
-        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     // Set up Ctrl+C handler for cancellation
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
@@ -906,16 +906,16 @@ pub fn run_fingerprints_rename(
 
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x08)?;
     let ctap2 = client_pin.into_ctap();
 
     let mut bio = fido2_client::bio::FPBioEnrollment::new(ctap2, protocol, token)
-        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     let key =
         hex::decode(template_id).map_err(|e| CliError(format!("Invalid template ID hex: {e}")))?;
@@ -935,16 +935,16 @@ pub fn run_fingerprints_delete(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let pin_str = require_pin(&ctap2, pin, "Biometrics")?;
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_pin_token(&mut client_pin, &pin_str, 0x08)?;
     let ctap2 = client_pin.into_ctap();
 
     let mut bio = fido2_client::bio::FPBioEnrollment::new(ctap2, protocol, token)
-        .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
     let key = hex::decode(template_id)
         .map_err(|_| CliError(format!("Invalid template ID hex: {template_id}")))?;
@@ -973,7 +973,7 @@ pub fn run_config_toggle_always_uv(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     let always_uv = match ctap2.info().options.get("alwaysUv") {
         Some(&v) => v,
@@ -992,7 +992,7 @@ pub fn run_config_toggle_always_uv(
     }
 
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_optional_pin_token(&mut client_pin, pin, 0x20)?; // AuthenticatorConfig
     let ctap2 = client_pin.into_ctap();
 
@@ -1015,7 +1015,7 @@ pub fn run_config_enable_ep_attestation(
 ) -> Result<(), CliError> {
     let ctap_dev = open_fido_device(dev, scp_params)?;
     let ctap2 = Ctap2::new(ctap_dev, false)
-        .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
 
     {
         let options = &ctap2.info().options;
@@ -1033,7 +1033,7 @@ pub fn run_config_enable_ep_attestation(
     }
 
     let mut client_pin = ClientPin::new(ctap2, None)
-        .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        .map_err(|(_, e)| CliError(format!("Failed to create ClientPin: {e}")))?;
     let (token, protocol) = get_optional_pin_token(&mut client_pin, pin, 0x20)?; // AuthenticatorConfig
     let ctap2 = client_pin.into_ctap();
 

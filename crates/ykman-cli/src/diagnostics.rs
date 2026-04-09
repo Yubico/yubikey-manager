@@ -601,7 +601,7 @@ fn probe_ctap2_pin(
                 ctap2,
             )
         }
-        Err(e) => panic!("ClientPin::new failed after info check: {e}"),
+        Err((_, e)) => panic!("ClientPin::new failed after info check: {e}"),
     }
 }
 
@@ -834,7 +834,7 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                                         };
                                         (ctap2_diag, mgmt)
                                     }
-                                    Err(e) => (
+                                    Err((_, e)) => (
                                         ResultOrError::Err(format!("{e}")),
                                         ResultOrError::Err(format!("{e}")),
                                     ),
