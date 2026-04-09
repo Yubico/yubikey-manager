@@ -1,3 +1,7 @@
+* Version 5.9.1
+ ** Improve device information when listing YubiKeys with no serial number visible over OTP.
+ ** Windows and MacOS installers build with Python 3.14.4
+
 * Version 5.9.0 (released 2026-01-22)
  ** OATH: Add support for importing credentials from PSKC files.
  ** OATH: Add --generate flag to "oath accounts add" command to generate random secrets.
