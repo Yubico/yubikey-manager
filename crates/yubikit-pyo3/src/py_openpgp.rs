@@ -3,7 +3,9 @@ use yubikit::openpgp::{
     self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
 };
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+};
 
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;

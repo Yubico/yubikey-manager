@@ -192,7 +192,12 @@ impl FidoConnection {
     }
 
     /// Send a CTAP HID command and receive the response.
-    fn call<'py>(&mut self, py: Python<'py>, cmd: u8, data: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
+    fn call<'py>(
+        &mut self,
+        py: Python<'py>,
+        cmd: u8,
+        data: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
         let conn = self
             .inner
             .as_mut()

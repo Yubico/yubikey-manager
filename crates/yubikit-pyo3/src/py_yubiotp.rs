@@ -3,7 +3,9 @@ use pyo3::types::PyBytes;
 use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py,
+};
 
 fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
     use pyo3::exceptions::*;

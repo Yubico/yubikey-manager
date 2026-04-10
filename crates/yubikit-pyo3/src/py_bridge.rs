@@ -114,9 +114,7 @@ impl SmartCardConnection for PythonSmartCardConnection {
 ///
 /// **Slow path**: wrap the Python object in a `PythonSmartCardConnection`
 /// bridge that calls `send_and_receive()` via the GIL.
-pub fn extract_smartcard_connection(
-    obj: &Bound<'_, PyAny>,
-) -> PyResult<BoxedSmartCardConnection> {
+pub fn extract_smartcard_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedSmartCardConnection> {
     // Fast path: native PcscConnection
     if let Ok(pcsc) = obj.downcast::<PcscConnection>() {
         let conn = pcsc.borrow_mut().take_inner()?;

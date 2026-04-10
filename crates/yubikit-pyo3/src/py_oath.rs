@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
 use yubikit::oath::{self, OathError, OathSession as RustOathSession};
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+};
 
 fn oath_err(e: OathError) -> PyErr {
     use pyo3::exceptions::*;

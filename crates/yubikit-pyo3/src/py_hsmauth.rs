@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
 use yubikit::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+};
 
 fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     use pyo3::exceptions::*;

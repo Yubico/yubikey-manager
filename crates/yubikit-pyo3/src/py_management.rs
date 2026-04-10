@@ -3,7 +3,9 @@ use yubikit::management::{DeviceInfo, ManagementSession};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::HidOtpConnection;
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py,
+};
 
 fn management_err(e: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyOSError::new_err(e.to_string())

@@ -4,7 +4,9 @@ use yubikit::securitydomain::{
     StaticKeys,
 };
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+};
 
 fn sd_err(e: SecurityDomainError) -> PyErr {
     use pyo3::exceptions::*;
@@ -46,7 +48,9 @@ impl SecurityDomainSession {
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
 
-    fn session_mut(&mut self) -> PyResult<&mut RustSecurityDomainSession<BoxedSmartCardConnection>> {
+    fn session_mut(
+        &mut self,
+    ) -> PyResult<&mut RustSecurityDomainSession<BoxedSmartCardConnection>> {
         self.inner
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))

@@ -35,7 +35,9 @@ use pyo3::prelude::*;
 use yubikit::core::Version;
 use yubikit::smartcard::SmartCardProtocol as RustSmartCardProtocol;
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, init_scp_from_py, smartcard_err};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, init_scp_from_py, smartcard_err,
+};
 
 #[pyclass]
 pub struct SmartCardProtocol {

@@ -3,7 +3,9 @@ use yubikit::piv::{
     self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot, TouchPolicy,
 };
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+};
 
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;

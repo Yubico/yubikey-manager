@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use fido2_client::ctap::{self, CtapDevice, CtapError};
 use fido2_client::ctap2::Ctap2;
+use yubikit::fido::FidoConnection;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
@@ -35,7 +36,9 @@ impl CtapDevice for HidCtapDevice {
     ) -> Result<Vec<u8>, CtapError> {
         self.conn
             .call_with_keepalive(cmd, data, on_keepalive, cancel)
-            .map_err(|e| CtapError::TransportError(e.to_string()))
+            .map_err(|e: yubikit::transport::ctaphid::FidoError| {
+                CtapError::TransportError(e.to_string())
+            })
     }
 
     fn capabilities(&self) -> u8 {
@@ -164,7 +167,7 @@ fn run_selection<D: CtapDevice>(device: D, transport_name: &str) {
 
     let mut ctap2 = match Ctap2::new(device, false) {
         Ok(c) => c,
-        Err(e) => {
+        Err((_, e)) => {
             eprintln!("Failed to init CTAP2: {e}");
             return;
         }
