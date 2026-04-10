@@ -1327,7 +1327,7 @@ pub fn get_name(info: &DeviceInfo) -> String {
         if !usb_supported.contains(Capability::FIDO2) {
             return "FIDO U2F Security Key".to_string();
         }
-        return "Security Key".to_string();
+        return "Security Key by Yubico".to_string();
     }
 
     // Pre-YK4 devices
@@ -1849,7 +1849,7 @@ mod tests {
 
     #[test]
     fn test_sky_preview_firmware() {
-        // SKY with preview firmware should still show as "Security Key",
+        // SKY with preview firmware should still show as "Security Key by Yubico",
         // not "YubiKey Preview"
         let mut info = make_info(
             Version(5, 0, 2),
@@ -1863,7 +1863,7 @@ mod tests {
         );
         apply_device_info_fixups(&mut info);
         assert!(info.is_sky);
-        assert_eq!(get_name(&info), "Security Key");
+        assert_eq!(get_name(&info), "Security Key by Yubico");
     }
 
     #[test]
