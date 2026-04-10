@@ -1377,6 +1377,7 @@ mod yubiotp {
 
 mod fido {
     use super::*;
+    use yubikit::fido::FidoConnection;
 
     /// Test that cancelling a CTAP2 selection command over HID works.
     ///
@@ -1390,7 +1391,7 @@ mod fido {
         require_capability!(Capability::FIDO2);
 
         let (dev, _) = get_device_and_info();
-        let conn = dev.open_fido().expect("open FIDO HID");
+        let mut conn = dev.open_fido().expect("open FIDO HID");
 
         // Cancel after the first keepalive is received (the cancel command
         // can only be sent in response to a keepalive packet).

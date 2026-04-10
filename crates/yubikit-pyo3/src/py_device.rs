@@ -25,7 +25,7 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use crate::py_bridge::PySmartCardConnection;
+use crate::py_bridge::extract_smartcard_connection;
 use crate::py_hid;
 use crate::py_management::device_info_to_dict;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError};
@@ -79,7 +79,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyOb
     }
 
     // Try SmartCard connection (duck-typed via send_and_receive)
-    let conn = PySmartCardConnection::from_py(connection).map_err(|_| {
+    let conn = extract_smartcard_connection(connection).map_err(|_| {
         PyTypeError::new_err("Expected a SmartCardConnection, OtpConnection, or FidoConnection")
     })?;
     let (info, _conn) = device::read_info_ccid(conn).map_err(device_err)?;

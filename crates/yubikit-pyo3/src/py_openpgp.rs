@@ -3,7 +3,7 @@ use yubikit::openpgp::{
     self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
 };
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
 
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     use pyo3::exceptions::*;
@@ -156,7 +156,7 @@ fn parse_pw(v: u8) -> PyResult<Pw> {
 
 #[pyclass]
 pub struct OpenPgpSession {
-    inner: RustOpenPgpSession<PySmartCardConnection>,
+    inner: RustOpenPgpSession<BoxedSmartCardConnection>,
 }
 
 #[pymethods]
@@ -167,7 +167,7 @@ impl OpenPgpSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustOpenPgpSession::new_with_scp(conn, &scp_params)

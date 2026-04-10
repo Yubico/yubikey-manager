@@ -4,7 +4,7 @@ use yubikit::securitydomain::{
     StaticKeys,
 };
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
 
 fn sd_err(e: SecurityDomainError) -> PyErr {
     use pyo3::exceptions::*;
@@ -36,17 +36,17 @@ fn parse_curve(v: u8) -> PyResult<Curve> {
 
 #[pyclass]
 pub struct SecurityDomainSession {
-    inner: Option<RustSecurityDomainSession<PySmartCardConnection>>,
+    inner: Option<RustSecurityDomainSession<BoxedSmartCardConnection>>,
 }
 
 impl SecurityDomainSession {
-    fn session(&self) -> PyResult<&RustSecurityDomainSession<PySmartCardConnection>> {
+    fn session(&self) -> PyResult<&RustSecurityDomainSession<BoxedSmartCardConnection>> {
         self.inner
             .as_ref()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
 
-    fn session_mut(&mut self) -> PyResult<&mut RustSecurityDomainSession<PySmartCardConnection>> {
+    fn session_mut(&mut self) -> PyResult<&mut RustSecurityDomainSession<BoxedSmartCardConnection>> {
         self.inner
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
@@ -57,7 +57,7 @@ impl SecurityDomainSession {
 impl SecurityDomainSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         let inner = RustSecurityDomainSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
         Ok(Self { inner: Some(inner) })
     }

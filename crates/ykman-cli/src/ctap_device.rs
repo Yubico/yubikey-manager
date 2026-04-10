@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 
 use fido2_client::ctap::{self, CtapDevice, CtapError, CtapStatus};
+use yubikit::fido::FidoConnection;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
 use yubikit::transport::ctaphid::HidFidoConnection;
 

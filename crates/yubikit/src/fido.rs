@@ -31,9 +31,9 @@ use crate::transport::ctaphid::FidoError;
 
 /// Abstract FIDO connection — send CTAP HID commands.
 pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
-    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError>;
+    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError>;
     fn call_with_keepalive(
-        &self,
+        &mut self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
@@ -41,4 +41,60 @@ pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
     ) -> Result<Vec<u8>, FidoError>;
     fn device_version(&self) -> (u8, u8, u8);
     fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability;
+}
+
+impl crate::core::Connection for Box<dyn FidoConnection + Send> {
+    type Error = FidoError;
+    fn close(&mut self) {
+        (**self).close();
+    }
+}
+
+impl FidoConnection for Box<dyn FidoConnection + Send> {
+    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
+        (**self).call(cmd, data)
+    }
+    fn call_with_keepalive(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: &mut dyn FnMut(u8),
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, FidoError> {
+        (**self).call_with_keepalive(cmd, data, on_keepalive, cancel)
+    }
+    fn device_version(&self) -> (u8, u8, u8) {
+        (**self).device_version()
+    }
+    fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability {
+        (**self).capabilities()
+    }
+}
+
+impl crate::core::Connection for Box<dyn FidoConnection + Send + Sync> {
+    type Error = FidoError;
+    fn close(&mut self) {
+        (**self).close();
+    }
+}
+
+impl FidoConnection for Box<dyn FidoConnection + Send + Sync> {
+    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
+        (**self).call(cmd, data)
+    }
+    fn call_with_keepalive(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: &mut dyn FnMut(u8),
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, FidoError> {
+        (**self).call_with_keepalive(cmd, data, on_keepalive, cancel)
+    }
+    fn device_version(&self) -> (u8, u8, u8) {
+        (**self).device_version()
+    }
+    fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability {
+        (**self).capabilities()
+    }
 }

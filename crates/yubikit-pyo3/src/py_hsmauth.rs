@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
 
 fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     use pyo3::exceptions::*;
@@ -40,7 +40,7 @@ fn cred_to_tuple(c: hsmauth::Credential) -> (String, u8, u32, bool) {
 
 #[pyclass]
 pub struct HsmAuthSession {
-    inner: RustHsmAuthSession<PySmartCardConnection>,
+    inner: RustHsmAuthSession<BoxedSmartCardConnection>,
 }
 
 #[pymethods]
@@ -51,7 +51,7 @@ impl HsmAuthSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustHsmAuthSession::new_with_scp(conn, &scp_params)

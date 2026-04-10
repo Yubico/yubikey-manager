@@ -3,7 +3,7 @@ use yubikit::management::{DeviceInfo, ManagementSession};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::HidOtpConnection;
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py};
 
 fn management_err(e: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyOSError::new_err(e.to_string())
@@ -69,7 +69,7 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
 
 #[pyclass(name = "ManagementSession", unsendable)]
 pub struct ManagementCcidSession {
-    inner: ManagementSession<PySmartCardConnection>,
+    inner: ManagementSession<BoxedSmartCardConnection>,
 }
 
 #[pymethods]
@@ -80,7 +80,7 @@ impl ManagementCcidSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = ManagementSession::new_with_scp(conn, &scp_params)

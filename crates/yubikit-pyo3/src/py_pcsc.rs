@@ -14,8 +14,22 @@ fn list_readers() -> PyResult<Vec<String>> {
 }
 
 #[pyclass]
-struct PcscConnection {
-    inner: pcsc::PcscSmartCardConnection,
+pub struct PcscConnection {
+    inner: Option<pcsc::PcscSmartCardConnection>,
+}
+
+impl PcscConnection {
+    /// Take the inner native connection, leaving None behind.
+    pub fn take_inner(&mut self) -> PyResult<pcsc::PcscSmartCardConnection> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyOSError::new_err("PCSC connection already consumed or closed"))
+    }
+
+    /// Restore a previously taken inner connection.
+    pub fn restore_inner(&mut self, conn: pcsc::PcscSmartCardConnection) {
+        self.inner = Some(conn);
+    }
 }
 
 #[pymethods]
@@ -24,7 +38,9 @@ impl PcscConnection {
     #[pyo3(signature = (reader_name, exclusive=true))]
     fn new(reader_name: &str, exclusive: bool) -> PyResult<Self> {
         Ok(Self {
-            inner: pcsc::PcscSmartCardConnection::new(reader_name, exclusive).map_err(pcsc_err)?,
+            inner: Some(
+                pcsc::PcscSmartCardConnection::new(reader_name, exclusive).map_err(pcsc_err)?,
+            ),
         })
     }
 
@@ -33,41 +49,69 @@ impl PcscConnection {
     #[staticmethod]
     fn open(reader_name: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: pcsc::PcscSmartCardConnection::open(reader_name).map_err(pcsc_err)?,
+            inner: Some(pcsc::PcscSmartCardConnection::open(reader_name).map_err(pcsc_err)?),
         })
     }
 
     fn get_atr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let atr = self.inner.get_atr().map_err(pcsc_err)?;
+        let conn = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        let atr = conn.get_atr().map_err(pcsc_err)?;
         Ok(PyBytes::new(py, &atr))
     }
 
     fn transmit<'py>(&self, py: Python<'py>, apdu: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
-        let resp = self.inner.transmit(apdu).map_err(pcsc_err)?;
+        let conn = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        let resp = conn.transmit(apdu).map_err(pcsc_err)?;
         Ok(PyBytes::new(py, &resp))
     }
 
     fn disconnect(&mut self) -> PyResult<()> {
-        self.inner.disconnect().map_err(pcsc_err)
+        let conn = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        conn.disconnect().map_err(pcsc_err)
     }
 
     #[pyo3(signature = (exclusive=false))]
     fn connect(&mut self, exclusive: bool) -> PyResult<()> {
-        self.inner.connect(exclusive).map_err(pcsc_err)
+        let conn = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        conn.connect(exclusive).map_err(pcsc_err)
     }
 
     #[pyo3(signature = (exclusive=true))]
     fn reconnect(&mut self, exclusive: bool) -> PyResult<()> {
-        self.inner.reconnect(exclusive).map_err(pcsc_err)
+        let conn = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        conn.reconnect(exclusive).map_err(pcsc_err)
     }
 
     /// Get the detected transport type ("usb" or "nfc").
     #[getter]
-    fn transport(&self) -> &'static str {
-        match self.inner.transport() {
+    fn transport(&self) -> PyResult<&'static str> {
+        let conn = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
+        Ok(match conn.transport() {
             yubikit::core::Transport::Usb => "usb",
             yubikit::core::Transport::Nfc => "nfc",
-        }
+        })
+    }
+
+    fn close(&mut self) {
+        self.inner.take();
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -80,7 +124,8 @@ impl PcscConnection {
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
-        self.disconnect()
+        self.close();
+        Ok(())
     }
 }
 

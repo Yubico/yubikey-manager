@@ -35,11 +35,11 @@ use pyo3::prelude::*;
 use yubikit::core::Version;
 use yubikit::smartcard::SmartCardProtocol as RustSmartCardProtocol;
 
-use crate::py_bridge::{PySmartCardConnection, init_scp_from_py, smartcard_err};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, init_scp_from_py, smartcard_err};
 
 #[pyclass]
 pub struct SmartCardProtocol {
-    inner: RustSmartCardProtocol<PySmartCardConnection>,
+    inner: RustSmartCardProtocol<BoxedSmartCardConnection>,
     /// Keep a reference to the Python connection so it can be accessed.
     connection: PyObject,
 }
@@ -49,7 +49,7 @@ impl SmartCardProtocol {
     #[new]
     #[pyo3(signature = (connection, ins_send_remaining=0xC0))]
     fn new(connection: &Bound<'_, PyAny>, ins_send_remaining: u8) -> PyResult<Self> {
-        let py_conn = PySmartCardConnection::from_py(connection)?;
+        let py_conn = extract_smartcard_connection(connection)?;
         let protocol =
             RustSmartCardProtocol::new(py_conn).with_ins_send_remaining(ins_send_remaining);
         Ok(Self {

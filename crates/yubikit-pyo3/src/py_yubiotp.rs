@@ -3,7 +3,7 @@ use pyo3::types::PyBytes;
 use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py};
 
 fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
     use pyo3::exceptions::*;
@@ -52,7 +52,7 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
 
 #[pyclass(name = "YubiOtpSession", unsendable)]
 pub struct PyYubiOtpSession {
-    session: YubiOtpSession<PySmartCardConnection>,
+    session: YubiOtpSession<BoxedSmartCardConnection>,
 }
 
 #[pymethods]
@@ -63,7 +63,7 @@ impl PyYubiOtpSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let session =

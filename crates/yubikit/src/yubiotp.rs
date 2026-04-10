@@ -1315,7 +1315,7 @@ struct OtpYubiOtp<T: OtpConnection> {
 impl<T: OtpConnection> OtpYubiOtp<T> {
     fn open(connection: T) -> Result<Self, (YubiOtpError<OtpError>, T)> {
         log::debug!("Opening OtpYubiOtp (HID)");
-        let protocol = match OtpProtocol::new(connection) {
+        let mut protocol = match OtpProtocol::new(connection) {
             Ok(p) => p,
             Err((e, conn)) => return Err((e.into(), conn)),
         };

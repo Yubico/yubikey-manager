@@ -151,8 +151,40 @@ pub enum OtpError {
 
 /// Trait for low-level OTP HID transport (feature report read/write).
 pub trait OtpConnection: crate::core::Connection<Error = OtpError> {
-    fn otp_receive(&self) -> Result<Vec<u8>, OtpError>;
-    fn otp_send(&self, data: &[u8]) -> Result<(), OtpError>;
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError>;
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError>;
+}
+
+impl crate::core::Connection for Box<dyn OtpConnection + Send> {
+    type Error = OtpError;
+    fn close(&mut self) {
+        (**self).close();
+    }
+}
+
+impl OtpConnection for Box<dyn OtpConnection + Send> {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        (**self).otp_receive()
+    }
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        (**self).otp_send(data)
+    }
+}
+
+impl crate::core::Connection for Box<dyn OtpConnection + Send + Sync> {
+    type Error = OtpError;
+    fn close(&mut self) {
+        (**self).close();
+    }
+}
+
+impl OtpConnection for Box<dyn OtpConnection + Send + Sync> {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        (**self).otp_receive()
+    }
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        (**self).otp_send(data)
+    }
 }
 
 impl crate::core::Connection for HidOtpConnection {
@@ -164,10 +196,10 @@ impl crate::core::Connection for HidOtpConnection {
 }
 
 impl OtpConnection for HidOtpConnection {
-    fn otp_receive(&self) -> Result<Vec<u8>, OtpError> {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
         self.get_feature_report().map_err(OtpError::from)
     }
-    fn otp_send(&self, data: &[u8]) -> Result<(), OtpError> {
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
         self.set_feature_report(data).map_err(OtpError::from)
     }
 }
@@ -203,7 +235,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
     }
 
     /// Read status bytes from the YubiKey (first 3 bytes are firmware version).
-    pub fn read_status(&self) -> Result<Vec<u8>, OtpError> {
+    pub fn read_status(&mut self) -> Result<Vec<u8>, OtpError> {
         let report = self.receive()?;
         // Return bytes 1..7 (skip first byte, drop last byte = status flags)
         Ok(report[1..FEATURE_RPT_DATA_SIZE].to_vec())
@@ -214,7 +246,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
     /// `expected_len == -1`: returns the raw data response (with CRC/padding).
     /// `expected_len == None`: expects no data (status-only), returns `None`.
     pub fn send_and_receive(
-        &self,
+        &mut self,
         slot: u8,
         data: Option<&[u8]>,
         expected_len: Option<i32>,
@@ -227,7 +259,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
     /// `expected_len == -1`: returns the raw data response (with CRC/padding).
     /// `expected_len == None`: expects no data (status-only), returns `None`.
     pub fn send_and_receive_with_cancel(
-        &self,
+        &mut self,
         slot: u8,
         data: Option<&[u8]>,
         expected_len: Option<i32>,
@@ -256,7 +288,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         }
     }
 
-    fn receive(&self) -> Result<Vec<u8>, OtpError> {
+    fn receive(&mut self) -> Result<Vec<u8>, OtpError> {
         let report = self.connection.otp_receive()?;
         if report.len() != FEATURE_RPT_SIZE {
             return Err(OtpError::BadResponse(format!(
@@ -267,7 +299,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         Ok(report)
     }
 
-    fn await_ready_to_write(&self) -> Result<(), OtpError> {
+    fn await_ready_to_write(&mut self) -> Result<(), OtpError> {
         for _ in 0..20 {
             let report = self.receive()?;
             if report[FEATURE_RPT_DATA_SIZE] & SLOT_WRITE_FLAG == 0 {
@@ -280,7 +312,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         ))
     }
 
-    fn send_frame(&self, buf: &[u8]) -> Result<u8, OtpError> {
+    fn send_frame(&mut self, buf: &[u8]) -> Result<u8, OtpError> {
         debug_assert_eq!(buf.len(), FRAME_SIZE);
         let prog_seq = self.receive()?[STATUS_OFFSET_PROG_SEQ];
         let mut seq: u8 = 0;
@@ -302,7 +334,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
     }
 
     fn read_frame(
-        &self,
+        &mut self,
         prog_seq: u8,
         cancel: Option<&dyn Fn() -> bool>,
         on_keepalive: Option<&dyn Fn(u8)>,
@@ -361,7 +393,7 @@ impl<T: OtpConnection> OtpProtocol<T> {
         }
     }
 
-    fn reset_state(&self) -> Result<(), OtpError> {
+    fn reset_state(&mut self) -> Result<(), OtpError> {
         let mut report = [0u8; FEATURE_RPT_SIZE];
         report[FEATURE_RPT_DATA_SIZE] = 0xFF;
         self.connection.otp_send(&report)?;

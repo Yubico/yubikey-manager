@@ -322,7 +322,7 @@ impl crate::core::Connection for PcscSmartCardConnection {
 }
 
 impl SmartCardConnection for PcscSmartCardConnection {
-    fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         use crate::logging::hex_encode;
         log_traffic!("SEND: {}", hex_encode(apdu));
         let resp = self.transmit(apdu).map_err(SmartCardError::from)?;

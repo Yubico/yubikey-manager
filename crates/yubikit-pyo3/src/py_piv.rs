@@ -3,7 +3,7 @@ use yubikit::piv::{
     self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot, TouchPolicy,
 };
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
 
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;
@@ -87,7 +87,7 @@ fn parse_touch_policy(v: u8) -> PyResult<TouchPolicy> {
 
 #[pyclass]
 pub struct PivSession {
-    inner: RustPivSession<PySmartCardConnection>,
+    inner: RustPivSession<BoxedSmartCardConnection>,
 }
 
 #[pymethods]
@@ -98,7 +98,7 @@ impl PivSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner =

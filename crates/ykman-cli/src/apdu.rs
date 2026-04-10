@@ -155,7 +155,7 @@ pub fn run_apdu(
             ));
         }
         // Raw send-apdu mode: send full hex APDUs directly
-        let conn = dev
+        let mut conn = dev
             .open_smartcard()
             .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
         let mut is_first = true;

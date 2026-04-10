@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::oath::{self, OathError, OathSession as RustOathSession};
 
-use crate::py_bridge::{PySmartCardConnection, scp_key_params_from_py, smartcard_err};
+use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err};
 
 fn oath_err(e: OathError) -> PyErr {
     use pyo3::exceptions::*;
@@ -45,7 +45,7 @@ fn parse_b32_key(key: &str) -> PyResult<Vec<u8>> {
 
 #[pyclass]
 pub struct OathSession {
-    inner: RustOathSession<PySmartCardConnection>,
+    inner: RustOathSession<BoxedSmartCardConnection>,
 }
 
 #[pymethods]
@@ -56,7 +56,7 @@ impl OathSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let conn = PySmartCardConnection::from_py(connection)?;
+        let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustOathSession::new_with_scp(conn, &scp_params)

@@ -28,21 +28,29 @@
 //! PyO3 wrapper for Rust OtpProtocol.
 //!
 //! Exposes `OtpProtocol` as a Python class that wraps the Rust
-//! implementation, bridging a Python OTP connection to the Rust
-//! `OtpTransport` trait.
+//! implementation. Supports both native `HidOtpConnection` (fast path)
+//! and arbitrary Python OTP connections (slow path via bridge).
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::otp::{OtpConnection, OtpError, OtpProtocol as RustOtpProtocol};
 
-/// Bridges a Python OtpConnection object to the Rust OtpTransport trait.
-pub struct PyOtpConnection {
+use crate::py_hid;
+
+/// Type alias for a boxed OTP connection.
+pub type BoxedOtpConnection = Box<dyn OtpConnection + Send>;
+
+/// Bridges an arbitrary Python OtpConnection to the Rust OtpConnection trait.
+struct PythonOtpConnection {
     receive_fn: PyObject,
     send_fn: PyObject,
 }
 
-impl PyOtpConnection {
-    pub fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+unsafe impl Send for PythonOtpConnection {}
+unsafe impl Sync for PythonOtpConnection {}
+
+impl PythonOtpConnection {
+    fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let receive_fn = connection.getattr("receive")?.unbind();
         let send_fn = connection.getattr("send")?.unbind();
         Ok(Self {
@@ -52,14 +60,14 @@ impl PyOtpConnection {
     }
 }
 
-impl yubikit::core::Connection for PyOtpConnection {
+impl yubikit::core::Connection for PythonOtpConnection {
     type Error = OtpError;
 
     fn close(&mut self) {}
 }
 
-impl OtpConnection for PyOtpConnection {
-    fn otp_receive(&self) -> Result<Vec<u8>, OtpError> {
+impl OtpConnection for PythonOtpConnection {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
         Python::with_gil(|py| {
             let result = self
                 .receive_fn
@@ -72,7 +80,7 @@ impl OtpConnection for PyOtpConnection {
         })
     }
 
-    fn otp_send(&self, data: &[u8]) -> Result<(), OtpError> {
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
         Python::with_gil(|py| {
             let py_bytes = PyBytes::new(py, data);
             self.send_fn
@@ -83,9 +91,23 @@ impl OtpConnection for PyOtpConnection {
     }
 }
 
+/// Extract a `BoxedOtpConnection` from a Python connection argument.
+///
+/// **Fast path**: if `obj` is a native `OtpConnection` pyclass, take the inner
+/// `HidOtpConnection` directly.
+///
+/// **Slow path**: wrap the Python object in a `PythonOtpConnection` bridge.
+fn extract_otp_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedOtpConnection> {
+    if let Ok(hid_conn) = obj.downcast::<py_hid::OtpConnection>() {
+        let conn = hid_conn.borrow_mut().take_inner()?;
+        return Ok(Box::new(conn));
+    }
+    Ok(Box::new(PythonOtpConnection::from_py(obj)?))
+}
+
 #[pyclass(unsendable)]
 pub struct OtpProtocol {
-    inner: RustOtpProtocol<PyOtpConnection>,
+    inner: RustOtpProtocol<BoxedOtpConnection>,
     connection: PyObject,
 }
 
@@ -93,8 +115,8 @@ pub struct OtpProtocol {
 impl OtpProtocol {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py_conn = PyOtpConnection::from_py(connection)?;
-        let protocol = RustOtpProtocol::new(py_conn)
+        let otp_conn = extract_otp_connection(connection)?;
+        let protocol = RustOtpProtocol::new(otp_conn)
             .map_err(|(e, _)| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self {
             inner: protocol,
@@ -119,7 +141,7 @@ impl OtpProtocol {
 
     #[pyo3(signature = (slot, data=None, expected_len=None, event=None, on_keepalive=None))]
     fn send_and_receive(
-        &self,
+        &mut self,
         slot: u8,
         data: Option<&[u8]>,
         expected_len: Option<i32>,
@@ -187,7 +209,7 @@ impl OtpProtocol {
             })
     }
 
-    fn read_status(&self) -> PyResult<Vec<u8>> {
+    fn read_status(&mut self) -> PyResult<Vec<u8>> {
         self.inner
             .read_status()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))

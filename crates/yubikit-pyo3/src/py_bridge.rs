@@ -27,31 +27,41 @@
 
 //! Bridge between Python SmartCardConnection and Rust SmartCardConnection trait.
 //!
-//! This module provides `PySmartCardConnection`, which implements the Rust
-//! `SmartCardConnection` trait by calling back to a Python connection object's
-//! `send_and_receive` method. This allows Rust sessions to work with any
-//! Python connection type (PCSC, NFC, etc.) transparently.
+//! This module provides [`extract_smartcard_connection`], which extracts a Rust
+//! `SmartCardConnection` from a Python connection object — either by unwrapping
+//! a native `PcscConnection` (fast path) or by bridging an arbitrary Python
+//! object via `PythonSmartCardConnection` (slow path).
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::core::Transport;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
 
+use crate::py_pcsc::PcscConnection;
+
+/// Type alias for a boxed smart card connection (used as the generic parameter
+/// for sessions and protocols in the PyO3 layer).
+pub type BoxedSmartCardConnection = Box<dyn SmartCardConnection + Send + Sync>;
+
 /// A Rust `SmartCardConnection` backed by a Python connection object.
 ///
 /// Calls the Python object's `send_and_receive(apdu)` method for each APDU,
-/// and reads `transport` property to determine USB vs NFC.
-pub struct PySmartCardConnection {
+/// and reads `transport` property to determine USB vs NFC. Used as the
+/// slow-path bridge when the connection is implemented in Python rather than
+/// being a native Rust connection.
+struct PythonSmartCardConnection {
     /// The Python connection's `send_and_receive` bound method.
     send_fn: PyObject,
     transport: Transport,
 }
 
-impl PySmartCardConnection {
-    /// Create from a Python SmartCardConnection object.
-    ///
-    /// Extracts the `send_and_receive` method and `transport` property.
-    pub fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+/// `Py<PyAny>` / `PyObject` is Send+Sync by design in pyo3 ≥0.21 — it's a
+/// GIL-independent handle. We only touch the Python object while holding the GIL.
+unsafe impl Send for PythonSmartCardConnection {}
+unsafe impl Sync for PythonSmartCardConnection {}
+
+impl PythonSmartCardConnection {
+    fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let send_fn = connection.getattr("send_and_receive")?.unbind();
 
         // Read transport: Python TRANSPORT enum has string values "usb"/"nfc"
@@ -69,14 +79,14 @@ impl PySmartCardConnection {
     }
 }
 
-impl yubikit::core::Connection for PySmartCardConnection {
+impl yubikit::core::Connection for PythonSmartCardConnection {
     type Error = SmartCardError;
 
     fn close(&mut self) {}
 }
 
-impl SmartCardConnection for PySmartCardConnection {
-    fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+impl SmartCardConnection for PythonSmartCardConnection {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         Python::with_gil(|py| {
             let apdu_bytes = PyBytes::new(py, apdu);
             let result = self
@@ -95,6 +105,26 @@ impl SmartCardConnection for PySmartCardConnection {
     fn transport(&self) -> Transport {
         self.transport
     }
+}
+
+/// Extract a `BoxedSmartCardConnection` from a Python connection argument.
+///
+/// **Fast path**: if `obj` is a native `PcscConnection`, take the inner
+/// `PcscSmartCardConnection` directly (no Python call overhead per APDU).
+///
+/// **Slow path**: wrap the Python object in a `PythonSmartCardConnection`
+/// bridge that calls `send_and_receive()` via the GIL.
+pub fn extract_smartcard_connection(
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<BoxedSmartCardConnection> {
+    // Fast path: native PcscConnection
+    if let Ok(pcsc) = obj.downcast::<PcscConnection>() {
+        let conn = pcsc.borrow_mut().take_inner()?;
+        return Ok(Box::new(conn));
+    }
+
+    // Slow path: arbitrary Python connection
+    Ok(Box::new(PythonSmartCardConnection::from_py(obj)?))
 }
 
 /// Convert a `SmartCardError` to the appropriate Python exception.

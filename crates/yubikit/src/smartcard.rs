@@ -181,8 +181,40 @@ impl SmartCardError {
 
 /// Abstract smart card connection — send raw APDU bytes, get response + SW.
 pub trait SmartCardConnection: crate::core::Connection<Error = SmartCardError> {
-    fn send_and_receive(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError>;
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError>;
     fn transport(&self) -> Transport;
+}
+
+impl crate::core::Connection for Box<dyn SmartCardConnection + Send> {
+    type Error = SmartCardError;
+    fn close(&mut self) {
+        (**self).close();
+    }
+}
+
+impl SmartCardConnection for Box<dyn SmartCardConnection + Send> {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        (**self).send_and_receive(apdu)
+    }
+    fn transport(&self) -> Transport {
+        (**self).transport()
+    }
+}
+
+impl crate::core::Connection for Box<dyn SmartCardConnection + Send + Sync> {
+    type Error = SmartCardError;
+    fn close(&mut self) {
+        (**self).close();
+    }
+}
+
+impl SmartCardConnection for Box<dyn SmartCardConnection + Send + Sync> {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        (**self).send_and_receive(apdu)
+    }
+    fn transport(&self) -> Transport {
+        (**self).transport()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -403,7 +435,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Send a pre-formatted APDU (raw bytes), handling response chaining only.
     /// Does NOT apply SCP wrapping or command chaining.
-    pub fn send_raw_apdu(&self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+    pub fn send_raw_apdu(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         let (resp, sw) = self.connection.send_and_receive(apdu)?;
         self.read_chained_response(resp, sw)
     }
@@ -476,7 +508,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Send with command chaining (short APDUs, split data into 255-byte chunks).
     fn send_chained(
-        &self,
+        &mut self,
         cla: u8,
         ins: u8,
         p1: u8,
@@ -500,7 +532,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Format and send a single APDU (short or extended).
     fn send_single_apdu(
-        &self,
+        &mut self,
         cla: u8,
         ins: u8,
         p1: u8,
@@ -519,7 +551,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Read response chaining (SW1 = 0x61).
     fn read_chained_response(
-        &self,
+        &mut self,
         mut resp: Vec<u8>,
         mut sw: u16,
     ) -> Result<(Vec<u8>, u16), SmartCardError> {

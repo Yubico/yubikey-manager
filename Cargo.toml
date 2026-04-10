@@ -5,7 +5,3 @@ resolver = "3"
 [workspace.lints.clippy]
 too_many_arguments = "allow"
 type_complexity = "allow"
-
-[patch."https://github.com/Yubico/python-fido2.git"]
-fido2-server = { path = "../fido2-rust/crates/fido2-server" }
-fido2-client = { path = "../fido2-rust/crates/fido2-client" }

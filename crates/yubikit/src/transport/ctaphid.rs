@@ -261,27 +261,6 @@ impl HidFidoConnection {
         self.capabilities
     }
 
-    /// Send a CTAP HID command and receive the response.
-    pub fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
-        self.call_with_keepalive(cmd, data, &mut |_| {}, None)
-    }
-
-    /// Send a CTAP HID command with a keepalive callback and optional cancel.
-    ///
-    /// The callback is invoked with the keepalive status byte when the status
-    /// changes. Consecutive keepalive messages with the same status are filtered.
-    /// If cancel is set, a CTAPHID_CANCEL command is sent to abort the operation.
-    pub fn call_with_keepalive(
-        &self,
-        cmd: u8,
-        data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, FidoError> {
-        self.send_request(cmd, data)?;
-        self.recv_response(cmd, on_keepalive, cancel)
-    }
-
     /// Close the connection.
     pub fn close(&mut self) {
         if self.device.is_some() {
@@ -294,7 +273,7 @@ impl HidFidoConnection {
         self.device.as_ref().ok_or(FidoError::ConnectionClosed)
     }
 
-    fn call_raw(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
+    fn call_raw(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
         self.send_request(cmd, data)?;
         self.recv_response(cmd, &mut |_| {}, None)
     }
@@ -449,18 +428,20 @@ impl crate::core::Connection for HidFidoConnection {
 }
 
 impl crate::fido::FidoConnection for HidFidoConnection {
-    fn call(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
-        self.call(cmd, data)
+    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
+        self.send_request(cmd, data)?;
+        self.recv_response(cmd, &mut |_| {}, None)
     }
 
     fn call_with_keepalive(
-        &self,
+        &mut self,
         cmd: u8,
         data: &[u8],
         on_keepalive: &mut dyn FnMut(u8),
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
-        self.call_with_keepalive(cmd, data, on_keepalive, cancel)
+        self.send_request(cmd, data)?;
+        self.recv_response(cmd, on_keepalive, cancel)
     }
 
     fn device_version(&self) -> (u8, u8, u8) {
