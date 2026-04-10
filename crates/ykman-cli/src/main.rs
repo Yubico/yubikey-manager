@@ -1571,9 +1571,14 @@ fn select_device(
     match (serial, devices.len()) {
         (None, 0) => Err(CliError("No YubiKey detected!".into())),
         (None, 1) => Ok(devices.into_iter().next().unwrap()),
-        (None, n) => Err(CliError(format!(
-            "Multiple YubiKeys detected ({n}). Use --device SERIAL to specify."
-        ))),
+        (None, n) => {
+            let mut msg = format!("Multiple YubiKeys detected ({n}):");
+            for dev in &devices {
+                msg.push_str(&format!("\n- {}", crate::list::describe_device(dev)));
+            }
+            msg.push_str("\nUse --device SERIAL to specify which one to use.");
+            Err(CliError(msg))
+        }
         (Some(s), _) => devices
             .into_iter()
             .find(|d| d.serial() == Some(s))
