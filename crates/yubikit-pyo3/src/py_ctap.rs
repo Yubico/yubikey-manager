@@ -475,7 +475,21 @@ impl PyPinProtocol {
 
 #[pyclass(name = "ClientPin", unsendable)]
 pub struct PyClientPin {
-    inner: ClientPin<BoxedSmartCardConnection>,
+    inner: Option<ClientPin<BoxedSmartCardConnection>>,
+}
+
+impl PyClientPin {
+    fn get(&self) -> PyResult<&ClientPin<BoxedSmartCardConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("ClientPin has been closed"))
+    }
+
+    fn get_mut(&mut self) -> PyResult<&mut ClientPin<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ClientPin has been closed"))
+    }
 }
 
 #[pymethods]
@@ -489,30 +503,43 @@ impl PyClientPin {
         } else {
             ClientPin::new(ctap2).map_err(ctap2_err)?
         };
-        Ok(Self { inner })
+        Ok(Self { inner: Some(inner) })
+    }
+
+    /// Close this ClientPin and restore the session back to the given
+    /// Ctap2Session object, allowing it to be reused.
+    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+        let pin = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("ClientPin has been closed"))?;
+        session.restore_session(pin.into_session());
+        Ok(())
     }
 
     #[getter]
-    fn protocol(&self) -> PyPinProtocol {
-        PyPinProtocol {
-            inner: self.inner.protocol(),
-        }
+    fn protocol(&self) -> PyResult<PyPinProtocol> {
+        Ok(PyPinProtocol {
+            inner: self.get()?.protocol(),
+        })
     }
 
     fn get_pin_retries(&mut self) -> PyResult<(u32, Option<u32>)> {
-        self.inner.get_pin_retries().map_err(ctap2_err)
+        self.get_mut()?.get_pin_retries().map_err(ctap2_err)
     }
 
     fn get_uv_retries(&mut self) -> PyResult<u32> {
-        self.inner.get_uv_retries().map_err(ctap2_err)
+        self.get_mut()?.get_uv_retries().map_err(ctap2_err)
     }
 
     fn set_pin(&mut self, pin: &str) -> PyResult<()> {
-        self.inner.set_pin(pin).map_err(ctap2_err)
+        self.get_mut()?.set_pin(pin).map_err(ctap2_err)
     }
 
     fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
-        self.inner.change_pin(old_pin, new_pin).map_err(ctap2_err)
+        self.get_mut()?
+            .change_pin(old_pin, new_pin)
+            .map_err(ctap2_err)
     }
 
     #[pyo3(signature = (pin, permissions=None, permissions_rpid=None))]
@@ -525,7 +552,7 @@ impl PyClientPin {
     ) -> PyResult<Bound<'py, PyBytes>> {
         let perms = permissions.map(Permissions::new);
         let token = self
-            .inner
+            .get_mut()?
             .get_pin_token(pin, perms, permissions_rpid)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
@@ -554,7 +581,7 @@ impl PyClientPin {
             None
         };
         let token = self
-            .inner
+            .get_mut()?
             .get_uv_token(perms, permissions_rpid, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
@@ -567,7 +594,21 @@ impl PyClientPin {
 
 #[pyclass(name = "ClientPinFido", unsendable)]
 pub struct PyClientPinFido {
-    inner: ClientPin<BoxedFidoConnection>,
+    inner: Option<ClientPin<BoxedFidoConnection>>,
+}
+
+impl PyClientPinFido {
+    fn get(&self) -> PyResult<&ClientPin<BoxedFidoConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("ClientPinFido has been closed"))
+    }
+
+    fn get_mut(&mut self) -> PyResult<&mut ClientPin<BoxedFidoConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ClientPinFido has been closed"))
+    }
 }
 
 #[pymethods]
@@ -581,29 +622,43 @@ impl PyClientPinFido {
         } else {
             ClientPin::new(ctap2).map_err(ctap2_err)?
         };
-        Ok(Self { inner })
+        Ok(Self { inner: Some(inner) })
+    }
+
+    /// Close this ClientPinFido and restore the session back to the given
+    /// Ctap2FidoSession object, allowing it to be reused.
+    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+        let pin = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("ClientPinFido has been closed"))?;
+        session.restore_session(pin.into_session());
+        Ok(())
     }
 
     #[getter]
-    fn protocol(&self) -> PyPinProtocol {
-        PyPinProtocol {
-            inner: self.inner.protocol(),
-        }
+    fn protocol(&self) -> PyResult<PyPinProtocol> {
+        Ok(PyPinProtocol {
+            inner: self.get()?.protocol(),
+        })
     }
+
     fn get_pin_retries(&mut self) -> PyResult<(u32, Option<u32>)> {
-        self.inner.get_pin_retries().map_err(ctap2_err)
+        self.get_mut()?.get_pin_retries().map_err(ctap2_err)
     }
 
     fn get_uv_retries(&mut self) -> PyResult<u32> {
-        self.inner.get_uv_retries().map_err(ctap2_err)
+        self.get_mut()?.get_uv_retries().map_err(ctap2_err)
     }
 
     fn set_pin(&mut self, pin: &str) -> PyResult<()> {
-        self.inner.set_pin(pin).map_err(ctap2_err)
+        self.get_mut()?.set_pin(pin).map_err(ctap2_err)
     }
 
     fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
-        self.inner.change_pin(old_pin, new_pin).map_err(ctap2_err)
+        self.get_mut()?
+            .change_pin(old_pin, new_pin)
+            .map_err(ctap2_err)
     }
 
     #[pyo3(signature = (pin, permissions=None, permissions_rpid=None))]
@@ -616,7 +671,7 @@ impl PyClientPinFido {
     ) -> PyResult<Bound<'py, PyBytes>> {
         let perms = permissions.map(Permissions::new);
         let token = self
-            .inner
+            .get_mut()?
             .get_pin_token(pin, perms, permissions_rpid)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
@@ -645,7 +700,7 @@ impl PyClientPinFido {
             None
         };
         let token = self
-            .inner
+            .get_mut()?
             .get_uv_token(perms, permissions_rpid, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
@@ -681,7 +736,15 @@ fn cbor_result_list_to_py(
 
 #[pyclass(name = "CredentialManagement", unsendable)]
 pub struct PyCredentialManagement {
-    inner: CredentialManagement<BoxedSmartCardConnection>,
+    inner: Option<CredentialManagement<BoxedSmartCardConnection>>,
+}
+
+impl PyCredentialManagement {
+    fn get_mut(&mut self) -> PyResult<&mut CredentialManagement<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("CredentialManagement has been closed"))
+    }
 }
 
 #[pymethods]
@@ -695,31 +758,49 @@ impl PyCredentialManagement {
         let ctap2 = session.take_session()?;
         let inner = CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
             .map_err(ctap2_err)?;
-        Ok(Self { inner })
+        Ok(Self { inner: Some(inner) })
+    }
+
+    /// Close this CredentialManagement and restore the session back to the
+    /// given Ctap2Session object, allowing it to be reused.
+    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+        let cm = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("CredentialManagement has been closed"))?;
+        session.restore_session(cm.into_session());
+        Ok(())
     }
 
     #[getter]
-    fn is_update_supported(&self) -> bool {
-        self.inner.is_update_supported()
+    fn is_update_supported(&self) -> PyResult<bool> {
+        Ok(self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("CredentialManagement has been closed"))?
+            .is_update_supported())
     }
 
     fn get_metadata(&mut self) -> PyResult<(u32, u32)> {
-        self.inner.get_metadata().map_err(ctap2_err)
+        self.get_mut()?.get_metadata().map_err(ctap2_err)
     }
 
     fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
-        let rps = self.inner.enumerate_rps().map_err(ctap2_err)?;
+        let rps = self.get_mut()?.enumerate_rps().map_err(ctap2_err)?;
         cbor_result_list_to_py(py, &rps)
     }
 
     fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
-        let creds = self.inner.enumerate_creds(rp_id_hash).map_err(ctap2_err)?;
+        let creds = self
+            .get_mut()?
+            .enumerate_creds(rp_id_hash)
+            .map_err(ctap2_err)?;
         cbor_result_list_to_py(py, &creds)
     }
 
     fn delete_cred(&mut self, credential_id: &Bound<'_, PyAny>) -> PyResult<()> {
         let value = py_to_cbor_value(credential_id)?;
-        self.inner.delete_cred(&value).map_err(ctap2_err)
+        self.get_mut()?.delete_cred(&value).map_err(ctap2_err)
     }
 
     fn update_user_info(
@@ -729,7 +810,9 @@ impl PyCredentialManagement {
     ) -> PyResult<()> {
         let cred = py_to_cbor_value(credential_id)?;
         let user = py_to_cbor_value(user)?;
-        self.inner.update_user_info(&cred, &user).map_err(ctap2_err)
+        self.get_mut()?
+            .update_user_info(&cred, &user)
+            .map_err(ctap2_err)
     }
 }
 
@@ -739,7 +822,15 @@ impl PyCredentialManagement {
 
 #[pyclass(name = "CredentialManagementFido", unsendable)]
 pub struct PyCredentialManagementFido {
-    inner: CredentialManagement<BoxedFidoConnection>,
+    inner: Option<CredentialManagement<BoxedFidoConnection>>,
+}
+
+impl PyCredentialManagementFido {
+    fn get_mut(&mut self) -> PyResult<&mut CredentialManagement<BoxedFidoConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("CredentialManagementFido has been closed"))
+    }
 }
 
 #[pymethods]
@@ -753,31 +844,49 @@ impl PyCredentialManagementFido {
         let ctap2 = session.take_session()?;
         let inner = CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
             .map_err(ctap2_err)?;
-        Ok(Self { inner })
+        Ok(Self { inner: Some(inner) })
+    }
+
+    /// Close this CredentialManagementFido and restore the session back to the
+    /// given Ctap2FidoSession object, allowing it to be reused.
+    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+        let cm = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("CredentialManagementFido has been closed"))?;
+        session.restore_session(cm.into_session());
+        Ok(())
     }
 
     #[getter]
-    fn is_update_supported(&self) -> bool {
-        self.inner.is_update_supported()
+    fn is_update_supported(&self) -> PyResult<bool> {
+        Ok(self
+            .inner
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("CredentialManagementFido has been closed"))?
+            .is_update_supported())
     }
 
     fn get_metadata(&mut self) -> PyResult<(u32, u32)> {
-        self.inner.get_metadata().map_err(ctap2_err)
+        self.get_mut()?.get_metadata().map_err(ctap2_err)
     }
 
     fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
-        let rps = self.inner.enumerate_rps().map_err(ctap2_err)?;
+        let rps = self.get_mut()?.enumerate_rps().map_err(ctap2_err)?;
         cbor_result_list_to_py(py, &rps)
     }
 
     fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
-        let creds = self.inner.enumerate_creds(rp_id_hash).map_err(ctap2_err)?;
+        let creds = self
+            .get_mut()?
+            .enumerate_creds(rp_id_hash)
+            .map_err(ctap2_err)?;
         cbor_result_list_to_py(py, &creds)
     }
 
     fn delete_cred(&mut self, credential_id: &Bound<'_, PyAny>) -> PyResult<()> {
         let value = py_to_cbor_value(credential_id)?;
-        self.inner.delete_cred(&value).map_err(ctap2_err)
+        self.get_mut()?.delete_cred(&value).map_err(ctap2_err)
     }
 
     fn update_user_info(
@@ -787,6 +896,8 @@ impl PyCredentialManagementFido {
     ) -> PyResult<()> {
         let cred = py_to_cbor_value(credential_id)?;
         let user = py_to_cbor_value(user)?;
-        self.inner.update_user_info(&cred, &user).map_err(ctap2_err)
+        self.get_mut()?
+            .update_user_info(&cred, &user)
+            .map_err(ctap2_err)
     }
 }

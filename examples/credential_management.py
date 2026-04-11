@@ -113,11 +113,8 @@ def _open_fido(dev: YubiKeyDevice, pin: str) -> CredentialManagementFido:
     client_pin = ClientPinFido(session)
     pin_token = client_pin.get_pin_token(pin, permissions=PERMISSION_CREDENTIAL_MGMT)
     protocol = client_pin.protocol
-
-    # Re-open: ClientPin consumed the session
-    conn2 = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
-    session2 = Ctap2FidoSession(conn2)
-    return CredentialManagementFido(session2, protocol, pin_token)
+    client_pin.close(session)  # Return session for reuse
+    return CredentialManagementFido(session, protocol, pin_token)
 
 
 def _open_ccid(dev: YubiKeyDevice, pin: str) -> CredentialManagement:
@@ -126,10 +123,8 @@ def _open_ccid(dev: YubiKeyDevice, pin: str) -> CredentialManagement:
     client_pin = ClientPin(session)
     pin_token = client_pin.get_pin_token(pin, permissions=PERMISSION_CREDENTIAL_MGMT)
     protocol = client_pin.protocol
-
-    conn2 = dev.open_connection(SmartCardConnection)
-    session2 = Ctap2Session(conn2)
-    return CredentialManagement(session2, protocol, pin_token)
+    client_pin.close(session)  # Return session for reuse
+    return CredentialManagement(session, protocol, pin_token)
 
 
 if __name__ == "__main__":
