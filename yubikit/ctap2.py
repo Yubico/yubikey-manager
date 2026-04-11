@@ -162,7 +162,15 @@ class ClientPin:
 
     def close(self) -> None:
         """Restore the session so it can be reused."""
-        self._native.close(self._session._native)  # type: ignore[arg-type]
+        native_session = self._session._native
+        if isinstance(self._native, _ClientPin) and isinstance(
+            native_session, _Ctap2Session
+        ):
+            self._native.close(native_session)
+        elif isinstance(self._native, _ClientPinFido) and isinstance(
+            native_session, _Ctap2FidoSession
+        ):
+            self._native.close(native_session)
 
     @property
     def protocol(self) -> PinProtocol:
@@ -245,7 +253,15 @@ class CredentialManagement:
 
     def close(self) -> None:
         """Restore the session so it can be reused."""
-        self._native.close(self._session._native)  # type: ignore[arg-type]
+        native_session = self._session._native
+        if isinstance(self._native, _CredentialManagement) and isinstance(
+            native_session, _Ctap2Session
+        ):
+            self._native.close(native_session)
+        elif isinstance(self._native, _CredentialManagementFido) and isinstance(
+            native_session, _Ctap2FidoSession
+        ):
+            self._native.close(native_session)
 
     @property
     def is_update_supported(self) -> bool:

@@ -7,12 +7,12 @@ from datetime import datetime
 from typing import Any
 
 from fido2.ctap import CtapError
-from fido2.ctap2 import ClientPin, Ctap2
 
 from yubikit.core import _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.ctap2 import ClientPin, Ctap2Session
 from yubikit.hsmauth import HsmAuthSession
 from yubikit.management import RELEASE_TYPE, ManagementSession
 from yubikit.oath import OathSession
@@ -185,29 +185,30 @@ def fido_info():
         for dev, _info in list_all_devices([FidoConnection]):
             try:
                 dev_info: list[Any] = []
-                with dev.open_connection(FidoConnection) as conn:  # type: ignore[type-var]  # ty: ignore[invalid-argument-type]
+                with dev.open_connection(FidoConnection) as conn:  # type: ignore[type-var]
                     dev_info.append(
                         {
                             "CTAP device version": "%d.%d.%d" % conn.device_version,
-                            "CTAPHID protocol version": conn.version,
                             "Capabilities": conn.capabilities,
                             "Management": mgmt_info(dev.pid, conn),
                         }
                     )
                     try:
-                        ctap2 = Ctap2(conn)
-                        ctap_data: dict[str, Any] = {"Ctap2Info": asdict(ctap2.info)}
-                        if ctap2.info.options.get("clientPin"):
-                            client_pin = ClientPin(ctap2)
-                            ctap_data["PIN retries"] = client_pin.get_pin_retries()
+                        session = Ctap2Session(conn)
+                        info = session.get_info()
+                        ctap_data: dict[str, Any] = {"Ctap2Info": info}
+                        options = info.get("options", {})
+                        if options.get("clientPin"):
+                            with ClientPin(session) as client_pin:
+                                ctap_data["PIN retries"] = client_pin.get_pin_retries()
 
-                            bio_enroll = ctap2.info.options.get("bioEnroll")
-                            if bio_enroll:
-                                ctap_data["Fingerprint retries"] = (
-                                    client_pin.get_uv_retries()
-                                )
-                            elif bio_enroll is False:
-                                ctap_data["Fingerprints"] = "Not configured"
+                                bio_enroll = options.get("bioEnroll")
+                                if bio_enroll:
+                                    ctap_data["Fingerprint retries"] = (
+                                        client_pin.get_uv_retries()
+                                    )
+                                elif bio_enroll is False:
+                                    ctap_data["Fingerprints"] = "Not configured"
                         else:
                             ctap_data["PIN"] = "Not configured"
                         dev_info.append(ctap_data)

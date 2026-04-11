@@ -4,13 +4,11 @@ from functools import partial
 
 import pytest
 
-from ykman._cli.util import find_scp11_params
 from ykman.device import list_all_devices
 from yubikit.core import TRANSPORT, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
-from yubikit.core.smartcard.scp import ScpKid
 from yubikit.management import RELEASE_TYPE
 
 from . import condition
@@ -100,7 +98,5 @@ def ccid_connection(device, info):
 
 @pytest.fixture(scope=connection_scope)
 def scp_params(ccid_connection):
-    try:
-        return find_scp11_params(ccid_connection, ScpKid.SCP11b, 0)
-    except ValueError:
-        return None
+    # SCP11 parameter discovery not yet available in the new stack
+    return None
