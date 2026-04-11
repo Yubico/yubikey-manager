@@ -35,7 +35,6 @@ import zlib
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from types import TracebackType
 from typing import TYPE_CHECKING, TypeAlias, overload
 
 from cryptography import x509
@@ -55,6 +54,7 @@ from .core import (
     BadResponseError,
     InvalidPinError,  # noqa: F401 - re-exported
     NotSupportedError,
+    Session,
     Tlv,
     Version,
     bytes2int,
@@ -660,7 +660,7 @@ def decompress_certificate(cert_data: bytes) -> bytes:
     raise BadResponseError("Failed to decompress certificate")
 
 
-class PivSession:
+class PivSession(Session):
     """A session with the PIV application."""
 
     def __init__(
@@ -677,21 +677,6 @@ class PivSession:
         self._max_pin_retries = 3
 
         logger.debug(f"PIV session initialized (version={self.version})")
-
-    def __enter__(self) -> PivSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def version(self) -> Version:

@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
-from types import TracebackType
 from typing import Any, Mapping
 
 from _yubikit_native.sessions import (
@@ -39,7 +38,7 @@ from _yubikit_native.sessions import (
 from _yubikit_native.sessions import ManagementOtpSession as _NativeManagementOtpSession
 from _yubikit_native.sessions import ManagementSession as _NativeManagementSession
 
-from .core import TRANSPORT, USB_INTERFACE, Version, require_version
+from .core import TRANSPORT, USB_INTERFACE, Session, Version, require_version
 from .core.fido import FidoConnection
 from .core.otp import (
     OtpConnection,
@@ -368,7 +367,7 @@ def _device_info_from_native(d: dict) -> DeviceInfo:
     )
 
 
-class ManagementSession:
+class ManagementSession(Session):
     def __init__(
         self,
         connection: OtpConnection | SmartCardConnection | FidoConnection,
@@ -406,21 +405,6 @@ class ManagementSession:
             "Management session initialized for "
             f"connection={type(connection).__name__}, version={self.version}"
         )
-
-    def __enter__(self) -> ManagementSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def version(self) -> Version:

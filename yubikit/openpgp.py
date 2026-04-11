@@ -33,7 +33,6 @@ import os
 import struct
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag, unique
-from types import TracebackType
 from typing import (
     ClassVar,
     Mapping,
@@ -62,6 +61,7 @@ from _yubikit_native.sessions import OpenPgpSession as _NativeOpenPgpSession
 from .core import (
     NotSupportedError,
     Oid,
+    Session,
     Tlv,
     Version,
     bytes2int,
@@ -967,7 +967,7 @@ def _prepare_private_key_for_native(
         raise ValueError(f"Unsupported key type: {type(private_key)}")
 
 
-class OpenPgpSession:
+class OpenPgpSession(Session):
     """A session with the OpenPGP application."""
 
     def __init__(
@@ -983,21 +983,6 @@ class OpenPgpSession:
         )
 
         logger.debug(f"OpenPGP session initialized (version={self.version})")
-
-    def __enter__(self) -> OpenPgpSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def aid(self) -> OpenPgpAid:

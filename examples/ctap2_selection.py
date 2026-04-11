@@ -9,11 +9,9 @@ Usage: uv run python examples/ctap2_selection.py
 
 import threading
 
-from _yubikit_native.hid import list_fido_devices
-from _yubikit_native.pcsc import list_readers
-from ykman.hid.fido import NativeFidoConnection
-from ykman.pcsc import ScardSmartCardConnection
-from yubikit.ctap2 import Ctap2Session
+from _yubikit_native.hid import FidoConnection, list_fido_devices
+from _yubikit_native.pcsc import PcscConnection, list_readers
+from _yubikit_native.sessions import Ctap2FidoSession, Ctap2Session
 
 CANCEL_TIMEOUT = 5  # seconds
 
@@ -22,7 +20,7 @@ def on_keepalive(status: int) -> None:
     print(f"  [keepalive] status=0x{status:02X}")
 
 
-def run_demo(session: Ctap2Session, transport: str) -> None:
+def run_demo(session: Ctap2Session | Ctap2FidoSession, transport: str) -> None:
     """Run selection + get_info on a CTAP2 session."""
 
     # --- selection ---
@@ -115,7 +113,7 @@ def main() -> None:
         print(f"Found FIDO HID device: {dev.path} (PID=0x{dev.pid:04X})")
 
         try:
-            conn = NativeFidoConnection(dev.path, dev.pid)
+            conn = FidoConnection(dev.path, dev.pid)
         except OSError as e:
             print(f"  Failed to open: {e}")
             continue
@@ -126,11 +124,12 @@ def main() -> None:
         )
 
         try:
-            with Ctap2Session(conn) as session:
-                run_demo(session, "FIDO HID")
+            fido_session = Ctap2FidoSession(conn)
         except Exception as e:
             print(f"  Failed to open CTAP2 session: {e}")
             continue
+
+        run_demo(fido_session, "FIDO HID")
 
     # CCID / SmartCard
     for reader in readers:
@@ -138,17 +137,18 @@ def main() -> None:
         print(f"Found CCID reader: {reader}")
 
         try:
-            sc_conn = ScardSmartCardConnection(reader)
+            sc_conn = PcscConnection(reader)
         except OSError as e:
             print(f"  Failed to connect: {e}")
             continue
 
         try:
-            with Ctap2Session(sc_conn) as session:
-                run_demo(session, f"CCID ({reader})")
+            ccid_session = Ctap2Session(sc_conn)
         except Exception as e:
             print(f"  FIDO not available: {e}")
             continue
+
+        run_demo(ccid_session, f"CCID ({reader})")
 
     if not found_any:
         print("No YubiKeys found.")

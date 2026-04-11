@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
 from time import time
-from types import TracebackType
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -13,7 +12,7 @@ from _yubikit_native.oath import format_cred_id as _format_cred_id_native
 from _yubikit_native.oath import parse_b32_key
 from _yubikit_native.sessions import OathSession as _NativeOathSession
 
-from .core import Version
+from .core import Session, Version
 from .core.smartcard import ScpKeyParams, SmartCardConnection
 
 logger = logging.getLogger(__name__)
@@ -132,7 +131,7 @@ def _format_cred_id(issuer, name, oath_type, period=DEFAULT_PERIOD):
     return bytes(_format_cred_id_native(issuer, name, int(oath_type), period))
 
 
-class OathSession:
+class OathSession(Session):
     """A session with the OATH application.
 
     Delegates to the Rust OathSession implementation via PyO3.
@@ -151,21 +150,6 @@ class OathSession:
         logger.debug(
             f"OATH session initialized (version={self.version}, has_key={self.has_key})"
         )
-
-    def __enter__(self) -> OathSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def version(self) -> Version:

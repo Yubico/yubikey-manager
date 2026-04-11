@@ -96,15 +96,16 @@ def main() -> None:
         print("  No usable connection available on this device.")
         return
 
-    with Ctap2Session(conn) as session:
-        with ClientPin(session) as client_pin:
-            pin_token = client_pin.get_pin_token(
-                pin, permissions=PERMISSION_CREDENTIAL_MGMT
-            )
-            protocol = client_pin.protocol
+    session = Ctap2Session(conn)
 
-        with CredentialManagement(session, protocol, pin_token) as cred_mgmt:
-            list_credentials(cred_mgmt)
+    with ClientPin(session) as client_pin:
+        pin_token = client_pin.get_pin_token(
+            pin, permissions=PERMISSION_CREDENTIAL_MGMT
+        )
+        protocol = client_pin.protocol
+
+    with CredentialManagement(session, protocol, pin_token) as cred_mgmt:
+        list_credentials(cred_mgmt)
 
 
 if __name__ == "__main__":

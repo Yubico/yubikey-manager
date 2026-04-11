@@ -32,7 +32,6 @@ import struct
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
-from types import TracebackType
 from typing import NamedTuple
 
 from cryptography.hazmat.backends import default_backend
@@ -44,6 +43,7 @@ from _yubikit_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 
 from .core import (
     InvalidPinError,  # noqa: F401 - re-exported
+    Session,
     Version,
     int2bytes,
     require_version,
@@ -165,7 +165,7 @@ class SessionKeys(NamedTuple):
     key_srmac: bytes
 
 
-class HsmAuthSession:
+class HsmAuthSession(Session):
     """A session with the YubiHSM Auth application."""
 
     def __init__(
@@ -178,21 +178,6 @@ class HsmAuthSession:
         self._version = Version(*native.version)
 
         logger.debug(f"YubiHSM Auth session initialized (version={self.version})")
-
-    def __enter__(self) -> HsmAuthSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def version(self) -> Version:

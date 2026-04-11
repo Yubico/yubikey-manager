@@ -32,7 +32,6 @@ import struct
 from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
-from types import TracebackType
 from typing import Any, Callable, TypeVar
 
 from _yubikit_native.sessions import (
@@ -44,6 +43,7 @@ from _yubikit_native.sessions import (
 
 from .core import (
     NotSupportedError,
+    Session,
     Version,
     require_version,
 )
@@ -634,7 +634,7 @@ class ConfigState:
         return f"ConfigState({', '.join(items)})"
 
 
-class YubiOtpSession:
+class YubiOtpSession(Session):
     """A session with the YubiOTP application."""
 
     def __init__(
@@ -660,21 +660,6 @@ class YubiOtpSession:
             f"connection={type(connection).__name__}, version={self.version}, "
             f"state={self.get_config_state()}"
         )
-
-    def __enter__(self) -> YubiOtpSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def version(self) -> Version:

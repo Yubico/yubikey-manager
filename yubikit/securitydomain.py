@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from enum import IntEnum, unique
-from types import TracebackType
 from typing import Mapping, Sequence
 
 from cryptography import x509
@@ -17,6 +16,7 @@ from _yubikit_native.sessions import (
 from .core import (
     BadResponseError,
     NotSupportedError,
+    Session,
     Version,
     int2bytes,
 )
@@ -58,7 +58,7 @@ class Curve(IntEnum):
         return getattr(ec, self.name)()
 
 
-class SecurityDomainSession:
+class SecurityDomainSession(Session):
     """A session for managing SCP keys.
 
     Delegates to the Rust SecurityDomainSession implementation via PyO3.
@@ -70,21 +70,6 @@ class SecurityDomainSession:
         self._native = native
         self._version = Version(*native.version)
         logger.debug("SecurityDomain session initialized")
-
-    def __enter__(self) -> SecurityDomainSession:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
         """Initialize SCP and authenticate the session.

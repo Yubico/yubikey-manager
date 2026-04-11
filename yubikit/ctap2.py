@@ -37,7 +37,6 @@ exits its ``with`` block.
 from __future__ import annotations
 
 import logging
-from types import TracebackType
 from typing import Any
 
 from _yubikit_native.sessions import ClientPin as _ClientPin
@@ -50,7 +49,7 @@ from _yubikit_native.sessions import Ctap2FidoSession as _Ctap2FidoSession
 from _yubikit_native.sessions import Ctap2Session as _Ctap2Session
 from _yubikit_native.sessions import PinProtocol as _PinProtocol
 
-from .core import Version
+from .core import Closable, Session, Version
 from .core.fido import FidoConnection
 from .core.smartcard import SmartCardConnection
 from .core.smartcard.scp import ScpKeyParams
@@ -76,7 +75,7 @@ class PinProtocol:
         return self._native.version
 
 
-class Ctap2Session:
+class Ctap2Session(Session):
     """CTAP2 session facade over SmartCard or FIDO HID transports."""
 
     def __init__(
@@ -100,21 +99,6 @@ class Ctap2Session:
             "CTAP2 session initialized for "
             f"connection={type(connection).__name__}, version={self.version}"
         )
-
-    def __enter__(self) -> Ctap2Session:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the session, restoring the underlying connection."""
-        self._native.close()
 
     @property
     def version(self) -> Version:
@@ -140,7 +124,7 @@ class Ctap2Session:
         return self._native.send_cbor(cmd, data, event, on_keepalive)
 
 
-class ClientPin:
+class ClientPin(Closable):
     """ClientPIN command facade with context-manager support.
 
     Usage::
@@ -163,17 +147,6 @@ class ClientPin:
             self._native: _ClientPin | _ClientPinFido = _ClientPin(native, proto)
         else:
             self._native = _ClientPinFido(native, proto)
-
-    def __enter__(self) -> ClientPin:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
 
     def close(self) -> None:
         """Restore the session so it can be reused."""
@@ -225,7 +198,7 @@ class ClientPin:
         )
 
 
-class CredentialManagement:
+class CredentialManagement(Closable):
     """Credential Management command facade with context-manager support.
 
     Usage::
@@ -254,17 +227,6 @@ class CredentialManagement:
             self._native = _CredentialManagementFido(
                 native, protocol._native, pin_token
             )
-
-    def __enter__(self) -> CredentialManagement:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
 
     def close(self) -> None:
         """Restore the session so it can be reused."""

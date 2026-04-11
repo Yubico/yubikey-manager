@@ -36,35 +36,35 @@ with open(output_fname, "a") as output:
             print("No serial number, skipping")
             continue
 
+        # NFC uses a SmartCardConnection for the OTP application
         with device.smart_card() as connection:
-            with YubiOtpSession(connection) as session:
-                # Change these as appropriate
-                # slot = SLOT.ONE
-                slot = SLOT.TWO
+            session = YubiOtpSession(connection)
 
-                # "cccc" + serial, 6 bytes (12 characters in modhex)
-                public_id = b"\x00\x00" + struct.pack(b">I", serial)
+            # Change these as appropriate
+            # slot = SLOT.ONE
+            slot = SLOT.TWO
 
-                # Randomly generate private ID and AES key
-                private_id = os.urandom(6)
-                key = os.urandom(16)
+            # "cccc" + serial, 6 bytes (12 characters in modhex)
+            public_id = b"\x00\x00" + struct.pack(b">I", serial)
 
-                # Access code from serial (BCD encoded, 6 bytes)
-                # access_code = bytes.fromhex(f"{serial:012}")
-                access_code = None
+            # Randomly generate private ID and AES key
+            private_id = os.urandom(6)
+            key = os.urandom(16)
 
-                # Write the configuration to the YubiKey
-                session.put_configuration(
-                    slot,
-                    YubiOtpSlotConfiguration(public_id, private_id, key).append_cr(
-                        True
-                    ),
-                    access_code,
-                )
+            # Access code from serial (BCD encoded, 6 bytes)
+            # access_code = bytes.fromhex(f"{serial:012}")
+            access_code = None
 
-                # Write the configuration as a line in the output file
-                csv_line = format_csv(serial, public_id, private_id, key, access_code)
-                output.write(csv_line + "\n")
+            # Write the configuration to the YubiKey
+            session.put_configuration(
+                slot,
+                YubiOtpSlotConfiguration(public_id, private_id, key).append_cr(True),
+                access_code,
+            )
+
+            # Write the configuration as a line in the output file
+            csv_line = format_csv(serial, public_id, private_id, key, access_code)
+            output.write(csv_line + "\n")
 
         print("Done! Replace the YubiKey with the next one...")
 

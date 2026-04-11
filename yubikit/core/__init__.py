@@ -33,6 +33,7 @@ import re
 from contextlib import contextmanager
 from enum import Enum, IntEnum, IntFlag, unique
 from threading import Timer
+from types import TracebackType
 from typing import (
     Callable,
     ClassVar,
@@ -135,6 +136,40 @@ class Connection(abc.ABC):
 
     def __exit__(self, typ, value, traceback):
         self.close()
+
+
+Self = TypeVar("Self", bound="Closable")
+
+
+class Closable(abc.ABC):
+    """Base class providing context-manager support around an abstract ``close()``."""
+
+    @abc.abstractmethod
+    def close(self) -> None:
+        """Release resources held by this object."""
+
+    def __enter__(self: Self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+
+class Session(Closable):
+    """Base class for YubiKey application sessions.
+
+    Provides a default ``close()`` that delegates to the underlying native
+    session object stored in ``self._native``.
+    """
+
+    def close(self) -> None:
+        """Close the session, restoring the underlying connection."""
+        self._native.close()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 
 
 @unique
