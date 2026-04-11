@@ -337,6 +337,9 @@ enum FidoCredentialAction {
         /// PIN code
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Output full credential information as CSV
+        #[arg(short = 'c', long)]
+        csv: bool,
     },
     /// Delete a credential
     Delete {
@@ -348,6 +351,20 @@ enum FidoCredentialAction {
         /// Confirm deletion without prompting
         #[arg(short = 'f', long)]
         force: bool,
+    },
+    /// Update user information for a credential
+    Update {
+        /// Credential ID (hex prefix)
+        credential_id: String,
+        /// New user name
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+        /// New display name
+        #[arg(short = 'd', long)]
+        display_name: Option<String>,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
     },
 }
 
@@ -2619,8 +2636,8 @@ fn run() -> Result<(), CliError> {
                 FidoAction::Credentials(cred) => {
                     check_capability(&dev, Capability::FIDO2)?;
                     match cred {
-                        FidoCredentialAction::List { pin } => {
-                            fido::run_credentials_list(&dev, &scp_params, pin.as_deref())
+                        FidoCredentialAction::List { pin, csv } => {
+                            fido::run_credentials_list(&dev, &scp_params, pin.as_deref(), csv)
                         }
                         FidoCredentialAction::Delete {
                             credential_id,
@@ -2632,6 +2649,19 @@ fn run() -> Result<(), CliError> {
                             &credential_id,
                             pin.as_deref(),
                             force,
+                        ),
+                        FidoCredentialAction::Update {
+                            credential_id,
+                            name,
+                            display_name,
+                            pin,
+                        } => fido::run_credentials_update(
+                            &dev,
+                            &scp_params,
+                            &credential_id,
+                            name.as_deref(),
+                            display_name.as_deref(),
+                            pin.as_deref(),
                         ),
                     }
                 }

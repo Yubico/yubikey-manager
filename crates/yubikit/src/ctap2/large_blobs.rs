@@ -369,8 +369,7 @@ mod tests {
     fn test_lb_pack_unpack_roundtrip() {
         let key = [0x42u8; 32];
         let data = b"hello, large blobs!";
-        let entry: Value =
-            lb_pack::<std::io::Error>(&key, data).expect("pack should succeed");
+        let entry: Value = lb_pack::<std::io::Error>(&key, data).expect("pack should succeed");
         let recovered = lb_unpack(&key, &entry).expect("unpack should succeed");
         assert_eq!(recovered, data);
     }
@@ -380,8 +379,7 @@ mod tests {
         let key = [0x42u8; 32];
         let wrong_key = [0x43u8; 32];
         let data = b"secret data";
-        let entry: Value =
-            lb_pack::<std::io::Error>(&key, data).expect("pack should succeed");
+        let entry: Value = lb_pack::<std::io::Error>(&key, data).expect("pack should succeed");
         assert!(lb_unpack(&wrong_key, &entry).is_err());
     }
 
@@ -389,8 +387,7 @@ mod tests {
     fn test_lb_pack_unpack_empty_data() {
         let key = [0xaa; 32];
         let data = b"";
-        let entry: Value =
-            lb_pack::<std::io::Error>(&key, data).expect("pack should succeed");
+        let entry: Value = lb_pack::<std::io::Error>(&key, data).expect("pack should succeed");
         let recovered = lb_unpack(&key, &entry).expect("unpack should succeed");
         assert_eq!(recovered, data);
     }

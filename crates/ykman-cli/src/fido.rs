@@ -607,6 +607,7 @@ pub fn run_credentials_list(
     dev: &YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
+    csv: bool,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
         if !ctap2
@@ -641,6 +642,8 @@ pub fn run_credentials_list(
             return Ok(());
         }
 
+        // Collect all credentials
+        let mut all_creds: Vec<(String, Vec<u8>, Vec<u8>, String, String)> = Vec::new();
         for rp_resp in &rps {
             let rp_id = cbor_u32_map_get_text(rp_resp, 3, "id").unwrap_or_default();
             let rp_id_hash = cbor_u32_map_get_bytes(rp_resp, 4).unwrap_or_default();
@@ -653,17 +656,87 @@ pub fn run_credentials_list(
                 let user_name = cbor_u32_map_get_text(cred_resp, 6, "name").unwrap_or_default();
                 let display_name =
                     cbor_u32_map_get_text(cred_resp, 6, "displayName").unwrap_or_default();
+                let user_id = cbor_u32_map_get_nested_bytes(cred_resp, 6, "id").unwrap_or_default();
                 let cred_id_bytes =
                     cbor_u32_map_get_nested_bytes(cred_resp, 7, "id").unwrap_or_default();
-                let cred_id_hex = hex::encode(&cred_id_bytes);
 
-                println!(
-                    "{}... {} {} {}",
-                    &cred_id_hex[..8.min(cred_id_hex.len())],
-                    rp_id,
+                all_creds.push((
+                    rp_id.clone(),
+                    cred_id_bytes,
+                    user_id,
                     user_name,
-                    display_name
+                    display_name,
+                ));
+            }
+        }
+
+        if csv {
+            println!("credential_id,rp_id,user_name,user_display_name,user_id");
+            for (rp_id, cred_id, user_id, user_name, display_name) in &all_creds {
+                println!(
+                    "{},{},{},{},{}",
+                    csv_escape(&hex::encode(cred_id)),
+                    csv_escape(rp_id),
+                    csv_escape(user_name),
+                    csv_escape(display_name),
+                    csv_escape(&hex::encode(user_id)),
                 );
+            }
+        } else {
+            // Determine shortest unique credential ID prefix
+            let mut ln = 4;
+            while all_creds
+                .iter()
+                .map(|(_, id, _, _, _)| {
+                    hex::encode(id)[..ln.min(hex::encode(id).len())].to_string()
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                < all_creds.len()
+            {
+                ln += 1;
+            }
+
+            // Collect rows for table formatting
+            let headings = ["Credential ID", "RP ID", "Username", "Display name"];
+            let rows: Vec<[String; 4]> = all_creds
+                .iter()
+                .map(|(rp_id, cred_id, _, user_name, display_name)| {
+                    let hex_id = hex::encode(cred_id);
+                    let short_id = format!("{}...", &hex_id[..ln.min(hex_id.len())]);
+                    [
+                        short_id,
+                        rp_id.clone(),
+                        user_name.clone(),
+                        display_name.clone(),
+                    ]
+                })
+                .collect();
+
+            // Calculate column widths
+            let mut widths = headings.map(|h| h.len());
+            for row in &rows {
+                for (i, cell) in row.iter().enumerate() {
+                    widths[i] = widths[i].max(cell.len());
+                }
+            }
+
+            // Print header
+            let header: Vec<String> = headings
+                .iter()
+                .enumerate()
+                .map(|(i, h)| format!("{:width$}", h, width = widths[i]))
+                .collect();
+            println!("{}", header.join("  "));
+
+            // Print rows
+            for row in &rows {
+                let formatted: Vec<String> = row
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cell)| format!("{:width$}", cell, width = widths[i]))
+                    .collect();
+                println!("{}", formatted.join("  "));
             }
         }
 
@@ -737,6 +810,135 @@ pub fn run_credentials_delete(
                     .delete_cred(cred_id_val)
                     .map_err(|e| CliError(format!("Failed to delete credential: {e}")))?;
                 println!("Credential deleted.");
+                Ok(())
+            }
+            _ => Err(CliError(
+                "Multiple matches, make the credential ID more specific.".to_string(),
+            )),
+        }
+    })
+}
+
+pub fn run_credentials_update(
+    dev: &YubiKeyDevice,
+    scp_params: &ScpParams,
+    credential_id: &str,
+    name: Option<&str>,
+    display_name: Option<&str>,
+    pin: Option<&str>,
+) -> Result<(), CliError> {
+    if name.is_none() && display_name.is_none() {
+        return Err(CliError(
+            "At least one of --name or --display-name must be provided.".to_string(),
+        ));
+    }
+
+    with_fido_session!(dev, scp_params, |ctap2| {
+        let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
+        let mut client_pin = ClientPin::new(ctap2)
+            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
+        let session = client_pin.into_session();
+
+        let mut credman = CredentialManagement::new(session, protocol, token)
+            .map_err(|e| CliError(format!("Failed to create credential manager: {e}")))?;
+
+        if !credman.is_update_supported() {
+            return Err(CliError(
+                "Credential update is not supported on this YubiKey.".to_string(),
+            ));
+        }
+
+        let search = credential_id.trim_end_matches('.').to_lowercase();
+
+        let rps = credman
+            .enumerate_rps()
+            .map_err(|e| CliError(format!("Failed to enumerate RPs: {e}")))?;
+
+        let mut hits = Vec::new();
+        for rp_resp in &rps {
+            let rp_id = cbor_u32_map_get_text(rp_resp, 3, "id").unwrap_or_default();
+            let rp_id_hash = cbor_u32_map_get_bytes(rp_resp, 4).unwrap_or_default();
+
+            let creds = credman.enumerate_creds(&rp_id_hash).unwrap_or_default();
+            for cred_resp in &creds {
+                let user_name = cbor_u32_map_get_text(cred_resp, 6, "name").unwrap_or_default();
+                let cred_id_bytes =
+                    cbor_u32_map_get_nested_bytes(cred_resp, 7, "id").unwrap_or_default();
+                let cred_id_hex = hex::encode(&cred_id_bytes);
+
+                if cred_id_hex.starts_with(&search) {
+                    // We need the credentialID value and the current user map
+                    let cred_id_val = cred_resp.get(&7).cloned();
+                    let user_val = cred_resp.get(&6).cloned();
+                    if let (Some(cid), Some(user)) = (cred_id_val, user_val) {
+                        hits.push((rp_id.clone(), user_name, cred_id_hex, cid, user));
+                    }
+                }
+            }
+        }
+
+        match hits.len() {
+            0 => Err(CliError("No matches, nothing to be done.".to_string())),
+            1 => {
+                let (rp_id, user_name, _cred_id_hex, cred_id_val, user_val) = &hits[0];
+
+                // Build updated user map from existing, overriding specified fields
+                let mut user_entries: Vec<(Value, Value)> = Vec::new();
+                if let Value::Map(entries) = user_val {
+                    for (k, v) in entries {
+                        let key_name = k.as_text().unwrap_or("");
+                        match key_name {
+                            "name" => {
+                                if let Some(n) = name {
+                                    user_entries.push((k.clone(), Value::Text(n.to_string())));
+                                } else {
+                                    user_entries.push((k.clone(), v.clone()));
+                                }
+                            }
+                            "displayName" => {
+                                if let Some(dn) = display_name {
+                                    user_entries.push((k.clone(), Value::Text(dn.to_string())));
+                                } else {
+                                    user_entries.push((k.clone(), v.clone()));
+                                }
+                            }
+                            _ => {
+                                user_entries.push((k.clone(), v.clone()));
+                            }
+                        }
+                    }
+                }
+
+                // Add fields that weren't in the original map
+                let has_name = user_entries
+                    .iter()
+                    .any(|(k, _)| k.as_text() == Some("name"));
+                let has_display_name = user_entries
+                    .iter()
+                    .any(|(k, _)| k.as_text() == Some("displayName"));
+                if let Some(n) = name
+                    && !has_name
+                {
+                    user_entries.push((Value::Text("name".into()), Value::Text(n.to_string())));
+                }
+                if let Some(dn) = display_name
+                    && !has_display_name
+                {
+                    user_entries.push((
+                        Value::Text("displayName".into()),
+                        Value::Text(dn.to_string()),
+                    ));
+                }
+
+                let updated_user = Value::Map(user_entries);
+
+                println!("Updating credential for {} (user: {})", rp_id, user_name);
+                credman
+                    .update_user_info(cred_id_val, &updated_user)
+                    .map_err(|e| CliError(format!("Failed to update credential: {e}")))?;
+                println!("Credential updated.");
                 Ok(())
             }
             _ => Err(CliError(
@@ -1113,4 +1315,14 @@ fn cbor_u32_map_get_nested_bytes(
         }
     }
     None
+}
+
+/// Escape a field for CSV output. Quotes the field if it contains commas,
+/// quotes, or newlines.
+fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('"') || field.contains('\n') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
 }
