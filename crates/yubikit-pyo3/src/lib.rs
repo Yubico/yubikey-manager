@@ -76,6 +76,8 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_ctap::PyPinProtocol>()?;
     m.add_class::<py_ctap::PyClientPin>()?;
     m.add_class::<py_ctap::PyClientPinFido>()?;
+    m.add_class::<py_ctap::PyCredentialManagement>()?;
+    m.add_class::<py_ctap::PyCredentialManagementFido>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

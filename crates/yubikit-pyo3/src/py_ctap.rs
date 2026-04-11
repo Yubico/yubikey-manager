@@ -5,7 +5,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
 use yubikit::cbor;
 use yubikit::ctap::CtapSession;
-use yubikit::ctap2::{ClientPin, Ctap2Error, Ctap2Session, Info, Permissions, PinProtocol};
+use yubikit::ctap2::{
+    ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, Info, Permissions, PinProtocol,
+};
 
 use crate::py_bridge::{
     BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection,
@@ -172,6 +174,32 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<PyObject> {
             }
             Ok(dict.into())
         }
+    }
+}
+
+fn py_to_cbor_value(obj: &Bound<'_, PyAny>) -> PyResult<cbor::Value> {
+    if let Ok(val) = obj.extract::<i64>() {
+        Ok(cbor::Value::Int(val))
+    } else if let Ok(val) = obj.extract::<bool>() {
+        Ok(cbor::Value::Bool(val))
+    } else if let Ok(val) = obj.extract::<Vec<u8>>() {
+        Ok(cbor::Value::Bytes(val))
+    } else if let Ok(val) = obj.extract::<String>() {
+        Ok(cbor::Value::Text(val))
+    } else if let Ok(list) = obj.downcast::<PyList>() {
+        let mut arr = Vec::new();
+        for item in list.iter() {
+            arr.push(py_to_cbor_value(&item)?);
+        }
+        Ok(cbor::Value::Array(arr))
+    } else if let Ok(dict) = obj.downcast::<PyDict>() {
+        let mut entries = Vec::new();
+        for (k, v) in dict.iter() {
+            entries.push((py_to_cbor_value(&k)?, py_to_cbor_value(&v)?));
+        }
+        Ok(cbor::Value::Map(entries))
+    } else {
+        Err(PyValueError::new_err("Cannot convert to CBOR value"))
     }
 }
 
@@ -621,5 +649,144 @@ impl PyClientPinFido {
             .get_uv_token(perms, permissions_rpid, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: BTreeMap<u32, Value> → Python dict
+// ---------------------------------------------------------------------------
+
+fn cbor_result_to_py(py: Python<'_>, map: &BTreeMap<u32, cbor::Value>) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    for (k, v) in map {
+        dict.set_item(k, cbor_value_to_py(py, v)?)?;
+    }
+    Ok(dict.into())
+}
+
+fn cbor_result_list_to_py(
+    py: Python<'_>,
+    items: &[BTreeMap<u32, cbor::Value>],
+) -> PyResult<PyObject> {
+    let list = PyList::empty(py);
+    for item in items {
+        list.append(cbor_result_to_py(py, item)?)?;
+    }
+    Ok(list.into())
+}
+
+// ---------------------------------------------------------------------------
+// SmartCard-backed CredentialManagement
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "CredentialManagement", unsendable)]
+pub struct PyCredentialManagement {
+    inner: CredentialManagement<BoxedSmartCardConnection>,
+}
+
+#[pymethods]
+impl PyCredentialManagement {
+    #[new]
+    fn new(
+        session: &mut PyCtap2Session,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner = CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
+            .map_err(ctap2_err)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn is_update_supported(&self) -> bool {
+        self.inner.is_update_supported()
+    }
+
+    fn get_metadata(&mut self) -> PyResult<(u32, u32)> {
+        self.inner.get_metadata().map_err(ctap2_err)
+    }
+
+    fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+        let rps = self.inner.enumerate_rps().map_err(ctap2_err)?;
+        cbor_result_list_to_py(py, &rps)
+    }
+
+    fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
+        let creds = self.inner.enumerate_creds(rp_id_hash).map_err(ctap2_err)?;
+        cbor_result_list_to_py(py, &creds)
+    }
+
+    fn delete_cred(&mut self, credential_id: &Bound<'_, PyAny>) -> PyResult<()> {
+        let value = py_to_cbor_value(credential_id)?;
+        self.inner.delete_cred(&value).map_err(ctap2_err)
+    }
+
+    fn update_user_info(
+        &mut self,
+        credential_id: &Bound<'_, PyAny>,
+        user: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let cred = py_to_cbor_value(credential_id)?;
+        let user = py_to_cbor_value(user)?;
+        self.inner.update_user_info(&cred, &user).map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FIDO HID-backed CredentialManagement
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "CredentialManagementFido", unsendable)]
+pub struct PyCredentialManagementFido {
+    inner: CredentialManagement<BoxedFidoConnection>,
+}
+
+#[pymethods]
+impl PyCredentialManagementFido {
+    #[new]
+    fn new(
+        session: &mut PyCtap2FidoSession,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner = CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
+            .map_err(ctap2_err)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn is_update_supported(&self) -> bool {
+        self.inner.is_update_supported()
+    }
+
+    fn get_metadata(&mut self) -> PyResult<(u32, u32)> {
+        self.inner.get_metadata().map_err(ctap2_err)
+    }
+
+    fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+        let rps = self.inner.enumerate_rps().map_err(ctap2_err)?;
+        cbor_result_list_to_py(py, &rps)
+    }
+
+    fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
+        let creds = self.inner.enumerate_creds(rp_id_hash).map_err(ctap2_err)?;
+        cbor_result_list_to_py(py, &creds)
+    }
+
+    fn delete_cred(&mut self, credential_id: &Bound<'_, PyAny>) -> PyResult<()> {
+        let value = py_to_cbor_value(credential_id)?;
+        self.inner.delete_cred(&value).map_err(ctap2_err)
+    }
+
+    fn update_user_info(
+        &mut self,
+        credential_id: &Bound<'_, PyAny>,
+        user: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let cred = py_to_cbor_value(credential_id)?;
+        let user = py_to_cbor_value(user)?;
+        self.inner.update_user_info(&cred, &user).map_err(ctap2_err)
     }
 }
